@@ -238,18 +238,22 @@ const typeAccepts = (type: Schema.Json | undefined, value: Schema.Json) => {
   return true
 }
 
-// Schema records already visited, shared across one evaluation (one value level for
-// normalization, one call for `admitsNull`). Each record is evaluated at most once, so `$ref`
-// cycles terminate and shared refs cannot fan out exponentially. A skipped revisit only means
-// fewer drops (or "admits null"), so it stays fail-closed.
+// Schema records already visited for one value level of normalization. Each record is applied at
+// most once per value, so `$ref` cycles terminate; across property paths the walk budget bounds
+// total work. A skipped revisit only means fewer drops, so it stays fail-closed.
 type Visited = Set<JsonObject>
+
+// Memoized `admitsNull` results for one call: each schema record is evaluated once, so shared
+// `$ref`s stay linear and exact. A record still being evaluated (a `$ref` cycle) counts as
+// admitting `null`, which only means fewer drops.
+type NullMemo = Map<JsonObject, boolean>
 
 /** Whether a JSON Schema admits `null`. Unconstrained or unknown schemas conservatively do. */
 const admitsNull = (
   schema: Schema.Json | undefined,
   definitions: JsonObject,
   depth: number,
-  visited: Visited
+  memo: NullMemo
 ): boolean => {
   if (depth > maxSchemaDepth) return true
 
@@ -259,9 +263,29 @@ const admitsNull = (
 
   const record = jsonObject(resolved)
 
-  if (record === undefined || visited.has(record)) return true
+  if (record === undefined) return true
 
-  visited.add(record)
+  const known = memo.get(record)
+
+  if (known !== undefined) return known
+
+  memo.set(record, true)
+
+  const result = recordAdmitsNull(record, definitions, depth, memo)
+
+  memo.set(record, result)
+
+  return result
+}
+
+const recordAdmitsNull = (
+  record: JsonObject,
+  definitions: JsonObject,
+  depth: number,
+  memo: NullMemo
+): boolean => {
+  // OpenAPI-style `nullable: true` (common in MCP servers) admits `null` alongside `type`.
+  if (ownValue(record, 'nullable') === true) return true
 
   if (Object.hasOwn(record, 'type') && !typeAccepts(record['type'], null)) return false
 
@@ -276,7 +300,7 @@ const admitsNull = (
 
     if (
       members !== undefined &&
-      !members.some(item => admitsNull(item, definitions, depth + 1, visited))
+      !members.some(item => admitsNull(item, definitions, depth + 1, memo))
     ) {
       return false
     }
@@ -284,19 +308,17 @@ const admitsNull = (
 
   const allOf = schemaArray(record, 'allOf')
 
-  return (
-    allOf === undefined || allOf.every(item => admitsNull(item, definitions, depth + 1, visited))
-  )
+  return allOf === undefined || allOf.every(item => admitsNull(item, definitions, depth + 1, memo))
 }
-
-const isStructured = (value: Schema.Json) => Predicate.isObjectOrArray(value)
 
 // Literal comparison is exact only for primitives; object/array literals never eliminate.
 const matchesLiteral = (schema: JsonObject, value: Schema.Json) => {
   if (Object.hasOwn(schema, 'const')) {
     const literal = schema['const']
 
-    return literal === value || isStructured(literal) || isStructured(value)
+    return (
+      literal === value || Predicate.isObjectOrArray(literal) || Predicate.isObjectOrArray(value)
+    )
   }
 
   const enumValues = schemaArray(schema, 'enum')
@@ -304,8 +326,8 @@ const matchesLiteral = (schema: JsonObject, value: Schema.Json) => {
   return (
     enumValues === undefined ||
     enumValues.includes(value) ||
-    isStructured(value) ||
-    enumValues.some(isStructured)
+    Predicate.isObjectOrArray(value) ||
+    enumValues.some(Predicate.isObjectOrArray)
   )
 }
 
@@ -361,10 +383,21 @@ const unionMemberMatches = (
   return true
 }
 
+// Per-call walk state. `budget` bounds total schema visits so hostile schemas (shared refs reached
+// through many property paths) cannot stall dispatch; once spent, the rest of the value is left
+// unchanged, which only means fewer drops. Each drop made before that is independently justified.
+type Walk = {
+  readonly definitions: JsonObject
+  readonly prefixItems: boolean
+  readonly budget: { remaining: number }
+}
+
+const maxSchemaVisits = 10_000
+
 const normalizeObject = (
   schema: JsonObject,
   value: JsonObject,
-  definitions: JsonObject,
+  walk: Walk,
   depth: number
 ): JsonObject => {
   const properties = schemaRecord(schema, 'properties')
@@ -387,15 +420,15 @@ const normalizeObject = (
     const declaredSchema = properties === undefined ? undefined : ownValue(properties, key)
     const propertySchema = declaredSchema ?? additionalProperties
 
-    // `null` means "not sent" only where this property's own declaration rejects `null`: any
-    // schema that also governs the key must accept `null` too, so the value could never have been
-    // accepted and no meaning is lost. Undeclared keys are never touched: decoding rejects them
-    // with a hint naming the allowed keys.
+    // `null` means "not sent" only where this property's own declaration rejects `null`. Every
+    // applicable schema must accept a value, so one rejecting declaration means the `null` could
+    // never have been accepted and no meaning is lost. Undeclared keys are never touched:
+    // decoding rejects them with a hint naming the allowed keys.
     if (
       propertyValue === null &&
       declaredSchema !== undefined &&
       !required.has(key) &&
-      !admitsNull(declaredSchema, definitions, 0, new Set())
+      !admitsNull(declaredSchema, walk.definitions, 0, new Map())
     ) {
       changed = true
 
@@ -405,7 +438,7 @@ const normalizeObject = (
     const normalizedValue =
       jsonObject(propertySchema) === undefined
         ? propertyValue
-        : normalizeValue(propertySchema, propertyValue, definitions, depth + 1, new Set())
+        : normalizeValue(propertySchema, propertyValue, walk, depth + 1, new Set())
 
     changed ||= normalizedValue !== propertyValue
     entries.push([key, normalizedValue])
@@ -417,10 +450,11 @@ const normalizeObject = (
 const normalizeArray = (
   schema: JsonObject,
   value: ReadonlyArray<Schema.Json>,
-  definitions: JsonObject,
+  walk: Walk,
   depth: number
 ): ReadonlyArray<Schema.Json> => {
-  const prefixItems = schemaArray(schema, 'prefixItems') ?? []
+  // `prefixItems` is a 2020-12 keyword; older dialects apply `items` to every element.
+  const prefixItems = walk.prefixItems ? (schemaArray(schema, 'prefixItems') ?? []) : []
   const items = ownValue(schema, 'items')
   let changed = false
 
@@ -429,7 +463,7 @@ const normalizeArray = (
 
     if (jsonObject(itemSchema) === undefined) return item
 
-    const normalizedItem = normalizeValue(itemSchema, item, definitions, depth + 1, new Set())
+    const normalizedItem = normalizeValue(itemSchema, item, walk, depth + 1, new Set())
 
     changed ||= normalizedItem !== item
 
@@ -442,53 +476,63 @@ const normalizeArray = (
 const normalizeUnion = (
   members: ReadonlyArray<Schema.Json>,
   value: Schema.Json,
-  definitions: JsonObject,
+  walk: Walk,
   depth: number,
   visited: Visited
 ): Schema.Json => {
-  const candidates = members.filter(member => unionMemberMatches(member, value, definitions))
+  const candidates = members.filter(member => unionMemberMatches(member, value, walk.definitions))
   const [candidate] = candidates
 
   // Ambiguous or unmatched unions stay untouched; the decoder reports the real error.
   return candidates.length === 1
-    ? normalizeValue(candidate, value, definitions, depth + 1, visited)
+    ? normalizeValue(candidate, value, walk, depth + 1, visited)
     : value
 }
 
 const normalizeValue = (
   schema: Schema.Json | undefined,
   value: Schema.Json,
-  definitions: JsonObject,
+  walk: Walk,
   depth: number,
   visited: Visited
 ): Schema.Json => {
   if (depth > maxSchemaDepth || !(isJsonObject(value) || isJsonArray(value))) return value
 
-  const resolved = jsonObject(resolveSchema(schema, definitions))
+  const resolved = jsonObject(resolveSchema(schema, walk.definitions))
 
-  if (resolved === undefined || visited.has(resolved)) return value
+  if (resolved === undefined || visited.has(resolved) || walk.budget.remaining <= 0) return value
 
+  // A nested `$id` changes the base for `$ref`; root-`$defs` resolution would be wrong below it.
+  if (depth > 0 && Object.hasOwn(resolved, '$id')) return value
+
+  walk.budget.remaining -= 1
   visited.add(resolved)
 
   let normalized: Schema.Json = value
 
   for (const member of schemaArray(resolved, 'allOf') ?? []) {
-    normalized = normalizeValue(member, normalized, definitions, depth + 1, visited)
+    normalized = normalizeValue(member, normalized, walk, depth + 1, visited)
   }
 
   for (const key of ['anyOf', 'oneOf']) {
     const members = schemaArray(resolved, key)
 
     if (members !== undefined) {
-      normalized = normalizeUnion(members, normalized, definitions, depth, visited)
+      normalized = normalizeUnion(members, normalized, walk, depth, visited)
     }
   }
 
-  if (isJsonArray(normalized)) return normalizeArray(resolved, normalized, definitions, depth)
+  if (isJsonArray(normalized)) return normalizeArray(resolved, normalized, walk, depth)
 
   const record = jsonObject(normalized)
 
-  return record === undefined ? normalized : normalizeObject(resolved, record, definitions, depth)
+  return record === undefined ? normalized : normalizeObject(resolved, record, walk, depth)
+}
+
+const isPre2020Dialect = (root: JsonObject | undefined) => {
+  const dialect = root === undefined ? undefined : ownValue(root, '$schema')
+
+  return Predicate.isString(dialect) && !/2020-12|2019-09/.test(dialect)
 }
 
 /** Drops `null` from model-produced tool arguments only where the advertised JSON Schema declares
@@ -505,9 +549,14 @@ export const omitNullOptionalToolArguments = (
   if (!isJson(params)) return params
 
   const root = Predicate.isBoolean(parameters) ? undefined : parameters
-  const definitions = root === undefined ? {} : (schemaRecord(root, '$defs') ?? {})
 
-  return normalizeValue(parameters, params, definitions, 0, new Set())
+  const walk: Walk = {
+    definitions: root === undefined ? {} : (schemaRecord(root, '$defs') ?? {}),
+    prefixItems: !isPre2020Dialect(root),
+    budget: { remaining: maxSchemaVisits }
+  }
+
+  return normalizeValue(parameters, params, walk, 0, new Set())
 }
 
 /** Applies {@link omitNullOptionalToolArguments} to a call, preserving identity when unchanged. */

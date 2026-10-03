@@ -483,9 +483,10 @@ describe('registry null omission for optional non-nullable properties', () => {
     expect(omitNullOptionalToolArguments(cyclic, { mode: null })).toEqual({})
 
     // A ladder of shared (non-cyclic) refs: each record is evaluated once per value level.
+    // Within the depth limit, so the result is pinned: the leaf declares `mode` non-nullable.
     const ladder = Object.fromEntries([
-      ['L40', { type: 'object', properties: { mode: { type: 'string' } } }],
-      ...Array.from({ length: 40 }, (_, level) => [
+      ['L30', { type: 'object', properties: { mode: { type: 'string' } } }],
+      ...Array.from({ length: 30 }, (_, level) => [
         `L${level}`,
         { allOf: [{ $ref: `#/$defs/L${level + 1}` }, { $ref: `#/$defs/L${level + 1}` }] }
       ])
@@ -493,8 +494,86 @@ describe('registry null omission for optional non-nullable properties', () => {
 
     expect(
       omitNullOptionalToolArguments({ $ref: '#/$defs/L0', $defs: ladder }, { mode: null })
-    ).toBeDefined()
+    ).toEqual({})
+
+    // The same ladder through anyOf inside a property declaration (admitsNull).
+    const choices = Object.fromEntries([
+      ['A30', { type: 'string' }],
+      ...Array.from({ length: 30 }, (_, level) => [
+        `A${level}`,
+        { anyOf: [{ $ref: `#/$defs/A${level + 1}` }, { $ref: `#/$defs/A${level + 1}` }] }
+      ])
+    ])
+
+    expect(
+      omitNullOptionalToolArguments(
+        { type: 'object', properties: { mode: { $ref: '#/$defs/A0' } }, $defs: choices },
+        { mode: null }
+      )
+    ).toEqual({})
+
+    // Shared refs reached through many property paths: 8 wrappers per level, 16 levels deep.
+    const fanout = Object.fromEntries([
+      ['F16', {}],
+      ...Array.from({ length: 16 }, (_, level) => [
+        `F${level}`,
+        {
+          allOf: Array.from({ length: 8 }, () => ({
+            properties: { x: { $ref: `#/$defs/F${level + 1}` } }
+          }))
+        }
+      ])
+    ])
+
+    let nested: Schema.Json = {}
+
+    for (let level = 0; level < 16; level++) nested = { x: nested }
+
+    expect(omitNullOptionalToolArguments({ $ref: '#/$defs/F0', $defs: fanout }, nested)).toBe(
+      nested
+    )
     expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
+  it('stays fail-closed for schema dialect features it does not resolve', () => {
+    // OpenAPI-style nullable (common in MCP servers) admits null.
+    const nullable = { clear: null }
+
+    expect(
+      omitNullOptionalToolArguments(
+        { type: 'object', properties: { clear: { type: 'string', nullable: true } } },
+        nullable
+      )
+    ).toBe(nullable)
+
+    // A nested $id rebases $ref; root-$defs resolution would pick the wrong definition.
+    const rebased: ToolJsonSchema = {
+      type: 'object',
+      properties: {
+        p: {
+          $id: 'https://example.com/p',
+          $defs: { X: { type: ['string', 'null'] } },
+          properties: { v: { $ref: '#/$defs/X' } }
+        }
+      },
+      $defs: { X: { type: 'string' } }
+    }
+
+    const rebasedValue = { p: { v: null } }
+
+    expect(omitNullOptionalToolArguments(rebased, rebasedValue)).toBe(rebasedValue)
+
+    // draft-07 ignores prefixItems; items applies to every element.
+    const draft07: ToolJsonSchema = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'array',
+      prefixItems: [{ type: 'object', properties: { x: { type: 'string' } } }],
+      items: { type: 'object', properties: { x: { type: ['string', 'null'] } } }
+    }
+
+    const elements = [{ x: null }]
+
+    expect(omitNullOptionalToolArguments(draft07, elements)).toBe(elements)
   })
 
   it('never drops a null declared by a nested conjunction', () => {
@@ -907,6 +986,23 @@ describe('unknown tool argument keys', () => {
       expect(result.content).toContain('Unknown argument "p" in ["a.b"]. Allowed there: x.')
       expect(result.content).toContain('Unknown argument "q" in "a.b". Allowed there: x.')
       expect(result.content).not.toContain('"p", "q"')
+
+      // Literal keys that look like path syntax never print like another path.
+      const syntax = capturingTool(
+        Schema.Struct({
+          '': Schema.Struct({ x: Schema.String }),
+          '[""]': Schema.Struct({ x: Schema.String })
+        })
+      )
+
+      const syntaxSet = yield* resolveOne(syntax.tool)
+
+      const collided = yield* syntaxSet.execute(
+        call({ '': { x: '1', p: 1 }, '[""]': { x: '2', q: 1 } })
+      )
+
+      expect(collided.content).toContain('Unknown argument "p" in [""]. Allowed there: x.')
+      expect(collided.content).toContain('Unknown argument "q" in ["[\\"\\"]"]. Allowed there: x.')
     })
   )
 
