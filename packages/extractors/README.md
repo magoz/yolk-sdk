@@ -7,13 +7,13 @@ Effect `FileExtractor` service with Office archive validation, hyperlink-safe XL
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/extractors@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/extractors@canary effect@4.0.0
 # Only if you extract .xlsx files: SheetJS from the SheetJS CDN, not npm.
 pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Use the SDK's matching Effect version (`4.0.0`) in host code.
 Requires Node.js 22+. `@yolk-sdk/extractors/node` is server-only.
 
 ### Why SheetJS comes from its CDN
@@ -163,7 +163,7 @@ plain text. Everything else fails with `UnsupportedFileFormatError`.
 
 ## Limits
 
-`defaultFileExtractorLimits` (the values the 10x app runs in production); override any of them
+`defaultFileExtractorLimits` (production-hardened defaults); override any of them
 through `makeFileExtractorLayer({ limits })`. Invalid values are a defect when the layer is built.
 
 | Limit                   | Default | Bounds                                                                    |

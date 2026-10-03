@@ -286,7 +286,7 @@ Check search scope, document ids, chunk ingestion, embedding dimensions, and hos
 
 ### Ingestion compiles but fails at runtime
 
-The package defines contracts. Your host must provide extraction, chunking, embedding, summarization, and `SearchIndexStore` layers.
+The package defines contracts. Your host must provide extraction, chunking, embedding, summarization, and `SearchIndexStore` layers. For file bytes, `FileKnowledgeExtractorLayer` from `@yolk-sdk/extractors/knowledge` provides extraction; see [Ingestion pipeline](./knowledge/ingestion-pipeline).
 
 ## Connector errors
 

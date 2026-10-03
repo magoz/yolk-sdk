@@ -10,13 +10,14 @@ Yolk packages are canary-stage. APIs can change between canary releases.
 Keep every public package on the same canary version:
 
 ```bash
-pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary @yolk-sdk/harness@canary @yolk-sdk/codemode@canary
+pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary @yolk-sdk/harness@canary @yolk-sdk/codemode@canary @yolk-sdk/extractors@canary
 pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
 ```
 
 Add only the packages you use. `@yolk-sdk/harness` is available from `0.1.0-canary.77`.
 `@yolk-sdk/codemode`, `@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from
-`0.1.0-canary.96`. Keep each of them on the same lockstep version as the other public packages.
+`0.1.0-canary.96`. `@yolk-sdk/extractors` is available from `0.1.0-canary.98`. Keep each of them
+on the same lockstep version as the other public packages.
 
 Check installed versions:
 
@@ -27,6 +28,21 @@ pnpm list '@yolk-sdk/*'
 Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
+
+### Canary.98: extractors package
+
+New package: `@yolk-sdk/extractors`, bounded text extraction for PDF, DOCX, XLSX, PPTX, CSV, JSON,
+Markdown, and plain-text files. Existing packages have no API changes, and `@yolk-sdk/knowledge`
+does not depend on it.
+
+- The root export is runtime-portable (`FileExtractor`, formats, limits, errors).
+  `@yolk-sdk/extractors/node` is server-only and parses in a worker thread per file.
+  `@yolk-sdk/extractors/knowledge` exports `FileKnowledgeExtractorLayer`, which provides
+  `KnowledgeExtractor` for [knowledge ingestion](./knowledge/ingestion-pipeline).
+- SheetJS is an optional peer needed only for XLSX. Install it from
+  `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, not the npm `xlsx`.
+- In Next.js, keep the package unbundled:
+  `serverExternalPackages: ['@yolk-sdk/extractors', 'xlsx']`.
 
 ### Canary.97: Effect 4.0.0
 
