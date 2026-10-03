@@ -132,7 +132,7 @@ export class EmailAttachmentMetadata extends Schema.Class<EmailAttachmentMetadat
 }) {}
 
 export const EmailAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
 )
 
 export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
@@ -169,7 +169,7 @@ export class EmailAttachmentContent extends Schema.Class<EmailAttachmentContent>
  */
 export const EmailImapKeyword = Schema.String.check(
   Schema.isNonEmpty(),
-  Schema.isPattern(/^[!#$&'+,\-\/.0-9:;<=>?@A-Z\[^_`a-z|}~]+$/)
+  Schema.isPattern(/^[!#$&'+,\-\/.0-9:;<=>?@A-Z\[^_`a-z|}~]+$/u)
 )
 
 export type EmailImapKeyword = typeof EmailImapKeyword.Type

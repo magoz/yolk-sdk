@@ -3,8 +3,10 @@ import * as Schema from 'effect/Schema'
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
 
 // Reject dot segments and malformed UTF-16 before encoding identifiers into URL paths.
+// The `u` flag keeps the pattern exportable to JSON Schema; the positive BMP class keeps the
+// pre-`u` acceptance exactly (no controls, DEL, surrogates or astral characters).
 const Identifier = NonEmptyString.check(
-  Schema.isPattern(/^(?!\.{1,2}$)[^\u0000-\u001f\u007f\uD800-\uDFFF]+$/)
+  Schema.isPattern(/^(?!\.{1,2}$)[\u0020-\u007e\u0080-\ud7ff\ue000-\uffff]+$/u)
 )
 
 export const FortnoxCustomerNumber = Identifier.pipe(Schema.brand('FortnoxCustomerNumber'))
@@ -19,7 +21,7 @@ export const FortnoxSupplierNumber = Identifier.pipe(Schema.brand('FortnoxSuppli
 
 export type FortnoxSupplierNumber = typeof FortnoxSupplierNumber.Type
 
-export const FortnoxGivenNumber = Schema.Trimmed.check(Schema.isPattern(/^[0-9]+$/)).pipe(
+export const FortnoxGivenNumber = Schema.Trimmed.check(Schema.isPattern(/^[0-9]+$/u)).pipe(
   Schema.brand('FortnoxGivenNumber')
 )
 

@@ -18,13 +18,13 @@ import { Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 
 /** A Dropbox revision: lower-case hex, at least nine digits (what the connector accepts). */
-const Rev = Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/))
+const Rev = Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/u))
 
 /** A Dropbox file or folder id (`id:` form). */
-const EntryId = Schema.String.check(Schema.isPattern(/^id:\S+$/))
+const EntryId = Schema.String.check(Schema.isPattern(/^id:\S+$/u))
 
 /** A Dropbox timestamp as the fixtures write it (`2026-09-20T10:00:00Z`). */
-const Timestamp = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/))
+const Timestamp = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u))
 
 /** One path component: non-empty, no `/`, not `.` or `..`. */
 const EntryName = Schema.String.check(
@@ -103,7 +103,7 @@ export type DropboxEmulatorState = {
 }
 
 /** An absolute path in display casing: `/`-separated non-empty components, no trailing `/`. */
-const SeedPath = Schema.String.check(Schema.isPattern(/^(?:\/[^/]+)+$/))
+const SeedPath = Schema.String.check(Schema.isPattern(/^(?:\/[^/]+)+$/u))
 
 /**
  * A seeded entry, addressed by its display path (its parent folder must be seeded too). File

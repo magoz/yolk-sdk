@@ -31,10 +31,10 @@ export type ConformanceSafety = typeof ConformanceSafety.Type
  * hyphens, for example `vendor.stream.plain-text`.
  */
 export const ConformanceCaseId = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/)
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/u)
 )
 
-const CalendarDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))
+const CalendarDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
 
 /** When and where a person last watched the claim hold against the real service. */
 export const ConformanceObservation = Schema.Struct({

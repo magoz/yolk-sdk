@@ -82,14 +82,14 @@ import { todoistTaskLifecycleFixture } from './task-lifecycle.ts'
 import { todoistTasksPagingFixture } from './tasks-paging.ts'
 
 /** A Todoist id: letters, digits, `_` and `-` (API v1 ids are opaque strings). */
-const SeedId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/))
+const SeedId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/u))
 
 /**
  * A run id: `run-` then lower-case letters, digits, and inner hyphens, at most 40 characters. The
  * `run-` prefix is required so `findTodoistConformanceLeftovers` covers every valid run id.
  */
 const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(40)
 )
 

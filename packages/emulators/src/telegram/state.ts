@@ -33,7 +33,7 @@ export const TelegramEmulatorChat = Schema.Struct({
 
 export type TelegramEmulatorChat = typeof TelegramEmulatorChat.Type
 
-const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,256}$/))
+const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,256}$/u))
 
 /** A relative file path the download helper accepts (no empty or dot segments). */
 const FilePath = Schema.String.check(

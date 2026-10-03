@@ -32,7 +32,7 @@ const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isNonEmpty()))
 const GithubCommentId = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)))
 
 const GithubCommitSha = Schema.String.pipe(
-  Schema.check(Schema.isPattern(/^[0-9a-f]{40}([0-9a-f]{24})?$/))
+  Schema.check(Schema.isPattern(/^[0-9a-f]{40}([0-9a-f]{24})?$/u))
 )
 
 // ---------------------------------------------------------------------------

@@ -290,7 +290,7 @@ const GmailLabelName = Schema.Trimmed.check(Schema.isNonEmpty())
 // URL parsers normalize even percent-encoded dot segments. Reject rather than change identity.
 const GmailLabelId = Schema.String.check(
   Schema.isNonEmpty(),
-  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/)
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/u)
 )
 
 export const GmailLabelMessageListVisibility = Schema.Literals(['show', 'hide'])
@@ -443,13 +443,13 @@ export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachment
 }) {}
 
 export const GmailAttachmentBase64Url = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/)
+  Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/u)
 )
 
 export type GmailAttachmentBase64Url = typeof GmailAttachmentBase64Url.Type
 
 export const GmailAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
 )
 
 export type GmailAttachmentBase64 = typeof GmailAttachmentBase64.Type

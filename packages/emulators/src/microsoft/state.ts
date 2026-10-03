@@ -108,7 +108,7 @@ export const MicrosoftEmulatorCalendar = Schema.Struct({
 export type MicrosoftEmulatorCalendar = typeof MicrosoftEmulatorCalendar.Type
 
 /** Graph local date-time in UTC with seven fractional digits (`2026-09-23T12:00:00.0000000`). */
-export const microsoftEmulatorDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}$/
+export const microsoftEmulatorDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}$/u
 
 const UtcDateTime = Schema.String.check(Schema.isPattern(microsoftEmulatorDateTimePattern))
 

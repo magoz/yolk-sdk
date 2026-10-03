@@ -23,7 +23,7 @@ export const googleDriveFolderMimeType = 'application/vnd.google-apps.folder'
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
 
-const GoogleDriveHeaderValue = NonEmptyString.check(Schema.isPattern(/^[^\r\n]+$/))
+const GoogleDriveHeaderValue = NonEmptyString.check(Schema.isPattern(/^[^\r\n]+$/u))
 
 const GoogleDrivePageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
 

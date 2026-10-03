@@ -93,14 +93,14 @@ import { dropboxUploadRevPreconditionFixture } from './upload-rev-precondition.t
 const SeedString = Schema.Trimmed.check(Schema.isNonEmpty())
 
 /** An absolute Dropbox path: `/`-separated, non-empty components, no trailing slash. */
-const SeedPath = Schema.String.check(Schema.isPattern(/^(?:\/[^/\s][^/]*)+$/))
+const SeedPath = Schema.String.check(Schema.isPattern(/^(?:\/[^/\s][^/]*)+$/u))
 
 /**
  * A run id: `run-` then lower-case letters, digits, and inner hyphens, at most 40 characters. The
  * `run-` prefix is required so `findDropboxConformanceLeftovers` covers every valid run id.
  */
 const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(40)
 )
 

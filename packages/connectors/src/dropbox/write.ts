@@ -46,14 +46,14 @@ const Create = Schema.Struct({
 })
 
 const Update = Schema.Struct({
-  fileId: OpaqueId.check(Schema.isPattern(/^id:.+$/)),
-  expectedRev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/))
+  fileId: OpaqueId.check(Schema.isPattern(/^id:.+$/u)),
+  expectedRev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/u))
 })
 
 const Metadata = Schema.Struct({
-  id: OpaqueId.check(Schema.isPattern(/^id:.+$/)),
+  id: OpaqueId.check(Schema.isPattern(/^id:.+$/u)),
   name: SafeText,
-  rev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/)),
+  rev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/u)),
   size: ByteLimit
 })
 

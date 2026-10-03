@@ -16,7 +16,7 @@ import { resolveTelegramBotToken } from './shared.ts'
 
 export const telegramHostedDownloadMaxBytes = 20_000_000
 
-const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/))
+const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/u))
 
 const File = Schema.Struct({
   ok: Schema.Literal(true),

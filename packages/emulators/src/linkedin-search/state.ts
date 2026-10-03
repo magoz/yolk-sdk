@@ -35,10 +35,10 @@ export const linkedInSearchKeyDigest = (key: string, origin: string): string =>
   createHash('sha256').update(`${origin} ${key}`, 'utf8').digest('hex')
 
 /** A search query as the cases seed it: trimmed, non-empty, one line, at most 500 characters. */
-export const linkedInSearchQueryPattern = /^\S(?:.*\S)?$/
+export const linkedInSearchQueryPattern = /^\S(?:.*\S)?$/u
 
 /** The profile URL form the emulator takes: `https://<host>/in/<slug>`. */
-export const linkedInSearchProfileUrlPattern = /^https:\/\/[A-Za-z0-9.-]+\/in\/[^\s?#]+$/
+export const linkedInSearchProfileUrlPattern = /^https:\/\/[A-Za-z0-9.-]+\/in\/[^\s?#]+$/u
 
 /** The largest `numResults` the emulator takes. */
 export const linkedInSearchMaxNumResults = 100
@@ -65,7 +65,7 @@ const NumResults = Schema.Int.check(
 const RejectedKey = Schema.String
 
 /** A SHA-256 digest (64 lower-case hex digits). */
-const Digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+const Digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 
 /** One Exa result, in the fixtures' fields (each a string, or absent; never null). */
 export const LinkedInSearchEmulatorResult = Schema.Struct({

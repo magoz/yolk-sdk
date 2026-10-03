@@ -58,14 +58,14 @@ import { linkedInSearchProfileFixture } from './profile.ts'
 import { linkedInSearchProfileNotFoundFixture } from './profile-not-found.ts'
 
 /** A search query: trimmed, non-empty, one line, at most 500 characters. */
-const SearchQuery = Schema.String.check(Schema.isPattern(/^\S(?:.*\S)?$/), Schema.isMaxLength(500))
+const SearchQuery = Schema.String.check(Schema.isPattern(/^\S(?:.*\S)?$/u), Schema.isMaxLength(500))
 
 /**
  * A LinkedIn person profile URL as the actions take it: `https://<host>/in/<slug>`, no query,
  * fragment, or whitespace, at most 2048 characters.
  */
 const ProfileUrl = Schema.String.check(
-  Schema.isPattern(/^https:\/\/[A-Za-z0-9.-]+\/in\/[^\s?#]+$/),
+  Schema.isPattern(/^https:\/\/[A-Za-z0-9.-]+\/in\/[^\s?#]+$/u),
   Schema.isMaxLength(2048)
 )
 

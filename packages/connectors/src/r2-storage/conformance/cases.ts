@@ -70,15 +70,15 @@ import { r2UpdateIfMatchFixtures } from './update-if-match.ts'
 
 /** An https endpoint origin (no path, query, or credentials). */
 const Endpoint = Schema.String.check(
-  Schema.isPattern(/^https:\/\/[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/)
+  Schema.isPattern(/^https:\/\/[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u)
 )
 
 /** An R2 bucket name, as `getR2Object` accepts it. */
-const Bucket = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/))
+const Bucket = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/u))
 
 /** An object key whose segments never start with a dot (no `.`/`..` segments). */
 const ObjectKey = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/),
+  Schema.isPattern(/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/u),
   Schema.isMaxLength(200)
 )
 
@@ -87,7 +87,7 @@ const ObjectKey = Schema.String.check(
  * same shape as the other connector conformance run ids.
  */
 const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(40)
 )
 

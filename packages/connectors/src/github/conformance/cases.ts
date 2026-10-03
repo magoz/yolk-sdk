@@ -96,14 +96,14 @@ const Owner = Schema.String.check(Schema.makeFilter(isValidGithubOwner))
 const Repo = Schema.String.check(Schema.makeFilter(isValidGithubRepo))
 
 /** An issue number, as a decimal string (seeds are strings). */
-const IssueNumber = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,9}$/))
+const IssueNumber = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,9}$/u))
 
 /** A label name in plain characters (no spaces, not dot-only). */
-const LabelName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/))
+const LabelName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/u))
 
 /** A relative file path whose segments never start with a dot (no `.`/`..` segments). */
 const FilePath = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/),
+  Schema.isPattern(/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/u),
   Schema.isMaxLength(200)
 )
 
@@ -112,7 +112,7 @@ const FilePath = Schema.String.check(
  * same shape as the other connector conformance run ids.
  */
 const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(40)
 )
 

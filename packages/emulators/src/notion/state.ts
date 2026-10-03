@@ -25,7 +25,7 @@ import { Result } from 'effect'
 import * as Schema from 'effect/Schema'
 
 /** A Notion id as stored and answered: a lower-case dashed UUID. */
-export const notionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+export const notionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u
 
 const NotionId = Schema.String.check(Schema.isPattern(notionIdPattern))
 

@@ -32,7 +32,7 @@ import { recordedInternalDate } from './shared.ts'
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 
 /** A Gmail message, thread, label, or attachment id as the fixtures use them. */
-const GmailId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,100}$/))
+const GmailId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,100}$/u))
 
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -45,7 +45,7 @@ const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const GoogleEmulatorPracticeAddress = Schema.String.check(
   Schema.isMaxLength(254),
   Schema.isPattern(
-    /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+    /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u
   ),
   Schema.makeFilter(value => value.indexOf('@') <= 64)
 )
@@ -129,7 +129,7 @@ export type GoogleEmulatorEventBoundary = typeof GoogleEmulatorEventBoundary.Typ
 /** A stored calendar event with its wire fields (creator and organizer derive from the state). */
 export const GoogleEmulatorCalendarEvent = Schema.Struct({
   calendarId: Schema.String,
-  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,1024}$/)),
+  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,1024}$/u)),
   etag: Schema.String,
   status: Schema.Literals(['confirmed', 'cancelled']),
   htmlLink: Schema.String,
@@ -147,7 +147,7 @@ export type GoogleEmulatorCalendarEvent = typeof GoogleEmulatorCalendarEvent.Typ
 
 /** A Drive file or folder with the fields the connector's `fields` selection answers. */
 export const GoogleEmulatorDriveFile = Schema.Struct({
-  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/)),
+  id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/u)),
   name: Schema.String,
   mimeType: Schema.String,
   starred: Schema.Boolean,

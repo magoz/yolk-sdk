@@ -54,7 +54,7 @@ export interface OutlookAddAttachmentResult {
 }
 
 const ContentType = SafeText.check(
-  Schema.isPattern(/^[A-Za-z0-9][\w!#$&^.+-]*\/[A-Za-z0-9][\w!#$&^.+-]*(?:\s*;[\x20-\x7e]*)?$/)
+  Schema.isPattern(/^[A-Za-z0-9][\w!#$&^.+-]*\/[A-Za-z0-9][\w!#$&^.+-]*(?:\s*;[\x20-\x7e]*)?$/u)
 )
 
 const Input = Schema.Struct({
