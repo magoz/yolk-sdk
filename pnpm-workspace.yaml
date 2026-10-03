@@ -31,3 +31,5 @@ overrides:
   '@effect/platform-node-shared': 4.0.0
   # 2.0.0 (like beta.6) imports S3 commands absent from the older lockfile resolution.
   '@effect-aws/client-s3>@aws-sdk/client-s3': 3.1132.0
+patchedDependencies:
+  'drizzle-orm@1.0.0-rc.5-ab785fc': patches/drizzle-orm@1.0.0-rc.5-ab785fc.patch

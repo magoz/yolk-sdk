@@ -40,6 +40,10 @@ version. Tooling such as `@effect/language-service` is versioned independently.
   `effect/unstable/http` becomes `effect/http`, likewise `effect/socket`, `effect/sql`,
   `effect/process` and the other areas; `effect/unstable/httpapi` becomes `effect/http-api`. Import
   `Arbitrary` from `effect`.
+- Check Effect-integrated dependencies for removed paths, not just your own code. For example,
+  `drizzle-orm` `1.0.0-rc.5` declarations still import `effect/unstable/sql/SqlError`; with
+  `skipLibCheck` that type silently becomes `any` and `catchTag('SqlError')` stops being checked.
+  The Next example pins a declaration-only `pnpm patch` until drizzle ships a fix.
 - `effect/Encoding` is split into `effect/encoding/Base64`, `Base64Url`, `Hex` and
   `EncodingError`. For example, `Encoding.encodeBase64` / `decodeBase64` become `Base64.encode` /
   `Base64.decode`.
