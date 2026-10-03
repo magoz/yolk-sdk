@@ -104,13 +104,15 @@ tool, top-level and nested code mode calls alike) run at most once per key:
 import { Effect } from 'effect'
 import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
 
-// Host-owned storage scoped to one Workflow run (sketch; `db` calls are host code).
+// Host-owned storage scoped to one Workflow run (sketch; `db` calls are host code). Leases use the
+// database clock: `now() + leaseMs`, classified against `now()`.
 const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
   scope: runId,
   // Atomic insert-if-absent; otherwise classify the stored entry without changing it.
   claim: request =>
-    db.claimToolCall(runId, request, entry => classifyToolLedgerEntry(entry, request.nowMs)),
-  heartbeat: ({ key, leaseExpiresAtMs }) => db.extendLeaseIfClaimed(runId, key, leaseExpiresAtMs),
+    db.claimToolCall(runId, request, (entry, dbNowMs) => classifyToolLedgerEntry(entry, dbNowMs)),
+  // Extend the lease to now() + leaseMs while the entry has no outcome; never shorten it.
+  heartbeat: ({ key, leaseMs }) => db.extendLeaseIfClaimed(runId, key, leaseMs),
   complete: ({ key, outcome, completedAtMs }) =>
     db.completeOnce(runId, key, outcome, completedAtMs),
   list: parentKey => db.listChildren(runId, parentKey)
@@ -129,8 +131,15 @@ const resolveStepTools = Effect.gen(function* () {
   collide: one run, plus the turn when a provider can reuse call ids across turns.
 - Executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions; forward it to
   external APIs that deduplicate, for a crash between their commit and the ledger's `complete`.
+- One clock per store: `claim` and `heartbeat` get the lease length `leaseMs` (stores on their own
+  clock, such as a database `now()`, which avoids skew between instances) and the caller's
+  `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
 - Override the policy with `isLedgered`, and the timing with `leaseMs` (30 s), `heartbeatIntervalMs`
-  (a third of the lease), `pollIntervalMs` (1 s), `maxWaitMs` (150 s), and `deadline`.
+  (a third of the lease, at most half), `pollIntervalMs` (1 s), `maxWaitMs` (150 s), and `deadline`.
+- `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered
+  call with `fresh`, `completed`, `in_flight_wait` (waited, then replayed), `in_flight_timeout`,
+  `abandoned`, or `conflict`, before the call runs or returns; `waitedMs` is set when it waited.
+  Use it for logs and metrics. A throw or rejected promise is logged and ignored.
 - `makeInMemoryToolLedgerStore` is for tests and single-process hosts; it does not survive
   restarts and cannot protect Workflow steps.
 

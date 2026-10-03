@@ -45,7 +45,10 @@ export type {
   InMemoryToolLedgerStore,
   ToolLedgerAbandonedInput,
   ToolLedgerClaimRequest,
+  ToolLedgerDecision,
+  ToolLedgerDecisionEvent,
   ToolLedgerErrorDetails,
+  ToolLedgerHeartbeatRequest,
   ToolLedgerOptions,
   ToolLedgerPolicyInput,
   ToolLedgerStore

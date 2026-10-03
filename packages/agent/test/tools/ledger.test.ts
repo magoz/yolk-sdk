@@ -1,4 +1,4 @@
-import { type Duration, Effect, Exit, Fiber, Predicate } from 'effect'
+import { type Duration, Effect, Exit, Fiber, Logger, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
@@ -18,6 +18,9 @@ import {
   ToolLedgerError,
   toolLedgerResult,
   ToolLedgerSucceeded,
+  type ToolLedgerClaimRequest,
+  type ToolLedgerDecisionEvent,
+  type ToolLedgerHeartbeatRequest,
   type ToolLedgerOptions,
   type ToolLedgerStore,
   type ToolModule,
@@ -382,9 +385,18 @@ describe('tool ledger', () => {
       const tools = [runner, noteTool(probe), noteTool(probe, { name: 'lookup', access: 'read' })]
       const runCall = ToolCall.make({ id: 'call_9', name: 'runner', params: { note: 'go' } })
 
-      yield* execute(tools, runCall, { store })
+      const decisions: Array<ToolLedgerDecisionEvent> = []
 
-      const replayed = yield* execute(tools, runCall, { store })
+      const ledger: ToolLedgerOptions = {
+        store,
+        onLedgerDecision: event => {
+          decisions.push(event)
+        }
+      }
+
+      yield* execute(tools, runCall, ledger)
+
+      const replayed = yield* execute(tools, runCall, ledger)
       const entries = yield* store.entries
 
       expect(probe.runs).toEqual(['n1', 'n2'])
@@ -395,6 +407,193 @@ describe('tool ledger', () => {
       ])
       expect(replayed.content).toBe('appended n1 (1), appended n2 (2)')
       expect(yield* store.list('call_9')).toHaveLength(1)
+      // Reads are not ledgered, so they report no decision.
+      expect(decisions).toEqual([
+        { key: 'call_9', toolName: 'runner', decision: 'fresh' },
+        { key: 'call_9/1', parentKey: 'call_9', toolName: 'append_note', decision: 'fresh' },
+        { key: 'call_9', toolName: 'runner', decision: 'completed' }
+      ])
+    })
+  )
+
+  it.effect('passes the lease length to claim and heartbeat for stores on their own clock', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const claims: Array<ToolLedgerClaimRequest> = []
+      const heartbeats: Array<ToolLedgerHeartbeatRequest> = []
+
+      const store: ToolLedgerStore = {
+        ...memory,
+        claim: request => {
+          claims.push(request)
+
+          return memory.claim(request)
+        },
+        heartbeat: request => {
+          heartbeats.push(request)
+
+          return memory.heartbeat(request)
+        }
+      }
+
+      const ledger: ToolLedgerOptions = { store, leaseMs: 9_000, heartbeatIntervalMs: 3_000 }
+
+      const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '7 seconds' })], noteCall(), ledger)
+      )
+
+      yield* TestClock.adjust('8 seconds')
+      yield* Fiber.join(running)
+
+      expect(claims).toEqual([
+        expect.objectContaining({ nowMs: 0, leaseExpiresAtMs: 9_000, leaseMs: 9_000 })
+      ])
+      expect(heartbeats).toEqual([
+        { key: 'call_1', leaseExpiresAtMs: 12_000, leaseMs: 9_000 },
+        { key: 'call_1', leaseExpiresAtMs: 15_000, leaseMs: 9_000 }
+      ])
+    })
+  )
+
+  it.effect('heartbeats at most every half lease', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const heartbeats: Array<number> = []
+
+      const store: ToolLedgerStore = {
+        ...memory,
+        heartbeat: request => {
+          heartbeats.push(request.leaseExpiresAtMs)
+
+          return memory.heartbeat(request)
+        }
+      }
+
+      const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '5 seconds' })], noteCall(), {
+          store,
+          leaseMs: 4_000,
+          heartbeatIntervalMs: 60_000
+        })
+      )
+
+      yield* TestClock.adjust('5 seconds')
+      yield* Fiber.join(running)
+
+      expect(heartbeats).toEqual([6_000, 8_000])
+    })
+  )
+
+  it.effect('reports one decision per ledgered call to onLedgerDecision', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const decisions: Array<ToolLedgerDecisionEvent> = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const ledger = (options: Partial<ToolLedgerOptions> = {}): ToolLedgerOptions => ({
+        store,
+        leaseMs: 10_000,
+        pollIntervalMs: 500,
+        onLedgerDecision: event => {
+          decisions.push(event)
+        },
+        ...options
+      })
+
+      const fast = [noteTool(probe)]
+      const slow = [noteTool(probe, { sleep: '3 seconds' })]
+      const blocked = [noteTool(probe, { sleep: '1 hour' })]
+
+      // fresh, then completed
+      yield* execute(fast, noteCall('call_a'), ledger())
+      yield* execute(fast, noteCall('call_a'), ledger())
+
+      // in_flight_wait: a concurrent duplicate waits for the running call
+      const running = yield* Effect.forkChild(execute(slow, noteCall('call_b'), ledger()))
+
+      yield* TestClock.adjust('1 second')
+
+      const waiting = yield* Effect.forkChild(execute(slow, noteCall('call_b'), ledger()))
+
+      yield* TestClock.adjust('3 seconds')
+      yield* Fiber.join(running)
+      yield* Fiber.join(waiting)
+
+      // in_flight_timeout
+      const stuck = yield* Effect.forkChild(execute(blocked, noteCall('call_c'), ledger()))
+
+      yield* TestClock.adjust('1 second')
+
+      const timingOut = yield* Effect.forkChild(
+        execute(blocked, noteCall('call_c'), ledger({ maxWaitMs: 2_000 }))
+      )
+
+      yield* TestClock.adjust('2 seconds')
+      yield* Fiber.join(timingOut)
+
+      // abandoned: the stuck execution dies and its lease runs out
+      yield* Fiber.interrupt(stuck)
+      yield* TestClock.adjust('20 seconds')
+      yield* execute(blocked, noteCall('call_c'), ledger())
+
+      // conflict
+      yield* execute(fast, noteCall('call_a', 'different'), ledger())
+
+      expect(decisions).toEqual([
+        { key: 'call_a', toolName: 'append_note', decision: 'fresh' },
+        { key: 'call_a', toolName: 'append_note', decision: 'completed' },
+        { key: 'call_b', toolName: 'append_note', decision: 'fresh' },
+        { key: 'call_b', toolName: 'append_note', decision: 'in_flight_wait', waitedMs: 2_000 },
+        { key: 'call_c', toolName: 'append_note', decision: 'fresh' },
+        {
+          key: 'call_c',
+          toolName: 'append_note',
+          decision: 'in_flight_timeout',
+          waitedMs: 2_000
+        },
+        { key: 'call_c', toolName: 'append_note', decision: 'abandoned' },
+        { key: 'call_a', toolName: 'append_note', decision: 'conflict' }
+      ])
+      expect(probe.runs).toEqual(['hot lead', 'hot lead', 'hot lead'])
+    })
+  )
+
+  it.effect('never lets a failing onLedgerDecision affect execution', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe)]
+
+      const throwing: ToolLedgerOptions = {
+        store,
+        onLedgerDecision: () => {
+          throw new Error('metrics down')
+        }
+      }
+
+      const rejecting: ToolLedgerOptions = {
+        store,
+        onLedgerDecision: () => Promise.reject(new Error('metrics down'))
+      }
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const first = yield* execute(tools, noteCall(), throwing).pipe(Effect.provide(logger))
+      const second = yield* execute(tools, noteCall(), rejecting).pipe(Effect.provide(logger))
+
+      // The rejected promise is observed by a detached fiber; let it settle.
+      yield* Effect.promise(() => new Promise(resolve => setTimeout(resolve, 10)))
+
+      expect(probe.runs).toEqual(['hot lead'])
+      expect(first.content).toBe('appended hot lead (1)')
+      expect(second).toEqual(first)
+      expect(messages).toEqual([
+        ['Tool ledger onLedgerDecision failed for call_1; ignored: metrics down'],
+        ['Tool ledger onLedgerDecision failed for call_1; ignored: metrics down']
+      ])
     })
   )
 

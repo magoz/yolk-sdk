@@ -73,15 +73,33 @@ export class ToolLedgerError extends Schema.TaggedError<ToolLedgerError>()('Tool
   message: Schema.String
 }) {}
 
+/**
+ * What `claim` receives. Times come in two forms so a store can pick one clock and use it for
+ * every lease: `nowMs` and `leaseExpiresAtMs` are the caller's `Clock` time (clock-agnostic
+ * stores, such as the in-memory one, store and compare them as given), and `leaseMs` is the lease
+ * length, for stores that use their own clock (for example a database's `now()`: lease
+ * `now() + leaseMs`, classified against `now()`). Never mix the two clocks in one store.
+ */
 export type ToolLedgerClaimRequest = {
   readonly key: string
   readonly parentKey?: string
   readonly toolName: string
   readonly args: string
-  /** The caller's `Clock` time. Hosts may use their storage clock instead, consistently. */
+  /** The caller's `Clock` time. */
   readonly nowMs: number
-  /** Lease of a fresh claim (`nowMs` plus the configured lease). */
+  /** Lease of a fresh claim on the caller's clock: `nowMs + leaseMs`. */
   readonly leaseExpiresAtMs: number
+  /** Lease length (the resolved `ToolLedgerOptions.leaseMs`), for stores using their own clock. */
+  readonly leaseMs: number
+}
+
+/** What `heartbeat` receives; the clocks follow `ToolLedgerClaimRequest`. */
+export type ToolLedgerHeartbeatRequest = {
+  readonly key: string
+  /** The extended lease on the caller's clock: its current time plus `leaseMs`. */
+  readonly leaseExpiresAtMs: number
+  /** Lease length, for stores using their own clock (new lease `now() + leaseMs`). */
+  readonly leaseMs: number
 }
 
 type ClaimRequestFields = {
@@ -91,6 +109,7 @@ type ClaimRequestFields = {
   args: string
   nowMs: number
   leaseExpiresAtMs: number
+  leaseMs: number
 }
 
 /**
@@ -100,8 +119,10 @@ type ClaimRequestFields = {
  * - `claim` is atomic: insert a claimed entry when the key is absent (`Fresh`), else classify the
  *   existing entry without changing it (`classifyToolLedgerEntry`). Repeated claims of an existing
  *   key are reads; waiting callers poll with them.
- * - `heartbeat` extends the lease of a claimed entry without an outcome; it never revives or
- *   changes a completed entry.
+ * - `heartbeat` extends the lease of a claimed entry without an outcome (never shortening it); it
+ *   never revives or changes a completed entry.
+ * - Leases use one clock per store: the caller's (`nowMs`, `leaseExpiresAtMs`) or the store's own
+ *   (`leaseMs`, for example a database `now()`); `classifyToolLedgerEntry` takes that clock's time.
  * - `complete` records the outcome once; a later completion of the same key is ignored.
  * - `list` returns the entries whose `parentKey` is the given key (nested calls of one call).
  *
@@ -114,10 +135,7 @@ export type ToolLedgerStore = {
   readonly claim: (
     request: ToolLedgerClaimRequest
   ) => Effect.Effect<ToolLedgerClaim, ToolLedgerError>
-  readonly heartbeat: (input: {
-    readonly key: string
-    readonly leaseExpiresAtMs: number
-  }) => Effect.Effect<void, ToolLedgerError>
+  readonly heartbeat: (input: ToolLedgerHeartbeatRequest) => Effect.Effect<void, ToolLedgerError>
   readonly complete: (input: {
     readonly key: string
     readonly outcome: ToolLedgerOutcome
@@ -155,6 +173,42 @@ export type ToolLedgerAbandonedInput = {
   readonly nested: ReadonlyArray<ToolLedgerEntry>
 }
 
+/**
+ * How the ledger handled one ledgered call:
+ * - `fresh`: claimed by this execution, which runs the call.
+ * - `completed`: an outcome was already recorded; it is replayed without running.
+ * - `in_flight_wait`: another execution was running it; this one waited and replayed its outcome.
+ * - `in_flight_timeout`: another execution was running it past `maxWaitMs`/`deadline`; not run.
+ * - `abandoned`: claimed earlier, lease expired, no outcome (possibly after a wait); not run.
+ * - `conflict`: the key holds a different call (tool name or arguments); not run.
+ */
+export type ToolLedgerDecision =
+  | 'fresh'
+  | 'completed'
+  | 'in_flight_wait'
+  | 'in_flight_timeout'
+  | 'abandoned'
+  | 'conflict'
+
+/** What `onLedgerDecision` receives. `waitedMs` is present when the call waited for another
+ * execution (its first claim was in flight).
+ */
+export type ToolLedgerDecisionEvent = {
+  readonly key: string
+  readonly parentKey?: string
+  readonly toolName: string
+  readonly decision: ToolLedgerDecision
+  readonly waitedMs?: number
+}
+
+type DecisionEventFields = {
+  key: string
+  parentKey?: string
+  toolName: string
+  decision: ToolLedgerDecision
+  waitedMs?: number
+}
+
 /** `resolveTools` ledger option. Without it, tool execution is unchanged. */
 export type ToolLedgerOptions = {
   readonly store: ToolLedgerStore
@@ -162,7 +216,7 @@ export type ToolLedgerOptions = {
   readonly isLedgered?: (input: ToolLedgerPolicyInput) => boolean
   /** Lease of a running call. Default 30000. */
   readonly leaseMs?: number
-  /** Heartbeat interval while a call runs. Default a third of `leaseMs`. */
+  /** Heartbeat interval while a call runs. Default a third of `leaseMs`; at most half of it. */
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */
   readonly pollIntervalMs?: number
@@ -172,6 +226,13 @@ export type ToolLedgerOptions = {
   readonly deadline?: () => number | undefined
   /** UTF-8 bytes of a stored result's compact JSON. Default 1 MiB (see `toolLedgerResult`). */
   readonly maxResultBytes?: number
+  /**
+   * Observability seam: called once per ledgered call with the ledger's decision, before the call
+   * runs or its result is returned (after any wait). Not called when the claim itself fails. It
+   * never affects execution: a throw (or a rejected promise) is logged and ignored, and a returned
+   * promise is not awaited.
+   */
+  readonly onLedgerDecision?: (event: ToolLedgerDecisionEvent) => void
 }
 
 export const defaultToolLedgerLeaseMs = 30_000
@@ -344,6 +405,7 @@ export type ResolvedToolLedgerOptions = {
   readonly maxWaitMs: number
   readonly deadline: (() => number | undefined) | undefined
   readonly maxResultBytes: number
+  readonly onLedgerDecision: ((event: ToolLedgerDecisionEvent) => void) | undefined
 }
 
 const positive = (value: number | undefined, fallback: number) =>
@@ -357,9 +419,10 @@ export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedTo
     store: options.store,
     isLedgered: options.isLedgered ?? defaultToolLedgerPolicy,
     leaseMs,
+    // At most half the lease, so one late heartbeat never lets a live lease lapse.
     heartbeatIntervalMs: Math.min(
       positive(options.heartbeatIntervalMs, Math.max(1, Math.floor(leaseMs / 3))),
-      leaseMs
+      Math.max(1, Math.floor(leaseMs / 2))
     ),
     pollIntervalMs: positive(options.pollIntervalMs, defaultToolLedgerPollIntervalMs),
     maxWaitMs:
@@ -367,9 +430,38 @@ export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedTo
         ? Math.max(0, options.maxWaitMs)
         : defaultToolLedgerMaxWaitMs,
     deadline: options.deadline,
-    maxResultBytes: positive(options.maxResultBytes, defaultToolLedgerMaxResultBytes)
+    maxResultBytes: positive(options.maxResultBytes, defaultToolLedgerMaxResultBytes),
+    onLedgerDecision: options.onLedgerDecision
   }
 }
+
+const decisionHookFailed = (key: string, error: unknown) =>
+  Effect.logWarning(
+    `Tool ledger onLedgerDecision failed for ${key}; ignored: ${error instanceof Error ? error.message : String(error)}`
+  )
+
+// Never fails and never waits for the hook: a throw or a rejected promise is only logged.
+const reportDecision = (
+  hook: ((event: ToolLedgerDecisionEvent) => void) | undefined,
+  event: ToolLedgerDecisionEvent
+): Effect.Effect<void> =>
+  hook === undefined
+    ? Effect.void
+    : Effect.try({ try: (): unknown => hook(event), catch: error => error }).pipe(
+        Effect.flatMap(returned =>
+          Predicate.isPromiseLike(returned)
+            ? Effect.tryPromise({
+                try: () => Promise.resolve(returned),
+                catch: error => error
+              }).pipe(
+                Effect.catch(error => decisionHookFailed(event.key, error)),
+                Effect.forkDetach({ startImmediately: true }),
+                Effect.asVoid
+              )
+            : Effect.void
+        ),
+        Effect.catch(error => decisionHookFailed(event.key, error))
+      )
 
 type ToolLedgerErrorState = 'in_flight' | 'abandoned' | 'conflict'
 
@@ -504,7 +596,8 @@ export const executeLedgered = (input: {
         toolName: call.name,
         args,
         nowMs,
-        leaseExpiresAtMs: nowMs + options.leaseMs
+        leaseExpiresAtMs: nowMs + options.leaseMs,
+        leaseMs: options.leaseMs
       }
 
       if (input.parentKey !== undefined) request.parentKey = input.parentKey
@@ -523,11 +616,27 @@ export const executeLedgered = (input: {
     const matches = (entry: ToolLedgerEntry) => entry.toolName === call.name && entry.args === args
 
     let current = yield* claim(startedAt)
+    const waited = ToolLedgerClaim.$is('InFlight')(current) && matches(current.entry)
+
+    const decide = (decision: ToolLedgerDecision) =>
+      Effect.gen(function* () {
+        const event: DecisionEventFields = { key, toolName: call.name, decision }
+
+        if (input.parentKey !== undefined) event.parentKey = input.parentKey
+
+        if (waited) event.waitedMs = Math.max(0, (yield* Clock.currentTimeMillis) - startedAt)
+
+        yield* reportDecision(options.onLedgerDecision, event)
+      })
 
     while (ToolLedgerClaim.$is('InFlight')(current) && matches(current.entry)) {
       const now = yield* Clock.currentTimeMillis
 
-      if (now >= waitUntil) return inFlightTimeoutResult(call)
+      if (now >= waitUntil) {
+        yield* decide('in_flight_timeout')
+
+        return inFlightTimeoutResult(call)
+      }
 
       yield* Effect.sleep(Duration.millis(Math.min(options.pollIntervalMs, waitUntil - now)))
       current = yield* claim(yield* Clock.currentTimeMillis)
@@ -536,7 +645,11 @@ export const executeLedgered = (input: {
     const heartbeat = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
 
-      yield* store.heartbeat({ key, leaseExpiresAtMs: now + options.leaseMs })
+      yield* store.heartbeat({
+        key,
+        leaseExpiresAtMs: now + options.leaseMs,
+        leaseMs: options.leaseMs
+      })
     }).pipe(
       Effect.catch(error =>
         Effect.logWarning(`Tool ledger heartbeat failed for ${key}: ${error.message}`)
@@ -589,14 +702,19 @@ export const executeLedgered = (input: {
     }
 
     if (!ToolLedgerClaim.$is('Fresh')(current) && !matches(current.entry)) {
+      yield* decide('conflict')
+
       return conflictResult(call, current.entry)
     }
 
     return yield* ToolLedgerClaim.$match(current, {
-      Fresh: (): Effect.Effect<ToolResult, ToolError> => runFresh,
-      Completed: ({ outcome }) => replay(call, outcome),
-      InFlight: () => Effect.succeed(inFlightTimeoutResult(call)),
-      Abandoned: ({ entry }) => abandoned(entry)
+      Fresh: (): Effect.Effect<ToolResult, ToolError> =>
+        decide('fresh').pipe(Effect.andThen(runFresh)),
+      Completed: ({ outcome }) =>
+        decide(waited ? 'in_flight_wait' : 'completed').pipe(Effect.andThen(replay(call, outcome))),
+      // Unreachable for a matching entry (the wait loop consumes it); kept total.
+      InFlight: () => decide('in_flight_timeout').pipe(Effect.as(inFlightTimeoutResult(call))),
+      Abandoned: ({ entry }) => decide('abandoned').pipe(Effect.andThen(abandoned(entry)))
     })
   })
 
