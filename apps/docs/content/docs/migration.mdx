@@ -28,11 +28,10 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
-### Next canary: Effect 4.0.0
+### Canary.97: Effect 4.0.0
 
-This source upgrade targets the stable `effect@4.0.0` release; it is not a claim that an
-already-published canary uses that version. Upgrade matching Yolk packages and Effect together when
-the corresponding canary is available, and keep `effect` and the coordinated Effect runtime packages
+Canary.97 targets the stable `effect@4.0.0` release; canary.96 and earlier use
+`effect@4.0.0-rc.115`. Upgrade matching Yolk packages and Effect together, and keep `effect` and the coordinated Effect runtime packages
 (`@effect/platform-*`, `@effect/sql-*`, `@effect/opentelemetry`, `@effect/vitest`) on the same
 version. Tooling such as `@effect/language-service` is versioned independently.
 
@@ -63,7 +62,7 @@ version. Tooling such as `@effect/language-service` is versioned independently.
   advertised as `minLength: ceil(n / 2)` code points. Tool execution still validates against the
   original Effect Schema (through its JSON codec).
 
-### Next canary: tool arguments accept `null` for optional fields and reject unknown keys
+### Canary.97: tool arguments accept `null` for optional fields and reject unknown keys
 
 `makeTool`, `makeInputTool`/`makeInteractionTool` call params, and the `question` tool now decode
 model arguments with `Schema.toCodecJson(parameters)`, the codec that `ToolDef.parameters` already
@@ -82,6 +81,43 @@ mapping, `Schema.optional(X)` is now enough; app wrappers that re-decoded with t
 use `makeTool` directly. Custom `invalidParamsMessage` callbacks can keep the unknown-key hint with
 the new `withToolArgumentsErrorHint`. `omitNullOptionalToolArguments` is new on `@yolk-sdk/agent/tools` for
 hosts that dispatch registrations without `resolveTools`.
+
+Package-generated agent tools follow the same policy: connector tools from
+`makeConnectorToolModule`, `knowledge_lookup`/`knowledge_manage`, and the `sandbox` tool reject
+unknown keys instead of stripping them. For example, `outlook.list_messages` rejects the search-only
+`query`, and Fortnox invoice update tools reject provider-managed fields such as `Booked` or `Sent`.
+Connector `execute`/`invoke` and `executeTyped` are unchanged.
+
+### Canary.97: code mode JSON arguments and structured tool outputs
+
+- Code mode (`@yolk-sdk/codemode`, breaking): nested calls that end in an error result, a
+  `beforeNestedCall` failure, or the `maxNestedCalls` limit now reject in the script with
+  `<label>: <message>` instead of the bare message. The label is `tools.<identifier>`, or
+  `tools["<name>"]` when an earlier tool already uses the identifier; cancelled and
+  failed-unexpectedly rejections use the same label. `ToolResult.nestedCalls` keeps the raw
+  message. Update scripts or checks that compare rejection messages.
+- The pi executor now rejects, inside the script and before the call, arguments that JSON would
+  silently change: `NaN`/`Infinity`, invalid `Date`s, `undefined`/function/symbol array items and
+  holes, functions, symbols, bigints, cycles, `Map`/`Set`/`RegExp`/`Error`/class instances without
+  `toJSON`, and arguments with more than 100000 values or 64 levels of nesting. A valid `Date` is
+  sent as its ISO string. See [What scripts see](./integrations/code-mode#what-scripts-see).
+- `CodeModeCatalogTool` gains a required `callLabel`; hosts that build catalog entries by hand must
+  set it. Custom executors receive an optional `CodeModeExecutorTool.callLabel` (set by
+  `makeCodeModeTool`) and should apply the same argument rules.
+- Connector agent tools (`makeConnectorToolModule`) return the JSON encoding of the action
+  `outputSchema` in both `structuredContent` and the text: `Chunk`s become arrays (instead of
+  `{"_id":"Chunk","values":[...]}`), `DateTime`s ISO strings, class instances plain objects, and
+  fields the output schema does not declare are dropped. A value that does not encode fails the call
+  with an `execution` `ToolError`. Provider failures keep their text; their `structuredContent` is
+  the JSON-encoded `ProviderFailure`, without a non-JSON `underlying`. Update UI or persistence that
+  read the old shapes. Modules now carry the connector `description` (override it with the
+  `description` option).
+- `knowledge_lookup`/`knowledge_manage` declare `KnowledgeLookupOutput`/`KnowledgeManageOutput` and
+  the `sandbox` tool declares `SandboxToolOutput` (with bounded `stdout`/`stderr`), returned as
+  `structuredContent`; code mode scripts now receive these objects instead of the text. Text
+  content is unchanged for the model.
+- New: the experimental `@yolk-sdk/connectors/afloat/conformance` subpath and the `afloat` profile
+  of `@yolk-sdk/emulators/mcp`; see [Afloat MCP conformance](./connectors/afloat).
 
 ### Canary.96: code mode, classifier models, conformance, and emulators
 
@@ -147,7 +183,8 @@ upgrading `@yolk-sdk/connectors` from canary.93:
   inputs with `FortnoxCreateCustomerInput.make` / `FortnoxUpdateCustomerInput.make`. Decoding those
   classes directly still strips unknown keys.
 
-Invoice write inputs are unchanged: `execute` and generated agent tools still drop unknown keys, and
+Invoice write inputs were unchanged in canary.94: `execute` and generated agent tools still dropped
+unknown keys (from canary.97, generated agent tools reject them), and
 `executeTyped` trusts an existing invoice input class instance without rechecking its keys. See
 [Fortnox write semantics](./connectors/fortnox#fortnox-write-semantics).
 

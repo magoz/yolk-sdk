@@ -211,7 +211,7 @@ await github.close()
 The rewrite loses the origin. The Dropbox, Notion, GitHub, Google, LinkedIn search, and MCP
 emulators answer each route only on its recorded origin, so serve their `fetchOn(origin)` rather
 than `fetch`, with one server per origin for the services that have two (Dropbox, Google, LinkedIn
-search). The Fortnox, Microsoft Graph, Todoist, Telegram, model-route, and OpenCode Go emulators
+search, and MCP with its `afloat` profile). The Fortnox, Microsoft Graph, Todoist, Telegram, model-route, and OpenCode Go emulators
 have no `fetchOn`: serve their `fetch`. Microsoft Graph serves both of its origins from one server.
 Each emulator's [reference section](../api-reference/emulators) names its origins. In Effect tests,
 `serveFetchHandler` is the scoped variant.
@@ -457,7 +457,9 @@ signal that the provider changed.
   a synthetic bearer in the `b64token` form their sections define (see
   [GitHub](../api-reference/emulators#github-emulator)). `synthetic-github-test-token` qualifies;
   a UUID or an all-hex key does not. Such a bearer also suits the other bearer emulators.
-  Telegram takes a synthetic `<digits>:<secret>` bot token instead.
+  Telegram takes a synthetic `<digits>:<secret>` bot token instead. The MCP `afloat` profile
+  (`https://useafloat.com`) takes `afloat_` followed by such a bearer, for example
+  `afloat_synthetic-key-0001`.
 - Send the credential only where the provider expects it, such as the `Authorization` bearer or
   Telegram's bot token in the path. There it is never stored or ledgered.
 - Checks for a credential repeated elsewhere in a request differ by emulator:
@@ -496,25 +498,25 @@ Each service's runner flags, seeds, and cleanup rules are on its page under
 
 Import an explicit subpath; there is no root export.
 
-| Subpath                               | Stands in for                                     | Used with                                                                       | Reference                                                              |
-| ------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `@yolk-sdk/emulators/router`          | Routing only                                      | Any Effect `HttpClient` code                                                    | [Router](../api-reference/emulators#router)                            |
-| `@yolk-sdk/emulators/node`            | Loopback server                                   | `EmulatedHttpClient`                                                            | [Node server](../api-reference/emulators#node-server)                  |
-| `@yolk-sdk/emulators/gateway`         | Vercel AI Gateway chat completions and classifier | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`, `ai-gateway-classifier` | [Gateway](../api-reference/emulators#gateway-emulator)                 |
-| `@yolk-sdk/emulators/openai`          | OpenAI Chat Completions                           | `@yolk-sdk/agent/providers/openai/provider`                                     | [OpenAI](../api-reference/emulators#openai-emulator)                   |
-| `@yolk-sdk/emulators/anthropic`       | Anthropic Messages and Claude usage               | `@yolk-sdk/agent/providers/anthropic/claude-provider`                           | [Anthropic](../api-reference/emulators#anthropic-emulator)             |
-| `@yolk-sdk/emulators/codex`           | ChatGPT Codex Responses and usage                 | `@yolk-sdk/agent/providers/openai/codex-provider`                               | [Responses](../api-reference/emulators#responses-emulators)            |
-| `@yolk-sdk/emulators/xai`             | xAI Grok CLI proxy Responses and billing          | `@yolk-sdk/agent/providers/xai/grok-provider`                                   | [Responses](../api-reference/emulators#responses-emulators)            |
-| `@yolk-sdk/emulators/opencode`        | OpenCode Go chat, Messages, Responses, and usage  | `@yolk-sdk/agent/providers/opencode/go-provider`                                | [OpenCode Go](../api-reference/emulators#opencode-go-emulator)         |
-| `@yolk-sdk/emulators/email`           | `EmailClient` port (fake backend)                 | `@yolk-sdk/connectors/email`                                                    | [Email](../api-reference/emulators#email-emulator)                     |
-| `@yolk-sdk/emulators/r2`              | `R2Presigner` and `R2ObjectClient` ports          | `@yolk-sdk/connectors/r2-storage`                                               | [R2](../api-reference/emulators#r2-emulator)                           |
-| `@yolk-sdk/emulators/fortnox`         | Fortnox `/3` API                                  | `@yolk-sdk/connectors/fortnox`                                                  | [Fortnox](../api-reference/emulators#fortnox-emulator)                 |
-| `@yolk-sdk/emulators/microsoft`       | Microsoft Graph (Outlook, OneDrive, calendar)     | `@yolk-sdk/connectors/microsoft`                                                | [Microsoft](../api-reference/emulators#microsoft-graph-emulator)       |
-| `@yolk-sdk/emulators/dropbox`         | Dropbox `/2` RPC and upload                       | `@yolk-sdk/connectors/dropbox`                                                  | [Dropbox](../api-reference/emulators#dropbox-emulator)                 |
-| `@yolk-sdk/emulators/notion`          | Notion `/v1`                                      | `@yolk-sdk/connectors/notion`                                                   | [Notion](../api-reference/emulators#notion-emulator)                   |
-| `@yolk-sdk/emulators/todoist`         | Todoist API v1                                    | `@yolk-sdk/connectors/todoist`                                                  | [Todoist](../api-reference/emulators#todoist-emulator)                 |
-| `@yolk-sdk/emulators/telegram`        | Telegram Bot API                                  | `@yolk-sdk/connectors/telegram`                                                 | [Telegram](../api-reference/emulators#telegram-emulator)               |
-| `@yolk-sdk/emulators/github`          | GitHub REST                                       | `@yolk-sdk/connectors/github`                                                   | [GitHub](../api-reference/emulators#github-emulator)                   |
-| `@yolk-sdk/emulators/google`          | Gmail, Calendar, and Drive                        | `@yolk-sdk/connectors/google`                                                   | [Google](../api-reference/emulators#google-emulator)                   |
-| `@yolk-sdk/emulators/linkedin-search` | Exa and Enrich Layer                              | `@yolk-sdk/connectors/linkedin-search`                                          | [LinkedIn search](../api-reference/emulators#linkedin-search-emulator) |
-| `@yolk-sdk/emulators/mcp`             | Two synthetic MCP servers                         | `@yolk-sdk/mcp/client`                                                          | [MCP](../api-reference/emulators#mcp-emulator)                         |
+| Subpath                               | Stands in for                                         | Used with                                                                       | Reference                                                              |
+| ------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `@yolk-sdk/emulators/router`          | Routing only                                          | Any Effect `HttpClient` code                                                    | [Router](../api-reference/emulators#router)                            |
+| `@yolk-sdk/emulators/node`            | Loopback server                                       | `EmulatedHttpClient`                                                            | [Node server](../api-reference/emulators#node-server)                  |
+| `@yolk-sdk/emulators/gateway`         | Vercel AI Gateway chat completions and classifier     | `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`, `ai-gateway-classifier` | [Gateway](../api-reference/emulators#gateway-emulator)                 |
+| `@yolk-sdk/emulators/openai`          | OpenAI Chat Completions                               | `@yolk-sdk/agent/providers/openai/provider`                                     | [OpenAI](../api-reference/emulators#openai-emulator)                   |
+| `@yolk-sdk/emulators/anthropic`       | Anthropic Messages and Claude usage                   | `@yolk-sdk/agent/providers/anthropic/claude-provider`                           | [Anthropic](../api-reference/emulators#anthropic-emulator)             |
+| `@yolk-sdk/emulators/codex`           | ChatGPT Codex Responses and usage                     | `@yolk-sdk/agent/providers/openai/codex-provider`                               | [Responses](../api-reference/emulators#responses-emulators)            |
+| `@yolk-sdk/emulators/xai`             | xAI Grok CLI proxy Responses and billing              | `@yolk-sdk/agent/providers/xai/grok-provider`                                   | [Responses](../api-reference/emulators#responses-emulators)            |
+| `@yolk-sdk/emulators/opencode`        | OpenCode Go chat, Messages, Responses, and usage      | `@yolk-sdk/agent/providers/opencode/go-provider`                                | [OpenCode Go](../api-reference/emulators#opencode-go-emulator)         |
+| `@yolk-sdk/emulators/email`           | `EmailClient` port (fake backend)                     | `@yolk-sdk/connectors/email`                                                    | [Email](../api-reference/emulators#email-emulator)                     |
+| `@yolk-sdk/emulators/r2`              | `R2Presigner` and `R2ObjectClient` ports              | `@yolk-sdk/connectors/r2-storage`                                               | [R2](../api-reference/emulators#r2-emulator)                           |
+| `@yolk-sdk/emulators/fortnox`         | Fortnox `/3` API                                      | `@yolk-sdk/connectors/fortnox`                                                  | [Fortnox](../api-reference/emulators#fortnox-emulator)                 |
+| `@yolk-sdk/emulators/microsoft`       | Microsoft Graph (Outlook, OneDrive, calendar)         | `@yolk-sdk/connectors/microsoft`                                                | [Microsoft](../api-reference/emulators#microsoft-graph-emulator)       |
+| `@yolk-sdk/emulators/dropbox`         | Dropbox `/2` RPC and upload                           | `@yolk-sdk/connectors/dropbox`                                                  | [Dropbox](../api-reference/emulators#dropbox-emulator)                 |
+| `@yolk-sdk/emulators/notion`          | Notion `/v1`                                          | `@yolk-sdk/connectors/notion`                                                   | [Notion](../api-reference/emulators#notion-emulator)                   |
+| `@yolk-sdk/emulators/todoist`         | Todoist API v1                                        | `@yolk-sdk/connectors/todoist`                                                  | [Todoist](../api-reference/emulators#todoist-emulator)                 |
+| `@yolk-sdk/emulators/telegram`        | Telegram Bot API                                      | `@yolk-sdk/connectors/telegram`                                                 | [Telegram](../api-reference/emulators#telegram-emulator)               |
+| `@yolk-sdk/emulators/github`          | GitHub REST                                           | `@yolk-sdk/connectors/github`                                                   | [GitHub](../api-reference/emulators#github-emulator)                   |
+| `@yolk-sdk/emulators/google`          | Gmail, Calendar, and Drive                            | `@yolk-sdk/connectors/google`                                                   | [Google](../api-reference/emulators#google-emulator)                   |
+| `@yolk-sdk/emulators/linkedin-search` | Exa and Enrich Layer                                  | `@yolk-sdk/connectors/linkedin-search`                                          | [LinkedIn search](../api-reference/emulators#linkedin-search-emulator) |
+| `@yolk-sdk/emulators/mcp`             | Two synthetic MCP servers and the Afloat MCP endpoint | `@yolk-sdk/mcp/client`, `@yolk-sdk/connectors/afloat/conformance`               | [MCP](../api-reference/emulators#mcp-emulator)                         |

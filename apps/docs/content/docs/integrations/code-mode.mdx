@@ -350,4 +350,6 @@ and aborts the executor's signal.
 ## Other runtimes
 
 `CodeModeExecutor` is a plain interface. Hosts on Workers or other runtimes can supply their own
-engine and keep the same tool, catalog, store, and result handling.
+engine and keep the same tool, catalog, store, and result handling. Custom executors must apply the
+same argument rules as the pi executor (see [What scripts see](#what-scripts-see)) and prefix
+rejections with `CodeModeExecutorTool.callLabel`, which `makeCodeModeTool` sets.

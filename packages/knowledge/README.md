@@ -144,7 +144,9 @@ storage, scope enforcement, and safe `ToolError` mapping.
 Both tools declare an output (`KnowledgeLookupOutput`, `KnowledgeManageOutput`) and return its JSON
 encoding as `structuredContent` (dates as ISO strings) next to the text, so code mode scripts get
 `{ operation: 'search', results }`, `{ operation: 'get', document }`, or
-`{ operation, document: { id, slug, title } }`.
+`{ operation, document: { id, slug, title } }`. A handler value that does not encode fails the call
+with an `execution` `ToolError`. Unknown argument keys are model-visible validation errors with a
+hint naming the allowed keys, not stripped.
 
 ## Ingestion semantics
 
