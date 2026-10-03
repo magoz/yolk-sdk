@@ -74,7 +74,8 @@ type UnknownArgumentGroup = {
 }
 
 const formatGroup = (group: UnknownArgumentGroup) => {
-  const keys = group.keys.map(key => `"${key}"`).join(', ')
+  // JSON-escaped so quotes, commas or newlines in a key cannot look like several keys.
+  const keys = group.keys.map(key => JSON.stringify(key)).join(', ')
   const label = group.keys.length === 1 ? 'Unknown argument' : 'Unknown arguments'
 
   return group.parent.length === 0

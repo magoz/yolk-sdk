@@ -29,27 +29,51 @@ type ToolArgumentsSchema = Schema.Schema<unknown> & { readonly DecodingServices:
 
 type PropertyPath = ReadonlyArray<PropertyKey>
 
-const nonFiniteNumberPath = (
-  value: unknown,
-  path: PropertyPath,
-  seen: Set<object>
-): PropertyPath | undefined => {
-  if (Predicate.isNumber(value)) return Number.isFinite(value) ? undefined : path
+// Iterative (no recursion) so deep or cyclic decoded values cannot overflow the stack. Covers
+// arrays, plain and class objects, and native `Map` keys/values and `Set` members, which the JSON
+// codec builds from tuple arrays (e.g. `ReadonlyMap(String, Number)` from `[["k", "Infinity"]]`).
+const nonFiniteNumberPath = (root: unknown): PropertyPath | undefined => {
+  const pending: Array<readonly [unknown, PropertyPath]> = [[root, []]]
+  const seen = new Set<object>()
 
-  if (!Predicate.isObjectOrArray(value) || value instanceof Date || seen.has(value)) {
-    return undefined
-  }
+  while (pending.length > 0) {
+    const next = pending.pop()
 
-  seen.add(value)
+    if (next === undefined) break
 
-  const entries: Iterable<readonly [PropertyKey, unknown]> = Array.isArray(value)
-    ? value.entries()
-    : Object.entries(value)
+    const [value, path] = next
 
-  for (const [key, item] of entries) {
-    const found = nonFiniteNumberPath(item, [...path, key], seen)
+    if (Predicate.isNumber(value)) {
+      if (!Number.isFinite(value)) return path
 
-    if (found !== undefined) return found
+      continue
+    }
+
+    if (!Predicate.isObjectOrArray(value) || value instanceof Date || seen.has(value)) continue
+
+    seen.add(value)
+
+    if (value instanceof Map) {
+      let index = 0
+
+      for (const [key, item] of value) {
+        pending.push([key, [...path, index, 0]], [item, [...path, index, 1]])
+        index += 1
+      }
+    } else if (value instanceof Set) {
+      let index = 0
+
+      for (const item of value) {
+        pending.push([item, [...path, index]])
+        index += 1
+      }
+    } else {
+      const entries: Iterable<readonly [PropertyKey, unknown]> = Array.isArray(value)
+        ? value.entries()
+        : Object.entries(value)
+
+      for (const [key, item] of entries) pending.push([item, [...path, key]])
+    }
   }
 
   return undefined
@@ -69,18 +93,59 @@ export const hasPlainPrototype = (value: object) => {
   return prototype === Object.prototype || prototype === null
 }
 
-/** Drops `undefined`-valued keys from plain objects at any depth, as JSON serialization would.
- * Model arguments are JSON and never carry `undefined`; in-process callers building params from
- * optional values do. Returns the same reference when nothing changes.
- */
-export const omitUndefinedKeys = (value: unknown): unknown => {
+// Iterative check for any `undefined` value in arrays/plain objects (cycle-safe, no recursion).
+// JSON arguments never contain one, so the common path never rebuilds anything.
+const containsUndefined = (root: unknown): boolean => {
+  const pending: Array<unknown> = [root]
+  const seen = new Set<object>()
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+
+    if (!Predicate.isObjectOrArray(value) || seen.has(value)) continue
+
+    seen.add(value)
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item === undefined) return true
+
+        pending.push(item)
+      }
+    } else if (hasPlainPrototype(value)) {
+      for (const item of Object.values(value)) {
+        if (item === undefined) return true
+
+        pending.push(item)
+      }
+    }
+  }
+
+  return false
+}
+
+// In-process inputs that carry `undefined` are shallow in practice; beyond this depth (or on a
+// cycle) the remaining structure is left as is and decoding decides.
+const maxRebuildDepth = 64
+
+const rebuildWithoutUndefined = (
+  value: unknown,
+  depth: number,
+  onPath: ReadonlySet<object>
+): unknown => {
+  if (!Predicate.isObjectOrArray(value) || depth > maxRebuildDepth || onPath.has(value)) {
+    return value
+  }
+
+  const path = new Set([...onPath, value])
+
   if (Array.isArray(value)) {
-    const items = value.map(omitUndefinedKeys)
+    const items = value.map(item => rebuildWithoutUndefined(item, depth + 1, path))
 
     return items.some((item, index) => item !== value[index]) ? items : value
   }
 
-  if (!Predicate.isObject(value) || !hasPlainPrototype(value)) return value
+  if (!hasPlainPrototype(value)) return value
 
   let changed = false
 
@@ -91,7 +156,7 @@ export const omitUndefinedKeys = (value: unknown): unknown => {
       return []
     }
 
-    const normalized = omitUndefinedKeys(item)
+    const normalized = rebuildWithoutUndefined(item, depth + 1, path)
 
     changed ||= normalized !== item
 
@@ -100,6 +165,13 @@ export const omitUndefinedKeys = (value: unknown): unknown => {
 
   return changed ? Object.fromEntries(entries) : value
 }
+
+/** Drops `undefined`-valued keys from plain objects, as JSON serialization would. Model arguments
+ * are JSON and never carry `undefined`; in-process callers building params from optional values
+ * do. Cycle-safe and stack-safe; returns the same reference when nothing changes.
+ */
+export const omitUndefinedKeys = (value: unknown): unknown =>
+  containsUndefined(value) ? rebuildWithoutUndefined(value, 0, new Set()) : value
 
 /** `Schema.Struct({})`: Effect parses an empty struct as any non-nullish value, without an
  * excess-property check, while it is advertised as a closed empty object. */
@@ -144,7 +216,7 @@ export const decodeToolArguments = <S extends ToolArgumentsSchema>(schema: S) =>
   return (input: unknown): Effect.Effect<S['Type'], Schema.SchemaError> =>
     decodeChecked(omitUndefinedKeys(input)).pipe(
       Effect.flatMap(decoded => {
-        const path = nonFiniteNumberPath(decoded, [], new Set())
+        const path = nonFiniteNumberPath(decoded)
 
         return path === undefined
           ? Effect.succeed(decoded)
@@ -185,60 +257,58 @@ const schemaRecord = (record: JsonObject, key: string): JsonObject | undefined =
 const requiredKeys = (schema: JsonObject): ReadonlySet<string> =>
   new Set((schemaArray(schema, 'required') ?? []).filter(Predicate.isString))
 
-// Each `$ref` hop of a schema, starting with the schema itself (bounded).
-const refHops = (schema: Schema.Json | undefined, definitions: JsonObject): Array<JsonObject> => {
+// `#/$defs/<token>` with a single JSON Pointer token (RFC 6901: `~1` is `/`, `~0` is `~`).
+// Multi-segment, percent-encoded, or invalid escapes are not resolved, so the reference stays
+// unknown instead of picking the wrong definition.
+const definitionName = (ref: string): string | undefined => {
+  if (!ref.startsWith(localDefinitionPrefix)) return undefined
+
+  const token = ref.slice(localDefinitionPrefix.length)
+
+  if (token.includes('/') || token.includes('%') || /~(?![01])/.test(token)) return undefined
+
+  return token.replaceAll('~1', '/').replaceAll('~0', '~')
+}
+
+type RefWalk = {
+  // Every object visited along the `$ref` chain, starting with the schema itself.
+  readonly hops: ReadonlyArray<JsonObject>
+  readonly resolved: Schema.Json | undefined
+}
+
+const walkRefs = (schema: Schema.Json | undefined, definitions: JsonObject): RefWalk => {
   const hops: Array<JsonObject> = []
   let current = schema
 
   for (let hop = 0; hop < maxSchemaDepth; hop++) {
     const record = jsonObject(current)
 
-    if (record === undefined) return hops
+    if (record === undefined) return { hops, resolved: current }
 
     hops.push(record)
 
     const ref = ownValue(record, '$ref')
+    const name = Predicate.isString(ref) ? definitionName(ref) : undefined
 
-    if (!Predicate.isString(ref) || !ref.startsWith(localDefinitionPrefix)) return hops
-
-    const name = ref.slice(localDefinitionPrefix.length)
-
-    if (!Object.hasOwn(definitions, name)) return hops
+    if (name === undefined || !Object.hasOwn(definitions, name)) {
+      return { hops, resolved: current }
+    }
 
     current = definitions[name]
   }
 
-  return hops
+  return { hops, resolved: current }
 }
 
-// A schema whose `$ref` did not resolve (non-local, `#/definitions/...`, missing, or too deep) is
-// unknown: its siblings may be ignored by the dialect (draft-07), so it never justifies a drop.
+// A schema whose `$ref` did not resolve (non-local, `#/definitions/...`, escaped beyond a single
+// token, missing, or too deep) is unknown: its siblings may be ignored by the dialect (draft-07),
+// so it never justifies a drop.
 const isUnresolvedRef = (record: JsonObject) => Object.hasOwn(record, '$ref')
 
 const resolveSchema = (
   schema: Schema.Json | undefined,
   definitions: JsonObject
-): Schema.Json | undefined => {
-  let current = schema
-
-  for (let hop = 0; hop < maxSchemaDepth; hop++) {
-    const record = jsonObject(current)
-
-    if (record === undefined) return current
-
-    const ref = ownValue(record, '$ref')
-
-    if (!Predicate.isString(ref) || !ref.startsWith(localDefinitionPrefix)) return current
-
-    const name = ref.slice(localDefinitionPrefix.length)
-
-    if (!Object.hasOwn(definitions, name)) return current
-
-    current = definitions[name]
-  }
-
-  return current
-}
+): Schema.Json | undefined => walkRefs(schema, definitions).resolved
 
 const jsonTypeOf = (value: Schema.Json) => {
   if (value === null) return 'null'
@@ -288,7 +358,9 @@ const admitsNull = (
   if (depth > maxSchemaDepth) return true
 
   // Keywords beside a `$ref` still apply; `nullable` on any hop must not be lost by resolving.
-  if (refHops(schema, definitions).some(hop => ownValue(hop, 'nullable') === true)) return true
+  if (walkRefs(schema, definitions).hops.some(hop => ownValue(hop, 'nullable') === true)) {
+    return true
+  }
 
   const resolved = resolveSchema(schema, definitions)
 
@@ -632,7 +704,9 @@ export const omitNullOptionalToolArguments = (
   parameters: ToolJsonSchema,
   params: unknown
 ): unknown => {
-  if (!isJson(params) || hasNestedResourceId(parameters)) return params
+  const input = omitUndefinedKeys(params)
+
+  if (!isJson(input) || hasNestedResourceId(parameters)) return params
 
   const root = Predicate.isBoolean(parameters) ? undefined : parameters
 
@@ -642,7 +716,10 @@ export const omitNullOptionalToolArguments = (
     budget: { remaining: maxSchemaVisits }
   }
 
-  return normalizeValue(parameters, params, walk, 0, new Set())
+  const normalized = normalizeValue(parameters, input, walk, 0, new Set())
+
+  // Only a dropped `null` counts as a change; stripped `undefined` keys alone keep the original.
+  return normalized === input ? params : normalized
 }
 
 /** Applies {@link omitNullOptionalToolArguments} to a call, preserving identity when unchanged. */

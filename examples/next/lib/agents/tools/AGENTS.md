@@ -32,7 +32,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - No Node-only imports/deps and no raw `fetch()` in this directory.
 - Use Effect `Config`, `HttpClient`, Schema, and runtime-injected adapters.
 - Define model-visible tool parameters with Effect Schema annotations and `makeTool`; avoid duplicated hand-written JSON schemas.
-- Optional tool params use `Schema.optional(...)`: `makeTool` already accepts `null` as omission (see `patterns/AI_TOOL_SCHEMAS.md#tool-arguments`). Use `Schema.optional(Schema.NullOr(...))` only when `null` means something different from omission. The `knowledge-tool.ts` and `skill-manager-tool.ts` `NullOr` workarounds predate this and can be simplified.
+- Optional tool params use `Schema.optional(...)`: `makeTool` already accepts `null` as omission (see `patterns/AI_TOOL_SCHEMAS.md#tool-arguments`). Use `Schema.optional(Schema.NullOr(...))` only when `null` means something different from omission.
 - Use `EmptyToolParams` from `@yolk-sdk/agent/tools` for no-arg tools.
 - Recoverable/model-correctable failures use `modelVisibleToolError` or `ToolResult.isError`; execution `ToolError`s become model-visible failed tool results, so keep messages safe and non-secret.
 - Tool modules receive context `{ surface, route, userId, sessionId?, subagent?, skillset? }`; add policy via `isEnabled`.

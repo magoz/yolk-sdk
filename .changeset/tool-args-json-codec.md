@@ -1,6 +1,8 @@
 ---
 '@yolk-sdk/agent': minor
 '@yolk-sdk/connectors': minor
+'@yolk-sdk/knowledge': minor
+'@yolk-sdk/sandbox': minor
 ---
 
 Accept tool arguments exactly as advertised: `null` for optional fields is accepted, and unknown keys are rejected. `ToolDef.parameters` describes the schema's canonical JSON codec, which advertises every `Schema.optional(X)` field as `X | null` and every object as closed (`additionalProperties: false`), but `makeTool` decoded calls with the type-side schema: it rejected the advertised `null`, so models (especially strict-mode providers) failed validation on unused optional fields, and it silently stripped unknown keys.
@@ -12,3 +14,5 @@ Breaking (0.x minor): unknown keys at any depth are now model-visible validation
 `resolveTools` also drops `null` where the advertised schema marks a property optional without admitting `null` (`Schema.optionalKey(X)`, the subagent `model`/`reasoning_effort`, raw MCP schemas) before any registration validates, executes, or forwards the call. The new `omitNullOptionalToolArguments` export on `@yolk-sdk/agent/tools` exposes that step for hosts that dispatch registrations themselves. User-submitted input/interaction responses keep strict decoding.
 
 Connector agent tools (`makeConnectorToolModule`) follow the same policy: unknown keys are rejected instead of stripped. For example, `outlook.list_messages` rejects the search-only `query`, and Fortnox invoice update tools reject provider-managed fields such as `Booked` or `Sent`. `execute` and `executeTyped` are unchanged.
+
+The knowledge (`knowledge_lookup`, `knowledge_manage`) and sandbox agent tools follow the same policy: unknown keys are rejected with a hint instead of being stripped.

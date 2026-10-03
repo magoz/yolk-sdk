@@ -56,7 +56,9 @@ arguments decode through `Schema.toCodecJson(parameters)`:
 - Unknown keys are rejected at any depth with a model-visible validation error. Parameters are
   advertised as closed objects, and silently dropping a key would let the model believe it set
   something (a filter, a start time) that was ignored. The error names the key and lists the
-  allowed ones, for example `Unknown argument "start". Allowed arguments: id, note.`
+  allowed ones, for example `Unknown argument "start". Allowed arguments: id, note.` One
+  exception: Effect parses `Schema.Struct({})` as any object, so only a root empty struct is
+  checked. Nested, use `EmptyToolParams` or a declared struct.
 
 `resolveTools` also drops `null` on properties advertised as optional without `null`, such as
 `Schema.optionalKey(X)` fields or raw MCP schemas, before any tool sees the call. It never touches

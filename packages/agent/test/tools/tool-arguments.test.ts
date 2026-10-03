@@ -632,6 +632,38 @@ describe('registry null omission for optional non-nullable properties', () => {
     expect(omitNullOptionalToolArguments(openApi, elements)).toBe(elements)
   })
 
+  it('resolves $defs references as JSON Pointer tokens', () => {
+    const value = { v: null }
+
+    // `a~1b` is the token for the definition named `a/b`, not a definition named `a~1b`.
+    const escaped: ToolJsonSchema = {
+      type: 'object',
+      properties: { v: { $ref: '#/$defs/a~1b' } },
+      $defs: { 'a/b': { type: ['string', 'null'] }, 'a~1b': { type: 'string' } }
+    }
+
+    expect(omitNullOptionalToolArguments(escaped, value)).toBe(value)
+
+    const tilde: ToolJsonSchema = {
+      type: 'object',
+      properties: { v: { $ref: '#/$defs/a~0b' } },
+      $defs: { 'a~b': { type: 'string' } }
+    }
+
+    expect(omitNullOptionalToolArguments(tilde, value)).toEqual({})
+
+    // Multi-segment and percent-encoded pointers stay unresolved (unknown), never mis-resolved.
+    for (const ref of ['#/$defs/a/b', '#/$defs/a%2Fb', '#/$defs/a~2b']) {
+      const unresolved: ToolJsonSchema = {
+        type: 'object',
+        properties: { v: { $ref: ref } },
+        $defs: { a: { type: 'string' }, 'a/b': { type: 'string' }, 'a%2Fb': { type: 'string' } }
+      }
+
+      expect(omitNullOptionalToolArguments(unresolved, value)).toBe(value)
+    }
+  })
+
   it('leaves the remainder unchanged once the work budget is spent', () => {
     // A small schema with many argument objects: each element costs one schema visit.
     const list: ToolJsonSchema = {
@@ -1217,6 +1249,80 @@ describe('unknown tool argument keys', () => {
 
       expect(received).toHaveLength(0)
       expectValidationError(result, '__proto__')
+    })
+  )
+
+  it.effect('rejects cyclic or very deep extra arguments instead of crashing', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Schema.Struct({ id: Schema.String }))
+      const toolSet = yield* resolveOne(tool)
+
+      type Cyclic = { readonly id: string; extra?: Cyclic }
+
+      const cyclic: Cyclic = { id: 'x' }
+
+      cyclic.extra = cyclic
+
+      expectValidationError(yield* toolSet.execute(call(cyclic)), 'extra')
+
+      type Nested = ReadonlyArray<Nested>
+
+      const deep = Array.from({ length: 20_000 }).reduce<Nested>(inner => [inner], [])
+
+      expectValidationError(yield* toolSet.execute(call({ id: 'x', extra: deep })), 'extra')
+      expect(received).toHaveLength(0)
+    })
+  )
+
+  it.effect('rejects non-finite numbers inside decoded maps and sets', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(
+        Schema.Struct({
+          values: Schema.optional(Schema.ReadonlyMap(Schema.String, Schema.Number)),
+          tags: Schema.optional(Schema.ReadonlySet(Schema.Number))
+        })
+      )
+
+      const toolSet = yield* resolveOne(tool)
+
+      for (const params of [{ values: [['k', 'Infinity']] }, { tags: ['NaN'] }]) {
+        const result = yield* toolSet.execute(call(params))
+
+        expect(result).toMatchObject({
+          isError: true,
+          content: expect.stringContaining('Expected a finite number')
+        })
+      }
+
+      expect(received).toHaveLength(0)
+    })
+  )
+
+  it.effect('escapes unknown key names in hints', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Schema.Struct({ id: Schema.String }))
+      const toolSet = yield* resolveOne(tool)
+      const result = yield* toolSet.execute(call({ id: 'x', 'a", "b': 1 }))
+
+      expect(result.content).toContain('Unknown argument "a\\", \\"b". Allowed arguments: id.')
+    })
+  )
+
+  it.effect('drops a strict-mode null even when in-process params also carry undefined', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(
+        Schema.Struct({
+          id: Schema.String,
+          mode: Schema.optionalKey(Schema.String),
+          note: Schema.optional(Schema.String)
+        })
+      )
+
+      const toolSet = yield* resolveOne(tool)
+      const result = yield* toolSet.execute(call({ id: 'x', mode: null, note: undefined }))
+
+      expect(result.isError).toBeUndefined()
+      expect(received).toEqual([{ id: 'x' }])
     })
   )
 
