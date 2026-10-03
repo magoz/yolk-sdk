@@ -6,9 +6,9 @@ application and integrity.
 
 ## Scope
 
-| Package       | Pinned version       | Patch                                     | Owner           |
-| ------------- | -------------------- | ----------------------------------------- | --------------- |
-| `drizzle-orm` | `1.0.0-rc.5-ab785fc` | Type declarations: `SqlError` import path | `examples/next` |
+| Package       | Pinned version       | Patch                                     | Owner                                                                                                        |
+| ------------- | -------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `drizzle-orm` | `1.0.0-rc.5-ab785fc` | Type declarations: `SqlError` import path | `examples/next` (applies to every install of this version, including the root and Alchemy's transitive copy) |
 
 `drizzle-orm@1.0.0-rc.5-ab785fc` declares `effect >=4.0.0-beta.105 || >=4.0.0`, and its runtime
 JavaScript imports no removed Effect paths. Its type declarations (46 `.d.ts`/`.d.cts` files)
