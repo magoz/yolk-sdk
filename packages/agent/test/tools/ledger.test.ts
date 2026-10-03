@@ -16,6 +16,7 @@ import {
   toolIdempotencyKey,
   ToolLedgerEntry,
   ToolLedgerError,
+  toolLedgerArgs,
   toolLedgerResult,
   ToolLedgerSucceeded,
   type ToolLedgerClaimRequest,
@@ -302,6 +303,68 @@ describe('tool ledger', () => {
       expect(probe.runs).toEqual(['first'])
       expect(conflict.isError).toBe(true)
       expect(conflict.structuredContent).toMatchObject({ details: { state: 'conflict' } })
+    })
+  )
+
+  it.effect('detects a conflict past the bounded argument preview', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe)]
+      const prefix = 'p'.repeat(9 * 1024)
+
+      const first = yield* execute(tools, noteCall('call_1', `${prefix}-first`), { store })
+      const conflict = yield* execute(tools, noteCall('call_1', `${prefix}-second`), { store })
+      const [entry] = yield* store.entries
+
+      expect(probe.runs).toEqual([`${prefix}-first`])
+      expect(first.isError).toBeUndefined()
+      expect(conflict.isError).toBe(true)
+      expect(conflict.structuredContent).toMatchObject({ details: { state: 'conflict' } })
+      // The preview stays bounded; the digest covers the full arguments.
+      expect(entry?.args.endsWith('…')).toBe(true)
+      expect(entry?.argsDigest).toMatch(/^[0-9a-f]{64}$/)
+    })
+  )
+
+  it.effect('matches arguments by canonical JSON, independent of key order', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const left = toolLedgerArgs({ b: [1, { y: 2, x: 1 }], a: 'é' })
+      const right = toolLedgerArgs({ a: 'é', b: [1, { x: 1, y: 2 }] })
+
+      expect(left.argsDigest).toBe(right.argsDigest)
+      expect(left.args).toBe('{"b":[1,{"y":2,"x":1}],"a":"é"}')
+      expect(toolLedgerArgs({ a: 'é' }).argsDigest).not.toBe(left.argsDigest)
+      expect(yield* store.entries).toEqual([])
+    })
+  )
+
+  it.effect('digests arguments with SHA-256 over their canonical JSON', () =>
+    Effect.gen(function* () {
+      const webCryptoHex = (text: string) =>
+        Effect.promise(() => crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).pipe(
+          Effect.map(buffer =>
+            Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('')
+          )
+        )
+
+      // Block boundaries (55/56/64 bytes), multi-byte text, and multi-block inputs.
+      const values = [
+        'x'.repeat(53),
+        'x'.repeat(54),
+        'x'.repeat(62),
+        'é😀\u0001'.repeat(300),
+        'y'.repeat(100_000)
+      ]
+
+      for (const value of values) {
+        expect(toolLedgerArgs(value).argsDigest).toBe(yield* webCryptoHex(JSON.stringify(value)))
+      }
+
+      expect(toolLedgerArgs({ b: 1, a: [true, null] }).argsDigest).toBe(
+        yield* webCryptoHex('{"a":[true,null],"b":1}')
+      )
     })
   )
 
@@ -630,6 +693,7 @@ describe('tool ledger', () => {
         key: 'call_1',
         toolName: 'append_note',
         args: '{}',
+        argsDigest: 'digest',
         claimedAtMs: 1,
         leaseExpiresAtMs: 2,
         completedAtMs: 2,

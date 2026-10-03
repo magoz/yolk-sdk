@@ -44,6 +44,7 @@ export {
 export type {
   InMemoryToolLedgerStore,
   ToolLedgerAbandonedInput,
+  ToolLedgerArgs,
   ToolLedgerClaimRequest,
   ToolLedgerDecision,
   ToolLedgerDecisionEvent,

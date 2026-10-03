@@ -12,6 +12,7 @@ import {
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
 import type { ToolAccess } from './registry.ts'
+import { sha256Hex } from './sha256.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -40,15 +41,17 @@ export type ToolLedgerOutcome = typeof ToolLedgerOutcome.Type
 /**
  * One persisted ledger entry. `key` is the top-level `call.id`, or `<parentCallId>/<seq>` for a
  * nested call (then `parentKey` is the parent call id). `args` is the compact JSON of the call
- * arguments, cut to 8 KiB (audit and conflict detection only). An entry without `outcome` is
- * claimed: running under a live lease, or abandoned once the lease expired. Plain wire data:
- * persist it with `Schema.toCodecJson(ToolLedgerEntry)`.
+ * arguments, cut to 8 KiB (an audit preview). `argsDigest` is the SHA-256 of the full arguments'
+ * canonical JSON (see `toolLedgerArgs`); conflict detection compares it with the tool name, never
+ * the preview. An entry without `outcome` is claimed: running under a live lease, or abandoned
+ * once the lease expired. Plain wire data: persist it with `Schema.toCodecJson(ToolLedgerEntry)`.
  */
 export class ToolLedgerEntry extends Schema.Class<ToolLedgerEntry>('ToolLedgerEntry')({
   key: NonEmptyTrimmedString,
   parentKey: Schema.optional(NonEmptyTrimmedString),
   toolName: NonEmptyTrimmedString,
   args: Schema.String,
+  argsDigest: Schema.String,
   claimedAtMs: Schema.Number,
   leaseExpiresAtMs: Schema.Number,
   completedAtMs: Schema.optional(Schema.Number),
@@ -87,7 +90,10 @@ export type ToolLedgerClaimRequest = {
   readonly key: string
   readonly parentKey?: string
   readonly toolName: string
+  /** Bounded preview of the arguments (`toolLedgerArgs`); store it as given. */
   readonly args: string
+  /** SHA-256 of the full arguments (`toolLedgerArgs`); store it as given. */
+  readonly argsDigest: string
   /** The caller's `Clock` time. */
   readonly nowMs: number
   /** Lease of a fresh claim on the caller's clock: `nowMs + leaseMs`. */
@@ -110,6 +116,7 @@ type ClaimRequestFields = {
   parentKey?: string
   toolName: string
   args: string
+  argsDigest: string
   nowMs: number
   leaseExpiresAtMs: number
   leaseMs: number
@@ -119,9 +126,10 @@ type ClaimRequestFields = {
  * Host-implemented durable storage of tool calls, scoped by the host (for example one Workflow
  * run). Every operation is keyed within `scope`; never look entries up across scopes.
  *
- * - `claim` is atomic: insert a claimed entry when the key is absent (`Fresh`), else classify the
- *   existing entry without changing it (`classifyToolLedgerEntry`). Repeated claims of an existing
- *   key are reads; waiting callers poll with them.
+ * - `claim` is atomic: insert a claimed entry when the key is absent (`Fresh`, persisting every
+ *   request field, `argsDigest` included), else classify the existing entry without changing it
+ *   (`classifyToolLedgerEntry`). Repeated claims of an existing key are reads; waiting callers
+ *   poll with them.
  * - `heartbeat` extends the lease of a claimed entry without an outcome (never shortening it); it
  *   never revives or changes a completed entry.
  * - Leases use one clock per store: the caller's (`nowMs`, `leaseExpiresAtMs`) or the store's own
@@ -263,9 +271,52 @@ const compactJson = (value: unknown): string | undefined =>
     }
   )
 
-/** Compact JSON of call arguments within `toolLedgerMaxArgsBytes`. */
-export const toolLedgerArgs = (params: unknown) =>
-  truncateUtf8(compactToolArguments(params), toolLedgerMaxArgsBytes)
+/** What the ledger records of a call's arguments (see `toolLedgerArgs`). */
+export type ToolLedgerArgs = {
+  /** Compact JSON within `toolLedgerMaxArgsBytes`, cut with a trailing `…`: an audit preview. */
+  readonly args: string
+  /** Lower-case hex SHA-256 of the full arguments' canonical JSON. */
+  readonly argsDigest: string
+}
+
+const isJsonObject = (value: Schema.Json): value is { readonly [key: string]: Schema.Json } =>
+  Predicate.isObject(value) && !Array.isArray(value)
+
+// Object keys sorted: equal values encode equally whatever the key order (for example after a
+// round trip through a database JSON column).
+const canonicalJson = (value: Schema.Json): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+
+  if (isJsonObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key] ?? null)}`)
+      .join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+const canonicalArguments = (compact: string) =>
+  Result.match(
+    Result.try((): Schema.Json => JSON.parse(compact)),
+    { onFailure: () => compact, onSuccess: canonicalJson }
+  )
+
+/**
+ * The ledger's record of call arguments: `args`, their compact JSON cut to
+ * `toolLedgerMaxArgsBytes` (an audit preview), and `argsDigest`, the lower-case hex SHA-256 of the
+ * full arguments' canonical JSON (compact, object keys sorted). Conflict detection compares
+ * `argsDigest`, so arguments that differ only past the preview still conflict.
+ */
+export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
+  const compact = compactToolArguments(params)
+
+  return {
+    args: truncateUtf8(compact, toolLedgerMaxArgsBytes),
+    argsDigest: sha256Hex(canonicalArguments(compact))
+  }
+}
 
 const jsonValue = (value: unknown): Result.Result<unknown, undefined> => {
   const encoded = compactJson(value)
@@ -565,13 +616,14 @@ export const executeLedgered = (input: {
     const { call, options } = input
     const { store } = options
     const key = call.id
-    const args = toolLedgerArgs(call.params)
+    const { args, argsDigest } = toolLedgerArgs(call.params)
 
     const claim = (nowMs: number) => {
       const request: ClaimRequestFields = {
         key,
         toolName: call.name,
         args,
+        argsDigest,
         nowMs,
         leaseExpiresAtMs: nowMs + options.leaseMs,
         leaseMs: options.leaseMs
@@ -590,7 +642,9 @@ export const executeLedgered = (input: {
       deadline === undefined ? Number.POSITIVE_INFINITY : deadline
     )
 
-    const matches = (entry: ToolLedgerEntry) => entry.toolName === call.name && entry.args === args
+    // The digest covers the full arguments; the bounded `args` preview never decides a match.
+    const matches = (entry: ToolLedgerEntry) =>
+      entry.toolName === call.name && entry.argsDigest === argsDigest
 
     let current = yield* claim(startedAt)
     const waited = ToolLedgerClaim.$is('InFlight')(current) && matches(current.entry)
@@ -708,6 +762,7 @@ type EntryFields = {
   parentKey?: string
   toolName: string
   args: string
+  argsDigest: string
   claimedAtMs: number
   leaseExpiresAtMs: number
   completedAtMs?: number
@@ -719,6 +774,7 @@ const entryFields = (entry: ToolLedgerEntry): EntryFields => {
     key: entry.key,
     toolName: entry.toolName,
     args: entry.args,
+    argsDigest: entry.argsDigest,
     claimedAtMs: entry.claimedAtMs,
     leaseExpiresAtMs: entry.leaseExpiresAtMs
   }
@@ -750,6 +806,7 @@ export const makeInMemoryToolLedgerStore = (
           key: request.key,
           toolName: request.toolName,
           args: request.args,
+          argsDigest: request.argsDigest,
           claimedAtMs: request.nowMs,
           leaseExpiresAtMs: request.leaseExpiresAtMs
         }

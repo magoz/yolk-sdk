@@ -15,6 +15,7 @@ import {
   toolLedgerArgs,
   ToolLedgerFailed,
   ToolLedgerSucceeded,
+  type ToolLedgerArgs,
   type ToolLedgerOptions,
   type ToolModule,
   type ToolRegistration
@@ -227,14 +228,14 @@ describe('code mode with a tool ledger', () => {
 
       const lease = { nowMs: 0, leaseExpiresAtMs: 1_000, leaseMs: 1_000 }
 
-      const claimNested = (key: string, args: string) =>
-        store.claim({ key, parentKey: 'call_1', toolName: 'sales_manage', args, ...lease })
+      const claimNested = (key: string, args: ToolLedgerArgs) =>
+        store.claim({ key, parentKey: 'call_1', toolName: 'sales_manage', ...args, ...lease })
 
       // An abandoned script with six ledgered nested writes: big arguments, mixed outcomes.
       yield* store.claim({
         key: 'call_1',
         toolName: 'codemode',
-        args: toolLedgerArgs({ code: 'script' }),
+        ...toolLedgerArgs({ code: 'script' }),
         ...lease
       })
 
@@ -298,6 +299,40 @@ describe('code mode with a tool ledger', () => {
       // Plain JSON: survives a JSON round trip unchanged.
       expect(JSON.parse(JSON.stringify(result.structuredContent))).toEqual(result.structuredContent)
       expect(text(result.content)).toContain('- call_1/2 sales_manage')
+    })
+  )
+
+  it.effect('reports a different long script under the same call id as a conflict', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const { executor, state } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 'once' })
+
+        return 'done'
+      })
+
+      const modules = codeModeModules(executor, [salesManage(log)])
+      const prefix = `// ${'x'.repeat(9 * 1024)}\n`
+
+      const run = (code: string) =>
+        Effect.gen(function* () {
+          const toolSet = yield* resolveTools(modules, context, { ledger: { store } })
+
+          return yield* toolSet.execute(
+            ToolCall.make({ id: 'call_1', name: 'codemode', params: { code } })
+          )
+        })
+
+      const first = yield* run(`${prefix}await sales_manage({ note: 'a' })`)
+      const second = yield* run(`${prefix}await sales_manage({ note: 'b' })`)
+
+      expect(first.isError).toBeUndefined()
+      expect(state.runs).toBe(1)
+      expect(log).toHaveLength(1)
+      expect(second.isError).toBe(true)
+      expect(second.structuredContent).toMatchObject({ details: { state: 'conflict' } })
     })
   )
 
