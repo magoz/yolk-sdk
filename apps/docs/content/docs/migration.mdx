@@ -29,6 +29,24 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.99: durable tool-call ledger
+
+New, opt-in: `resolveTools(modules, context, { ledger: { store } })` runs ledgered tool calls at
+most once per ledger key when a step re-executes. It is available from `0.1.0-canary.99`; without
+`ledger`, tool execution is unchanged.
+
+- Vercel Workflow tool-batch steps are at-least-once: the queue redelivers them after crashes and
+  sometimes while a first execution is still running, even with `noWorkflowStepRetry`. Hosts that
+  resolve tools inside a step should pass a durable store. See
+  [Tool steps run at least once](./integrations/vercel-workflow#tool-steps-run-at-least-once) and
+  [Ledger writes for re-executed steps](./agent/tools-hitl#ledger-writes-for-re-executed-steps).
+- Custom executor or registration wrappers must forward `idempotencyKey` (like `nested`).
+- A custom `isLedgered` should compose `defaultToolLedgerPolicy`, which also ledgers the built-in
+  `subagent` tool.
+- Code mode: `ToolResult.nestedCalls` is now sized from `limits.maxNestedCalls` (up to 4096)
+  instead of a fixed 256, and `NestedToolCalls` gains optional per-status `counts`. Hosts with a
+  higher limit store larger records in step output and audit storage.
+
 ### Canary.98: extractors package
 
 New package: `@yolk-sdk/extractors`, bounded text extraction for PDF, DOCX, XLSX, PPTX, CSV, JSON,

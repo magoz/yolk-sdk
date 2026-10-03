@@ -549,6 +549,31 @@ regions paid a cross-region round trip per 10 ms write batch, with writer backpr
 the delay. Upgrade to `workflow@^5.0.0-beta.42`: 5.x region-pins each run so storage, queuing, and
 streams are served from the run's own region.
 
+### Tool ran twice after a crash or redelivery
+
+The Workflow queue is at-least-once: a tool-batch step runs again after a crash, and sometimes
+while its first execution is still running, even with `noWorkflowStepRetry`. Without a ledger,
+every tool call in that step runs again. Pass a durable store with
+`resolveTools(modules, context, { ledger: { store } })` inside the step, scoped to the run (plus the
+turn or step if call ids can repeat). Input and interaction tools are never ledgered; they rely on
+your `InteractionHost` receipts. See
+[Ledger writes for re-executed steps](./agent/tools-hitl#ledger-writes-for-re-executed-steps).
+
+### Ledgered call returns unavailable, conflict, or may already have been applied
+
+- `ToolError` with reason `unavailable`: the store failed to claim or poll. The call fails closed
+  and nothing runs. Check store connectivity, and keep store operations interruptible.
+- Conflict: the same ledger key holds a different tool name or `argsDigest`, usually because a
+  provider reused a call id within the scope. Add the turn or step to the scope.
+- "May already have been applied": an earlier execution's lease expired without an outcome (a
+  crash or a step stopped mid-call). The call never re-runs; verify the side effect before retrying.
+- Timeout while waiting for an in-flight call: `maxWaitMs` (default 150 s) or `deadline` passed.
+- A step overruns its budget after a call: recording the outcome can take about 15 s after
+  `deadline`. Pass a `deadline` that leaves that finalization time before the platform stops the
+  step.
+
+Log `onLedgerDecision` to see which decision each call got.
+
 ### Duplicate or replayed events
 
 Durable clients should de-dupe by `eventId` when available and resume from the last known stream index.

@@ -102,7 +102,11 @@ runs again after a crash and sometimes concurrently with a first execution that 
 Pass a durable ledger when you resolve tools and every ledgered call runs at most once per key. By
 default that is every non-`read` call, including the nested calls of a
 [code mode](../integrations/code-mode#survive-step-re-execution) script, plus the built-in
-`subagent` tool (a `read` tool whose child run could otherwise repeat its writes):
+`subagent` tool (a `read` tool whose child run could otherwise repeat its writes). Input and
+interaction tools are never ledgered: their at-most-once guarantee is your `InteractionHost`
+receipts.
+
+Fragment: `db`, `modules`, `requestContext`, `runId`, and `stepDeadlineMs` are host-owned.
 
 ```ts
 import { Effect } from 'effect'
@@ -154,6 +158,7 @@ const resolveStepTools = Effect.gen(function* () {
   still returns the full result.
 - Tool executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions. Pass it
   to external APIs that deduplicate, which covers a crash between their commit and `complete`.
+  Custom executor or registration wrappers must forward `idempotencyKey` (like `nested`).
 - Pick one clock per store. `claim` and `heartbeat` receive both `leaseMs` (for stores that use
   their own clock, such as a database `now()`) and `nowMs`/`leaseExpiresAtMs` from the caller's
   `Clock` (for clock-agnostic stores, such as the in-memory one). Database time avoids clock skew
@@ -176,6 +181,20 @@ const resolveStepTools = Effect.gen(function* () {
   `conflict`) for logs and metrics, for example to count replays. It never affects execution:
   errors are logged and ignored.
 - `makeInMemoryToolLedgerStore()` is for tests and single-process hosts only.
+
+| `ledger` option       | Default                                   | Meaning                                         |
+| --------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `store`               | required                                  | host-implemented `ToolLedgerStore`              |
+| `isLedgered`          | `defaultToolLedgerPolicy`                 | which calls are ledgered                        |
+| `leaseMs`             | `defaultToolLedgerLeaseMs` (30 s)         | lease of a running call                         |
+| `heartbeatIntervalMs` | a third of `leaseMs`, at most half        | how often a running call renews its lease       |
+| `pollIntervalMs`      | `defaultToolLedgerPollIntervalMs` (1 s)   | how often a duplicate polls an in-flight call   |
+| `maxWaitMs`           | `defaultToolLedgerMaxWaitMs` (150 s)      | longest wait for an in-flight call              |
+| `deadline`            | none                                      | epoch ms after which a duplicate stops waiting  |
+| `maxResultBytes`      | `defaultToolLedgerMaxResultBytes` (1 MiB) | bound on a stored result's serialized JSON      |
+| `onLedgerDecision`    | none                                      | one `ToolLedgerDecisionEvent` per ledgered call |
+
+Argument previews are cut at `toolLedgerMaxArgsBytes` (8 KiB).
 
 ## Ask a human
 

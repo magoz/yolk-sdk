@@ -29,7 +29,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/client`                                 | HTTP/NDJSON transport, HITL resume, retry/error state helpers                                 |
 | `@yolk-sdk/agent/compaction`                             | Host-owned compaction budgets, checkpoints, formatting, retry                                 |
 | `@yolk-sdk/agent/classification`                         | Classifier model contract: typed questions, answers, usage, errors                            |
-| `@yolk-sdk/agent/tools`                                  | Tool registry, typed inputs, interactions, subagents/questions                                |
+| `@yolk-sdk/agent/tools`                                  | Tool registry, typed inputs, interactions, subagents/questions, durable tool ledger           |
 | `@yolk-sdk/agent/react`                                  | Headless React chat hook, reducer, selectors, and render model                                |
 | `@yolk-sdk/agent/oauth`                                  | Provider-neutral OAuth token and broker contracts                                             |
 | `@yolk-sdk/agent/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                         |
@@ -943,7 +943,8 @@ Steps that hosts re-execute (Vercel Workflow's queue is at-least-once) must not 
 Pass `resolveTools(modules, context, { ledger: { store } })` with a host-implemented durable
 `ToolLedgerStore` scoped to the run: every ledgered call (by default every non-`read` call plus the
 built-in `subagent` tool, top-level or nested in code mode) runs at most once per ledger key. Add
-custom delegation tools with `isLedgered`. A different call under the same key (tool name or a
+custom delegation tools with `isLedgered`. Input and interaction tools are never ledgered; their
+at-most-once guarantee is the host's `InteractionHost` receipts. A different call under the same key (tool name or a
 SHA-256 `argsDigest` of the full arguments, a stable format hosts persist) is a conflict, never a
 replay. Completed calls return their stored result, concurrent duplicates wait, and calls abandoned
 by a crash are never re-run (the model is told to verify). Executors receive a stable
@@ -984,6 +985,9 @@ aborts, and implementation bugs outside typed tool execution.
 - Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.
 - Provide tools, approval policy, auth, storage, and observability.
+- When steps can re-execute, implement a durable `ToolLedgerStore` scoped to one run (plus the turn
+  or step when call ids can repeat), keep its operations interruptible, and reserve about 15 s of
+  the step budget after `deadline` for recording outcomes.
 - If you send `ToolDef`s to providers yourself (outside `run`/`runModelTurn`), filter them with
   protocol `providerToolDefs`; codemode-only tools must never reach providers. Executor decorators
   outside `ResolvedToolSet.execute` do not see nested code mode calls.
