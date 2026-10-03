@@ -1,5 +1,13 @@
 # @yolk-sdk/extractors
 
+## 0.1.0-canary.99
+
+### Patch Changes
+
+- 1af11ff: Document the package boundaries in the README, add an install command for knowledge ingestion (`@yolk-sdk/extractors` with `@yolk-sdk/knowledge`), and list the public exports in the Subpaths table, including `extractedFileFormats`, `isOfficeFileFormat`, `minimumSheetJsVersion`, `sheetJsInstallCommand`, `FileExtractionFailureReason`, the `FileExtractorLimits` schema, the `FileExtractorApi` type, and the `./node` types `FileExtractorOptions`, `OfficeArchiveLimits`, and `SheetJsLoader`. The Output table now says that PPTX slides are read by slide part number and that only worksheets get a text section, and the worker timeout note no longer claims a typical parse time.
+- Updated dependencies [ee80a4a]
+  - @yolk-sdk/knowledge@0.1.0-canary.99
+
 ## 0.1.0-canary.98
 
 ### Minor Changes
