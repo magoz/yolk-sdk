@@ -1,19 +1,30 @@
+// @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { Effect, Predicate, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMError, ToolError } from '@yolk-sdk/agent/loop'
 import { TurnStart, UsageUpdate, AgentUsage, ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
-import { resolveAgentToolSet, nodeTextToolModules } from '@/lib/agents/tools/registry'
+import {
+  makeNodeTextToolModules,
+  resolveAgentToolSet,
+  nodeTextToolModules
+} from '@/lib/agents/tools/registry'
+import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
+import { makeSkillManagerToolModule } from '@/lib/agents/tools/skill-manager-tool'
+import { makeAppStorageKnowledgeSearchToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
+import { lookupModules } from './child-control'
 import {
   collectSubagentEvents,
   makeCompletedSubagentToolResult,
-  recoverSubagentToolFailure
+  recoverSubagentToolFailure,
+  subagentToolModuleDescription
 } from './text-response'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
 
 const subagentToolStart = source.indexOf(
-  'const subagentToolModule = makeNonRecursiveSubagentToolModule'
+  'const subagentToolModule: ToolModule<AgentToolContext> = {\n      ...makeNonRecursiveSubagentToolModule'
 )
 
 const subagentExecuteSource = source.slice(
@@ -37,6 +48,31 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
     expect(source).toContain("name: 'general'")
     expect(source).toContain("name: 'explore'")
   })
+
+  it.effect('describes every module of the top-level runtime, including subagent', () =>
+    Effect.gen(function* () {
+      // The modules `makeAgentTextRuntime` composes into `toolModules` (MCP modules are covered by
+      // the MCP module tests); the subagent module is the package builder plus the app description.
+      const modules = [
+        ...(yield* makeNodeTextToolModules()),
+        makeAppKnowledgeToolModule(),
+        makeAppStorageKnowledgeSearchToolModule(),
+        makeAppTelegramToolModule({ botToken: 'token', chatId: 'chat' }),
+        makeSkillManagerToolModule(() => Effect.die('unused')),
+        ...lookupModules
+      ]
+
+      for (const toolModule of modules) {
+        expect(toolModule.description, toolModule.id).toEqual(expect.stringMatching(/\S/))
+      }
+
+      expect(subagentToolModuleDescription).toEqual(expect.stringMatching(/\S/))
+      expect(subagentExecuteSource).toContain('description: subagentToolModuleDescription')
+      expect(source).toContain(
+        '? [skillManagerToolModule, subagentToolModule, ...(options.modules ?? [])]'
+      )
+    })
+  )
 
   it.effect('omits recursive delegation and question HITL from child toolsets', () =>
     Effect.gen(function* () {

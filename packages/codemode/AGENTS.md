@@ -70,15 +70,34 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   `(async (tools, console) => {...})` whose `tools` is a guard proxy (`toolsGuardSource` in
   `node.ts`): the prefix shares line 1 (only line-1 columns shift) and the guard follows the
   script, whose frames are dropped from error stacks. Before a call leaves the VM the guard walks
-  the first argument (cycle-safe, at most 10000 values and 64 levels) and rejects with a
-  `TypeError` `tools.<id>: argument at <path> is ...` (non-finite numbers, `undefined`/function/
-  symbol array items and holes, function/symbol/bigint values, cycles, non-plain objects without
-  `toJSON`); `undefined` keys are allowed (absent) and `toJSON` values (`Date`) pass. Rejected calls
-  are never sent to the host or recorded. Unknown members fall through to pi's proxy (suggestions).
-  It is not a security boundary (`globalThis.tools` is unguarded); the registry still decodes.
-  Other executors must apply the same rules (`CodeModeExecutorTool` docs).
-- Nested calls rejected for an error result or a `beforeNestedCall` failure reject with
-  `tools.<identifier>: <text>` (fallback text `Tool <name> failed.`); nested-call records keep the
+  the first argument once as `JSON.stringify` reads it (`Object.keys` keys and array indexes read
+  once, so getters run once; a callable `toJSON` is called once with the key, `''` at the root, and
+  its result walked at the same path but not `toJSON`'d again) and builds a fresh copy
+  (null-prototype objects and null-prototype arrays; `length` read once with unary `+`, which is
+  `ToNumber`) that is what it sends: the checked value is the serialized value. It uses built-ins
+  captured before the script runs (`Reflect.apply` for `toJSON`, the intrinsic
+  `Date.prototype.getTime` for invalid dates, indexed loops instead of iterators), so scripts that
+  change built-ins cannot alter what is checked or sent; only rejection message text (paths, type
+  names) still reads script-mutable built-ins. It rejects with a `TypeError`
+  `<label>: argument at <path> is ...` (non-finite numbers,
+  invalid `Date`s, `undefined`/function/symbol array items and holes, function/symbol/bigint
+  values, cycles, non-plain objects without `toJSON`) and, past its limits, `<label>: argument has
+more than 100000 values; ...` or `... is nested more than 64 levels deep`: a walk that cannot
+  finish rejects, never forwards unchecked. `undefined` keys are left out (absent); DAG aliases are
+  copied, not cycles. A getter or `toJSON` that throws rejects the call with its own error (as
+  `JSON.stringify` would). Rejected calls are never sent to the host or recorded. Every key of pi's
+  `tools` is wrapped; unknown members fall through to pi's proxy (suggestions). It is not a
+  security boundary (`globalThis.tools` is unguarded); the registry still decodes. Other executors
+  must apply the same rules (`CodeModeExecutorTool` docs).
+- Call labels come from `codeModeCallLabels` (`catalog.ts`), shared by the guard (injected as
+  `[name, label]` pairs in tool order, never derived from `Object.keys` order) and the host prefix
+  (`CodeModeCatalogTool.callLabel`): pi binds `tools[identifier]` for the first tool with that
+  identifier, then `tools[name]` if free, so the label is `tools.<identifier>` or, for a shadowed
+  identifier, `tools["<name>"]` (a tool whose name is taken too is unreachable). The host passes
+  it as `CodeModeExecutorTool.callLabel`; the pi guard recomputes only when it is absent.
+  Cancelled and failed-unexpectedly rejections use the same label.
+- Nested calls rejected for an error result, a `beforeNestedCall` failure, or `maxNestedCalls`
+  reject with `<label>: <text>` (fallback text `Tool <name> failed.`); nested-call records keep the
   raw text. A tool with an output schema but no `structuredContent` resolves to its text (a tool
   bug, kept readable).
 - Code mode access is `write`; nested calls keep their own access metadata.
@@ -95,13 +114,14 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 
 ## Tests
 
-- `test/pi-executor.test.ts`: real pi executor end-to-end through `resolveTools`.
-- `test/catalog.test.ts`: listing, fairness, stability, description hook, search.
+- `test/pi-executor.test.ts`: real pi executor end-to-end through `resolveTools`: store and image
+  limits, cancellation, the executor concurrency cap, argument JSON rules and the guard (a
+  table-driven case per rejection and allowed shape, snapshot semantics for getters and `toJSON`,
+  value and depth limits; never executed or recorded), the unknown-key hint, call labels from the
+  guard and the host (`"123"`, identifier collisions), line numbers, `return`, and `exit()`.
+- `test/catalog.test.ts`: listing, fairness, stability, description hook, search, call labels.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
-  backstops), bounding, store rebuild and bounds.
-- `test/pi-executor.test.ts` also covers store and image limits, cancellation, the executor
-  concurrency cap, argument JSON rules and the guard (messages, never executed or recorded), the
-  unknown-key hint, the `tools.<id>:` prefix, line numbers, `return`, and `exit()`.
-- `test/tool.test.ts` also covers the rejection prefix and unprefixed nested-call records.
+  backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
+  records.
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

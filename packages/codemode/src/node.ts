@@ -8,6 +8,7 @@ import {
   type CodemodeTool,
   type CodemodeWasmModule
 } from '@earendil-works/pi-codemode'
+import { codeModeCallLabels } from './catalog.ts'
 import type {
   CodeModeError,
   CodeModeExecuteOptions,
@@ -96,80 +97,166 @@ const wrapperPrefix = 'async function __yolkCodeMode() {\n'
 
 const wrapperSuffix = '\n}'
 
+/** Most values one argument may hold; a larger argument is rejected. */
+const maxArgumentValues = 100_000
+
+/** Deepest object/array nesting one argument may have; deeper arguments are rejected. */
+const maxArgumentDepth = 64
+
 /**
- * Evaluated in the VM before the script runs: `(tools) => guardedTools`. Each `tools.<name>(args)`
- * first walks `args` (cycle-safe; at most 10000 values and 64 levels deep, beyond which the host
- * still validates) and rejects with a `TypeError` naming the tool and path when JSON would change
- * the value instead of carrying it: non-finite numbers, `undefined`/function/symbol array items
- * and holes, function/symbol/bigint values, cycles, and objects that are neither plain (prototype
- * `Object.prototype` or `null`), arrays, nor have a `toJSON` method (`Date`). `undefined`-valued
- * keys stay allowed: JSON drops them, which means absent. A rejected call never reaches the host.
- * Unknown members fall through to pi's `tools` proxy (close-match suggestions). Not a security
- * boundary (`globalThis.tools` is unguarded): arguments are still decoded by the host.
+ * Evaluated in the VM before the script runs: `(tools, labels) => guardedTools`, with `labels` the
+ * `[name, callLabel]` pairs of the tools in order (`codeModeCallLabels`). Each call walks its first
+ * argument once, the way `JSON.stringify` reads it (each own enumerable string key and each array
+ * index read once, so getters run once; a callable `toJSON` is called once with the key, `''` at
+ * the root, and its result is walked at the same path), and builds a fresh copy (null-prototype
+ * objects and arrays) that is what the call sends. It rejects with a `TypeError` naming the call
+ * label and path when JSON would change the value instead of carrying it: non-finite numbers,
+ * invalid `Date`s, `undefined`/function/symbol array items and holes, function/symbol/bigint
+ * values, cycles, and objects that are neither plain (prototype `Object.prototype` or `null`) nor
+ * arrays and have no `toJSON`. An argument with more than `maxArgumentValues` values or nested more
+ * than `maxArgumentDepth` levels is rejected too, never sent unchecked. `undefined`-valued keys are
+ * left out (absent, as JSON drops them); the same object twice (not a cycle) is copied twice. An
+ * error thrown by a getter or `toJSON` rejects the call with that error. A rejected call never
+ * reaches the host. Every member of pi's `tools` is wrapped; unknown members fall through to pi's
+ * proxy (close-match suggestions). Not a security boundary (`globalThis.tools` is unguarded):
+ * arguments are still decoded by the host.
  */
-const toolsGuardSource = `(function (tools) {
+const toolsGuardSource = `(function (tools, labels) {
+  // Captured before the script runs, so a script that changes built-ins cannot change the checks.
+  const { apply, getPrototypeOf, setPrototypeOf } = Reflect
+  const isFinite = Number.isFinite
+  const isArray = Array.isArray
+  const { keys, create, defineProperty } = Object
+  const getTime = Date.prototype.getTime
+  const TypeErrorCtor = TypeError
+  const SetCtor = Set
+  const setAdd = Set.prototype.add
+  const setHas = Set.prototype.has
+  const setDelete = Set.prototype.delete
+  const ObjectProto = Object.prototype
+  const { trunc, min } = Math
+  const stringify = JSON.stringify
   const plainJson = 'pass plain JSON (objects, arrays, strings, finite numbers, booleans, null)'
-  const maxValues = 10000
-  const maxDepth = 64
+  const maxValues = ${maxArgumentValues}
+  const maxDepth = ${maxArgumentDepth}
+  class Rejected {
+    constructor(message) {
+      defineProperty(this, 'message', { value: message })
+    }
+  }
   const keyPath = (path, key) =>
     /^[A-Za-z_$][\\w$]*$/.test(key)
       ? (path === '' ? key : path + '.' + key)
-      : path + '[' + JSON.stringify(key) + ']'
+      : path + '[' + stringify(key) + ']'
   const typeName = value => {
-    const proto = Object.getPrototypeOf(value)
+    const proto = getPrototypeOf(value)
     const name = proto && typeof proto.constructor === 'function' ? proto.constructor.name : ''
     return name ? (/^[AEIOU]/.test(name) ? 'an ' : 'a ') + name : 'a non-plain object'
   }
-  // Why JSON would not carry the value unchanged ("at <path> is ..."), or undefined.
-  const check = (value, path, slot, ancestors, budget) => {
+  // The JSON copy of a value already read from its holder at key (undefined: absent), or throws
+  // Rejected with why JSON would not carry it unchanged.
+  const snapshot = (read, key, path, slot, walk) => {
     const at = path === '' ? 'is ' : 'at ' + path + ' is '
-    budget.values++
+    if (++walk.values > maxValues) {
+      throw new Rejected('has more than ' + maxValues + ' values; split the work across calls')
+    }
+    let value = read
+    const kind = typeof value
+    if ((kind === 'object' && value !== null) || kind === 'function' || kind === 'bigint') {
+      // The intrinsic getTime reads a Date's internal time (and throws for anything else).
+      let time
+      try {
+        time = apply(getTime, value, [])
+      } catch {
+        time = undefined
+      }
+      if (time !== undefined && !isFinite(time)) {
+        throw new Rejected(at + 'an invalid Date; pass a valid Date or an ISO string')
+      }
+      const toJSON = value.toJSON
+      if (typeof toJSON === 'function') value = apply(toJSON, value, [key])
+    }
     switch (typeof value) {
       case 'string':
       case 'boolean':
-        return undefined
+        return value
       case 'number':
-        return Number.isFinite(value)
-          ? undefined
-          : at + value + '; pass a finite number' + (slot === 'key' ? ' or omit the key' : '')
+        if (isFinite(value)) return value
+        throw new Rejected(
+          at + value + '; pass a finite number' + (slot === 'key' ? ' or omit the key' : '')
+        )
       case 'undefined':
-        return slot === 'item' ? at + 'undefined; arrays cannot hold undefined' : undefined
+        if (slot === 'item') throw new Rejected(at + 'undefined; arrays cannot hold undefined')
+        return undefined
       case 'bigint':
       case 'function':
       case 'symbol':
-        return at + 'a ' + typeof value + '; ' + plainJson
+        throw new Rejected(at + 'a ' + typeof value + '; ' + plainJson)
     }
-    if (value === null || typeof value.toJSON === 'function') return undefined
-    if (ancestors.includes(value)) return at + 'a circular reference; ' + plainJson
-    if (ancestors.length >= maxDepth) return undefined
-    const isArray = Array.isArray(value)
-    const proto = Object.getPrototypeOf(value)
-    if (!isArray && proto !== Object.prototype && proto !== null) {
-      return at + typeName(value) + '; ' + plainJson
+    if (value === null) return null
+    if (apply(setHas, walk.ancestors, [value])) {
+      throw new Rejected(at + 'a circular reference; ' + plainJson)
     }
-    const keys = isArray ? undefined : Object.keys(value)
-    const length = isArray ? value.length : keys.length
-    let found
-    ancestors.push(value)
-    for (let i = 0; i < length && found === undefined && budget.values < maxValues; i++) {
-      found = isArray
-        ? check(value[i], path + '[' + i + ']', 'item', ancestors, budget)
-        : check(value[keys[i]], keyPath(path, keys[i]), 'key', ancestors, budget)
+    if (walk.depth >= maxDepth) {
+      throw new Rejected('at ' + path + ' is nested more than ' + maxDepth + ' levels deep')
     }
-    ancestors.pop()
-    return found
+    const array = isArray(value)
+    if (!array) {
+      const proto = getPrototypeOf(value)
+      if (proto !== ObjectProto && proto !== null) {
+        throw new Rejected(at + typeName(value) + '; ' + plainJson)
+      }
+    }
+    apply(setAdd, walk.ancestors, [value])
+    walk.depth++
+    let copy
+    if (array) {
+      // LengthOfArrayLike, read once, as JSON.stringify does.
+      // Unary plus is ToNumber: one coercion, and it throws for a bigint as JSON.stringify does.
+      const raw = +value.length
+      const length = raw > 0 ? min(trunc(raw), 9007199254740991) : 0
+      // No prototype: no inherited toJSON or index setter can change the checked copy when pi
+      // serializes it (still an array to JSON.stringify).
+      copy = []
+      setPrototypeOf(copy, null)
+      for (let i = 0; i < length; i++) {
+        copy[i] = snapshot(value[i], '' + i, path + '[' + i + ']', 'item', walk)
+      }
+    } else {
+      copy = create(null)
+      // Indexed over the fresh key array: no iterator a script could replace.
+      const names = keys(value)
+      for (let i = 0; i < names.length; i++) {
+        const name = names[i]
+        const item = snapshot(value[name], name, keyPath(path, name), 'key', walk)
+        if (item !== undefined) copy[name] = item
+      }
+    }
+    walk.depth--
+    apply(setDelete, walk.ancestors, [value])
+    return copy
   }
   const wrap = (label, call) => async (...args) => {
-    const found = check(args[0], '', 'root', [], { values: 0 })
-    if (found !== undefined) throw new TypeError(label + ': argument ' + found)
-    return call(...args)
+    let json
+    try {
+      json = snapshot(args[0], '', '', 'root', { values: 0, depth: 0, ancestors: new SetCtor() })
+    } catch (error) {
+      if (error instanceof Rejected) throw new TypeErrorCtor(label + ': argument ' + error.message)
+      throw error
+    }
+    return call(json)
+  }
+  // Each tool's function sits at tools[name] unless an earlier tool holds that key, in which case
+  // that earlier function is already wrapped.
+  const wrappers = new Map()
+  for (const [name, label] of labels) {
+    const call = name in tools ? tools[name] : undefined
+    if (typeof call === 'function' && !wrappers.has(call)) wrappers.set(call, wrap(label, call))
   }
   const guarded = Object.create(null)
-  const wrappers = new Map()
-  // pi defines each identifier before its raw name, so the label is tools.<identifier>.
   for (const key of Object.keys(tools)) {
     const call = tools[key]
-    if (!wrappers.has(call)) wrappers.set(call, wrap('tools.' + key, call))
+    if (!wrappers.has(call)) wrappers.set(call, wrap('tools[' + JSON.stringify(key) + ']', call))
     guarded[key] = wrappers.get(call)
   }
   return new Proxy(Object.freeze(guarded), {
@@ -182,7 +269,24 @@ const toolsGuardSource = `(function (tools) {
 // columns shift) and the guard follows the script, so its line numbers are unchanged.
 const guardPrefix = 'return (async (tools, console) => {'
 
-const guardSuffix = `\n})(${toolsGuardSource}(tools), console)`
+/** JSON as a JavaScript expression (U+2028/U+2029 escaped for older parsers). */
+const jsonSource = (value: unknown) =>
+  JSON.stringify(value).replace(/[\u2028\u2029]/g, char =>
+    char === '\u2028' ? '\\u2028' : '\\u2029'
+  )
+
+const guardSuffix = (tools: ReadonlyArray<CodeModeExecutorTool>) => {
+  const names = tools.map(tool => tool.name)
+  const labels = codeModeCallLabels(names)
+
+  // `makeCodeModeTool` supplies each label; other callers get pi's binding rule.
+  const pairs = tools.map((tool, index) => [
+    tool.name,
+    tool.callLabel ?? labels[index] ?? `tools[${JSON.stringify(tool.name)}]`
+  ])
+
+  return `\n})(${toolsGuardSource}(tools, ${jsonSource(pairs)}), console)`
+}
 
 const lineTerminators = /\r\n?|[\n\u2028\u2029]/g
 
@@ -406,7 +510,7 @@ export const makePiCodeModeExecutor = (
 
     try {
       return fromPiResult(
-        await sandbox.execute(`${guardPrefix}${stripped.code}${guardSuffix}`, {
+        await sandbox.execute(`${guardPrefix}${stripped.code}${guardSuffix(execution.tools)}`, {
           signal: execution.signal,
           store: execution.store,
           timeoutMs

@@ -20,6 +20,12 @@ export type CodeModeCatalogTool = {
   readonly name: string
   /** Identifier for `tools.<identifier>(args)` (invalid identifier characters become `_`). */
   readonly identifier: string
+  /**
+   * How scripts call this tool, used to prefix its rejections: `tools.<identifier>`, or
+   * `tools["<name>"]` when an earlier tool already has the identifier (see `codeModeCallLabels`;
+   * when the name is taken too, the tool is unreachable and the label only names it).
+   */
+  readonly callLabel: string
   /** The tool's `ToolModule.id`. */
   readonly namespace: string
   /** The module's `ToolModule.description`, when set. */
@@ -35,14 +41,38 @@ export type CodeModeCatalogTool = {
 
 const textOutputSchema: CodeModeJsonSchema = { type: 'string' }
 
+/**
+ * The call label of each tool name, in order, as pi binds `tools`: each tool takes
+ * `tools[<identifier>]` unless an earlier tool holds that key (first tool wins), then
+ * `tools[<name>]` if still free. The label is `tools.<identifier>` for the tool that holds its
+ * identifier, otherwise `tools["<name>"]`. The executor guard and the host rejection prefix share
+ * it, so both name a call the same way.
+ */
+export const codeModeCallLabels = (names: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const bound = new Set<string>()
+
+  return names.map(name => {
+    const identifier = toCodemodeIdentifier(name)
+    const ownsIdentifier = !bound.has(identifier)
+
+    bound.add(identifier)
+    bound.add(name)
+
+    return ownsIdentifier ? `tools.${identifier}` : `tools[${JSON.stringify(name)}]`
+  })
+}
+
 /** Catalog of nested tools in resolution order. */
 export const codeModeCatalog = (
   tools: ReadonlyArray<NestedTool>
-): ReadonlyArray<CodeModeCatalogTool> =>
-  tools.map(({ def, moduleId, moduleDescription }) => {
+): ReadonlyArray<CodeModeCatalogTool> => {
+  const labels = codeModeCallLabels(tools.map(({ def }) => def.name))
+
+  return tools.map(({ def, moduleId, moduleDescription }, index) => {
     const tool: CodeModeCatalogTool = {
       name: def.name,
       identifier: toCodemodeIdentifier(def.name),
+      callLabel: labels[index] ?? `tools[${JSON.stringify(def.name)}]`,
       namespace: moduleId,
       description: def.description,
       inputSchema: def.parameters,
@@ -55,6 +85,7 @@ export const codeModeCatalog = (
       ? tool
       : { ...tool, namespaceDescription: moduleDescription }
   })
+}
 
 /** Default inline budget of the nested tool listing, in estimated tokens. */
 export const defaultCodeModeInlineBudget = 3000

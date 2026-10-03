@@ -449,6 +449,10 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
       )
     )
 
+/** App-owned `ToolModule.description` of the Workflow `subagent` module (the package builder sets none). */
+export const subagentToolModuleDescription =
+  'Delegate a focused task to a general or explore child agent and get its summary.'
+
 export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
@@ -495,83 +499,86 @@ export const makeAgentTextRuntime = (
       pinnedKnowledge
     )
 
-    const subagentToolModule = makeNonRecursiveSubagentToolModule<AgentToolContext>({
-      subagents: agentTextSubagents,
-      background: options.executeSubagent !== undefined,
-      execute:
-        options.executeSubagent ??
-        (({ call, context, params }) =>
-          Effect.gen(function* () {
-            const startedAtMs = yield* Clock.currentTimeMillis
-            const subagentRunId = subagentToolRunId(call.id)
+    const subagentToolModule: ToolModule<AgentToolContext> = {
+      ...makeNonRecursiveSubagentToolModule<AgentToolContext>({
+        subagents: agentTextSubagents,
+        background: options.executeSubagent !== undefined,
+        execute:
+          options.executeSubagent ??
+          (({ call, context, params }) =>
+            Effect.gen(function* () {
+              const startedAtMs = yield* Clock.currentTimeMillis
+              const subagentRunId = subagentToolRunId(call.id)
 
-            const reasoningEffort = input.reasoningEffort ?? baseConfig.reasoningEffort
+              const reasoningEffort = input.reasoningEffort ?? baseConfig.reasoningEffort
 
-            return yield* recoverSubagentToolFailure(
-              Effect.gen(function* () {
-                const subagentToolSet = yield* resolveAgentToolSet({
-                  modules: withoutInputTools(subagentToolModules),
-                  context: {
-                    ...context,
-                    sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
-                    subagent: true
-                  }
-                }).pipe(Effect.mapError(toolRegistryErrorToToolError))
-
-                const events = yield* collectSubagentEvents(
-                  runRuntime(
-                    RuntimeRequest.Transcript({
-                      sessionId: `${input.sessionId}:subagent:${call.id}`,
-                      messages: [UserMessage.make({ content: params.prompt })]
-                    }),
-                    {
-                      systemPrompt: subagentPrompt({
-                        subagentType: params.subagent_type,
-                        baseSystemPrompt
-                      }),
-                      tools: subagentToolSet.tools,
-                      inputs: subagentToolSet.inputs,
-                      reasoningEffort,
-                      capabilities: agentTextCapabilities,
-                      model
+              return yield* recoverSubagentToolFailure(
+                Effect.gen(function* () {
+                  const subagentToolSet = yield* resolveAgentToolSet({
+                    modules: withoutInputTools(subagentToolModules),
+                    context: {
+                      ...context,
+                      sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
+                      subagent: true
                     }
-                  ).pipe(
-                    Stream.provide(
-                      makeAgentRuntimeLayerWithTools(
-                        providerLayer,
-                        makeToolExecutorLayer(subagentToolSet)
+                  }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+
+                  const events = yield* collectSubagentEvents(
+                    runRuntime(
+                      RuntimeRequest.Transcript({
+                        sessionId: `${input.sessionId}:subagent:${call.id}`,
+                        messages: [UserMessage.make({ content: params.prompt })]
+                      }),
+                      {
+                        systemPrompt: subagentPrompt({
+                          subagentType: params.subagent_type,
+                          baseSystemPrompt
+                        }),
+                        tools: subagentToolSet.tools,
+                        inputs: subagentToolSet.inputs,
+                        reasoningEffort,
+                        capabilities: agentTextCapabilities,
+                        model
+                      }
+                    ).pipe(
+                      Stream.provide(
+                        makeAgentRuntimeLayerWithTools(
+                          providerLayer,
+                          makeToolExecutorLayer(subagentToolSet)
+                        )
                       )
                     )
                   )
-                )
 
-                const summary = subagentResultFromEvents(events)
-                const endedAtMs = yield* Clock.currentTimeMillis
+                  const summary = subagentResultFromEvents(events)
+                  const endedAtMs = yield* Clock.currentTimeMillis
 
-                return makeCompletedSubagentToolResult({
+                  return makeCompletedSubagentToolResult({
+                    callId: call.id,
+                    subagentType: params.subagent_type,
+                    description: params.description,
+                    subagentRunId,
+                    startedAtMs,
+                    endedAtMs,
+                    model,
+                    reasoningEffort,
+                    result: summary
+                  })
+                }),
+                {
                   callId: call.id,
                   subagentType: params.subagent_type,
                   description: params.description,
                   subagentRunId,
                   startedAtMs,
-                  endedAtMs,
                   model,
-                  reasoningEffort,
-                  result: summary
-                })
-              }),
-              {
-                callId: call.id,
-                subagentType: params.subagent_type,
-                description: params.description,
-                subagentRunId,
-                startedAtMs,
-                model,
-                reasoningEffort
-              }
-            )
-          }))
-    })
+                  reasoningEffort
+                }
+              )
+            }))
+      }),
+      description: subagentToolModuleDescription
+    }
 
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...subagentToolModules,

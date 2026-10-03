@@ -18,6 +18,9 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
   `outputSchema`) uses the same `ToolJsonSchema` representation and the same lowering as
   `parameters`. It is declaration-only guidance for code mode: provider adapters never send it and
   results are never validated against it, so provider rules below do not apply to it.
+- A tool declaring an output schema returns, on successful results, `structuredContent` that is the
+  `Schema.toCodecJson(output)` encoding of its value; error results (`isError`) keep their own
+  structured content (see `packages/agent/AGENTS.md`).
 - `callableBy: 'codemode'` definitions are not provider-facing at all; the loop and realtime
   builders filter them with `providerToolDefs` before any adapter lowers schemas.
 

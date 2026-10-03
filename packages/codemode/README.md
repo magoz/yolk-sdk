@@ -58,15 +58,19 @@ const program = Effect.gen(function* () {
   truncated error, and usage. Nested results never reach the model; only the script output and
   return value do.
 - A call resolves to `structuredContent` for tools with an output schema and to the text content
-  otherwise; error results reject with an `Error` whose message is `tools.<id>: <text>` (the
-  nested-call record keeps the raw text). Calls still running when the script ends are cancelled
-  and recorded as `cancelled`.
+  otherwise; error results, `beforeNestedCall` failures, and calls past `maxNestedCalls` reject
+  with an `Error` whose message is `tools.<id>: <text>`, or `tools["<name>"]: <text>` for a tool
+  whose identifier an earlier tool already uses (the nested-call record keeps the raw text). Calls
+  still running when the script ends are cancelled and recorded as `cancelled`.
 - Arguments make a JSON round trip: `undefined` keys and `null` optionals are absent, unknown keys
   reject with a hint naming the allowed keys, and values JSON would silently change (`NaN`,
-  `Infinity`, `undefined` array items, `Map`, `Set`, functions, class instances) reject in the
-  script before the call, with messages such as
-  `tools.search: argument at limit is NaN; pass a finite number or omit the key`. A `Date` passes
-  as its ISO string. Custom executors follow the same rules (`CodeModeExecutorTool`).
+  `Infinity`, invalid `Date`s, `undefined` array items, `Map`, `Set`, functions, class instances)
+  reject in the script before the call, with messages such as
+  `tools.search: argument at limit is NaN; pass a finite number or omit the key`. The pi executor
+  reads the argument once (getters and `toJSON` run once) into a checked JSON copy and sends that
+  copy; a valid `Date` passes as its ISO string. Arguments with more than 100,000 values or more
+  than 64 levels of nesting are rejected, never sent unchecked. Custom executors follow the same
+  rules (`CodeModeExecutorTool`).
 - The tool description lists the globals and the nested tools by namespace, with the module's
   `ToolModule.description` under each heading. `codemode` + `listed` tools get TypeScript
   declarations within `inlineBudget` (default 3,000 estimated tokens, filled fairly across
@@ -88,8 +92,8 @@ const program = Effect.gen(function* () {
   `ToolResultMessage`s carry no tool name: pair each with its assistant tool call's name.
 - `beforeNestedCall({ call, context })` runs before each nested call; a failure rejects that call in
   the script with the message and records it as `error` without executing it.
-- A nested call that is interrupted rejects with `was cancelled`; a defect rejects with `failed
-unexpectedly`. If an executor misses its deadline, the tool returns a `timeout` failure
+- A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
+  `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.
 
 ## Limits

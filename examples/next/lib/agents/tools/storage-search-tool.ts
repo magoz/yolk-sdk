@@ -85,8 +85,8 @@ const StorageSourceSummaryFields = {
   createdAt: Schema.String
 }
 
-// Declared outputs: `structuredContent` is the JSON encoding of these (absent optional values
-// encode as null).
+// Declared outputs: `structuredContent` is the JSON encoding of these (absent keys stay absent,
+// `undefined`-valued `Schema.optional` keys encode as null).
 const StorageSearchOutput = Schema.Struct({
   queries: Schema.Array(
     Schema.Struct({

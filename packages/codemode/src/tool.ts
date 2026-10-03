@@ -319,13 +319,13 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
             (args, { signal }) => {
               if (signal.aborted) {
-                return Promise.reject(new Error(`tools.${tool.identifier} was cancelled.`))
+                return Promise.reject(new Error(`${tool.callLabel} was cancelled.`))
               }
 
               if (records.length >= limits.maxNestedCalls) {
                 return Promise.reject(
                   new Error(
-                    `Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
+                    `${tool.callLabel}: Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
                   )
                 )
               }
@@ -377,8 +377,8 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     reject(
                       new Error(
                         Cause.hasInterruptsOnly(exit.cause)
-                          ? `tools.${tool.identifier} was cancelled.`
-                          : `tools.${tool.identifier} failed unexpectedly.`
+                          ? `${tool.callLabel} was cancelled.`
+                          : `${tool.callLabel} failed unexpectedly.`
                       )
                     )
 
@@ -391,7 +391,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     resolve(resolution.value)
                   } else {
                     // The script sees which call failed; the nested-call record keeps the raw text.
-                    reject(new Error(`tools.${tool.identifier}: ${resolution.message}`))
+                    reject(new Error(`${tool.callLabel}: ${resolution.message}`))
                   }
                 })
               })
@@ -402,6 +402,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             description: tool.description,
             inputSchema: tool.inputSchema,
             outputSchema: tool.outputSchema,
+            callLabel: tool.callLabel,
             execute: callTool(tool)
           }))
 

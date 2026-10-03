@@ -116,7 +116,7 @@ const KnowledgeContextParams = Schema.Struct({
 })
 
 // Declared outputs: `structuredContent` is the JSON encoding of these (dates become ISO strings;
-// absent optional values encode as null).
+// absent keys stay absent, `undefined`-valued `Schema.optional` keys encode as null).
 const KnowledgeSearchOutput = Schema.Struct({
   queries: Schema.Array(
     Schema.Struct({

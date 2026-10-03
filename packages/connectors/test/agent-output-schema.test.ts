@@ -124,6 +124,23 @@ const listAction = defineAction({
     )
 })
 
+const ExtraKeyOutput = Schema.Struct({ id: Schema.String, meta: Schema.Unknown })
+
+const extraKeyAction = defineAction({
+  id: 'test.extra_key',
+  inputSchema: Schema.Struct({}),
+  outputSchema: ExtraKeyOutput,
+  // The implementation returns a field the output schema does not declare.
+  execute: () =>
+    Effect.succeed(
+      ActionResult.success({ id: 'a', meta: { raw: true }, internal: 'x' } satisfies {
+        readonly id: string
+        readonly meta: unknown
+        readonly internal: string
+      })
+    )
+})
+
 const MismatchOutput = Schema.Struct({ count: Schema.Int })
 
 const mismatchAction = defineAction({
@@ -150,6 +167,7 @@ const EncodingConnector = defineConnector({
   description: 'Encoding test connector.',
   actions: [
     listAction,
+    extraKeyAction,
     mismatchAction,
     failingAction('test.fail_json', { retryable: false }),
     failingAction('test.fail_error', new Error('wrapped'))
@@ -187,6 +205,16 @@ describe('connector tool results', () => {
       expect(result.structuredContent).toStrictEqual(encoded)
       expect(result.content).toBe(JSON.stringify(encoded))
       expect(JSON.stringify(result.structuredContent)).not.toContain('_id')
+    })
+  )
+
+  it.effect('returns only the fields the output schema declares', () =>
+    Effect.gen(function* () {
+      const result = yield* execute('test.extra_key')
+
+      // Undeclared keys are dropped; `Schema.Unknown` values pass through as JSON.
+      expect(result.structuredContent).toStrictEqual({ id: 'a', meta: { raw: true } })
+      expect(result.content).toBe('{"id":"a","meta":{"raw":true}}')
     })
   )
 

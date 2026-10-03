@@ -49,8 +49,10 @@ explicit host classification for other connectors until their actions do.
 The module's `description` is the connector's `description` (override it with the `description`
 option); code mode shows it under the module's heading. Each tool declares the action's
 `outputSchema`, and a successful call returns its JSON encoding (`Schema.toCodecJson`) as both
-`structuredContent` and the text content: `Chunk`s become arrays and dates ISO strings. A value that
-does not encode fails the call with an `execution` error. Provider failures return an error result
+`structuredContent` and the text content: `Chunk`s become arrays and dates ISO strings. Fields not
+declared in `outputSchema` are not returned (Effect `toCodecJson` encoding drops undeclared keys and
+requires JSON values for `Schema.Unknown`). A value that does not encode fails the call with an
+`execution` error. Provider failures return an error result
 whose `structuredContent` is the JSON-encoded `ProviderFailure` (a non-JSON `underlying` is dropped).
 
 ## Use directly without an agent
