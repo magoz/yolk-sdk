@@ -6,6 +6,7 @@ import {
   contentText,
   TextPart,
   truncateUtf8,
+  truncationMarker,
   utf8ByteLength,
   ToolResult,
   type Content,
@@ -380,12 +381,48 @@ const withNote = (content: Content): Content =>
 
 const resultBytes = (fields: StoredResultFields) => utf8ByteLength(compactJson(fields) ?? '')
 
+// The longest prefix of `text` (whole code points) whose cut content keeps the result within
+// `maxBytes`, measured on the actual serialized JSON (escapes such as `\u0001` take six bytes).
+// Below that: the note alone, then an empty content.
+const fitText = (base: StoredResultFields, text: string, maxBytes: number): ToolResult => {
+  const characters = Array.from(text)
+
+  const cut = (count: number): StoredResultFields => ({
+    ...base,
+    content: `${characters.slice(0, count).join('')}${truncationMarker}\n\n${reducedNote}`
+  })
+
+  if (resultBytes(cut(0)) > maxBytes) {
+    const noteOnly: StoredResultFields = { ...base, content: reducedNote }
+
+    return ToolResult.make(resultBytes(noteOnly) <= maxBytes ? noteOnly : { ...base, content: '' })
+  }
+
+  let fits = 0
+  let tooLong = characters.length + 1
+
+  while (tooLong - fits > 1) {
+    const middle = Math.floor((fits + tooLong) / 2)
+
+    if (resultBytes(cut(middle)) <= maxBytes) {
+      fits = middle
+    } else {
+      tooLong = middle
+    }
+  }
+
+  return ToolResult.make(cut(fits))
+}
+
 /**
  * The stored copy of a result: wire-safe (`structuredContent` made plain JSON through a JSON round
- * trip, dropped when it cannot be serialized) and at most `maxBytes` of compact JSON. Over the
- * bound it degrades in steps, each adding a note to the content: media parts become text
- * placeholders, then `structuredContent` is dropped, then `nestedCalls` is dropped and the text is
- * cut. The live call still returns the original result; only replays see the stored copy.
+ * trip, dropped when it cannot be serialized) and at most `maxBytes` UTF-8 bytes of compact JSON,
+ * measured on the serialized result. Over the bound it degrades in steps, each adding a note to
+ * the content: media parts become text placeholders, then `nestedCalls` (audit data) is dropped,
+ * then `structuredContent` (which can carry state, such as code mode store writes), then the text
+ * is cut. A bound smaller than the identifying fields (`toolCallId`, `isError`, `acceptance`,
+ * `usage`) leaves an empty content. The live call still returns the original result; only replays
+ * see the stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,
@@ -414,22 +451,19 @@ export const toolLedgerResult = (
 
   if (resultBytes(textOnly) <= maxBytes) return ToolResult.make(textOnly)
 
-  const withoutStructured: StoredResultFields = { ...textOnly }
+  const withoutNested: StoredResultFields = { ...textOnly }
+
+  delete withoutNested.nestedCalls
+
+  if (resultBytes(withoutNested) <= maxBytes) return ToolResult.make(withoutNested)
+
+  const withoutStructured: StoredResultFields = { ...withoutNested }
 
   delete withoutStructured.structuredContent
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  const minimal: StoredResultFields = { ...withoutStructured, content: `\n\n${reducedNote}` }
-
-  delete minimal.nestedCalls
-
-  const text = contentText(textOnlyContent(result.content))
-  const overhead = resultBytes(minimal)
-  // JSON escaping can double a character's bytes; halve the budget to stay within the bound.
-  const cut = truncateUtf8(text, Math.max(0, Math.floor((maxBytes - overhead) / 2)))
-
-  return ToolResult.make({ ...minimal, content: `${cut}\n\n${reducedNote}` })
+  return fitText(withoutStructured, contentText(textOnlyContent(result.content)), maxBytes)
 }
 
 const nestedSeq = (key: string) => {

@@ -6,6 +6,8 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   ImagePart,
   inlineBase64AttachmentSource,
+  NestedToolCallRecord,
+  NestedToolCalls,
   ToolCall,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
@@ -703,6 +705,61 @@ describe('tool ledger', () => {
       ])
     })
   )
+
+  it('bounds stored results by their serialized UTF-8 size, escapes included', () => {
+    const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
+
+    // \u0001 serializes as a six-byte escape; quotes and backslashes as two.
+    for (const text of ['\u0001'.repeat(5_000), '"\\'.repeat(5_000), 'é😀'.repeat(3_000)]) {
+      for (const maxBytes of [2_000, 400, 120]) {
+        const stored = toolLedgerResult(
+          ToolResult.make({ toolCallId: 'call_1', content: text }),
+          maxBytes
+        )
+
+        expect(bytes(stored)).toBeLessThanOrEqual(maxBytes)
+        expect(resultText(stored)).toContain(maxBytes >= 400 ? 'reduced to fit' : '')
+      }
+    }
+
+    // Below the size of the identifying fields, only an empty content is left.
+    const tiny = toolLedgerResult(
+      ToolResult.make({ toolCallId: 'call_1', content: 'x'.repeat(100), isError: true }),
+      10
+    )
+
+    expect(tiny).toEqual(ToolResult.make({ toolCallId: 'call_1', content: '', isError: true }))
+  })
+
+  it('drops nestedCalls before structuredContent when reducing a stored result', () => {
+    const storeWrites = { set: { report: 'v'.repeat(500_000) }, delete: [] }
+
+    const nestedCalls = NestedToolCalls.make({
+      complete: true,
+      calls: Array.from({ length: 600 }, (_, index) =>
+        NestedToolCallRecord.make({
+          id: `call_1/${index + 1}`,
+          name: 'sales_manage',
+          args: '{}',
+          status: 'error',
+          error: 'é'.repeat(500)
+        })
+      )
+    })
+
+    const stored = toolLedgerResult(
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content: 'done',
+        structuredContent: { codemode: { ok: true, storeWrites } },
+        nestedCalls
+      })
+    )
+
+    expect(stored.structuredContent).toEqual({ codemode: { ok: true, storeWrites } })
+    expect(stored.nestedCalls).toBeUndefined()
+    expect(resultText(stored)).toContain('reduced to fit')
+  })
 
   it.effect('stores bounded, wire-safe results that round-trip through the JSON codec', () =>
     Effect.gen(function* () {
