@@ -1,6 +1,6 @@
 ---
 title: Integration APIs
-description: Public MCP, knowledge, connector, sandbox, and code mode APIs.
+description: Public MCP, knowledge, connector, sandbox, code mode, and file extraction APIs.
 ---
 
 ## Portable connector annotations
@@ -368,6 +368,17 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 | `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`, `defaultMaxConcurrentExecutions`                                                                                                                                                                                                            |
 
 See [Add code mode](../integrations/code-mode).
+
+## File extraction
+
+| Subpath                          | Main exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/extractors`           | `FileExtractor`, `FileExtractorApi`, `FileInput`, `ExtractedFile`, `ExtractedFileMetadata`, `ExtractedFileFormat`, `OfficeFileFormat`, `extractedFileFormats`, `fileFormatFor`, `isOfficeFileFormat`, `FileExtractorLimits`, `defaultFileExtractorLimits`, `sanitizeExtractedText`, `FileExtractorError`, `FileExtractionError`, `FileExtractionFailureReason`, `UnsupportedFileFormatError`, `OfficeArchiveError`, `SheetJsUnavailableError`, `minimumSheetJsVersion`, `sheetJsInstallCommand` |
+| `@yolk-sdk/extractors/node`      | `FileExtractorLayer`, `makeFileExtractorLayer`, `FileExtractorOptions`, `FileExtractorIsolation`, `WorkerIsolationOptions`, `defaultWorkerIsolation`, `normalizeOfficeArchive`, `OfficeArchiveLimits`, `SheetJsLoader`; re-exports `FileExtractor`, `FileExtractorApi`                                                                                                                                                                                                                          |
+| `@yolk-sdk/extractors/knowledge` | `FileKnowledgeExtractorLayer`, `makeFileKnowledgeExtractor`                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+`@yolk-sdk/extractors/node/extraction-worker` is the worker entry the Node layer starts; do not
+import it directly. See [Extract file text](../integrations/file-extraction).
 
 ## Connector file APIs
 

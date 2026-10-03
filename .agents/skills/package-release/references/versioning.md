@@ -77,7 +77,18 @@ Expected `.changeset/config.json` traits:
 - Use patch for canaries unless user requests otherwise.
 - Do not include private Cloudflare package.
 - Keep changeset text user-facing and concise.
+- Changesets become npm-shipped `CHANGELOG.md` text: never name private apps (`examples/*`,
+  `cloudflare/*`, `apps/*`) or internal app paths. Describe the package behavior instead.
+- A new package's first changeset describes current behavior, not deltas ("now", "no longer",
+  "replaces the old …"): its users have no previous version to compare against.
 - Write release notes before `pnpm changeset:version`; generated changelogs inherit this text.
+- Fixed-group lockstep notes: when a release would bump fixed-group packages that have no pending
+  changeset, add `.changeset/canary-<n>-lockstep.md` (`<n>` is the upcoming canary number) with a
+  `patch` entry for each of them and one note saying they advance in lockstep with no direct
+  changes, naming what did change. Otherwise their changelogs get a version entry with no release note (at most "Updated
+  dependencies").
+  Precedents: `canary-96-lockstep.md`, `canary-98-lockstep.md`. Check coverage with the pending
+  changesets' front matter against the `fixed` group in `.changeset/config.json`.
 
 ## Release-note source
 

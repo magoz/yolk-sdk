@@ -34,8 +34,9 @@ import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
 const HostExtractorLayer = FileKnowledgeExtractorLayer.pipe(Layer.provide(FileExtractorLayer))
 ```
 
-`@yolk-sdk/extractors/node` is server-only, and XLSX needs the optional SheetJS peer; see
-[Installation](../installation).
+`@yolk-sdk/extractors/node` is server-only, and XLSX needs the optional SheetJS peer. See
+[Extract file text](../integrations/file-extraction) for install, limits, worker isolation, and
+errors.
 
 ## Ingest a document
 

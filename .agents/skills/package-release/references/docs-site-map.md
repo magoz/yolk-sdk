@@ -60,16 +60,21 @@ Map changed code to docs that must be inspected or updated.
 
 ## Extractors package
 
-| Change                                           | Docs                                                                              |
-| ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| formats, limits, errors, SheetJS install         | `packages/extractors/README.md`, `docs/adr/0004-extractors-package.md`            |
-| XLSX hyperlinks, archive validation, UTF-16 rule | `packages/extractors/README.md`, `packages/extractors/AGENTS.md`, ADR 0004        |
-| knowledge adapter                                | `packages/extractors/README.md`, `packages/knowledge/README.md` (extraction note) |
+| Change                                           | Docs                                                                                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| exports, subpaths                                | `integrations/file-extraction.mdx`, `api-reference/integrations.mdx`, `reference/packages.mdx`, `packages/extractors/README.md` |
+| formats, limits, errors, SheetJS install         | `integrations/file-extraction.mdx`, `installation.mdx` (install, peer table), `packages/extractors/README.md`, ADR 0004         |
+| worker isolation, failure reasons, Next.js setup | `integrations/file-extraction.mdx`, `packages/extractors/README.md`, `troubleshooting.mdx` when failures recur                  |
+| XLSX hyperlinks, archive validation, UTF-16 rule | `packages/extractors/README.md`, `packages/extractors/AGENTS.md`, ADR 0004                                                      |
+| knowledge adapter                                | `integrations/file-extraction.mdx`, `knowledge/ingestion-pipeline.mdx`, `packages/knowledge/README.md` (extraction note)        |
 
-The docs site lists `@yolk-sdk/extractors` (role and subpaths) in `index.mdx` and
-`reference/packages.mdx`, and its `extractors/knowledge -> knowledge` edge in
-`reference/architecture.mdx`; update those with the package list or dependency direction. There
-is no dedicated API page yet; the README is the API reference.
+`integrations/file-extraction.mdx` is the docs-site page (install, subpaths, runnable example,
+limits, worker isolation, errors, knowledge ingestion, Next.js, host responsibilities); it links to
+the README for the full XLSX and Office archive security model. The docs site also lists
+`@yolk-sdk/extractors` in `index.mdx`, `installation.mdx`, `integrations/index.mdx`,
+`reference/packages.mdx`, and the canary.98 section of `migration.mdx`,
+and its `extractors/knowledge -> knowledge` edge in `reference/architecture.mdx`; update those
+with the package list or dependency direction.
 
 ## Conformance and emulators packages
 

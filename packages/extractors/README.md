@@ -12,6 +12,12 @@ pnpm add @yolk-sdk/extractors@canary effect@4.0.0
 pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 ```
 
+With knowledge ingestion (`@yolk-sdk/extractors/knowledge`):
+
+```bash
+pnpm add @yolk-sdk/extractors@canary @yolk-sdk/knowledge@canary effect@4.0.0
+```
+
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Use the SDK's matching Effect version (`4.0.0`) in host code.
 Requires Node.js 22+. `@yolk-sdk/extractors/node` is server-only.
@@ -38,12 +44,12 @@ If SheetJS is missing, is not a SheetJS build, or is older than 0.20.3 (for exam
 
 ## Subpaths
 
-| Subpath                                       | Purpose                                                                                                                                                                                                                                                                       |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/extractors`                        | Runtime-portable contract: `FileInput`, `ExtractedFile`, formats, errors, `fileFormatFor`, `defaultFileExtractorLimits`, `sanitizeExtractedText`, and the `FileExtractor` service tag. No parser imports.                                                                     |
-| `@yolk-sdk/extractors/node`                   | `FileExtractorLayer` and `makeFileExtractorLayer(options)`: the Node implementation (unpdf, mammoth, SheetJS, fflate, `node:zlib`). Also `defaultWorkerIsolation`, the `FileExtractorIsolation` and `WorkerIsolationOptions` types, and `normalizeOfficeArchive` (see below). |
-| `@yolk-sdk/extractors/node/extraction-worker` | The worker entry the Node layer starts per extraction (not imported directly; see Worker isolation).                                                                                                                                                                          |
-| `@yolk-sdk/extractors/knowledge`              | `FileKnowledgeExtractorLayer`: a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by the `FileExtractor` in context, and `makeFileKnowledgeExtractor`.                                                                                                            |
+| Subpath                                       | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/extractors`                        | Runtime-portable contract. No parser imports. The `FileExtractor` service tag and `FileExtractorApi` type; the `FileInput`, `ExtractedFile`, `ExtractedFileMetadata`, `ExtractedFileFormat`, `OfficeFileFormat`, and `FileExtractorError` types; `extractedFileFormats`, `fileFormatFor`, `isOfficeFileFormat`; `defaultFileExtractorLimits` and the `FileExtractorLimits` schema; `sanitizeExtractedText`; the errors and the `FileExtractionFailureReason` schema; `minimumSheetJsVersion` and `sheetJsInstallCommand`. |
+| `@yolk-sdk/extractors/node`                   | `FileExtractorLayer` and `makeFileExtractorLayer(options)`: the Node implementation (unpdf, mammoth, SheetJS, fflate, `node:zlib`). Also `defaultWorkerIsolation` and `normalizeOfficeArchive` (see below), and the `FileExtractorOptions`, `FileExtractorIsolation`, `WorkerIsolationOptions`, `OfficeArchiveLimits`, and `SheetJsLoader` types. Re-exports `FileExtractor` and `FileExtractorApi`.                                                                                                                      |
+| `@yolk-sdk/extractors/node/extraction-worker` | The worker entry the Node layer starts per extraction (not imported directly; see Worker isolation).                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `@yolk-sdk/extractors/knowledge`              | `FileKnowledgeExtractorLayer`: a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by the `FileExtractor` in context, and `makeFileKnowledgeExtractor`.                                                                                                                                                                                                                                                                                                                                                        |
 
 ## Example
 
@@ -111,8 +117,8 @@ no separate cap in this package, which is a residual risk for crafted PDFs. Your
 limit (container or serverless function) is the outer bound: size it for four workers plus your
 own load, or lower the limits.
 
-Legitimate files at the default limits parse in well under a second, so 30 s only stops runaway
-work.
+The 30 s default is a backstop against runaway work, not a measure of normal parse time. Before
+lowering `timeoutMs`, measure extraction with representative files from your own uploads.
 
 `isolation: 'none'` parses in the calling thread, for runtimes without worker threads. It is
 **unsafe for untrusted input**: a crafted file can then exhaust the process heap or block the
@@ -139,13 +145,13 @@ merge under the source's own metadata, so host keys win. Failures become
 
 ## Output
 
-| Format                            | Text                                                                                    | Metadata                                 |
-| --------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `text`, `markdown`, `csv`, `json` | UTF-8 decoded                                                                           | `title` = filename                       |
-| `pdf`                             | Text of all pages (unpdf)                                                               | PDF `Title` if set, `pageCount`          |
-| `docx`                            | Raw text (mammoth)                                                                      | `title` = filename                       |
-| `xlsx`                            | One `# <sheet>` section per sheet with bounded CSV rows; external links as `text <url>` | workbook title or filename, `sheetNames` |
-| `pptx`                            | Slide text in slide order, then speaker notes                                           | `title` = filename                       |
+| Format                            | Text                                                                                        | Metadata                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `text`, `markdown`, `csv`, `json` | UTF-8 decoded                                                                               | `title` = filename                       |
+| `pdf`                             | Text of all pages (unpdf)                                                                   | PDF `Title` if set, `pageCount`          |
+| `docx`                            | Raw text (mammoth)                                                                          | `title` = filename                       |
+| `xlsx`                            | One `# <sheet>` section per worksheet with bounded CSV rows; external links as `text <url>` | workbook title or filename, `sheetNames` |
+| `pptx`                            | Slide text by slide part number (`slide<n>.xml`), then speaker notes                        | `title` = filename                       |
 
 XLSX cells show their cached value as Excel displays it: SheetJS applies the number formats, and
 format codes longer than Excel's own 255-character limit show as General. Formulas are not
@@ -316,3 +322,12 @@ a copy of the traced files. If your tracer misses `dist/node/extraction-worker.m
   worker limits bound V8 heap and time, not the process: your platform's memory limit is the
   outer bound (see Worker isolation).
 - Installing SheetJS from the CDN when XLSX extraction is needed.
+
+## Boundaries
+
+- Domain-free: no upload, auth, storage, or product concepts. The host decides where bytes come
+  from and what the text is used for.
+- The root and `./knowledge` are runtime-portable: no Node built-ins and no parsers. Parsers live
+  only behind `./node`.
+- `./knowledge` is the only bridge to `@yolk-sdk/knowledge`; the knowledge package never imports
+  extractors.
