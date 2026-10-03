@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Deferred, Effect, Layer, Result } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,

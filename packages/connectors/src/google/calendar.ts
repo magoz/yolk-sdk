@@ -21,7 +21,7 @@ import {
 
 export const googleCalendarApiBaseUrl = 'https://www.googleapis.com/calendar/v3'
 
-// Parse options are call-scoped in Effect rc.115, not schema annotations.
+// Parse options are call-scoped in Effect 4, not schema annotations.
 // Keep strictness inside each union member so mixed boundary kinds cannot pass.
 const strictBoundary = <S extends Schema.Constraint>(schema: S) =>
   Schema.declareConstructor<S['Type'], S['Encoded']>()(

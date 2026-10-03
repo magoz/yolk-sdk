@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { WireExchange, WireFixture } from '@yolk-sdk/conformance/fixture'
 import { makeReplayHttpClient } from '@yolk-sdk/conformance/replay'

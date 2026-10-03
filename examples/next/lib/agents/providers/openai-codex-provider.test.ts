@@ -1,11 +1,6 @@
 import { Cause, Effect, Exit, Layer, Option, Predicate, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
-import {
-  Headers,
-  HttpClient,
-  HttpClientResponse,
-  type HttpClientRequest
-} from 'effect/unstable/http'
+import { Headers, HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ImagePart,

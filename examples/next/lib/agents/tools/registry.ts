@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import type { Layer } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeQuestionToolRegistration } from '@yolk-sdk/agent/tools'
 import { draftComposerToolModule } from './draft-composer-tool.ts'

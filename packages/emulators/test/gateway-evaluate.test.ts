@@ -8,7 +8,7 @@
 import { Effect, Fiber, Layer, Predicate, Redacted } from 'effect'
 import { TestClock } from 'effect/testing'
 import type * as Schema from 'effect/Schema'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { runConformance } from '@yolk-sdk/conformance/runner'
 import { ClassifierModel } from '@yolk-sdk/agent/classification'

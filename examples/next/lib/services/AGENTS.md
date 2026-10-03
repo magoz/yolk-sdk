@@ -33,7 +33,7 @@ examples/next/lib/services/[service-name]/
 
 ## HTTP
 
-- Use Effect `HttpClient` from `effect/unstable/http` inside services.
+- Use Effect `HttpClient` from `effect/http` inside services.
 - Static live layers provide `FetchHttpClient.layer` internally.
 - HTTP-backed services expose injectable layer factories accepting `Layer.Layer<HttpClient.HttpClient>`.
 - Current examples: `makeOpenAiCodexOAuthLayer(httpClientLayer)`, `makeAnthropicClaudeOAuthLayer(httpClientLayer)`.

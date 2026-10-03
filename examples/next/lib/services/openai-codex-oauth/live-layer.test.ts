@@ -1,7 +1,7 @@
 import { Effect, Layer, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   OPENAI_CODEX_CLIENT_ID,

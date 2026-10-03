@@ -29,7 +29,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add -D @yolk-sdk/emulators@canary effect@4.0.0-rc.115
+pnpm add -D @yolk-sdk/emulators@canary effect@4.0.0
 ```
 
 ## Subpaths
@@ -72,7 +72,7 @@ Pick a transport by swapping `HttpClient` layers. Code under test keeps calling 
 
 ```ts
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeGatewayEmulator } from '@yolk-sdk/emulators/gateway'
 import { serveFetchHandler } from '@yolk-sdk/emulators/node'
 import { EmulatedHttpClient, EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'

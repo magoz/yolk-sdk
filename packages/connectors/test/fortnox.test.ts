@@ -998,7 +998,8 @@ describe('Fortnox connector', () => {
     readonly input: Schema.Json
   }> = [
     { action: 'fortnox.get_customer', input: {} },
-    ...['', ' ', '.', '..', '\r\n', '\uD800'].map(customerNumber => ({
+    // Identifiers stay BMP-only: lone surrogates and astral characters are both rejected.
+    ...['', ' ', '.', '..', '\r\n', '\uD800', 'A\u{1F600}'].map(customerNumber => ({
       action: 'fortnox.get_customer',
       input: { customerNumber }
     })),

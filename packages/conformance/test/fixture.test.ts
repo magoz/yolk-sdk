@@ -1,4 +1,5 @@
-import { Effect, Encoding } from 'effect'
+import { Effect } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import { describe, expect, it } from '@effect/vitest'
 import {
   decodeWireFixture,
@@ -312,7 +313,7 @@ describe('scanFixtureForSecrets', () => {
   })
 
   it('scans the decodable text of base64 chunks and bodyBase64 bodies', () => {
-    const encoded = Encoding.encodeBase64(`{"password":"synthetic-pw","key":"${syntheticKey}"}`)
+    const encoded = Base64.encode(`{"password":"synthetic-pw","key":"${syntheticKey}"}`)
 
     const stream = scanFixtureForSecrets(
       withExchange({

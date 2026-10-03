@@ -10,7 +10,7 @@ import {
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
-import type { HttpClientResponse } from 'effect/unstable/http'
+import type { HttpClientResponse } from 'effect/http'
 import {
   makeOpenAiResponsesProviderLayer,
   streamOpenAiResponsesResponse,

@@ -47,8 +47,9 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Data, Effect, Encoding, Layer, Predicate, Result } from 'effect'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { Data, Effect, Layer, Predicate, Result } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
+import { FetchHttpClient, HttpClient } from 'effect/http'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   OpenAiCodexConformanceConfig,
@@ -665,7 +666,7 @@ export const redactResponsesFields = (exchange: WireExchange): WireExchange => {
 // Exact bytes of base64 text, or undefined when it does not decode (the payload is then
 // unscannable, never read as empty).
 const base64Bytes = (base64: string): Uint8Array | undefined =>
-  Result.getOrUndefined(Encoding.decodeBase64(base64))
+  Result.getOrUndefined(Base64.decode(base64))
 
 const chunkBytes = (chunk: WireChunk): Uint8Array | undefined =>
   Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)

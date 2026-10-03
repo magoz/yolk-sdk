@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import type { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
-import type { HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
+import type { HttpClient } from 'effect/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   callRemoteMcpServerTool,

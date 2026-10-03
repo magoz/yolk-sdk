@@ -14,7 +14,7 @@ import * as Schema from 'effect/Schema'
 const EmailBatchMessageIdElement = Schema.Trimmed.check(Schema.isNonEmpty())
 
 export const EmailBatchMessageIds = Schema.Array(EmailBatchMessageIdElement).check(
-  Schema.isLengthBetween(1, 100),
+  Schema.isBetweenLength(1, 100),
   Schema.isUnique()
 )
 
@@ -36,7 +36,7 @@ export type EmailBatchOperationStatus = typeof EmailBatchOperationStatus.Type
 export const EmailBatchResultCode = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(128),
-  Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/)
+  Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/u)
 )
 
 export type EmailBatchResultCode = typeof EmailBatchResultCode.Type

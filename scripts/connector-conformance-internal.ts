@@ -82,7 +82,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import process from 'node:process'
 import { Cause, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient } from 'effect/http'
 import type { ConformanceCase, ConformanceSafety } from '../packages/conformance/src/case.ts'
 import {
   isWireBase64BodyResponse,

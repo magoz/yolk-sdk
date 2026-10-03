@@ -303,7 +303,7 @@ export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
 const OutlookAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
 const OutlookAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
 )
 
 export class OutlookAttachmentMetadata extends Schema.Class<OutlookAttachmentMetadata>(
@@ -582,7 +582,7 @@ export class OutlookSendOutput extends Schema.Class<OutlookSendOutput>('OutlookS
 
 // One string is one recipient address field: reject empty or
 // control-character-only values without trimming or normalizing the field.
-const OutlookReplyAddress = Schema.NonEmptyString.check(Schema.isPattern(/[^\u0000-\u0020\u007f]/))
+const OutlookReplyAddress = Schema.NonEmptyString.check(Schema.isPattern(/[^\u0000-\u0020\u007f]/u))
 
 export class OutlookReplyInput extends Schema.Class<OutlookReplyInput>('OutlookReplyInput')({
   messageId: OutlookDraftIdentity,
@@ -1894,7 +1894,7 @@ const OutlookCategoriesApiOutput = Schema.Struct({
 
 // Dot-only path segments are normalized by URL parsers even when encoded.
 const OutlookCategoryPathId = OutlookNonEmptyString.check(
-  Schema.isPattern(/^(?!\.+$)[^\u0000-\u001f\u007f]+$/)
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u001f\u007f]+$/u)
 )
 
 export class OutlookCreateCategoryInput extends Schema.Class<OutlookCreateCategoryInput>(
@@ -2349,7 +2349,7 @@ const OutlookBatchPathId = Schema.Trimmed.check(
 )
 
 const OutlookBatchMessageIds = Schema.Array(OutlookBatchPathId).check(
-  Schema.isLengthBetween(1, 100),
+  Schema.isBetweenLength(1, 100),
   Schema.isUnique()
 )
 

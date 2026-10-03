@@ -78,7 +78,7 @@ const fail = (code: OneDriveDownloadErrorCode) => Effect.fail(new OneDriveDownlo
 // URL parsers normalize even percent-encoded dot segments. Reject rather than change identity.
 const OpaqueId = Schema.String.check(
   Schema.isNonEmpty(),
-  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/)
+  Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/u)
 )
 
 const Input = Schema.Struct({ itemId: OpaqueId, driveId: Schema.optional(OpaqueId) })

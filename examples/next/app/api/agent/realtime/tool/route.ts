@@ -1,4 +1,4 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Data, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import {

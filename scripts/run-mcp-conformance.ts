@@ -46,7 +46,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, type HttpClient } from 'effect/http'
 import {
   afloatMcpConformanceFixtureSeeds,
   afloatMcpConformanceLiveSeeds,

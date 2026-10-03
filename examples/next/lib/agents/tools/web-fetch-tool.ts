@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
-import type { HttpClientError } from 'effect/unstable/http/HttpClientError'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
+import type { HttpClientError } from 'effect/http/HttpClientError'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import {

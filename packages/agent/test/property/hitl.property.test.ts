@@ -1,5 +1,4 @@
-import { Arbitrary } from 'effect/unstable/arbitrary'
-import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
+import { Arbitrary, Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   type AgentEvent,

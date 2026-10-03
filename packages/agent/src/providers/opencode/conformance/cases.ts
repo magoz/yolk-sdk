@@ -25,7 +25,7 @@ import {
   type Redacted
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, type HttpClientRequest } from 'effect/http'
 import {
   defineConformanceCase,
   expectConformance,

@@ -1,6 +1,6 @@
 import { Effect, Layer, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
 import { ProviderErrorInfo, replaceLoneSurrogatesDeep } from '@yolk-sdk/agent/protocol'
 import { streamAnthropicResponse, toAnthropicRequestBody } from './anthropic-provider-internal.ts'

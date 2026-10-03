@@ -15,13 +15,13 @@ Tool arguments/results remain opaque until their execution/provider boundary.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 Running the experimental `@yolk-sdk/mcp/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the examples import `@yolk-sdk/conformance/*` subpaths directly.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Use the SDK's matching Effect version (`4.0.0`) in host code.
 Published package metadata requires Node.js 22+; `client/node` and `server/node` are Node-only.
 
 ## Subpaths
@@ -88,7 +88,7 @@ The high-level remote helpers use the official v2 client over an Effect `HttpCli
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 
 const tools = await Effect.runPromise(
@@ -201,7 +201,7 @@ conformance API reference for every claim.
 
 ```ts
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { runConformance } from '@yolk-sdk/conformance/runner'
 import {
   McpConformanceConfig,

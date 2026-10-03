@@ -1,6 +1,6 @@
 import { Chunk, Clock, Effect, Redacted } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import { openCodeGoProviderId } from './go-provider.ts'
 import {
   canonicalSubscriptionUsageInstant,

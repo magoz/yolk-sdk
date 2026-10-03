@@ -9,7 +9,7 @@
  * none is observed live yet (`observed` absent = unverified).
  */
 import { Context, Effect, Predicate, Result, Stream, type Redacted } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import {
   defineConformanceCase,
   expectConformance,

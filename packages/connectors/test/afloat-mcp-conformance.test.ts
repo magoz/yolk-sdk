@@ -8,7 +8,7 @@
  */
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   decodeWireFixture,

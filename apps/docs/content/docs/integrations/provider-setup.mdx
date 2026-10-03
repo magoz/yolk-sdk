@@ -12,7 +12,7 @@ not infer model limits or apply hidden fallbacks.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 ## OpenAI-compatible chat
@@ -21,7 +21,7 @@ Use this for OpenAI Chat Completions or compatible gateways.
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
 
 const OpenAiLayer = makeOpenAiProviderLayer({
@@ -38,7 +38,7 @@ Use this for Vercel's OpenAI-compatible Gateway endpoint and `provider/model` ro
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 
 const GatewayLayer = makeVercelAiGatewayProviderLayer({
@@ -69,7 +69,7 @@ Server-side configuration fragment; the host supplies the API key and model poli
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenCodeGoProviderLayer } from '@yolk-sdk/agent/providers/opencode/go-provider'
 
 const GoLayer = makeOpenCodeGoProviderLayer({
@@ -104,7 +104,7 @@ Read allowance on your host's schedule (server-side fragment):
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenCodeGoSubscriptionUsage } from '@yolk-sdk/agent/providers/opencode/usage'
 
 const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), {
@@ -125,7 +125,7 @@ Use this for Codex OAuth/token-broker flows and the Responses API.
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
 
 const CodexLayer = makeOpenAiCodexProviderLayer({
@@ -148,7 +148,7 @@ Configuration fragment (the host supplies the token, model policy, and HTTP laye
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeXAiGrokProviderLayer } from '@yolk-sdk/agent/providers/xai/grok-provider'
 
 const GrokLayer = makeXAiGrokProviderLayer({
@@ -178,7 +178,7 @@ Use this for Claude OAuth/token-broker flows and Claude Code-compatible requests
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 
 const ClaudeLayer = makeAnthropicClaudeProviderLayer({

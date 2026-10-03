@@ -79,7 +79,7 @@ const Etag = SafeText.check(
 )
 
 const Target = {
-  bucket: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)),
+  bucket: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/u)),
   key: SafeText.check(
     Schema.makeFilter(
       s =>

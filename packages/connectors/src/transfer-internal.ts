@@ -31,7 +31,7 @@ export const SafeText = Schema.String.check(
   Schema.makeFilter(s => !/[\ud800-\udfff]/u.test(s) && !/[\u0000-\u001f\u007f]/.test(s))
 )
 
-export const OpaqueId = SafeText.check(Schema.isPattern(/^(?!\.+$)[^\s/\\?#]+$/))
+export const OpaqueId = SafeText.check(Schema.isPattern(/^(?!\.+$)[^\s/\\?#]+$/u))
 
 export const Budget = Schema.Struct({
   maxBytes: ByteLimit,

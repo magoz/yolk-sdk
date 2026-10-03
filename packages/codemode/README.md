@@ -6,11 +6,11 @@ resolved tools, filters and aggregates their results, and returns only what matt
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/codemode@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/codemode@canary @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Use the SDK's matching Effect version (`4.0.0`) in host code.
 Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is server-only.
 
 ## Subpaths

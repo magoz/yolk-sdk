@@ -7,7 +7,7 @@ import {
   HttpClientError,
   HttpClientResponse,
   type HttpClientRequest
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
@@ -1714,7 +1714,7 @@ describe('Dropbox conformance run interruption', () => {
 
         expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-        // Observed on effect 4.0.0-rc.115: the run ends with the case's own RestoreFailed, and
+        // Observed on effect 4.0.0: the run ends with the case's own RestoreFailed, and
         // no Interrupt in the cause. Leaving the case's mask with a failure while an interruption
         // is pending, the failure exit skips every error continuation (runConformance's Effect.exit
         // included; finalizers still run), so the run produces no report and resumes no case.

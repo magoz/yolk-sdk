@@ -234,7 +234,7 @@ layer(MyService.layer, { timeout: '30 seconds' })('live tests', it => {
 
 ## Property-Based Testing
 
-Effect rc.115 uses native arbitraries from `effect/unstable/arbitrary`. Use `Arbitrary.schema(schema)`; `@effect/vitest` accepts schemas or native arbitraries in `it.prop` and `it.effect.prop`. It requires Vitest 5. Assert inside callbacks rather than returning an unchecked boolean.
+Effect 4 uses the native `Arbitrary` module (`import { Arbitrary } from 'effect'`). Use `Arbitrary.schema(schema)`; `@effect/vitest` accepts schemas or native arbitraries in `it.prop` and `it.effect.prop`. It requires Vitest 5. Assert inside callbacks rather than returning an unchecked boolean.
 
 ```typescript
 import { it, expect } from '@effect/vitest'
@@ -274,15 +274,14 @@ it.effect.prop(
 ### Creating Arbitraries from Schema
 
 ```typescript
-import { Schema } from 'effect'
-import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Arbitrary, Schema } from 'effect'
 
 // Define your domain schema
 export class User extends Schema.Class<User>('User')({
   id: Schema.String,
   name: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty())),
   age: Schema.Int.check(Schema.isBetween(0, 150)),
-  email: Schema.String.pipe(Schema.check(Schema.isPattern(/^[^@]+@[^@]+\.[^@]+$/)))
+  email: Schema.String.pipe(Schema.check(Schema.isPattern(/^[^@]+@[^@]+\.[^@]+$/u)))
 }) {}
 
 const userArb = Arbitrary.schema(User)
@@ -298,8 +297,7 @@ it.prop('user validation', [userArb], ([user]) => {
 ### Testing Domain Invariants
 
 ```typescript
-import { Schema } from 'effect'
-import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Arbitrary, Schema } from 'effect'
 
 // Bounded integer minor units keep generated financial examples exact.
 export class Money extends Schema.Class<Money>('Money')({

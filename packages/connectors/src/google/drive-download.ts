@@ -48,15 +48,15 @@ type DriveDownloadHeaders = {
 }
 
 const Input = Schema.Struct({
-  fileId: OpaqueId.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
-  resourceKey: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)))
+  fileId: OpaqueId.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/u)),
+  resourceKey: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/u)))
 })
 
 const Metadata = Schema.Struct({
   id: OpaqueId,
   name: SafeText,
   mimeType: SafeText,
-  size: Schema.optional(Schema.String.check(Schema.isPattern(/^\d+$/))),
+  size: Schema.optional(Schema.String.check(Schema.isPattern(/^\d+$/u))),
   capabilities: Schema.Struct({ canDownload: Schema.Boolean }),
   downloadRestrictions: Schema.optional(
     Schema.Struct({

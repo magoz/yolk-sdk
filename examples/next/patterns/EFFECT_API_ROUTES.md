@@ -5,7 +5,7 @@ Use API routes only for webhooks, external APIs, streaming endpoints, and non-br
 ## Canonical route
 
 ```typescript
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Data, Effect, Schema } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { getSession } from '@/lib/services/auth/get-session'

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientError, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientError, type HttpClientRequest } from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,
@@ -861,7 +861,7 @@ describe('Telegram conformance run interruption', () => {
 
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-      // Same shape as the Dropbox failing-restore drill (effect 4.0.0-rc.115): the run ends with the
+      // Same shape as the Dropbox failing-restore drill (effect 4.0.0): the run ends with the
       // case's own failure and no Interrupt in the cause, produces no report, and resumes no case.
       if (Exit.isSuccess(exit)) {
         return expect.fail('expected the interrupted run to fail')

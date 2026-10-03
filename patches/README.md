@@ -1,56 +1,38 @@
-# Effect rc.115 compatibility patches
+# Effect 4.0.0 compatibility patches
 
 These are pnpm-managed dependency patches, not generated build output or peer-range
 suppressions. `pnpm-workspace.yaml#patchedDependencies` and `pnpm-lock.yaml` own their
-application and integrity. The Cloudflare app owns this compatibility requirement.
-
-Alchemy beta.77 and its current dependency cohort declare support for Effect rc.112+
-but still call APIs removed by rc.115. An unpatched Node import fails on
-`Config.string`; the CLI also fails on `GlobalFlag.setting` and `Flag.boolean`.
-Typechecks alone do not exercise these runtime calls.
+application and integrity.
 
 ## Scope
 
-| Package                                                                           | Pinned version  | Patch                            |
-| --------------------------------------------------------------------------------- | --------------- | -------------------------------- |
-| `alchemy`                                                                         | `2.0.0-beta.77` | Config and CLI constructor names |
-| `@alchemy.run/cloudflare-runtime`                                                 | `2.0.0-beta.77` | Config constructor names         |
-| `@distilled.cloud/{aws,axiom,cloudflare,core,fly-io,hetzner,planetscale,railway}` | `1.0.0-rc.9`    | Config string constructor names  |
+| Package       | Pinned version       | Patch                                     | Owner                                                                                                        |
+| ------------- | -------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `drizzle-orm` | `1.0.0-rc.5-ab785fc` | Type declarations: `SqlError` import path | `examples/next` (applies to every install of this version, including the root and Alchemy's transitive copy) |
 
-The changes use public rc.115 APIs with the same arguments:
-
-- `Config.string/redacted/boolean/number/int/duration` →
-  `Config.String/Redacted/Boolean/Number/Int/Duration` (where used).
-- `Config.mapOrFail` → `Config.mapEffect`.
-- `GlobalFlag.setting` → `GlobalFlag.Setting`.
-- `Flag.boolean/string/integer/file/choice` → `Flag.Boolean/String/Int/File/Literals`.
-- `Argument.file/string` → `Argument.File/String`.
-
-Both shipped source and compiled runtime files are patched: Node imports and the
-published Node CLI use compiled exports, while Bun/Worker conditions select source.
-Alchemy's generated code templates are included. Existing error policies, defaults,
-provider logic, and peer declarations are unchanged. The broader provider imports
-are loaded by the CLI; this is not a claim that those providers were exercised.
+`drizzle-orm@1.0.0-rc.5-ab785fc` declares `effect >=4.0.0-beta.105 || >=4.0.0`, and its runtime
+JavaScript imports no removed Effect paths. Its type declarations (46 `.d.ts`/`.d.cts` files)
+still import `SqlError` from `effect/unstable/sql/SqlError`, which Effect 4.0.0 removed. Root
+`skipLibCheck` hides the missing module, so `SqlError` silently becomes `any` and transaction
+error channels in the Next example (`db.transaction`, `catchTag('SqlError')`) stop being
+type-checked. The patch rewrites only that specifier to `effect/sql/SqlError`, the same module in
+Effect 4.0.0. No newer drizzle build (checked through `1.0.0-rc.5-5935859`) fixes it yet.
 
 ## Maintenance
 
-Use `pnpm patch` / `pnpm patch-commit`, not direct edits to installed dependencies.
-After changing a patch, force pnpm to reevaluate the patch configuration:
+Use `pnpm patch` / `pnpm patch-commit`, not direct edits to installed dependencies. After changing
+a patch, force pnpm to reevaluate the patch configuration:
 
 ```sh
 pnpm install --ignore-scripts --no-frozen-lockfile --config.optimistic-repeat-install=false
 pnpm peers check
-pnpm cloudflare:check
+pnpm --filter @yolk-example/next check
 ```
 
-The explicit install option avoids pnpm 11's optimistic repeat-install shortcut
-reporting “Already up to date” without refreshing a changed patch. Verify the
-lockfile's `patch_hash` and installed files, not just the install exit code.
+The explicit install option avoids pnpm 11's optimistic repeat-install shortcut reporting
+“Already up to date” without refreshing a changed patch. Verify the lockfile's `patch_hash` and
+the installed declarations, not just the install exit code.
 
-`cloudflare:check` includes a non-deploying Node import/CLI smoke and verifies a
-single Effect instance. Run it without cloud credentials; no DB or live-provider
-checks are needed. Worker execution and deployment remain separate validation.
-
-When upstream packages adopt rc.115, remove each obsolete patch and its registration,
-refresh the lockfile, and rerun the same checks plus the DB-free regression suite.
-Do not restore removed Effect APIs or suppress peer warnings to make a check pass.
+When drizzle ships declarations that import `effect/sql/SqlError`, upgrade it, remove the patch and
+its registration, refresh the lockfile, and rerun the same checks. Do not alias the removed path or
+suppress the type error instead.

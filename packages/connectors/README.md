@@ -5,13 +5,13 @@ Effect-native connector primitives and reusable provider actions for hosts that 
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 Running the experimental `@yolk-sdk/connectors/*/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the examples import `@yolk-sdk/conformance/*` subpaths directly.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Use the SDK's matching Effect version (`4.0.0`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -422,7 +422,7 @@ const driveProgram = GoogleConnector.invoke({
 })
 ```
 
-Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
+Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
 
 Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains the existing broad-consent scope set (its `gmail.compose` grant already permits sending).
 

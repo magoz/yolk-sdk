@@ -1,5 +1,5 @@
 import { Effect, Layer, Redacted } from 'effect'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   speechResultToAudioPart,

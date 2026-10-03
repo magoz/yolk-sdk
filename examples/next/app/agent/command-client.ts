@@ -1,11 +1,6 @@
 import { Effect, type Layer } from 'effect'
 import * as Schema from 'effect/Schema'
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse
-} from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import type { AgentCommandSummary } from './slash-command-model'
 
 type CommandClientOptions = {

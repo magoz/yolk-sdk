@@ -5,7 +5,7 @@ import {
   HttpClientResponse,
   type HttpClient,
   type HttpClientRequest
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { retryAfterMsFromHeaders } from './provider-error.ts'
 import {
   ProviderSubscriptionUsageAuthError,

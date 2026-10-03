@@ -1,5 +1,4 @@
-import { Arbitrary } from 'effect/unstable/arbitrary'
-import { Effect, Match, Option, Predicate, Result, Schema } from 'effect'
+import { Arbitrary, Effect, Match, Option, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentError,

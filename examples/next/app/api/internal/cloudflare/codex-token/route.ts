@@ -1,5 +1,5 @@
 import { Config, Effect, Redacted } from 'effect'
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { TokenBrokerRequest } from '@yolk-sdk/agent/oauth'
 import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
 import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'

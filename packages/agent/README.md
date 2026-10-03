@@ -7,7 +7,7 @@ Root export is intentionally empty. Import feature APIs from explicit subpaths.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
@@ -15,7 +15,7 @@ Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
 Running the experimental `@yolk-sdk/agent/providers/*/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the cases run through `@yolk-sdk/conformance/runner`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Use the SDK's matching Effect version (`4.0.0`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -221,7 +221,7 @@ Server-side configuration fragment (the host supplies credentials and model poli
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenCodeGoProviderLayer } from '@yolk-sdk/agent/providers/opencode/go-provider'
 
 const GoLayer = makeOpenCodeGoProviderLayer({
@@ -249,7 +249,7 @@ Read Go subscription allowance separately from per-request token usage (server-s
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenCodeGoSubscriptionUsage } from '@yolk-sdk/agent/providers/opencode/usage'
 
 const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), {
@@ -419,7 +419,7 @@ Effect `HttpClient`:
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenAiCodexSubscriptionUsage } from '@yolk-sdk/agent/providers/openai/codex-usage'
 
 const snapshot = await fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken).pipe(
@@ -775,7 +775,7 @@ as the chat provider:
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { classify } from '@yolk-sdk/agent/classification'
 import { makeVercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
 
@@ -922,7 +922,7 @@ see the message and continue. The result includes structured content with `type`
 Optional `makeTool({ invalidParamsMessage })` receives the `Schema.SchemaError` produced by
 `Schema.decodeUnknownEffect` on `parameters` (validate and execute). The decode error is passed
 through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
-`SchemaError(...)` wrapper. In Effect rc.115, `SchemaError` extends native `Error`, but the
+`SchemaError(...)` wrapper. In Effect 4, `SchemaError` extends native `Error`, but the
 wrapper remains part of this tool-message contract; do not default to `.message`.
 Existing `(error: unknown) => string` callbacks remain assignable.
 

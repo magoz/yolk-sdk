@@ -1,6 +1,6 @@
 import { Chunk, Clock, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { openAiCodexProviderId } from './codex.ts'
 import {

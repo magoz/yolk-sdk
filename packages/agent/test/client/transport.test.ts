@@ -5,7 +5,7 @@ import {
   HttpClientResponse,
   type HttpClientError,
   type HttpClientRequest
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentAwaitingInput,

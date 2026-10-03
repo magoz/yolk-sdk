@@ -1,4 +1,4 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Data, Effect } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'

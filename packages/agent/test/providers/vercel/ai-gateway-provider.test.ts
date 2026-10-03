@@ -1,5 +1,5 @@
 import { Deferred, Effect, Fiber, Layer, Predicate, Redacted, Ref, Schema, Stream } from 'effect'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   LLMDone,

@@ -77,7 +77,7 @@ const fail = (code: DropboxDownloadErrorCode) => Effect.fail(new DropboxDownload
 // Dropbox path, id, rev, or namespace addressing. Control characters never belong in a header arg.
 const DropboxPath = Schema.String.check(
   Schema.isPattern(
-    /^(?:\/[^\u0000-\u001f\u007f]+|id:[^\u0000-\u001f\u007f\s/]+(?:\/[^\u0000-\u001f\u007f]+)?|rev:[0-9a-f]{9,}|ns:[0-9]+\/[^\u0000-\u001f\u007f]+)(?![\s\S])/
+    /^(?:\/[^\u0000-\u001f\u007f]+|id:[^\u0000-\u001f\u007f\s/]+(?:\/[^\u0000-\u001f\u007f]+)?|rev:[0-9a-f]{9,}|ns:[0-9]+\/[^\u0000-\u001f\u007f]+)(?![\s\S])/u
   )
 )
 

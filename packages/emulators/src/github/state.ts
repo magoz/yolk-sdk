@@ -28,13 +28,13 @@ import { Result } from 'effect'
 import * as Schema from 'effect/Schema'
 
 /** A GitHub owner login (the connector's owner pattern). */
-export const githubOwnerPattern = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
+export const githubOwnerPattern = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u
 
 /** A repository name in plain characters (no `.`/`..`, no `.git` suffix; checked below). */
-export const githubRepoPattern = /^[A-Za-z0-9._-]{1,100}$/
+export const githubRepoPattern = /^[A-Za-z0-9._-]{1,100}$/u
 
 /** A label name in plain characters (the conformance seed pattern; never percent-encoded). */
-export const githubLabelNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/
+export const githubLabelNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/u
 
 /**
  * The source of a relative file path whose segments never start with a dot (the conformance seed
@@ -43,10 +43,10 @@ export const githubLabelNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/
 export const githubFilePathSource = '[A-Za-z0-9_-][A-Za-z0-9._-]*(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*'
 
 /** A relative file path whose segments never start with a dot (the conformance seed pattern). */
-export const githubFilePathPattern = new RegExp(`^${githubFilePathSource}$`)
+export const githubFilePathPattern = new RegExp(`^${githubFilePathSource}$`, 'u')
 
 /** A GitHub timestamp as the fixtures write it: whole seconds, UTC. */
-export const githubTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+export const githubTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u
 
 const Timestamp = Schema.String.check(Schema.isPattern(githubTimestampPattern))
 
@@ -87,7 +87,7 @@ export const GithubEmulatorRepository = Schema.Struct({
   ),
   /** The id the `Link` URLs name (`/repositories/<id>/labels`). */
   id: PositiveInt,
-  defaultBranch: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/))
+  defaultBranch: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u))
 })
 
 export type GithubEmulatorRepository = typeof GithubEmulatorRepository.Type
@@ -98,7 +98,7 @@ export const GithubEmulatorLabel = Schema.Struct({
   nodeId: Schema.String,
   name: LabelName,
   /** Six hex digits, as the fixtures write colors. */
-  color: Schema.String.check(Schema.isPattern(/^[0-9a-f]{6}$/)),
+  color: Schema.String.check(Schema.isPattern(/^[0-9a-f]{6}$/u)),
   default: Schema.Boolean,
   description: Schema.NullOr(Schema.String)
 })
@@ -150,7 +150,7 @@ export type GithubEmulatorComment = typeof GithubEmulatorComment.Type
 export const GithubEmulatorFile = Schema.Struct({
   path: Schema.String.check(Schema.isPattern(githubFilePathPattern), Schema.isMaxLength(200)),
   /** The blob sha (40 lower-case hex digits). */
-  sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/u)),
   text: Schema.String
 })
 

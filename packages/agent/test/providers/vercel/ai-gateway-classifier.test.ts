@@ -1,7 +1,7 @@
 import { Clock, ConfigProvider, Effect, Exit, Fiber, Layer, Random, Redacted } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/unstable/http'
-import type { HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/http'
+import type { HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ClassificationProviderError,

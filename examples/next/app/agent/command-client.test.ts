@@ -1,10 +1,5 @@
 import { Effect, Layer, Option, Predicate } from 'effect'
-import {
-  Headers,
-  HttpClient,
-  HttpClientResponse,
-  type HttpClientRequest
-} from 'effect/unstable/http'
+import { Headers, HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { loadAgentCommands, renderAgentCommand } from './command-client'
 

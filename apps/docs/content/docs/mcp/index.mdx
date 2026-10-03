@@ -10,7 +10,7 @@ For auth, local stdio, and server policy, see [MCP auth, local servers, and serv
 Install:
 
 ```bash
-pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-rc.115
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0
 ```
 
 ## Connect with the full MCP v2 client
@@ -40,7 +40,7 @@ Import official wire schemas from `@yolk-sdk/mcp/core`. Import Node stdio transp
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 

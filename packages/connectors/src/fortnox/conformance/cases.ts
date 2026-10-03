@@ -89,7 +89,7 @@ export const FortnoxConformanceSeeds = Schema.Struct({
    * invoice's `EmailInformation.EmailAddressTo` equals it exactly (and no copy address is set).
    */
   emailRecipient: Schema.optionalKey(
-    Schema.Trimmed.check(Schema.isPattern(/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/))
+    Schema.Trimmed.check(Schema.isPattern(/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/u))
   )
 })
 

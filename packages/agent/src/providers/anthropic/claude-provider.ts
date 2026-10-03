@@ -1,5 +1,5 @@
 import type { Effect, Layer, Schema, Stream } from 'effect'
-import type { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import type { HttpClient, HttpClientResponse } from 'effect/http'
 import type { LLMError, LLMEvent, LLMProvider, LLMRequest } from '@yolk-sdk/agent/loop'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {

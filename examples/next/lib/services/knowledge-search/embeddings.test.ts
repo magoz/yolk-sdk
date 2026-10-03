@@ -1,6 +1,6 @@
 import { ConfigProvider, Effect, Fiber, Layer, Predicate, Result } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { makeOpenAiKnowledgeEmbedderLayer } from './live-layer'

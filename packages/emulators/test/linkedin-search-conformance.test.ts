@@ -7,7 +7,7 @@
  * packages; the emulator source never does.
  */
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   formatConformanceReport,

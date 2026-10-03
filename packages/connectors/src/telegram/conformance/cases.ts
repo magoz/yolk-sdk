@@ -66,18 +66,18 @@ import { telegramValidateGetChatFixture } from './validate-get-chat.ts'
 
 /** A chat id: an integer (negative for groups and channels) or a public `@username`. */
 const ChatId = Schema.String.check(
-  Schema.isPattern(/^(?:-?[1-9][0-9]{0,19}|@[A-Za-z][A-Za-z0-9_]{3,31})$/)
+  Schema.isPattern(/^(?:-?[1-9][0-9]{0,19}|@[A-Za-z][A-Za-z0-9_]{3,31})$/u)
 )
 
 /** A Bot API file id, in the characters `downloadTelegramFile` accepts. */
-const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,256}$/))
+const FileId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,256}$/u))
 
 /**
  * A run id: `run-` then lower-case letters, digits, and inner hyphens, at most 40 characters, the
  * same shape as the other connector conformance run ids.
  */
 const RunId = Schema.String.check(
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   Schema.isMaxLength(40)
 )
 

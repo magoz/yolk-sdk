@@ -9,7 +9,7 @@
  * fixture records), so no case sleeps and these run on the test clock.
  */
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   formatConformanceReport,

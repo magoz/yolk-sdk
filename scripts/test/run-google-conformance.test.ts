@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Result } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,

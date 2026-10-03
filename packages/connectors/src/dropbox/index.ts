@@ -55,7 +55,7 @@ const NonEmptyString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 const DropboxSearchQuery = NonEmptyString.pipe(Schema.check(Schema.isMaxLength(1000)))
 
-const DropboxRevision = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{9,}$/)))
+const DropboxRevision = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{9,}$/u)))
 
 const DropboxListLimit = Schema.Int.pipe(
   Schema.check(Schema.isGreaterThanOrEqualTo(1)),

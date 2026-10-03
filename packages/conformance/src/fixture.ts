@@ -119,7 +119,7 @@ export const WireExchange = Schema.Struct({
 
 export type WireExchange = typeof WireExchange.Type
 
-const RecordedAtDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))
+const RecordedAtDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u))
 
 export const WireFixture = Schema.Struct({
   id: Schema.NonEmptyString,

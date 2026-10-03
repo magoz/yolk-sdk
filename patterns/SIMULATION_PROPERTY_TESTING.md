@@ -80,14 +80,14 @@ Use existing test stack:
 - `vitest`
 - `@effect/vitest`
 - `effect`
-- Effect native `Arbitrary.schema()` from `effect/unstable/arbitrary`
+- Effect native `Arbitrary.schema()` from `effect` (`import { Arbitrary } from 'effect'`)
 
 Add `fast-check` only when command/model testing needs direct generators or shrinkers beyond `@effect/vitest` helpers.
 
 Effect v4 already supports schema-derived arbitraries:
 
 ```ts
-import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Arbitrary } from 'effect'
 
 const inputArbitrary = Arbitrary.schema(ToolInputSchema)
 ```

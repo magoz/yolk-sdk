@@ -1,4 +1,5 @@
-import { Context, Encoding, type Effect } from 'effect'
+import { Context, type Effect } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import * as Schema from 'effect/Schema'
 import { AudioPart, inlineBase64AttachmentSource } from '@yolk-sdk/agent/protocol'
 
@@ -92,7 +93,7 @@ export const speechResultToAudioPart = (
   options?: { readonly filename?: string; readonly durationMs?: number }
 ): AudioPart =>
   AudioPart.make({
-    source: inlineBase64AttachmentSource(Encoding.encodeBase64(result.audio)),
+    source: inlineBase64AttachmentSource(Base64.encode(result.audio)),
     mimeType: result.mimeType,
     filename: options?.filename,
     durationMs: options?.durationMs

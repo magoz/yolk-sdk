@@ -34,7 +34,7 @@ const localPartMaxLength = 64
 export const GooglePracticeAddress = Schema.String.check(
   Schema.isMaxLength(254),
   Schema.isPattern(
-    /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+    /^[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u
   ),
   Schema.makeFilter(value => value.indexOf('@') <= localPartMaxLength)
 ).pipe(Schema.brand('GooglePracticeAddress'))
@@ -42,19 +42,19 @@ export const GooglePracticeAddress = Schema.String.check(
 export type GooglePracticeAddress = typeof GooglePracticeAddress.Type
 
 /** A Gmail message or label id (letters, digits, `_`, `-`). */
-const GmailId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,100}$/))
+const GmailId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,100}$/u))
 
 /** A calendar id: `primary` or an address-like id, never dot-only. */
-const CalendarId = Schema.String.check(Schema.isPattern(/^(?!\.+$)[A-Za-z0-9._%+@-]{1,200}$/))
+const CalendarId = Schema.String.check(Schema.isPattern(/^(?!\.+$)[A-Za-z0-9._%+@-]{1,200}$/u))
 
 /** An RFC 3339 instant with a `Z` or numeric offset (the only form Calendar accepts as a bound). */
 const Instant = Schema.String.check(
-  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/),
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u),
   Schema.makeFilter(value => Number.isFinite(Date.parse(value)))
 )
 
 /** A Drive file or folder id (letters, digits, `_`, `-`). */
-const DriveId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/))
+const DriveId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/u))
 
 /**
  * A run id: `run-` then lower-case letters, digits, and inner hyphens, at most 40 characters, the
@@ -62,7 +62,7 @@ const DriveId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{10,200}$/))
  */
 export const GoogleConformanceRunId = Schema.String.check(
   Schema.isMaxLength(40),
-  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  Schema.isPattern(/^run-[a-z0-9]+(?:-[a-z0-9]+)*$/u)
 ).pipe(Schema.brand('GoogleConformanceRunId'))
 
 export type GoogleConformanceRunId = typeof GoogleConformanceRunId.Type

@@ -1,10 +1,6 @@
-import { Effect, Encoding, Layer, Predicate, Stream } from 'effect'
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse
-} from 'effect/unstable/http'
+import { Effect, Layer, Predicate, Stream } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { scanFixtureForSecrets, type WireExchange } from '../src/fixture.ts'
 import {
@@ -260,8 +256,8 @@ describe('recording HttpClient', () => {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
         chunks: [
-          { base64: Encoding.encodeBase64(splitChunks[0] ?? new Uint8Array()) },
-          { base64: Encoding.encodeBase64(splitChunks[1] ?? new Uint8Array()) }
+          { base64: Base64.encode(splitChunks[0] ?? new Uint8Array()) },
+          { base64: Base64.encode(splitChunks[1] ?? new Uint8Array()) }
         ]
       })
       expect(received).toEqual(splitChunks.map(bytes => Array.from(bytes)))
@@ -295,7 +291,7 @@ describe('recording HttpClient', () => {
       expect(recorded?.response).toEqual({
         status: 200,
         headers: { 'content-type': 'application/pdf' },
-        bodyBase64: Encoding.encodeBase64(binaryDocument)
+        bodyBase64: Base64.encode(binaryDocument)
       })
 
       const fixture = yield* makeWireFixture({

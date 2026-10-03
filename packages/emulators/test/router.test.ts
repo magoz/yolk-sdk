@@ -5,7 +5,7 @@ import {
   HttpClientError,
   HttpClientRequest,
   HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   EmulatedHttpClient,

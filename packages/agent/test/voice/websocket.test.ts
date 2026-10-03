@@ -1,6 +1,6 @@
 import { Effect, Fiber, Layer, Predicate, Scope, Stream, Exit } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import * as Socket from 'effect/unstable/socket/Socket'
+import * as Socket from 'effect/socket/Socket'
 import {
   makeWebSocketVoiceTransport,
   VoiceUserTranscriptFinal,
