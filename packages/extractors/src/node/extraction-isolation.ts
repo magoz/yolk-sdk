@@ -21,14 +21,16 @@ export type WorkerIsolationOptions = {
   /** Wall-clock time a worker may run before it is terminated, in ms. Default 30,000. */
   readonly timeoutMs?: number
   /**
-   * This layer's share of the process-wide worker pool: at most this many of its extractions run
-   * at once. Every layer in the process shares one pool of 4 workers, however often the layer is
-   * built, so this can only lower the layer's share. 1 to 4; default 4.
+   * This layer's share of the realm-wide worker pool: at most this many of its extractions run at
+   * once. Every layer in a JavaScript realm (the main thread, or each worker thread that builds
+   * the layer) shares one pool of 4 workers, however often the layer is built, so this can only
+   * lower the layer's share. 1 to 4; default 4.
    */
   readonly maxConcurrentWorkers?: number
   /**
    * How long an extraction may wait for a worker slot, in ms, before it fails with
-   * `reason: 'busy'` without starting a worker. Default: the layer's `timeoutMs`.
+   * `reason: 'busy'` without starting a worker. Slots are handed out first come, first served, and
+   * a slot freed after the deadline never admits the extraction. Default: the layer's `timeoutMs`.
    */
   readonly maxQueueWaitMs?: number
   /**
@@ -72,7 +74,7 @@ export type WorkerIsolationSettings = typeof WorkerIsolationSettings.Type
 /**
  * Defaults. 256 MB of old generation holds SheetJS's cell objects for the default limits (100,000
  * visited cells, 50 MiB expanded) several times over and PDF.js's working set for ordinary PDFs,
- * and the process-wide pool of four workers keeps their V8 heaps near 1 GB together. That bounds
+ * and the realm-wide pool of four workers keeps their V8 heaps near 1 GB together. That bounds
  * heap, not the process: Buffers and PDF.js's decoded data live outside it (see the README).
  * 32 MB of young generation is twice V8's usual 64-bit default, enough for short-lived parser
  * strings. 30 s is far above legitimate parse times at the default limits (well under a second
@@ -216,7 +218,7 @@ const missingWorker = new Error(
  * Run each extraction in a fresh worker: the input is copied into a transferred buffer, the
  * worker returns only text and metadata, and the worker is terminated when the result arrives,
  * the timeout fires, or the caller is interrupted. Admission goes through this layer's share and
- * the process-wide pool (`worker-admission.ts`); a slot is freed only once its worker has
+ * the realm-wide pool (`worker-admission.ts`); a slot is freed only once its worker has
  * terminated. A worker that cannot start, or a missing `workerUrl`, fails closed with
  * `reason: 'worker-unavailable'`; there is no in-process fallback.
  */

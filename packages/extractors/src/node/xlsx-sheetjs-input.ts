@@ -26,7 +26,8 @@ import type { PartIndex, Relationship } from './xlsx-parts.ts'
  * - generated: `[Content_Types].xml`, `_rels/.rels`, `xl/_rels/workbook.xml.rels`,
  *   `xl/workbook.xml` (`xlsx-workbook.ts`), and `xl/styles.xml` (`xlsx-styles.ts`);
  * - copied after checks: worksheets (stored as `xl/worksheets/sheet<n>.xml`) and
- *   `xl/sharedStrings.xml`, validated, hyperlink-stripped, and free of CDATA.
+ *   `xl/sharedStrings.xml`, validated, hyperlink-stripped, and free of anything SheetJS could
+ *   turn into a CDATA marker (`sheetJsCouldReadCdata`).
  *
  * With these entries SheetJS 0.20.3 `parse_zip` can only take its XLSX path:
  *
@@ -120,9 +121,13 @@ const malformed = () =>
   new FileExtractionError({ format: 'xlsx', message: 'XLSX workbook is malformed.' })
 
 const cdataRejected = () =>
-  new FileExtractionError({ format: 'xlsx', message: 'XLSX contains unsupported CDATA sections.' })
+  new FileExtractionError({
+    format: 'xlsx',
+    message:
+      'XLSX contains unsupported markup (CDATA, comments or declarations) in worksheet or shared-strings parts.'
+  })
 
-/** A copied part, unless SheetJS could meet a CDATA marker in it. */
+/** A copied part, unless SheetJS could meet a CDATA marker in it (decoded or tag-removed). */
 const withoutCdata = (bytes: Uint8Array) => {
   if (sheetJsCouldReadCdata(bytes)) throw cdataRejected()
 

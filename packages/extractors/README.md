@@ -83,15 +83,18 @@ const FileExtractorLive = makeFileExtractorLayer({
 | `maxYoungGenerationSizeMb` | 32                       | V8 young-generation heap of each worker                                  |
 | `stackSizeMb`              | 4                        | Stack of each worker (Node's default)                                    |
 | `timeoutMs`                | 30,000                   | Wall-clock time per worker (a real timer, not Effect's clock)            |
-| `maxConcurrentWorkers`     | 4                        | This layer's share of the process-wide pool of 4 workers (1 to 4)        |
+| `maxConcurrentWorkers`     | 4                        | This layer's share of the realm-wide pool of 4 workers (1 to 4)          |
 | `maxQueueWaitMs`           | the layer's `timeoutMs`  | Time an extraction may wait for a worker slot; then it fails with `busy` |
 | `workerUrl`                | the package's own worker | The worker entry, for hosts that bundle or relocate the package          |
 
-**Process-wide cap.** Every layer in the process shares one pool of 4 workers, however often the
-layer is built (a per-request `Effect.provide` builds a new one each time). The pool is kept on
-`globalThis`, so duplicated copies of the package share it too. A layer's `maxConcurrentWorkers`
-can only lower its own share. An extraction waits for a slot at most `maxQueueWaitMs`, then fails
-with `reason: 'busy'` without starting a worker.
+**Cap per JavaScript realm.** Every layer in a JavaScript realm (the main thread, or each worker
+thread that builds the layer) shares one pool of 4 workers, however often the layer is built (a
+per-request `Effect.provide` builds a new one each time). The pool is kept on `globalThis`, so
+duplicated copies of the package in that realm share it too. A host that runs its request
+handlers in a pool of worker threads gets 4 workers per thread. A layer's
+`maxConcurrentWorkers` can only lower its own share. Slots are handed out first come, first
+served. An extraction waits for a slot at most `maxQueueWaitMs`, then fails with
+`reason: 'busy'` without starting a worker; a slot freed after that deadline never admits it.
 
 **What the worker bounds.** Each worker's V8 heap, stack, and running time. When a worker runs
 out of heap, times out, cannot start, or exits without a result, it is terminated and the
@@ -186,9 +189,9 @@ annotations and links beyond the cap, described below.
   is a deliberate tightening: OOXML input missing `[Content_Types].xml` or its main part
   (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) now fails.
 - **Worker isolation.** Every parser runs in a worker with V8 heap, stack, and time limits and a
-  process-wide cap of 4 workers (see above). A parser path nobody has found yet that exhausts the
-  worker's heap or runs too long ends in a typed error. Memory outside the V8 heap is bounded
-  only by the input and expanded-size limits and your host's memory limit.
+  cap of 4 workers per JavaScript realm (see above). A parser path nobody has found yet that
+  exhausts the worker's heap or runs too long ends in a typed error. Memory outside the V8 heap is
+  bounded only by the input and expanded-size limits and your host's memory limit.
 - **Generated SheetJS input.** SheetJS picks its parser from the archive, not the file name, and
   several of its XML parsers do work far beyond the size of the part. So SheetJS never receives
   the uploaded archive. The extractor builds a new one:
@@ -207,9 +210,19 @@ annotations and links beyond the cap, described below.
     `xl/worksheets/sheet<n>.xml`) and `xl/sharedStrings.xml`, validated and hyperlink-stripped.
     Parts where SheetJS could meet a CDATA marker are rejected: SheetJS's unescaping recurses
     over an unterminated CDATA section with quadratic output, and Excel never writes CDATA there.
-    The check covers the text raw and after every chain of up to two of SheetJS's conversions
-    (`unescapexml` and `utf8read`, which keeps only each character's low byte, so `&#x13C;` in a
-    `str` cell becomes `<` between its two decodes).
+    SheetJS reaches that unescaping in two ways the check models. It decodes: up to two of
+    `unescapexml` and `utf8read` (which keeps only each character's low byte, so `&#x13C;` in a
+    `str` cell becomes `<` between its two decodes). And it removes tags before decoding: every
+    `<si>` in the shared-strings table, and every `<r>` in rich text, so `A<<r>![CDATA[B` becomes
+    `A<![CDATA[B`. Inline strings take the rich-text path even with `cellHTML: false`. So a part is
+    rejected when its text, or its text after `utf8read`, contains `<<` or `<!`, or when its text,
+    as is or with every simple opening tag removed, meets the marker after any chain of up to two
+    conversions. This deliberately fails closed: XML comments, `<!DOCTYPE` and any other `<!…`
+    declaration, and a literal `<<` in a worksheet or the shared strings are rejected as
+    unsupported markup (CDATA, comments or declarations). Excel, LibreOffice, and Google Sheets
+    never write them there. Some forms are rejected only because they fall in this superset, not
+    because SheetJS 0.20.3 would expand them (for example `&lt;<r>![CDATA[`, which it decodes
+    after its CDATA check).
 
   The title comes from `docProps/core.xml`, read by the extractor. With no marker entries and no
   `.bin` entries, SheetJS can only take its XLSX path. Everything else (comments, VML, drawings,
@@ -261,7 +274,8 @@ annotations and links beyond the cap, described below.
   reaches SheetJS, and SheetJS 0.20.3 parsing the file directly is not polluted either.
 
 - **Residual risk.** SheetJS still parses the worksheets and shared strings as uploaded (after
-  validation, the hyperlink strip, and the CDATA check), and unpdf, mammoth, and the PPTX reader
+  validation, the hyperlink strip, and the CDATA check, which models SheetJS 0.20.3's decodes and
+  tag removals), and unpdf, mammoth, and the PPTX reader
   parse their parts. No other super-linear path is known in these parsers with the options used,
   but any one found later runs before the extractor's budgets. The worker's heap, stack, and time
   limits are the backstop for that, and they do not bound memory outside the V8 heap (PDF.js's

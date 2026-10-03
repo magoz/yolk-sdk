@@ -263,6 +263,28 @@ describe('XLSX hyperlinks', () => {
     })
   )
 
+  it.effect(
+    'keeps links past 200,000 unterminated hyperlink starts, with no comment around them',
+    () =>
+      Effect.gen(function* () {
+        // The research file `quadratic.xlsx` hid this run in an XML comment, which is now rejected
+        // with the CDATA check's `<!`; bare, it still reaches the strip and the link reader, and
+        // scanning past the next `<` from every start would take ~2e11 steps.
+        const book = workbook([
+          {
+            name: 'Sheet1',
+            rows: [['site']],
+            afterSheetData: `${hyperlinks('<hyperlink ref="A1" r:id="rId1"/>')}${'<hyperlink '.repeat(200_000)}`,
+            relationships: [external('1', 'https://run.example/')]
+          }
+        ])
+
+        const result = yield* extractWith(xlsxInput(book))
+
+        expect(result.content).toBe('# Sheet1\nsite <https://run.example/>')
+      })
+  )
+
   it.effect('drops links whose target exceeds 2,048 characters', () =>
     Effect.gen(function* () {
       const book = workbook([

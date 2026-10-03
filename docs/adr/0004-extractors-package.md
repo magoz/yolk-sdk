@@ -18,7 +18,7 @@ into a public package, `@yolk-sdk/extractors`, that the apps consume.
 | SheetJS    | Optional peer `xlsx >=0.20.3`, lazily imported, version-checked at runtime. Hosts install the SheetJS CDN tarball.            |
 | Archives   | Every DOCX, XLSX, and PPTX goes through bounded ZIP validation and is rebuilt as a stored archive before any parser reads it. |
 | SheetJS    | SheetJS only reads an archive the extractor builds (workbook and styles generated); XLSB/ODS/Numbers input is rejected early. |
-| Isolation  | Every PDF, DOCX, XLSX, and PPTX parse runs in a fresh worker thread with V8 heap, stack, and time limits; process-wide cap.   |
+| Isolation  | Every PDF, DOCX, XLSX, and PPTX parse runs in a fresh worker thread with V8 heap, stack, and time limits; cap per JS realm.   |
 | Formulas   | SheetJS runs with `cellFormula: false`: cached values only, formula-only cells are empty.                                     |
 | Hyperlinks | Read and removed before SheetJS parses; external targets shown as `text <url>` through an indexed lookup.                     |
 | UTF-16     | XLSX parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag are rejected.                                |
@@ -165,14 +165,38 @@ the shapes those applications write (attribute order, `state="visible"`, LibreOf
 164); they are not real exports, so they are not exhaustive interoperability evidence.
 
 Copied parts. A worksheet or shared-strings part in which SheetJS could meet `<![CDATA[` is
-rejected. SheetJS hands `unescapexml` the raw text (`<v>` of every cell), `utf8read(raw)` (shared
-and inline strings), and `utf8read(unescapexml(raw))` (cells of type `str`, which are decoded
-twice). `utf8read` keeps only the low byte of each character, so U+013C from `_x013C_`,
-`&#x13C;`, or `&#316;` becomes `<` between the two decodes. The check therefore looks at every
-text view raw and after every chain of up to two steps of `unescapexml` and `utf8read`, in any
-order, which is a superset of SheetJS's sequences. Regression tests run real SheetJS on each
-`str` form (about 2 KB of cell text decodes to over 200,000 characters) and assert the extractor
-rejects it before SheetJS loads. Excel, LibreOffice, and Google Sheets never write CDATA there. The
+rejected. SheetJS transforms the part text in two ways before `unescapexml` sees it, and the
+check models both:
+
+- Decodes. SheetJS hands `unescapexml` the raw text (`<v>` of every cell), `utf8read(raw)`
+  (shared and inline strings), and `utf8read(unescapexml(raw))` (cells of type `str`, which are
+  decoded twice). `utf8read` keeps only the low byte of each character, so U+013C from
+  `_x013C_`, `&#x13C;`, or `&#316;` becomes `<` between the two decodes.
+- Tag removal before decoding. `parse_sst_xml` removes every `<si>`/`<sstItem>` opening tag
+  across the whole shared-strings table, and `parse_rs` removes every `<r>` opening tag in rich
+  text (after `utf8read`). The `inlineStr` branch calls `parse_si` without options, so inline
+  rich text is rendered even with `cellHTML: false`. `<t>A<<r>![CDATA[B</t>` therefore reaches
+  `unescapexml` as `A<![CDATA[B`, though no view or decode of the part contains the marker.
+
+So the check rejects a text view when the view or `utf8read` of it contains `<<` or `<!` (a
+marker assembled by tag removal needs a literal `<` followed by `!` or by a removed tag, which
+starts with `<`), and
+when the view, as is or with every simple opening tag `<(?:[\w.-]+:)?[\w.-]+>` removed (a
+superset of SheetJS's removals), meets the marker after any chain of up to two steps of
+`unescapexml` and `utf8read`, in any order (a superset of SheetJS's decode sequences). Each step
+is one linear pass. Regression tests run real SheetJS on each `str` form and on the `<si>` and
+`<r>` removals (about 2 KB of text expands to over 200,000 characters, the inline one with the
+extractor's own `cellHTML: false`) and assert the extractor rejects them before SheetJS loads.
+This deliberately fails closed: XML comments, `<!DOCTYPE` and any other `<!…` declaration, and
+a literal `<<` in worksheet and shared-strings parts are rejected as unsupported markup (CDATA,
+comments or declarations), because Excel, LibreOffice, and Google Sheets never write them there.
+Entity forms such as `&lt;<r>![CDATA[` are rejected only as part of this superset: SheetJS 0.20.3
+decodes them after its CDATA check, and their controls assert no expansion. The research file
+`quadratic.xlsx`, which hid 200,000 unterminated `<hyperlink ` starts in a comment, is now
+rejected for the comment; the same run without a comment still extracts, and tests keep both the
+strip's and the extractor's linear handling of it. Positive controls (Excel-like, LibreOffice- and Google-shaped,
+SheetJS-written, and rich text in shared and inline strings) still extract. Any future SheetJS
+string removal or splice before decoding must be modelled the same way. The
 title is read from `docProps/core.xml` by the extractor (`str_match_xml` on `dc:title`, then
 `unescapexml`), so core properties never reach SheetJS.
 
@@ -240,8 +264,9 @@ What this guarantees, and what it does not:
 - The worker bounds its own V8 heap (old and young generation), its stack, and its running
   time. Heap exhaustion, the timeout, a worker that cannot start, and a worker that crashes or
   exits end that extraction with a typed `FileExtractionError`; the worker is terminated.
-- The cap on running workers is process-wide (below), so the total V8 heap of parser workers is
-  bounded by 4 × the per-worker heap.
+- The cap on running workers is per JavaScript realm (below), so the total V8 heap of parser
+  workers started from one realm is bounded by 4 × the largest per-worker heap among the layers
+  in use (layers can set different `maxOldGenerationSizeMb` values).
 - Total RSS and memory outside the V8 heap are not bounded. Buffers, inflated archive parts, and
   native allocations count against the process, not the worker's heap. They are limited only by
   the 50 MiB input and Office expanded-size caps, per running worker.
@@ -261,19 +286,28 @@ Mechanics:
   are configurable (`isolation`) and checked at layer build. 256 MB holds SheetJS's cells for the
   default limits several times over and PDF.js's working set for ordinary PDFs. Legitimate files
   parse in well under a second, so 30 s only stops runaway work.
-- Admission (`worker-admission.ts`). Every layer in the process shares one pool of 4 worker
-  slots. A per-request `Effect.provide` builds a new layer (and a new semaphore) on every call,
-  so a per-layer cap would not hold for the example app's own server actions. The pool lives on
-  `globalThis` under `Symbol.for('@yolk-sdk/extractors/worker-admission/v1')` and holds only
-  plain data and callbacks, so duplicated copies of the package (or of Effect) in one process
-  share it. A layer's `maxConcurrentWorkers` (1 to 4, default 4) is that layer's own share inside
-  the pool: it can only lower it. An extraction takes its layer slot, then a process slot, and
-  waits for both up to `maxQueueWaitMs` (default: the layer's `timeoutMs`). Past that it fails
-  with `reason: 'busy'` without starting a worker. Taking a slot and registering its release
-  happen without an interruption point between them, and a slot is returned only after
-  `worker.terminate()` has resolved. A waiting extraction can be interrupted. Tests assert the
-  peak of four running workers across independently built layers, a layer's lower share, queue
-  deadline expiry, and that interrupting an extraction terminates its worker and frees its slot.
+- Admission (`worker-admission.ts`). Every layer in a JavaScript realm (the main thread, or each
+  worker thread or `vm` context that builds the layer) shares one pool of 4 worker slots.
+  `globalThis` belongs to one realm, so a host that runs request handlers in a worker-thread pool
+  gets 4 workers per thread; Next.js `next start` and the example app use one realm. A
+  per-request `Effect.provide` builds a new layer (and a new semaphore) on every call, so a
+  per-layer cap would not hold for the example app's own server actions. The pool lives on
+  `globalThis` under `Symbol.for('@yolk-sdk/extractors/worker-admission/v2')` (the version names
+  the hand-off protocol) and holds only plain data and callbacks, so duplicated copies of the
+  package (or of Effect) in one realm share it. A layer's `maxConcurrentWorkers` (1 to 4,
+  default 4) is that layer's own share inside the pool: it can only lower it. An extraction
+  takes its layer slot, then a realm slot, and waits for both up to `maxQueueWaitMs` (default:
+  the layer's `timeoutMs`). Past that it fails with `reason: 'busy'` without starting a worker.
+  Admission is first come, first served: a released slot is handed directly to the
+  longest-waiting extraction, and a new extraction takes a free slot only when nobody waits. The
+  deadline is checked again whenever a slot would be taken (by a new extraction or a hand-off),
+  so a slot freed after the deadline, or a late wake-up, never turns expiry into admission.
+  Taking a slot and registering its release happen without an interruption point between them;
+  a slot handed to a waiter interrupted before it resumes is passed on; and a slot is returned
+  only after `worker.terminate()` has resolved. A waiting extraction can be interrupted. Tests
+  assert the peak of four running workers across independently built layers, a layer's lower
+  share, queue deadline expiry, an expired deadline with a free slot, FIFO hand-off, a late
+  wake-up, and that interrupting an extraction terminates its worker and frees its slot.
 - The worker is terminated in the scope's release on every exit, including interruption.
   `ERR_WORKER_OUT_OF_MEMORY` maps to `reason: 'resource-limit'`, the timer to `'timeout'`, a
   worker that errors or exits before posting `WorkerStarted` (a missing or unloadable worker
@@ -376,7 +410,7 @@ extractor's read options on the original file.
 | `column.xlsx`          | 920 ms, 313 MB RSS                        | 120 ms, +32 MB RSS, internal link omitted                    |
 | `block.xlsx`           | per-cell link expansion                   | 125 ms, +33 MB RSS, internal link omitted                    |
 | `fullsheet.xlsx`       | heap exhausted at 1 GB (crash)            | 133 ms, +32 MB RSS, internal link omitted                    |
-| `quadratic.xlsx`       | quadratic hyperlink scan                  | 160 ms, +33 MB RSS, links kept                               |
+| `quadratic.xlsx`       | quadratic hyperlink scan                  | 118 ms, rejected (`<!--` comment)                            |
 | `ods-disguise.xlsx`    | ODS repeat expansion                      | 95 ms, rejected before SheetJS loads                         |
 | `ods-doubleslash.xlsx` | ODS through `META-INF//manifest.xml`      | 104 ms, rejected (`//` entry name)                           |
 | `bin-target.xlsx`      | XLSB `BrtHLink` expansion                 | 100 ms, rejected before SheetJS loads                        |

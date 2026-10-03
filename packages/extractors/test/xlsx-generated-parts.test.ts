@@ -1,7 +1,11 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { strToU8, unzipSync } from 'fflate'
+import { Buffer } from 'node:buffer'
+import { vi } from 'vitest'
 import * as XLSX from 'xlsx'
+import { sheetJsReadOptions } from '../src/node/sheetjs.ts'
+import { withoutSimpleTags } from '../src/node/sheetjs-xml.ts'
 import {
   maxCellFormats,
   maxCustomNumberFormats,
@@ -16,7 +20,8 @@ import {
   readDirectly,
   singleSheetParts,
   workbookParts,
-  worksheet
+  worksheet,
+  zipParts
 } from './fixtures.ts'
 
 const xmlHeader = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -27,7 +32,8 @@ const relNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationshi
 
 const packageRelNs = 'http://schemas.openxmlformats.org/package/2006/relationships'
 
-const cdataMessage = 'XLSX contains unsupported CDATA sections.'
+const cdataMessage =
+  'XLSX contains unsupported markup (CDATA, comments or declarations) in worksheet or shared-strings parts.'
 
 /** Add a part with its content-type override and workbook relationship, as Excel declares it. */
 const withWorkbookPart = (
@@ -75,6 +81,29 @@ const styledRows = (cells: ReadonlyArray<readonly [number, number]>) =>
         `<row r="${index + 1}"><c r="A${index + 1}" s="${style}"><v>${value}</v></c></row>`
     )
     .join('')
+
+const sharedStrings = (items: string) =>
+  `${xmlHeader}<sst xmlns="${mainNs}" count="1" uniqueCount="1">${items}</sst>`
+
+/** Real SheetJS with the extractor's own `read` options (`cellHTML: false` among them). */
+const readWithExtractorOptions = (parts: Record<string, Uint8Array>) =>
+  XLSX.read(zipParts(parts), { ...sheetJsReadOptions })
+
+/**
+ * The longest string `String.prototype.replace` ran on during `run`: SheetJS's rich-text renderer
+ * calls it on every run's decoded text, whether or not the HTML is kept.
+ */
+const longestReplacedString = (run: () => unknown) => {
+  const spy = vi.spyOn(String.prototype, 'replace')
+
+  try {
+    run()
+
+    return Math.max(0, ...spy.mock.contexts.map(text => String(text).length))
+  } finally {
+    spy.mockRestore()
+  }
+}
 
 /** `# name\n<csv>` for every sheet SheetJS read directly, as the extractor renders it. */
 const directCsv = (book: XLSX.WorkBook) =>
@@ -412,23 +441,158 @@ describe('CDATA never reaches SheetJS (F1)', () => {
       })
     )
 
-  it.effect('rejects shared strings that could decode to a marker (a superset of SheetJS)', () =>
+  it.effect(
+    'rejects shared strings that could decode to a marker (beyond what SheetJS decodes)',
+    () =>
+      Effect.gen(function* () {
+        const sharedString = `${'A'.repeat(before)}_x013C_![CDATA[${'B'.repeat(after)}`
+
+        const parts = withWorkbookPart(
+          singleSheetParts(worksheet('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', 'A1')),
+          'xl/sharedStrings.xml',
+          sharedStrings(`<si><t>${sharedString}</t></si>`)
+        )
+
+        // Control: shared strings are decoded once (`unescapexml(utf8read(raw))`), so SheetJS 0.20.3
+        // does not expand this one; the check covers every chain of up to two conversions anyway.
+        // The shared-strings path SheetJS does expand is tag removal, tested below.
+        expect(String(readDirectly(parts).Sheets.Sheet1?.A1?.v)).toHaveLength(before + after + 9)
+
+        yield* expectRejected(parts, cdataMessage)
+      })
+  )
+
+  // SheetJS removes some opening tags before it decodes: every `<si>` in the shared-strings table
+  // (`parse_sst_xml`), and every `<r>` in rich text (`parse_rs`). Inline strings call `parse_si`
+  // without options, so their rich text is rendered even with the extractor's `cellHTML: false`.
+  // Removing the tag assembles a marker that no view of the part contains.
+  it.effect('rejects a marker that SheetJS assembles by removing <si> from shared strings', () =>
     Effect.gen(function* () {
-      const sharedString = `${'A'.repeat(before)}_x013C_![CDATA[${'B'.repeat(after)}`
+      const item = `<si><t>${'A'.repeat(before)}<<si>![CDATA[${'B'.repeat(after)}</t></si>`
 
       const parts = withWorkbookPart(
         singleSheetParts(worksheet('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', 'A1')),
         'xl/sharedStrings.xml',
-        `${xmlHeader}<sst xmlns="${mainNs}" count="1" uniqueCount="1"><si><t>${sharedString}</t></si></sst>`
+        sharedStrings(item)
       )
 
-      // Control: shared strings are decoded once (`unescapexml(utf8read(raw))`), so SheetJS 0.20.3
-      // does not expand this one. The check covers every chain of up to two conversions anyway.
-      expect(String(readDirectly(parts).Sheets.Sheet1?.A1?.v)).toHaveLength(before + after + 9)
+      // Control: about 2 KB of shared string decodes to over 200,000 characters, with the
+      // extractor's own read options.
+      expect(item).not.toContain('<![CDATA[')
+      expect(String(readWithExtractorOptions(parts).Sheets.Sheet1?.A1?.v).length).toBeGreaterThan(
+        200_000
+      )
 
       yield* expectRejected(parts, cdataMessage)
     })
   )
+
+  it.effect('rejects a marker that SheetJS assembles by removing <r> from an inline string', () =>
+    Effect.gen(function* () {
+      const cell = `<c r="A1" t="inlineStr"><is><r><t>${'A'.repeat(before)}<<r>![CDATA[${'B'.repeat(after)}</t></r></is></c>`
+      const parts = singleSheetParts(worksheet(`<row r="1">${cell}</row>`, 'A1'))
+
+      // Control: with the extractor's options (`cellHTML: false`) SheetJS keeps no HTML, yet it
+      // still renders the run, a string of over 200,000 characters.
+      expect(cell).not.toContain('<![CDATA[')
+      expect(longestReplacedString(() => readWithExtractorOptions(parts))).toBeGreaterThan(200_000)
+      expect(String(readDirectly(parts).Sheets.Sheet1?.A1?.h).length).toBeGreaterThan(200_000)
+
+      yield* expectRejected(parts, cdataMessage)
+    })
+  )
+
+  it.effect('rejects escaped markers around a removed tag as a superset (not exploitable)', () =>
+    Effect.gen(function* () {
+      const inline = singleSheetParts(
+        worksheet(
+          `<row r="1"><c r="A1" t="inlineStr"><is><r><t>${'A'.repeat(before)}&lt;<r>![CDATA[${'B'.repeat(after)}</t></r></is></c></row>`,
+          'A1'
+        )
+      )
+
+      const shared = withWorkbookPart(
+        singleSheetParts(worksheet('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', 'A1')),
+        'xl/sharedStrings.xml',
+        sharedStrings(`<si><t>${'A'.repeat(before)}&lt;<si>![CDATA[${'B'.repeat(after)}</t></si>`)
+      )
+
+      // Control: no expansion. SheetJS 0.20.3 decodes these once, after the tag removal, so `&lt;`
+      // becomes `<` only after its CDATA check. They are not exploitable; the check rejects them
+      // as part of its superset (the view without simple tags unescapes to a marker).
+      expect(longestReplacedString(() => readWithExtractorOptions(inline))).toBeLessThan(5_000)
+      expect(String(readDirectly(inline).Sheets.Sheet1?.A1?.h).length).toBeLessThan(5_000)
+      expect(String(readWithExtractorOptions(shared).Sheets.Sheet1?.A1?.v)).toHaveLength(
+        before + after + 9
+      )
+
+      yield* expectRejected(inline, cdataMessage)
+      yield* expectRejected(shared, cdataMessage)
+    })
+  )
+
+  it.effect(
+    'fails closed on `<<`, comments, and declarations, which spreadsheet apps never write',
+    () =>
+      Effect.gen(function* () {
+        for (const text of ['a<<b', '<!-- note -->', '<!DOCTYPE sst>']) {
+          const shared = withWorkbookPart(
+            singleSheetParts(worksheet('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', 'A1')),
+            'xl/sharedStrings.xml',
+            sharedStrings(`<si><t>x</t></si>${text}`)
+          )
+
+          yield* expectRejected(shared, cdataMessage)
+          yield* expectRejected(
+            singleSheetParts(worksheet('<row r="1"><c r="A1"><v>1</v></c></row>', 'A1', text)),
+            cdataMessage
+          )
+        }
+
+        // In a BOM-marked UTF-16 part, `utf8read` keeps only each character's low byte, so U+013C
+        // becomes `<` right before a `<r>` that SheetJS removes: rejected through the UTF-16 view.
+        const utf16 = (text: string) =>
+          Uint8Array.from([0xff, 0xfe, ...new Uint8Array(Buffer.from(text, 'utf16le'))])
+
+        const sheet = decode(
+          worksheet(
+            '<row r="1"><c r="A1" t="inlineStr"><is><r><t>A\u013C<r>![CDATA[B</t></r></is></c></row>',
+            'A1'
+          )
+        )
+
+        expect(sheet).not.toContain('<<')
+        yield* expectRejected(singleSheetParts(utf16(sheet)), cdataMessage)
+      })
+  )
+
+  it.effect('keeps rich text in shared and inline strings (positive control)', () =>
+    Effect.gen(function* () {
+      const parts = withWorkbookPart(
+        singleSheetParts(
+          worksheet(
+            '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="inlineStr"><is><r><rPr><i/></rPr><t xml:space="preserve">Inline </t></r><r><t>rich &amp; &lt;b&gt;</t></r></is></c><c r="C1" t="inlineStr"><is><t>plain</t></is></c></row>',
+            'A1:C1'
+          )
+        ),
+        'xl/sharedStrings.xml',
+        sharedStrings(
+          '<si><r><rPr><b/><sz val="11"/></rPr><t>東京</t></r><r><t xml:space="preserve"> office</t></r><rPh sb="0" eb="2"><t>トウキョウ</t></rPh><phoneticPr fontId="1"/></si>'
+        )
+      )
+
+      const { result } = yield* extractRecorded(parts)
+
+      expect(result.content).toBe(directCsv(readDirectly(parts)))
+      expect(result.content).toBe('# Sheet1\n東京 office,Inline rich & <b>,plain')
+    })
+  )
+
+  it('removes only simple opening tags, a superset of the tags SheetJS removes', () => {
+    expect(withoutSimpleTags('<si><x:r><sstItem>t<t xml:space="preserve"></t><a:><<r>!<-.>')).toBe(
+      't<t xml:space="preserve"></t><a:><!'
+    )
+  })
 
   it.effect('reads the title without SheetJS and ignores a CDATA title', () =>
     Effect.gen(function* () {

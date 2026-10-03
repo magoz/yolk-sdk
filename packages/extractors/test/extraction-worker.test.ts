@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Cause, Effect, Exit, Fiber } from 'effect'
 import { strToU8, zipSync } from 'fflate'
+import { vi } from 'vitest'
 import * as XLSX from 'xlsx'
 import { FileExtractionError, OfficeArchiveError } from '../src/errors.ts'
 import type { FileInput } from '../src/format.ts'
@@ -54,7 +55,7 @@ const stubWorker = (code: string) =>
  * the test broadcasts `release`; then they reply with a fixed result. Counting announcements gives
  * the number of workers started.
  */
-const heldWorkers = (name: string) => {
+const openHeldWorkers = (name: string) => {
   const channel = new BroadcastChannel(name)
   let started = 0
   const waiters = new Set<() => void>()
@@ -95,6 +96,13 @@ const heldWorkers = (name: string) => {
     close: () => Effect.sync(() => channel.close())
   }
 }
+
+/** `openHeldWorkers` whose channel is closed with the test's scope, even when an assertion fails. */
+const heldWorkers = (name: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => openHeldWorkers(name)),
+    held => held.close()
+  )
 
 const times = (count: number) => Array.from({ length: count }, (_, index) => index)
 
@@ -316,39 +324,50 @@ describe('isolated extraction in a worker thread', () => {
 
   it.effect('caps running workers process-wide across independently built layers', () =>
     Effect.gen(function* () {
-      const held = heldWorkers('yolk-extractors-peak')
+      const held = yield* heldWorkers('yolk-extractors-peak')
 
       // Six extractions, each through its own layer build (as per-request `Effect.provide` does).
-      const all = yield* Effect.forkChild(
-        Effect.forEach(times(6), () => inWorker(pdfInput, { workerUrl: held.workerUrl }), {
-          concurrency: 'unbounded'
-        })
-      )
+      const extractions = (count: number) =>
+        Effect.forkChild(
+          Effect.forEach(times(count), () => inWorker(pdfInput, { workerUrl: held.workerUrl }), {
+            concurrency: 'unbounded'
+          })
+        )
+
+      const first = yield* extractions(4)
 
       yield* held.awaitStarted(4)
 
-      // A fifth worker needs a slot, so four running and two waiting is the peak.
+      const second = yield* extractions(2)
+
+      // Wait until both newcomers queue (each starts with its own layer build).
+      while (processAdmissionSnapshot().waiting < 2) yield* Effect.yieldNow
+
+      // Four running and two waiting is the peak: no fifth worker started.
       expect(processAdmissionSnapshot()).toEqual({ active: 4, waiting: 2 })
       expect(held.started()).toBe(4)
 
+      // Join the first four, so their slots have been released (after `worker.terminate()`).
       yield* held.release()
+
+      const firstResults = yield* Fiber.join(first)
+
       yield* held.awaitStarted(6)
 
       expect(processAdmissionSnapshot()).toEqual({ active: 2, waiting: 0 })
 
       yield* held.release()
 
-      const results = yield* Fiber.join(all)
+      const results = [...firstResults, ...(yield* Fiber.join(second))]
 
       expect(results.map(result => result.content)).toEqual(times(6).map(() => 'held'))
       expect(processAdmissionSnapshot()).toEqual({ active: 0, waiting: 0 })
-      yield* held.close()
     })
   )
 
   it.effect('keeps a layer within its own maxConcurrentWorkers share', () =>
     Effect.gen(function* () {
-      const held = heldWorkers('yolk-extractors-share')
+      const held = yield* heldWorkers('yolk-extractors-share')
 
       const all = yield* Effect.forkChild(
         Effect.gen(function* () {
@@ -377,13 +396,12 @@ describe('isolated extraction in a worker thread', () => {
       }
 
       expect(yield* Fiber.join(all)).toHaveLength(3)
-      yield* held.close()
     })
   )
 
   it.effect('fails with busy, without starting a worker, when no slot frees up in time', () =>
     Effect.gen(function* () {
-      const held = heldWorkers('yolk-extractors-busy')
+      const held = yield* heldWorkers('yolk-extractors-busy')
 
       const holders = yield* Effect.forkChild(
         Effect.forEach(times(4), () => inWorker(pdfInput, { workerUrl: held.workerUrl }), {
@@ -410,13 +428,44 @@ describe('isolated extraction in a worker thread', () => {
 
       yield* held.release()
       yield* Fiber.join(holders)
-      yield* held.close()
+    })
+  )
+
+  it.effect('fails with busy, without starting a worker, once its deadline has passed', () =>
+    Effect.gen(function* () {
+      const held = yield* heldWorkers('yolk-extractors-expired')
+
+      // Every `Date.now` reads a second later than the one before, so the admission deadline
+      // (1 ms after the first read) has passed by the time a free slot would be taken.
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const now = Date.now.bind(Date)
+          let reads = 0
+
+          return vi.spyOn(Date, 'now').mockImplementation(() => now() + 1000 * reads++)
+        }),
+        spy => Effect.sync(() => spy.mockRestore())
+      )
+
+      expect(processAdmissionSnapshot()).toEqual({ active: 0, waiting: 0 })
+
+      const error = yield* inWorker(pdfInput, {
+        workerUrl: held.workerUrl,
+        maxQueueWaitMs: 1
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        reason: 'busy',
+        message: 'File extraction is busy. Try again later.'
+      })
+      expect(held.started()).toBe(0)
+      expect(processAdmissionSnapshot()).toEqual({ active: 0, waiting: 0 })
     })
   )
 
   it.effect('terminates the worker and frees its slot when the caller is interrupted', () =>
     Effect.gen(function* () {
-      const held = heldWorkers('yolk-extractors-interrupt')
+      const held = yield* heldWorkers('yolk-extractors-interrupt')
       const fiber = yield* Effect.forkChild(inWorker(pdfInput, { workerUrl: held.workerUrl }))
 
       yield* held.awaitStarted(1)
@@ -436,7 +485,6 @@ describe('isolated extraction in a worker thread', () => {
       yield* held.release()
 
       expect(yield* Fiber.join(next)).toMatchObject({ content: 'held' })
-      yield* held.close()
     })
   )
 

@@ -19,7 +19,9 @@ export type SheetJs = {
  * - `cellFormula: false`: no formula text. SheetJS otherwise copies a shifted master formula onto
  *   every shared-formula dependent and scans every earlier array formula for each cell, before
  *   any extractor budget runs. Cached values still render; formula-only cells render empty.
- * - `cellHTML: false`: no rich-text HTML (`cell.h`) we never read.
+ * - `cellHTML: false`: no rich-text HTML (`cell.h`) we never read. Inline strings ignore it
+ *   (SheetJS calls `parse_si` without options), so their rich text is still rendered; the CDATA
+ *   check (`sheetJsCouldReadCdata`) does not rely on this option.
  * - `cellText: true`: keep the formatted display text (`cell.w`) the CSV uses. SheetJS formats
  *   every styled cell inside `read`, with work proportional to the format code, so it only ever
  *   reads the generated `xl/styles.xml` (codes of at most 255 characters, `xlsx-styles.ts`).

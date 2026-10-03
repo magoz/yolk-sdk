@@ -143,18 +143,23 @@ configuration; the template alone is not a runnable environment.
 ## Extractor worker
 
 `@yolk-sdk/extractors` parses PDF, DOCX, XLSX, and PPTX uploads in a `worker_threads` worker with
-heap and time limits, at most four at once per process. The worker is one self-contained file,
-`packages/extractors/dist/node/extraction-worker.mjs`, whose only package import is `xlsx`.
+heap and time limits, at most four at once per JavaScript realm (see the package README). The
+worker is one self-contained file, `packages/extractors/dist/node/extraction-worker.mjs`, whose
+only package import is `xlsx`.
 
 This app links the package from the workspace, and Turbopack bundles workspace links even when
 they are listed in `serverExternalPackages`. The bundled module still knows its source location,
 and the package maps `src/node/extraction-isolation.ts` to its built `dist` worker. So:
 
 - `pnpm build` here builds `@yolk-sdk/extractors` before `next build` (`turbo build` does too).
-  Run `pnpm --filter @yolk-sdk/extractors build` once before `next dev`; without the built worker,
-  uploads fail closed with `FileExtractionError` `reason: 'worker-unavailable'`.
+  Run `pnpm --filter @yolk-sdk/extractors build` before `next dev`, and again after changing
+  `packages/extractors/src`: `next dev` runs the host side from source but the worker from the
+  built `dist`, so a stale worker can disagree with the host (a malformed message, reported as
+  `reason: 'worker-failed'`). Without the built worker, uploads fail closed with
+  `FileExtractionError` `reason: 'worker-unavailable'`.
 - `next.config.ts` adds the worker file and SheetJS (`package.json` and `xlsx.mjs`, which has no
-  dependencies) to output file tracing with `outputFileTracingIncludes`. A temporary
+  dependencies) to output file tracing with `outputFileTracingIncludes`, for every route
+  (`'/**'`): the upload server actions run in the function of whichever page imports them. A temporary
   `output: 'standalone'` build, run with `node server.js` from a copy outside the repository,
   passed the smoke below.
 

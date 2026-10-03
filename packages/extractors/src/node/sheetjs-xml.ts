@@ -225,20 +225,97 @@ const meetsCdata = (text: string, steps: number): boolean => {
   })
 }
 
+const isNameCode = (code: number) =>
+  (code >= 48 && code <= 57) || // 0-9
+  (code >= 65 && code <= 90) || // A-Z
+  (code >= 97 && code <= 122) || // a-z
+  code === 95 || // _
+  code === 46 || // .
+  code === 45 // -
+
+/** The end of the run of name characters (`[\w.-]`) starting at `start`. */
+const nameEnd = (text: string, start: number) => {
+  let end = start
+
+  while (end < text.length && isNameCode(text.charCodeAt(end))) end += 1
+
+  return end
+}
+
+/**
+ * `text` without its simple opening tags, `<(?:[\w.-]+:)?[\w.-]+>`: a superset of the tags SheetJS
+ * removes before decoding (`<(?:\w+:)?(?:si|sstItem)>` in `parse_sst_xml`, `<(?:\w+:)?r>` in
+ * `parse_rs`). One forward scan: a `<` that does not start such a tag is kept and the scan resumes
+ * at the next `<`, so every character is read at most twice.
+ */
+export const withoutSimpleTags = (text: string) => {
+  let output = ''
+  let kept = 0
+  let index = text.indexOf('<')
+
+  while (index >= 0) {
+    let end = nameEnd(text, index + 1)
+
+    if (end > index + 1 && text.charCodeAt(end) === 58) {
+      const local = nameEnd(text, end + 1)
+
+      end = local > end + 1 ? local : -1
+    }
+
+    if (end > index + 1 && text.charCodeAt(end) === 62) {
+      output += text.slice(kept, index)
+      kept = end + 1
+      index = text.indexOf('<', kept)
+    } else {
+      index = text.indexOf('<', index + 1)
+    }
+  }
+
+  return output + text.slice(kept)
+}
+
+/** `<<` or `<!`: never written in worksheets or shared strings by Excel, LibreOffice, or Sheets. */
+const hasMarkupOpener = (text: string) => text.includes('<<') || text.includes('<!')
+
 /**
  * Whether SheetJS could meet a CDATA marker in this part. SheetJS's `unescapexml` handles CDATA by
  * recursing on a string two characters shorter and copying the whole tail at every level, so an
- * unterminated marker costs quadratic time and memory. Every text SheetJS hands to `unescapexml`
- * in a worksheet or shared-strings part is the part text after at most two of its conversions:
- * raw (`<v>` of every cell), `utf8read(raw)` (shared and inline strings), and
- * `utf8read(unescapexml(raw))` (cells of type `str`, decoded again after `utf8read`). `utf8read`
- * keeps only the low byte of each character, so U+013C from `_x013C_`, `&#x13C;`, or `&#316;`
- * becomes `<`. So each text view (`sheetJsTextViews`) is checked raw and after every chain of up
- * to two steps of `unescapexml` and `utf8read` in any order, a superset of SheetJS's sequences.
- * Excel, LibreOffice, and Google Sheets never write CDATA in worksheets or shared strings.
+ * unterminated marker costs quadratic time and memory.
+ *
+ * What SheetJS hands to `unescapexml` in a worksheet or shared-strings part comes from the part
+ * text through two kinds of transformation:
+ *
+ * - Decodes: raw (`<v>` of every cell), `utf8read(raw)` (shared and inline strings), and
+ *   `utf8read(unescapexml(raw))` (cells of type `str`, decoded again after `utf8read`).
+ *   `utf8read` keeps only the low byte of each character, so U+013C from `_x013C_`, `&#x13C;`, or
+ *   `&#316;` becomes `<`.
+ * - Tag removal before decoding: `parse_sst_xml` removes every `<si>`/`<sstItem>` opening tag
+ *   from the whole shared-strings table, and `parse_rs` removes every `<r>` opening tag from rich
+ *   text (after `utf8read`). Inline strings (`t="inlineStr"`) call `parse_si` without options,
+ *   so their rich text is processed even with `cellHTML: false`. `A<<r>![CDATA[B` thus reaches
+ *   `unescapexml` as `A<![CDATA[B`.
+ *
+ * So the check rejects a text view (`sheetJsTextViews`) when:
+ *
+ * - the view, or `utf8read` of it, contains `<<` or `<!`. A marker assembled by removing tags
+ *   needs a literal `<` (in the view, or from `utf8read`) followed by a removed tag, or by `!`,
+ *   and every removed tag starts with `<`;
+ * - the view, or the view without any simple opening tag (`withoutSimpleTags`, a superset of
+ *   SheetJS's removals), meets the marker raw or after any chain of up to two steps of
+ *   `unescapexml` and `utf8read`, in any order (a superset of SheetJS's decode sequences).
+ *
+ * Every step is a linear pass, at most a few per view. The first rule deliberately fails closed:
+ * it also rejects XML comments, `<!DOCTYPE`, and any other `<!…` declaration, which Excel,
+ * LibreOffice, and Google Sheets never write in worksheets or shared strings (nor a literal `<<`).
  */
 export const sheetJsCouldReadCdata = (content: Uint8Array) =>
-  sheetJsTextViews(content).some(view => meetsCdata(view, 2))
+  sheetJsTextViews(content).some(
+    view =>
+      hasMarkupOpener(view) ||
+      hasMarkupOpener(sheetJsUtf8Read(view)) ||
+      meetsCdata(view, 2) ||
+      meetsCdata(withoutSimpleTags(view), 2)
+  )
 
 const xmlBoundary = new Set([' ', '\t', '\r', '\n', '>'])
 

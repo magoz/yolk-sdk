@@ -24,7 +24,9 @@ const nextConfig: NextConfig = {
   // Turbopack still bundles workspace links, so tracing never sees the extractor worker. Its
   // default location resolves from the package source to `packages/extractors/dist`; ship that one
   // self-contained file and the dependency-free SheetJS it imports (see the README's "Extractor
-  // worker").
+  // worker"). The key is `/**`, not the extracting routes: the upload server actions
+  // (`complete-*-upload-action.ts`) run in the function of whichever page imports them, and that
+  // set changes with the UI. The cost is about 3.5 MB of worker and SheetJS per server function.
   outputFileTracingIncludes: {
     '/**': [
       '../../packages/extractors/dist/node/extraction-worker.mjs',

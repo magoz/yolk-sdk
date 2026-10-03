@@ -441,7 +441,7 @@ const main = async () => {
           'const { cpSync: smokeCopy, mkdtempSync: smokeTempDir, readFileSync: smokeRead, realpathSync: smokeRealpath, rmSync: smokeRemove } = await import("node:fs")',
           'const workerSource = smokeRead(smokeWorkerFile, "utf8")',
           'const { isBuiltin: smokeIsBuiltin } = await import("node:module")',
-          'const workerImports = [...workerSource.matchAll(/^import [^;]*?from "([^"]+)";$/gm), ...workerSource.matchAll(/\\bimport\\("([^"$]+)"\\)/g), ...workerSource.matchAll(/require\\("([^"]+)"\\)/g)].map(match => match[1])',
+          'const workerImports = [...workerSource.matchAll(/^import [^;]*?from "([^"]+)";$/gm), ...workerSource.matchAll(/^import "([^"]+)";$/gm), ...workerSource.matchAll(/^export [^;]*?from "([^"]+)";$/gm), ...workerSource.matchAll(/\\bimport\\("([^"$]+)"\\)/g), ...workerSource.matchAll(/require\\("([^"]+)"\\)/g)].map(match => match[1])',
           'if (workerImports.some(specifier => specifier !== "xlsx" && !smokeIsBuiltin(specifier)) || !workerImports.includes("xlsx")) throw new Error(`Extraction worker is not self-contained: ${workerImports.join(", ")}`)',
           'const isolatedWorkerDir = smokeTempDir(`${(await import("node:os")).tmpdir()}/yolk-extractor-worker-`)',
           'try {',

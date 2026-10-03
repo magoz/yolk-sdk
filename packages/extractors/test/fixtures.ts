@@ -331,14 +331,21 @@ export const expectRejected = (
 ) =>
   Effect.gen(function* () {
     const calls: Array<SheetJsCall> = []
+    const load = recordingSheetJs(calls)
+    let loads = 0
 
     const error = yield* extractWith(xlsxInput(zipParts(parts)), {
       limits,
-      loadSheetJs: recordingSheetJs(calls)
+      loadSheetJs: () => {
+        loads += 1
+
+        return load()
+      }
     }).pipe(Effect.flip)
 
     expect(error._tag).toBe('FileExtractionError')
     expect(error.message).toBe(message)
+    expect(loads).toBe(0)
     expect(calls).toHaveLength(0)
   })
 

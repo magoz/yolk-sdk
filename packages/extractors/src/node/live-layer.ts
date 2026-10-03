@@ -22,8 +22,8 @@ export type FileExtractorOptions = {
   readonly limits?: Partial<FileExtractorLimits>
   /**
    * Where parsers run (default `'worker'`): each PDF, DOCX, XLSX, and PPTX extraction runs in a
-   * fresh worker thread with V8 heap, stack, and time limits, admitted through a process-wide pool
-   * of 4 workers; pass an object to change them. `'none'` parses in the calling thread and is
+   * fresh worker thread with V8 heap, stack, and time limits, admitted through a pool of 4 workers
+   * per JavaScript realm; pass an object to change them. `'none'` parses in the calling thread and is
    * unsafe for untrusted input.
    */
   readonly isolation?: FileExtractorIsolation
