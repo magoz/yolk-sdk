@@ -1,9 +1,4 @@
-import {
-  FetchHttpClient,
-  HttpEffect,
-  HttpServerRequest,
-  HttpServerResponse
-} from 'effect/unstable/http'
+import { FetchHttpClient, HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Config, Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { VoiceTranscriber, VoiceTranscriptionResult } from '@yolk-sdk/agent/voice'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Effect, Layer, Predicate, Result, Stream } from 'effect'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import {
   LLMDone,
   LLMError,

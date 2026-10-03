@@ -9,7 +9,8 @@
  * Ignored: ids, text, numbers, and how many content events carry the text. Tests may import SDK
  * packages; the emulator source never does.
  */
-import { Encoding, Predicate, Result } from 'effect'
+import { Predicate, Result } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import type * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vitest'
 import {
@@ -103,7 +104,7 @@ const chunkText = (chunk: WireChunk): string => {
   if (Predicate.isString(chunk)) return chunk
 
   return new TextDecoder().decode(
-    Result.getOrElse(Encoding.decodeBase64(chunk.base64), () => new Uint8Array())
+    Result.getOrElse(Base64.decode(chunk.base64), () => new Uint8Array())
   )
 }
 

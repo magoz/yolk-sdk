@@ -1,6 +1,6 @@
 import { Config, Effect, Layer, type Redacted } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { LLMError } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer, type OpenAiRequestExtras } from '../openai/provider.ts'
 import { vercelAiGatewayCredentialConfig } from './ai-gateway-credential-internal.ts'

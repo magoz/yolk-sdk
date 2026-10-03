@@ -16,7 +16,7 @@
  */
 import { Effect, Equal, Option, Predicate, Ref, Result, Stream, type Layer } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import {
   defineConformanceCase,
   expectConformance,

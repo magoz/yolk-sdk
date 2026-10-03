@@ -6,7 +6,7 @@
  * Codex keeps EOF-completion compatibility).
  */
 import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   defineConformanceCase,

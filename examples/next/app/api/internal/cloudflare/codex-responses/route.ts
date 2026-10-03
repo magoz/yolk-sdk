@@ -6,7 +6,7 @@ import {
   HttpEffect,
   HttpServerRequest,
   HttpServerResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { AppLayer } from '@/lib/layers'
 import { openAiCodexResponsesUrl } from '@yolk-sdk/agent/providers/openai/codex'
 import { forwardedHeaders } from './route-model'

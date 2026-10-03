@@ -9,7 +9,7 @@ import {
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { VoiceTranscriptionResult } from '@yolk-sdk/agent/voice'
 
 export type HoldToSpeakStatus = 'idle' | 'recording' | 'transcribing'

@@ -14,7 +14,7 @@
  *   a listing, not 401 (authorization is host-owned).
  */
 import { Effect, Layer, Predicate } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'

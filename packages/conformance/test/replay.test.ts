@@ -1,5 +1,6 @@
-import { Deferred, Effect, Encoding, Fiber, Predicate, Ref, Stream } from 'effect'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { Deferred, Effect, Fiber, Predicate, Ref, Stream } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { WireFixture } from '../src/fixture.ts'
 import {
@@ -96,7 +97,7 @@ const bytesFixture: WireFixture = {
       response: {
         status: 200,
         headers: { 'content-type': 'application/pdf' },
-        bodyBase64: Encoding.encodeBase64(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0xff]))
+        bodyBase64: Base64.encode(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0xff]))
       }
     }
   ]

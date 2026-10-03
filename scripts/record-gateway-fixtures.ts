@@ -33,9 +33,10 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { Data, Effect, Encoding, Layer, Predicate, Redacted, Result } from 'effect'
+import { Data, Effect, Layer, Predicate, Redacted, Result } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import type * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient } from 'effect/http'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { vercelAiGatewayChatCompletionsUrl } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 import {
@@ -472,7 +473,7 @@ const redactResponse = (response: WireResponse, redactions: JsonFieldRedactions)
 
 // Exact bytes of base64 text; undecodable base64 yields no bytes (the recorder never writes it).
 const base64Bytes = (base64: string): Uint8Array =>
-  Result.getOrElse(Encoding.decodeBase64(base64), () => new Uint8Array())
+  Result.getOrElse(Base64.decode(base64), () => new Uint8Array())
 
 const chunkBytes = (chunk: WireChunk): Uint8Array =>
   Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : base64Bytes(chunk.base64)

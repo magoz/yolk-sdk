@@ -1,11 +1,6 @@
 import { Duration, Effect, Fiber, Predicate, Result, Tracer } from 'effect'
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientError,
-  HttpClientResponse
-} from 'effect/unstable/http'
-import type { HttpClientRequest } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from 'effect/http'
+import type { HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import * as TestClock from 'effect/testing/TestClock'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'

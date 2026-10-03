@@ -1,5 +1,5 @@
 import { Clock, Config, Effect, Layer, Match, Predicate, Stream } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import {
   ToolError,
   type ContextTransformer,

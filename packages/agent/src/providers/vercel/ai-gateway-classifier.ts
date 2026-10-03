@@ -34,7 +34,7 @@ import {
   Schedule
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import {
   ClassificationProviderError,
   ClassificationResponseInvalid,

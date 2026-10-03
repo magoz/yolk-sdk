@@ -1,5 +1,5 @@
 import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import { decorateLLMProvider, LLMError, type LLMProvider } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer } from '../openai/provider.ts'
 import { makeOpenAiResponsesProviderLayer } from '../openai-responses-provider-internal.ts'

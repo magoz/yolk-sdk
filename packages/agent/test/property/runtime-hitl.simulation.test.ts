@@ -1,5 +1,4 @@
-import { Arbitrary } from 'effect/unstable/arbitrary'
-import { Effect, Layer, Match, Option, Predicate, Result, Schema, Stream } from 'effect'
+import { Arbitrary, Effect, Layer, Match, Option, Predicate, Result, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   HitlResponseSource,

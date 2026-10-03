@@ -2083,7 +2083,7 @@ const GmailBatchMessageId = Schema.Trimmed.check(
 )
 
 const GmailBatchMessageIds = Schema.Array(GmailBatchMessageId).check(
-  Schema.isLengthBetween(1, 100),
+  Schema.isBetweenLength(1, 100),
   Schema.isUnique()
 )
 
@@ -2108,7 +2108,7 @@ export class GmailBatchSetStarredInput extends Schema.Class<GmailBatchSetStarred
 
 const GmailLabelIdDelta = Schema.NonEmptyString
 
-const GmailLabelDeltaArray = Schema.Array(GmailLabelIdDelta).check(Schema.isLengthBetween(1, 100))
+const GmailLabelDeltaArray = Schema.Array(GmailLabelIdDelta).check(Schema.isBetweenLength(1, 100))
 
 export class GmailBatchModifyLabelsInput extends Schema.Class<GmailBatchModifyLabelsInput>(
   'GmailBatchModifyLabelsInput'

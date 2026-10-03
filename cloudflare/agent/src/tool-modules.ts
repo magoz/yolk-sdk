@@ -1,5 +1,5 @@
 import type { Layer } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
 import { makeTextToolModules } from '../../../examples/next/lib/agents/tools/registry.ts'
 

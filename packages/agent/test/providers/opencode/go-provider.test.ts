@@ -1,6 +1,6 @@
 import { Effect, Layer, Match, Predicate, Redacted, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import {
   accumulateAssistantMessage,
   LLMProvider,

@@ -1,11 +1,6 @@
 import { Effect, Layer, Predicate, Stream } from 'effect'
 import type * as Schema from 'effect/Schema'
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse
-} from 'effect/unstable/http'
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,

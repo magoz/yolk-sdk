@@ -4,7 +4,7 @@
  * matches, so the drills keep working when live recordings replace the synthetic placeholders).
  */
 import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
 import {

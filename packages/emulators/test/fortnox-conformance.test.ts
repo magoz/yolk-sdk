@@ -6,7 +6,7 @@
  */
 import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
-import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   formatConformanceReport,

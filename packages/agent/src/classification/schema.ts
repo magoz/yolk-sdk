@@ -31,7 +31,7 @@ export const ChoiceClassifierQuestion = Schema.Struct({
   type: Schema.Literal('choice'),
   instructions: Schema.NonEmptyString,
   criteria: Schema.Record(Schema.NonEmptyString, ClassifierCriterion).check(
-    Schema.isPropertiesLengthBetween(minClassifierChoiceOptions, maxClassifierChoiceOptions)
+    Schema.isBetweenProperties(minClassifierChoiceOptions, maxClassifierChoiceOptions)
   )
 })
 
@@ -42,7 +42,7 @@ export const ScoreClassifierQuestion = Schema.Struct({
   type: Schema.Literal('score'),
   instructions: Schema.NonEmptyString,
   criteria: Schema.NonEmptyArray(ClassifierCriterion).check(
-    Schema.isLengthBetween(minClassifierScoreLevels, maxClassifierScoreLevels)
+    Schema.isBetweenLength(minClassifierScoreLevels, maxClassifierScoreLevels)
   )
 })
 

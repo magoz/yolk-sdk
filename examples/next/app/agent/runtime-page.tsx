@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from 'react'
 import { Config, Effect, Option } from 'effect'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import * as Schema from 'effect/Schema'
 import { cookies } from 'next/headers'
 import { Layer } from 'effect'

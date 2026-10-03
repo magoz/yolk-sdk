@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { KnowledgeDocumentId, KnowledgeScopeId } from '@yolk-sdk/knowledge/documents'
 import { KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
 import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'

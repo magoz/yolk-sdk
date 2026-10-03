@@ -6,7 +6,7 @@ import {
   HttpEffect,
   HttpServerRequest,
   HttpServerResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import { Config, Data, Effect, Layer, Option, Redacted } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AppLayer } from '@/lib/layers'

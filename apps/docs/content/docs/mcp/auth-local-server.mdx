@@ -11,7 +11,7 @@ Pass host-resolved headers into remote config:
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 
 const tools = await Effect.runPromise(

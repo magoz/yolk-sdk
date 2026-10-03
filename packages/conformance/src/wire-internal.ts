@@ -1,6 +1,7 @@
-import { Effect, Encoding, Option, Predicate, Result } from 'effect'
+import { Effect, Option, Predicate, Result } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import * as Schema from 'effect/Schema'
-import type { HttpClientRequest } from 'effect/unstable/http'
+import type { HttpClientRequest } from 'effect/http'
 
 // Header names that carry credentials or session state. Fixtures must never
 // contain them and replay ledgers redact them.
@@ -337,7 +338,7 @@ export const requestBodyText = (
 
 /** Exact bytes of standard base64 text; `None` when the text is not valid base64. */
 export const decodeBase64Bytes = (text: string): Option.Option<Uint8Array> =>
-  Result.getSuccess(Encoding.decodeBase64(text))
+  Result.getSuccess(Base64.decode(text))
 
 /**
  * Decode bytes as UTF-8 only when they are valid UTF-8 on their own. A leading
@@ -353,7 +354,7 @@ export const recordBytes = (
   bytes: Uint8Array
 ): { readonly text: string } | { readonly base64: string } =>
   Option.match(decodeUtf8Strict(bytes), {
-    onNone: () => ({ base64: Encoding.encodeBase64(bytes) }),
+    onNone: () => ({ base64: Base64.encode(bytes) }),
     onSome: text => ({ text })
   })
 

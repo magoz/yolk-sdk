@@ -21,7 +21,7 @@ import {
   HttpClientError,
   HttpClientRequest,
   HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 
 /** A fetch handler, such as the one returned by an emulator factory. */
 export type EmulatorFetch = (request: Request) => Promise<Response>

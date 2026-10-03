@@ -7,7 +7,7 @@
  */
 import { Chunk, Effect, Layer, Predicate, Redacted, Ref } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   decodeWireFixture,

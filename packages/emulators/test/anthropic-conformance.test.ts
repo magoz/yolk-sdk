@@ -7,7 +7,7 @@
  * source never does.
  */
 import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
-import { FetchHttpClient, type HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMDone, LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'

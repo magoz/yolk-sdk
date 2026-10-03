@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { HttpClient, HttpClientError } from 'effect/unstable/http'
+import { HttpClient, HttpClientError } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { makeMcpToolModule } from './mcp-tool-module'
 

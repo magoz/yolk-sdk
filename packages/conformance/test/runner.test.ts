@@ -1,5 +1,5 @@
 import { Context, Data, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   defineConformanceCase,

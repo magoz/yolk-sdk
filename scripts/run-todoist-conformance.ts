@@ -31,7 +31,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Layer } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import {
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer

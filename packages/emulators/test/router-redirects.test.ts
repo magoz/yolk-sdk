@@ -4,12 +4,7 @@
  * second, unrouted loopback server, which must receive nothing. Loopback sockets only.
  */
 import { ConfigProvider, Effect, Layer } from 'effect'
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest
-} from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { serveFetchHandler } from '../src/node.ts'
 import { EmulatedHttpClient, EmulatorRoute } from '../src/router.ts'

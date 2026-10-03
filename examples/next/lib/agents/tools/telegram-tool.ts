@@ -1,6 +1,6 @@
 import { Effect, Layer, Match, Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'

@@ -34,7 +34,7 @@ host-owned AI Gateway API key or Vercel OIDC token.
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { classify } from '@yolk-sdk/agent/classification'
 import { makeVercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
 

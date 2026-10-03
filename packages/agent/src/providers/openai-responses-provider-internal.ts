@@ -14,7 +14,7 @@ import {
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import * as Schema from 'effect/Schema'
 import {
   AgentInputUsage,

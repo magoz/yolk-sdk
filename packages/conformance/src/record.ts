@@ -13,7 +13,7 @@ import {
   HttpClientRequest,
   HttpClientResponse,
   type HttpClientError
-} from 'effect/unstable/http'
+} from 'effect/http'
 import {
   decodeWireFixture,
   scanFixtureForSecrets,

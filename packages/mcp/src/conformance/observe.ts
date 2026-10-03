@@ -30,12 +30,7 @@
  */
 import { Effect, Exit, Option, Predicate, Ref, Stream } from 'effect'
 import type * as Schema from 'effect/Schema'
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse
-} from 'effect/unstable/http'
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { gateVerdict, type McpCallGate, type McpCallRefusal } from './call-gate.ts'
 import { field, parseWireJson, type Json } from './json.ts'
 import { decodeAsTextDecoderStream, sseAllPayloads } from './sse.ts'

@@ -20,7 +20,8 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Encoding, Predicate, Result } from 'effect'
+import { Predicate, Result } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import {
   isWireBase64BodyResponse,
   isWireStreamResponse,
@@ -118,7 +119,7 @@ export const redactExchange = (exchange: WireExchange, spec: RedactionSpec): Wir
 // Exact bytes of base64 text, or undefined when it does not decode (the recorder never writes
 // undecodable base64, so such a recording is refused as unscannable, never read as empty).
 const base64Bytes = (base64: string): Uint8Array | undefined =>
-  Result.getOrUndefined(Encoding.decodeBase64(base64))
+  Result.getOrUndefined(Base64.decode(base64))
 
 const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
   const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0))

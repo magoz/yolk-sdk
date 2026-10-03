@@ -1,6 +1,6 @@
 import { Effect, Predicate, Result } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
-import type { HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
+import type { HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {

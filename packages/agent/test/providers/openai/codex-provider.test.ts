@@ -1,10 +1,5 @@
 import { Effect, Layer, Predicate, Stream } from 'effect'
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse
-} from 'effect/unstable/http'
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,

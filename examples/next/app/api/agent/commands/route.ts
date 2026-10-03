@@ -1,4 +1,4 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Array as Arr, Data, Effect, Option, Schema } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'

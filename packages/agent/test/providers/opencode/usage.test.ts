@@ -7,7 +7,7 @@ import {
   HttpClientError,
   HttpClientResponse,
   type HttpClientRequest
-} from 'effect/unstable/http'
+} from 'effect/http'
 import {
   fetchOpenCodeGoSubscriptionUsage,
   openCodeGoSubscriptionUsageUrl,

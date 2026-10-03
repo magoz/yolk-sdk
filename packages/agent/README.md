@@ -221,7 +221,7 @@ Server-side configuration fragment (the host supplies credentials and model poli
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenCodeGoProviderLayer } from '@yolk-sdk/agent/providers/opencode/go-provider'
 
 const GoLayer = makeOpenCodeGoProviderLayer({
@@ -249,7 +249,7 @@ Read Go subscription allowance separately from per-request token usage (server-s
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenCodeGoSubscriptionUsage } from '@yolk-sdk/agent/providers/opencode/usage'
 
 const usageEffect = fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), {
@@ -419,7 +419,7 @@ Effect `HttpClient`:
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenAiCodexSubscriptionUsage } from '@yolk-sdk/agent/providers/openai/codex-usage'
 
 const snapshot = await fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken).pipe(
@@ -775,7 +775,7 @@ as the chat provider:
 
 ```ts
 import { Effect, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { classify } from '@yolk-sdk/agent/classification'
 import { makeVercelAiGatewayClassifierLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-classifier'
 

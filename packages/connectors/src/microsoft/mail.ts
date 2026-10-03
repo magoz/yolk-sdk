@@ -2349,7 +2349,7 @@ const OutlookBatchPathId = Schema.Trimmed.check(
 )
 
 const OutlookBatchMessageIds = Schema.Array(OutlookBatchPathId).check(
-  Schema.isLengthBetween(1, 100),
+  Schema.isBetweenLength(1, 100),
   Schema.isUnique()
 )
 

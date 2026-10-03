@@ -105,7 +105,7 @@ fixture warnings.
 
 ```ts
 import { Effect } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { ReplayHttpClient, ReplayLedger, WireFault } from '@yolk-sdk/conformance/replay'
 
 const program = Effect.gen(function* () {
@@ -161,7 +161,7 @@ This package **never performs network I/O itself**. For live recording, the host
 
 ```ts
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeWireFixture, WireRecorder } from '@yolk-sdk/conformance/record'
 
 const recording = WireRecorder.layer().pipe(Layer.provide(FetchHttpClient.layer))
@@ -202,7 +202,7 @@ emulator process, or a real practice account: only the layers change.
 
 ```ts
 import { Effect } from 'effect'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/http'
 import { defineConformanceCase, expectEqual } from '@yolk-sdk/conformance/case'
 
 export const missingItemCase = defineConformanceCase({

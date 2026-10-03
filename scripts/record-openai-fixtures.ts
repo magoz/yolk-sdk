@@ -31,7 +31,7 @@ import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Data, Effect, Layer, Redacted } from 'effect'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient } from 'effect/http'
 import {
   OpenAiConformanceConfig,
   openAiConformanceCases,

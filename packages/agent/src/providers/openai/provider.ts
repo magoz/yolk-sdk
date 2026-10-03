@@ -2,7 +2,6 @@ import {
   Config,
   Context,
   Effect,
-  Encoding,
   Layer,
   Match,
   Option,
@@ -11,13 +10,14 @@ import {
   Ref,
   Stream
 } from 'effect'
+import * as Base64 from 'effect/encoding/Base64'
 import {
   FetchHttpClient,
   HttpClient,
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import * as Schema from 'effect/Schema'
 import {
   ToolCall,
@@ -1756,9 +1756,7 @@ const pdfDataUrlFromResponse = (
           retryable: false
         })
     ),
-    Effect.map(
-      bytes => `data:application/pdf;base64,${Encoding.encodeBase64(new Uint8Array(bytes))}`
-    )
+    Effect.map(bytes => `data:application/pdf;base64,${Base64.encode(new Uint8Array(bytes))}`)
   )
 }
 

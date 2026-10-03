@@ -71,7 +71,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Effect, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import type { ConformanceSafety } from '../packages/conformance/src/case.ts'
 import {
   isWireBase64BodyResponse,

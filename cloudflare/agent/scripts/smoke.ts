@@ -12,8 +12,8 @@ import {
   Stream
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
-import * as Socket from 'effect/unstable/socket/Socket'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
+import * as Socket from 'effect/socket/Socket'
 import { AgentWebSocketServerMessage } from '@yolk-sdk/agent/protocol'
 
 const statePath = '.alchemy/state/YolkAgentWorker/dev_magoz/Api.json'

@@ -1,6 +1,6 @@
 import { Effect, Layer, Redacted } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpBody, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpBody, HttpClient, HttpClientRequest } from 'effect/http'
 import {
   VoiceSpeechError,
   VoiceSpeechSynthesizer,

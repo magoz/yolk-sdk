@@ -234,7 +234,7 @@ layer(MyService.layer, { timeout: '30 seconds' })('live tests', it => {
 
 ## Property-Based Testing
 
-Effect rc.115 uses native arbitraries from `effect/unstable/arbitrary`. Use `Arbitrary.schema(schema)`; `@effect/vitest` accepts schemas or native arbitraries in `it.prop` and `it.effect.prop`. It requires Vitest 5. Assert inside callbacks rather than returning an unchecked boolean.
+Effect rc.115 uses native arbitraries from `effect/Arbitrary`. Use `Arbitrary.schema(schema)`; `@effect/vitest` accepts schemas or native arbitraries in `it.prop` and `it.effect.prop`. It requires Vitest 5. Assert inside callbacks rather than returning an unchecked boolean.
 
 ```typescript
 import { it, expect } from '@effect/vitest'
@@ -275,7 +275,7 @@ it.effect.prop(
 
 ```typescript
 import { Schema } from 'effect'
-import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Arbitrary } from 'effect'
 
 // Define your domain schema
 export class User extends Schema.Class<User>('User')({
@@ -299,7 +299,7 @@ it.prop('user validation', [userArb], ([user]) => {
 
 ```typescript
 import { Schema } from 'effect'
-import { Arbitrary } from 'effect/unstable/arbitrary'
+import { Arbitrary } from 'effect'
 
 // Bounded integer minor units keep generated financial examples exact.
 export class Money extends Schema.Class<Money>('Money')({

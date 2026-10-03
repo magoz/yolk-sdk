@@ -1,5 +1,5 @@
 import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import { isWireStreamResponse, type WireFixture } from '@yolk-sdk/conformance/fixture'

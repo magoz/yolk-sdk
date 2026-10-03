@@ -20,7 +20,7 @@ import {
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import * as Schema from 'effect/Schema'
 import {
   AgentEvent,
@@ -707,7 +707,7 @@ const responseToLineStream = (response: HttpClientResponse.HttpClientResponse) =
     Stream.filter(line => line.length > 0)
   )
 
-const closeScope = (scope: Scope.Scope) => Scope.close(scope, Exit.succeed(undefined))
+const closeScope = (scope: Scope.Closeable) => Scope.close(scope, Exit.succeed(undefined))
 
 // Protocol-terminal events finish the consumer stream, but HTTP bodies must still
 // drain to EOF so server runtimes do not observe client-side response aborts.

@@ -1,5 +1,5 @@
 import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'

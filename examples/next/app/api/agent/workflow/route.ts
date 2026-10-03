@@ -1,4 +1,4 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'

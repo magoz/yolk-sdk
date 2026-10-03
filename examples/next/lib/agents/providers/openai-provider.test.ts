@@ -1,6 +1,6 @@
 import { Cause, Effect, Exit, Layer, Predicate, Redacted, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'

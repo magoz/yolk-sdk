@@ -13,7 +13,7 @@
  */
 import { Context, Effect, Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   makeSubscriptionUsageConformanceCase,

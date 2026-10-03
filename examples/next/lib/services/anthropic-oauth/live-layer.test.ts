@@ -1,6 +1,6 @@
 import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ANTHROPIC_CLAUDE_CLIENT_ID,

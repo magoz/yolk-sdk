@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
   decodeWireFixture,

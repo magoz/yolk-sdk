@@ -76,7 +76,7 @@
  * @experimental
  */
 import { Cause, Effect, Equal, Exit, Option, Predicate } from 'effect'
-import { HttpClient } from 'effect/unstable/http'
+import { HttpClient } from 'effect/http'
 import {
   ConformanceMismatch,
   defineConformanceCase,

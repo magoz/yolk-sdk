@@ -15,7 +15,7 @@
  * none is observed live yet (`observed` absent = unverified).
  */
 import { Context, Effect } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import type { ConformanceCase, ConformanceMismatch } from '@yolk-sdk/conformance/case'
 import type { LLMProviderError } from '@yolk-sdk/agent/loop'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'

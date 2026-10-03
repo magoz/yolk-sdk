@@ -11,7 +11,7 @@
  * synthetic placeholders until an owner-approved live probe records them.
  */
 import { Context, Effect, Predicate, Result, type Redacted } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import {
   defineConformanceCase,
   expectConformance,

@@ -34,7 +34,7 @@
 import { join } from 'node:path'
 import process from 'node:process'
 import { Data, Effect, Layer } from 'effect'
-import { FetchHttpClient, HttpClient } from 'effect/unstable/http'
+import { FetchHttpClient, HttpClient } from 'effect/http'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   AnthropicClaudeUsageConformanceConfig,

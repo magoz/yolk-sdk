@@ -6,7 +6,7 @@ import {
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core'
 import * as Schema from 'effect/Schema'
 import { DefaultKnowledgeChunkerLive } from '@yolk-sdk/knowledge/chunking'
@@ -41,7 +41,7 @@ const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
 
 const OpenAiEmbeddingDataSchema = Schema.Struct({
   index: Schema.Int,
-  embedding: Schema.Array(Schema.Finite).pipe(Schema.check(Schema.isLengthBetween(1536, 1536)))
+  embedding: Schema.Array(Schema.Finite).pipe(Schema.check(Schema.isBetweenLength(1536, 1536)))
 })
 
 const OpenAiEmbeddingResponseSchema = Schema.Struct({

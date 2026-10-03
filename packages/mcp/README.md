@@ -88,7 +88,7 @@ The high-level remote helpers use the official v2 client over an Effect `HttpCli
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 
 const tools = await Effect.runPromise(
@@ -201,7 +201,7 @@ conformance API reference for every claim.
 
 ```ts
 import { Effect, Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { runConformance } from '@yolk-sdk/conformance/runner'
 import {
   McpConformanceConfig,

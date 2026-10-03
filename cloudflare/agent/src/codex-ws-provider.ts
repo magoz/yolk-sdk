@@ -6,8 +6,8 @@ import {
   HttpClientRequest,
   type HttpClientError,
   type HttpClientResponse
-} from 'effect/unstable/http'
-import * as Socket from 'effect/unstable/socket/Socket'
+} from 'effect/http'
+import * as Socket from 'effect/socket/Socket'
 import {
   LLMDone,
   LLMError,

@@ -11,7 +11,7 @@
  * `HttpClient`. It is a `read` case, not observed live yet (`observed` absent = unverified).
  */
 import { Context, Effect } from 'effect'
-import type { HttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   makeSubscriptionUsageConformanceCase,

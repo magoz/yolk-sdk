@@ -1,5 +1,5 @@
 import { Predicate, Schedule } from 'effect'
-import { SqlError } from 'effect/unstable/sql/SqlError'
+import { SqlError } from 'effect/sql/SqlError'
 
 // Exponential backoff
 // Handles network issues, cold starts, and transient cloud infrastructure problems

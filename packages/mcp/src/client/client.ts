@@ -8,9 +8,9 @@ import {
   StreamableHTTPClientTransport,
   type ClientOptions as SdkClientOptions
 } from '@modelcontextprotocol/client'
-import { HttpClient } from 'effect/unstable/http'
-import { ChildProcess } from 'effect/unstable/process'
-import type { ChildProcessSpawner } from 'effect/unstable/process'
+import { HttpClient } from 'effect/http'
+import { ChildProcess } from 'effect/process'
+import type { ChildProcessSpawner } from 'effect/process'
 import type { ToolResult } from '@yolk-sdk/agent/protocol'
 import type {
   McpClientInfo,

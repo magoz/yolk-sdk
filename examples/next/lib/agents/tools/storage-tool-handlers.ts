@@ -1,7 +1,7 @@
 import { Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ConfigError } from 'effect/Config'
-import type { SqlError } from 'effect/unstable/sql/SqlError'
+import type { SqlError } from 'effect/sql/SqlError'
 import type { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'

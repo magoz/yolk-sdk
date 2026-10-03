@@ -1,5 +1,4 @@
-import { Arbitrary } from 'effect/unstable/arbitrary'
-import { Schema } from 'effect'
+import { Arbitrary, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
 import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'

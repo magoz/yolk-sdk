@@ -27,7 +27,7 @@ maintain a model-limit catalog or apply hidden fallbacks.
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
 
 const ProviderLayer = makeOpenAiProviderLayer({
@@ -45,7 +45,7 @@ This is a server-side configuration fragment. The host supplies credentials and 
 
 ```ts
 import { Layer, Redacted } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 
 const ProviderLayer = makeVercelAiGatewayProviderLayer({
@@ -106,7 +106,7 @@ reasoning efforts, allowance polling/persistence, and UI remain host-owned. Read
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
 
 const ProviderLayer = makeOpenAiCodexProviderLayer({
@@ -139,7 +139,7 @@ Configuration fragment (the host supplies the token, model policy, and HTTP laye
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeXAiGrokProviderLayer } from '@yolk-sdk/agent/providers/xai/grok-provider'
 
 const ProviderLayer = makeXAiGrokProviderLayer({
@@ -178,7 +178,7 @@ terms.
 
 ```ts
 import { Layer } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 
 const ProviderLayer = makeAnthropicClaudeProviderLayer({
@@ -212,7 +212,7 @@ This server-side fragment reads Codex allowance using a fresh host-owned token:
 
 ```ts
 import { Effect } from 'effect'
-import { FetchHttpClient } from 'effect/unstable/http'
+import { FetchHttpClient } from 'effect/http'
 import { fetchOpenAiCodexSubscriptionUsage } from '@yolk-sdk/agent/providers/openai/codex-usage'
 
 const snapshotEffect = fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken, {

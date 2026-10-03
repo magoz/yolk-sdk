@@ -3,7 +3,7 @@
  * pinned SDK's real behaviour, all through the real `@yolk-sdk/mcp/client` over replay.
  */
 import { Effect, Layer, Predicate, Ref } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   isWireStreamResponse,

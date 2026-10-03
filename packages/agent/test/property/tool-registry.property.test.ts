@@ -1,5 +1,4 @@
-import { Arbitrary } from 'effect/unstable/arbitrary'
-import { Effect, Predicate, Result, Schema } from 'effect'
+import { Arbitrary, Effect, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
