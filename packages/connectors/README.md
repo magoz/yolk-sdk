@@ -71,7 +71,12 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 
 `makeConnectorToolModule` uses the connector `description` as the module description (override
 with `description`) and returns each action result as the JSON encoding of its `outputSchema`
-(`Chunk`s become arrays, dates ISO strings) in both `structuredContent` and the text.
+(`Chunk`s become arrays, dates ISO strings) in both `structuredContent` and the text. Fields the
+output schema does not declare are not returned; a value that does not encode fails the call with
+an `execution` `ToolError`, and provider failures carry the JSON-encoded `ProviderFailure` as
+`structuredContent`. Agent tools decode arguments like `makeTool`: `null` optionals are absent and
+unknown keys are model-visible validation errors (`execute`/`invoke` and `executeTyped` are
+unchanged).
 
 ## Portable metadata
 
@@ -1826,7 +1831,7 @@ rewritten generically) and the two receipt-upload tools that write, and no `read
 (`afloatMcpConformanceFixtures`, every case but `mcp.legacy.session`, which does not apply to a
 modern server) are derived from the provider's source (owner-supplied), not a live recording: the
 pinned official MCP server SDK run in-process with the provider's handler options, over synthetic
-data, `evidence: 'unverified'`. `pnpm conformance:mcp --target afloat` previews the run (a dry run:
+data, `evidence: 'unverified'`. In this repository, `pnpm conformance:mcp --target afloat` previews the run (a dry run:
 no network, no credential read); `--live --owner-approved --account <label>` runs the cases by hand
 against a practice account (a tool is called only when named with the `--read-tool` flag, never
 from the environment), and `@yolk-sdk/emulators/mcp` serves the fixtures as profile `afloat`.

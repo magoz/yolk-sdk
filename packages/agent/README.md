@@ -97,7 +97,9 @@ import {
   modelVisibleToolError,
   modelVisibleToolErrorStructuredContent,
   makeQuestionToolModule,
-  resolveTools
+  omitNullOptionalToolArguments,
+  resolveTools,
+  withToolArgumentsErrorHint
 } from '@yolk-sdk/agent/tools'
 import {
   AgentChatAction,
@@ -327,7 +329,9 @@ remain opaque. Background wrapping preserves boolean `true`/`false` as the argum
 reference/resource restrictions still apply at activation. `makeTool` may add root `type: "object"`
 to typeless `anyOf`/`oneOf` unions whose members are all object schemas, as required by strict
 OpenAI-compatible upstreams; primitives, unknown, and already-typed roots are unchanged, and call
-validation still uses the original Effect Schema.
+validation still decodes through the original Effect Schema's JSON codec. Effect 4.0.0 exports
+`Schema.isPattern` to JSON Schema only for `u`-flag regexes (optionally with `d`, `g`, or `y`);
+add `u` to keep model-visible `pattern` hints.
 
 ### Tool arguments: `null` and unknown keys
 
@@ -345,7 +349,7 @@ bypasses their own parser). Their error message names each unknown key and lists
 a `null` on another union member's field.
 `resolveTools` also drops `null` where the advertised schema declares a property optional without
 admitting `null` (for example `Schema.optionalKey(X)`, the subagent `model`, or raw MCP schemas)
-before any registration sees the call; `omitNullOptionalToolArguments` exposes that step for hosts
+before any registration sees the call; `omitNullOptionalToolArguments` (`@yolk-sdk/agent/tools`) exposes that step for hosts
 that dispatch registrations themselves. User-submitted input/interaction responses are unchanged.
 
 ### OpenAI Chat Completions, Responses, and extraBody

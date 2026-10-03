@@ -70,7 +70,8 @@ const program = Effect.gen(function* () {
   reads the argument once (getters and `toJSON` run once) into a checked JSON copy and sends that
   copy; a valid `Date` passes as its ISO string. Arguments with more than 100,000 values or more
   than 64 levels of nesting are rejected, never sent unchecked. Custom executors follow the same
-  rules (`CodeModeExecutorTool`).
+  rules (`CodeModeExecutorTool`) and label rejections with `CodeModeExecutorTool.callLabel`, which
+  `makeCodeModeTool` sets.
 - The tool description lists the globals and the nested tools by namespace, with the module's
   `ToolModule.description` under each heading. `codemode` + `listed` tools get TypeScript
   declarations within `inlineBudget` (default 3,000 estimated tokens, filled fairly across
@@ -91,7 +92,7 @@ const program = Effect.gen(function* () {
   keeps the 256 KiB-per-value and 1 MiB-total bounds by dropping offending writes. Transcript
   `ToolResultMessage`s carry no tool name: pair each with its assistant tool call's name.
 - `beforeNestedCall({ call, context })` runs before each nested call; a failure rejects that call in
-  the script with the message and records it as `error` without executing it.
+  the script with `<label>: <message>` and records it as `error` without executing it.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
   `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.

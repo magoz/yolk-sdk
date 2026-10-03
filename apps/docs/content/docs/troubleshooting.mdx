@@ -17,6 +17,11 @@ pnpm list '@yolk-sdk/*'
 
 Yolk packages release in lockstep. Do not mix canary versions.
 
+Also check that `effect` and the coordinated `@effect/*` runtime packages match the version the
+canary expects (`pnpm list effect`): canary.97 and later use `effect@4.0.0`, which removed the
+`effect/unstable/*` entrypoints. Import from `effect/http`, `effect/process`, and the other
+`effect/<area>` paths; see [Migration](./migration#canary97-effect-400).
+
 ### Node or ESM errors
 
 Yolk packages are ESM-first and require Node 22 or newer. `@yolk-sdk/codemode` requires Node
@@ -156,6 +161,16 @@ The model called a tool name not present in the resolved tool set. Resolve tools
 ### Tool input validation failed
 
 `makeTool` validates model input with Effect Schema. Return model-visible validation errors for recoverable cases. Keep thrown `ToolError`s safe and non-secret.
+
+Unknown keys are rejected at any depth, for example
+`Unknown argument "x". Allowed arguments: a, b.` Remove extra keys from callers, fixtures, and code
+mode scripts. `null` on a `Schema.optional(X)` field is accepted as omitted, but required fields
+still reject it. Custom `invalidParamsMessage` callbacks can keep the hint with
+`withToolArgumentsErrorHint(message, error)` from `@yolk-sdk/agent/tools`.
+
+In code mode, a call whose arguments JSON would change (`NaN`, invalid `Date`s, `Map`, class
+instances) rejects before it runs, for example
+`tools.search: argument at limit is NaN; pass a finite number or omit the key`.
 
 ### Typed input is unavailable or stays pending
 

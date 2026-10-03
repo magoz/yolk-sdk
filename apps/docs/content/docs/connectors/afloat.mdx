@@ -99,6 +99,8 @@ bearer rule (an Afloat key starts with the hex digit `a`, which fails it), and t
 guarded secret, never stored, ledgered, or echoed. Use a synthetic key such as
 `afloat_synthetic-key-0001`.
 
+Setup fragment (inside an async test; not a runnable example):
+
 ```ts
 import { Effect, Layer } from 'effect'
 import { ApiKeyCredential } from '@yolk-sdk/connectors'
