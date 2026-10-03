@@ -10,7 +10,7 @@ App-owned knowledge use-cases and agent context helpers.
 
 ## Current scope
 
-- Manual text and file knowledge creation; file text extraction reuses `FileExtractor`.
+- Manual text and file knowledge creation; file text extraction reuses `FileExtractor` from `@yolk-sdk/extractors`.
 - File upload is presigned R2 PUT + finalize action; finalize clones downloaded bytes before extraction because PDF parsing may detach ArrayBuffers.
 - `listUserKnowledgeDocuments` returns document summaries for agent discovery before search/traversal.
 - Search ingestion uses `KnowledgeChunker` + `KnowledgeEmbedder` and writes chunk rows.

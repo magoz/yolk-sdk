@@ -347,6 +347,90 @@ describe('code mode boundaries', () => {
   })
 })
 
+describe('extractors boundaries', () => {
+  const scaffoldExtractors = (root: string): void => {
+    scaffoldPackages(root)
+    write(
+      root,
+      'packages/extractors/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/extractors',
+        exports: {
+          '.': './src/index.ts',
+          './knowledge': './src/knowledge.ts',
+          './node': './src/node/index.ts'
+        }
+      })
+    )
+    write(root, 'packages/extractors/src/index.ts', `export const core = 1\n`)
+    write(root, 'packages/extractors/src/node/index.ts', `export const node = 1\n`)
+    write(root, 'packages/extractors/src/node/parser.ts', `export const parser = 1\n`)
+    write(
+      root,
+      'packages/knowledge/package.json',
+      JSON.stringify({
+        name: '@yolk-sdk/knowledge',
+        exports: { './extraction': './src/extraction.ts' }
+      })
+    )
+    write(root, 'packages/knowledge/src/extraction.ts', `export const extraction = 1\n`)
+  }
+
+  it('keeps parsers and Node builtins behind the node subpath', () => {
+    const root = fixtureDirectory()
+
+    scaffoldExtractors(root)
+    write(
+      root,
+      'packages/extractors/src/leak.ts',
+      `import { a } from 'unpdf'\nimport b from 'mammoth'\nimport * as c from 'xlsx'\nimport { d } from 'fflate'\nimport fs from 'node:fs'\nimport { parser } from './node/parser.ts'\nimport { e } from '@yolk-sdk/knowledge/extraction'\n\nexport const probe = [a, b, c, d, fs, parser, e]\n`
+    )
+    write(
+      root,
+      'packages/extractors/src/knowledge.ts',
+      `import { extraction } from '@yolk-sdk/knowledge/extraction'\nimport { core } from './index.ts'\n\nexport const probe = [extraction, core]\n`
+    )
+    write(
+      root,
+      'packages/extractors/src/node/live.ts',
+      `import { a } from 'unpdf'\nimport fs from 'node:fs'\nimport { core } from '../index.ts'\n\nexport const probe = [a, fs, core]\n`
+    )
+
+    expect(
+      violationsFor(root, 'packages/extractors/src/leak.ts')
+        .map(violation => violation.forbidden)
+        .sort()
+    ).toEqual([
+      '@yolk-sdk/extractors/node',
+      '@yolk-sdk/knowledge',
+      'fflate',
+      'mammoth',
+      'node:',
+      'unpdf',
+      'xlsx'
+    ])
+    expect(violationsFor(root, 'packages/extractors/src/knowledge.ts')).toEqual([])
+    expect(violationsFor(root, 'packages/extractors/src/node/live.ts')).toEqual([])
+  })
+
+  it('keeps extractors out of the knowledge package', () => {
+    const root = fixtureDirectory()
+
+    scaffoldExtractors(root)
+    write(
+      root,
+      'packages/knowledge/src/uses-extractors.ts',
+      `import { core } from '@yolk-sdk/extractors'\n\nexport const probe = core\n`
+    )
+
+    expect(
+      violationsFor(root, 'packages/knowledge/src/uses-extractors.ts').map(
+        violation => violation.forbidden
+      )
+    ).toEqual(['@yolk-sdk/extractors'])
+  })
+})
+
 describe('conformance and connector import rules', () => {
   const scaffoldConformance = (root: string): void => {
     scaffoldPackages(root)

@@ -68,6 +68,7 @@ const conformanceForbiddenImports = [
   ...retiredImports,
   '@yolk-sdk/agent',
   '@yolk-sdk/codemode',
+  '@yolk-sdk/extractors',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -86,6 +87,7 @@ const emulatorsForbiddenImports = [
   '@yolk-sdk/agent',
   '@yolk-sdk/codemode',
   '@yolk-sdk/conformance',
+  '@yolk-sdk/extractors',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -103,8 +105,26 @@ const codeModeForbiddenImports = [
   '@yolk-sdk/conformance',
   '@yolk-sdk/connectors',
   '@yolk-sdk/emulators',
+  '@yolk-sdk/extractors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
+  'next',
+  'react'
+]
+
+// Extractors depend only on `@yolk-sdk/knowledge`, and only from the `./knowledge` adapter.
+// Listed explicitly for the same self-import reason as conformance.
+const extractorsForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/agent',
+  '@yolk-sdk/codemode',
+  '@yolk-sdk/conformance',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/emulators',
+  '@yolk-sdk/harness',
   '@yolk-sdk/mcp',
   '@yolk-sdk/sandbox',
   '@yolk-sdk/vercel-workflows',
@@ -229,11 +249,35 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/codemode/src/node.ts']
   },
   {
+    packageDir: 'packages/extractors/src',
+    forbiddenImports: extractorsForbiddenImports
+  },
+  {
+    packageDir: 'packages/extractors/src',
+    forbiddenImports: ['@yolk-sdk/knowledge'],
+    excludedDirs: ['packages/extractors/src/knowledge.ts']
+  },
+  {
+    // The extractors root and `./knowledge` stay runtime-portable: Node builtins, the parsers
+    // (unpdf, mammoth, the lazily loaded SheetJS peer, fflate), and `./node` stay behind the
+    // Node subpath (`src/node/**`, whose `index.ts` entry maps every file there to the
+    // `@yolk-sdk/extractors/node` owner, so relative imports into it are caught too).
+    packageDir: 'packages/extractors/src',
+    forbiddenImports: ['node:', 'unpdf', 'mammoth', 'xlsx', 'fflate', '@yolk-sdk/extractors/node'],
+    excludedDirs: ['packages/extractors/src/node']
+  },
+  {
+    // Knowledge defines the extractor contract; the extractors package adapts to it.
+    packageDir: 'packages/knowledge/src',
+    forbiddenImports: ['@yolk-sdk/extractors']
+  },
+  {
     packageDir: 'packages/harness/src',
     forbiddenImports: [
       ...retiredImports,
       '@yolk-sdk/agent',
       '@yolk-sdk/codemode',
+      '@yolk-sdk/extractors',
       '@yolk-sdk/knowledge',
       '@yolk-sdk/mcp',
       '@yolk-sdk/sandbox',

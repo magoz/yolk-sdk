@@ -1,0 +1,160 @@
+# @yolk-sdk/extractors
+
+Bounded text extraction for PDF, DOCX, XLSX, PPTX, CSV, JSON, Markdown, and plain-text files: an
+Effect `FileExtractor` service with Office archive validation, hyperlink-safe XLSX text, and a
+`KnowledgeExtractor` adapter for `@yolk-sdk/knowledge`.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/extractors@canary effect@4.0.0-rc.115
+# Only if you extract .xlsx files: SheetJS from the SheetJS CDN, not npm.
+pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+```
+
+Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Use the SDK's matching Effect version (`4.0.0-rc.115`) in host code.
+Requires Node.js 22+. `@yolk-sdk/extractors/node` is server-only.
+
+### Why SheetJS comes from its CDN
+
+SheetJS (`xlsx`) is an optional peer dependency (`>=0.20.3`), loaded with a dynamic import only
+when an XLSX file is extracted. The `xlsx` package on npm is unmaintained at 0.18.5, which has
+CVE-2023-30533 (prototype pollution from a crafted file, fixed in 0.19.3) and CVE-2024-22363
+(regular-expression denial of service, fixed in 0.20.2). Fixed releases are published only as
+tarballs on `cdn.sheetjs.com`. A published package must not depend on a URL, so the host installs
+the tarball itself.
+
+pnpm records the tarball URL and its integrity hash in the lockfile. A direct tarball dependency
+needs no extra pnpm 11 settings. `blockExoticSubdeps` (default `true`) rejects tarball and git
+dependencies only below the top level. `minimumReleaseAge` (default one day) checks registry
+publish times, and a URL tarball has none. Because the peer is optional, SheetJS cannot arrive
+transitively: each host adds it directly.
+
+If SheetJS is missing, is not a SheetJS build, or is older than 0.20.3 (for example a leftover npm
+`xlsx@0.18.5`), XLSX extraction fails with `SheetJsUnavailableError` (`reason: 'missing' |
+'invalid' | 'outdated'`). Its message includes the install command. Other formats never load
+SheetJS.
+
+## Subpaths
+
+| Subpath                          | Purpose                                                                                                                                                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/extractors`           | Runtime-portable contract: `FileInput`, `ExtractedFile`, formats, errors, `fileFormatFor`, `defaultFileExtractorLimits`, `sanitizeExtractedText`, and the `FileExtractor` service tag. No parser imports. |
+| `@yolk-sdk/extractors/node`      | `FileExtractorLayer` and `makeFileExtractorLayer(options)`: the Node implementation (unpdf, mammoth, SheetJS, fflate, `node:zlib`). Also `normalizeOfficeArchive`.                                        |
+| `@yolk-sdk/extractors/knowledge` | `FileKnowledgeExtractorLayer`: a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by the `FileExtractor` in context, and `makeFileKnowledgeExtractor`.                                        |
+
+## Example
+
+```ts
+import { Effect } from 'effect'
+import { FileExtractor } from '@yolk-sdk/extractors'
+import { makeFileExtractorLayer } from '@yolk-sdk/extractors/node'
+
+const FileExtractorLive = makeFileExtractorLayer({ limits: { maxInputBytes: 10 * 1024 * 1024 } })
+
+const program = Effect.gen(function* () {
+  const extractor = yield* FileExtractor
+
+  return yield* extractor.extract({ filename: 'report.xlsx', mediaType: '', bytes })
+}).pipe(Effect.provide(FileExtractorLive))
+```
+
+`bytes` is a host-owned `Uint8Array`. `FileExtractorLayer` is the same layer with default limits.
+The extractor copies PDF input before PDF.js reads it, so the caller's buffer is never detached.
+
+Knowledge ingestion:
+
+```ts
+import { Layer } from 'effect'
+import { FileKnowledgeExtractorLayer } from '@yolk-sdk/extractors/knowledge'
+import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
+
+const KnowledgeExtractorLive = FileKnowledgeExtractorLayer.pipe(Layer.provide(FileExtractorLayer))
+```
+
+The adapter passes string `content` through unchanged (blank text fails). Bytes are extracted with
+the format chosen from the source's name (`File` name or ref, `Url` path, `Text` label) and media
+type (`LoadedKnowledgeSource.mediaType`, then the `File` source's, then `text/plain` for `Text`
+sources). The extracted title becomes the document title. `format`, `pageCount`, and `sheetNames`
+merge under the source's own metadata, so host keys win. Failures become
+`KnowledgeExtractionError` with the original error as `cause`.
+
+## Output
+
+| Format                            | Text                                                                                    | Metadata                                 |
+| --------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `text`, `markdown`, `csv`, `json` | UTF-8 decoded                                                                           | `title` = filename                       |
+| `pdf`                             | Text of all pages (unpdf)                                                               | PDF `Title` if set, `pageCount`          |
+| `docx`                            | Raw text (mammoth)                                                                      | `title` = filename                       |
+| `xlsx`                            | One `# <sheet>` section per sheet with bounded CSV rows; external links as `text <url>` | workbook title or filename, `sheetNames` |
+| `pptx`                            | Slide text in slide order, then speaker notes                                           | `title` = filename                       |
+
+All text is sanitized: line endings are normalized, control characters dropped, and runs of
+spaces, dots, and blank lines collapsed. Empty results fail with `FileExtractionError`. The format
+comes from the filename extension first, then the media type, then any `text/*` media type as
+plain text. Everything else fails with `UnsupportedFileFormatError`.
+
+## Limits
+
+`defaultFileExtractorLimits` (the values the 10x app runs in production); override any of them
+through `makeFileExtractorLayer({ limits })`. Invalid values are a defect when the layer is built.
+
+| Limit                   | Default | Bounds                                                                    |
+| ----------------------- | ------- | ------------------------------------------------------------------------- |
+| `maxInputBytes`         | 50 MiB  | Input size, every format                                                  |
+| `maxArchiveEntries`     | 10,000  | ZIP entries in DOCX, XLSX, PPTX                                           |
+| `maxExpandedBytes`      | 50 MiB  | Inflated bytes of an Office archive, counted while inflating              |
+| `maxXlsxSheets`         | 100     | Worksheets                                                                |
+| `maxXlsxCellVisits`     | 100,000 | Cells inside every sheet's declared range, absent cells included          |
+| `maxXlsxTextCharacters` | 512 Ki  | XLSX text, hyperlink annotations and the omission marker included         |
+| `maxXlsxHyperlinks`     | 10,000  | Hyperlinks read per workbook. Extra links are dropped but still stripped. |
+
+Exceeding a limit fails the extraction with `FileExtractionError`. The exceptions are hyperlink
+annotations and links beyond the cap, described below.
+
+## Security model
+
+- **Office archives** (DOCX, XLSX, PPTX) are validated before any parser sees them. The ZIP
+  directory is read only as an index and its sizes are never trusted. Each entry is inflated in
+  bounded chunks, and the real output is counted against its declared size and
+  `maxExpandedBytes`. Encrypted, ZIP64, split, and duplicate-name archives fail, as do archives
+  with ambiguous paths (`..`, absolute, control characters) or macro projects (`vbaProject.bin`).
+  Parsers then get a fresh stored-entry archive built from the validated bytes. This is a
+  deliberate tightening: OOXML input missing `[Content_Types].xml` or its main part
+  (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) now fails.
+- **XLSX hyperlinks.** Before parsing, SheetJS (0.18.5 and 0.20.3) expands every
+  `<hyperlink ref>` range into per-cell objects. A 6 KB file with `ref="A1:XFD1048576"`
+  exhausts a 1 GB heap. So the extractor reads each `<hyperlink>` itself (`ref`, `r:id` to the
+  worksheet relationship target, `location`, `display`), up to `maxXlsxHyperlinks` per workbook. It
+  removes every hyperlink tag from every archive part, replacing each with a space so fragments
+  cannot join into a new tag. SheetJS never sees one. In the text, every existing cell of the
+  visited range that falls inside a link is written as `text <url>`. An indexed lookup over the
+  visited range keeps this at O((links + cells) · log) instead of a scan of every link per cell.
+  Only `http:`, `https:`, and `mailto:` targets are shown (normalized, at most 2,048 characters).
+  Internal `#Sheet!A1` locations and other schemes are omitted. Plain text is rendered first and
+  links use only the budget left over. When an annotation does not fit, or links exceed the cap,
+  the cell is written plain and the output ends with one
+  `[Some hyperlinks omitted: output limit]` (or `hyperlink limit`) marker, inside the budget.
+- **UTF-16 parts.** SheetJS decodes BOM-marked UTF-16 parts itself, and the byte-level strip
+  cannot see tags inside them. Any XLSX part whose stripped bytes would decode as UTF-16 with a
+  hyperlink tag is rejected. Excel never writes UTF-16 parts.
+- **Bounded XLSX text.** Every sheet range is checked strictly against Excel's grid, and the
+  cell-visit total is checked before any cell is read. CSV is generated incrementally against
+  the character budget (never `sheet_to_csv`). Cells and sheets are read as own properties only,
+  and number formats are never executed.
+- **SheetJS version.** Only SheetJS 0.20.3+ is used (see above). The prototype-pollution
+  regression (CVE-2023-30533) is covered by a test with a crafted comment.
+
+## Next.js
+
+`@yolk-sdk/extractors/node` uses Node APIs and a dynamic `import('xlsx')`. In a Next.js host, use
+it from server code only. If the host does not install SheetJS, add `@yolk-sdk/extractors` to
+`serverExternalPackages`, so the bundler does not try to resolve the optional `xlsx` import at
+build time.
+
+## Host responsibilities
+
+- Upload size and auth policy, storage, and any per-user quotas.
+- Choosing limits that fit your runtime's memory and the model context you feed the text to.
+- Installing SheetJS from the CDN when XLSX extraction is needed.

@@ -1,0 +1,389 @@
+import { describe, expect, it } from '@effect/vitest'
+import { Cause, Effect, Exit } from 'effect'
+import { strToU8, zipSync } from 'fflate'
+import * as XLSX from 'xlsx'
+import {
+  FileExtractionError,
+  fileFormatFor,
+  sheetJsInstallCommand,
+  SheetJsUnavailableError,
+  UnsupportedFileFormatError
+} from '../src/index.ts'
+import { withAcquiredPdfDocument } from '../src/node/live-layer.ts'
+import { encode, extractWith, workbookParts, xlsxInput, zipParts } from './fixtures.ts'
+
+const zipText = (text: string) => Uint8Array.from(strToU8(text))
+
+const docxMediaType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+const pptxMediaType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+
+const makeDocx = (text: string) =>
+  zipSync({
+    '[Content_Types].xml': zipText(
+      '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+    ),
+    '_rels/.rels': zipText(
+      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+    ),
+    'word/document.xml': zipText(
+      `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`
+    )
+  })
+
+const makePptx = () =>
+  zipSync({
+    '[Content_Types].xml': zipText('<Types/>'),
+    'ppt/presentation.xml': zipText('<p:presentation/>'),
+    'ppt/slides/slide2.xml': zipText('<a:p><a:r><a:t>Second</a:t></a:r></a:p>'),
+    'ppt/slides/slide1.xml': zipText('<a:p><a:r><a:t>First &amp; one</a:t></a:r></a:p>'),
+    'ppt/notesSlides/notesSlide1.xml': zipText('<a:p><a:r><a:t>Speaker note</a:t></a:r></a:p>')
+  })
+
+const makePdf = (text: string) => {
+  const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`
+
+  const objects = [
+    '1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj',
+    '2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj',
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj',
+    `4 0 obj<</Length ${stream.length}>>stream\n${stream}\nendstream endobj`,
+    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj'
+  ]
+
+  let body = '%PDF-1.4\n'
+  const offsets: Array<number> = []
+
+  for (const object of objects) {
+    offsets.push(body.length)
+    body += `${object}\n`
+  }
+
+  const startXref = body.length
+
+  const rows = [
+    '0000000000 65535 f ',
+    ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)
+  ]
+
+  return encode(
+    `${body}xref\n0 6\n${rows.join('\n')}\ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n${startXref}\n%%EOF`
+  )
+}
+
+const sheetJsBytes = () => {
+  const workbook = XLSX.utils.book_new()
+
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['Name', 'Count'],
+    ['Alpha', 2]
+  ])
+
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Inventory')
+
+  const written: unknown = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+
+  if (!(written instanceof ArrayBuffer)) throw new Error('Expected XLSX fixture')
+
+  return new Uint8Array(written)
+}
+
+describe('FileExtractor', () => {
+  it.effect('extracts and sanitizes text files', () =>
+    Effect.gen(function* () {
+      const extracted = yield* extractWith({
+        filename: 'notes.txt',
+        mediaType: 'text/plain',
+        bytes: encode('  Alpha\r\n\r\n\r\nBeta   gamma....  ')
+      })
+
+      expect(extracted.content).toBe('Alpha\n\nBeta gamma…')
+      expect(extracted.metadata).toEqual({ format: 'text', title: 'notes.txt' })
+    })
+  )
+
+  it.effect('extracts xlsx sheets as csv sections', () =>
+    Effect.gen(function* () {
+      const extracted = yield* extractWith(xlsxInput(sheetJsBytes(), 'inventory.xlsx'))
+
+      expect(extracted.content).toBe('# Inventory\nName,Count\nAlpha,2')
+      expect(extracted.metadata).toEqual({
+        format: 'xlsx',
+        title: 'inventory.xlsx',
+        sheetNames: ['Inventory']
+      })
+    })
+  )
+
+  it.effect('extracts pdf text and page count without detaching the caller bytes', () =>
+    Effect.gen(function* () {
+      const bytes = makePdf('Hello PDF')
+
+      const extracted = yield* extractWith({
+        filename: 'paper.pdf',
+        mediaType: 'application/pdf',
+        bytes
+      })
+
+      expect(extracted.content).toBe('Hello PDF')
+      expect(extracted.metadata.format).toBe('pdf')
+      expect(extracted.metadata.pageCount).toBe(1)
+      expect(bytes.byteLength).toBeGreaterThan(0)
+    })
+  )
+
+  it.effect('extracts docx text', () =>
+    Effect.gen(function* () {
+      const extracted = yield* extractWith({
+        filename: 'brief.docx',
+        mediaType: docxMediaType,
+        bytes: makeDocx('Hello DOCX')
+      })
+
+      expect(extracted.content).toBe('Hello DOCX')
+      expect(extracted.metadata).toEqual({ format: 'docx', title: 'brief.docx' })
+    })
+  )
+
+  it.effect('extracts pptx slide and notes text', () =>
+    Effect.gen(function* () {
+      const extracted = yield* extractWith({
+        filename: 'deck.pptx',
+        mediaType: pptxMediaType,
+        bytes: makePptx()
+      })
+
+      expect(extracted.content).toBe('First & one\n\nSecond\n\nSpeaker note')
+      expect(extracted.metadata.format).toBe('pptx')
+    })
+  )
+
+  it.effect('rejects OOXML archives missing the content types or main part', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith({
+        filename: 'deck.pptx',
+        mediaType: pptxMediaType,
+        bytes: zipSync({ 'ppt/slides/slide1.xml': zipText('<a:t>x</a:t>') })
+      }).pipe(Effect.flip)
+
+      expect(error).toEqual(
+        new FileExtractionError({
+          message: 'Invalid Office archive.',
+          format: 'pptx',
+          cause: expect.anything()
+        })
+      )
+    })
+  )
+
+  it.effect('stops a DOCX zip bomb before mammoth reads it', () =>
+    Effect.gen(function* () {
+      const bomb = zipSync({
+        '[Content_Types].xml': zipText('<Types/>'),
+        'word/document.xml': new Uint8Array(80 * 1024 * 1024)
+      })
+
+      const error = yield* extractWith({
+        filename: 'bomb.docx',
+        mediaType: docxMediaType,
+        bytes: bomb
+      }).pipe(Effect.flip)
+
+      expect(error.message).toContain('expansion exceeds')
+    })
+  )
+
+  it.effect('rejects files over the input byte limit for every format', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith(
+        { filename: 'big.txt', mediaType: 'text/plain', bytes: encode('x'.repeat(11)) },
+        { limits: { maxInputBytes: 10 } }
+      ).pipe(Effect.flip)
+
+      expect(error).toEqual(
+        new FileExtractionError({
+          message: 'File exceeds the extraction size limit',
+          format: 'text'
+        })
+      )
+    })
+  )
+
+  it.effect('fails empty content', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith({
+        filename: 'blank.md',
+        mediaType: 'text/markdown',
+        bytes: encode(' \n\t ')
+      }).pipe(Effect.flip)
+
+      expect(error.message).toBe('Extracted file content is empty')
+    })
+  )
+
+  it.effect('rejects unsupported files', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith({
+        filename: 'archive.zip',
+        mediaType: 'application/zip',
+        bytes: encode('zip')
+      }).pipe(Effect.flip)
+
+      expect(error).toEqual(
+        new UnsupportedFileFormatError({ filename: 'archive.zip', mediaType: 'application/zip' })
+      )
+      expect(error.message).toBe('Unsupported file format: archive.zip')
+    })
+  )
+
+  it.effect('treats invalid limits as a defect when the layer is built', () =>
+    Effect.gen(function* () {
+      const exit = yield* extractWith(
+        { filename: 'a.txt', mediaType: 'text/plain', bytes: encode('a') },
+        { limits: { maxXlsxCellVisits: 0 } }
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+    })
+  )
+})
+
+describe('SheetJS loading', () => {
+  const missingModule = () =>
+    Promise.reject(
+      Object.assign(new Error("Cannot find package 'xlsx'"), { code: 'ERR_MODULE_NOT_FOUND' })
+    )
+
+  it.effect('reports a missing SheetJS with the CDN install command', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith(xlsxInput(sheetJsBytes()), {
+        loadSheetJs: missingModule
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('SheetJsUnavailableError')
+      expect(error instanceof SheetJsUnavailableError && error.reason).toBe('missing')
+      expect(error.message).toContain(sheetJsInstallCommand)
+    })
+  )
+
+  it.effect('refuses SheetJS releases older than 0.20.3', () =>
+    Effect.gen(function* () {
+      for (const version of ['0.18.5', '0.19.3', '0.20.2']) {
+        const error = yield* extractWith(xlsxInput(sheetJsBytes()), {
+          loadSheetJs: async () => ({ version, read: XLSX.read })
+        }).pipe(Effect.flip)
+
+        expect(error.message).toContain(`SheetJS ${version} is older than 0.20.3`)
+      }
+    })
+  )
+
+  it.effect('accepts newer SheetJS releases and CommonJS-style default exports', () =>
+    Effect.gen(function* () {
+      const result = yield* extractWith(xlsxInput(sheetJsBytes()), {
+        loadSheetJs: async () => ({ default: { version: '0.21.0', read: XLSX.read } })
+      })
+
+      expect(result.content).toContain('Alpha,2')
+    })
+  )
+
+  it.effect('refuses modules that are not SheetJS', () =>
+    Effect.gen(function* () {
+      const error = yield* extractWith(xlsxInput(sheetJsBytes()), {
+        loadSheetJs: async () => ({ read: 'nope' })
+      }).pipe(Effect.flip)
+
+      expect(error instanceof SheetJsUnavailableError && error.reason).toBe('invalid')
+    })
+  )
+
+  it.effect('never loads SheetJS for other formats', () =>
+    Effect.gen(function* () {
+      const result = yield* extractWith(
+        { filename: 'a.csv', mediaType: 'text/csv', bytes: encode('a,b') },
+        { loadSheetJs: missingModule }
+      )
+
+      expect(result.content).toBe('a,b')
+    })
+  )
+
+  it.effect('does not let a crafted comment pollute Object.prototype (CVE-2023-30533)', () =>
+    Effect.gen(function* () {
+      // SheetJS before 0.19.3 inserted comments with `sheet[ref]`, so `ref="__proto__"` made
+      // `Object.prototype.c` a comment list.
+      const parts = workbookParts([
+        {
+          name: 'Sheet1',
+          rows: [['safe']],
+          relationships: [['rId9', 'comments', '../comments1.xml', false]]
+        }
+      ])
+
+      parts['xl/comments1.xml'] = zipText(
+        '<?xml version="1.0"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>a</author></authors><commentList><comment ref="__proto__" authorId="0"><text><t>polluted</t></text></comment></commentList></comments>'
+      )
+
+      const result = yield* extractWith(xlsxInput(zipParts(parts)))
+
+      expect(result.content).toBe('# Sheet1\nsafe')
+      expect(Object.getOwnPropertyNames(Object.prototype)).not.toContain('c')
+      expect(Object.hasOwn(Object.prototype, 'c')).toBe(false)
+    })
+  )
+})
+
+describe('fileFormatFor', () => {
+  it.each([
+    ['notes.TXT', '', 'text'],
+    ['a.md', '', 'markdown'],
+    ['a.markdown', '', 'markdown'],
+    ['a.csv', '', 'csv'],
+    ['a.json', '', 'json'],
+    ['a.pdf', '', 'pdf'],
+    ['a.docx', '', 'docx'],
+    ['a.xlsx', '', 'xlsx'],
+    ['a.pptx', '', 'pptx'],
+    ['download', 'application/pdf', 'pdf'],
+    ['download', 'text/x-log', 'text'],
+    ['report.pdf', 'text/plain', 'pdf']
+  ])('maps %s (%s) to %s', (filename, mediaType, format) => {
+    expect(fileFormatFor({ filename, mediaType })).toBe(format)
+  })
+
+  it('returns undefined for unsupported files', () => {
+    expect(fileFormatFor({ filename: 'a.zip', mediaType: 'application/zip' })).toBeUndefined()
+    expect(fileFormatFor({ filename: 'old.xls', mediaType: '' })).toBeUndefined()
+  })
+})
+
+describe('PDF extraction lifecycle', () => {
+  it.effect('destroys documents after both successful and failed extraction', () =>
+    Effect.gen(function* () {
+      let destroyCount = 0
+
+      const open = Effect.succeed({
+        destroy: async () => {
+          destroyCount += 1
+        }
+      })
+
+      expect(yield* withAcquiredPdfDocument(open, () => Effect.succeed('PDF text'), 'pdf')).toBe(
+        'PDF text'
+      )
+
+      const failed = yield* withAcquiredPdfDocument(
+        open,
+        () =>
+          Effect.fail(
+            new FileExtractionError({ message: 'private parser payload', format: 'pdf' })
+          ),
+        'pdf'
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(failed)).toBe(true)
+      expect(destroyCount).toBe(2)
+    })
+  )
+})

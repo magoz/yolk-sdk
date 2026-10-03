@@ -22,6 +22,6 @@ App-owned `/storage` source ingestion and indexing helpers.
 - Server actions live in one `*-action.ts` file each with `'use server'`.
 - Actions call `await cookies()`, run through `NextEffect.runPromise()`, and redirect unauthenticated users to `/login`.
 - Revalidate `/storage` only after successful create/finalize/delete mutations.
-- Provide `AppKnowledgeSearchLayer`, R2 layers, and `FileExtractor.layer` at action boundaries as needed.
+- Provide `AppKnowledgeSearchLayer`, R2 layers, and `FileExtractorLayer` (`@yolk-sdk/extractors/node`) at action boundaries as needed.
 - Domain helpers return Effect values; do not run effects inside helpers.
 - No raw env, provider SDKs, or external HTTP here.

@@ -1,0 +1,97 @@
+{
+  "name": "@yolk-sdk/extractors",
+  "version": "0.1.0-canary.97",
+  "description": "Bounded text extraction for PDF, DOCX, XLSX, PPTX, and text files: an Effect FileExtractor service with Office archive validation, hyperlink-safe XLSX text, and a knowledge extractor adapter.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/extractors"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "extraction",
+    "pdf",
+    "docx",
+    "xlsx",
+    "pptx",
+    "knowledge",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./knowledge": {
+      "types": "./src/knowledge.ts",
+      "default": "./src/knowledge.ts"
+    },
+    "./node": {
+      "types": "./src/node/index.ts",
+      "default": "./src/node/index.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./knowledge": {
+        "types": "./dist/knowledge.d.mts",
+        "import": "./dist/knowledge.mjs",
+        "default": "./dist/knowledge.mjs"
+      },
+      "./node": {
+        "types": "./dist/node/index.d.mts",
+        "import": "./dist/node/index.mjs",
+        "default": "./dist/node/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk-sdk/knowledge": "workspace:^",
+    "effect": "catalog:",
+    "fflate": "^0.8.3",
+    "mammoth": "^1.12.0",
+    "unpdf": "^1.6.2"
+  },
+  "peerDependencies": {
+    "xlsx": ">=0.20.3"
+  },
+  "peerDependenciesMeta": {
+    "xlsx": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

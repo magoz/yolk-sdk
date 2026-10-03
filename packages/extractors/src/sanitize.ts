@@ -6,6 +6,7 @@ const horizontalWhitespaceRuns = /[\t ]{2,}/g
 
 const blankLineRuns = /\n{3,}/g
 
+/** Normalize line endings, drop control characters, and collapse layout noise. */
 export const sanitizeExtractedText = (text: string) =>
   text
     .replaceAll('\r\n', '\n')

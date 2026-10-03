@@ -9,7 +9,7 @@ import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
+import { FileExtractor } from '@yolk-sdk/extractors'
 import { encodePersistedMetadata } from './encode-persisted-metadata'
 import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
 

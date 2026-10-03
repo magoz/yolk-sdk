@@ -17,7 +17,7 @@
 
 - No app users, orgs, permissions, product routes, R2/S3 layouts, auth, or DB schema.
 - No provider SDKs, database drivers, Cloudflare bindings, React, Next.js, or Node-only imports.
-- Concrete stores, file storage, extraction providers, embedding providers, and permissions belong in app services.
+- Concrete stores, file storage, extraction providers, embedding providers, and permissions belong in app services (`@yolk-sdk/extractors/knowledge` is an optional extractor; knowledge never imports it).
 - `KnowledgeScope` is caller-provided routing metadata only; package never interprets user/workspace/project semantics.
 
 ## Availability semantics
