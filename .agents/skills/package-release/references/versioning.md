@@ -85,7 +85,8 @@ Expected `.changeset/config.json` traits:
 - Fixed-group lockstep notes: when a release would bump fixed-group packages that have no pending
   changeset, add `.changeset/canary-<n>-lockstep.md` (`<n>` is the upcoming canary number) with a
   `patch` entry for each of them and one note saying they advance in lockstep with no direct
-  changes, naming what did change. Otherwise their changelogs get an empty version entry.
+  changes, naming what did change. Otherwise their changelogs get a version entry with no release note (at most "Updated
+  dependencies").
   Precedents: `canary-96-lockstep.md`, `canary-98-lockstep.md`. Check coverage with the pending
   changesets' front matter against the `fixed` group in `.changeset/config.json`.
 

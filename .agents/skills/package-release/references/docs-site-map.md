@@ -63,7 +63,7 @@ Map changed code to docs that must be inspected or updated.
 | Change                                           | Docs                                                                                                                     |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | exports, subpaths                                | `integrations/file-extraction.mdx`, `reference/packages.mdx`, `packages/extractors/README.md`                            |
-| formats, limits, errors, SheetJS install         | `integrations/file-extraction.mdx`, `packages/extractors/README.md`, `docs/adr/0004-extractors-package.md`               |
+| formats, limits, errors, SheetJS install         | `integrations/file-extraction.mdx`, `installation.mdx` (install, peer table), `packages/extractors/README.md`, ADR 0004  |
 | worker isolation, failure reasons, Next.js setup | `integrations/file-extraction.mdx`, `packages/extractors/README.md`, `troubleshooting.mdx` when failures recur           |
 | XLSX hyperlinks, archive validation, UTF-16 rule | `packages/extractors/README.md`, `packages/extractors/AGENTS.md`, ADR 0004                                               |
 | knowledge adapter                                | `integrations/file-extraction.mdx`, `knowledge/ingestion-pipeline.mdx`, `packages/knowledge/README.md` (extraction note) |
@@ -71,7 +71,8 @@ Map changed code to docs that must be inspected or updated.
 `integrations/file-extraction.mdx` is the docs-site page (install, subpaths, runnable example,
 limits, worker isolation, errors, knowledge ingestion, Next.js, host responsibilities); it links to
 the README for the full XLSX and Office archive security model. The docs site also lists
-`@yolk-sdk/extractors` in `index.mdx`, `integrations/index.mdx`, and `reference/packages.mdx`,
+`@yolk-sdk/extractors` in `index.mdx`, `installation.mdx`, `integrations/index.mdx`,
+`reference/packages.mdx`, and the canary.98 section of `migration.mdx`,
 and its `extractors/knowledge -> knowledge` edge in `reference/architecture.mdx`; update those
 with the package list or dependency direction.
 

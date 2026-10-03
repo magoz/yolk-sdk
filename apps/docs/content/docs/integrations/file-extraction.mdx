@@ -37,21 +37,22 @@ lockfile. Other formats never load SheetJS.
 
 ## Subpaths
 
-| Subpath                                       | Runtime          | Use for                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@yolk-sdk/extractors`                        | runtime-portable | the `FileExtractor` service tag and `FileExtractorApi` type; `FileInput`, `ExtractedFile`, and format types; `fileFormatFor`, `extractedFileFormats`, `isOfficeFileFormat`; `defaultFileExtractorLimits` and the `FileExtractorLimits` schema; `sanitizeExtractedText`; errors and `FileExtractionFailureReason`; `minimumSheetJsVersion`, `sheetJsInstallCommand` |
-| `@yolk-sdk/extractors/node`                   | Node, server     | `FileExtractorLayer`, `makeFileExtractorLayer(options)`, `defaultWorkerIsolation`, `normalizeOfficeArchive`; types `FileExtractorOptions`, `FileExtractorIsolation`, `WorkerIsolationOptions`, `OfficeArchiveLimits`, `SheetJsLoader`                                                                                                                              |
-| `@yolk-sdk/extractors/knowledge`              | runtime-portable | `FileKnowledgeExtractorLayer` and `makeFileKnowledgeExtractor`: a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by the `FileExtractor` in context                                                                                                                                                                                                   |
-| `@yolk-sdk/extractors/node/extraction-worker` | Node worker      | the worker entry the Node layer starts; do not import it directly (see [Next.js](#nextjs))                                                                                                                                                                                                                                                                         |
+| Subpath                                       | Runtime          | Use for                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/extractors`                        | runtime-portable | the `FileExtractor` service tag and `FileExtractorApi` type; types `FileInput`, `ExtractedFile`, `ExtractedFileMetadata`, `ExtractedFileFormat`, `OfficeFileFormat`, `FileExtractorError`; `fileFormatFor`, `extractedFileFormats`, `isOfficeFileFormat`; `defaultFileExtractorLimits` and the `FileExtractorLimits` schema; `sanitizeExtractedText`; errors and `FileExtractionFailureReason`; `minimumSheetJsVersion`, `sheetJsInstallCommand` |
+| `@yolk-sdk/extractors/node`                   | Node, server     | `FileExtractorLayer`, `makeFileExtractorLayer(options)`, `defaultWorkerIsolation`, `normalizeOfficeArchive`; types `FileExtractorOptions`, `FileExtractorIsolation`, `WorkerIsolationOptions`, `OfficeArchiveLimits`, `SheetJsLoader`; also re-exports `FileExtractor` and `FileExtractorApi`                                                                                                                                                    |
+| `@yolk-sdk/extractors/knowledge`              | runtime-portable | `FileKnowledgeExtractorLayer` and `makeFileKnowledgeExtractor`: a `@yolk-sdk/knowledge/extraction` `KnowledgeExtractor` backed by the `FileExtractor` in context                                                                                                                                                                                                                                                                                 |
+| `@yolk-sdk/extractors/node/extraction-worker` | Node worker      | the worker entry the Node layer starts; do not import it directly (see [Next.js](#nextjs))                                                                                                                                                                                                                                                                                                                                                       |
 
 The root and `./knowledge` import no parsers and no Node built-ins, so code that only needs the
 contract (for example a service that receives a `FileExtractor` from context) can run anywhere.
 
 ## Extract a file
 
-Create `extract.ts`:
+Create `extract.mts` (the `.mts` extension makes it an ES module, so top-level `await` works in
+any project):
 
-```ts title="extract.ts"
+```ts title="extract.mts"
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { Effect } from 'effect'
@@ -77,7 +78,7 @@ Create a text file and run the script:
 
 ```bash
 printf 'Quarterly   notes\r\n\r\n\r\n\r\nRevenue grew.\r\n' > notes.txt
-pnpm dlx tsx extract.ts notes.txt
+pnpm dlx tsx extract.mts notes.txt
 ```
 
 You should see the metadata and the sanitized text (line endings normalized, repeated spaces and
@@ -104,16 +105,17 @@ The format comes from the filename extension (`txt`, `md`, `markdown`, `csv`, `j
 `docx`, `xlsx`, `pptx`), then the media type, then any `text/*` media type as plain text.
 `fileFormatFor` exposes the same rule. Anything else fails with `UnsupportedFileFormatError`.
 
-| Format                            | Where it is read      | Text                                                                         | Metadata                                 |
-| --------------------------------- | --------------------- | ---------------------------------------------------------------------------- | ---------------------------------------- |
-| `text`, `markdown`, `csv`, `json` | calling thread        | UTF-8 decoded                                                                | `title` = filename                       |
-| `pdf`                             | worker thread (unpdf) | text of all pages                                                            | PDF `Title` if set, `pageCount`          |
-| `docx`                            | worker thread         | raw text (mammoth)                                                           | `title` = filename                       |
-| `xlsx`                            | worker thread         | one `# <sheet>` section per sheet with CSV rows; external links `text <url>` | workbook title or filename, `sheetNames` |
-| `pptx`                            | worker thread         | slide text in order, then speaker notes                                      | `title` = filename                       |
+| Format                            | Where it is read      | Text                                                                             | Metadata                                 |
+| --------------------------------- | --------------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
+| `text`, `markdown`, `csv`, `json` | calling thread        | UTF-8 decoded                                                                    | `title` = filename                       |
+| `pdf`                             | worker thread (unpdf) | text of all pages                                                                | PDF `Title` if set, `pageCount`          |
+| `docx`                            | worker thread         | raw text (mammoth)                                                               | `title` = filename                       |
+| `xlsx`                            | worker thread         | one `# <sheet>` section per worksheet with CSV rows; external links `text <url>` | workbook title or filename, `sheetNames` |
+| `pptx`                            | worker thread         | slide text by slide part number, then speaker notes                              | `title` = filename                       |
 
-Only PDF, DOCX, XLSX, and PPTX are parsed in worker threads. Text formats are only decoded and
-sanitized in the calling thread; no parser reads them.
+With the default isolation, only PDF, DOCX, XLSX, and PPTX are parsed in worker threads. Text
+formats are only decoded and sanitized in the calling thread; no parser reads them. Chart sheets
+appear in `sheetNames` but get no text section.
 
 All text goes through `sanitizeExtractedText`: line endings are normalized, control characters
 dropped, and runs of spaces, dots, and blank lines collapsed. An empty result fails with
@@ -124,7 +126,7 @@ full XLSX and Office archive rules.
 
 ## Limits
 
-`makeFileExtractorLayer({ limits })` overrides any of `defaultFileExtractorLimits`.
+`makeFileExtractorLayer({ limits })` overrides any of `defaultFileExtractorLimits` (fragment):
 `FileExtractorLayer` uses the defaults. Invalid values are a defect when the layer is built, not a
 typed failure.
 
@@ -154,7 +156,7 @@ with one `[Some hyperlinks omitted: …]` marker.
 
 Each PDF, DOCX, XLSX, and PPTX extraction runs in a fresh Node `worker_threads` worker. Only the
 extracted text and metadata come back. Pass an `isolation` object to change the defaults
-(`defaultWorkerIsolation`):
+(`defaultWorkerIsolation`) (fragment):
 
 ```ts
 import { makeFileExtractorLayer } from '@yolk-sdk/extractors/node'
@@ -213,12 +215,13 @@ or never admitted:
 | `reason`             | Meaning                                                 | Typical host response                                                    |
 | -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `resource-limit`     | the worker ran out of its V8 heap                       | reject the file, or raise `maxOldGenerationSizeMb` if your memory allows |
-| `timeout`            | the worker exceeded `timeoutMs` and was terminated      | reject the file; retrying with the same limits will time out again       |
+| `timeout`            | the worker exceeded `timeoutMs` and was terminated      | reject the file, or retry; it may time out again with the same limits    |
 | `worker-unavailable` | the worker could not start (missing or unloadable file) | fix deployment: see [Next.js](#nextjs) and `workerUrl`                   |
 | `worker-failed`      | the worker crashed, exited, or sent a malformed message | log and reject the file                                                  |
 | `busy`               | no worker slot freed up within `maxQueueWaitMs`         | retry later; no worker was started                                       |
 
-No `reason` means the file itself failed: unreadable, invalid, too large, or empty.
+No `reason` means the extraction itself failed, usually because the file is unreadable, invalid,
+too large, or empty.
 
 Fragment, mapping errors to host responses inside the program above:
 
@@ -238,7 +241,8 @@ const handled = program.pipe(
 ## Feed knowledge ingestion
 
 `FileKnowledgeExtractorLayer` provides `KnowledgeExtractor` from the `FileExtractor` in context.
-Give it the Node layer and pass the result to `ingestKnowledgeDocument` (fragment):
+Give it the Node layer and include the result in the layers you provide to
+`ingestKnowledgeDocument` (fragment):
 
 ```ts
 import { Layer } from 'effect'
@@ -275,7 +279,8 @@ const nextConfig: NextConfig = {
 export default nextConfig
 ```
 
-With the package external, Next.js output file tracing includes the worker. If a bundler moves the
+With the package external, Next.js 16 (Turbopack) output file tracing includes the worker; this
+was checked with an `output: 'standalone'` build. If a bundler moves the
 Node module into a chunk of another name, there is no default worker: extraction fails closed with
 `reason: 'worker-unavailable'` and starts nothing. Then copy
 `@yolk-sdk/extractors/node/extraction-worker` somewhere with `xlsx` resolvable beside it and pass
