@@ -12,9 +12,8 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   outputFileTracingRoot: workspaceRoot,
   // Code mode's pi executor loads its worker file and quickjs.wasm from disk, and the extractors
-  // start their parser worker beside their own module and load SheetJS inside it; keep them
-  // unbundled, as npm consumers must. Turbopack still bundles workspace links, so here the
-  // extractor worker runs from `packages/extractors/src` (see the README's "Extractor worker").
+  // start their self-contained parser worker from the package's `dist` and load SheetJS inside it;
+  // keep them unbundled, as npm consumers do.
   serverExternalPackages: [
     '@yolk-sdk/codemode',
     '@earendil-works/pi-codemode',
@@ -22,6 +21,17 @@ const nextConfig: NextConfig = {
     '@yolk-sdk/extractors',
     'xlsx'
   ],
+  // Turbopack still bundles workspace links, so tracing never sees the extractor worker. Its
+  // default location resolves from the package source to `packages/extractors/dist`; ship that one
+  // self-contained file and the dependency-free SheetJS it imports (see the README's "Extractor
+  // worker").
+  outputFileTracingIncludes: {
+    '/**': [
+      '../../packages/extractors/dist/node/extraction-worker.mjs',
+      '../../packages/extractors/node_modules/xlsx/package.json',
+      '../../packages/extractors/node_modules/xlsx/xlsx.mjs'
+    ]
+  },
   // Next's synchronous config boundary; trust only the injected development hostname.
   allowedDevOrigins: getAllowedDevOrigins(
     process.env.NODE_ENV === 'development' ? process.env.PORTLESS_URL : undefined

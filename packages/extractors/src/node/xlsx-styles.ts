@@ -15,8 +15,9 @@ import {
  * many cells amplifies before any budget runs. The extractor writes a minimal stylesheet with
  * only what display text needs: custom number formats (`numFmtId`, `formatCode`) of at most
  * `maxNumberFormatCharacters`, and one `<xf numFmtId>` per source cell format, in order, so cell
- * `s` indexes keep their meaning. Fonts, fills, borders, cell styles, and dxfs are left out;
- * SheetJS reads them only with `cellStyles`.
+ * `s` indexes keep their meaning. Fonts, fills, borders, cell styles, and dxfs are left out:
+ * SheetJS parses fonts, fills, and borders whatever the options but uses them only with
+ * `cellStyles`, so leaving them out also removes their parsers from the input.
  */
 
 /** Excel's own limit on a number format code, counted after unescaping. */

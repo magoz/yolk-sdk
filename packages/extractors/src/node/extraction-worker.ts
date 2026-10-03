@@ -1,7 +1,9 @@
 // Worker entry for isolated extraction (`@yolk-sdk/extractors/node/extraction-worker`). The Node
 // layer starts it once per extraction with V8 resource limits; it reads the request from
 // `workerData`, runs the parsers, posts one plain-data result, and exits. Importing it outside a
-// worker thread does nothing.
+// worker thread does nothing. The build bundles it into one self-contained
+// `dist/node/extraction-worker.mjs` (effect, fflate, mammoth, unpdf, and this package inlined);
+// only the optional `xlsx` peer stays a dynamic import.
 import { parentPort, workerData } from 'node:worker_threads'
 import { Cause, Effect, Exit, Option } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -24,7 +26,7 @@ const run = (port: NonNullable<typeof parentPort>) =>
         Effect.map(encoded => port.postMessage(encoded))
       )
 
-    yield* post(new WorkerStarted({}))
+    yield* post(WorkerStarted.make({}))
 
     const exit = yield* Effect.exit(
       Schema.decodeUnknownEffect(ExtractionWorkerRequest)(workerData).pipe(
@@ -41,12 +43,12 @@ const run = (port: NonNullable<typeof parentPort>) =>
       )
     )
 
-    if (Exit.isSuccess(exit)) return yield* post(new WorkerSucceeded({ file: exit.value }))
+    if (Exit.isSuccess(exit)) return yield* post(WorkerSucceeded.make({ file: exit.value }))
 
     return yield* post(
       Option.match(Cause.findErrorOption(exit.cause), {
         onSome: failureMessage,
-        onNone: () => new WorkerDefect({ message: Cause.pretty(exit.cause) })
+        onNone: () => WorkerDefect.make({ message: Cause.pretty(exit.cause) })
       })
     )
   })

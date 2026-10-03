@@ -22,8 +22,9 @@ export type FileExtractorOptions = {
   readonly limits?: Partial<FileExtractorLimits>
   /**
    * Where parsers run (default `'worker'`): each PDF, DOCX, XLSX, and PPTX extraction runs in a
-   * fresh worker thread with heap limits and a timeout; pass an object to change them. `'none'`
-   * parses in the calling thread and is unsafe for untrusted input.
+   * fresh worker thread with V8 heap, stack, and time limits, admitted through a process-wide pool
+   * of 4 workers; pass an object to change them. `'none'` parses in the calling thread and is
+   * unsafe for untrusted input.
    */
   readonly isolation?: FileExtractorIsolation
   /**
@@ -91,6 +92,7 @@ const parsedFileExtractor = (
     )
 
   const overrides = isolation === 'worker' ? {} : isolation
+  const timeoutMs = overrides.timeoutMs ?? defaultWorkerIsolation.timeoutMs
 
   return Schema.decodeUnknownEffect(WorkerIsolationSettings)({
     maxOldGenerationSizeMb:
@@ -98,9 +100,10 @@ const parsedFileExtractor = (
     maxYoungGenerationSizeMb:
       overrides.maxYoungGenerationSizeMb ?? defaultWorkerIsolation.maxYoungGenerationSizeMb,
     stackSizeMb: overrides.stackSizeMb ?? defaultWorkerIsolation.stackSizeMb,
-    timeoutMs: overrides.timeoutMs ?? defaultWorkerIsolation.timeoutMs,
+    timeoutMs,
     maxConcurrentWorkers:
-      overrides.maxConcurrentWorkers ?? defaultWorkerIsolation.maxConcurrentWorkers
+      overrides.maxConcurrentWorkers ?? defaultWorkerIsolation.maxConcurrentWorkers,
+    maxQueueWaitMs: overrides.maxQueueWaitMs ?? timeoutMs
   }).pipe(
     Effect.flatMap(settings =>
       makeWorkerExtractor(settings, overrides.workerUrl ?? defaultExtractionWorkerUrl())

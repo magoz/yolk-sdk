@@ -119,7 +119,11 @@ describe('generated xl/workbook.xml (R3-S2, F3)', () => {
         'Code _x0041_ lit',
         'Tab&#9;Name',
         'Emoji 📈',
-        'Ünï'
+        'Ünï',
+        // SheetJS reads `_xHHHH_` codes ignoring case: this is `_X0041_`, not `A`, and must not
+        // become a second sheet named `A` in the generated workbook.
+        'Lit _x005F_X0041_',
+        'Lit A'
       ]
 
       const parts = workbookParts(
@@ -140,6 +144,7 @@ describe('generated xl/workbook.xml (R3-S2, F3)', () => {
       expect(call.workbook.SheetNames).toEqual(direct.SheetNames)
       expect(result.metadata.sheetNames).toEqual(direct.SheetNames)
       expect(direct.SheetNames).toContain('Code A lit')
+      expect(direct.SheetNames).toContain('Lit _X0041_')
       expect(result.content).toBe(directCsv(direct))
     })
   )
@@ -295,10 +300,12 @@ describe('generated xl/styles.xml (R3-S3, F2)', () => {
         [167, '0.0%'],
         [168, '#,##0;[Red]\\-#,##0'],
         [169, '&quot;Total: &quot;@'],
-        [170, '[$-409]mmm\\ d&quot;, &quot;yyyy;@']
+        [170, '[$-409]mmm\\ d&quot;, &quot;yyyy;@'],
+        // A literal SheetJS reads as `_X0041_` (codes match ignoring case), not `A`.
+        [171, '&quot;_x005F_X0041_ &quot;0']
       ] as const
 
-      const xfs = [0, 164, 165, 166, 167, 168, 9, 14, 22, 10, 170]
+      const xfs = [0, 164, 165, 166, 167, 168, 9, 14, 22, 10, 170, 171]
 
       const values: ReadonlyArray<readonly [number, number]> = [
         [1234.5, 1],
@@ -311,6 +318,7 @@ describe('generated xl/styles.xml (R3-S3, F2)', () => {
         [45292.25, 8],
         [0.3333, 9],
         [45000, 10],
+        [5, 11],
         [42, 0]
       ]
 
@@ -330,6 +338,7 @@ describe('generated xl/styles.xml (R3-S3, F2)', () => {
         '2024-01-01',
         '12.5%'
       ])
+      expect(result.content).toContain('\n_X0041_ 5\n')
     })
   )
 })
@@ -379,6 +388,45 @@ describe('CDATA never reaches SheetJS (F1)', () => {
       expect(String(value).length).toBeGreaterThan(50)
 
       yield* expectRejected(escaped, cdataMessage)
+    })
+  )
+
+  // SheetJS decodes a `str` cell as `unescapexml(utf8read(unescapexml(raw)))`, and `utf8read`
+  // keeps only the low byte of each character: U+013C becomes `<` between the two decodes.
+  for (const lowByteLessThan of ['_x013C_', '&#x13C;', '&#316;', '_X013c_'])
+    it.effect(`rejects ${lowByteLessThan} that utf8read turns into a CDATA marker`, () =>
+      Effect.gen(function* () {
+        const cell = `${'A'.repeat(before)}${lowByteLessThan}![CDATA[${'B'.repeat(after)}`
+
+        const parts = singleSheetParts(
+          worksheet(`<row r="1"><c r="A1" t="str"><v>${cell}</v></c></row>`, 'A1')
+        )
+
+        // Control: neither the raw text nor one unescape holds a marker, yet about 2 KB of cell
+        // text decodes to over 200,000 characters.
+        expect(cell).not.toContain('<![CDATA[')
+        expect(String(readDirectly(parts).Sheets.Sheet1?.A1?.v).length).toBeGreaterThan(200_000)
+
+        // Rejected before SheetJS is loaded or `read` runs.
+        yield* expectRejected(parts, cdataMessage)
+      })
+    )
+
+  it.effect('rejects shared strings that could decode to a marker (a superset of SheetJS)', () =>
+    Effect.gen(function* () {
+      const sharedString = `${'A'.repeat(before)}_x013C_![CDATA[${'B'.repeat(after)}`
+
+      const parts = withWorkbookPart(
+        singleSheetParts(worksheet('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', 'A1')),
+        'xl/sharedStrings.xml',
+        `${xmlHeader}<sst xmlns="${mainNs}" count="1" uniqueCount="1"><si><t>${sharedString}</t></si></sst>`
+      )
+
+      // Control: shared strings are decoded once (`unescapexml(utf8read(raw))`), so SheetJS 0.20.3
+      // does not expand this one. The check covers every chain of up to two conversions anyway.
+      expect(String(readDirectly(parts).Sheets.Sheet1?.A1?.v)).toHaveLength(before + after + 9)
+
+      yield* expectRejected(parts, cdataMessage)
     })
   )
 

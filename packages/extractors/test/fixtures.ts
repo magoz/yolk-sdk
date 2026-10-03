@@ -18,6 +18,13 @@ export const encode = (text: string) => new TextEncoder().encode(text)
 export const decode = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes)
 
 /**
+ * The worker entry from source, run with Node's type stripping. Worker tests pass it as
+ * `workerUrl` so they exercise the code under test; the layer's default is the built
+ * `dist/node/extraction-worker.mjs`, covered by `pnpm packages:smoke`.
+ */
+export const sourceWorkerUrl = new URL('../src/node/extraction-worker.ts', import.meta.url)
+
+/**
  * Extract through the Node layer. Parsing runs in the test thread (`isolation: 'none'`) unless
  * the options choose a worker, so the recording SheetJS loader can observe every call;
  * `test/extraction-worker.test.ts` covers the worker.

@@ -78,7 +78,7 @@ const portableCause = (cause: unknown): typeof PortableCause.Type | undefined =>
 export const failureMessage = (error: FileExtractorError): WorkerFailed | WorkerDefect =>
   Match.valueTags(error, {
     FileExtractionError: failure =>
-      new WorkerFailed({
+      WorkerFailed.make({
         error: new FileExtractionError({
           message: failure.message,
           format: failure.format,
@@ -87,7 +87,7 @@ export const failureMessage = (error: FileExtractorError): WorkerFailed | Worker
         })
       }),
     SheetJsUnavailableError: failure =>
-      new WorkerFailed({
+      WorkerFailed.make({
         error: new SheetJsUnavailableError({
           reason: failure.reason,
           installedVersion: failure.installedVersion,
@@ -95,7 +95,7 @@ export const failureMessage = (error: FileExtractorError): WorkerFailed | Worker
         })
       }),
     UnsupportedFileFormatError: () =>
-      new WorkerDefect({ message: 'The worker received an unsupported format' })
+      WorkerDefect.make({ message: 'The worker received an unsupported format' })
   })
 
 /** Turn a portable archive cause back into an `OfficeArchiveError`; other causes stay as sent. */

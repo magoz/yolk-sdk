@@ -138,6 +138,11 @@ Requirements:
 - source maps optional.
 - package-local `build`, `check`, and `test:run` scripts stay consistent.
 
+Exception: `@yolk-sdk/extractors` also builds `dist/node/extraction-worker.mjs` as one
+self-contained file (its dependencies inlined, the optional `xlsx` peer left as a dynamic
+import). It runs in its own worker thread, so Effect identity does not matter there, and hosts
+only have to ship that file and `xlsx` (ADR 0004).
+
 ## Dependency Policy
 
 Current canary policy: keep runtime libraries in package `dependencies` unless singleton identity matters at runtime. This makes first canary installs simpler and avoids peer-resolution friction while APIs are unstable.

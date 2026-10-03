@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads'
-import { Effect, Match, Option, Semaphore } from 'effect'
+import { Effect, Match, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FileExtractionError } from '../errors.ts'
 import type { FileExtractionFailureReason, FileExtractorError } from '../errors.ts'
@@ -8,6 +8,7 @@ import type { FileExtractorLimits } from '../limits.ts'
 import type { ParsedFileFormat } from './extract-file.ts'
 import { decodeWorkerMessage, revivedError } from './extraction-worker-protocol.ts'
 import type { ExtractionWorkerRequest } from './extraction-worker-protocol.ts'
+import { makeSlotPool, processSlotPool, processWorkerLimit, withSlot } from './worker-admission.ts'
 
 /** Limits for the worker each PDF, DOCX, XLSX, or PPTX extraction runs in. */
 export type WorkerIsolationOptions = {
@@ -19,19 +20,31 @@ export type WorkerIsolationOptions = {
   readonly stackSizeMb?: number
   /** Wall-clock time a worker may run before it is terminated, in ms. Default 30,000. */
   readonly timeoutMs?: number
-  /** Workers running at once per layer; further extractions wait. Default 4. */
+  /**
+   * This layer's share of the process-wide worker pool: at most this many of its extractions run
+   * at once. Every layer in the process shares one pool of 4 workers, however often the layer is
+   * built, so this can only lower the layer's share. 1 to 4; default 4.
+   */
   readonly maxConcurrentWorkers?: number
   /**
-   * The worker entry. Default: `extraction-worker.mjs` next to this module, which exists on disk
-   * when the package is not bundled (Next.js `serverExternalPackages`). Bundled hosts can copy
-   * `@yolk-sdk/extractors/node/extraction-worker` and point here.
+   * How long an extraction may wait for a worker slot, in ms, before it fails with
+   * `reason: 'busy'` without starting a worker. Default: the layer's `timeoutMs`.
+   */
+  readonly maxQueueWaitMs?: number
+  /**
+   * The worker entry. Default: the package's self-contained `dist/node/extraction-worker.mjs`,
+   * found from this module's own location (in `dist`, or in `src` when a workspace or a bundler
+   * that keeps module locations, such as Next.js Turbopack, runs the source). When this module has
+   * been bundled into a file of another name, there is no default and extraction fails with
+   * `reason: 'worker-unavailable'` without starting a worker; point this at a copy of
+   * `@yolk-sdk/extractors/node/extraction-worker` instead.
    */
   readonly workerUrl?: string | URL
 }
 
 /**
  * Where parsers run. `'worker'` (the default) and an options object run each PDF, DOCX, XLSX, and
- * PPTX extraction in a fresh `worker_threads` worker with resource limits and a timeout.
+ * PPTX extraction in a fresh `worker_threads` worker with V8 heap, stack, and time limits.
  * `'none'` runs parsers in the calling thread: only for environments without worker threads, and
  * unsafe for untrusted input (a crafted file can exhaust the process heap or block the event loop).
  */
@@ -48,7 +61,10 @@ export const WorkerIsolationSettings = Schema.Struct({
   maxYoungGenerationSizeMb: PositiveSafeInteger,
   stackSizeMb: PositiveSafeInteger,
   timeoutMs: PositiveSafeInteger,
-  maxConcurrentWorkers: PositiveSafeInteger
+  maxConcurrentWorkers: PositiveSafeInteger.pipe(
+    Schema.check(Schema.isLessThanOrEqualTo(processWorkerLimit))
+  ),
+  maxQueueWaitMs: PositiveSafeInteger
 })
 
 export type WorkerIsolationSettings = typeof WorkerIsolationSettings.Type
@@ -56,33 +72,47 @@ export type WorkerIsolationSettings = typeof WorkerIsolationSettings.Type
 /**
  * Defaults. 256 MB of old generation holds SheetJS's cell objects for the default limits (100,000
  * visited cells, 50 MiB expanded) several times over and PDF.js's working set for ordinary PDFs,
- * while keeping four concurrent workers near 1 GB of V8 heap, inside a 2 GB serverless function.
+ * and the process-wide pool of four workers keeps their V8 heaps near 1 GB together. That bounds
+ * heap, not the process: Buffers and PDF.js's decoded data live outside it (see the README).
  * 32 MB of young generation is twice V8's usual 64-bit default, enough for short-lived parser
  * strings. 30 s is far above legitimate parse times at the default limits (well under a second
- * for the research workbooks) and below common serverless request budgets.
+ * for the research workbooks) and below common serverless request budgets; a queued extraction
+ * waits at most as long again for a slot.
  */
 export const defaultWorkerIsolation: WorkerIsolationSettings = {
   maxOldGenerationSizeMb: 256,
   maxYoungGenerationSizeMb: 32,
   stackSizeMb: 4,
   timeoutMs: 30_000,
-  maxConcurrentWorkers: 4
+  maxConcurrentWorkers: processWorkerLimit,
+  maxQueueWaitMs: 30_000
 }
 
+const isolationModule =
+  /\/(?:src\/node\/extraction-isolation\.ts|dist\/node\/extraction-isolation\.mjs)$/
+
 /**
- * The worker file next to this module: `extraction-worker.ts` beside the source (tests, workspace)
- * and `extraction-worker.mjs` beside `dist/node/extraction-isolation.mjs`. The URL is derived from
- * this module's own URL at runtime, never written as `new URL('./…', import.meta.url)`: bundlers
- * rewrite that pattern into a copied asset whose own imports cannot resolve.
+ * The built worker for an isolation module at `moduleUrl`: `dist/node/extraction-worker.mjs` of
+ * the same package, from `dist/node/extraction-isolation.mjs` (installed) or
+ * `src/node/extraction-isolation.ts` (workspace source, which must be built first). Any other
+ * location (this module bundled into a chunk) has no default: `undefined`, and nothing is started.
+ * The URL is derived from the module URL at runtime, never written as
+ * `new URL('./…', import.meta.url)`: bundlers rewrite that pattern into a copied asset.
  */
-export const defaultExtractionWorkerUrl = () =>
-  new URL(import.meta.url.replace(/extraction-isolation\.(ts|mjs)$/, 'extraction-worker.$1'))
+export const extractionWorkerUrlFor = (moduleUrl: string): URL | undefined =>
+  isolationModule.test(moduleUrl)
+    ? new URL(moduleUrl.replace(isolationModule, '/dist/node/extraction-worker.mjs'))
+    : undefined
+
+/** The default worker entry for this module; see `extractionWorkerUrlFor`. */
+export const defaultExtractionWorkerUrl = () => extractionWorkerUrlFor(import.meta.url)
 
 const stoppedMessages: Readonly<Record<FileExtractionFailureReason, string>> = {
   'resource-limit': 'File extraction exceeded its memory limit.',
   timeout: 'File extraction timed out.',
   'worker-unavailable': 'File extraction worker could not start.',
-  'worker-failed': 'File extraction worker failed.'
+  'worker-failed': 'File extraction worker failed.',
+  busy: 'File extraction is busy. Try again later.'
 }
 
 const stopped = (format: ParsedFileFormat, reason: FileExtractionFailureReason, cause?: unknown) =>
@@ -178,51 +208,73 @@ export type WorkerExtractor = (
   limits: FileExtractorLimits
 ) => Effect.Effect<ExtractedFile, FileExtractorError>
 
+const missingWorker = new Error(
+  'No default extraction worker next to this module; set isolation.workerUrl'
+)
+
 /**
  * Run each extraction in a fresh worker: the input is copied into a transferred buffer, the
  * worker returns only text and metadata, and the worker is terminated when the result arrives,
- * the timeout fires, or the caller is interrupted. A worker that cannot start fails closed with
+ * the timeout fires, or the caller is interrupted. Admission goes through this layer's share and
+ * the process-wide pool (`worker-admission.ts`); a slot is freed only once its worker has
+ * terminated. A worker that cannot start, or a missing `workerUrl`, fails closed with
  * `reason: 'worker-unavailable'`; there is no in-process fallback.
  */
 export const makeWorkerExtractor = (
   settings: WorkerIsolationSettings,
-  workerUrl: string | URL
+  workerUrl: string | URL | undefined
 ): Effect.Effect<WorkerExtractor> =>
-  Effect.map(Semaphore.make(settings.maxConcurrentWorkers), slots => (input, format, limits) => {
-    const extraction = Effect.gen(function* () {
-      const bytes = new Uint8Array(input.bytes)
+  Effect.sync(() => {
+    const layerPool = makeSlotPool(settings.maxConcurrentWorkers)
 
-      const request: ExtractionWorkerRequest = {
-        filename: input.filename,
-        mediaType: input.mediaType,
-        bytes,
-        format,
-        limits
-      }
+    return (input, format, limits) => {
+      if (workerUrl === undefined)
+        return Effect.fail(stopped(format, 'worker-unavailable', missingWorker))
 
-      const started = yield* Effect.acquireRelease(
-        Effect.try({
-          try: () =>
-            startWorker(
-              workerUrl,
-              {
-                workerData: request,
-                transferList: [bytes.buffer],
-                resourceLimits: {
-                  maxOldGenerationSizeMb: settings.maxOldGenerationSizeMb,
-                  maxYoungGenerationSizeMb: settings.maxYoungGenerationSizeMb,
-                  stackSizeMb: settings.stackSizeMb
-                }
-              },
-              format
-            ),
-          catch: cause => stopped(format, 'worker-unavailable', cause)
-        }),
-        ({ worker }) => Effect.promise(() => worker.terminate())
-      )
+      const extraction = Effect.gen(function* () {
+        const bytes = new Uint8Array(input.bytes)
 
-      return yield* awaitOutcome(started, format, settings.timeoutMs)
-    })
+        const request: ExtractionWorkerRequest = {
+          filename: input.filename,
+          mediaType: input.mediaType,
+          bytes,
+          format,
+          limits
+        }
 
-    return slots.withPermits(1)(Effect.scoped(extraction))
+        const started = yield* Effect.acquireRelease(
+          Effect.try({
+            try: () =>
+              startWorker(
+                workerUrl,
+                {
+                  workerData: request,
+                  transferList: [bytes.buffer],
+                  resourceLimits: {
+                    maxOldGenerationSizeMb: settings.maxOldGenerationSizeMb,
+                    maxYoungGenerationSizeMb: settings.maxYoungGenerationSizeMb,
+                    stackSizeMb: settings.stackSizeMb
+                  }
+                },
+                format
+              ),
+            catch: cause => stopped(format, 'worker-unavailable', cause)
+          }),
+          ({ worker }) => Effect.promise(() => worker.terminate())
+        )
+
+        return yield* awaitOutcome(started, format, settings.timeoutMs)
+      })
+
+      return Effect.suspend(() => {
+        // One deadline for both waits, from when the extraction asks for a worker.
+        const deadline = Date.now() + settings.maxQueueWaitMs
+        const busy = () => stopped(format, 'busy')
+
+        return Effect.scoped(extraction).pipe(
+          withSlot(processSlotPool(), deadline, busy),
+          withSlot(layerPool, deadline, busy)
+        )
+      })
+    }
   })

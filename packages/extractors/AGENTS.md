@@ -6,16 +6,17 @@ upload size policy, auth, storage, and what the text is used for.
 
 ## Subpaths
 
-| Subpath                          | Source                          | Role                                                                                                      |
-| -------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/extractors`           | `src/index.ts`                  | Types, `Schema.TaggedError` errors, `fileFormatFor`, limits, `sanitizeExtractedText`, `FileExtractor` tag |
-| `@yolk-sdk/extractors/node`      | `src/node/index.ts`             | `FileExtractorLayer`, `makeFileExtractorLayer`, `normalizeOfficeArchive`                                  |
-| `…/node/extraction-worker`       | `src/node/extraction-worker.ts` | Worker entry; a no-op when imported outside a worker                                                      |
-| `@yolk-sdk/extractors/knowledge` | `src/knowledge.ts`              | `FileKnowledgeExtractorLayer`, `makeFileKnowledgeExtractor`                                               |
+| Subpath                          | Source                          | Role                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/extractors`           | `src/index.ts`                  | Types, `Schema.TaggedError` errors (`FileExtractionError` with `reason`), `FileExtractionFailureReason`, `fileFormatFor`, limits, `sanitizeExtractedText`, `FileExtractor` tag                                |
+| `@yolk-sdk/extractors/node`      | `src/node/index.ts`             | `FileExtractorLayer`, `makeFileExtractorLayer`, `defaultWorkerIsolation`, `normalizeOfficeArchive`; types `FileExtractorIsolation`, `WorkerIsolationOptions` (incl. `maxConcurrentWorkers`, `maxQueueWaitMs`) |
+| `…/node/extraction-worker`       | `src/node/extraction-worker.ts` | Worker entry, built as one self-contained `dist/node/extraction-worker.mjs`; a no-op when imported outside a worker                                                                                           |
+| `@yolk-sdk/extractors/knowledge` | `src/knowledge.ts`              | `FileKnowledgeExtractorLayer`, `makeFileKnowledgeExtractor`                                                                                                                                                   |
 
 Root files: `errors.ts`, `format.ts`, `limits.ts`, `sanitize.ts`, `service.ts`. Node files (`src/node/`):
 `live-layer.ts` (options, dispatch to a worker or in-process), `extraction-isolation.ts` (worker
-spawn, limits, timeout, semaphore, failure reasons), `extraction-worker.ts` (worker entry),
+spawn, limits, timeout, default worker URL, failure reasons), `worker-admission.ts` (process-wide
+and per-layer worker slots), `extraction-worker.ts` (worker entry),
 `extraction-worker-protocol.ts` (message schemas, error round trip), `extract-file.ts`
 (PDF/DOCX/XLSX/PPTX extraction), `office-archive.ts` (bounded ZIP validation, hyperlink strip,
 UTF-16 guard), `xlsx-sheetjs-input.ts` (the archive SheetJS reads), `xlsx-workbook.ts`
@@ -73,7 +74,10 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
     `<xf numFmtId>` per source `xf`, in order, at most 64,000;
   - copied: sheet `n`'s worksheet as `xl/worksheets/sheet<n>.xml` when its relationship is an
     internal worksheet resolving to any `.xml` part, and `xl/sharedStrings.xml`. Both are rejected
-    when SheetJS could meet `<![CDATA[`, raw or after one `unescapexml`, in any text view.
+    when SheetJS could meet `<![CDATA[` in any text view, raw or after any chain of up to two
+    `unescapexml`/`utf8read` steps (`sheetJsCouldReadCdata`). SheetJS decodes `str` cells as
+    `unescapexml(utf8read(unescapexml(raw)))`, and `utf8read` keeps only each character's low
+    byte (U+013C becomes `<`). Never narrow it to counted unescapes.
 
   `docProps/*` is never handed over: the title comes from `coreTitle` (`sheetJsElementText` on
   `dc:title`). Themes, worksheet relationships, comments, VML, drawings, `.bin`, markers,
@@ -101,16 +105,32 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
   sees exactly the sheets the extractor counted.
 - Isolation: PDF, DOCX, XLSX, and PPTX run in a fresh worker per extraction
   (`extraction-isolation.ts`). Input bytes are copied into a transferred buffer, and only the
-  `ExtractedFile` or a serialized error comes back. Defaults: 256 MB old generation, 32 MB young,
-  4 MB stack, a 30 s wall-clock `setTimeout` (never the Effect `Clock`, so a test clock cannot
-  stall it), and 4 workers per layer (a `Semaphore`). The worker is terminated in the scope's
-  release on every exit, including interruption. Failures map to `FileExtractionError` `reason`:
-  `ERR_WORKER_OUT_OF_MEMORY` → `resource-limit`, timer → `timeout`, no `Started` message →
-  `worker-unavailable`, later crash or exit → `worker-failed`. Never fall back to in-process.
-- The default worker URL is derived at runtime from `import.meta.url` (`extraction-isolation` →
-  `extraction-worker`, `.ts` or `.mjs`). Never write `new URL('./…', import.meta.url)` or
-  `new Worker(new URL(…))` for it: Turbopack copies the former as an asset whose imports cannot
-  resolve, and panics on the latter.
+  `ExtractedFile` or a serialized error comes back; protocol messages are built with `.make()`.
+  Defaults: 256 MB old generation, 32 MB young, 4 MB stack, and a 30 s wall-clock `setTimeout`
+  (never the Effect `Clock`, so a test clock cannot stall it). The worker is terminated in the
+  scope's release on every exit, including interruption. Failures map to `FileExtractionError`
+  `reason`: `ERR_WORKER_OUT_OF_MEMORY` → `resource-limit`, timer → `timeout`, error or exit
+  before `WorkerStarted` → `worker-unavailable`, later crash, exit, or malformed message →
+  `worker-failed`, no slot within `maxQueueWaitMs` → `busy`. Never fall back to in-process.
+- Guarantee wording: the worker bounds V8 heap, stack, and running time, and the cap is
+  process-wide. It does not bound RSS or off-heap memory (Buffers, PDF.js decoded data); those
+  are limited only by the input and expanded-size caps, and the host's memory limit is the outer
+  bound. Never claim the process always survives.
+- Admission (`worker-admission.ts`): one pool of `processWorkerLimit` (4) slots per process, on
+  `globalThis` under `Symbol.for('@yolk-sdk/extractors/worker-admission/v1')`, holding only plain
+  data and callbacks (no Effect objects, so module copies share it). Each layer also has its own
+  pool of `maxConcurrentWorkers` (1 to 4) that can only lower its share. Take the layer slot, then
+  the process slot, with one deadline; take and register the release with no interruption point
+  between them, and release only after `worker.terminate()` resolves. Bump the symbol's version
+  if the pool's shape changes.
+- The default worker URL (`extractionWorkerUrlFor`) maps `dist/node/extraction-isolation.mjs` or
+  `src/node/extraction-isolation.ts` to the same package's built `dist/node/extraction-worker.mjs`,
+  and anything else to `undefined` (fail closed, start nothing). Derive it from a string at
+  runtime; never write `new URL('./…', import.meta.url)` or `new Worker(new URL(…))` for it:
+  Turbopack copies the former as an asset whose imports cannot resolve, and panics on the latter.
+- The worker bundle is the second `tsdown.config.ts` entry: everything bundled, dynamic imports
+  inlined, only `xlsx` external. Keep `xlsx` a dynamic import there and keep the bundle free of
+  any other package import (the tarball smoke checks both).
 - Links resolve through `xl/workbook.xml` sheet `r:id` → workbook rels → worksheet part (any
   extension) → worksheet rels `TargetMode="External"`. Show only normalized `http:`/`https:`/`mailto:`
   targets (≤ 2,048 characters, longer links dropped), append `#location` like SheetJS; omit
@@ -146,13 +166,19 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
   `test/fixtures.ts` (through `extractRecorded`); controls call `XLSX.read` directly on fixtures
   (`readDirectly`). `extractWith` defaults to `isolation: 'none'` so the recording loader sees
   every call.
-- `test/xlsx-generated-parts.test.ts`: defined-name flood, exact sheet names, 1904 dates, hidden
-  sheets, a huge reused number format, format caps, CDATA (cells, shared strings, escaped, title),
-  and LibreOffice- and Google-Sheets-shaped workbooks (hand-written, compared with SheetJS).
-- `test/extraction-worker.test.ts`: real workers and SheetJS: every format matches in-process
-  output, typed errors and causes cross the boundary, a 16 MB heap gives `resource-limit` and the
-  process keeps working, a 1 ms timeout, spawn failure, early exit, the concurrency limit, and
-  layer defects.
+- `test/xlsx-generated-parts.test.ts`: defined-name flood, exact sheet names (`_X0041_` read
+  ignoring case), 1904 dates, hidden sheets, a huge reused number format, format caps, CDATA
+  (cells, shared strings, escaped, `utf8read` low-byte forms `_x013C_`, `&#x13C;`, `&#316;` with
+  real-SheetJS controls, title), and LibreOffice- and Google-Sheets-shaped workbooks
+  (hand-written, not real exports, compared with SheetJS).
+- `test/extraction-worker.test.ts`: real workers (the source entry via `sourceWorkerUrl`) and
+  SheetJS: every format matches in-process output, typed errors and causes cross the boundary, a
+  16 MB heap gives `resource-limit` and the process keeps working, a 1 ms timeout, spawn failure,
+  exit before and after `WorkerStarted`, a malformed message, a layer's share with real parsers,
+  and layer defects. `data:` stub workers that announce themselves on a `BroadcastChannel` and
+  hold their slot prove the process-wide peak of four across independent layer builds, a
+  layer's lower share, `busy` after `maxQueueWaitMs`, and that interruption terminates the worker
+  and frees its slot. Also the default URL mapping and failing closed with no worker URL.
 - `test/xlsx-text.test.ts`: 10x bounded CSV tests (ranges, quoting, budgets, visit preflight).
 - `test/xlsx-hyperlinks.test.ts`: link output, schemes, overlap, sheet mapping, full-sheet/column
   ranges (SheetJS never sees a tag, via a recording loader), budget marker, cap, display/target

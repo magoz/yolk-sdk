@@ -150,7 +150,8 @@ const escapedCharacters: ReadonlyMap<string, string> = new Map([
   ['"', '&quot;']
 ])
 
-const startsCodeEscape = /_x[\da-fA-F]{4}_/y
+// SheetJS matches `_xHHHH_` codes ignoring case (`coderegex`), so `_X0041_` is a code too.
+const startsCodeEscape = /_x[\da-fA-F]{4}_/iy
 
 /**
  * Escape `text` for a double-quoted attribute of a generated UTF-8 part so that SheetJS's
@@ -206,17 +207,38 @@ export const officeDocumentRelationshipsNamespace =
 
 const cdataMarker = '<![CDATA['
 
+type TextStep = (text: string) => string | undefined
+
+/** The two conversions SheetJS chains over cell and shared-string text. */
+const sheetJsTextSteps: ReadonlyArray<TextStep> = [sheetJsUnescapeXml, sheetJsUtf8Read]
+
+/** Depth first, so at most `steps + 1` derived strings are alive at once. */
+const meetsCdata = (text: string, steps: number): boolean => {
+  if (text.includes(cdataMarker)) return true
+
+  if (steps === 0) return false
+
+  return sheetJsTextSteps.some(step => {
+    const next = step(text)
+
+    return next !== undefined && next !== text && meetsCdata(next, steps - 1)
+  })
+}
+
 /**
- * Whether SheetJS could meet a CDATA marker in this part: in any text view (`sheetJsTextViews`),
- * raw or after one `unescapexml` (cells of type `str` are decoded twice, so `&lt;![CDATA[`
- * counts). SheetJS's `unescapexml` handles CDATA by recursing on a string two characters shorter
- * and copying the whole tail at every level, so an unterminated marker costs quadratic time and
- * memory. Excel, LibreOffice, and Google Sheets never write CDATA in worksheets or shared strings.
+ * Whether SheetJS could meet a CDATA marker in this part. SheetJS's `unescapexml` handles CDATA by
+ * recursing on a string two characters shorter and copying the whole tail at every level, so an
+ * unterminated marker costs quadratic time and memory. Every text SheetJS hands to `unescapexml`
+ * in a worksheet or shared-strings part is the part text after at most two of its conversions:
+ * raw (`<v>` of every cell), `utf8read(raw)` (shared and inline strings), and
+ * `utf8read(unescapexml(raw))` (cells of type `str`, decoded again after `utf8read`). `utf8read`
+ * keeps only the low byte of each character, so U+013C from `_x013C_`, `&#x13C;`, or `&#316;`
+ * becomes `<`. So each text view (`sheetJsTextViews`) is checked raw and after every chain of up
+ * to two steps of `unescapexml` and `utf8read` in any order, a superset of SheetJS's sequences.
+ * Excel, LibreOffice, and Google Sheets never write CDATA in worksheets or shared strings.
  */
 export const sheetJsCouldReadCdata = (content: Uint8Array) =>
-  sheetJsTextViews(content).some(
-    text => text.includes(cdataMarker) || sheetJsUnescapeXml(text)?.includes(cdataMarker) === true
-  )
+  sheetJsTextViews(content).some(view => meetsCdata(view, 2))
 
 const xmlBoundary = new Set([' ', '\t', '\r', '\n', '>'])
 

@@ -13,20 +13,23 @@ export const minimumSheetJsVersion = '0.20.3'
  * - `resource-limit`: the worker ran out of its V8 heap (`maxOldGenerationSizeMb`, …);
  * - `timeout`: the worker exceeded `timeoutMs` and was terminated;
  * - `worker-unavailable`: the worker could not start (a missing or unloadable worker file);
- * - `worker-failed`: the worker crashed or exited without a result.
+ * - `worker-failed`: the worker crashed or exited without a result;
+ * - `busy`: no worker slot freed up within `maxQueueWaitMs`, so no worker was started.
  */
 export const FileExtractionFailureReason = Schema.Literals([
   'resource-limit',
   'timeout',
   'worker-unavailable',
-  'worker-failed'
+  'worker-failed',
+  'busy'
 ])
 
 export type FileExtractionFailureReason = typeof FileExtractionFailureReason.Type
 
 /**
  * Reading, validating, or bounding a file failed. `message` is safe to show to users. `reason`
- * is set only when an isolated worker was stopped (see `FileExtractionFailureReason`).
+ * is set only when an isolated worker was stopped or never admitted (see
+ * `FileExtractionFailureReason`).
  */
 export class FileExtractionError extends Schema.TaggedError<FileExtractionError>()(
   'FileExtractionError',

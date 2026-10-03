@@ -18,7 +18,7 @@ into a public package, `@yolk-sdk/extractors`, that the apps consume.
 | SheetJS    | Optional peer `xlsx >=0.20.3`, lazily imported, version-checked at runtime. Hosts install the SheetJS CDN tarball.            |
 | Archives   | Every DOCX, XLSX, and PPTX goes through bounded ZIP validation and is rebuilt as a stored archive before any parser reads it. |
 | SheetJS    | SheetJS only reads an archive the extractor builds (workbook and styles generated); XLSB/ODS/Numbers input is rejected early. |
-| Isolation  | Every PDF, DOCX, XLSX, and PPTX parse runs in a fresh worker thread with heap, stack, and time limits; failures are typed.    |
+| Isolation  | Every PDF, DOCX, XLSX, and PPTX parse runs in a fresh worker thread with V8 heap, stack, and time limits; process-wide cap.   |
 | Formulas   | SheetJS runs with `cellFormula: false`: cached values only, formula-only cells are empty.                                     |
 | Hyperlinks | Read and removed before SheetJS parses; external targets shown as `text <url>` through an indexed lookup.                     |
 | UTF-16     | XLSX parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag are rejected.                                |
@@ -156,14 +156,23 @@ removed, the first `numFmts` and `cellXfs` regions, SheetJS's tag grammar). The 
 `numFmt` codes of at most 255 characters after unescaping, which is Excel's own limit, with no
 CDATA, and at most 1,000 of them. It writes one `<xf numFmtId>` per source `xf`, in order, so
 cell `s` indexes keep their meaning, up to Excel's 64,000. Dropped formats show as General.
-Fonts, fills, borders, cell styles, and dxfs are read only with `cellStyles`, so they are left
-out. The positive controls (Excel-like, LibreOffice-shaped, and Google-Sheets-shaped workbooks,
-dates, 1904 dates, percentages, currency, and text formats) match SheetJS reading the original
-file.
+Fonts, fills, borders, cell styles, and dxfs are left out: SheetJS parses fonts, fills, and
+borders whatever the options but uses them only with `cellStyles`, so leaving them out also
+removes their parsers from the input. The positive controls (Excel-like, LibreOffice-shaped, and
+Google-Sheets-shaped workbooks, dates, 1904 dates, percentages, currency, and text formats) match
+SheetJS reading the original file. The LibreOffice and Google Sheets fixtures are hand-written to
+the shapes those applications write (attribute order, `state="visible"`, LibreOffice's numFmt
+164); they are not real exports, so they are not exhaustive interoperability evidence.
 
-Copied parts. A worksheet or shared-strings part in which SheetJS could meet `<![CDATA[`, raw or
-after one `unescapexml` in any text view, is rejected: `str` cells are decoded twice, so
-`&lt;![CDATA[` counts too. Excel, LibreOffice, and Google Sheets never write CDATA there. The
+Copied parts. A worksheet or shared-strings part in which SheetJS could meet `<![CDATA[` is
+rejected. SheetJS hands `unescapexml` the raw text (`<v>` of every cell), `utf8read(raw)` (shared
+and inline strings), and `utf8read(unescapexml(raw))` (cells of type `str`, which are decoded
+twice). `utf8read` keeps only the low byte of each character, so U+013C from `_x013C_`,
+`&#x13C;`, or `&#316;` becomes `<` between the two decodes. The check therefore looks at every
+text view raw and after every chain of up to two steps of `unescapexml` and `utf8read`, in any
+order, which is a superset of SheetJS's sequences. Regression tests run real SheetJS on each
+`str` form (about 2 KB of cell text decodes to over 200,000 characters) and assert the extractor
+rejects it before SheetJS loads. Excel, LibreOffice, and Google Sheets never write CDATA there. The
 title is read from `docProps/core.xml` by the extractor (`str_match_xml` on `dc:title`, then
 `unescapexml`), so core properties never reach SheetJS.
 
@@ -226,50 +235,97 @@ mammoth) are too large to prove linear, and in-process nothing can pre-empt a sy
 DOCX, XLSX, and PPTX extraction runs in a fresh `worker_threads` worker
 (`extraction-isolation.ts`), following `@yolk-sdk/codemode/node`.
 
+What this guarantees, and what it does not:
+
+- The worker bounds its own V8 heap (old and young generation), its stack, and its running
+  time. Heap exhaustion, the timeout, a worker that cannot start, and a worker that crashes or
+  exits end that extraction with a typed `FileExtractionError`; the worker is terminated.
+- The cap on running workers is process-wide (below), so the total V8 heap of parser workers is
+  bounded by 4 × the per-worker heap.
+- Total RSS and memory outside the V8 heap are not bounded. Buffers, inflated archive parts, and
+  native allocations count against the process, not the worker's heap. They are limited only by
+  the 50 MiB input and Office expanded-size caps, per running worker.
+- PDF.js decodes images, fonts, and streams into buffers outside the heap, and those have no
+  separate cap in this package. That is a residual risk for crafted PDFs.
+- The host's own memory limit (container, serverless function) is the outer bound. A process
+  that hits it is killed, whatever the worker limits say.
+
+Mechanics:
+
 - The input is copied into a transferred `ArrayBuffer`. The worker validates the archive, runs
   the parser, renders the bounded text, and posts only the `ExtractedFile` or a serialized error
-  (with its archive cause) back. Parser objects never cross.
+  (with its archive cause) back. Parser objects never cross. Messages are built with the
+  protocol classes' `.make()` and decoded with Schema on both sides.
 - `resourceLimits`: 256 MB old generation, 32 MB young generation, 4 MB stack. A 30 s wall-clock
-  timer runs on `setTimeout`, not the Effect `Clock`, so a test clock cannot stall it. At most 4
-  workers per layer, through a `Semaphore`. Defaults are configurable (`isolation`) and checked
-  at layer build. 256 MB holds SheetJS's cells for the default limits several times over and
-  PDF.js's working set for ordinary PDFs, and 4 such workers stay inside a 2 GB serverless
-  function. Legitimate files parse in well under a second, so 30 s only stops runaway work.
+  timer runs on `setTimeout`, not the Effect `Clock`, so a test clock cannot stall it. Defaults
+  are configurable (`isolation`) and checked at layer build. 256 MB holds SheetJS's cells for the
+  default limits several times over and PDF.js's working set for ordinary PDFs. Legitimate files
+  parse in well under a second, so 30 s only stops runaway work.
+- Admission (`worker-admission.ts`). Every layer in the process shares one pool of 4 worker
+  slots. A per-request `Effect.provide` builds a new layer (and a new semaphore) on every call,
+  so a per-layer cap would not hold for the example app's own server actions. The pool lives on
+  `globalThis` under `Symbol.for('@yolk-sdk/extractors/worker-admission/v1')` and holds only
+  plain data and callbacks, so duplicated copies of the package (or of Effect) in one process
+  share it. A layer's `maxConcurrentWorkers` (1 to 4, default 4) is that layer's own share inside
+  the pool: it can only lower it. An extraction takes its layer slot, then a process slot, and
+  waits for both up to `maxQueueWaitMs` (default: the layer's `timeoutMs`). Past that it fails
+  with `reason: 'busy'` without starting a worker. Taking a slot and registering its release
+  happen without an interruption point between them, and a slot is returned only after
+  `worker.terminate()` has resolved. A waiting extraction can be interrupted. Tests assert the
+  peak of four running workers across independently built layers, a layer's lower share, queue
+  deadline expiry, and that interrupting an extraction terminates its worker and frees its slot.
 - The worker is terminated in the scope's release on every exit, including interruption.
   `ERR_WORKER_OUT_OF_MEMORY` maps to `reason: 'resource-limit'`, the timer to `'timeout'`, a
-  worker that never posted `Started` (a missing or unloadable worker file) to
-  `'worker-unavailable'`, and a later crash or exit to `'worker-failed'`. All are
-  `FileExtractionError`s, and the host keeps running. A worker that cannot start never falls back
-  to in-process parsing.
+  worker that errors or exits before posting `WorkerStarted` (a missing or unloadable worker
+  file) to `'worker-unavailable'`, and a later crash, exit, or malformed message to
+  `'worker-failed'`. A worker that cannot start never falls back to in-process parsing.
 - `isolation: 'none'` parses in the calling thread. It exists for runtimes without worker threads
   and for tests that observe SheetJS through `loadSheetJs`, and it is documented as unsafe for
   untrusted input.
-- Packaging: the entry is `dist/node/extraction-worker.mjs` (subpath
-  `./node/extraction-worker`). Its URL is derived at runtime from the isolation module's own
-  `import.meta.url`. Turbopack copies a literal `new URL('./…', import.meta.url)` as an asset whose
-  imports do not resolve, and Next.js 16.1.3 panics on `new Worker(new URL(…))`. Hosts keep
-  `@yolk-sdk/extractors` and `xlsx` in `serverExternalPackages`. With that, a standalone Next.js
-  16 build of a consumer installed from the packed tarball traces the worker and its imports, and
-  the extraction, heap-limit, and timeout paths work from the traced files only.
-- Cost: about 150–250 ms per extraction to start a worker and load Effect and the parser. A pool
-  can come later.
+- Packaging. The worker is built as one self-contained file, `dist/node/extraction-worker.mjs`
+  (subpath `./node/extraction-worker`; a second tsdown config with every dependency bundled and
+  dynamic imports inlined). Effect, fflate, mammoth with its dependencies, unpdf, and the
+  package's own code are inside it (about 3.5 MB, unminified). Its only imports are Node builtins
+  and SheetJS: `xlsx` stays a dynamic `import('xlsx')` with the version check, so the optional
+  peer is still the host's install. The packed-tarball smoke checks the file's imports and runs
+  every format from a copy that has nothing beside it but `node_modules/xlsx`.
+- Default location. `extractionWorkerUrlFor` maps the isolation module's own URL to the built
+  file of the same package: `dist/node/extraction-isolation.mjs` (installed from npm) and
+  `src/node/extraction-isolation.ts` (workspace source) both map to
+  `dist/node/extraction-worker.mjs`. Any other module URL (the module bundled into a chunk of
+  another name) has no default: the extraction fails with `worker-unavailable` and nothing is
+  started. Next.js Turbopack keeps a bundled module's `import.meta.url` as its project-relative
+  source path, resolved at run time, so the mapping works for a workspace link too. The URL is
+  derived from a string at runtime: Turbopack copies a literal `new URL('./…', import.meta.url)`
+  as an asset whose imports do not resolve, and Next.js 16.1.3 panics on
+  `new Worker(new URL(…))`. Resolving through the export map or `import.meta.resolve` was not
+  chosen: in the workspace the export map points at `src`, and a bundler may rewrite or reject
+  `import.meta.resolve`.
+- Hosts. npm consumers keep `@yolk-sdk/extractors` and `xlsx` in `serverExternalPackages`; a
+  standalone Next.js 16 build of a consumer installed from the packed tarball traces the worker,
+  and the extraction, heap-limit, and timeout paths work from a copy of the standalone output.
+  `examples/next` bundles the workspace link, so it traces the worker file and SheetJS with
+  `outputFileTracingIncludes` (three files) and builds the package before `next build`. A
+  standalone build of the example, run from a copy outside the repository, passes the same smoke.
+- Cost: about 90 ms per extraction to start a worker and load the bundle (measured below). A
+  pool can come later.
 
 ### Residual risks
 
 - SheetJS still parses the worksheets and shared strings as uploaded (validated,
   hyperlink-stripped, CDATA-free), and unpdf, mammoth, and the PPTX reader parse their parts. No
   other super-linear path is known with the options used, but one found later runs before the
-  extractor's budgets. The worker limits are the backstop. They bound the V8 heap, stack, and
-  time, not memory outside the heap (Buffers), so the input and expanded-archive limits stay.
+  extractor's budgets. The worker's heap, stack, and time limits are the backstop for the V8 heap
+  only (see "What this guarantees" above).
+- With `isolation: 'none'`, nothing bounds that work. A number format of up to 255 tokens still
+  multiplies SheetJS's per-cell work and memory by up to about 255 there; in a worker the heap
+  limit stops it.
+- PDF.js decoded buffers have no separate cap; RSS can grow beyond the worker heap until the
+  host's memory limit.
 - The generated workbook and styles follow SheetJS 0.20.3's reading. A later SheetJS that reads
   more from these parts could change display text, not safety.
 - Sheet text comes from SheetJS; hyperlink annotations come from the extractor's parse of the
   same worksheet parts, mapped through the same generated sheet list.
-- `examples/next` links the package from the workspace, which Turbopack bundles, so its worker
-  runs from `packages/extractors/src`. Output file tracing misses the worker's 21 runtime
-  packages, so a Vercel deployment of the example fails closed (`worker-unavailable`) until a
-  follow-up adds a self-contained worker bundle or dist export conditions for workspace
-  packages. npm consumers are not affected.
 
 ## Hyperlinks
 
@@ -308,26 +364,27 @@ without the blow-up:
    it is built or CSV-scanned, so a long label over many empty cells costs constant time per cell.
 
 Measured with `node --max-old-space-size=1024` on the research files (`/tmp/xlsx-research`)
-through the built `dist` and the default layer (worker isolation). Times are for `extract` only
-and include about 140 ms to start the worker. RSS growth is measured around the call and
-includes the worker; peak process RSS stayed at 165–242 MB. The `r3-*` files are the round-3
-attacks; the plain-SheetJS column uses the extractor's read options on the original file.
+through the built `dist` and the default layer (worker isolation, the self-contained worker
+bundle). Times are for `extract` only and include about 90 ms to start the worker and load the
+bundle. RSS growth is measured around the call and includes the worker; peak process RSS stayed
+at 161–214 MB. The `r3-*` files are the round-3 attacks; the plain-SheetJS column uses the
+extractor's read options on the original file.
 
 | File                   | Plain SheetJS 0.20.3 `read`               | `FileExtractor` (package)                                    |
 | ---------------------- | ----------------------------------------- | ------------------------------------------------------------ |
-| `base.xlsx`            | links kept                                | 160 ms, +46 MB RSS, `acme.example <https://acme.example/>` … |
-| `column.xlsx`          | 920 ms, 313 MB RSS                        | 180 ms, +45 MB RSS, internal link omitted                    |
-| `block.xlsx`           | per-cell link expansion                   | 154 ms, +45 MB RSS, internal link omitted                    |
-| `fullsheet.xlsx`       | heap exhausted at 1 GB (crash)            | 154 ms, +46 MB RSS, internal link omitted                    |
-| `quadratic.xlsx`       | quadratic hyperlink scan                  | 199 ms, +41 MB RSS, links kept                               |
-| `ods-disguise.xlsx`    | ODS repeat expansion                      | 145 ms, rejected before SheetJS loads                        |
-| `ods-doubleslash.xlsx` | ODS through `META-INF//manifest.xml`      | 152 ms, rejected (`//` entry name)                           |
-| `bin-target.xlsx`      | XLSB `BrtHLink` expansion                 | 145 ms, rejected before SheetJS loads                        |
-| `lowercase-type.xlsx`  | XLSB through a lower-case `type`          | 131 ms, rejected before SheetJS loads                        |
-| `r3-definedname.xlsx`  | 300,000 `</definedName>`: > 60 s, killed  | 245 ms, +104 MB RSS, text extracted (no defined names)       |
-| `r3-numfmt.xlsx`       | 1 MB format × 2,000 cells: heap exhausted | 179 ms, +48 MB RSS, cells show General                       |
-| `r3-cdata.xlsx`        | 3 CDATA cells (2 KB file): 2.9 GB RSS     | 142 ms, rejected (CDATA)                                     |
-| `r3-sheets.xlsx`       | 2,000 hidden `<sheet>`s: heap exhausted   | 149 ms, rejected (sheet limit)                               |
+| `base.xlsx`            | links kept                                | 119 ms, +31 MB RSS, `acme.example <https://acme.example/>` … |
+| `column.xlsx`          | 920 ms, 313 MB RSS                        | 120 ms, +32 MB RSS, internal link omitted                    |
+| `block.xlsx`           | per-cell link expansion                   | 125 ms, +33 MB RSS, internal link omitted                    |
+| `fullsheet.xlsx`       | heap exhausted at 1 GB (crash)            | 133 ms, +32 MB RSS, internal link omitted                    |
+| `quadratic.xlsx`       | quadratic hyperlink scan                  | 160 ms, +33 MB RSS, links kept                               |
+| `ods-disguise.xlsx`    | ODS repeat expansion                      | 95 ms, rejected before SheetJS loads                         |
+| `ods-doubleslash.xlsx` | ODS through `META-INF//manifest.xml`      | 104 ms, rejected (`//` entry name)                           |
+| `bin-target.xlsx`      | XLSB `BrtHLink` expansion                 | 100 ms, rejected before SheetJS loads                        |
+| `lowercase-type.xlsx`  | XLSB through a lower-case `type`          | 92 ms, rejected before SheetJS loads                         |
+| `r3-definedname.xlsx`  | 300,000 `</definedName>`: > 60 s, killed  | 222 ms, +61 MB RSS, text extracted (no defined names)        |
+| `r3-numfmt.xlsx`       | 1 MB format × 2,000 cells: heap exhausted | 147 ms, +43 MB RSS, cells show General                       |
+| `r3-cdata.xlsx`        | 3 CDATA cells (2 KB file): 2.9 GB RSS     | 115 ms, rejected (CDATA)                                     |
+| `r3-sheets.xlsx`       | 2,000 hidden `<sheet>`s: heap exhausted   | 109 ms, rejected (sheet limit)                               |
 
 ## UTF-16 parts
 

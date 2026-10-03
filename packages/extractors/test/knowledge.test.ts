@@ -11,8 +11,8 @@ import type { LoadedKnowledgeSource } from '@yolk-sdk/knowledge/extraction'
 import { FileExtractionError, FileExtractor } from '../src/index.ts'
 import type { FileInput } from '../src/index.ts'
 import { FileKnowledgeExtractorLayer, makeFileKnowledgeExtractor } from '../src/knowledge.ts'
-import { FileExtractorLayer } from '../src/node/index.ts'
-import { encode, workbook, xlsxMediaType } from './fixtures.ts'
+import { makeFileExtractorLayer } from '../src/node/index.ts'
+import { encode, sourceWorkerUrl, workbook, xlsxMediaType } from './fixtures.ts'
 
 const extract = (source: LoadedKnowledgeSource) =>
   Effect.gen(function* () {
@@ -21,8 +21,11 @@ const extract = (source: LoadedKnowledgeSource) =>
     return yield* extractor.extract(source)
   })
 
+/** The real Node extractor, its worker run from source. */
+const NodeExtractorLayer = makeFileExtractorLayer({ isolation: { workerUrl: sourceWorkerUrl } })
+
 const withNodeExtractor = <A, E>(effect: Effect.Effect<A, E, KnowledgeExtractor>) =>
-  effect.pipe(Effect.provide(FileKnowledgeExtractorLayer.pipe(Layer.provide(FileExtractorLayer))))
+  effect.pipe(Effect.provide(FileKnowledgeExtractorLayer.pipe(Layer.provide(NodeExtractorLayer))))
 
 /** A fake `FileExtractor` that records its inputs. */
 const recordingExtractor = (inputs: Array<FileInput>) =>
