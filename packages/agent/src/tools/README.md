@@ -15,7 +15,8 @@ Generic host tool registration and resolution.
   absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
 - `withToolArgumentsErrorHint` for actionable unknown-key validation messages.
 - The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
-  reference store, so re-executed write calls never run twice.
+  reference store, so a re-executed ledgered call (by default writes and `subagent`) never runs
+  twice under the same ledger key.
 
 ## Use it when
 
@@ -91,7 +92,8 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
 
 Hosts that re-execute steps (Vercel Workflow's queue is at-least-once, sequentially and
 concurrently) pass a durable ledger to `resolveTools`. Ledgered calls (default: every non-`read`
-tool, top-level and nested code mode calls alike) run at most once per key:
+tool plus the built-in `subagent` tool, top-level and nested code mode calls alike) run at most
+once per key:
 
 | Claim       | Meaning                                        | What happens                                                     |
 | ----------- | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -125,8 +127,12 @@ const resolveStepTools = Effect.gen(function* () {
 })
 ```
 
-- Persist entries with `Schema.toCodecJson(ToolLedgerEntry)`. Stored results are bounded
-  (`maxResultBytes`, default 1 MiB) and wire-safe; the live call still returns the full result.
+- Persist entries with `Schema.toCodecJson(ToolLedgerEntry)`, or every claim field: `args` (8 KiB
+  audit preview), `argsTruncated`, and `argsDigest` (SHA-256 of the full arguments' canonical
+  JSON). A different tool name or `argsDigest` under the same key is a model-visible conflict;
+  never compare the preview. Stored results are bounded (`maxResultBytes`, default 1 MiB, measured
+  on the serialized JSON; media, then `nestedCalls`, then `structuredContent` are reduced first)
+  and wire-safe; the live call still returns the full result.
 - Keys are `call.id` and `<parentCallId>/<seq>` for nested calls. Scope the store so keys cannot
   collide: one run, plus the turn when a provider can reuse call ids across turns.
 - Executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions; forward it to
@@ -134,8 +140,16 @@ const resolveStepTools = Effect.gen(function* () {
 - One clock per store: `claim` and `heartbeat` get the lease length `leaseMs` (stores on their own
   clock, such as a database `now()`, which avoids skew between instances) and the caller's
   `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
-- Override the policy with `isLedgered`, and the timing with `leaseMs` (30 s), `heartbeatIntervalMs`
-  (a third of the lease, at most half), `pollIntervalMs` (1 s), `maxWaitMs` (150 s), and `deadline`.
+- Override the policy with `isLedgered` (add your own delegation tools, for example
+  `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing
+  with `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin,
+  not a guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s, store polls included), and
+  `deadline` (non-finite values ignored). A failed poll fails closed.
+- Each `complete` attempt is bounded (`toolLedgerCompleteTimeoutMs`, 5 s; three attempts). A result
+  or `ToolError` the call returned is recorded before an interruption takes effect; an outcome that
+  cannot be recorded leaves the entry to read as abandoned.
+- `abandonedResult({ call, entry, nested })` gets `nested: undefined` when `list` fails: report the
+  nested calls as unavailable (they may have been applied), never as an empty list.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered
   call with `fresh`, `completed`, `in_flight_wait` (waited, then replayed), `in_flight_timeout`,
   `abandoned`, or `conflict`, before the call runs or returns; `waitedMs` is set when it waited.

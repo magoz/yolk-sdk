@@ -55,8 +55,8 @@ const program = Effect.gen(function* () {
 - Scripts call tools as `await tools.<id>(args)`. Every nested call runs through the resolution's
   normal execute path (input decoding, enablement, registration wrappers, same host context), gets
   the id `<toolCallId>/<seq>`, and is recorded on the result's `nestedCalls` with status, duration,
-  truncated error, and usage. The record keeps up to `maxNestedCalls` calls (argument byte budgets
-  still apply) and per-status `counts` over every call. Nested results never reach the model; only
+  truncated error, and usage. The record keeps up to `maxNestedCalls` calls, at most 4096
+  (`nestedToolCallMaxRecordedCalls`; argument byte budgets still apply), and per-status `counts` over every call. Nested results never reach the model; only
   the script output and return value do.
 - A call resolves to `structuredContent` for tools with an output schema and to the text content
   otherwise; error results, `beforeNestedCall` failures, and calls past `maxNestedCalls` reject
@@ -97,7 +97,7 @@ const program = Effect.gen(function* () {
 - `afterNestedCall({ call, outcome, durationMs, context, result? })` runs after each admitted
   nested call with `success`, `failure` (error result or unexpected failure), or `interrupted`
   (cancelled, for example still running when the script ended). Calls rejected before running are
-  not reported.
+  not reported. A failing hook is logged and never changes the call's result.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
   `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.
@@ -117,22 +117,25 @@ Hosts that re-execute steps (Vercel Workflow's queue is at-least-once) pass a du
   `{ ok: false, interrupted: true, interruptedCalls: { calls, complete, counts } }`, where each call
   is `{ key, toolName, args, status: 'applied' | 'failed' | 'unknown' }` (`args` compact JSON cut
   with a trailing `…`), bounded like `nestedCalls` (`maxNestedCalls` calls, 8 KiB of arguments per
-  call, 32 KiB in total; `complete: false` when cut), and `counts` covers every entry. Types:
-  `CodeModeInterruptedCalls`, `CodeModeInterruptedCall`, `CodeModeInterruptedCallStatus`.
+  call, 32 KiB in total; `complete: false` when cut, here or by the ledger), and `counts` covers
+  every entry. Types: `CodeModeInterruptedCalls`, `CodeModeInterruptedCall`,
+  `CodeModeInterruptedCallStatus`. When the ledger cannot list the nested calls, the result stays
+  interrupted, says they may already have been applied, and sets
+  `interruptedCallsUnavailable: true` instead of `interruptedCalls`.
 
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive a stable `idempotencyKey`.
-Read-only nested calls bypass the ledger by default and are not listed.
+Calls the ledger policy skips (by default read-only calls) are not listed.
 
 ## Limits
 
-| Limit              | Default | Notes                                                     |
-| ------------------ | ------- | --------------------------------------------------------- |
-| `timeoutMs`        | 120000  | Clamped to `deadline(context)` minus 5 s, never below 1 s |
-| `memoryLimitBytes` | 64 MiB  | QuickJS heap cap                                          |
-| `maxNestedCalls`   | 256     | Further calls reject; also sizes the `nestedCalls` record |
-| `maxOutputChars`   | 40000   | Head-and-tail cut with an omission marker                 |
-| `maxImages`        | 8       | Later images are dropped with a note                      |
-| `maxImageBytes`    | 4 MiB   | Base64 characters of images in total                      |
+| Limit              | Default | Notes                                                                    |
+| ------------------ | ------- | ------------------------------------------------------------------------ |
+| `timeoutMs`        | 120000  | Clamped to `deadline(context)` minus 5 s, never below 1 s                |
+| `memoryLimitBytes` | 64 MiB  | QuickJS heap cap                                                         |
+| `maxNestedCalls`   | 256     | Further calls reject; also sizes the `nestedCalls` record (at most 4096) |
+| `maxOutputChars`   | 40000   | Head-and-tail cut with an omission marker                                |
+| `maxImages`        | 8       | Later images are dropped with a note                                     |
+| `maxImageBytes`    | 4 MiB   | Base64 characters of images in total                                     |
 
 ## Classifier tool
 

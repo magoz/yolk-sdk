@@ -50,16 +50,21 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   nested entries as applied, failed, or unknown, bounded by `maxOutputChars`, with
   `structuredContent.codemode` `{ ok: false, interrupted: true, interruptedCalls }`
   (`CodeModeInterruptedCalls` in `store.ts`: `{ key, toolName, args, status }` per call, plain JSON,
-  bounded like `nestedCalls` by `maxNestedCalls` and the protocol's 8/32 KiB argument budgets, with
-  `complete` and per-status `counts` over every entry). Never re-run a script on re-execution;
-  deterministic replay is phase 2 (ADR 0002).
+  bounded like `nestedCalls` by `maxNestedCalls` and the protocol's 8/32 KiB argument budgets via
+  `boundNestedToolCallArgs`, with `complete` (also false for `ToolLedgerEntry.argsTruncated`) and
+  per-status `counts` over every entry). When the ledger's `list` fails (`nested` is `undefined`),
+  keep the interrupted result, say the nested calls may have been applied, and set
+  `interruptedCallsUnavailable: true` instead; never an empty listing. Never re-run a script on
+  re-execution; deterministic replay is phase 2 (ADR 0002). Use the protocol's bounded-text
+  helpers (`truncateCodePoints`, `boundNestedToolCallArgs`), never local copies.
 - Record every executed nested call with `recordNestedToolCall` over
   `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
   dropped entries); calls still running when the script ends are interrupted (`FiberSet.clear`) and
   recorded `cancelled`. Never store nested results.
 - `afterNestedCall` wraps only `nested.execute` (not `beforeNestedCall` rejections) in `onExit`:
   outcome `success` (no `isError`), `failure` (error result or non-interrupt failure), or
-  `interrupted` (interrupts only); the script sees the call settle after the hook.
+  `interrupted` (interrupts only); the script sees the call settle after the hook. A hook failure
+  (defects included) is logged and never changes the call's result or record.
 - Description: intro, globals one line each, nested tools by namespace (with the module
   `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
   `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within
@@ -139,8 +144,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
   records.
 - `test/ledger.test.ts`: the tool ledger through code mode (crash then re-execution returns the
-  interrupted listing and `interruptedCalls` and runs nothing, `interruptedCalls` bounds, completed
-  replay, concurrent duplicates wait), records past
+  interrupted listing and `interruptedCalls` and runs nothing, a failing `list`, arguments the
+  ledger already cut, `interruptedCalls` bounds, long-script conflicts, completed replay,
+  concurrent duplicates wait), records past
   256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

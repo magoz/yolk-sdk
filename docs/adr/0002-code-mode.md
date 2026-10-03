@@ -40,7 +40,7 @@ world only through the host's resolved tools.
 | Exposure         | New `callableBy` (`all` / `model` / `codemode`) and, for `codemode`, `discovery` (`listed` / `search`) on tools. |
 | Fail-closed rule | Approval, input, interaction, and background tools never run from code mode, whatever their `callableBy` says.   |
 | Approvals        | Not supported inside scripts in phase 1. Phase 2 uses abort-and-replay over a recorded nested-call log.          |
-| Re-execution     | A host-supplied durable tool ledger runs each write call (top-level and nested) at most once per key.            |
+| Re-execution     | A host-supplied durable tool ledger runs each ledgered call (top-level and nested) at most once per key.         |
 
 ## Engine
 
@@ -263,7 +263,8 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   atomically inserts a claimed entry (`Fresh`) or classifies the existing one as `Completed`,
   `InFlight` (live lease), or `Abandoned` (lease expired, no outcome). Claims are never taken
   over, so heartbeats and completion need no fencing. `ToolLedgerEntry` is the persisted Schema:
-  key, parent key, tool name, compact arguments (8 KiB), claim and lease times, and the outcome
+  key, parent key, tool name, an 8 KiB compact-argument preview with `argsTruncated`, the
+  `argsDigest` (SHA-256 of the full arguments' canonical JSON), claim and lease times, and the outcome
   (`Succeeded` with a bounded, wire-safe `ToolResult`, or `Failed` with the `ToolError` fields;
   never causes or provider bodies). `makeInMemoryToolLedgerStore` is the reference implementation.
 - **Clocks**: `claim` and `heartbeat` receive the lease length `leaseMs` and the caller's `Clock`
@@ -276,14 +277,20 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   behavior. It applies inside the registry where top-level calls and nested calls share one
   registration path, so neither can bypass it. Interaction and input tools keep their own HITL
   receipts. Keys are `call.id` and, for nested calls, `<parentCallId>/<seq>` with the parent as
-  `parentKey`. Default policy: every non-`read` tool; hosts override it with `isLedgered`.
+  `parentKey`. Default policy: every non-`read` tool plus the built-in `subagent` tool (`read`,
+  but its child run would repeat its writes and its child calls get fresh ids); hosts override it
+  with `isLedgered` and must add their own delegation tools there.
 - **Semantics**: `Fresh` runs the call, heartbeats the lease, and completes with the outcome.
   `Completed` returns the stored result (or fails with the stored `ToolError`) without executing.
   `InFlight` waits (Effect `Clock`) until completed or abandoned, or until `maxWaitMs`/`deadline`,
-  then returns a model-visible timeout result; it never executes. `Abandoned` never re-executes:
-  it returns a model-visible result saying the call may already have been applied and must be
-  verified. Claim failures fail closed (nothing runs); heartbeat and completion failures are
-  logged and leave the entry claimed (later read as abandoned), never masking the live result.
+  then returns a model-visible timeout result; it never executes, and each poll is bounded by the
+  remaining wait. `Abandoned` never re-executes: it returns a model-visible result saying the call
+  may already have been applied and must be verified. A different tool name or `argsDigest` under
+  the same key is a model-visible conflict (never decided by the bounded preview). Claim failures,
+  polls included, fail closed (nothing runs); heartbeat and completion failures (each `complete`
+  attempt bounded to 5 s) are logged and leave the entry claimed (later read as abandoned), never
+  masking the live result. Every returned result or `ToolError` is recorded before an
+  interruption takes effect; interruption and defects never record an outcome.
 - **Observability**: `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called
   once per ledgered call with `fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`,
   `abandoned`, or `conflict`, so hosts can log and count replays. It never affects execution:
@@ -295,9 +302,11 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   never runs its script again. `Completed` returns the stored result; `InFlight` waits;
   `Abandoned` returns an interrupted result listing that script's ledgered nested calls as
   applied, failed, or unknown (claimed, no result), stating that they were not undone; hosts get
-  the same entries in `structuredContent.codemode.interruptedCalls` (`{ calls: [{ key, toolName,
-args, status }], complete, counts }`, bounded like `nestedCalls`). Nested
-  write calls are ledgered under `<toolCallId>/<seq>`. Deterministic script replay is not part of
+  the same entries in `structuredContent.codemode.interruptedCalls`
+  (`{ calls: [{ key, toolName, args, status }], complete, counts }`, bounded like `nestedCalls`).
+  When `list` fails the result stays interrupted and says the nested calls may have been applied
+  (`interruptedCallsUnavailable`), never an empty listing. Nested write calls are ledgered under
+  `<toolCallId>/<seq>`. Deterministic script replay is not part of
   this; it stays with phase 2.
 
 ## Phase 2: approvals inside scripts
@@ -353,11 +362,12 @@ independent calls.
 
 1. **Tool contract** (`@yolk-sdk/agent`): `output` schemas, connector output pass-through,
    `callableBy`/`discovery`, the fail-closed rule, nested tool access, `nestedCalls` and usage on
-   `ToolResult`, and provider tool lists that omit `codemode`-only tools. Live nested progress
-   events follow later.
+   `ToolResult`, provider tool lists that omit `codemode`-only tools, and the durable tool ledger
+   (`@yolk-sdk/agent/tools`). Live nested progress events follow later.
 2. **`@yolk-sdk/codemode`**: executor interface, pi executor under `/node`, `makeCodeModeTool`,
-   catalog and discovery, type stripping, bounding, store persistence, the durable tool ledger,
-   limits, and `makeClassifierTool` once [Classifier models](0003-classifier-models.md) lands.
+   catalog and discovery, type stripping, bounding, store persistence, the ledgered `codemode` call
+   and its interrupted results, limits, and `makeClassifierTool` once
+   [Classifier models](0003-classifier-models.md) lands.
 3. **Reference integration**: `examples/next` dogfood behind a flag, Workflow placement, the Next
    config line, docs pages, package exports, smoke imports, and a changeset.
 4. **Measurement in 10x** before stable release: inbox triage, Fortnox follow-up, and Dropbox or
@@ -377,7 +387,8 @@ Tests must demonstrate:
 - Output, nested-call records, and store values respect their bounds; failed scripts keep partial
   output and report calls made.
 - Store writes persist only for successful scripts and replay correctly from transcripts.
-- With a ledger, a re-executed write (direct or nested) never runs twice: completed calls return
-  their stored result, concurrent duplicates wait, abandoned calls and scripts never re-run, and
-  read tools bypass the ledger.
+- With a ledger, a re-executed ledgered call (direct or nested; by default writes and `subagent`)
+  never runs twice under the same key: completed calls return their stored result, concurrent
+  duplicates wait, abandoned calls and scripts never re-run, and other read tools bypass the
+  ledger.
 - The pi executor loads inside a deployed Next workflow step with the documented config.

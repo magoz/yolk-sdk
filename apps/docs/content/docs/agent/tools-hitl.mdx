@@ -99,9 +99,10 @@ The SDK records access metadata. Your host enforces approval policy.
 
 Durable hosts re-execute steps: Vercel Workflow's queue is at-least-once, so a tool-batch step
 runs again after a crash and sometimes concurrently with a first execution that is still running.
-Pass a durable ledger when you resolve tools and every non-`read` call, including the nested calls
-of a [code mode](../integrations/code-mode#survive-step-re-execution) script, runs at most once per
-key:
+Pass a durable ledger when you resolve tools and every ledgered call runs at most once per key. By
+default that is every non-`read` call, including the nested calls of a
+[code mode](../integrations/code-mode#survive-step-re-execution) script, plus the built-in
+`subagent` tool (a `read` tool whose child run could otherwise repeat its writes):
 
 ```ts
 import { Effect } from 'effect'
@@ -130,24 +131,32 @@ const resolveStepTools = Effect.gen(function* () {
 })
 ```
 
-| Claim       | When                                           | Result                                                         |
-| ----------- | ---------------------------------------------- | -------------------------------------------------------------- |
-| `Fresh`     | first execution of the key                     | runs, heartbeats its lease, stores the outcome                 |
-| `Completed` | an outcome is stored                           | returns the stored result (or the stored `ToolError`), no run  |
-| `InFlight`  | another execution holds a live lease           | waits for it up to `maxWaitMs`/`deadline`; never runs          |
-| `Abandoned` | the lease expired without an outcome (a crash) | never runs; tells the model it may have been applied to verify |
+| Claim       | When                                           | Result                                                                        |
+| ----------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `Fresh`     | first execution of the key                     | runs, heartbeats its lease, stores the outcome                                |
+| `Completed` | an outcome is stored                           | returns the stored result (or the stored `ToolError`), no run                 |
+| `InFlight`  | another execution holds a live lease           | waits for it up to `maxWaitMs`/`deadline`; never runs                         |
+| `Abandoned` | the lease expired without an outcome (a crash) | never runs; tells the model it may already have been applied and to verify it |
 
 - Keys are `call.id`, and `<parentCallId>/<seq>` for nested calls. Scope the store to one run (add
   the turn if your provider can reuse call ids across turns).
-- Persist `ToolLedgerEntry` with `Schema.toCodecJson(ToolLedgerEntry)`. Stored results are bounded
-  (`maxResultBytes`, default 1 MiB) and wire-safe; the live call still returns the full result.
+- Persist `ToolLedgerEntry` with `Schema.toCodecJson(ToolLedgerEntry)`, or store every claim
+  field: `args` is an 8 KiB audit preview (`argsTruncated` says it was cut) and `argsDigest` is the
+  SHA-256 of the full arguments' canonical JSON. A different tool name or `argsDigest` under the
+  same key is a model-visible conflict; never compare the preview. Stored results are bounded
+  (`maxResultBytes`, default 1 MiB, measured on the serialized JSON) and wire-safe; the live call
+  still returns the full result.
 - Tool executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions. Pass it
   to external APIs that deduplicate, which covers a crash between their commit and `complete`.
 - Pick one clock per store. `claim` and `heartbeat` receive both `leaseMs` (for stores that use
   their own clock, such as a database `now()`) and `nowMs`/`leaseExpiresAtMs` from the caller's
   `Clock` (for clock-agnostic stores, such as the in-memory one). Database time avoids clock skew
   between step instances.
-- Change which calls are ledgered with `isLedgered`. Without `ledger`, execution is unchanged.
+- Change which calls are ledgered with `isLedgered`. Include your own delegation tools, for
+  example `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`. Without
+  `ledger`, execution is unchanged.
+- Waits, store polls included, end at `maxWaitMs` or `deadline`; a failed poll fails closed. Each
+  `complete` attempt is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` reports each ledgered
   call's decision (`fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`, `abandoned`,
   `conflict`) for logs and metrics, for example to count replays. It never affects execution:

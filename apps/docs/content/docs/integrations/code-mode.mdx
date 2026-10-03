@@ -242,7 +242,7 @@ itself ledgered, so a re-executed call never runs its script again:
           args: string
           status: 'applied' | 'failed' | 'unknown'
         }>
-        complete: boolean // false when calls were dropped or arguments cut
+        complete: boolean // false when calls were dropped or arguments cut (here or by the ledger)
         counts: { applied: number; failed: number; unknown: number } // every entry, dropped too
       }
     }
@@ -252,10 +252,12 @@ itself ledgered, so a re-executed call never runs its script again:
   It is plain JSON (`CodeModeStructuredContent`, `CodeModeInterruptedCalls`) bounded like
   `nestedCalls`: at most `maxNestedCalls` calls, 8 KiB of arguments per call, 32 KiB in total.
   `failed` means the call recorded a `ToolError` or an error result; `unknown` means it started
-  without a recorded result and may have been applied.
+  without a recorded result and may have been applied. When the ledger cannot list the nested
+  calls, the result stays interrupted, tells the model they may already have been applied, and
+  carries `interruptedCallsUnavailable: true` instead of `interruptedCalls`.
 
-Nested write calls are ledgered under `<toolCallId>/<seq>` and receive `idempotencyKey`; read-only
-nested calls bypass the ledger by default and are not listed. Scripts are never replayed.
+Nested write calls are ledgered under `<toolCallId>/<seq>` and receive `idempotencyKey`. Calls the
+ledger policy skips (by default read-only calls) are not listed. Scripts are never replayed.
 
 ## Make tools ready for code mode
 
@@ -347,14 +349,14 @@ message.
 
 ## Limits
 
-| Limit              | Default | Notes                                                                  |
-| ------------------ | ------- | ---------------------------------------------------------------------- |
-| `timeoutMs`        | 120000  | includes nested calls and queue time; clamped by `deadline`            |
-| `memoryLimitBytes` | 64 MiB  | VM heap cap; allocations beyond it fail inside the script              |
-| `maxNestedCalls`   | 256     | later calls reject and do not run; also sizes the `nestedCalls` record |
-| `maxOutputChars`   | 40000   | the result keeps the head and tail with an omission marker in between  |
-| `maxImages`        | 8       | later images are dropped with an omission note                         |
-| `maxImageBytes`    | 4 MiB   | base64 image data in total; an image beyond it is dropped with a note  |
+| Limit              | Default | Notes                                                                                 |
+| ------------------ | ------- | ------------------------------------------------------------------------------------- |
+| `timeoutMs`        | 120000  | includes nested calls and queue time; clamped by `deadline`                           |
+| `memoryLimitBytes` | 64 MiB  | VM heap cap; allocations beyond it fail inside the script                             |
+| `maxNestedCalls`   | 256     | later calls reject and do not run; also sizes the `nestedCalls` record (at most 4096) |
+| `maxOutputChars`   | 40000   | the result keeps the head and tail with an omission marker in between                 |
+| `maxImages`        | 8       | later images are dropped with an omission note                                        |
+| `maxImageBytes`    | 4 MiB   | base64 image data in total; an image beyond it is dropped with a note                 |
 
 Set them with `makeCodeModeTool({ limits: { ... } })`. The executor's `maxConcurrentExecutions`
 (default 4) caps concurrent scripts per executor; Fluid compute shares instances between requests.
@@ -378,7 +380,8 @@ and aborts the executor's signal.
     executor,
     // Fails with a message to reject the nested call; it is recorded as an error and never runs.
     beforeNestedCall: ({ call, context }) => assertRunActive(context, call), // host-owned
-    // Observes each admitted call: outcome 'success' | 'failure' | 'interrupted'.
+    // Observes each admitted call: outcome 'success' | 'failure' | 'interrupted'. A failing hook
+    // is logged and never changes the call's result.
     afterNestedCall: ({ call, outcome, durationMs, context }) =>
       auditNestedCall(context, call, outcome, durationMs) // host-owned
   })

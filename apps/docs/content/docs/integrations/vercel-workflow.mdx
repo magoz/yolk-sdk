@@ -48,6 +48,12 @@ still running, even with the default `noWorkflowStepRetry`. Supply a durable too
 to the Workflow run, where your step resolves tools:
 
 ```ts
+// Fragment from your tool-batch step module. `modules`, `context`, `makeRunToolLedger`,
+// `workflowRunId`, and `stepDeadlineMs` are host-owned.
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+
+// Inside the 'use step' function:
 const toolSet = await Effect.runPromise(
   resolveTools(modules, context, {
     ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
@@ -56,10 +62,12 @@ const toolSet = await Effect.runPromise(
 ```
 
 `makeRunToolLedger` is your `ToolLedgerStore` (for example Postgres); see
-[Ledger writes](../agent/tools-hitl#ledger-writes-for-re-executed-steps). Re-executed write calls and
-code mode scripts then return their stored result, wait for the running execution, or report that
-an abandoned call may already have been applied. They never run twice. The package itself never
-builds tool sets, so there is nothing to configure on `runVercelAgentWorkflow`.
+[Ledger writes](../agent/tools-hitl#ledger-writes-for-re-executed-steps). Ledgered calls (by
+default every non-`read` tool plus the built-in `subagent` tool, code mode scripts included) then
+return their stored result, wait for the running execution, or report that an abandoned call may
+already have been applied; they never run twice under the same ledger key. Include custom
+delegation tools with `isLedgered`. Read calls still re-run. The package itself never builds tool
+sets, so there is nothing to configure on `runVercelAgentWorkflow`.
 
 ## Durable stream rule
 

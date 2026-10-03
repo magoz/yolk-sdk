@@ -27,6 +27,8 @@ provider compatibility and tool execution validation are separate. Params/result
 | `providerToolDefs`, `isProviderToolDef`                                                                                                                                                                      | filter out codemode-only defs before sending tools to a provider                                   |
 | `NestedToolCalls`, `NestedToolCallRecord`, `NestedToolCallStatus`, `NestedToolCallCounts`, `recordNestedToolCall`, `nestedToolCallResultFields`, `makeNestedToolCallRecorder`, `emptyNestedToolCallRecorder` | bounded, non-model-visible nested call record for `ToolResult.nestedCalls`, with per-status counts |
 | `nestedToolCallMaxCalls`, `nestedToolCallMaxArgsBytes`, `nestedToolCallMaxTotalArgsBytes`, `nestedToolCallMaxErrorChars`                                                                                     | nested call record bounds (`nestedToolCallMaxCalls` is the default `maxCalls`)                     |
+| `nestedToolCallMaxRecordedCalls`, `nestedToolCallRecordLimit`, `boundNestedToolCallArgs`, `BoundedNestedToolCallArgs`                                                                                        | record size ceiling (4096), `maxCalls` clamping, and the shared per-call/total argument budgets    |
+| `utf8ByteLength`, `truncateUtf8`, `truncateCodePoints`, `compactToolArguments`, `truncationMarker`                                                                                                           | bounded-text helpers shared by nested-call records, the tool ledger, and code mode                 |
 | `ToolExecutionAccepted`                                                                                                                                                                                      | background admission event                                                                         |
 | `ToolApprovalRequest`, `ToolApprovalResponse`                                                                                                                                                                | approval HITL                                                                                      |
 | `QuestionRequest`, `QuestionResponse`                                                                                                                                                                        | question HITL                                                                                      |
@@ -210,13 +212,16 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 | `ToolLedgerStore`, `ToolLedgerOptions`, `ToolLedgerClaim`, `ToolLedgerClaimRequest`, `ToolLedgerHeartbeatRequest`, `ToolLedgerError`                      | host-implemented durable tool-call ledger (`resolveTools` `ledger` option) |
 | `ToolLedgerDecision`, `ToolLedgerDecisionEvent`                                                                                                           | `onLedgerDecision` observability events                                    |
 | `ToolLedgerEntry`, `ToolLedgerOutcome`, `ToolLedgerSucceeded`, `ToolLedgerFailed`, `ToolLedgerFailure`                                                    | persisted ledger entry Schemas                                             |
-| `makeInMemoryToolLedgerStore`, `classifyToolLedgerEntry`, `toolLedgerResult`, `toolLedgerArgs`, `sortToolLedgerEntries`                                   | reference store and helpers for host stores                                |
+| `makeInMemoryToolLedgerStore`, `classifyToolLedgerEntry`, `toolLedgerResult`, `toolLedgerArgs`, `ToolLedgerArgs`, `sortToolLedgerEntries`                 | reference store and helpers for host stores                                |
+| `toolLedgerCompleteTimeoutMs`                                                                                                                             | timeout of one `complete` attempt (5 s, three attempts)                    |
 | `toolIdempotencyKey`, `defaultToolLedgerPolicy`, `abandonedToolCallResult`, `ToolLedgerPolicyInput`, `ToolLedgerAbandonedInput`, `ToolLedgerErrorDetails` | idempotency keys, default policy, and ledger results                       |
 
 `makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`, `discovery`,
 `nestedToolAccess`, `describe`, and `abandonedResult` (the result of a ledgered call found
 abandoned). `resolveTools(modules, context, { ledger })` runs ledgered calls (default every non-`read`
-tool, top-level and nested) at most once per key and passes executors a stable `idempotencyKey`; see
+tool plus the built-in `subagent` tool, top-level and nested) at most once per key, detects
+conflicts by `argsDigest` (SHA-256 of the full arguments), and passes executors, subagent
+executors included, a stable `idempotencyKey`; see
 [Durable tool ledger](../agent/tools-hitl#ledger-writes-for-re-executed-steps). `ToolResult.nestedCalls` and `ToolResult.usage` never reach the
 model: `toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run
 usage. `ToolRegistryError` causes include `codemode_unsupported_tool` and `invalid_tool_exposure`.
@@ -298,6 +303,7 @@ type SubagentExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
   readonly params: SubagentToolParams
+  readonly idempotencyKey?: string // with a tool ledger: `<scope>:<call id>`
 }
 
 type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {

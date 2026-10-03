@@ -941,8 +941,10 @@ This package declares them; it does not run scripts.
 
 Steps that hosts re-execute (Vercel Workflow's queue is at-least-once) must not repeat writes.
 Pass `resolveTools(modules, context, { ledger: { store } })` with a host-implemented durable
-`ToolLedgerStore` scoped to the run: every non-`read` call, top-level or nested in code mode, runs
-at most once per key. Completed calls return their stored result, concurrent duplicates wait,
+`ToolLedgerStore` scoped to the run: every ledgered call (by default every non-`read` call plus the
+built-in `subagent` tool, top-level or nested in code mode) runs at most once per ledger key. Add
+custom delegation tools with `isLedgered`. A different call under the same key (tool name or a
+SHA-256 `argsDigest` of the full arguments) is a conflict, never a replay. Completed calls return their stored result, concurrent duplicates wait,
 and calls abandoned by a crash are never re-run (the model is told to verify). Executors receive a
 stable `idempotencyKey`. Stores get the lease length (`leaseMs`) so they can use database time,
 and `onLedgerDecision` reports each call's decision (`fresh`, `completed`, `in_flight_wait`, ...)
