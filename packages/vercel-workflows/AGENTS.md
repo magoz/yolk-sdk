@@ -46,6 +46,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
 - Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.
+- Steps are still at-least-once (queue redelivery re-executes a step, also concurrently with a running first execution). Document that hosts must supply a durable tool ledger (`resolveTools(..., { ledger })` from `@yolk-sdk/agent/tools`) in their tool-batch steps; this package never builds tool sets or imports agent protocol, so it carries no ledger wiring.
 - `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `AwaitInputFailed`, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
 - Destructure callback config before invoking workflow steps/hooks; hook suspension may serialize functions otherwise.
 - Test observable runtime contract, not Vercel SDK implementation details.

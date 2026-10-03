@@ -17,6 +17,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import {
   formatSubagentResult,
+  makeInMemoryToolLedgerStore,
   makeNonRecursiveSubagentToolModule,
   makeSubagentToolResult,
   makeSubagentToolModule,
@@ -49,6 +50,13 @@ const reasoningEfforts: ReadonlyArray<SubagentReasoningEffortDefinition> = [
   { value: 'low', description: 'Use for straightforward work.' },
   { value: 'high', description: 'Use for difficult reasoning.' }
 ]
+
+const subagentCall = (id: string) =>
+  ToolCall.make({
+    id,
+    name: subagentToolName,
+    params: { description: 'Find auth', prompt: 'Explore auth flow', subagent_type: 'explore' }
+  })
 
 describe('subagent tool', () => {
   it.effect('resolves subagent tool with subagent metadata', () =>
@@ -213,6 +221,67 @@ describe('subagent tool', () => {
       expect(result.content).toBe(
         '<subagent_result>\nsession_1:explore:Find auth:Explore auth flow:fast-model:low\n</subagent_result>'
       )
+    })
+  )
+
+  it.effect('forwards the ledger idempotency key to the host executor', () =>
+    Effect.gen(function* () {
+      const keys: Array<string | undefined> = []
+
+      const toolSet = yield* resolveTools(
+        [
+          makeSubagentToolModule<TestContext>({
+            subagents,
+            execute: ({ call, idempotencyKey }) =>
+              Effect.sync(() => {
+                keys.push(idempotencyKey)
+
+                return ToolResult.make({ toolCallId: call.id, content: 'done' })
+              })
+          })
+        ],
+        { sessionId: 'session_1' },
+        { ledger: { store: makeInMemoryToolLedgerStore({ scope: 'wrun_7' }) } }
+      )
+
+      yield* toolSet.execute(subagentCall('call_1'))
+
+      expect(keys).toEqual(['wrun_7:call_1'])
+    })
+  )
+
+  it.effect('ledgers subagent calls by default, so a re-executed call never runs again', () =>
+    Effect.gen(function* () {
+      let runs = 0
+      const store = makeInMemoryToolLedgerStore()
+
+      const subagentModule = makeSubagentToolModule<TestContext>({
+        subagents,
+        execute: ({ call }) =>
+          Effect.sync(() => {
+            runs++
+
+            return ToolResult.make({ toolCallId: call.id, content: `child run ${runs}` })
+          })
+      })
+
+      // One resolution per step execution, as a host re-executing a step would do.
+      const execute = Effect.gen(function* () {
+        const toolSet = yield* resolveTools(
+          [subagentModule],
+          { sessionId: 'session_1' },
+          { ledger: { store } }
+        )
+
+        return yield* toolSet.execute(subagentCall('call_1'))
+      })
+
+      const first = yield* execute
+      const second = yield* execute
+
+      expect(runs).toBe(1)
+      expect(second).toEqual(first)
+      expect((yield* store.entries).map(entry => entry.toolName)).toEqual([subagentToolName])
     })
   )
 

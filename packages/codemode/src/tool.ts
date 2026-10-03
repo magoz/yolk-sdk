@@ -14,9 +14,13 @@ import {
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
-  emptyNestedToolCallRecorder,
+  boundNestedToolCallArgs,
+  makeNestedToolCallRecorder,
+  nestedToolCallMaxErrorChars,
+  nestedToolCallRecordLimit,
   nestedToolCallResultFields,
   recordNestedToolCall,
+  truncateCodePoints,
   contentPartText,
   ToolCall,
   ToolResult,
@@ -29,6 +33,8 @@ import {
   makeTool,
   type NestedToolExecutor,
   type ToolExecutionInput,
+  type ToolLedgerAbandonedInput,
+  type ToolLedgerEntry,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
@@ -47,13 +53,19 @@ import type {
   CodeModeStore
 } from './executor.ts'
 import {
+  boundCodeModeSegments,
   codeModeResultSegments,
   codeModeSegmentsContent,
   defaultCodeModeMaxImageBytes,
   defaultCodeModeMaxImages
 } from './output.ts'
 import { searchCodeModeTools } from './search.ts'
-import type { CodeModeStructuredContent } from './store.ts'
+import type {
+  CodeModeInterruptedCall,
+  CodeModeInterruptedCalls,
+  CodeModeInterruptedCallStatus,
+  CodeModeStructuredContent
+} from './store.ts'
 
 /** Default name of the code mode tool. */
 export const codeModeToolName = 'codemode'
@@ -64,7 +76,10 @@ export type CodeModeLimits = {
   readonly timeoutMs?: number
   /** VM heap cap. Default 64 MiB. */
   readonly memoryLimitBytes?: number
-  /** Nested tool calls per script; further calls reject with an Error. Default 256. */
+  /** Nested tool calls per script; further calls reject with an Error. Default 256. The
+   * `nestedCalls` record keeps up to this many calls, at most `nestedToolCallMaxRecordedCalls`
+   * (4096) whatever the limit (argument byte budgets still apply).
+   */
   readonly maxNestedCalls?: number
   /** Model-visible result characters, cut head and tail with an omission marker. Default 40000. */
   readonly maxOutputChars?: number
@@ -119,6 +134,27 @@ export type MakeCodeModeToolOptions<Context> = {
     readonly call: ToolCall
     readonly context: Context
   }) => Effect.Effect<void, string>
+  /**
+   * Runs after each nested call that `beforeNestedCall` admitted, with its outcome: `success` (a
+   * result without `isError`), `failure` (an error result or an unexpected failure), or
+   * `interrupted` (cancelled, for example still running when the script ended). `durationMs`
+   * covers the execution; `result` is present when the call produced one. Calls rejected by
+   * `beforeNestedCall` or the call limit never ran and are not reported. The script waits for the
+   * hook before it sees the call settle. A failing hook (a failure, a defect, or a synchronous
+   * throw) is logged and never changes the call's result.
+   */
+  readonly afterNestedCall?: (input: CodeModeAfterNestedCallInput<Context>) => Effect.Effect<void>
+}
+
+/** Outcome of a nested call for `afterNestedCall`. */
+export type CodeModeNestedCallOutcome = 'success' | 'failure' | 'interrupted'
+
+export type CodeModeAfterNestedCallInput<Context> = {
+  readonly call: ToolCall
+  readonly outcome: CodeModeNestedCallOutcome
+  readonly durationMs: number
+  readonly context: Context
+  readonly result?: ToolResult
 }
 
 const CodeModeParams = Schema.Struct({
@@ -200,6 +236,15 @@ const recordedOutcome = (exit: Exit.Exit<ToolResult>, durationMs: number): CallO
 
   return outcome
 }
+
+const hookOutcome = (exit: Exit.Exit<ToolResult>): CodeModeNestedCallOutcome =>
+  Exit.isSuccess(exit)
+    ? exit.value.isError === true
+      ? 'failure'
+      : 'success'
+    : Cause.hasInterruptsOnly(exit.cause)
+      ? 'interrupted'
+      : 'failure'
 
 /** What `describeNamespace(name)` resolves to. */
 type CodeModeNamespaceDescription = {
@@ -341,10 +386,57 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
               records.push(record)
 
               const nestedCall = ToolCall.make({ id: record.id, name: tool.name, params })
+              const afterNestedCall = options.afterNestedCall
+
+              const run =
+                afterNestedCall === undefined
+                  ? nested.execute(nestedCall)
+                  : Effect.gen(function* () {
+                      const started = yield* Clock.currentTimeMillis
+
+                      // Host observability never changes the call: a hook failure, defects and
+                      // synchronous throws included, is only logged.
+                      const afterNestedCallSafely = (
+                        hookInput: CodeModeAfterNestedCallInput<Context>
+                      ) =>
+                        Effect.suspend(() => afterNestedCall(hookInput)).pipe(
+                          Effect.exit,
+                          Effect.flatMap(hookExit =>
+                            Exit.isSuccess(hookExit)
+                              ? Effect.void
+                              : Effect.logWarning(
+                                  `Code mode afterNestedCall failed for ${nestedCall.id}; ignored: ${Cause.pretty(hookExit.cause)}`
+                                )
+                          )
+                        )
+
+                      return yield* nested.execute(nestedCall).pipe(
+                        Effect.onExit(exit =>
+                          Effect.flatMap(Clock.currentTimeMillis, finished =>
+                            afterNestedCallSafely(
+                              Exit.isSuccess(exit)
+                                ? {
+                                    call: nestedCall,
+                                    outcome: hookOutcome(exit),
+                                    durationMs: finished - started,
+                                    context: input.context,
+                                    result: exit.value
+                                  }
+                                : {
+                                    call: nestedCall,
+                                    outcome: hookOutcome(exit),
+                                    durationMs: finished - started,
+                                    context: input.context
+                                  }
+                            )
+                          )
+                        )
+                      )
+                    })
 
               const admitted =
                 options.beforeNestedCall === undefined
-                  ? nested.execute(nestedCall)
+                  ? run
                   : options.beforeNestedCall({ call: nestedCall, context: input.context }).pipe(
                       Effect.matchEffect({
                         onFailure: message =>
@@ -355,7 +447,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                               isError: true
                             })
                           ),
-                        onSuccess: () => nested.execute(nestedCall)
+                        onSuccess: () => run
                       })
                     )
 
@@ -455,7 +547,11 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             ...(record.outcome ?? { status: 'cancelled' })
           }))
 
-          const recorder = recorded.reduce(recordNestedToolCall, emptyNestedToolCallRecorder)
+          const recorder = recorded.reduce(
+            recordNestedToolCall,
+            makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })
+          )
+
           const { nestedCalls, usage } = nestedToolCallResultFields(recorder)
 
           const content = codeModeSegmentsContent(
@@ -506,6 +602,119 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
     )
   })
 
+const argsPreviewChars = 200
+
+const interruptedCallStatus = (entry: ToolLedgerEntry): CodeModeInterruptedCallStatus => {
+  const outcome = entry.outcome
+
+  if (outcome === undefined) return 'unknown'
+
+  if (Predicate.isTagged(outcome, 'Failed')) return 'failed'
+
+  return outcome.result.isError === true ? 'failed' : 'applied'
+}
+
+const nestedEntryState = (entry: ToolLedgerEntry) => {
+  const outcome = entry.outcome
+
+  if (outcome === undefined) {
+    return 'unknown: it started but never recorded a result, so it may have been applied'
+  }
+
+  if (Predicate.isTagged(outcome, 'Failed'))
+    return `completed with an error: ${truncateCodePoints(outcome.error.message, nestedToolCallMaxErrorChars)}`
+
+  return outcome.result.isError === true ? 'completed with an error result' : 'applied'
+}
+
+/** The bounded, wire-safe `interruptedCalls` of an abandoned execution's nested ledger entries:
+ * the `nestedCalls` record bounds (`maxCalls`, 8 KiB of arguments per call, 32 KiB in total).
+ */
+const interruptedCalls = (
+  nested: ReadonlyArray<ToolLedgerEntry>,
+  maxCalls: number
+): CodeModeInterruptedCalls => {
+  const counts = { applied: 0, failed: 0, unknown: 0 }
+  const calls: Array<CodeModeInterruptedCall> = []
+  let argsBytes = 0
+  let complete = true
+
+  for (const entry of nested) {
+    const status = interruptedCallStatus(entry)
+
+    counts[status]++
+
+    if (calls.length >= maxCalls) {
+      complete = false
+      continue
+    }
+
+    const { args, bytes, truncated } = boundNestedToolCallArgs(entry.args, argsBytes)
+
+    // `argsTruncated`: the ledger already cut the arguments when the call was claimed.
+    if (truncated || entry.argsTruncated) complete = false
+
+    argsBytes += bytes
+    calls.push({ key: entry.key, toolName: entry.toolName, args, status })
+  }
+
+  return { calls, complete, counts }
+}
+
+/**
+ * The result of a code mode call whose earlier execution was abandoned (claimed, lease expired,
+ * no result recorded). The script never runs again: the result lists that execution's ledgered
+ * nested calls as applied, failed, or unknown, and says they were not undone. The text is bounded
+ * by `maxOutputChars`; `structuredContent.codemode.interruptedCalls` carries the same entries for
+ * hosts, bounded like `nestedCalls`. When the ledger cannot list them, the result stays
+ * interrupted, says they may have been applied, and sets `interruptedCallsUnavailable` instead.
+ */
+const abandonedScriptResult =
+  (limits: Required<CodeModeLimits>) =>
+  ({ call, nested }: ToolLedgerAbandonedInput): ToolResult => {
+    const maxChars = limits.maxOutputChars
+
+    const listing =
+      nested === undefined
+        ? 'Its ledgered nested tool calls could not be listed (the tool ledger is unavailable), so any of them may already have been applied.'
+        : nested.length === 0
+          ? 'No ledgered nested tool calls were recorded for that execution.'
+          : [
+              `Ledgered nested tool calls of that execution (they were not undone):`,
+              ...nested.map(
+                entry =>
+                  `- ${entry.key} ${entry.toolName} ${truncateCodePoints(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
+              )
+            ].join('\n')
+
+    const text = [
+      `Script interrupted: an earlier execution of this ${call.name} call (${call.id}) started but never recorded a result. The script was not run again.`,
+      listing,
+      'Calls the ledger policy skips (by default read-only calls) are not listed. Verify the state these calls affect before repeating any work.'
+    ].join('\n\n')
+
+    const structuredContent: CodeModeStructuredContent = {
+      codemode:
+        nested === undefined
+          ? { ok: false, interrupted: true, interruptedCallsUnavailable: true }
+          : {
+              ok: false,
+              interrupted: true,
+              interruptedCalls: interruptedCalls(
+                nested,
+                nestedToolCallRecordLimit(limits.maxNestedCalls)
+              )
+            }
+    }
+
+    return ToolResult.make({
+      toolCallId: call.id,
+      content: codeModeSegmentsContent(boundCodeModeSegments([{ type: 'text', text }], maxChars)),
+      isError: true,
+      structuredContent
+    })
+  }
+
 /**
  * The code mode tool: one registration (default name `codemode`, input `{ code }`) whose scripts
  * call the other code-mode-callable tools of the same `resolveTools` resolution. Nested calls run
@@ -516,6 +725,11 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
  *
  * Access is `write`: scripts can call any write tool the resolution exposes to code mode; each
  * nested call keeps its own access metadata and host wrappers.
+ *
+ * With a tool ledger (`resolveTools(..., { ledger })`) the code mode call itself is ledgered, so a
+ * re-executed call never runs its script again: a completed call returns its stored result, an
+ * in-flight one is awaited, and an abandoned one returns an interrupted result listing its
+ * ledgered nested calls. Nested write calls are ledgered under `<toolCallId>/<seq>`.
  */
 export const makeCodeModeTool = <Context>(
   options: MakeCodeModeToolOptions<Context>
@@ -532,6 +746,7 @@ export const makeCodeModeTool = <Context>(
     access: 'write',
     nestedToolAccess: true,
     describe: ({ tools }) => renderCodeModeDescription({ tools, inlineBudget, store }),
+    abandonedResult: abandonedScriptResult(limits),
     execute: ({
       call,
       context,

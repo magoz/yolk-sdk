@@ -5,18 +5,24 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
+  makeNestedToolCallRecorder,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,
   nestedToolCallMaxErrorChars,
+  nestedToolCallMaxRecordedCalls,
   nestedToolCallMaxTotalArgsBytes,
+  nestedToolCallRecordLimit,
   nestedToolCallResultFields,
   recordNestedToolCall,
   ToolResult,
   toolResultMessageFromResult,
+  truncateCodePoints,
   type NestedToolCallInput,
   type NestedToolCallRecorder
 } from '@yolk-sdk/agent/protocol'
+import { truncateUtf8, utf8ByteLength } from '../../src/protocol/bounded-text.ts'
 
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length
 
@@ -78,6 +84,63 @@ describe('nested tool call record', () => {
     expect(fields.nestedCalls.calls.at(-1)?.id).toBe(`call_parent/${nestedToolCallMaxCalls}`)
     expect(fields.nestedCalls.complete).toBe(false)
     expect(fields.usage?.input.total).toBe(nestedToolCallMaxCalls + 4)
+  })
+
+  it('keeps per-status counts of every call, dropped calls included', () => {
+    const statuses = ['ok', 'error', 'cancelled', 'ok', 'ok'] as const
+
+    const recorder = statuses
+      .map((status, index) => ({ ...nestedCall(index + 1), status }))
+      .reduce(recordNestedToolCall, makeNestedToolCallRecorder({ maxCalls: 2 }))
+
+    const fields = nestedToolCallResultFields(recorder)
+
+    expect(fields.nestedCalls.calls.map(call => call.id)).toEqual([
+      'call_parent/1',
+      'call_parent/2'
+    ])
+    expect(fields.nestedCalls.complete).toBe(false)
+    expect(fields.nestedCalls.counts).toEqual({ ok: 3, error: 1, cancelled: 1 })
+  })
+
+  it('keeps the record size finite whatever maxCalls says', () => {
+    expect(makeNestedToolCallRecorder({ maxCalls: Number.POSITIVE_INFINITY }).maxCalls).toBe(
+      nestedToolCallMaxRecordedCalls
+    )
+    expect(makeNestedToolCallRecorder({ maxCalls: 1e9 }).maxCalls).toBe(
+      nestedToolCallMaxRecordedCalls
+    )
+    expect(makeNestedToolCallRecorder({ maxCalls: Number.NaN }).maxCalls).toBe(
+      nestedToolCallMaxCalls
+    )
+    expect(nestedToolCallRecordLimit(-3)).toBe(0)
+    expect(nestedToolCallRecordLimit(12.7)).toBe(12)
+
+    const unbounded: NestedToolCallRecorder = {
+      ...emptyNestedToolCallRecorder,
+      maxCalls: Number.POSITIVE_INFINITY
+    }
+
+    const recorded = Array.from({ length: nestedToolCallMaxRecordedCalls + 5 }, (_, index) =>
+      nestedCall(index + 1)
+    ).reduce(recordNestedToolCall, unbounded)
+
+    expect(recorded.calls).toHaveLength(nestedToolCallMaxRecordedCalls)
+    expect(recorded.complete).toBe(false)
+  })
+
+  it('sizes the record from maxCalls while keeping the byte budgets', () => {
+    const inputs = Array.from({ length: 768 }, (_, index) => nestedCall(index + 1))
+
+    const fields = nestedToolCallResultFields(
+      inputs.reduce(recordNestedToolCall, makeNestedToolCallRecorder({ maxCalls: 768 }))
+    )
+
+    const total = fields.nestedCalls.calls.reduce((sum, call) => sum + utf8Bytes(call.args), 0)
+
+    expect(fields.nestedCalls.calls).toHaveLength(768)
+    expect(fields.nestedCalls.counts?.ok).toBe(768)
+    expect(total).toBeLessThanOrEqual(nestedToolCallMaxTotalArgsBytes)
   })
 
   it('cuts arguments to the per-call byte bound on character boundaries', () => {
@@ -168,4 +231,42 @@ describe('nested tool call record', () => {
       expect(JSON.stringify(message)).not.toContain('call_parent/1')
     })
   )
+})
+
+describe('bounded text helpers', () => {
+  it('never exceed the UTF-8 budget, even below the marker size', () => {
+    expect(truncateUtf8('abcdef', 2)).toBe('')
+    expect(truncateUtf8('abcdef', 3)).toBe('…')
+    expect(truncateUtf8('abcdef', 5)).toBe('ab…')
+    expect(truncateUtf8('ééé', 6)).toBe('ééé')
+    expect(truncateUtf8('éééé', 6)).toBe('é…')
+    expect(truncateUtf8('😀😀', 6)).toBe('…')
+
+    for (const budget of [0, 1, 2, 3, 4, 7, 10]) {
+      expect(utf8ByteLength(truncateUtf8('a😀é\u0001b'.repeat(4), budget))).toBeLessThanOrEqual(
+        budget
+      )
+    }
+
+    expect(utf8ByteLength('a😀é')).toBe(utf8Bytes('a😀é'))
+    expect(truncateCodePoints('😀😀😀', 2)).toBe('😀…')
+    expect(truncateCodePoints('abc', 0)).toBe('')
+  })
+
+  it('bounds one call within the per-call and remaining total budgets', () => {
+    const big = 'x'.repeat(nestedToolCallMaxArgsBytes + 10)
+
+    expect(boundNestedToolCallArgs('{"a":1}', 0)).toEqual({
+      args: '{"a":1}',
+      bytes: 7,
+      truncated: false
+    })
+    expect(boundNestedToolCallArgs(big, 0).bytes).toBe(nestedToolCallMaxArgsBytes)
+    expect(boundNestedToolCallArgs(big, nestedToolCallMaxTotalArgsBytes - 5)).toEqual({
+      args: 'xx…',
+      bytes: 5,
+      truncated: true
+    })
+    expect(boundNestedToolCallArgs(big, nestedToolCallMaxTotalArgsBytes).args).toBe('')
+  })
 })

@@ -934,6 +934,25 @@ This package declares them; it does not run scripts.
   bounded `ToolResult.nestedCalls` record and summed `ToolResult.usage` never reach the model:
   `toolResultMessageFromResult` drops both, and the loop does not add `ToolResult.usage` to run
   usage. Capture them from the `ToolResult` or tool events when you need audit or billing records.
+  Size the record with `makeNestedToolCallRecorder({ maxCalls })`; per-status `counts` cover
+  every call, dropped ones included.
+
+## Durable tool ledger
+
+Steps that hosts re-execute (Vercel Workflow's queue is at-least-once) must not repeat writes.
+Pass `resolveTools(modules, context, { ledger: { store } })` with a host-implemented durable
+`ToolLedgerStore` scoped to the run: every ledgered call (by default every non-`read` call plus the
+built-in `subagent` tool, top-level or nested in code mode) runs at most once per ledger key. Add
+custom delegation tools with `isLedgered`. A different call under the same key (tool name or a
+SHA-256 `argsDigest` of the full arguments, a stable format hosts persist) is a conflict, never a
+replay. Completed calls return their stored result, concurrent duplicates wait, and calls abandoned
+by a crash are never re-run (the model is told to verify). Executors receive a stable
+`idempotencyKey`. Stores get the lease length (`leaseMs`) so they can use database time, and must
+keep their operations interruptible (the ledger's timeouts cannot cut uninterruptible store work).
+`deadline` bounds only waiting for a duplicate; recording an outcome can take about 15 s more.
+`onLedgerDecision` reports each call's decision (`fresh`, `completed`, `in_flight_wait`, ...) for
+logs and metrics. Without the option behavior is unchanged. See
+[the tools README](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/tools/README.md#durable-tool-ledger).
 
 ## Tool failures
 

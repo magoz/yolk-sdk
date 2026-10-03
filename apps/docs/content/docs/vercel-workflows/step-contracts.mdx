@@ -199,6 +199,10 @@ await runVercelAgentWorkflow({
 Finite `maxAttempts` values are floored and clamped to at least `1`; non-finite values normalize to
 `1`. Retries run immediately with no backoff. `writeError` is best-effort cleanup and is not retried.
 
+One attempt does not stop queue redelivery: a tool-batch step can still run again after a crash or
+concurrently with a running execution. See
+[Tool steps run at least once](../integrations/vercel-workflow#tool-steps-run-at-least-once).
+
 `maxTurns` accepts positive integers. Finite values are floored and clamped to at least `1`; omitted
 or non-finite values use `defaultMaxWorkflowTurns`.
 

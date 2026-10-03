@@ -18,6 +18,44 @@ export {
 
 export { omitNullOptionalToolArguments } from './arguments.ts'
 
+export {
+  abandonedToolCallResult,
+  classifyToolLedgerEntry,
+  defaultToolLedgerLeaseMs,
+  defaultToolLedgerMaxResultBytes,
+  defaultToolLedgerMaxWaitMs,
+  defaultToolLedgerPolicy,
+  defaultToolLedgerPollIntervalMs,
+  makeInMemoryToolLedgerStore,
+  sortToolLedgerEntries,
+  toolIdempotencyKey,
+  ToolLedgerClaim,
+  toolLedgerCompleteTimeoutMs,
+  ToolLedgerEntry,
+  ToolLedgerError,
+  ToolLedgerFailed,
+  ToolLedgerFailure,
+  toolLedgerArgs,
+  toolLedgerMaxArgsBytes,
+  ToolLedgerOutcome,
+  toolLedgerResult,
+  ToolLedgerSucceeded
+} from './ledger.ts'
+
+export type {
+  InMemoryToolLedgerStore,
+  ToolLedgerAbandonedInput,
+  ToolLedgerArgs,
+  ToolLedgerClaimRequest,
+  ToolLedgerDecision,
+  ToolLedgerDecisionEvent,
+  ToolLedgerErrorDetails,
+  ToolLedgerHeartbeatRequest,
+  ToolLedgerOptions,
+  ToolLedgerPolicyInput,
+  ToolLedgerStore
+} from './ledger.ts'
+
 export { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 
 export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'

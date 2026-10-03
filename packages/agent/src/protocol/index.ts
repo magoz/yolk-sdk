@@ -222,12 +222,19 @@ export {
   validateInteractionSubmission
 } from './tool.ts'
 
+export { truncateCodePoints } from './bounded-text.ts'
+
 export {
+  boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
+  makeNestedToolCallRecorder,
+  NestedToolCallCounts,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,
   nestedToolCallMaxErrorChars,
+  nestedToolCallMaxRecordedCalls,
   nestedToolCallMaxTotalArgsBytes,
+  nestedToolCallRecordLimit,
   nestedToolCallResultFields,
   NestedToolCallRecord,
   NestedToolCalls,
@@ -236,6 +243,7 @@ export {
 } from './nested-tool-calls.ts'
 
 export type {
+  BoundedNestedToolCallArgs,
   NestedToolCallInput,
   NestedToolCallRecorder,
   NestedToolCallResultFields

@@ -14,6 +14,9 @@ Generic host tool registration and resolution.
 - Model-argument decoding through the advertised JSON codec (`null` on `Schema.optional` means
   absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
 - `withToolArgumentsErrorHint` for actionable unknown-key validation messages.
+- The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
+  reference store, so a re-executed ledgered call (by default writes and `subagent`) never runs
+  twice under the same ledger key.
 
 ## Use it when
 
@@ -82,7 +85,96 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
   description from those nested tools (for example a code mode catalog); `def.description` stays
   the static fallback.
 - Report nested calls on the result with protocol `recordNestedToolCall` and
-  `nestedToolCallResultFields`; the bounded record and summed usage never reach the model.
+  `nestedToolCallResultFields` over `makeNestedToolCallRecorder({ maxCalls })`; the bounded record
+  (with per-status `counts` over every call) and summed usage never reach the model.
+
+## Durable tool ledger
+
+Hosts that re-execute steps (Vercel Workflow's queue is at-least-once, sequentially and
+concurrently) pass a durable ledger to `resolveTools`. Ledgered calls (default: every non-`read`
+tool plus the built-in `subagent` tool, top-level and nested code mode calls alike) run at most
+once per key:
+
+| Claim       | Meaning                                        | What happens                                                     |
+| ----------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `Fresh`     | key was absent; this execution owns the claim  | runs, heartbeats the lease, records the outcome                  |
+| `Completed` | an outcome is recorded                         | returns the stored result (or the stored `ToolError`), no run    |
+| `InFlight`  | another execution holds a live lease           | waits until completed/abandoned or the deadline; never runs      |
+| `Abandoned` | lease expired without an outcome (crashed run) | never runs; model-visible "may already have been applied" result |
+
+```ts
+import { Effect } from 'effect'
+import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
+
+// Host-owned storage scoped to one Workflow run (sketch; `db` calls are host code returning
+// interruptible Effects, for example `Effect.tryPromise` passing the AbortSignal to the driver).
+// Leases use the database clock: `now() + leaseMs`, classified against `now()`.
+const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
+  scope: runId,
+  // Atomic insert-if-absent; otherwise classify the stored entry without changing it.
+  claim: request =>
+    db.claimToolCall(runId, request, (entry, dbNowMs) => classifyToolLedgerEntry(entry, dbNowMs)),
+  // Extend the lease to now() + leaseMs while the entry has no outcome; never shorten it.
+  heartbeat: ({ key, leaseMs }) => db.extendLeaseIfClaimed(runId, key, leaseMs),
+  complete: ({ key, outcome, completedAtMs }) =>
+    db.completeOnce(runId, key, outcome, completedAtMs),
+  list: parentKey => db.listChildren(runId, parentKey)
+})
+
+const resolveStepTools = Effect.gen(function* () {
+  return yield* resolveTools(modules, context, {
+    ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
+  })
+})
+```
+
+- Persist entries with `Schema.toCodecJson(ToolLedgerEntry)`, or every claim field: `args` (8 KiB
+  audit preview), `argsTruncated`, and `argsDigest`. A different tool name or `argsDigest` under the
+  same key is a model-visible conflict; never compare the preview. Stored results are bounded
+  (`maxResultBytes`, default 1 MiB, measured on the serialized JSON; media, then `nestedCalls`, then
+  `structuredContent` are reduced first) and wire-safe; the live call still returns the full result.
+- `argsDigest` is a stable format; store it as text (`char(64)`) and never recompute it
+  differently: lower-case hex SHA-256 of the UTF-8 bytes of the canonical JSON of the raw
+  `call.params` (before Schema decoding), compact, with object keys sorted by UTF-16 code units
+  and numbers and strings as `JSON.stringify` writes them. It is a conflict fingerprint, not a
+  security boundary. All unserializable arguments (cycles, `BigInt`) share one digest, integers
+  beyond 2^53 lose precision before hashing, and arguments nested too deeply to canonicalize are
+  digested from their compact JSON.
+- Keys are `call.id` and `<parentCallId>/<seq>` for nested calls. Call ids must be unique within a
+  ledger scope: a reused id with the same arguments replays the earlier result. Scope the store so
+  keys cannot collide: one run, plus the turn or step when a provider can reuse call ids.
+- Executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions; forward it to
+  external APIs that deduplicate, for a crash between their commit and the ledger's `complete`.
+- One clock per store: `claim` and `heartbeat` get the lease length `leaseMs` (stores on their own
+  clock, such as a database `now()`, which avoids skew between instances) and the caller's
+  `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
+- Override the policy with `isLedgered` (add your own delegation tools, for example
+  `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing with
+  `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin, not a
+  guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s from the first claim; the polls after it
+  stay within the wait, the last one halfway through the final interval), and `deadline` (non-finite
+  values ignored). A failed poll fails closed.
+- `deadline` bounds only waiting for an in-flight duplicate. A call that runs is not cut at it, and
+  recording its outcome can take up to three `complete` attempts of `toolLedgerCompleteTimeoutMs`
+  (5 s each, about 15 s) after the call returns. Reserve that finalization time: pass a deadline
+  that ends before the platform stops the step.
+- Store operations must be interruptible (for example `Effect.tryPromise` passing the
+  `AbortSignal` to the driver). The ledger's timeouts interrupt the store operation and wait for
+  it to stop, so they cannot cut uninterruptible work (an `Effect.uninterruptible` section, or a
+  release or rollback that blocks): it holds the wait, heartbeat, or completion until it ends.
+- Each `complete` attempt is bounded (`toolLedgerCompleteTimeoutMs`, 5 s; three attempts), and so is
+  each `heartbeat` (a timed-out or failed heartbeat is logged; the next one still runs). A result or
+  `ToolError` the call returned is recorded before an interruption takes effect (a `ToolError` also
+  when its cause carries interruptions); defects, and interruption without a `ToolError`, record
+  nothing. An outcome that cannot be recorded leaves the entry to read as abandoned.
+- `abandonedResult({ call, entry, nested })` gets `nested: undefined` when `list` fails: report the
+  nested calls as unavailable (they may have been applied), never as an empty list.
+- `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered
+  call with `fresh`, `completed`, `in_flight_wait` (waited, then replayed), `in_flight_timeout`,
+  `abandoned`, or `conflict`, before the call runs or returns; `waitedMs` is set when it waited.
+  Use it for logs and metrics. A throw or rejected promise is logged and ignored.
+- `makeInMemoryToolLedgerStore` is for tests and single-process hosts; it does not survive
+  restarts and cannot protect Workflow steps.
 
 ## Recoverable tool failures
 

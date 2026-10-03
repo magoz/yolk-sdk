@@ -41,6 +41,40 @@ Run [code mode](./code-mode#vercel-workflow) calls inside your tool-batch step, 
 Workflow stop or run-admission check, do not see nested calls; pass the same check to
 `makeCodeModeTool` as `beforeNestedCall`.
 
+## Tool steps run at least once
+
+Vercel's queue can deliver a tool-batch step again after a crash, or while the first execution is
+still running, even with the default `noWorkflowStepRetry`. Supply a durable tool ledger, scoped
+to the Workflow run, where your step resolves tools:
+
+```ts
+// Fragment from your tool-batch step module. `modules`, `context`, `makeRunToolLedger`,
+// `workflowRunId`, and `stepDeadlineMs` are host-owned.
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+
+// Inside the 'use step' function:
+const toolSet = await Effect.runPromise(
+  resolveTools(modules, context, {
+    ledger: { store: makeRunToolLedger(workflowRunId), deadline: () => stepDeadlineMs }
+  })
+)
+```
+
+`makeRunToolLedger` is your `ToolLedgerStore` (for example Postgres); see
+[Ledger writes](../agent/tools-hitl#ledger-writes-for-re-executed-steps). Ledgered calls (by
+default every non-`read` tool plus the built-in `subagent` tool, code mode scripts included) then
+return their stored result, wait for the running execution, or report that an abandoned call may
+already have been applied; they never run twice under the same ledger key. Include custom
+delegation tools with `isLedgered`. Read calls still re-run. The package itself never builds tool
+sets, so there is nothing to configure on `runVercelAgentWorkflow`.
+
+`deadline` bounds only waiting for a duplicate execution; it does not stop a call that runs.
+Recording a call's outcome can take up to about 15 s after the call returns (three 5 s attempts),
+so set `stepDeadlineMs` to leave that finalization time before the function budget ends. Keep
+the store's operations interruptible (for example `Effect.tryPromise` passing the `AbortSignal` to
+the driver): the ledger's timeouts cannot cut uninterruptible store work.
+
 ## Durable stream rule
 
 Use distinct finalization paths:
