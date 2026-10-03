@@ -682,6 +682,44 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('returns the live result when building its stored copy throws', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+
+      // An unchecked result the stored copy cannot rebuild (`toolCallId` must be trimmed).
+      const unchecked: ToolRegistration<TestContext> = makeTool<TestContext, typeof NoteParams>({
+        name: 'append_note',
+        description: 'Append a note',
+        parameters: NoteParams,
+        access: 'write',
+        execute: ({ call }) =>
+          Effect.succeed(
+            ToolResult.make(
+              { toolCallId: `${call.id} `, content: 'applied' },
+              { disableChecks: true }
+            )
+          )
+      })
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const result = yield* execute([unchecked], noteCall(), { store }).pipe(Effect.provide(logger))
+
+      const [entry] = yield* store.entries
+
+      expect(result.content).toBe('applied')
+      expect(entry?.outcome).toBeUndefined()
+      expect(messages).toEqual([
+        [
+          expect.stringContaining(
+            'Tool ledger could not record the outcome of call_1; the call stays claimed and will read as abandoned:'
+          )
+        ]
+      ])
+    })
+  )
+
   it.effect('ledgers nested calls under <parentCallId>/<seq> with the parent key', () =>
     Effect.gen(function* () {
       const probe = makeProbe()

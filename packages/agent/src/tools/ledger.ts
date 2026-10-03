@@ -825,17 +825,28 @@ export const executeLedgered = (input: {
         Effect.uninterruptible
       )
 
+    // The stored copy is built lazily and a defect while building or recording it is only logged:
+    // a throw after the call succeeded never masks its live result (the entry stays claimed).
+    const record = (outcome: () => ToolLedgerOutcome): Effect.Effect<void> =>
+      Effect.suspend(() => complete(outcome())).pipe(
+        Effect.catchDefect(defect =>
+          Effect.logWarning(
+            `Tool ledger could not record the outcome of ${key}; the call stays claimed and will read as abandoned: ${defect instanceof Error ? defect.message : String(defect)}`
+          )
+        )
+      )
+
     // Results and ToolErrors are recorded; interruption or a defect leaves the entry claimed: its
     // outcome is unknown, so a later execution reports it as abandoned instead of running it again.
     const recordOutcome = (exit: Exit.Exit<ToolResult, ToolError>): Effect.Effect<void> => {
       if (Exit.isSuccess(exit))
-        return complete(succeededOutcome(exit.value, options.maxResultBytes))
+        return record(() => succeededOutcome(exit.value, options.maxResultBytes))
 
       if (Cause.hasInterrupts(exit.cause) || Cause.hasDies(exit.cause)) return Effect.void
 
       return Option.match(Cause.findErrorOption(exit.cause), {
         onNone: () => Effect.void,
-        onSome: error => complete(failedOutcome(error))
+        onSome: error => record(() => failedOutcome(error))
       })
     }
 
