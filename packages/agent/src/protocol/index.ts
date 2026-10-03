@@ -222,13 +222,7 @@ export {
   validateInteractionSubmission
 } from './tool.ts'
 
-export {
-  compactToolArguments,
-  truncateCodePoints,
-  truncateUtf8,
-  truncationMarker,
-  utf8ByteLength
-} from './bounded-text.ts'
+export { truncateCodePoints } from './bounded-text.ts'
 
 export {
   boundNestedToolCallArgs,

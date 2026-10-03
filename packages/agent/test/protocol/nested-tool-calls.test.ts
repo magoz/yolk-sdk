@@ -19,11 +19,10 @@ import {
   ToolResult,
   toolResultMessageFromResult,
   truncateCodePoints,
-  truncateUtf8,
-  utf8ByteLength,
   type NestedToolCallInput,
   type NestedToolCallRecorder
 } from '@yolk-sdk/agent/protocol'
+import { truncateUtf8, utf8ByteLength } from '../../src/protocol/bounded-text.ts'
 
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length
 

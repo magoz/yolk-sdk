@@ -2,16 +2,18 @@ import { Cause, Clock, Data, Duration, Effect, Exit, Option, Predicate, Result }
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
-  compactToolArguments,
   contentText,
   TextPart,
-  truncateUtf8,
-  truncationMarker,
-  utf8ByteLength,
   ToolResult,
   type Content,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
+import {
+  compactToolArguments,
+  truncateUtf8,
+  truncationMarker,
+  utf8ByteLength
+} from '../protocol/bounded-text.ts'
 import { subagentToolName } from '../protocol/tool.ts'
 import type { ToolAccess } from './registry.ts'
 import { sha256Hex } from './sha256.ts'
