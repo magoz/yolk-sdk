@@ -93,7 +93,10 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
 Hosts that re-execute steps (Vercel Workflow's queue is at-least-once, sequentially and
 concurrently) pass a durable ledger to `resolveTools`. Ledgered calls (default: every non-`read`
 tool plus the built-in `subagent` tool, top-level and nested code mode calls alike) run at most
-once per key:
+once per key. Input and interaction tools are never ledgered: their at-most-once guarantee is the
+host's `InteractionHost` receipts. When the policy ledgers an activated background tool, its
+`host.accept` admission runs inside the ledger, so a replay returns the stored acceptance instead of
+admitting again:
 
 | Claim       | Meaning                                        | What happens                                                     |
 | ----------- | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -167,8 +170,11 @@ const resolveStepTools = Effect.gen(function* () {
   `ToolError` the call returned is recorded before an interruption takes effect (a `ToolError` also
   when its cause carries interruptions); defects, and interruption without a `ToolError`, record
   nothing. An outcome that cannot be recorded leaves the entry to read as abandoned.
-- `abandonedResult({ call, entry, nested })` gets `nested: undefined` when `list` fails: report the
+- Set `abandonedResult({ call, entry, nested })` on a registration (or as a `makeTool` option) to
+  describe that tool's abandoned call. It gets `nested: undefined` when `list` fails: report the
   nested calls as unavailable (they may have been applied), never as an empty list.
+- Custom registration wrappers must forward `idempotencyKey` (and `nested`) to the inner
+  `execute`. With a ledger configured, executors receive `idempotencyKey` for unledgered calls too.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered
   call with `fresh`, `completed`, `in_flight_wait` (waited, then replayed), `in_flight_timeout`,
   `abandoned`, or `conflict`, before the call runs or returns; `waitedMs` is set when it waited.
