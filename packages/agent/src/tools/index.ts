@@ -30,6 +30,7 @@ export {
   sortToolLedgerEntries,
   toolIdempotencyKey,
   ToolLedgerClaim,
+  toolLedgerCompleteTimeoutMs,
   ToolLedgerEntry,
   ToolLedgerError,
   ToolLedgerFailed,

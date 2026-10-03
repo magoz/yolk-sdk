@@ -1,4 +1,4 @@
-import { Clock, Data, Duration, Effect, Option, Predicate, Result } from 'effect'
+import { Cause, Clock, Data, Duration, Effect, Exit, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -274,6 +274,9 @@ export const defaultToolLedgerPollIntervalMs = 1_000
 export const defaultToolLedgerMaxWaitMs = 150_000
 
 export const defaultToolLedgerMaxResultBytes = 1024 * 1024
+
+/** Timeout of one `store.complete` attempt (three attempts at most). */
+export const toolLedgerCompleteTimeoutMs = 5_000
 
 /** UTF-8 byte budget of `ToolLedgerEntry.args`. */
 export const toolLedgerMaxArgsBytes = 8 * 1024
@@ -757,11 +760,23 @@ export const executeLedgered = (input: {
       )
     )
 
+    // Each attempt is bounded, so a hung store never holds the call (or its interruption) for
+    // long; an outcome that cannot be recorded leaves the entry claimed (it reads as abandoned).
     const complete = (outcome: ToolLedgerOutcome) =>
       Effect.gen(function* () {
         const completedAtMs = yield* Clock.currentTimeMillis
 
-        yield* store.complete({ key, outcome, completedAtMs })
+        yield* store.complete({ key, outcome, completedAtMs }).pipe(
+          Effect.timeoutOrElse({
+            duration: Duration.millis(toolLedgerCompleteTimeoutMs),
+            orElse: () =>
+              Effect.fail(
+                new ToolLedgerError({
+                  message: `timed out after ${toolLedgerCompleteTimeoutMs} ms`
+                })
+              )
+          })
+        )
       }).pipe(
         Effect.retry({ times: 2 }),
         Effect.catch(error =>
@@ -772,8 +787,22 @@ export const executeLedgered = (input: {
         Effect.uninterruptible
       )
 
-    // Interruption or a defect leaves the entry claimed: its outcome is unknown, so a later
-    // execution reports it as abandoned instead of running it again.
+    // Results and ToolErrors are recorded; interruption or a defect leaves the entry claimed: its
+    // outcome is unknown, so a later execution reports it as abandoned instead of running it again.
+    const recordOutcome = (exit: Exit.Exit<ToolResult, ToolError>): Effect.Effect<void> => {
+      if (Exit.isSuccess(exit))
+        return complete(succeededOutcome(exit.value, options.maxResultBytes))
+
+      if (Cause.hasInterrupts(exit.cause) || Cause.hasDies(exit.cause)) return Effect.void
+
+      return Option.match(Cause.findErrorOption(exit.cause), {
+        onNone: () => Effect.void,
+        onSome: error => complete(failedOutcome(error))
+      })
+    }
+
+    // Only the call itself is interruptible: once it has returned, its outcome is recorded before
+    // an interruption takes effect.
     const runFresh = Effect.scoped(
       Effect.gen(function* () {
         yield* Effect.sleep(Duration.millis(options.heartbeatIntervalMs)).pipe(
@@ -782,9 +811,12 @@ export const executeLedgered = (input: {
           Effect.forkScoped
         )
 
-        return yield* input.execute.pipe(
-          Effect.tap(result => complete(succeededOutcome(result, options.maxResultBytes))),
-          Effect.tapError(error => complete(failedOutcome(error)))
+        return yield* Effect.uninterruptibleMask(restore =>
+          restore(input.execute).pipe(
+            Effect.exit,
+            Effect.tap(recordOutcome),
+            Effect.flatMap(exit => exit)
+          )
         )
       })
     )

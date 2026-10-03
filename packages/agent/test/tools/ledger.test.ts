@@ -9,6 +9,7 @@ import {
   NestedToolCallRecord,
   NestedToolCalls,
   ToolCall,
+  ToolDef,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -16,6 +17,7 @@ import {
   makeTool,
   resolveTools,
   toolIdempotencyKey,
+  toolLedgerCompleteTimeoutMs,
   ToolLedgerEntry,
   ToolLedgerError,
   toolLedgerArgs,
@@ -411,6 +413,70 @@ describe('tool ledger', () => {
       expect(toolLedgerArgs({ b: 1, a: [true, null] }).argsDigest).toBe(
         yield* webCryptoHex('{"a":[true,null],"b":1}')
       )
+    })
+  )
+
+  it.effect('bounds each completion attempt when the store hangs', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      let attempts = 0
+
+      const store: ToolLedgerStore = {
+        ...memory,
+        complete: () =>
+          Effect.suspend(() => {
+            attempts++
+
+            return Effect.never
+          })
+      }
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const running = yield* Effect.forkChild(
+        execute([noteTool(probe)], noteCall(), { store }).pipe(
+          Effect.provide(logger),
+          Effect.timeoutOption('1 minute')
+        )
+      )
+
+      yield* TestClock.adjust(`${3 * toolLedgerCompleteTimeoutMs} millis`)
+
+      const result = yield* Fiber.join(running)
+      const [entry] = yield* memory.entries
+
+      expect(Option.getOrUndefined(result)?.content).toBe('appended hot lead (1)')
+      expect(attempts).toBe(3)
+      expect(entry?.outcome).toBeUndefined()
+      expect(messages).toEqual([
+        [
+          `Tool ledger completion failed for call_1; the call stays claimed and will read as abandoned: timed out after ${toolLedgerCompleteTimeoutMs} ms`
+        ]
+      ])
+    })
+  )
+
+  it.effect('never records an outcome for a defect', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+
+      const dying: ToolRegistration<TestContext> = {
+        def: ToolDef.make({
+          name: 'append_note',
+          description: 'Append a note',
+          parameters: { type: 'object', properties: { note: { type: 'string' } } }
+        }),
+        access: 'write',
+        execute: () => Effect.die('connection reset mid-write')
+      }
+
+      const exit = yield* Effect.exit(execute([dying], noteCall(), { store }))
+      const [entry] = yield* store.entries
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(entry?.outcome).toBeUndefined()
     })
   )
 
