@@ -85,6 +85,10 @@ export type SubagentExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
   readonly params: SubagentToolParams
+  /** The tool ledger's stable key for this call (see `ToolExecutionInput.idempotencyKey`);
+   * present when `resolveTools` has a ledger. Pass it to child work that deduplicates writes.
+   */
+  readonly idempotencyKey?: string
 }
 
 export type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
@@ -412,7 +416,7 @@ export const makeSubagentToolRegistration = <Context>(
         `Invalid subagent arguments: ${error instanceof Error ? error.message : String(error)}`,
         error
       ),
-    execute: ({ call, context, params }) =>
+    execute: ({ call, context, params, idempotencyKey }) =>
       Effect.gen(function* () {
         if (call.name !== subagentToolName) {
           return yield* Effect.fail(
@@ -423,7 +427,11 @@ export const makeSubagentToolRegistration = <Context>(
         const normalizedParams = yield* validateSubagentParams(params)
         yield* requireKnownSubagent(options.subagents, normalizedParams.subagent_type)
 
-        return yield* options.execute({ call, context, params: normalizedParams })
+        return yield* options.execute(
+          idempotencyKey === undefined
+            ? { call, context, params: normalizedParams }
+            : { call, context, params: normalizedParams, idempotencyKey }
+        )
       })
   })
 
