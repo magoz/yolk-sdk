@@ -563,17 +563,85 @@ describe('registry null omission for optional non-nullable properties', () => {
 
     expect(omitNullOptionalToolArguments(rebased, rebasedValue)).toBe(rebasedValue)
 
-    // draft-07 ignores prefixItems; items applies to every element.
-    const draft07: ToolJsonSchema = {
-      $schema: 'http://json-schema.org/draft-07/schema#',
-      type: 'array',
-      prefixItems: [{ type: 'object', properties: { x: { type: 'string' } } }],
-      items: { type: 'object', properties: { x: { type: ['string', 'null'] } } }
+    // Nested $id reached through admitsNull, and a root $ref to a $defs entry with $id.
+    const idInDeclaration: ToolJsonSchema = {
+      type: 'object',
+      properties: {
+        v: {
+          $id: 'https://example.com/v',
+          $defs: { S: { type: ['string', 'null'] } },
+          allOf: [{ $ref: '#/$defs/S' }]
+        }
+      },
+      $defs: { S: { type: 'string' } }
     }
 
+    const idValue = { v: null }
+
+    expect(omitNullOptionalToolArguments(idInDeclaration, idValue)).toBe(idValue)
+
+    const idAtRootRef: ToolJsonSchema = {
+      $ref: '#/$defs/A',
+      $defs: {
+        A: {
+          $id: 'https://example.com/a',
+          type: 'object',
+          properties: { v: { $ref: '#/$defs/S' } },
+          $defs: { S: { type: ['string', 'null'] } }
+        },
+        S: { type: 'string' }
+      }
+    }
+
+    expect(omitNullOptionalToolArguments(idAtRootRef, idValue)).toBe(idValue)
+
+    // nullable beside a $ref still applies.
+    const refNullable: ToolJsonSchema = {
+      type: 'object',
+      properties: { v: { $ref: '#/$defs/S', nullable: true } },
+      $defs: { S: { type: 'string' } }
+    }
+
+    expect(omitNullOptionalToolArguments(refNullable, idValue)).toBe(idValue)
+
+    // Only 2020-12 (and the OpenAPI 3.1 base dialect) have prefixItems; draft-07 and 2019-09
+    // ignore it and may apply items to every element.
     const elements = [{ x: null }]
 
-    expect(omitNullOptionalToolArguments(draft07, elements)).toBe(elements)
+    for (const dialect of [
+      'http://json-schema.org/draft-07/schema#',
+      'https://json-schema.org/draft/2019-09/schema'
+    ]) {
+      const older: ToolJsonSchema = {
+        $schema: dialect,
+        type: 'array',
+        prefixItems: [{ type: 'object', properties: { x: { type: 'string' } } }],
+        items: { type: 'object', properties: { x: { type: ['string', 'null'] } } }
+      }
+
+      expect(omitNullOptionalToolArguments(older, elements)).toBe(elements)
+    }
+
+    const openApi: ToolJsonSchema = {
+      $schema: 'https://spec.openapis.org/oas/3.1/dialect/base',
+      type: 'array',
+      prefixItems: [{ type: 'object', properties: { x: { type: ['string', 'null'] } } }],
+      items: { type: 'object', properties: { x: { type: 'string' } } }
+    }
+
+    expect(omitNullOptionalToolArguments(openApi, elements)).toBe(elements)
+  })
+
+  it('leaves the remainder unchanged once the work budget is spent', () => {
+    const exhausting: ToolJsonSchema = {
+      type: 'object',
+      properties: { x: { type: 'string' } },
+      allOf: Array.from({ length: 10_000 }, (_, index) => ({ title: `part ${index}` }))
+    }
+
+    const value = { x: null }
+
+    expect(omitNullOptionalToolArguments(exhausting, value)).toBe(value)
   })
 
   it('never drops a null declared by a nested conjunction', () => {

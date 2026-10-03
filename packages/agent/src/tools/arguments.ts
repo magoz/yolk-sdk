@@ -257,6 +257,11 @@ const admitsNull = (
 ): boolean => {
   if (depth > maxSchemaDepth) return true
 
+  // Keywords beside a `$ref` still apply; `nullable` there must not be lost by resolving.
+  const unresolved = jsonObject(schema)
+
+  if (unresolved !== undefined && ownValue(unresolved, 'nullable') === true) return true
+
   const resolved = resolveSchema(schema, definitions)
 
   if (Predicate.isBoolean(resolved)) return resolved
@@ -417,6 +422,13 @@ const normalizeObject = (
   let changed = false
 
   for (const [key, propertyValue] of Object.entries(value)) {
+    // Once the walk budget is spent, keep every remaining entry unchanged.
+    if (walk.budget.remaining <= 0) {
+      entries.push([key, propertyValue])
+
+      continue
+    }
+
     const declaredSchema = properties === undefined ? undefined : ownValue(properties, key)
     const propertySchema = declaredSchema ?? additionalProperties
 
@@ -453,8 +465,12 @@ const normalizeArray = (
   walk: Walk,
   depth: number
 ): ReadonlyArray<Schema.Json> => {
-  // `prefixItems` is a 2020-12 keyword; older dialects apply `items` to every element.
-  const prefixItems = walk.prefixItems ? (schemaArray(schema, 'prefixItems') ?? []) : []
+  const prefixItems = schemaArray(schema, 'prefixItems') ?? []
+
+  // `prefixItems` is a 2020-12 keyword: other dialects ignore it and may apply `items` to every
+  // element. Leave such arrays unchanged rather than guess.
+  if (!walk.prefixItems && prefixItems.length > 0) return value
+
   const items = ownValue(schema, 'items')
   let changed = false
 
@@ -502,9 +518,6 @@ const normalizeValue = (
 
   if (resolved === undefined || visited.has(resolved) || walk.budget.remaining <= 0) return value
 
-  // A nested `$id` changes the base for `$ref`; root-`$defs` resolution would be wrong below it.
-  if (depth > 0 && Object.hasOwn(resolved, '$id')) return value
-
   walk.budget.remaining -= 1
   visited.add(resolved)
 
@@ -529,10 +542,40 @@ const normalizeValue = (
   return record === undefined ? normalized : normalizeObject(resolved, record, walk, depth)
 }
 
-const isPre2020Dialect = (root: JsonObject | undefined) => {
+// `prefixItems` semantics are 2020-12 (also the OpenAPI 3.1 base dialect); absent `$schema`
+// follows the 2020-12 documents Yolk advertises.
+const hasPrefixItemsDialect = (root: JsonObject | undefined) => {
   const dialect = root === undefined ? undefined : ownValue(root, '$schema')
 
-  return Predicate.isString(dialect) && !/2020-12|2019-09/.test(dialect)
+  return !Predicate.isString(dialect) || /2020-12|oas\/3\.1/.test(dialect)
+}
+
+// A `$id` below the root rebases `$ref` resolution (and may hide definitions behind its own
+// `$defs`); root-`$defs` resolution would then pick the wrong schema. Such documents are left
+// unchanged. Bounded scan; data positions (`const`, `default`, ...) can only cause a skip.
+const maxScannedNodes = 10_000
+
+const hasNestedResourceId = (root: Schema.Json): boolean => {
+  const pending: Array<Schema.Json> = [root]
+  let scanned = 0
+
+  while (pending.length > 0) {
+    const node = pending.pop()
+
+    scanned += 1
+
+    if (scanned > maxScannedNodes) return true
+
+    if (isJsonArray(node)) {
+      pending.push(...node)
+    } else if (isJsonObject(node)) {
+      if (node !== root && Object.hasOwn(node, '$id')) return true
+
+      pending.push(...Object.values(node))
+    }
+  }
+
+  return false
 }
 
 /** Drops `null` from model-produced tool arguments only where the advertised JSON Schema declares
@@ -546,13 +589,13 @@ export const omitNullOptionalToolArguments = (
   parameters: ToolJsonSchema,
   params: unknown
 ): unknown => {
-  if (!isJson(params)) return params
+  if (!isJson(params) || hasNestedResourceId(parameters)) return params
 
   const root = Predicate.isBoolean(parameters) ? undefined : parameters
 
   const walk: Walk = {
     definitions: root === undefined ? {} : (schemaRecord(root, '$defs') ?? {}),
-    prefixItems: !isPre2020Dialect(root),
+    prefixItems: hasPrefixItemsDialect(root),
     budget: { remaining: maxSchemaVisits }
   }
 
