@@ -72,13 +72,15 @@ const formatGroup = (group: UnknownArgumentGroup) => {
     : `${label} ${keys} in "${formatPath(group.parent)}". Allowed there: ${formatAllowed(group.allowed)}.`
 }
 
-/** Actionable hint for unknown-key failures: one line per object path, naming its unknown keys
- * and listing the keys that object declares, or `undefined` when there are no unknown keys. */
+/** Actionable hint for unknown-key failures: one line per object (path and allowed-key set; union
+ * members at one path can each produce a line), naming its unknown keys and listing the keys that
+ * object declares, or `undefined` when there are no unknown keys. */
 export const toolArgumentsErrorHint = (error: Schema.SchemaError): string | undefined => {
   const groups = new Map<string, UnknownArgumentGroup>()
 
   for (const argument of unknownArgumentsIn(error.issue, [])) {
-    const id = `${formatPath(argument.parent)}\u0000${argument.allowed.join(',')}`
+    // Structural identity: distinct paths or allowed lists never merge.
+    const id = JSON.stringify([argument.parent.map(String), argument.allowed])
     const key = String(argument.key)
     const group = groups.get(id)
 

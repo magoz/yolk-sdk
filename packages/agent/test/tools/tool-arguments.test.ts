@@ -350,7 +350,7 @@ describe('registry null omission for optional non-nullable properties', () => {
     })
   )
 
-  it('never drops a null that another allOf conjunct declares or requires', () => {
+  it('never drops a null that another allOf conjunct or union member declares', () => {
     const composed: ToolJsonSchema = {
       anyOf: [
         {
@@ -371,25 +371,76 @@ describe('registry null omission for optional non-nullable properties', () => {
 
     // `clear` is declared (nullable) by A's second conjunct: keep it.
     expect(omitNullOptionalToolArguments(composed, meaningful)).toBe(meaningful)
-    // `other` is only declared by sibling member B: a strict-mode null means "not sent".
-    expect(omitNullOptionalToolArguments(composed, { kind: 'a', other: null })).toEqual({
-      kind: 'a'
-    })
+    // `other` is only declared by sibling member B: undeclared keys are never rewritten; decoding
+    // rejects them with a hint naming the allowed keys.
+    const siblingOnly = { kind: 'a', other: null }
 
-    const requiredElsewhere: ToolJsonSchema = {
-      allOf: [
-        { type: 'object', properties: { id: { type: 'string' } } },
-        { type: 'object', required: ['id'] }
+    expect(omitNullOptionalToolArguments(composed, siblingOnly)).toBe(siblingOnly)
+
+    // Shared properties beside a union, with no allOf: the shared nullable `clear` is kept even
+    // though the selected member does not declare it and another member declares it non-nullable.
+    const shared: ToolJsonSchema = {
+      type: 'object',
+      properties: { clear: { type: ['string', 'null'] } },
+      anyOf: [
+        { type: 'object', properties: { kind: { const: 'a' } }, required: ['kind'] },
+        {
+          type: 'object',
+          properties: { kind: { const: 'b' }, clear: { type: 'string' } },
+          required: ['kind']
+        }
       ]
     }
 
-    const nullId = { id: null }
-
-    // Optional in one conjunct, required in another: leave it for the decoder to reject.
-    expect(omitNullOptionalToolArguments(requiredElsewhere, nullId)).toBe(nullId)
+    expect(omitNullOptionalToolArguments(shared, meaningful)).toBe(meaningful)
   })
 
-  it('never drops a null declared or required by a nested conjunction', () => {
+  it('stays fail-closed on deep nesting and terminates on $ref cycles', () => {
+    let deep: ToolJsonSchema = {
+      type: 'object',
+      properties: { clear: { type: ['string', 'null'] } }
+    }
+
+    for (let level = 0; level < 40; level++) deep = { allOf: [deep] }
+
+    const meaningful = { kind: 'a', clear: null }
+
+    const deepUnion: ToolJsonSchema = {
+      anyOf: [
+        {
+          allOf: [
+            { type: 'object', properties: { kind: { const: 'a' } }, required: ['kind'] },
+            deep
+          ]
+        },
+        {
+          type: 'object',
+          properties: { kind: { const: 'b' }, clear: { type: 'string' } },
+          required: ['kind']
+        }
+      ]
+    }
+
+    expect(omitNullOptionalToolArguments(deepUnion, meaningful)).toBe(meaningful)
+
+    const cyclic: ToolJsonSchema = {
+      $ref: '#/$defs/X',
+      $defs: {
+        X: {
+          type: 'object',
+          properties: { mode: { type: 'string' } },
+          allOf: [{ $ref: '#/$defs/X' }, { $ref: '#/$defs/X' }]
+        }
+      }
+    }
+
+    const started = performance.now()
+
+    expect(omitNullOptionalToolArguments(cyclic, { mode: null })).toEqual({})
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
+  it('never drops a null declared by a nested conjunction', () => {
     const nullable: ToolJsonSchema = {
       type: 'object',
       properties: { clear: { type: ['string', 'null'] } }
@@ -423,17 +474,6 @@ describe('registry null omission for optional non-nullable properties', () => {
     for (const parameters of variants) {
       expect(omitNullOptionalToolArguments(parameters, meaningful)).toBe(meaningful)
     }
-
-    const requiredNested: ToolJsonSchema = {
-      allOf: [
-        { type: 'object', properties: { id: { type: 'string' } } },
-        { allOf: [{ type: 'object', required: ['id'] }] }
-      ]
-    }
-
-    const nullId = { id: null }
-
-    expect(omitNullOptionalToolArguments(requiredNested, nullId)).toBe(nullId)
   })
 
   it('leaves ambiguous unions and required properties untouched', () => {
@@ -771,21 +811,44 @@ describe('unknown tool argument keys', () => {
     })
   )
 
-  it.effect('drops null on another union branch field but rejects a real value there', () =>
+  it.effect('rejects null or a value on another union branch field with an actionable hint', () =>
     Effect.gen(function* () {
       const { tool, received } = capturingTool(Operations)
       const toolSet = yield* resolveOne(tool)
 
-      // Provider-flattened schemas (Anthropic) show every branch's fields to the model.
-      const accepted = yield* toolSet.execute(call({ kind: 'delete', title: null, reason: 'r' }))
+      // Provider-flattened schemas (Anthropic) show every branch's fields to the model. A `null`
+      // there is rejected like any unknown key, naming the matched branch's allowed keys.
+      const nulled = yield* toolSet.execute(call({ kind: 'delete', title: null, reason: 'r' }))
 
-      expect(accepted.isError).toBeUndefined()
-      expect(received).toEqual([{ kind: 'delete', reason: 'r' }])
+      expectValidationError(nulled, 'title')
+      expect(nulled.content).toContain('Allowed arguments: kind, reason.')
 
       expectValidationError(
         yield* toolSet.execute(call({ kind: 'delete', title: 'kept?' })),
         'title'
       )
+      expect(received).toHaveLength(0)
+    })
+  )
+
+  it.effect('keeps unknown keys at distinct paths in separate hint lines', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(
+        Schema.Struct({
+          'a.b': Schema.Struct({ x: Schema.String }),
+          a: Schema.Struct({ b: Schema.Struct({ x: Schema.String }) })
+        })
+      )
+
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(
+        call({ 'a.b': { x: '1', p: 1 }, a: { b: { x: '2', q: 1 } } })
+      )
+
+      expect(result.content).toContain('Unknown argument "p" in "a.b". Allowed there: x.')
+      expect(result.content).toContain('Unknown argument "q" in "a.b". Allowed there: x.')
+      expect(result.content).not.toContain('"p", "q"')
     })
   )
 

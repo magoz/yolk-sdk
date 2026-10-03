@@ -341,9 +341,9 @@ call params, and the loop `question` decode model arguments with `Schema.toCodec
 Non-finite numbers (the codec's `"NaN"`/`"Infinity"` strings) are validation errors. Objects are
 advertised closed (`additionalProperties: false`), so unknown keys at any depth are model-visible
 validation errors instead of being stripped (also through closed-input declarations whose JSON codec
-bypasses their own parser). Their error message names each unknown key and lists the allowed keys at that path.
-`resolveTools` also drops `null` on an undeclared key that another member of the enclosing union
-declares (provider-flattened unions show every member's fields), and where the advertised schema marks a property optional without
+bypasses their own parser). Their error message names each unknown key and lists the allowed keys at that path; this includes
+a `null` on another union member's field.
+`resolveTools` also drops `null` where the advertised schema declares a property optional without
 admitting `null` (for example `Schema.optionalKey(X)`, the subagent `model`, or raw MCP schemas)
 before any registration sees the call; `omitNullOptionalToolArguments` exposes that step for hosts
 that dispatch registrations themselves. User-submitted input/interaction responses are unchanged.
@@ -942,7 +942,7 @@ see the message and continue. The result includes structured content with `type`
 Optional `makeTool({ invalidParamsMessage })` receives the `Schema.SchemaError` produced by
 decoding `parameters` through its JSON codec (validate and execute). The decode error is passed
 through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
-`SchemaError(...)` wrapper, followed by one line per object path naming its unknown keys and
+`SchemaError(...)` wrapper, followed by one line per object (path and allowed-key set) naming its unknown keys and
 listing the allowed keys. Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native `Error`, but the
 wrapper remains part of this tool-message contract; do not default to `.message`.
 Existing `(error: unknown) => string` callbacks remain assignable.
