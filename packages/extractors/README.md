@@ -117,8 +117,8 @@ no separate cap in this package, which is a residual risk for crafted PDFs. Your
 limit (container or serverless function) is the outer bound: size it for four workers plus your
 own load, or lower the limits.
 
-Legitimate files at the default limits parse in well under a second, so 30 s only stops runaway
-work.
+The 30 s default is a backstop against runaway work, not a measure of normal parse time. Before
+lowering `timeoutMs`, measure extraction with representative files from your own uploads.
 
 `isolation: 'none'` parses in the calling thread, for runtimes without worker threads. It is
 **unsafe for untrusted input**: a crafted file can then exhaust the process heap or block the
