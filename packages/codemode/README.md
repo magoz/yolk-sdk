@@ -56,8 +56,8 @@ const program = Effect.gen(function* () {
   normal execute path (input decoding, enablement, registration wrappers, same host context), gets
   the id `<toolCallId>/<seq>`, and is recorded on the result's `nestedCalls` with status, duration,
   truncated error, and usage. The record keeps up to `maxNestedCalls` calls, at most 4096
-  (`nestedToolCallMaxRecordedCalls`; argument byte budgets still apply), and per-status `counts` over every call. Nested results never reach the model; only
-  the script output and return value do.
+  (`nestedToolCallMaxRecordedCalls`; argument byte budgets still apply), and per-status `counts`
+  over every call. Nested results never reach the model; only the script output and return value do.
 - A call resolves to `structuredContent` for tools with an output schema and to the text content
   otherwise; error results, `beforeNestedCall` failures, and calls past `maxNestedCalls` reject
   with an `Error` whose message is `tools.<id>: <text>`, or `tools["<name>"]: <text>` for a tool

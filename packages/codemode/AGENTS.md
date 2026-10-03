@@ -64,7 +64,8 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 - `afterNestedCall` wraps only `nested.execute` (not `beforeNestedCall` rejections) in `onExit`:
   outcome `success` (no `isError`), `failure` (error result or non-interrupt failure), or
   `interrupted` (interrupts only); the script sees the call settle after the hook. A hook failure
-  (defects included) is logged and never changes the call's result or record.
+  (defects and synchronous throws included: the invocation runs inside `Effect.suspend`) is logged
+  and never changes the call's result or record.
 - Description: intro, globals one line each, nested tools by namespace (with the module
   `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
   `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within

@@ -108,8 +108,9 @@ default that is every non-`read` call, including the nested calls of a
 import { Effect } from 'effect'
 import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
 
-// Your storage, scoped to one run. `db` is host code (for example Drizzle over Postgres), and
-// leases use the database clock: `now() + leaseMs`, classified against `now()`.
+// Your storage, scoped to one run. `db` is host code (for example Drizzle over Postgres) returning
+// interruptible Effects (`Effect.tryPromise` passing the AbortSignal to the driver), and leases
+// use the database clock: `now() + leaseMs`, classified against `now()`.
 const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
   scope: runId,
   // Atomic: insert a claimed entry if the key is absent, else classify the stored entry.
@@ -138,12 +139,17 @@ const resolveStepTools = Effect.gen(function* () {
 | `InFlight`  | another execution holds a live lease           | waits for it up to `maxWaitMs`/`deadline`; never runs                         |
 | `Abandoned` | the lease expired without an outcome (a crash) | never runs; tells the model it may already have been applied and to verify it |
 
-- Keys are `call.id`, and `<parentCallId>/<seq>` for nested calls. Scope the store to one run (add
-  the turn if your provider can reuse call ids across turns).
-- Persist `ToolLedgerEntry` with `Schema.toCodecJson(ToolLedgerEntry)`, or store every claim
-  field: `args` is an 8 KiB audit preview (`argsTruncated` says it was cut) and `argsDigest` is the
-  SHA-256 of the full arguments' canonical JSON. A different tool name or `argsDigest` under the
-  same key is a model-visible conflict; never compare the preview. Stored results are bounded
+- Keys are `call.id`, and `<parentCallId>/<seq>` for nested calls. Call ids must be unique within
+  a ledger scope: a reused id with the same arguments replays the earlier result. Scope the store
+  to one run (add the turn or step if your provider can reuse call ids across turns).
+- Persist `ToolLedgerEntry` with `Schema.toCodecJson(ToolLedgerEntry)`, or store every claim field:
+  `args` is an 8 KiB audit preview (`argsTruncated` says it was cut) and `argsDigest` is the SHA-256
+  of the full arguments' canonical JSON. A different tool name or `argsDigest` under the same key is
+  a model-visible conflict; never compare the preview. `argsDigest` is a stable format (store it as
+  text, for example `char(64)`): lower-case hex SHA-256 of the UTF-8 canonical JSON of the raw
+  `call.params`, with object keys sorted by UTF-16 code units and `JSON.stringify` number and string
+  rules. It is a conflict fingerprint, not a security boundary: unserializable arguments share one
+  digest, and integers beyond 2^53 lose precision before hashing. Stored results are bounded
   (`maxResultBytes`, default 1 MiB, measured on the serialized JSON) and wire-safe; the live call
   still returns the full result.
 - Tool executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions. Pass it
@@ -155,8 +161,16 @@ const resolveStepTools = Effect.gen(function* () {
 - Change which calls are ledgered with `isLedgered`. Include your own delegation tools, for
   example `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`. Without
   `ledger`, execution is unchanged.
-- Waits, store polls included, end at `maxWaitMs` or `deadline`; a failed poll fails closed. Each
-  `complete` attempt is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
+- Waits, store polls included, end at `maxWaitMs` or `deadline` (one final poll runs shortly before
+  the end); a failed poll fails closed. Each `heartbeat` and each of up to three `complete`
+  attempts is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
+- `deadline` bounds only waiting for a duplicate. A call that runs is not cut at it, and recording
+  its outcome can take up to about 15 s (three 5 s attempts) after the call returns, so reserve
+  that finalization time before the platform stops the step.
+- Store operations (`claim`, `heartbeat`, `complete`, `list`) must be interruptible, for example
+  `Effect.tryPromise` passing the `AbortSignal` to the driver. The ledger's timeouts interrupt the
+  operation and wait for it to stop, so uninterruptible store work holds the wait, heartbeat, or
+  completion until it ends.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` reports each ledgered
   call's decision (`fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`, `abandoned`,
   `conflict`) for logs and metrics, for example to count replays. It never affects execution:

@@ -69,6 +69,12 @@ already have been applied; they never run twice under the same ledger key. Inclu
 delegation tools with `isLedgered`. Read calls still re-run. The package itself never builds tool
 sets, so there is nothing to configure on `runVercelAgentWorkflow`.
 
+`deadline` bounds only waiting for a duplicate execution; it does not stop a call that runs.
+Recording a call's outcome can take up to about 15 s after the call returns (three 5 s attempts),
+so set `stepDeadlineMs` to leave that finalization time before the function budget ends. Keep
+the store's operations interruptible (for example `Effect.tryPromise` passing the `AbortSignal` to
+the driver): the ledger's timeouts cannot cut uninterruptible store work.
+
 ## Durable stream rule
 
 Use distinct finalization paths:

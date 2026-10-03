@@ -45,10 +45,11 @@ export type ToolLedgerOutcome = typeof ToolLedgerOutcome.Type
 /**
  * One persisted ledger entry. `key` is the top-level `call.id`, or `<parentCallId>/<seq>` for a
  * nested call (then `parentKey` is the parent call id). `args` is the compact JSON of the call
- * arguments, cut to 8 KiB (an audit preview; `argsTruncated` says it was cut). `argsDigest` is the SHA-256 of the full arguments'
- * canonical JSON (see `toolLedgerArgs`); conflict detection compares it with the tool name, never
- * the preview. An entry without `outcome` is claimed: running under a live lease, or abandoned
- * once the lease expired. Plain wire data: persist it with `Schema.toCodecJson(ToolLedgerEntry)`.
+ * arguments, cut to 8 KiB (an audit preview; `argsTruncated` says it was cut). `argsDigest` is the
+ * SHA-256 of the full arguments' canonical JSON, a stable format (see `toolLedgerArgs`; store it
+ * as text, for example `char(64)`); conflict detection compares it with the tool name, never the
+ * preview. An entry without `outcome` is claimed: running under a live lease, or abandoned once
+ * the lease expired. Plain wire data: persist it with `Schema.toCodecJson(ToolLedgerEntry)`.
  */
 export class ToolLedgerEntry extends Schema.Class<ToolLedgerEntry>('ToolLedgerEntry')({
   key: NonEmptyTrimmedString,
@@ -147,6 +148,13 @@ type ClaimRequestFields = {
  *
  * No operation ever hands a claimed entry to another execution: a claim is never taken over, so
  * heartbeats and completion need no fencing token.
+ *
+ * Every operation must be interruptible, for example `Effect.tryPromise` passing its
+ * `AbortSignal` to the driver. The ledger's timeouts (polls within the wait, each `heartbeat` and
+ * `complete` attempt bounded by `toolLedgerCompleteTimeoutMs`) interrupt the operation and wait
+ * for it to stop, so they cannot cut uninterruptible store work: an `Effect.uninterruptible`
+ * section, or a release or rollback that blocks, holds the wait, heartbeat, or completion (and
+ * the call's interruption) until it ends.
  */
 export type ToolLedgerStore = {
   /** Host scope (for example the Workflow run id); the prefix of every idempotency key. */
@@ -165,7 +173,9 @@ export type ToolLedgerStore = {
   ) => Effect.Effect<ReadonlyArray<ToolLedgerEntry>, ToolLedgerError>
 }
 
-/** Classifies an existing entry at `nowMs`: completed, in flight under a live lease, or abandoned. */
+/** Classifies an existing entry at `nowMs`: completed, in flight under a live lease, or
+ * abandoned.
+ */
 export const classifyToolLedgerEntry = (entry: ToolLedgerEntry, nowMs: number): ToolLedgerClaim =>
   entry.outcome !== undefined
     ? ToolLedgerClaim.Completed({ entry, outcome: entry.outcome })
@@ -260,8 +270,12 @@ export type ToolLedgerOptions = {
    * execution, or the recording of its outcome. Default 150000.
    */
   readonly maxWaitMs?: number
-  /** Epoch milliseconds by which a wait must end (for example the step's function budget). A
-   * non-finite value is ignored.
+  /**
+   * Epoch milliseconds by which a wait for an in-flight duplicate must end (for example the step's
+   * function budget). A non-finite value is ignored. It bounds only that wait: a call that runs is
+   * not cut at the deadline, and recording its outcome can take up to three
+   * `toolLedgerCompleteTimeoutMs` attempts (about 15 s) after it returns. Pass a deadline that
+   * reserves that finalization time before the platform stops the step.
    */
   readonly deadline?: () => number | undefined
   /** UTF-8 bytes of a stored result's compact JSON. Default 1 MiB (see `toolLedgerResult`). */
@@ -311,7 +325,7 @@ export type ToolLedgerArgs = {
   readonly args: string
   /** Whether `args` was cut, so it no longer holds every argument. */
   readonly argsTruncated: boolean
-  /** Lower-case hex SHA-256 of the full arguments' canonical JSON. */
+  /** Lower-case hex SHA-256 of the full arguments' canonical JSON (format: `toolLedgerArgs`). */
   readonly argsDigest: string
 }
 
@@ -334,8 +348,8 @@ const canonicalJson = (value: Schema.Json): string => {
 }
 
 // Falls back to the compact JSON itself when it does not parse (the unserializable placeholder)
-// or nests too deeply for the recursion (a `RangeError`): the digest stays deterministic and the
-// claim is never preceded by a throw.
+// or nests too deeply for the recursion (a `RangeError`): the digest stays deterministic for a
+// runtime and the claim is never preceded by a throw.
 const canonicalArguments = (compact: string) =>
   Result.match(
     Result.try(() => canonicalJson(JSON.parse(compact))),
@@ -344,9 +358,22 @@ const canonicalArguments = (compact: string) =>
 
 /**
  * The ledger's record of call arguments: `args`, their compact JSON cut to
- * `toolLedgerMaxArgsBytes` (an audit preview; `argsTruncated` says it was cut), and `argsDigest`, the lower-case hex SHA-256 of the
- * full arguments' canonical JSON (compact, object keys sorted). Conflict detection compares
- * `argsDigest`, so arguments that differ only past the preview still conflict.
+ * `toolLedgerMaxArgsBytes` (an audit preview; `argsTruncated` says it was cut), and `argsDigest`.
+ * Conflict detection compares `argsDigest`, so arguments that differ only past the preview still
+ * conflict. Pure and synchronous.
+ *
+ * `argsDigest` is a stable format that hosts persist (as text, for example `char(64)`): the
+ * lower-case hex SHA-256 of the UTF-8 bytes of the canonical JSON of the raw `call.params` (as
+ * the model sent them, before Schema decoding): compact, object keys sorted by UTF-16 code units,
+ * arrays in order, numbers and strings as `JSON.stringify` writes them. It is a conflict
+ * fingerprint, not a security boundary, and it cannot tell apart:
+ * - two calls under the same key with equal arguments: call ids must be unique within a ledger
+ *   scope (include the turn or step in the scope when a provider can reuse ids), or the later call
+ *   replays the earlier result;
+ * - unserializable arguments (cycles, `BigInt`): they all share one digest;
+ * - integers beyond 2^53, which lose precision before hashing.
+ * Arguments nested too deeply to canonicalize (thousands of levels, depending on the runtime's
+ * stack) are digested from their compact JSON instead.
  */
 export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
   const compact = compactToolArguments(params)

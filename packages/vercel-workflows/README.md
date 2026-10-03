@@ -167,6 +167,9 @@ writes) then return their recorded result, wait for the running execution, or re
 abandoned call may already have been applied; they never run twice under the same ledger key.
 Add custom delegation tools with `isLedgered`. Read calls still re-run, and after an in-flight
 timeout the model may retry under a new call id. An in-memory store does not protect steps.
+`deadline` bounds only waiting for a duplicate: recording a call's outcome can take up to about
+15 s after the call returns, so leave that time before the function budget ends, and keep store
+operations interruptible (the ledger's timeouts cannot cut uninterruptible store work).
 
 ## Independent children
 

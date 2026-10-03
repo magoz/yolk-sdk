@@ -180,11 +180,12 @@ interface NestedToolExecutor {
 
 Nested call IDs are `<parentToolCallId>/<seq>`; they are the nested calls' ledger keys, and tool
 executors receive a ready-made `idempotencyKey` (see
-[Durable tool-call ledger](#durable-tool-call-ledger)). `ToolModule.id` is the namespace used for grouping and search. Host wrappers apply to
-nested calls only when they wrap registrations or the resolved tool set; executor decorators
-outside `ResolvedToolSet.execute` do not see nested calls. `makeCodeModeTool` therefore takes an
-optional `beforeNestedCall({ call, context })` hook for per-call run-authority checks: a failure
-rejects that nested call in the script and records it as an error without executing it.
+[Durable tool-call ledger](#durable-tool-call-ledger)). `ToolModule.id` is the namespace used for
+grouping and search. Host wrappers apply to nested calls only when they wrap registrations or the
+resolved tool set; executor decorators outside `ResolvedToolSet.execute` do not see nested calls.
+`makeCodeModeTool` therefore takes an optional `beforeNestedCall({ call, context })` hook for
+per-call run-authority checks: a failure rejects that nested call in the script and records it as an
+error without executing it.
 
 ### Nested-call record
 
@@ -261,12 +262,25 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
 - **Contract**: `ToolLedgerStore` is host-implemented storage scoped by the host (for example the
   Workflow run id, `scope`), with `claim`, `heartbeat`, `complete`, and `list(parentKey)`. `claim`
   atomically inserts a claimed entry (`Fresh`) or classifies the existing one as `Completed`,
-  `InFlight` (live lease), or `Abandoned` (lease expired, no outcome). Claims are never taken
-  over, so heartbeats and completion need no fencing. `ToolLedgerEntry` is the persisted Schema:
-  key, parent key, tool name, an 8 KiB compact-argument preview with `argsTruncated`, the
-  `argsDigest` (SHA-256 of the full arguments' canonical JSON), claim and lease times, and the outcome
+  `InFlight` (live lease), or `Abandoned` (lease expired, no outcome). Claims are never taken over,
+  so heartbeats and completion need no fencing. `ToolLedgerEntry` is the persisted Schema: key,
+  parent key, tool name, an 8 KiB compact-argument preview with `argsTruncated`, the `argsDigest`
+  (SHA-256 of the full arguments' canonical JSON), claim and lease times, and the outcome
   (`Succeeded` with a bounded, wire-safe `ToolResult`, or `Failed` with the `ToolError` fields;
   never causes or provider bodies). `makeInMemoryToolLedgerStore` is the reference implementation.
+  Store operations must be interruptible (for example `Effect.tryPromise` with the `AbortSignal`):
+  the ledger's timeouts interrupt an operation and wait for it to stop, so they cannot cut
+  uninterruptible store work.
+- **Argument digest**: `argsDigest` is a stable, host-persisted format (text, `char(64)`):
+  lower-case hex SHA-256 of the UTF-8 bytes of the canonical JSON of the raw `call.params` (compact,
+  object keys sorted by UTF-16 code units, `JSON.stringify` number and string rules). It is a
+  conflict fingerprint, not a security boundary, so changing the canonical form would turn replays
+  that span a deploy into conflicts. The hash is a synchronous, runtime-neutral implementation
+  (`tools/sha256.ts`, checked against FIPS vectors and `node:crypto`) so `toolLedgerArgs` stays a
+  pure synchronous helper with no failure path before `claim`, and ledgered calls never wait on
+  asynchronous work that `TestClock` cannot see. Limits: call ids must be unique within a scope
+  (equal arguments under a reused id replay the earlier result), unserializable arguments share one
+  digest, and integers beyond 2^53 lose precision before hashing.
 - **Clocks**: `claim` and `heartbeat` receive the lease length `leaseMs` and the caller's `Clock`
   times (`nowMs`, `leaseExpiresAtMs`). A store uses one clock for every lease: its own (for
   example Postgres `now() + leaseMs`, classified against `now()`, so instances with skewed clocks
@@ -287,15 +301,17 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   remaining wait. `Abandoned` never re-executes: it returns a model-visible result saying the call
   may already have been applied and must be verified. A different tool name or `argsDigest` under
   the same key is a model-visible conflict (never decided by the bounded preview). Claim failures,
-  polls included, fail closed (nothing runs); heartbeat and completion failures (each `complete`
-  attempt bounded to 5 s) are logged and leave the entry claimed (later read as abandoned), never
-  masking the live result. Every returned result or `ToolError` is recorded before an
-  interruption takes effect (a `ToolError` also when its cause carries interruptions); defects,
-  and interruption without a `ToolError`, never record an outcome.
-- **Observability**: `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called
-  once per ledgered call with `fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`,
-  `abandoned`, or `conflict`, so hosts can log and count replays. It never affects execution:
-  throws and rejected promises are logged and ignored.
+  polls included, fail closed (nothing runs); heartbeat and completion failures (each heartbeat and
+  each of up to three `complete` attempts bounded to 5 s) are logged and leave the entry claimed
+  (later read as abandoned), never masking the live result. `deadline` bounds only the wait for a
+  duplicate: completion can add about 15 s after the call returns, which hosts reserve in the step
+  budget. Every returned result or `ToolError` is recorded before an interruption takes effect (a
+  `ToolError` also when its cause carries interruptions); defects, and interruption without a
+  `ToolError`, never record an outcome.
+- **Observability**: `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is
+  called once per ledgered call with `fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`,
+  `abandoned`, or `conflict`, so hosts can log and count replays. It never affects execution: throws
+  and rejected promises are logged and ignored.
 - **Idempotency key**: executors receive `idempotencyKey` (`<scope>:<ledger key>`), stable across
   re-executions, for external APIs that deduplicate: defence in depth for a crash between the
   tool's commit and `complete`.

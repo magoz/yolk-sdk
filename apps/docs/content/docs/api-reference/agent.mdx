@@ -192,40 +192,41 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 
 `@yolk-sdk/agent/tools`
 
-| Export                                                                                                                                                    | Purpose                                                                    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `makeTool`                                                                                                                                                | schema-backed tool registration                                            |
-| `resolveTools`                                                                                                                                            | filter/merge modules into model-visible defs and executor                  |
-| `BackgroundToolHost`                                                                                                                                      | host seam that admits model-chosen background calls                        |
-| `makeToolExecutorLayer`                                                                                                                                   | provide resolved executor as `ToolExecutor`                                |
-| `EmptyToolParams`                                                                                                                                         | no-arg tool schema                                                         |
-| `ToolAccess`                                                                                                                                              | `read`, `write`, `destructive`                                             |
-| `makeQuestionToolModule`                                                                                                                                  | built-in question HITL tool                                                |
-| `makeNonRecursiveSubagentToolModule`                                                                                                                      | subagent tool without recursive delegation                                 |
-| `SubagentRuntimeSelectionOptions`                                                                                                                         | host-advertised subagent model and reasoning choices                       |
-| `SubagentModelDefinition`                                                                                                                                 | model id and model-visible selection guidance                              |
-| `SubagentReasoningEffortDefinition`                                                                                                                       | reasoning effort and model-visible selection guidance                      |
-| `modelVisibleToolError`                                                                                                                                   | recoverable error visible to model                                         |
-| `withToolArgumentsErrorHint`                                                                                                                              | append unknown-argument hints to a validation message                      |
-| `omitNullOptionalToolArguments`                                                                                                                           | drop strict-mode `null`s for hosts dispatching directly                    |
-| `NestedTool`, `NestedToolExecutor`, `NestedToolDescriber`                                                                                                 | nested tool access for code mode registrations                             |
-| `ToolLedgerStore`, `ToolLedgerOptions`, `ToolLedgerClaim`, `ToolLedgerClaimRequest`, `ToolLedgerHeartbeatRequest`, `ToolLedgerError`                      | host-implemented durable tool-call ledger (`resolveTools` `ledger` option) |
-| `ToolLedgerDecision`, `ToolLedgerDecisionEvent`                                                                                                           | `onLedgerDecision` observability events                                    |
-| `ToolLedgerEntry`, `ToolLedgerOutcome`, `ToolLedgerSucceeded`, `ToolLedgerFailed`, `ToolLedgerFailure`                                                    | persisted ledger entry Schemas                                             |
-| `makeInMemoryToolLedgerStore`, `classifyToolLedgerEntry`, `toolLedgerResult`, `toolLedgerArgs`, `ToolLedgerArgs`, `sortToolLedgerEntries`                 | reference store and helpers for host stores                                |
-| `toolLedgerCompleteTimeoutMs`                                                                                                                             | timeout of one `complete` attempt (5 s, three attempts)                    |
-| `toolIdempotencyKey`, `defaultToolLedgerPolicy`, `abandonedToolCallResult`, `ToolLedgerPolicyInput`, `ToolLedgerAbandonedInput`, `ToolLedgerErrorDetails` | idempotency keys, default policy, and ledger results                       |
+| Export                                                                                                                                                    | Purpose                                                                             |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `makeTool`                                                                                                                                                | schema-backed tool registration                                                     |
+| `resolveTools`                                                                                                                                            | filter/merge modules into model-visible defs and executor                           |
+| `BackgroundToolHost`                                                                                                                                      | host seam that admits model-chosen background calls                                 |
+| `makeToolExecutorLayer`                                                                                                                                   | provide resolved executor as `ToolExecutor`                                         |
+| `EmptyToolParams`                                                                                                                                         | no-arg tool schema                                                                  |
+| `ToolAccess`                                                                                                                                              | `read`, `write`, `destructive`                                                      |
+| `makeQuestionToolModule`                                                                                                                                  | built-in question HITL tool                                                         |
+| `makeNonRecursiveSubagentToolModule`                                                                                                                      | subagent tool without recursive delegation                                          |
+| `SubagentRuntimeSelectionOptions`                                                                                                                         | host-advertised subagent model and reasoning choices                                |
+| `SubagentModelDefinition`                                                                                                                                 | model id and model-visible selection guidance                                       |
+| `SubagentReasoningEffortDefinition`                                                                                                                       | reasoning effort and model-visible selection guidance                               |
+| `modelVisibleToolError`                                                                                                                                   | recoverable error visible to model                                                  |
+| `withToolArgumentsErrorHint`                                                                                                                              | append unknown-argument hints to a validation message                               |
+| `omitNullOptionalToolArguments`                                                                                                                           | drop strict-mode `null`s for hosts dispatching directly                             |
+| `NestedTool`, `NestedToolExecutor`, `NestedToolDescriber`                                                                                                 | nested tool access for code mode registrations                                      |
+| `ToolLedgerStore`, `ToolLedgerOptions`, `ToolLedgerClaim`, `ToolLedgerClaimRequest`, `ToolLedgerHeartbeatRequest`, `ToolLedgerError`                      | host-implemented durable tool-call ledger (`resolveTools` `ledger` option)          |
+| `ToolLedgerDecision`, `ToolLedgerDecisionEvent`                                                                                                           | `onLedgerDecision` observability events                                             |
+| `ToolLedgerEntry`, `ToolLedgerOutcome`, `ToolLedgerSucceeded`, `ToolLedgerFailed`, `ToolLedgerFailure`                                                    | persisted ledger entry Schemas                                                      |
+| `makeInMemoryToolLedgerStore`, `classifyToolLedgerEntry`, `toolLedgerResult`, `toolLedgerArgs`, `ToolLedgerArgs`, `sortToolLedgerEntries`                 | reference store and helpers for host stores                                         |
+| `toolLedgerCompleteTimeoutMs`                                                                                                                             | timeout of each `heartbeat` and `complete` attempt (5 s; three `complete` attempts) |
+| `toolIdempotencyKey`, `defaultToolLedgerPolicy`, `abandonedToolCallResult`, `ToolLedgerPolicyInput`, `ToolLedgerAbandonedInput`, `ToolLedgerErrorDetails` | idempotency keys, default policy, and ledger results                                |
 
-`makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`, `discovery`,
-`nestedToolAccess`, `describe`, and `abandonedResult` (the result of a ledgered call found
-abandoned). `resolveTools(modules, context, { ledger })` runs ledgered calls (default every non-`read`
-tool plus the built-in `subagent` tool, top-level and nested) at most once per key, detects
-conflicts by `argsDigest` (SHA-256 of the full arguments), and passes executors, subagent
+`makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`,
+`discovery`, `nestedToolAccess`, `describe`, and `abandonedResult` (the result of a ledgered call
+found abandoned). `resolveTools(modules, context, { ledger })` runs ledgered calls (default every
+non-`read` tool plus the built-in `subagent` tool, top-level and nested) at most once per key,
+detects conflicts by `argsDigest` (SHA-256 of the full arguments), and passes executors, subagent
 executors included, a stable `idempotencyKey`; see
-[Durable tool ledger](../agent/tools-hitl#ledger-writes-for-re-executed-steps). `ToolResult.nestedCalls` and `ToolResult.usage` never reach the
-model: `toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run
-usage. `ToolRegistryError` causes include `codemode_unsupported_tool` and `invalid_tool_exposure`.
-See [Add code mode](../integrations/code-mode#choose-what-scripts-can-call).
+[Durable tool ledger](../agent/tools-hitl#ledger-writes-for-re-executed-steps).
+`ToolResult.nestedCalls` and `ToolResult.usage` never reach the model: `toolResultMessageFromResult`
+drops them and the loop does not add `ToolResult.usage` to run usage. `ToolRegistryError` causes
+include `codemode_unsupported_tool` and `invalid_tool_exposure`. See
+[Add code mode](../integrations/code-mode#choose-what-scripts-can-call).
 
 Typed-input helpers: `makeInputTool` keeps original call/response validators server-side;
 `makeInputToolModule` packages the registration as a module. `makeInputToolDef` creates only a
@@ -303,7 +304,7 @@ type SubagentExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
   readonly params: SubagentToolParams
-  readonly idempotencyKey?: string // with a tool ledger: `<scope>:<call id>`
+  readonly idempotencyKey?: string // with a tool ledger: `<scope>:<ledger key>`
 }
 
 type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
