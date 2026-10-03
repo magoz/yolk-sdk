@@ -128,6 +128,8 @@ pnpm changeset:version
    - `pnpm-lock.yaml` when changed.
    - `.changeset/pre.json` and removed consumed changesets.
    - No feature code, env files, `dist`, `.next`, `.turbo`, coverage.
+   - Changesets' formatter can rewrite older changelog entries (for example code-block quotes);
+     run `pnpm exec oxfmt packages/*/CHANGELOG.md` before validating so `pnpm format:check` passes.
    - Confirm normal releases have unpublished package versions; already-published versions are partial retry/tag repair only.
    - Confirm `v<version>` tag does not already exist.
 
@@ -180,6 +182,7 @@ pnpm packages:check
 pnpm cloudflare:check
 pnpm tsc
 pnpm lint
+pnpm format:check
 pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```

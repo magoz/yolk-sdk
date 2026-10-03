@@ -41,6 +41,7 @@ pnpm packages:check
 pnpm cloudflare:check
 pnpm tsc
 pnpm lint
+pnpm format:check
 pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
@@ -92,6 +93,7 @@ pnpm packages:check
 pnpm cloudflare:check
 pnpm tsc
 pnpm lint
+pnpm format:check
 pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 verify lockstep version and missing git tag

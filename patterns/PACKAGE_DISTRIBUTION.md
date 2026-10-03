@@ -198,6 +198,7 @@ pnpm packages:check
 pnpm cloudflare:check
 pnpm tsc
 pnpm lint
+pnpm format:check
 pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
@@ -286,7 +287,7 @@ Requirements before dispatch:
 - the requested npm dist-tag matches the version channel (`canary` for prereleases, `latest` for stable versions)
 - `v<version>` tag does not exist
 - normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
-- validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
+- validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm format:check`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. It publishes with `--provenance`, so each Action-published version carries an npm provenance attestation; versions published locally (first publish or emergency) have none.
 
@@ -359,6 +360,7 @@ Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-pu
    - `pnpm packages:smoke`
    - `pnpm tsc`
    - `pnpm lint`
+   - `pnpm format:check`
    - `pnpm test:run`
    - `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
    - clean fixture install from packed tarballs

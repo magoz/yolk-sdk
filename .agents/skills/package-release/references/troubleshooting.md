@@ -1,5 +1,17 @@
 # Troubleshooting
 
+## Publish Action fails `pnpm format:check` on generated changelogs
+
+Cause: `pnpm changeset:version` formats each changelog with its own formatter, which can rewrite
+older entries (for example code-block quotes and semicolons) in a way `oxfmt` rejects. The Action's
+Validate step runs `pnpm format:check` and stops before packing, so nothing is published.
+
+Fix:
+
+- Run `pnpm exec oxfmt packages/*/CHANGELOG.md` on the release-prep branch before validating.
+- If the release PR already merged, land a formatting-only PR on `main`, then rerun the Action for
+  the same version; no version bump is needed because nothing was published or tagged.
+
 ## `pnpm packages:smoke` fails on missing internal package
 
 Cause: packed package depends on unpublished internal `@yolk-sdk/*`.
