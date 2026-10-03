@@ -21,6 +21,14 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
 - `callableBy: 'codemode'` definitions are not provider-facing at all; the loop and realtime
   builders filter them with `providerToolDefs` before any adapter lowers schemas.
 
+## Effect Schema checks
+
+- Write `Schema.isPattern` regexes with the `u` flag. Effect 4 exports `pattern` to JSON Schema only
+  for Unicode-mode regexes and silently omits other patterns from the tool schema. Adding `u` can
+  change what a negated class or surrogate range accepts; keep runtime acceptance identical.
+- Effect 4 exports string `Schema.isMinLength(n)` as `minLength: ceil(n / 2)` code points
+  (`n >= 2`). Runtime checks are unchanged; do not rely on exact advertised string minimums.
+
 ## OpenAI-compatible function parameters
 
 - Tool parameter JSON Schema sent to OpenAI-compatible providers must have root `{ "type": "object" }`.

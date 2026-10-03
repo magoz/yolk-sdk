@@ -861,7 +861,7 @@ describe('Telegram conformance run interruption', () => {
 
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-      // Same shape as the Dropbox failing-restore drill (effect 4.0.0-rc.115): the run ends with the
+      // Same shape as the Dropbox failing-restore drill (effect 4.0.0): the run ends with the
       // case's own failure and no Interrupt in the cause, produces no report, and resumes no case.
       if (Exit.isSuccess(exit)) {
         return expect.fail('expected the interrupted run to fail')

@@ -28,6 +28,34 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: Effect 4.0.0
+
+This source upgrade targets the stable `effect@4.0.0` release; it is not a claim that an
+already-published canary uses that version. Upgrade matching Yolk packages and Effect together when
+the corresponding canary is available, and keep `effect` and every `@effect/*` package on the same
+version.
+
+- Effect 4.0.0 removes the `effect/unstable/*` entrypoints. Drop the `unstable` segment:
+  `effect/unstable/http` becomes `effect/http`, likewise `effect/socket`, `effect/sql`,
+  `effect/process` and the other areas; `effect/unstable/httpapi` becomes `effect/http-api`. Import
+  `Arbitrary` from `effect`.
+- `effect/Encoding` is split into `effect/encoding/Base64`, `Base64Url`, `Hex` and
+  `EncodingError`. For example, `Encoding.encodeBase64` / `decodeBase64` become `Base64.encode` /
+  `Base64.decode`.
+- Host Effect code must also adopt upstream renames, such as `Schema.isBetweenLength` /
+  `Schema.isBetweenProperties` and `Scope.close` accepting only a `Scope.Closeable`. Follow
+  Effect's release notes for semantic changes in your own code; for example, `Array`, `Chunk`,
+  `Effect` and `Record` `partition` now return successes before failures.
+- Tool JSON Schemas: Effect 4.0.0 exports `Schema.isPattern` only for regexes with the `u` flag and
+  silently omits other patterns. Yolk's connector schemas now use `u`, so connector tool
+  parameters keep their `pattern` hints with unchanged runtime validation; the Fortnox identifier
+  pattern is advertised as the equivalent BMP-only class
+  `^(?!\.{1,2}$)[\u0020-\u007e\u0080-\ud7ff\ue000-\uffff]+$`. Add `u` to `Schema.isPattern` in
+  your own tool parameter schemas to keep their hints, and check that `u` does not change what
+  your regex accepts (surrogate ranges and bounded quantifiers over astral characters can).
+- String `Schema.isMinLength(n)` with `n >= 2` is advertised as `minLength: ceil(n / 2)` code
+  points. Tool execution still validates against the original Effect Schema.
+
 ### Canary.96: code mode, classifier models, conformance, and emulators
 
 New packages: `@yolk-sdk/codemode` ([Add code mode](./integrations/code-mode)) and the

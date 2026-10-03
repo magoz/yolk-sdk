@@ -85,7 +85,7 @@ const SupplierInvoicesResponse = Schema.Struct({
   MetaInformation: FortnoxMetaInformation
 })
 
-// Parse options are call-scoped in Effect rc.115, not schema annotations. Customer writes reject
+// Parse options are call-scoped in Effect 4, not schema annotations. Customer writes reject
 // unknown keys (including Fortnox's read-only `Country` and list-only `Phone`) instead of
 // stripping them, so a request is never silently sent without a field the caller supplied.
 // Take fields, not a Class: `Schema.toType` (used by `executeTyped`) accepts an existing Class

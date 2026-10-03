@@ -209,14 +209,14 @@ const main = async () => {
       dependencies: {
         // Dependency of @yolk-sdk/codemode; tarballs are extracted, not installed.
         '@earendil-works/pi-codemode': '1.0.0',
-        '@effect/platform-node': '4.0.0-rc.115',
+        '@effect/platform-node': '4.0.0',
         // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
         '@emulators/core': '0.12.0',
         '@modelcontextprotocol/client': '2.0.0',
         '@modelcontextprotocol/core': '2.0.0',
         '@modelcontextprotocol/server': '2.0.0',
         '@vercel/sandbox': '2.2.1',
-        effect: '4.0.0-rc.115',
+        effect: '4.0.0',
         // Dependency of @yolk-sdk/mcp (./conformance), with the MCP client's own range.
         'eventsource-parser': '^3.0.0',
         'gpt-tokenizer': '^3.4.0',
@@ -227,10 +227,10 @@ const main = async () => {
 
     writeFileSync(join(fixtureDir, 'package.json'), JSON.stringify(packageJson, null, 2))
     // pnpm 11 reads overrides from workspace config, not package.json's pnpm field.
-    // Match the workspace's tested platform graph rather than a newer prerelease.
+    // Match the workspace's tested platform graph rather than a newer release.
     writeFileSync(
       join(fixtureDir, 'pnpm-workspace.yaml'),
-      "overrides:\n  '@effect/platform-node-shared': 4.0.0-rc.115\n"
+      "overrides:\n  '@effect/platform-node-shared': 4.0.0\n"
     )
     execFileSync('pnpm', ['install', '--ignore-scripts'], {
       cwd: fixtureDir,

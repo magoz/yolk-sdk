@@ -80,7 +80,7 @@ Use existing test stack:
 - `vitest`
 - `@effect/vitest`
 - `effect`
-- Effect native `Arbitrary.schema()` from `effect/Arbitrary`
+- Effect native `Arbitrary.schema()` from `effect` (`import { Arbitrary } from 'effect'`)
 
 Add `fast-check` only when command/model testing needs direct generators or shrinkers beyond `@effect/vitest` helpers.
 

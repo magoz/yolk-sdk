@@ -65,11 +65,11 @@ The smoke command reads `.alchemy/state/YolkAgentWorker/dev_magoz/Api.json` unle
 
 ## Alchemy compatibility
 
-This app pins `alchemy@2.0.0-beta.77` against catalog Effect `4.0.0-rc.115` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
+This app pins `alchemy@2.0.0-beta.80` against catalog Effect `4.0.0` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
 
-The published beta.77 dependency cohort still calls pre-rc.115 Config and CLI constructors. Reproducible pnpm patches cover Alchemy, its Cloudflare runtime, and the affected Distilled packages in both source and compiled exports; see [patch ownership and removal checks](../../patches/README.md). Keep these patches until an upstream release passes the runtime compatibility check without them. Peer ranges are not suppressed.
+The beta.80 dependency cohort (`@alchemy.run/*` beta.80, `@distilled.cloud/*` rc.13) declares `effect ^4.0.0` and runs unpatched; the rc.115 compatibility patches were removed with the Effect 4.0.0 upgrade. Peer ranges are not suppressed. If a future Alchemy release regresses against catalog Effect, fix it upstream or with a reviewed `pnpm patch` rather than restoring removed Effect APIs.
 
-The previous beta.56 / Effect beta.80 pair is no longer the compatibility target. Do not restore old `DurableObjectNamespace` or `ApiLive` wiring, add old Vite patches, or blanket-strip `.asEffect` calls: Alchemy-owned protocols are not Effect API aliases.
+The previous beta.56 / Effect beta.80 and beta.77 / rc.115 pairs are no longer the compatibility target. Do not restore old `DurableObjectNamespace` or `ApiLive` wiring, add old Vite patches, or blanket-strip `.asEffect` calls: Alchemy-owned protocols are not Effect API aliases.
 
 `pnpm --filter @yolk-sdk/cloudflare-agent run compat` (also part of `pnpm cloudflare:check`) is a synchronous Node CLI smoke (`node --experimental-strip-types`, not tsx) so it loads Alchemy `lib/` the same way the CLI does. It checks the import graph, `alchemy --help`, and that app/root/Alchemy `require.resolve('effect')` realpaths are one instance. It does not deploy, start `alchemy dev`, or prove a running Worker or E2E.
 
