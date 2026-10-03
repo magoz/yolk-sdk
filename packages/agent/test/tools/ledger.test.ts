@@ -225,6 +225,136 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('ends a wait at the deadline option before maxWaitMs', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe, { sleep: '1 minute' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store }))
+
+      yield* TestClock.adjust('1 second')
+
+      const second = yield* Effect.forkChild(
+        execute(tools, noteCall(), { store, maxWaitMs: 60_000, deadline: () => 4_000 })
+      )
+
+      yield* TestClock.adjust('3 seconds')
+
+      const timedOut = yield* Fiber.join(second)
+
+      expect(timedOut.structuredContent).toMatchObject({
+        reason: 'timeout',
+        details: { state: 'in_flight' }
+      })
+      expect(probe.runs).toEqual(['hot lead'])
+
+      yield* Fiber.interrupt(first)
+    })
+  )
+
+  it.effect('fails closed when a polling claim fails', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe, { sleep: '1 minute' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store: memory }))
+
+      yield* TestClock.adjust('1 second')
+
+      let claims = 0
+
+      const failing: ToolLedgerStore = {
+        ...memory,
+        claim: request =>
+          claims++ === 0
+            ? memory.claim(request)
+            : Effect.fail(new ToolLedgerError({ message: 'database down' }))
+      }
+
+      const second = yield* Effect.forkChild(
+        Effect.exit(execute(tools, noteCall(), { store: failing, pollIntervalMs: 500 }))
+      )
+
+      yield* TestClock.adjust('1 second')
+
+      const exit = yield* Fiber.join(second)
+
+      expect(exit).toEqual(
+        Exit.fail(
+          new ToolError({
+            tool: 'append_note',
+            cause: 'unavailable',
+            message: 'The tool ledger is unavailable (database down); append_note was not run.'
+          })
+        )
+      )
+      expect(probe.runs).toEqual(['hot lead'])
+
+      yield* Fiber.interrupt(first)
+    })
+  )
+
+  it.effect('reports a conflict with an in-flight call without waiting for it', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const decisions: Array<ToolLedgerDecisionEvent> = []
+      const tools = [noteTool(probe, { sleep: '1 minute' })]
+
+      const first = yield* Effect.forkChild(execute(tools, noteCall('call_1', 'first'), { store }))
+
+      yield* TestClock.adjust('1 second')
+
+      // No clock adjustment: a wait would never finish.
+      const conflict = yield* execute(tools, noteCall('call_1', 'second'), {
+        store,
+        onLedgerDecision: event => {
+          decisions.push(event)
+        }
+      })
+
+      expect(conflict.structuredContent).toMatchObject({ details: { state: 'conflict' } })
+      expect(decisions).toEqual([{ key: 'call_1', toolName: 'append_note', decision: 'conflict' }])
+      expect(probe.runs).toEqual(['first'])
+
+      yield* Fiber.interrupt(first)
+    })
+  )
+
+  it.effect('logs heartbeat failures and still records the outcome', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+
+      const store: ToolLedgerStore = {
+        ...memory,
+        heartbeat: () => Effect.fail(new ToolLedgerError({ message: 'lease update failed' }))
+      }
+
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '5 seconds' })], noteCall(), {
+          store,
+          leaseMs: 4_000
+        }).pipe(Effect.provide(logger))
+      )
+
+      yield* TestClock.adjust('5 seconds')
+
+      const result = yield* Fiber.join(running)
+      const [entry] = yield* memory.entries
+
+      expect(result.content).toBe('appended hot lead (1)')
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+      expect(messages.length).toBeGreaterThan(0)
+      expect(messages).toContainEqual([
+        'Tool ledger heartbeat failed for call_1: lease update failed'
+      ])
+    })
+  )
+
   it.effect('never re-executes an abandoned call', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
