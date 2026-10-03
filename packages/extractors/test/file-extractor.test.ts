@@ -364,8 +364,10 @@ describe('PDF extraction lifecycle', () => {
       let destroyCount = 0
 
       const open = Effect.succeed({
-        destroy: async () => {
-          destroyCount += 1
+        loadingTask: {
+          destroy: async () => {
+            destroyCount += 1
+          }
         }
       })
 

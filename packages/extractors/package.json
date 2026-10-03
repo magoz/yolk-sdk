@@ -80,8 +80,8 @@
     "@yolk-sdk/knowledge": "workspace:^",
     "effect": "catalog:",
     "fflate": "^0.8.3",
-    "mammoth": "^1.12.0",
-    "unpdf": "^1.6.2"
+    "mammoth": "^1.13.0",
+    "unpdf": "^1.8.1"
   },
   "peerDependencies": {
     "xlsx": ">=0.20.3"

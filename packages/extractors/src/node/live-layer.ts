@@ -50,8 +50,12 @@ const makeExtractedFile = (content: string, metadata: ExtractedFileMetadata) => 
 
 const decodeText = (bytes: Uint8Array) => new TextDecoder('utf-8', { fatal: false }).decode(bytes)
 
+/**
+ * PDF.js 6 releases a document through its loading task (`PDFDocumentProxy` no longer has
+ * `destroy()`); unpdf releases the documents it opens the same way.
+ */
 type PdfDocumentResource = {
-  readonly destroy: () => Promise<void>
+  readonly loadingTask: { readonly destroy: () => Promise<void> }
 }
 
 /** Run `use` with an opened PDF document and always release the parser afterwards. */
@@ -64,7 +68,7 @@ export const withAcquiredPdfDocument = <D extends PdfDocumentResource, A, E, R>(
     Effect.gen(function* () {
       const document = yield* Effect.acquireRelease(open, document =>
         Effect.tryPromise({
-          try: () => document.destroy(),
+          try: () => document.loadingTask.destroy(),
           catch: () => new FileExtractionError({ message: 'Could not release PDF parser', format })
         }).pipe(Effect.ignore)
       )
