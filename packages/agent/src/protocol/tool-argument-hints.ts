@@ -50,9 +50,9 @@ const unknownArgumentsIn = (
 
 // A quoted dotted path when unambiguous (`"a.b"`), otherwise an unquoted JSON path array
 // (`["a.b"]`). The two forms never collide: only the array form starts with `[`, and any segment
-// that could look like path syntax (empty, `.`, `[`, `"`) forces the array form.
-const needsArrayForm = (segment: string) =>
-  segment === '' || segment.includes('.') || segment.includes('[') || segment.includes('"')
+// that could look like path syntax or break the line (empty, `.`, `[`, `"`, newline) forces the
+// array form.
+const needsArrayForm = (segment: string) => segment === '' || /[.["\n\r]/.test(segment)
 
 const formatPath = (path: ReadonlyArray<PropertyKey>) => {
   const segments = path.map(String)

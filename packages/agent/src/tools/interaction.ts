@@ -67,28 +67,44 @@ const decodeExact = <S extends SyncSchema>(
     )
   )
 
+// Bounds for comparing in-process call params: past them the input is returned unchanged, so the
+// exact-JSON check fails closed with a validation error instead of overflowing or stalling.
+const maxCompareDepth = 64
+
+const maxCompareNodes = 100_000
+
 // Treat an input `null` as absent only where the decoded value has no such key.
 const omitNullsAbsentFrom = (input: unknown, decoded: unknown): unknown => {
-  if (Array.isArray(input) && Array.isArray(decoded)) {
-    return input.map((item, index) => omitNullsAbsentFrom(item, decoded[index]))
-  }
+  const budget = { remaining: maxCompareNodes }
 
-  if (
-    !Predicate.isObject(input) ||
-    !hasPlainPrototype(input) ||
-    !Predicate.isObject(decoded) ||
-    !hasPlainPrototype(decoded)
-  ) {
-    return input
-  }
+  const walk = (left: unknown, right: unknown, depth: number): unknown => {
+    budget.remaining -= 1
 
-  return Object.fromEntries(
-    Object.entries(input).flatMap(([key, item]) =>
-      item === null && !Object.hasOwn(decoded, key)
-        ? []
-        : [[key, omitNullsAbsentFrom(item, decoded[key])]]
+    if (budget.remaining < 0 || depth > maxCompareDepth) return left
+
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return left.map((item, index) => walk(item, right[index], depth + 1))
+    }
+
+    if (
+      !Predicate.isObject(left) ||
+      !hasPlainPrototype(left) ||
+      !Predicate.isObject(right) ||
+      !hasPlainPrototype(right)
+    ) {
+      return left
+    }
+
+    return Object.fromEntries(
+      Object.entries(left).flatMap(([key, item]) =>
+        item === null && !Object.hasOwn(right, key)
+          ? []
+          : [[key, walk(item, right[key], depth + 1)]]
+      )
     )
-  )
+  }
+
+  return walk(input, decoded, 0)
 }
 
 /** Model-produced call params decode through the JSON codec that `ToolDef.parameters`

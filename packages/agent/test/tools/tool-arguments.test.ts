@@ -1274,6 +1274,28 @@ describe('unknown tool argument keys', () => {
     })
   )
 
+  it.effect('rejects shared object graphs carrying undefined promptly, without a hang', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Schema.Struct({ id: Schema.String }))
+      const toolSet = yield* resolveOne(tool)
+
+      // 41 distinct objects aliased into a 2^40-path graph, with an undefined at the bottom.
+      type Shared = { readonly drop?: undefined; readonly left?: Shared; readonly right?: Shared }
+
+      const shared = Array.from({ length: 40 }).reduce<Shared>(
+        node => ({ left: node, right: node }),
+        { drop: undefined }
+      )
+
+      const started = performance.now()
+      const result = yield* toolSet.execute(call({ id: 'x', extra: shared }))
+
+      expect(performance.now() - started).toBeLessThan(1_000)
+      expectValidationError(result, 'extra')
+      expect(received).toHaveLength(0)
+    })
+  )
+
   it.effect('rejects non-finite numbers inside decoded maps and sets', () =>
     Effect.gen(function* () {
       const { tool, received } = capturingTool(

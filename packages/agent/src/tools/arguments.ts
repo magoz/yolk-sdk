@@ -124,23 +124,33 @@ const containsUndefined = (root: unknown): boolean => {
   return false
 }
 
-// In-process inputs that carry `undefined` are shallow in practice; beyond this depth (or on a
-// cycle) the remaining structure is left as is and decoding decides.
+// In-process inputs that carry `undefined` are shallow in practice; beyond this depth the
+// remaining structure is left as is and decoding decides.
 const maxRebuildDepth = 64
 
+// Memoized by object identity: shared (aliased) subgraphs are rebuilt once and stay aliased, so
+// work is linear in distinct objects; a cycle sees the original placeholder and stops.
 const rebuildWithoutUndefined = (
   value: unknown,
   depth: number,
-  onPath: ReadonlySet<object>
+  memo: Map<object, unknown>
 ): unknown => {
-  if (!Predicate.isObjectOrArray(value) || depth > maxRebuildDepth || onPath.has(value)) {
-    return value
-  }
+  if (!Predicate.isObjectOrArray(value) || depth > maxRebuildDepth) return value
 
-  const path = new Set([...onPath, value])
+  if (memo.has(value)) return memo.get(value)
 
+  memo.set(value, value)
+
+  const result = rebuildChildren(value, depth, memo)
+
+  memo.set(value, result)
+
+  return result
+}
+
+const rebuildChildren = (value: object, depth: number, memo: Map<object, unknown>): unknown => {
   if (Array.isArray(value)) {
-    const items = value.map(item => rebuildWithoutUndefined(item, depth + 1, path))
+    const items = value.map(item => rebuildWithoutUndefined(item, depth + 1, memo))
 
     return items.some((item, index) => item !== value[index]) ? items : value
   }
@@ -156,7 +166,7 @@ const rebuildWithoutUndefined = (
       return []
     }
 
-    const normalized = rebuildWithoutUndefined(item, depth + 1, path)
+    const normalized = rebuildWithoutUndefined(item, depth + 1, memo)
 
     changed ||= normalized !== item
 
@@ -171,7 +181,7 @@ const rebuildWithoutUndefined = (
  * do. Cycle-safe and stack-safe; returns the same reference when nothing changes.
  */
 export const omitUndefinedKeys = (value: unknown): unknown =>
-  containsUndefined(value) ? rebuildWithoutUndefined(value, 0, new Set()) : value
+  containsUndefined(value) ? rebuildWithoutUndefined(value, 0, new Map()) : value
 
 /** `Schema.Struct({})`: Effect parses an empty struct as any non-nullish value, without an
  * excess-property check, while it is advertised as a closed empty object. */
