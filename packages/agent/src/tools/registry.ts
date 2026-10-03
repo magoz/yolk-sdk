@@ -9,7 +9,6 @@ import {
   type JsonSchema
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import * as SchemaAST from 'effect/SchemaAST'
 import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/agent/loop'
 import {
   isCodeModeCallable,
@@ -37,6 +36,13 @@ import {
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
+import {
+  decodeToolArguments,
+  isEmptyStructSchema,
+  omitNullOptionalToolArguments,
+  omitNullOptionalToolCallArguments
+} from './arguments.ts'
 import {
   backgroundToolDef,
   executeBackgroundTool,
@@ -405,16 +411,6 @@ const hasJsonSchemaType = (input: Schema.Json, type: string) => {
   return schema !== undefined && jsonField(schema, 'type') === type
 }
 
-const isEmptyStructSchema = (schema: Schema.Top) => {
-  const ast = Schema.toEncoded(schema).ast
-
-  return (
-    SchemaAST.isObjects(ast) &&
-    ast.propertySignatures.length === 0 &&
-    ast.indexSignatures.length === 0
-  )
-}
-
 const isEmptyRecordJsonSchema = (schema: typeof ToolJsonSchema.Type) =>
   isToolJsonSchemaObject(schema) &&
   hasJsonSchemaType(schema, 'object') &&
@@ -433,7 +429,7 @@ const emptyObjectJsonSchema: typeof ToolJsonSchemaObject.Type = {
 // object type. Stamp only typeless combinators whose members are all objects
 // (local $refs resolved): every other root keeps its prior shape, so
 // primitive, unknown, and already-typed schemas are untouched, and call
-// validation still decodes against the original Effect Schema.
+// validation still decodes through the original Effect Schema's JSON codec.
 const isObjectCombinatorMember = (
   member: Schema.Json | undefined,
   definitions: typeof ToolJsonSchemaObject.Type
@@ -532,7 +528,9 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
 }
 
 /** JSON Schema lowering of an Effect Schema for model guidance and display hints.
- * Guidance only: execution validation always decodes against the original Effect Schema.
+ * It describes the schema's canonical JSON codec (`Schema.toCodecJson`), which is what tool
+ * argument validation decodes with; e.g. `Schema.optional(X)` is advertised and accepted as
+ * `X | null`.
  */
 export const toolJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
   jsonSchemaFromSchema(schema)
@@ -546,7 +544,9 @@ const invalidParamsMessage = (
     readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   },
   error: Schema.SchemaError
-) => options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${String(error)}`
+) =>
+  options.invalidParamsMessage?.(error) ??
+  withToolArgumentsErrorHint(`Invalid ${options.name} arguments: ${String(error)}`, error)
 
 type MakeToolRegistrationFields = {
   def: ToolDef
@@ -612,12 +612,15 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     registration.describe = options.describe
   }
 
+  // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
+  const decodeParams = decodeToolArguments(options.parameters)
+
   const tails: Pick<
     ToolRegistration<Context>,
     'validate' | 'access' | 'approval' | 'isEnabled' | 'execute'
   > = {
     validate: call =>
-      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+      decodeParams(call.params).pipe(
         Effect.asVoid,
         Effect.mapError(
           error =>
@@ -632,7 +635,7 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     approval: options.approval,
     isEnabled: options.isEnabled,
     execute: ({ call, context, nested }) =>
-      Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+      decodeParams(call.params).pipe(
         Effect.matchEffect({
           onFailure: error => {
             const message = invalidParamsMessage(options, error)
@@ -786,6 +789,13 @@ const executeInteractionTool = <Context>(input: {
     if (stored.status === 'started') return unknownResult()
 
     const handler = input.registration?.interaction
+
+    // Receipts bind the original call; validators and handlers see normalized arguments.
+    const businessCall =
+      input.registration === undefined
+        ? stored.call
+        : omitNullOptionalToolCallArguments(input.registration.def.parameters, stored.call)
+
     const actionId = stored.actionId
     const data = stored.data
 
@@ -805,7 +815,7 @@ const executeInteractionTool = <Context>(input: {
     }
 
     yield* handler
-      .validateCall(stored.call.params)
+      .validateCall(businessCall.params)
       .pipe(
         Effect.mapError(error =>
           interactionToolError({ tool: name, cause: 'validation', message: error.message })
@@ -880,7 +890,7 @@ const executeInteractionTool = <Context>(input: {
                 data,
                 context: input.context,
                 submissionId: stored.submissionId,
-                call: stored.call
+                call: businessCall
               })
             )
           ).pipe(
@@ -1137,10 +1147,30 @@ export const resolveTools = <Context>(
       access: item.tool.access
     }))
 
+    // Registry boundary for model-produced arguments: every validator and handler below sees
+    // call params with strict-mode `null`s on optional, non-nullable properties omitted.
+    const withArguments =
+      (def: ToolDef) =>
+      <A, E>(validate: (params: unknown) => Effect.Effect<A, E>) =>
+      (params: unknown) =>
+        Effect.suspend(() => validate(omitNullOptionalToolArguments(def.parameters, params)))
+
+    const businessCallFor = (def: ToolDef, call: ToolCall) =>
+      Effect.sync(() => omitNullOptionalToolCallArguments(def.parameters, call))
+
     const inputs: Record<string, ResolvedInputTool> = Object.fromEntries(
       resolved.flatMap(({ tool }) =>
         tool.def.input !== undefined && tool.input !== undefined
-          ? [[tool.def.name, { def: tool.def, ...tool.input }]]
+          ? [
+              [
+                tool.def.name,
+                {
+                  def: tool.def,
+                  ...tool.input,
+                  validateCall: withArguments(tool.def)(tool.input.validateCall)
+                }
+              ]
+            ]
           : []
       )
     )
@@ -1155,7 +1185,7 @@ export const resolveTools = <Context>(
                 tool.def.name,
                 {
                   def: tool.def,
-                  validateCall: tool.interaction.validateCall,
+                  validateCall: withArguments(tool.def)(tool.interaction.validateCall),
                   validateResponse: tool.interaction.validateResponse,
                   actionIds: Object.keys(tool.interaction.actions),
                   validateAction: ({ actionId, data }) => {
@@ -1220,12 +1250,15 @@ export const resolveTools = <Context>(
 
       const host = options.backgroundHost
       const validate = match.tool.validate
+      const def = match.tool.def
 
       return activated(match.tool) && host !== undefined && validate !== undefined
         ? executeBackgroundTool({
             request: call,
             context,
             host,
+            businessCall: businessCall =>
+              omitNullOptionalToolCallArguments(def.parameters, businessCall),
             validate: businessCall =>
               validate(businessCall).pipe(
                 Effect.catchIf(
@@ -1246,7 +1279,9 @@ export const resolveTools = <Context>(
               ),
             execute: businessCall => match.tool.execute(executionInput(match.tool, businessCall))
           })
-        : match.tool.execute(executionInput(match.tool, call))
+        : businessCallFor(def, call).pipe(
+            Effect.flatMap(normalized => match.tool.execute(executionInput(match.tool, normalized)))
+          )
     }
 
     // Model-facing dispatch: codemode-only tools are unknown here (fail closed as not found).

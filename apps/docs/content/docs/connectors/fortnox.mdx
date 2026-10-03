@@ -115,8 +115,10 @@ identifier (`CustomerNumber` or `DocumentNumber`) and omit it from the request b
 bound into the URL. Invoice write inputs use `InvoiceRows` as JSON arrays; returned invoice rows are
 runtime `Chunk` values. Writes do not send or book invoices and are subject to host authorization.
 The connector forwards accepted write fields unchanged; it does not inject defaults or rewrite
-values. Invoice write inputs are not closed: when `execute` or an agent tool decodes input, unknown
-or provider-managed keys (such as `Booked` or `VoucherNumber`) are dropped before the request.
+values. Invoice write inputs are not closed: when `execute` decodes input, unknown or
+provider-managed keys (such as `Booked` or `VoucherNumber`) are dropped before the request. Agent
+tools from `makeConnectorToolModule` reject those keys instead, with a model-visible validation
+error, so a model never believes it booked or sent an invoice.
 `executeTyped` trusts an existing invoice input class instance and does not re-check its keys.
 
 ### Fortnox write semantics

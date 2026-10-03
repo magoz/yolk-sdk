@@ -157,6 +157,8 @@ export const executeBackgroundTool = <Context>(input: {
   readonly request: ToolCall
   readonly context: Context
   readonly host: BackgroundToolHost<Context>
+  /** Prepares model-produced business arguments before validation, admission, and execution. */
+  readonly businessCall: (call: ToolCall) => ToolCall
   readonly validate: (call: ToolCall) => Effect.Effect<void | ToolResult, ToolError>
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
 }): Effect.Effect<ToolResult, ToolError> =>
@@ -183,7 +185,7 @@ export const executeBackgroundTool = <Context>(input: {
       onSome: Effect.succeed
     })
 
-    const call = ToolCall.make({ ...input.request, params: envelope.arguments })
+    const call = input.businessCall(ToolCall.make({ ...input.request, params: envelope.arguments }))
     // Decode business arguments before admission, without running business effects.
     const invalidResult = yield* input.validate(call)
 

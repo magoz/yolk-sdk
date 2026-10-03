@@ -204,6 +204,8 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 | `SubagentModelDefinition`                                 | model id and model-visible selection guidance             |
 | `SubagentReasoningEffortDefinition`                       | reasoning effort and model-visible selection guidance     |
 | `modelVisibleToolError`                                   | recoverable error visible to model                        |
+| `withToolArgumentsErrorHint`                              | append unknown-argument hints to a validation message     |
+| `omitNullOptionalToolArguments`                           | drop strict-mode `null`s for hosts dispatching directly   |
 | `NestedTool`, `NestedToolExecutor`, `NestedToolDescriber` | nested tool access for code mode registrations            |
 
 `makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`, `discovery`,

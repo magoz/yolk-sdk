@@ -70,6 +70,7 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -710,13 +711,24 @@ const questionToolResult = (
   })
 }
 
-const invalidQuestionToolResult = (call: ToolCall) =>
+const invalidQuestionToolResult = (call: ToolCall, error: Schema.SchemaError) =>
   ToolResult.make({
     toolCallId: call.id,
-    content: 'Invalid question arguments.',
+    content: withToolArgumentsErrorHint(`Invalid question arguments: ${error.message}`, error),
     isError: true,
     structuredContent: { type: 'question_invalid' }
   })
+
+// Model-produced question args decode like `decodeToolArguments` (tools; loop cannot import it):
+// the advertised JSON codec, so `null` on optional prompt fields means absent, and unknown keys are
+// rejected as the closed advertised schema says. No numeric fields, so no non-finite guard.
+const decodeQuestionToolParams = Schema.decodeUnknownEffect(
+  Schema.toCodecJson(QuestionToolParams),
+  {
+    errors: 'all',
+    onExcessProperty: 'error'
+  }
+)
 
 const prepareQuestionCall = (
   call: ToolCall,
@@ -724,15 +736,13 @@ const prepareQuestionCall = (
   responses: ReadonlyArray<HitlResponse>
 ): Effect.Effect<PreparedToolCall> =>
   Effect.gen(function* () {
-    const decoded = yield* Schema.decodeUnknownEffect(QuestionToolParams)(call.params).pipe(
-      Effect.result
-    )
+    const decoded = yield* decodeQuestionToolParams(call.params).pipe(Effect.result)
 
     if (Predicate.isTagged(decoded, 'Failure')) {
       return PreparedToolCall.Result({
         index,
         call,
-        result: invalidQuestionToolResult(call),
+        result: invalidQuestionToolResult(call, decoded.failure),
         events: []
       })
     }
@@ -891,7 +901,10 @@ const prepareInputCall = (input: {
         events: [],
         result: ToolResult.make({
           toolCallId: input.call.id,
-          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          content: withToolArgumentsErrorHint(
+            `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+            validCall.failure
+          ),
           isError: true
         })
       })
@@ -1059,7 +1072,10 @@ const prepareInteractionCall = (input: {
         events: [],
         result: ToolResult.make({
           toolCallId: input.call.id,
-          content: `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+          content: withToolArgumentsErrorHint(
+            `Invalid ${input.call.name} arguments: ${validCall.failure.message}`,
+            validCall.failure
+          ),
           isError: true
         })
       })

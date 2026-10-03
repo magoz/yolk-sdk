@@ -27,6 +27,7 @@ import {
   type ToolRegistration,
   type ToolRegistryError
 } from './registry.ts'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 
 export { subagentToolName }
 
@@ -407,7 +408,10 @@ export const makeSubagentToolRegistration = <Context>(
     access: 'read',
     isEnabled: options.isEnabled,
     invalidParamsMessage: error =>
-      `Invalid subagent arguments: ${error instanceof Error ? error.message : String(error)}`,
+      withToolArgumentsErrorHint(
+        `Invalid subagent arguments: ${error instanceof Error ? error.message : String(error)}`,
+        error
+      ),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         if (call.name !== subagentToolName) {

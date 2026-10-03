@@ -32,12 +32,40 @@ export const echoTool = makeTool({
 ```
 
 Optional `invalidParamsMessage: (error: Schema.SchemaError) => string` customizes the
-model-visible validation text. Only `Schema.decodeUnknownEffect` on `parameters` invokes it, and
+model-visible validation text. Only decoding `parameters` (through its JSON codec) invokes it, and
 the decode error is passed through unwrapped. Default:
-`Invalid ${name} arguments: ${String(error)}`. In Effect 4, `SchemaError` extends native
+`Invalid ${name} arguments: ${String(error)}`, followed by one line per object that names its
+unknown keys and lists the allowed keys. Custom callbacks can keep that hint with
+`withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native
 `Error`, but do not default to `.message`: that drops the `SchemaError(...)` wrapper required by
 this tool-message contract. Existing
 `(error: unknown) => string` callbacks remain assignable.
+
+### Optional arguments, `null`, and unknown keys
+
+The advertised `ToolDef.parameters` describe the schema's JSON codec, so `Schema.optional(X)`
+reaches the model as `X | null`, and models often send `null` for fields they do not use. Tool
+arguments decode through `Schema.toCodecJson(parameters)`:
+
+- `null` on `Schema.optional(X)` is treated as omitted, and `Schema.withDecodingDefault` still
+  applies.
+- `Schema.optional(Schema.NullOr(X))` keeps `null`; use it only when `null` means something
+  different from omission, such as clearing a value.
+- Required non-nullable fields still reject `null` with a model-visible validation error.
+- Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
+- Unknown keys are rejected at any depth with a model-visible validation error. Parameters are
+  advertised as closed objects, and silently dropping a key would let the model believe it set
+  something (a filter, a start time) that was ignored. The error names the key and lists the
+  allowed ones, for example `Unknown argument "start". Allowed arguments: id, note.` One
+  exception: Effect parses `Schema.Struct({})` as any object, so only a root empty struct is
+  checked. Nested, use `EmptyToolParams` or a declared struct.
+
+`resolveTools` also drops `null` on properties advertised as optional without `null`, such as
+`Schema.optionalKey(X)` fields or raw MCP schemas, before any tool sees the call. It never touches
+undeclared keys: a `null` on an unknown key, including another union member's field, is rejected
+like a value, with a hint listing the allowed keys. If you dispatch
+registrations without `resolveTools`, apply `omitNullOptionalToolArguments(def.parameters, params)`
+from `@yolk-sdk/agent/tools` yourself.
 
 ## Resolve tools for a request
 

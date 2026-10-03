@@ -1,6 +1,7 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
+import { decodeToolArguments, hasPlainPrototype, omitUndefinedKeys } from './arguments.ts'
 import {
   EmptyToolParams,
   toolJsonSchemaFromSchema,
@@ -47,6 +48,11 @@ export type InteractionActionDefinition<Context, Data = unknown, Params = unknow
   readonly execute: InteractionActionExecute<Context, Data, Params>
 }
 
+const exactJsonError = () =>
+  new InteractionValidationError({
+    message: 'Interaction schemas must preserve exact JSON values'
+  })
+
 /** Original schema decoding must preserve the person's exact JSON values, including
  * nested values. Transforms/defaults that change JSON are not supported in v1. */
 const decodeExact = <S extends SyncSchema>(
@@ -57,13 +63,70 @@ const decodeExact = <S extends SyncSchema>(
     Effect.flatMap(decoded =>
       interactionJsonEquals(decoded, input)
         ? Effect.succeed(decoded)
-        : Effect.fail(
-            new InteractionValidationError({
-              message: 'Interaction schemas must preserve exact JSON values'
-            })
-          )
+        : Effect.fail(exactJsonError())
     )
   )
+
+// Bounds for comparing in-process call params: past them the input is returned unchanged, so the
+// exact-JSON check fails closed with a validation error instead of overflowing or stalling.
+const maxCompareDepth = 64
+
+const maxCompareNodes = 100_000
+
+// Treat an input `null` as absent only where the decoded value has no such key.
+const omitNullsAbsentFrom = (input: unknown, decoded: unknown): unknown => {
+  const budget = { remaining: maxCompareNodes }
+
+  const walk = (left: unknown, right: unknown, depth: number): unknown => {
+    budget.remaining -= 1
+
+    if (budget.remaining < 0 || depth > maxCompareDepth) return left
+
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return left.map((item, index) => walk(item, right[index], depth + 1))
+    }
+
+    if (
+      !Predicate.isObject(left) ||
+      !hasPlainPrototype(left) ||
+      !Predicate.isObject(right) ||
+      !hasPlainPrototype(right)
+    ) {
+      return left
+    }
+
+    return Object.fromEntries(
+      Object.entries(left).flatMap(([key, item]) =>
+        item === null && !Object.hasOwn(right, key)
+          ? []
+          : [[key, walk(item, right[key], depth + 1)]]
+      )
+    )
+  }
+
+  return walk(input, decoded, 0)
+}
+
+/** Model-produced call params decode through the JSON codec that `ToolDef.parameters`
+ * advertises, so `null` on `Schema.optional(X)` means absent. Handlers receive the decoded JSON
+ * with those keys omitted (re-checked by `decodeExact`); any other JSON-changing transform or
+ * default is still rejected. */
+const makeDecodeCallExact = <S extends SyncSchema>(schema: S) => {
+  const decode = decodeToolArguments(schema)
+
+  return (
+    input: unknown
+  ): Effect.Effect<S['Type'], Schema.SchemaError | InteractionValidationError> =>
+    decode(input).pipe(
+      Effect.flatMap(decoded => {
+        const params = omitUndefinedKeys(decoded)
+
+        return interactionJsonEquals(params, omitNullsAbsentFrom(omitUndefinedKeys(input), params))
+          ? decodeExact(schema, params)
+          : Effect.fail(exactJsonError())
+      })
+    )
+}
 
 export type MakeInteractionToolOptions<
   Context,
@@ -213,7 +276,9 @@ export const makeInteractionTool = <
     })()
   )
 
-  const validateCall = (params: unknown) => decodeExact(callSchema, params).pipe(Effect.asVoid)
+  const decodeCall = makeDecodeCallExact(options.callParameters ?? EmptyToolParams)
+
+  const validateCall = (params: unknown) => decodeCall(params).pipe(Effect.asVoid)
 
   const validateResponse = (data: unknown) =>
     decodeExact(options.response, data).pipe(Effect.asVoid)
@@ -234,7 +299,7 @@ export const makeInteractionTool = <
         execute: ({ data, context, submissionId, call }) =>
           decodeExact(options.response, data).pipe(
             Effect.flatMap(decoded =>
-              decodeExact(options.callParameters ?? EmptyToolParams, call.params).pipe(
+              decodeCall(call.params).pipe(
                 Effect.flatMap(params =>
                   action.execute({
                     data: decoded,

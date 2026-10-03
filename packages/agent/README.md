@@ -302,7 +302,8 @@ for unions, refinements, and tuples. The Claude adapter therefore projects tool 
 provider-compatible object schema without `anyOf`, `oneOf`, `allOf`, or tuple-only `prefixItems`.
 When a constraint cannot be represented faithfully, the projection widens the model-facing schema
 rather than excluding a valid call. Tool execution remains safe because `makeTool` validates the
-returned arguments against the original Effect Schema before invoking the executor.
+returned arguments against the original Effect Schema (through its JSON codec) before invoking the
+executor.
 
 Before projection, `toAnthropicClaudeRequestBody` and the Claude provider decode `ToolDef.parameters`
 and `ToolCall.params` as `Schema.Json`. Non-JSON values fail as non-retryable `LLMError` with
@@ -327,6 +328,25 @@ reference/resource restrictions still apply at activation. `makeTool` may add ro
 to typeless `anyOf`/`oneOf` unions whose members are all object schemas, as required by strict
 OpenAI-compatible upstreams; primitives, unknown, and already-typed roots are unchanged, and call
 validation still uses the original Effect Schema.
+
+### Tool arguments: `null` and unknown keys
+
+Tool arguments are accepted exactly as advertised: unambiguous `null`s are normalized, and keys
+that would be silently lost are rejected. `ToolDef.parameters` describes the schema's canonical JSON codec, so `Schema.optional(X)` is
+advertised as `X | null`. `makeTool` (validate and execute), `makeInputTool`/`makeInteractionTool`
+call params, and the loop `question` decode model arguments with `Schema.toCodecJson(parameters)`:
+`null` on `Schema.optional(X)` decodes as absent and `withDecodingDefault` still applies,
+`Schema.optional(Schema.NullOr(X))` keeps `null`, and required non-nullable fields still reject it.
+`undefined`-valued keys from in-process callers count as absent.
+Non-finite numbers (the codec's `"NaN"`/`"Infinity"` strings) are validation errors. Objects are
+advertised closed (`additionalProperties: false`), so unknown keys at any depth are model-visible
+validation errors instead of being stripped (also through closed-input declarations whose JSON codec
+bypasses their own parser). Their error message names each unknown key and lists the allowed keys at that path; this includes
+a `null` on another union member's field.
+`resolveTools` also drops `null` where the advertised schema declares a property optional without
+admitting `null` (for example `Schema.optionalKey(X)`, the subagent `model`, or raw MCP schemas)
+before any registration sees the call; `omitNullOptionalToolArguments` exposes that step for hosts
+that dispatch registrations themselves. User-submitted input/interaction responses are unchanged.
 
 ### OpenAI Chat Completions, Responses, and extraBody
 
@@ -920,9 +940,10 @@ see the message and continue. The result includes structured content with `type`
 `reason`, `message`, and optional `details` for UI/runtime handling.
 
 Optional `makeTool({ invalidParamsMessage })` receives the `Schema.SchemaError` produced by
-`Schema.decodeUnknownEffect` on `parameters` (validate and execute). The decode error is passed
+decoding `parameters` through its JSON codec (validate and execute). The decode error is passed
 through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
-`SchemaError(...)` wrapper. In Effect 4, `SchemaError` extends native `Error`, but the
+`SchemaError(...)` wrapper, followed by one line per object (path and allowed-key set) naming its unknown keys and
+listing the allowed keys. Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native `Error`, but the
 wrapper remains part of this tool-message contract; do not default to `.message`.
 Existing `(error: unknown) => string` callbacks remain assignable.
 

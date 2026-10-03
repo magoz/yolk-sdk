@@ -4,6 +4,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
+  withToolArgumentsErrorHint,
   modelVisibleToolError,
   type ModelVisibleToolError,
   type ToolModule,
@@ -333,7 +334,10 @@ export const makeSandboxToolModuleFromApi = <Context>(
       access: 'destructive',
       isEnabled: options.isEnabled,
       invalidParamsMessage: error =>
-        `Invalid sandbox arguments: ${error instanceof Error ? error.message : String(error)}`,
+        withToolArgumentsErrorHint(
+          `Invalid sandbox arguments: ${error instanceof Error ? error.message : String(error)}`,
+          error
+        ),
       execute: ({ call, params }) =>
         Effect.gen(function* () {
           if (call.name !== sandboxToolName) {
