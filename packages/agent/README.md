@@ -942,8 +942,8 @@ see the message and continue. The result includes structured content with `type`
 Optional `makeTool({ invalidParamsMessage })` receives the `Schema.SchemaError` produced by
 decoding `parameters` through its JSON codec (validate and execute). The decode error is passed
 through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
-`SchemaError(...)` wrapper, followed by one line per unknown key naming it and listing the allowed
-keys. Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native `Error`, but the
+`SchemaError(...)` wrapper, followed by one line per object path naming its unknown keys and
+listing the allowed keys. Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native `Error`, but the
 wrapper remains part of this tool-message contract; do not default to `.message`.
 Existing `(error: unknown) => string` callbacks remain assignable.
 

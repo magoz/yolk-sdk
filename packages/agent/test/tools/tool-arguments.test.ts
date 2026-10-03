@@ -389,6 +389,53 @@ describe('registry null omission for optional non-nullable properties', () => {
     expect(omitNullOptionalToolArguments(requiredElsewhere, nullId)).toBe(nullId)
   })
 
+  it('never drops a null declared or required by a nested conjunction', () => {
+    const nullable: ToolJsonSchema = {
+      type: 'object',
+      properties: { clear: { type: ['string', 'null'] } }
+    }
+
+    const kindA: ToolJsonSchema = {
+      type: 'object',
+      properties: { kind: { const: 'a' } },
+      required: ['kind']
+    }
+
+    const memberB: ToolJsonSchema = {
+      type: 'object',
+      properties: { kind: { const: 'b' }, clear: { type: 'string' } },
+      required: ['kind']
+    }
+
+    const meaningful = { kind: 'a', clear: null }
+
+    // A's nullable `clear` sits behind a nested allOf / $ref / union, in either conjunct order.
+    const variants: ReadonlyArray<ToolJsonSchema> = [
+      { anyOf: [{ allOf: [kindA, { allOf: [nullable] }] }, memberB] },
+      { anyOf: [{ allOf: [{ allOf: [nullable] }, kindA] }, memberB] },
+      {
+        anyOf: [{ allOf: [{ $ref: '#/$defs/Base' }, kindA] }, memberB],
+        $defs: { Base: { allOf: [nullable] } }
+      },
+      { anyOf: [{ allOf: [kindA, { anyOf: [nullable, { type: 'object' }] }] }, memberB] }
+    ]
+
+    for (const parameters of variants) {
+      expect(omitNullOptionalToolArguments(parameters, meaningful)).toBe(meaningful)
+    }
+
+    const requiredNested: ToolJsonSchema = {
+      allOf: [
+        { type: 'object', properties: { id: { type: 'string' } } },
+        { allOf: [{ type: 'object', required: ['id'] }] }
+      ]
+    }
+
+    const nullId = { id: null }
+
+    expect(omitNullOptionalToolArguments(requiredNested, nullId)).toBe(nullId)
+  })
+
   it('leaves ambiguous unions and required properties untouched', () => {
     const parameters: ToolJsonSchema = {
       anyOf: [
@@ -648,7 +695,7 @@ const closedDeclaration = <S extends Schema.Top>(schema: S) =>
 const expectValidationError = (result: ToolResult, key: string) =>
   expect(result).toMatchObject({
     isError: true,
-    content: expect.stringContaining(`Unknown argument "${key}"`),
+    content: expect.stringMatching(new RegExp(`Unknown arguments? (?:"[^"]*", )*"${key}"`)),
     structuredContent: {
       type: 'model_visible_tool_error',
       reason: 'validation',
@@ -803,10 +850,7 @@ describe('unknown tool argument keys', () => {
 
       expect(received).toHaveLength(0)
       expect(result.content).toContain(
-        'Unknown argument "start". Allowed arguments: id, note, child.'
-      )
-      expect(result.content).toContain(
-        'Unknown argument "end". Allowed arguments: id, note, child.'
+        'Unknown arguments "start", "end". Allowed arguments: id, note, child.'
       )
       expect(result.content).toContain('Unknown argument "extra" in "child". Allowed there: tag.')
       expect(result.content).toContain('Expected string')
@@ -824,8 +868,9 @@ describe('unknown tool argument keys', () => {
         const result = yield* toolSet.execute(call({ verbose: true, limit: 3 }))
 
         expect(received).toHaveLength(0)
-        expect(result.content).toContain('Unknown argument "verbose". Allowed arguments: none.')
-        expect(result.content).toContain('Unknown argument "limit". Allowed arguments: none.')
+        expect(result.content).toContain(
+          'Unknown arguments "verbose", "limit". Allowed arguments: none.'
+        )
 
         const accepted = yield* toolSet.execute(call({}))
 

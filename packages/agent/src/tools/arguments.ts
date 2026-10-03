@@ -100,14 +100,6 @@ export const omitUndefinedKeys = (value: unknown): unknown => {
   return changed ? Object.fromEntries(entries) : value
 }
 
-/** Decoder for model-produced tool/interaction call arguments.
- *
- * Decodes through `Schema.toCodecJson(schema)`, the codec that `ToolDef.parameters` advertises, so
- * `null` on `Schema.optional(X)` decodes as absent, and unknown keys are rejected (callers may
- * override `onExcessProperty`). `undefined`-valued keys from in-process callers count as absent. The JSON codec also accepts the strings
- * `"NaN"`/`"Infinity"`/`"-Infinity"` for bare `Schema.Number`; JSON arguments never carried
- * non-finite numbers before, so any non-finite number in the decoded value is a validation error.
- */
 /** `Schema.Struct({})`: Effect parses an empty struct as any non-nullish value, without an
  * excess-property check, while it is advertised as a closed empty object. */
 export const isEmptyStructSchema = (schema: Schema.Top) => {
@@ -122,17 +114,19 @@ export const isEmptyStructSchema = (schema: Schema.Top) => {
 
 const NoArguments = Schema.Record(Schema.String, Schema.Never)
 
-export const decodeToolArguments = <S extends ToolArgumentsSchema>(
-  schema: S,
-  options?: SchemaAST.ParseOptions
-) => {
+/** Decoder for model-produced tool/interaction call arguments.
+ *
+ * Decodes through `Schema.toCodecJson(schema)`, the codec that `ToolDef.parameters` advertises, so
+ * `null` on `Schema.optional(X)` decodes as absent and unknown keys are rejected (policy, not
+ * configurable). `undefined`-valued keys from in-process callers count as absent. The JSON codec
+ * also accepts the strings `"NaN"`/`"Infinity"`/`"-Infinity"` for bare `Schema.Number`; JSON
+ * arguments never carried non-finite numbers before, so any non-finite number in the decoded value
+ * is a validation error.
+ */
+export const decodeToolArguments = <S extends ToolArgumentsSchema>(schema: S) => {
   // Report every issue (each unknown key, each invalid field) so the model can fix the call in one
   // retry, and reject unknown keys as the closed advertised schema says.
-  const parseOptions: SchemaAST.ParseOptions = {
-    errors: 'all',
-    onExcessProperty: 'error',
-    ...options
-  }
+  const parseOptions: SchemaAST.ParseOptions = { errors: 'all', onExcessProperty: 'error' }
 
   const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), parseOptions)
 
@@ -314,15 +308,29 @@ const withConjunction = (
   const declared = new Set<string>()
   const required = new Set<string>()
 
-  for (const part of parts) {
-    const record = jsonObject(resolveSchema(part, definitions))
+  // Same-object composition only: never descends into `properties` or `items`. Declarations are
+  // collected through `$ref`, `allOf`, `anyOf` and `oneOf` (conservative: when unsure, keep the
+  // `null` and let decoding decide); requiredness only through `$ref` and `allOf`, which always
+  // apply to the object.
+  const collect = (schema: Schema.Json | undefined, conjunct: boolean, depth: number): void => {
+    if (depth > maxSchemaDepth) return
 
-    if (record === undefined) continue
+    const record = jsonObject(resolveSchema(schema, definitions))
+
+    if (record === undefined) return
 
     for (const name of Object.keys(schemaRecord(record, 'properties') ?? {})) declared.add(name)
 
-    for (const name of requiredKeys(record)) required.add(name)
+    if (conjunct) for (const name of requiredKeys(record)) required.add(name)
+
+    for (const part of schemaArray(record, 'allOf') ?? []) collect(part, conjunct, depth + 1)
+
+    for (const key of ['anyOf', 'oneOf']) {
+      for (const member of schemaArray(record, key) ?? []) collect(member, false, depth + 1)
+    }
   }
+
+  for (const part of parts) collect(part, true, 0)
 
   return {
     siblingKeys: scope.siblingKeys,

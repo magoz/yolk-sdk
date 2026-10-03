@@ -57,17 +57,39 @@ const formatAllowed = (allowed: ReadonlyArray<string>) =>
       ? `${allowed.slice(0, maxAllowedNames).join(', ')}, …`
       : allowed.join(', ')
 
-const formatUnknownArgument = (argument: UnknownArgument) =>
-  argument.parent.length === 0
-    ? `Unknown argument "${String(argument.key)}". Allowed arguments: ${formatAllowed(argument.allowed)}.`
-    : `Unknown argument "${String(argument.key)}" in "${formatPath(argument.parent)}". Allowed there: ${formatAllowed(argument.allowed)}.`
+type UnknownArgumentGroup = {
+  readonly parent: ReadonlyArray<PropertyKey>
+  readonly keys: Array<string>
+  readonly allowed: ReadonlyArray<string>
+}
 
-/** Actionable hint for unknown-key failures (one line per unknown key, listing the keys the
- * matched object declares), or `undefined` when the error has no unknown keys. */
+const formatGroup = (group: UnknownArgumentGroup) => {
+  const keys = group.keys.map(key => `"${key}"`).join(', ')
+  const label = group.keys.length === 1 ? 'Unknown argument' : 'Unknown arguments'
+
+  return group.parent.length === 0
+    ? `${label} ${keys}. Allowed arguments: ${formatAllowed(group.allowed)}.`
+    : `${label} ${keys} in "${formatPath(group.parent)}". Allowed there: ${formatAllowed(group.allowed)}.`
+}
+
+/** Actionable hint for unknown-key failures: one line per object path, naming its unknown keys
+ * and listing the keys that object declares, or `undefined` when there are no unknown keys. */
 export const toolArgumentsErrorHint = (error: Schema.SchemaError): string | undefined => {
-  const lines = Array.from(new Set(unknownArgumentsIn(error.issue, []).map(formatUnknownArgument)))
+  const groups = new Map<string, UnknownArgumentGroup>()
 
-  return lines.length === 0 ? undefined : lines.join('\n')
+  for (const argument of unknownArgumentsIn(error.issue, [])) {
+    const id = `${formatPath(argument.parent)}\u0000${argument.allowed.join(',')}`
+    const key = String(argument.key)
+    const group = groups.get(id)
+
+    if (group === undefined) {
+      groups.set(id, { parent: argument.parent, keys: [key], allowed: argument.allowed })
+    } else if (!group.keys.includes(key)) {
+      group.keys.push(key)
+    }
+  }
+
+  return groups.size === 0 ? undefined : Array.from(groups.values(), formatGroup).join('\n')
 }
 
 /** Appends {@link toolArgumentsErrorHint} to an argument-validation message when available. */
