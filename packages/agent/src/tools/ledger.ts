@@ -325,10 +325,13 @@ const canonicalJson = (value: Schema.Json): string => {
   return JSON.stringify(value)
 }
 
+// Falls back to the compact JSON itself when it does not parse (the unserializable placeholder)
+// or nests too deeply for the recursion (a `RangeError`): the digest stays deterministic and the
+// claim is never preceded by a throw.
 const canonicalArguments = (compact: string) =>
   Result.match(
-    Result.try((): Schema.Json => JSON.parse(compact)),
-    { onFailure: () => compact, onSuccess: canonicalJson }
+    Result.try(() => canonicalJson(JSON.parse(compact))),
+    { onFailure: () => compact, onSuccess: canonical => canonical }
   )
 
 /**

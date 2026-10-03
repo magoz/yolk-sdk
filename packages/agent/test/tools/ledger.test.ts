@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { type Duration, Effect, Exit, Fiber, Logger, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
@@ -574,6 +575,22 @@ describe('tool ledger', () => {
       )
     })
   )
+
+  it('digests arguments nested too deeply to canonicalize from their compact JSON', () => {
+    type Nested = number | { readonly a: Nested }
+
+    let deep: Nested = 1
+
+    // Deep enough to overflow the canonical recursion, shallow enough for JSON.stringify/parse.
+    for (let depth = 0; depth < 5_000; depth++) deep = { a: deep }
+
+    const compact = JSON.stringify(deep)
+    const digested = toolLedgerArgs(deep)
+
+    expect(digested.argsDigest).toBe(createHash('sha256').update(compact).digest('hex'))
+    expect(toolLedgerArgs(JSON.parse(compact)).argsDigest).toBe(digested.argsDigest)
+    expect(digested.argsTruncated).toBe(true)
+  })
 
   it.effect('bounds each completion attempt when the store hangs', () =>
     Effect.gen(function* () {
