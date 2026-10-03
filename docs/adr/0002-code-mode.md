@@ -290,7 +290,8 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   polls included, fail closed (nothing runs); heartbeat and completion failures (each `complete`
   attempt bounded to 5 s) are logged and leave the entry claimed (later read as abandoned), never
   masking the live result. Every returned result or `ToolError` is recorded before an
-  interruption takes effect; interruption and defects never record an outcome.
+  interruption takes effect (a `ToolError` also when its cause carries interruptions); defects,
+  and interruption without a `ToolError`, never record an outcome.
 - **Observability**: `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called
   once per ledgered call with `fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`,
   `abandoned`, or `conflict`, so hosts can log and count replays. It never affects execution:

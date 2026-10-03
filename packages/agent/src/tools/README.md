@@ -146,8 +146,9 @@ const resolveStepTools = Effect.gen(function* () {
   not a guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s, store polls included), and
   `deadline` (non-finite values ignored). A failed poll fails closed.
 - Each `complete` attempt is bounded (`toolLedgerCompleteTimeoutMs`, 5 s; three attempts). A result
-  or `ToolError` the call returned is recorded before an interruption takes effect; an outcome that
-  cannot be recorded leaves the entry to read as abandoned.
+  or `ToolError` the call returned is recorded before an interruption takes effect (a `ToolError`
+  also when its cause carries interruptions); defects, and interruption without a `ToolError`,
+  record nothing. An outcome that cannot be recorded leaves the entry to read as abandoned.
 - `abandonedResult({ call, entry, nested })` gets `nested: undefined` when `list` fails: report the
   nested calls as unavailable (they may have been applied), never as an empty list.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered

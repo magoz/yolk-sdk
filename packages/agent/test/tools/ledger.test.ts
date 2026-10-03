@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { type Duration, Effect, Exit, Fiber, Logger, Option, Predicate } from 'effect'
+import { Cause, type Duration, Effect, Exit, Fiber, Logger, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
@@ -24,6 +24,7 @@ import {
   ToolLedgerError,
   toolLedgerArgs,
   toolLedgerResult,
+  ToolLedgerFailed,
   ToolLedgerSucceeded,
   type ToolLedgerClaimRequest,
   type ToolLedgerDecisionEvent,
@@ -631,6 +632,38 @@ describe('tool ledger', () => {
           `Tool ledger completion failed for call_1; the call stays claimed and will read as abandoned: timed out after ${toolLedgerCompleteTimeoutMs} ms`
         ]
       ])
+    })
+  )
+
+  it.effect('records a ToolError even when its cause also carries interruptions', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const error = new ToolError({ tool: 'append_note', cause: 'execution', message: 'rejected' })
+
+      // A typed failure whose cause also holds an interruption, as from interrupted sibling or
+      // cleanup work inside the tool (for example a forked worker joined after it was cancelled).
+      const failing: ToolRegistration<TestContext> = makeTool<TestContext, typeof NoteParams>({
+        name: 'append_note',
+        description: 'Append a note',
+        parameters: NoteParams,
+        access: 'write',
+        execute: () => Effect.failCause(Cause.combine(Cause.fail(error), Cause.interrupt()))
+      })
+
+      const first = yield* Effect.exit(execute([failing], noteCall(), { store }))
+      const [entry] = yield* store.entries
+
+      expect(Exit.isFailure(first) && Cause.findErrorOption(first.cause)).toEqual(
+        Option.some(error)
+      )
+      expect(entry?.outcome).toEqual(
+        ToolLedgerFailed.make({
+          error: { tool: 'append_note', cause: 'execution', message: 'rejected' }
+        })
+      )
+      expect(yield* Effect.exit(execute([failing], noteCall(), { store }))).toEqual(
+        Exit.fail(error)
+      )
     })
   )
 

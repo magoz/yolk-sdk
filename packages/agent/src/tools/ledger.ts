@@ -839,13 +839,15 @@ export const executeLedgered = (input: {
         )
       )
 
-    // Results and ToolErrors are recorded; interruption or a defect leaves the entry claimed: its
-    // outcome is unknown, so a later execution reports it as abandoned instead of running it again.
+    // Results and ToolErrors are recorded (a ToolError also when the cause carries interruptions,
+    // for example of the tool's own sibling work: the tool did fail). A defect, or an interruption
+    // without a ToolError, leaves the entry claimed: its outcome is unknown, so a later execution
+    // reports it as abandoned instead of running it again.
     const recordOutcome = (exit: Exit.Exit<ToolResult, ToolError>): Effect.Effect<void> => {
       if (Exit.isSuccess(exit))
         return record(() => succeededOutcome(exit.value, options.maxResultBytes))
 
-      if (Cause.hasInterrupts(exit.cause) || Cause.hasDies(exit.cause)) return Effect.void
+      if (Cause.hasDies(exit.cause)) return Effect.void
 
       return Option.match(Cause.findErrorOption(exit.cause), {
         onNone: () => Effect.void,
