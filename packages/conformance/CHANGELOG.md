@@ -1,5 +1,11 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.98
+
+### Patch Changes
+
+- def9f9c: Advance unchanged public packages in lockstep with the new `@yolk-sdk/extractors` package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.97
 
 ### Minor Changes

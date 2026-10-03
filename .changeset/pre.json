@@ -14,7 +14,8 @@
     "@yolk-sdk/harness": "0.1.0-canary.76",
     "@yolk-sdk/codemode": "0.1.0-canary.95",
     "@yolk-sdk/conformance": "0.1.0-canary.95",
-    "@yolk-sdk/emulators": "0.1.0-canary.95"
+    "@yolk-sdk/emulators": "0.1.0-canary.95",
+    "@yolk-sdk/extractors": "0.1.0-canary.97"
   },
   "changesets": [
     "action-backed-interactions",
@@ -56,6 +57,7 @@
     "canary-92-lockstep",
     "canary-95-lockstep",
     "canary-96-lockstep",
+    "canary-98-lockstep",
     "canonical-tagged-models-530",
     "classifier-models",
     "clear-claude-limits",
@@ -99,6 +101,7 @@
     "emulators-package",
     "emulators-responses-codex-grok",
     "emulators-todoist-telegram",
+    "extractors-package",
     "fast-claude-parity",
     "figma-runtime-secrets",
     "finite-workflow-retries",
