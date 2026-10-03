@@ -266,6 +266,10 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   key, parent key, tool name, compact arguments (8 KiB), claim and lease times, and the outcome
   (`Succeeded` with a bounded, wire-safe `ToolResult`, or `Failed` with the `ToolError` fields;
   never causes or provider bodies). `makeInMemoryToolLedgerStore` is the reference implementation.
+- **Clocks**: `claim` and `heartbeat` receive the lease length `leaseMs` and the caller's `Clock`
+  times (`nowMs`, `leaseExpiresAtMs`). A store uses one clock for every lease: its own (for
+  example Postgres `now() + leaseMs`, classified against `now()`, so instances with skewed clocks
+  agree) or the caller's (clock-agnostic stores such as the in-memory one).
 - **Seam**: `resolveTools(modules, context, { ledger })`, an explicit option like
   `interactionHost`: the ledger belongs to one resolution (one step and run scope), keeps
   `ResolvedToolSet.execute` free of service requirements, and absent means exactly the previous
@@ -280,13 +284,19 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   it returns a model-visible result saying the call may already have been applied and must be
   verified. Claim failures fail closed (nothing runs); heartbeat and completion failures are
   logged and leave the entry claimed (later read as abandoned), never masking the live result.
+- **Observability**: `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called
+  once per ledgered call with `fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`,
+  `abandoned`, or `conflict`, so hosts can log and count replays. It never affects execution:
+  throws and rejected promises are logged and ignored.
 - **Idempotency key**: executors receive `idempotencyKey` (`<scope>:<ledger key>`), stable across
   re-executions, for external APIs that deduplicate: defence in depth for a crash between the
   tool's commit and `complete`.
 - **Code mode**: the `codemode` call is itself ledgered (access `write`), so a re-executed call
   never runs its script again. `Completed` returns the stored result; `InFlight` waits;
   `Abandoned` returns an interrupted result listing that script's ledgered nested calls as
-  applied, failed, or unknown (claimed, no result), stating that they were not undone. Nested
+  applied, failed, or unknown (claimed, no result), stating that they were not undone; hosts get
+  the same entries in `structuredContent.codemode.interruptedCalls` (`{ calls: [{ key, toolName,
+args, status }], complete, counts }`, bounded like `nestedCalls`). Nested
   write calls are ledgered under `<toolCallId>/<seq>`. Deterministic script replay is not part of
   this; it stays with phase 2.
 

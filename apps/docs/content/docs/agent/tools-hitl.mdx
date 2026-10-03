@@ -107,14 +107,15 @@ key:
 import { Effect } from 'effect'
 import { classifyToolLedgerEntry, resolveTools, type ToolLedgerStore } from '@yolk-sdk/agent/tools'
 
-// Your storage, scoped to one run. `db` is host code (for example Drizzle over Postgres).
+// Your storage, scoped to one run. `db` is host code (for example Drizzle over Postgres), and
+// leases use the database clock: `now() + leaseMs`, classified against `now()`.
 const makeRunToolLedger = (runId: string): ToolLedgerStore => ({
   scope: runId,
   // Atomic: insert a claimed entry if the key is absent, else classify the stored entry.
   claim: request =>
-    db.claimToolCall(runId, request, entry => classifyToolLedgerEntry(entry, request.nowMs)),
-  // Extend the lease only while the entry has no outcome.
-  heartbeat: ({ key, leaseExpiresAtMs }) => db.extendLeaseIfClaimed(runId, key, leaseExpiresAtMs),
+    db.claimToolCall(runId, request, (entry, dbNowMs) => classifyToolLedgerEntry(entry, dbNowMs)),
+  // Extend the lease to now() + leaseMs only while the entry has no outcome.
+  heartbeat: ({ key, leaseMs }) => db.extendLeaseIfClaimed(runId, key, leaseMs),
   // Record the outcome once; ignore later completions.
   complete: ({ key, outcome, completedAtMs }) =>
     db.completeOnce(runId, key, outcome, completedAtMs),
@@ -142,7 +143,15 @@ const resolveStepTools = Effect.gen(function* () {
   (`maxResultBytes`, default 1 MiB) and wire-safe; the live call still returns the full result.
 - Tool executors receive `idempotencyKey` (`<scope>:<key>`), stable across re-executions. Pass it
   to external APIs that deduplicate, which covers a crash between their commit and `complete`.
+- Pick one clock per store. `claim` and `heartbeat` receive both `leaseMs` (for stores that use
+  their own clock, such as a database `now()`) and `nowMs`/`leaseExpiresAtMs` from the caller's
+  `Clock` (for clock-agnostic stores, such as the in-memory one). Database time avoids clock skew
+  between step instances.
 - Change which calls are ledgered with `isLedgered`. Without `ledger`, execution is unchanged.
+- `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` reports each ledgered
+  call's decision (`fresh`, `completed`, `in_flight_wait`, `in_flight_timeout`, `abandoned`,
+  `conflict`) for logs and metrics, for example to count replays. It never affects execution:
+  errors are logged and ignored.
 - `makeInMemoryToolLedgerStore()` is for tests and single-process hosts only.
 
 ## Ask a human

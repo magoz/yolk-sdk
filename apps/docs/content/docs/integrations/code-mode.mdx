@@ -226,7 +226,33 @@ itself ledgered, so a re-executed call never runs its script again:
 - Abandoned (the earlier execution crashed): an interrupted error result lists that script's
   ledgered nested calls as applied, failed, or unknown (started without a recorded result), says
   they were not undone, and asks the model to verify before repeating work.
-  `structuredContent.codemode` is `{ ok: false, interrupted: true }`.
+  The model sees the text listing; hosts get the same entries in `structuredContent.codemode`:
+
+  ```ts
+  // structuredContent of an interrupted result (CodeModeStructuredContent)
+  type Interrupted = {
+    codemode: {
+      ok: false
+      interrupted: true
+      interruptedCalls: {
+        // In sequence order. args: compact JSON, cut with a trailing '…' (then no longer JSON).
+        calls: Array<{
+          key: string // ledger key, `<toolCallId>/<seq>`
+          toolName: string
+          args: string
+          status: 'applied' | 'failed' | 'unknown'
+        }>
+        complete: boolean // false when calls were dropped or arguments cut
+        counts: { applied: number; failed: number; unknown: number } // every entry, dropped too
+      }
+    }
+  }
+  ```
+
+  It is plain JSON (`CodeModeStructuredContent`, `CodeModeInterruptedCalls`) bounded like
+  `nestedCalls`: at most `maxNestedCalls` calls, 8 KiB of arguments per call, 32 KiB in total.
+  `failed` means the call recorded a `ToolError` or an error result; `unknown` means it started
+  without a recorded result and may have been applied.
 
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive `idempotencyKey`; read-only
 nested calls bypass the ledger by default and are not listed. Scripts are never replayed.
