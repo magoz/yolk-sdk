@@ -395,6 +395,50 @@ describe('registry null omission for optional non-nullable properties', () => {
     expect(omitNullOptionalToolArguments(shared, meaningful)).toBe(meaningful)
   })
 
+  it('never selects a union member by guessing about closed property sets', () => {
+    // Member A accepts `x: null` through patternProperties; a closed-set check would wrongly
+    // eliminate A, select B, and drop the accepted null.
+    const patterned: ToolJsonSchema = {
+      type: 'object',
+      anyOf: [
+        { patternProperties: { '^x$': { type: 'null' } }, additionalProperties: false },
+        { properties: { x: { type: 'string' } } }
+      ]
+    }
+
+    const accepted = { x: null }
+
+    expect(omitNullOptionalToolArguments(patterned, accepted)).toBe(accepted)
+
+    // A key matching a pattern is not governed by additionalProperties.
+    const patternedChild: ToolJsonSchema = {
+      type: 'object',
+      patternProperties: {
+        '^x': { type: 'object', properties: { v: { type: ['string', 'null'] } } }
+      },
+      additionalProperties: { type: 'object', properties: { v: { type: 'string' } } }
+    }
+
+    const child = { x1: { v: null } }
+
+    expect(omitNullOptionalToolArguments(patternedChild, child)).toBe(child)
+
+    // Object-valued literals never eliminate a member by reference comparison.
+    const objectConst: ToolJsonSchema = {
+      anyOf: [
+        {
+          type: 'object',
+          properties: { tag: { const: { k: 1 } }, clear: { type: ['string', 'null'] } }
+        },
+        { type: 'object', properties: { tag: { type: 'object' }, clear: { type: 'string' } } }
+      ]
+    }
+
+    const tagged = { tag: { k: 1 }, clear: null }
+
+    expect(omitNullOptionalToolArguments(objectConst, tagged)).toBe(tagged)
+  })
+
   it('stays fail-closed on deep nesting and terminates on $ref cycles', () => {
     let deep: ToolJsonSchema = {
       type: 'object',
@@ -437,6 +481,19 @@ describe('registry null omission for optional non-nullable properties', () => {
     const started = performance.now()
 
     expect(omitNullOptionalToolArguments(cyclic, { mode: null })).toEqual({})
+
+    // A ladder of shared (non-cyclic) refs: each record is evaluated once per value level.
+    const ladder = Object.fromEntries([
+      ['L40', { type: 'object', properties: { mode: { type: 'string' } } }],
+      ...Array.from({ length: 40 }, (_, level) => [
+        `L${level}`,
+        { allOf: [{ $ref: `#/$defs/L${level + 1}` }, { $ref: `#/$defs/L${level + 1}` }] }
+      ])
+    ])
+
+    expect(
+      omitNullOptionalToolArguments({ $ref: '#/$defs/L0', $defs: ladder }, { mode: null })
+    ).toBeDefined()
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
@@ -846,7 +903,8 @@ describe('unknown tool argument keys', () => {
         call({ 'a.b': { x: '1', p: 1 }, a: { b: { x: '2', q: 1 } } })
       )
 
-      expect(result.content).toContain('Unknown argument "p" in "a.b". Allowed there: x.')
+      // A dotted key prints as a JSON path array, so the two paths stay distinguishable.
+      expect(result.content).toContain('Unknown argument "p" in ["a.b"]. Allowed there: x.')
       expect(result.content).toContain('Unknown argument "q" in "a.b". Allowed there: x.')
       expect(result.content).not.toContain('"p", "q"')
     })

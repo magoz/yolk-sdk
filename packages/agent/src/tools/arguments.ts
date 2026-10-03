@@ -21,8 +21,9 @@ import { ToolCall, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
 // 2. `omitNullOptionalToolArguments` covers properties advertised as optional WITHOUT `null`
 //    (`Schema.optionalKey(X)`, raw/MCP JSON Schemas). Strict-mode models still fill those with
 //    `null`; the registry drops such a `null` before any registration decodes or forwards the
-//    arguments. It only drops a `null` the declaring schema rejects, so it never loses meaning;
-//    a `null` on an undeclared key is rejected like any unknown key.
+//    arguments. It only drops a `null` the declaring property schema rejects (union members are
+//    eliminated only on certain grounds), so it never loses meaning; a `null` on an undeclared
+//    key is rejected like any unknown key.
 
 type ToolArgumentsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 
@@ -237,13 +238,11 @@ const typeAccepts = (type: Schema.Json | undefined, value: Schema.Json) => {
   return true
 }
 
-// Schema records already visited for the current value. A local `$ref` cycle (or a schema that
-// reaches itself through `allOf`/`anyOf`) stops instead of recursing or fanning out exponentially.
-type Visited = ReadonlySet<JsonObject>
-
-const noneVisited: Visited = new Set()
-
-const visit = (visited: Visited, record: JsonObject): Visited => new Set([...visited, record])
+// Schema records already visited, shared across one evaluation (one value level for
+// normalization, one call for `admitsNull`). Each record is evaluated at most once, so `$ref`
+// cycles terminate and shared refs cannot fan out exponentially. A skipped revisit only means
+// fewer drops (or "admits null"), so it stays fail-closed.
+type Visited = Set<JsonObject>
 
 /** Whether a JSON Schema admits `null`. Unconstrained or unknown schemas conservatively do. */
 const admitsNull = (
@@ -262,7 +261,7 @@ const admitsNull = (
 
   if (record === undefined || visited.has(record)) return true
 
-  const seen = visit(visited, record)
+  visited.add(record)
 
   if (Object.hasOwn(record, 'type') && !typeAccepts(record['type'], null)) return false
 
@@ -277,7 +276,7 @@ const admitsNull = (
 
     if (
       members !== undefined &&
-      !members.some(item => admitsNull(item, definitions, depth + 1, seen))
+      !members.some(item => admitsNull(item, definitions, depth + 1, visited))
     ) {
       return false
     }
@@ -285,20 +284,37 @@ const admitsNull = (
 
   const allOf = schemaArray(record, 'allOf')
 
-  return allOf === undefined || allOf.every(item => admitsNull(item, definitions, depth + 1, seen))
+  return (
+    allOf === undefined || allOf.every(item => admitsNull(item, definitions, depth + 1, visited))
+  )
 }
 
+const isStructured = (value: Schema.Json) => Predicate.isObjectOrArray(value)
+
+// Literal comparison is exact only for primitives; object/array literals never eliminate.
 const matchesLiteral = (schema: JsonObject, value: Schema.Json) => {
-  if (Object.hasOwn(schema, 'const')) return schema['const'] === value
+  if (Object.hasOwn(schema, 'const')) {
+    const literal = schema['const']
+
+    return literal === value || isStructured(literal) || isStructured(value)
+  }
 
   const enumValues = schemaArray(schema, 'enum')
 
-  return enumValues === undefined || enumValues.includes(value)
+  return (
+    enumValues === undefined ||
+    enumValues.includes(value) ||
+    isStructured(value) ||
+    enumValues.some(isStructured)
+  )
 }
 
-/** Whether a union member can describe the value. Object members are matched on literal
- * discriminators, required keys, and closed property sets; optional `null` values count as
- * absent so a strict-mode `null` does not disqualify the intended member.
+/** Whether a union member can still describe the value. A member is eliminated only on certain
+ * grounds: a boolean `false` schema, a JSON `type` mismatch, a primitive literal mismatch (member
+ * or declared property discriminator), or a missing required key. Closed property sets never
+ * eliminate a member (`patternProperties`, nested composition and `$ref` make them uncertain), so
+ * an uncertain union stays ambiguous and its value is left untouched. Optional `null` values count
+ * as absent so a strict-mode `null` does not disqualify the intended member.
  */
 const unionMemberMatches = (
   member: Schema.Json,
@@ -331,11 +347,7 @@ const unionMemberMatches = (
   for (const [key, propertyValue] of Object.entries(valueRecord)) {
     const propertySchema = resolveSchema(ownValue(properties, key), definitions)
 
-    if (propertySchema === undefined) {
-      if (ownValue(record, 'additionalProperties') === false) return false
-
-      continue
-    }
+    if (propertySchema === undefined) continue
 
     if (propertyValue === null && !required.has(key)) continue
 
@@ -356,7 +368,12 @@ const normalizeObject = (
   depth: number
 ): JsonObject => {
   const properties = schemaRecord(schema, 'properties')
-  const additionalProperties = ownValue(schema, 'additionalProperties')
+
+  // With `patternProperties`, an undeclared key may be governed by a pattern rather than by
+  // `additionalProperties`; never normalize undeclared keys through it then.
+  const additionalProperties = Object.hasOwn(schema, 'patternProperties')
+    ? undefined
+    : ownValue(schema, 'additionalProperties')
 
   if (properties === undefined && jsonObject(additionalProperties) === undefined) return value
 
@@ -370,14 +387,15 @@ const normalizeObject = (
     const declaredSchema = properties === undefined ? undefined : ownValue(properties, key)
     const propertySchema = declaredSchema ?? additionalProperties
 
-    // `null` means "not sent" only where this property's own declaration rejects `null`, so the
-    // value could never have been accepted and no meaning is lost. Undeclared keys are never
-    // touched: decoding rejects them with a hint naming the allowed keys.
+    // `null` means "not sent" only where this property's own declaration rejects `null`: any
+    // schema that also governs the key must accept `null` too, so the value could never have been
+    // accepted and no meaning is lost. Undeclared keys are never touched: decoding rejects them
+    // with a hint naming the allowed keys.
     if (
       propertyValue === null &&
       declaredSchema !== undefined &&
       !required.has(key) &&
-      !admitsNull(declaredSchema, definitions, 0, noneVisited)
+      !admitsNull(declaredSchema, definitions, 0, new Set())
     ) {
       changed = true
 
@@ -387,7 +405,7 @@ const normalizeObject = (
     const normalizedValue =
       jsonObject(propertySchema) === undefined
         ? propertyValue
-        : normalizeValue(propertySchema, propertyValue, definitions, depth + 1, noneVisited)
+        : normalizeValue(propertySchema, propertyValue, definitions, depth + 1, new Set())
 
     changed ||= normalizedValue !== propertyValue
     entries.push([key, normalizedValue])
@@ -411,7 +429,7 @@ const normalizeArray = (
 
     if (jsonObject(itemSchema) === undefined) return item
 
-    const normalizedItem = normalizeValue(itemSchema, item, definitions, depth + 1, noneVisited)
+    const normalizedItem = normalizeValue(itemSchema, item, definitions, depth + 1, new Set())
 
     changed ||= normalizedItem !== item
 
@@ -450,18 +468,19 @@ const normalizeValue = (
 
   if (resolved === undefined || visited.has(resolved)) return value
 
-  const seen = visit(visited, resolved)
+  visited.add(resolved)
+
   let normalized: Schema.Json = value
 
   for (const member of schemaArray(resolved, 'allOf') ?? []) {
-    normalized = normalizeValue(member, normalized, definitions, depth + 1, seen)
+    normalized = normalizeValue(member, normalized, definitions, depth + 1, visited)
   }
 
   for (const key of ['anyOf', 'oneOf']) {
     const members = schemaArray(resolved, key)
 
     if (members !== undefined) {
-      normalized = normalizeUnion(members, normalized, definitions, depth, seen)
+      normalized = normalizeUnion(members, normalized, definitions, depth, visited)
     }
   }
 
@@ -488,7 +507,7 @@ export const omitNullOptionalToolArguments = (
   const root = Predicate.isBoolean(parameters) ? undefined : parameters
   const definitions = root === undefined ? {} : (schemaRecord(root, '$defs') ?? {})
 
-  return normalizeValue(parameters, params, definitions, 0, noneVisited)
+  return normalizeValue(parameters, params, definitions, 0, new Set())
 }
 
 /** Applies {@link omitNullOptionalToolArguments} to a call, preserving identity when unchanged. */

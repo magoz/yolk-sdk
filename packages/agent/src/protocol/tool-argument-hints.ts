@@ -48,7 +48,21 @@ const unknownArgumentsIn = (
     Match.orElse(() => [])
   )
 
-const formatPath = (path: ReadonlyArray<PropertyKey>) => path.map(String).join('.')
+// Dotted when unambiguous; a segment that is empty or contains a dot switches to a JSON path
+// array so distinct paths never print alike (`a.b` vs `["a.b"]`).
+const formatPath = (path: ReadonlyArray<PropertyKey>) => {
+  const segments = path.map(String)
+
+  return segments.some(segment => segment === '' || segment.includes('.'))
+    ? JSON.stringify(segments)
+    : segments.join('.')
+}
+
+const quotePath = (path: ReadonlyArray<PropertyKey>) => {
+  const formatted = formatPath(path)
+
+  return formatted.startsWith('[') ? formatted : `"${formatted}"`
+}
 
 const formatAllowed = (allowed: ReadonlyArray<string>) =>
   allowed.length === 0
@@ -69,7 +83,7 @@ const formatGroup = (group: UnknownArgumentGroup) => {
 
   return group.parent.length === 0
     ? `${label} ${keys}. Allowed arguments: ${formatAllowed(group.allowed)}.`
-    : `${label} ${keys} in "${formatPath(group.parent)}". Allowed there: ${formatAllowed(group.allowed)}.`
+    : `${label} ${keys} in ${quotePath(group.parent)}. Allowed there: ${formatAllowed(group.allowed)}.`
 }
 
 /** Actionable hint for unknown-key failures: one line per object (path and allowed-key set; union
