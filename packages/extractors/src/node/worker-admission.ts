@@ -9,7 +9,7 @@ import * as Schema from 'effect/Schema'
  * `Symbol.for` key and holds only plain data and plain callbacks, so duplicated copies of this
  * package (and of Effect) in one realm share it. Each layer also has its own pool of
  * `maxConcurrentWorkers` slots (at most `processWorkerLimit`), which can only lower that layer's
- * share. An extraction takes its layer's slot, then a process slot, and waits for both until its
+ * share. An extraction takes its layer's slot, then a realm slot, and waits for both until its
  * admission deadline; a slot is released only after its worker has terminated.
  *
  * Admission is first come, first served: a freed slot is handed to the longest-waiting extraction
@@ -21,7 +21,9 @@ export const processWorkerLimit = 4
 
 /**
  * Takes a freed slot for its waiter and returns `true`, or returns `false` when the waiter's
- * deadline has passed (it then fails with `busy`). Either way it leaves the queue.
+ * deadline has passed (it then fails with `busy`). Either way it leaves the queue. It never runs
+ * the waiter's fiber: the resume is deferred to a microtask, so a waiter that finishes at once
+ * cannot release (and hand off) again inside this call, and a long queue drains in constant stack.
  */
 export type SlotHandOff = () => boolean
 
@@ -115,13 +117,15 @@ export const withSlot =
             stop()
 
             if (expired(deadline)) {
-              resume(Effect.succeed(false))
+              queueMicrotask(() => resume(Effect.succeed(false)))
 
               return false
             }
 
+            // The slot is this fiber's from here on. If it is interrupted before the deferred
+            // resume runs, Effect ignores that resume and `onInterrupt` passes the slot on.
             owned = true
-            resume(Effect.succeed(true))
+            queueMicrotask(() => resume(Effect.succeed(true)))
 
             return true
           }

@@ -303,11 +303,16 @@ Mechanics:
   deadline is checked again whenever a slot would be taken (by a new extraction or a hand-off),
   so a slot freed after the deadline, or a late wake-up, never turns expiry into admission.
   Taking a slot and registering its release happen without an interruption point between them;
-  a slot handed to a waiter interrupted before it resumes is passed on; and a slot is returned
+  a hand-off reserves the slot at once but resumes its waiter on a later microtask, so a waiter
+  that finishes immediately (for example when worker construction fails) cannot release and
+  hand off again inside the previous hand-off, and a queue of any length drains in constant
+  stack; a slot handed to a waiter interrupted before it resumes is passed on; and a slot is returned
   only after `worker.terminate()` has resolved. A waiting extraction can be interrupted. Tests
   assert the peak of four running workers across independently built layers, a layer's lower
   share, queue deadline expiry, an expired deadline with a free slot, FIFO hand-off, a late
-  wake-up, and that interrupting an extraction terminates its worker and frees its slot.
+  wake-up, a 20,000-waiter queue of immediate successes and failures, interruption between
+  hand-off and resume, and that interrupting an extraction terminates its worker and frees its
+  slot. `timeoutMs` and `maxQueueWaitMs` are capped at Node's largest timer delay (2³¹−1 ms).
 - The worker is terminated in the scope's release on every exit, including interruption.
   `ERR_WORKER_OUT_OF_MEMORY` maps to `reason: 'resource-limit'`, the timer to `'timeout'`, a
   worker that errors or exits before posting `WorkerStarted` (a missing or unloadable worker
@@ -427,7 +432,8 @@ inside them. Removing a decoy tag can also realign UTF-16 text or create a BOM. 
 the check runs on the stripped bytes SheetJS will parse. It covers little- and big-endian
 decodings from byte 2 and SheetJS's `arr[1]/arr[2]` offset check, and rejects the archive when a
 hyperlink tag appears. Excel never writes UTF-16 parts, so rejecting costs nothing in practice and
-avoids a second decoder.
+avoids a second decoder. For the same reason the markup rule's occasional rejection of a
+legitimate UTF-16 part (a character whose low byte forms `<<` or `<!`) is accepted.
 
 ## Other deltas reviewed
 

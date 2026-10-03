@@ -57,16 +57,19 @@ const PositiveSafeInteger = Schema.Int.pipe(
   Schema.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER))
 )
 
-/** Resolved worker settings; every value is a positive integer. */
+/** Node's largest `setTimeout` delay; a larger one fires after 1 ms instead. */
+const MaxTimerMs = PositiveSafeInteger.pipe(Schema.check(Schema.isLessThanOrEqualTo(2_147_483_647)))
+
+/** Resolved worker settings; every value is a positive integer, and timers fit `setTimeout`. */
 export const WorkerIsolationSettings = Schema.Struct({
   maxOldGenerationSizeMb: PositiveSafeInteger,
   maxYoungGenerationSizeMb: PositiveSafeInteger,
   stackSizeMb: PositiveSafeInteger,
-  timeoutMs: PositiveSafeInteger,
+  timeoutMs: MaxTimerMs,
   maxConcurrentWorkers: PositiveSafeInteger.pipe(
     Schema.check(Schema.isLessThanOrEqualTo(processWorkerLimit))
   ),
-  maxQueueWaitMs: PositiveSafeInteger
+  maxQueueWaitMs: MaxTimerMs
 })
 
 export type WorkerIsolationSettings = typeof WorkerIsolationSettings.Type

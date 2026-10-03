@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Deferred, Effect, Fiber } from 'effect'
+import { Deferred, Effect, Exit, Fiber } from 'effect'
 import { vi } from 'vitest'
 import { makeSlotPool, withSlot } from '../src/node/worker-admission.ts'
 import type { SlotPool } from '../src/node/worker-admission.ts'
@@ -133,6 +133,80 @@ describe('worker admission', () => {
       yield* Fiber.join(patient.fiber)
 
       expect(runs).toEqual(['first', 'patient'])
+      expect(pool).toMatchObject({ active: 0, waiters: new Set() })
+    })
+  )
+
+  it.effect('drains a long queue of waiters that finish at once in constant stack', () =>
+    Effect.gen(function* () {
+      // Each waiter succeeds or fails as soon as it is admitted (as when worker construction
+      // fails at once), so it releases its slot while the previous hand-off would still be on
+      // the stack if hand-offs resumed fibers synchronously.
+      const pool = makeSlotPool(1)
+      const waiters = 20_000
+      const runs: Array<string> = []
+      const first = yield* holder(pool, farDeadline(), 'first', runs)
+
+      yield* awaitPool(pool, 1, 0)
+
+      const fibers = []
+
+      for (let index = 0; index < waiters; index += 1) {
+        const run = index % 2 === 0 ? Effect.void : Effect.fail('failed' as const)
+
+        fibers.push(yield* Effect.forkChild(run.pipe(withSlot(pool, farDeadline(), busy))))
+      }
+
+      yield* awaitPool(pool, 1, waiters)
+      yield* first.release
+      yield* Fiber.join(first.fiber)
+
+      const exits = yield* Effect.forEach(fibers, fiber => Fiber.await(fiber))
+      const failures = exits.filter(Exit.isFailure)
+
+      expect(failures).toHaveLength(waiters / 2)
+      expect(failures.every(exit => String(exit.cause).includes('failed'))).toBe(true)
+      expect(pool).toMatchObject({ active: 0, waiters: new Set() })
+    })
+  )
+
+  it.effect('passes on a slot handed to a waiter that is interrupted before it resumes', () =>
+    Effect.gen(function* () {
+      const pool = makeSlotPool(1)
+      const runs: Array<string> = []
+      let finishFirst = () => {}
+
+      // `first` holds its slot until `finishFirst` resumes it synchronously.
+      const first = yield* Effect.forkChild(
+        Effect.callback<void>(resume => {
+          finishFirst = () => resume(Effect.sync(() => runs.push('first')))
+        }).pipe(withSlot(pool, farDeadline(), busy))
+      )
+
+      yield* awaitPool(pool, 1, 0)
+
+      const handedOff = yield* holder(pool, farDeadline(), 'handed-off', runs)
+
+      yield* awaitPool(pool, 1, 1)
+
+      const next = yield* holder(pool, farDeadline(), 'next', runs)
+
+      yield* awaitPool(pool, 1, 2)
+
+      // Releasing `first` hands its slot to `handedOff`, whose resume waits for a microtask; the
+      // interruption lands in between, so `handedOff` owns a slot it never used.
+      yield* Effect.sync(() => {
+        finishFirst()
+        handedOff.fiber.interruptUnsafe()
+      })
+
+      yield* Fiber.join(first)
+      yield* Fiber.await(handedOff.fiber)
+      yield* awaitPool(pool, 1, 0)
+      yield* next.release
+      yield* Fiber.join(next.fiber)
+
+      expect(runs).toEqual(['first', 'next'])
       expect(pool).toMatchObject({ active: 0, waiters: new Set() })
     })
   )

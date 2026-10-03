@@ -77,15 +77,15 @@ const FileExtractorLive = makeFileExtractorLayer({
 })
 ```
 
-| `isolation` option         | Default                  | Bounds                                                                   |
-| -------------------------- | ------------------------ | ------------------------------------------------------------------------ |
-| `maxOldGenerationSizeMb`   | 256                      | V8 old-generation heap of each worker                                    |
-| `maxYoungGenerationSizeMb` | 32                       | V8 young-generation heap of each worker                                  |
-| `stackSizeMb`              | 4                        | Stack of each worker (Node's default)                                    |
-| `timeoutMs`                | 30,000                   | Wall-clock time per worker (a real timer, not Effect's clock)            |
-| `maxConcurrentWorkers`     | 4                        | This layer's share of the realm-wide pool of 4 workers (1 to 4)          |
-| `maxQueueWaitMs`           | the layer's `timeoutMs`  | Time an extraction may wait for a worker slot; then it fails with `busy` |
-| `workerUrl`                | the package's own worker | The worker entry, for hosts that bundle or relocate the package          |
+| `isolation` option         | Default                  | Bounds                                                                    |
+| -------------------------- | ------------------------ | ------------------------------------------------------------------------- |
+| `maxOldGenerationSizeMb`   | 256                      | V8 old-generation heap of each worker                                     |
+| `maxYoungGenerationSizeMb` | 32                       | V8 young-generation heap of each worker                                   |
+| `stackSizeMb`              | 4                        | Stack of each worker (Node's default)                                     |
+| `timeoutMs`                | 30,000                   | Wall-clock time per worker (a real timer, not Effect's clock; ≤ 2³¹−1 ms) |
+| `maxConcurrentWorkers`     | 4                        | This layer's share of the realm-wide pool of 4 workers (1 to 4)           |
+| `maxQueueWaitMs`           | the layer's `timeoutMs`  | Wait for a worker slot (≤ 2³¹−1 ms); then it fails with `busy`            |
+| `workerUrl`                | the package's own worker | The worker entry, for hosts that bundle or relocate the package           |
 
 **Cap per JavaScript realm.** Every layer in a JavaScript realm (the main thread, or each worker
 thread that builds the layer) shares one pool of 4 workers, however often the layer is built (a
@@ -95,6 +95,8 @@ handlers in a pool of worker threads gets 4 workers per thread. A layer's
 `maxConcurrentWorkers` can only lower its own share. Slots are handed out first come, first
 served. An extraction waits for a slot at most `maxQueueWaitMs`, then fails with
 `reason: 'busy'` without starting a worker; a slot freed after that deadline never admits it.
+A freed slot is handed to the next waiter, which resumes on a later microtask, so a long queue
+of extractions that fail at once drains without deepening the stack.
 
 **What the worker bounds.** Each worker's V8 heap, stack, and running time. When a worker runs
 out of heap, times out, cannot start, or exits without a result, it is terminated and the
@@ -263,7 +265,8 @@ annotations and links beyond the cap, described below.
   `[Some hyperlinks omitted: output limit]` (or `hyperlink limit`) marker, inside the budget.
 - **UTF-16 parts.** SheetJS decodes BOM-marked UTF-16 parts itself, and the byte-level strip
   cannot see tags inside them. Any XLSX part whose stripped bytes would decode as UTF-16 with a
-  hyperlink tag is rejected. Excel never writes UTF-16 parts.
+  hyperlink tag is rejected. Excel never writes UTF-16 parts. The markup rule can also reject a
+  legitimate BOM-marked UTF-16 part, when a character's low byte forms `<<` or `<!`.
 - **Bounded XLSX text.** Every sheet range is checked strictly against Excel's grid, and the
   cell-visit total is checked before any cell is read. CSV is generated incrementally against
   the character budget (never `sheet_to_csv`). Cells and sheets are read as own properties only.

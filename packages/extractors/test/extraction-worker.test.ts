@@ -536,7 +536,10 @@ describe('isolated extraction in a worker thread', () => {
             { maxOldGenerationSizeMb: 0 },
             // The process-wide pool has four slots; a layer can only lower its share.
             { maxConcurrentWorkers: 5 },
-            { maxQueueWaitMs: 0 }
+            { maxQueueWaitMs: 0 },
+            // Above Node's largest timer delay, `setTimeout` would fire after 1 ms.
+            { timeoutMs: 2 ** 31 },
+            { maxQueueWaitMs: 2 ** 31 }
           ],
           isolation => Effect.exit(inWorker(input, isolation))
         )

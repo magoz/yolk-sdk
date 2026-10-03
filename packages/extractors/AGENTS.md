@@ -192,7 +192,7 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
   SheetJS: every format matches in-process output, typed errors and causes cross the boundary, a
   16 MB heap gives `resource-limit` and the process keeps working, a 1 ms timeout, spawn failure,
   exit before and after `WorkerStarted`, a malformed message, a layer's share with real parsers,
-  and layer defects. `data:` stub workers that announce themselves on a `BroadcastChannel` and
+  and layer defects (including timer settings above 2³¹−1 ms). `data:` stub workers that announce themselves on a `BroadcastChannel` and
   hold their slot (closed with the test's scope) prove the realm-wide peak of four across
   independent layer builds (joining the first four before the exact two-running assertion), a
   layer's lower share, `busy` after `maxQueueWaitMs`, `busy` with no worker started once the
@@ -200,8 +200,10 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
   default URL mapping and failing closed with no worker URL.
 - `test/worker-admission.test.ts`: the pool alone with private one-slot pools: an expired
   deadline with a free slot is `busy` and runs nothing, FIFO hand-off ahead of new arrivals, a
-  waiter woken after its deadline is `busy` and the slot passes on (`Date.now` stubbed ahead), and
-  an interrupted waiter leaves the queue.
+  waiter woken after its deadline is `busy` and the slot passes on (`Date.now` stubbed ahead), a
+  20,000-waiter queue of immediate successes and failures drains (hand-offs resume on a
+  microtask), a slot handed to a waiter interrupted before it resumes passes on, and an
+  interrupted waiter leaves the queue.
 - `test/xlsx-text.test.ts`: 10x bounded CSV tests (ranges, quoting, budgets, visit preflight).
 - `test/xlsx-hyperlinks.test.ts`: link output, schemes, overlap, sheet mapping, full-sheet/column
   ranges (SheetJS never sees a tag, via a recording loader), budget marker, cap, display/target
