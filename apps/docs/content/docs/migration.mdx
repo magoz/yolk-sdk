@@ -36,7 +36,8 @@ Markdown, and plain-text files. Existing packages have no API changes, and `@yol
 does not depend on it.
 
 - The root export is runtime-portable (`FileExtractor`, formats, limits, errors).
-  `@yolk-sdk/extractors/node` is server-only and parses in a worker thread per file.
+  `@yolk-sdk/extractors/node` is server-only and parses PDF and Office files in a worker thread
+  per file; text formats are decoded in the calling thread.
   `@yolk-sdk/extractors/knowledge` exports `FileKnowledgeExtractorLayer`, which provides
   `KnowledgeExtractor` for [knowledge ingestion](./knowledge/ingestion-pipeline).
 - SheetJS is an optional peer needed only for XLSX. Install it from

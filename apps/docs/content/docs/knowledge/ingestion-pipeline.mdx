@@ -34,6 +34,9 @@ import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
 const HostExtractorLayer = FileKnowledgeExtractorLayer.pipe(Layer.provide(FileExtractorLayer))
 ```
 
+`@yolk-sdk/extractors/node` is server-only, and XLSX needs the optional SheetJS peer; see
+[Installation](../installation).
+
 ## Ingest a document
 
 Fragment; supply the host layers and `loadedSource` below:

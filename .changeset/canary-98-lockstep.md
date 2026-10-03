@@ -11,4 +11,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Advance unchanged public packages in lockstep with the new `@yolk-sdk/extractors` package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version. The `@yolk-sdk/knowledge` README now points to the `@yolk-sdk/extractors/knowledge` `KnowledgeExtractor` adapter.
+Advance unchanged public packages in lockstep with the new `@yolk-sdk/extractors` package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.

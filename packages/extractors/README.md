@@ -163,7 +163,7 @@ plain text. Everything else fails with `UnsupportedFileFormatError`.
 
 ## Limits
 
-`defaultFileExtractorLimits` (production-hardened defaults); override any of them
+`defaultFileExtractorLimits` (conservative defaults); override any of them
 through `makeFileExtractorLayer({ limits })`. Invalid values are a defect when the layer is built.
 
 | Limit                   | Default | Bounds                                                                    |
@@ -187,9 +187,9 @@ annotations and links beyond the cap, described below.
   `maxExpandedBytes`. Encrypted, ZIP64, split, and duplicate-name archives fail (names that differ
   only in case count as duplicates, as in OPC), as do archives with ambiguous paths (`..`, `.`,
   `//`, absolute, backslashes, control characters) or macro projects (`vbaProject.bin`). Directory
-  entries ending in `/` are fine. Parsers then get archives rebuilt from the validated bytes. This
-  is a deliberate tightening: OOXML input missing `[Content_Types].xml` or its main part
-  (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) now fails.
+  entries ending in `/` are fine. Parsers then get archives rebuilt from the validated bytes. OOXML
+  input missing `[Content_Types].xml` or its main part (`word/document.xml`, `xl/workbook.xml`,
+  `ppt/presentation.xml`) fails; this is deliberately strict.
 - **Worker isolation.** Every parser runs in a worker with V8 heap, stack, and time limits and a
   cap of 4 workers per JavaScript realm (see above). A parser path nobody has found yet that
   exhausts the worker's heap or runs too long ends in a typed error. Memory outside the V8 heap is
