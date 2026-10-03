@@ -177,8 +177,30 @@ The fail-closed rules above still apply: resolution fails when an exposure contr
   `structuredContent` for tools with an output schema and to the text content otherwise, and
   rejects with an `Error` when the tool returns an error result. Unknown names suggest close
   matches. Calls still running when the script ends are cancelled.
-- A nested call that is interrupted rejects with `tools.<id> was cancelled.`; one whose tool
-  fails with a defect rejects with `tools.<id> failed unexpectedly.` and is recorded as `error`.
+- Arguments make a JSON round trip, and the tool decodes them exactly as it decodes model calls:
+  - The argument is read once, the way `JSON.stringify` reads it (each getter and `toJSON` runs
+    once), into a checked JSON copy, and that copy is what the call sends.
+  - A key set to `undefined` is absent, and `null` on an optional argument means absent.
+  - An unknown key rejects the call with a hint that names the keys allowed there.
+  - Values JSON would silently change reject inside the script before the call is made (it never
+    runs and is not recorded): `NaN`, `Infinity`, invalid `Date`s, `undefined` or functions in
+    arrays, `Map`, `Set`, functions, symbols, bigints, cycles, and class instances. For example
+    `tools.search: argument at limit is NaN; pass a finite number or omit the key`.
+  - Values with `toJSON` pass as their JSON, checked by the same rules: a valid `Date` becomes its
+    ISO string. An error thrown by a getter or `toJSON` rejects the call with that error.
+  - An argument with more than 100000 values or nested more than 64 levels deep is rejected too
+    (`tools.search: argument has more than 100000 values; split the work across calls`).
+  - The checks use built-ins captured before the script runs, and the copy has no prototypes, so
+    a script that changes `Array.prototype`, `Date`, or other built-ins cannot change what is
+    checked or sent.
+- A rejected call's message starts with the call's label: `tools.<id>`, or `tools["<name>"]` for a
+  tool whose identifier an earlier tool already uses (scripts call it by that name when the name
+  is still free; a tool whose identifier and name are both taken is unreachable). Error results,
+  argument rejections, `beforeNestedCall` failures, and the `maxNestedCalls` limit read
+  `<label>: <message>`. Only the message crosses into the script; there is no structured reason or
+  details yet. `ToolResult.nestedCalls` records the tool's own message without the prefix.
+- A nested call that is interrupted rejects with `<label> was cancelled.`; one whose tool fails
+  with a defect rejects with `<label> failed unexpectedly.` and is recorded as `error`.
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
   and `store(key, value)` / `load(key)`.
@@ -191,6 +213,28 @@ tool calls already made, which are not undone. `ToolResult.nestedCalls` records 
 model never sees it. `toolResultMessageFromResult` drops `nestedCalls` and `usage`, and the loop
 does not add `ToolResult.usage` (nested and classifier token spend) to run usage; read both from
 the `ToolResult` or tool events.
+
+## Make tools ready for code mode
+
+Scripts can only use what a tool declares and returns. For each tool scripts may call:
+
+- Declare `output` (an Effect Schema) and return its JSON encoding as the `structuredContent` of
+  successful results, for example with `Schema.encodeEffect(Schema.toCodecJson(Output))`. Error
+  results (`isError`) keep their own `structuredContent` (scripts only see their message).
+  `makeTool` never encodes or validates results: `Chunk`, `DateTime`, `Option`, or class instances
+  in `structuredContent` reach scripts as their raw JSON (`{"_id":"Chunk",...}`), not the declared
+  shape. A tool that declares `output` but returns no `structuredContent` resolves to its text; treat
+  that as a bug in the tool.
+- Give each module a `description` (`{ id, description, tools }`): scripts read it under the
+  namespace heading, from `describeNamespace()`, and through `searchTools()`.
+- Custom `invalidParamsMessage` callbacks should end with
+  `withToolArgumentsErrorHint(message, error)` from `@yolk-sdk/agent/tools`, so an unknown key names
+  the allowed keys (the default message already does).
+- Keep polling, outbound-message, and human-in-the-loop tools `callableBy: 'model'`.
+
+Package tools follow these rules: connector modules take the connector `description` (override with
+the `description` option) and return JSON-encoded action results, knowledge tools declare
+`KnowledgeLookupOutput`/`KnowledgeManageOutput`, and the sandbox tool declares `SandboxToolOutput`.
 
 ## Keep state between scripts
 

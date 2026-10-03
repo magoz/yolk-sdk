@@ -1,7 +1,7 @@
 import { Effect, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
-import { resolveAgentTools } from './registry'
+import { makeNodeTextToolModules, resolveAgentTools } from './registry'
 import { executeJustBashTool, justBashHostFailure } from './just-bash-tool'
 
 describe('just_bash tool', () => {
@@ -120,6 +120,43 @@ describe('just_bash tool', () => {
         expect(result.failure._tag).toBe('ToolError')
         expect(result.failure.cause).toBe('validation')
         expect(result.failure.message).toContain('Invalid just-bash arguments: SchemaError(')
+      }
+    })
+  )
+
+  it.effect('names unknown arguments of the text tools and the allowed keys', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveAgentTools({
+        surface: 'text',
+        route: '/agent',
+        userId: 'user_1'
+      })
+
+      const calls = [
+        { name: 'just_bash', params: { script: 'echo hi', shell: 'zsh' }, unknown: 'shell' },
+        { name: 'web_search', params: { query: 'yolk', engine: 'x' }, unknown: 'engine' },
+        { name: 'web_fetch', params: { url: 'https://example.com', proxy: 'x' }, unknown: 'proxy' }
+      ]
+
+      for (const call of calls) {
+        const result = yield* toolSet.execute(
+          ToolCall.make({ id: 'call_1', name: call.name, params: call.params })
+        )
+
+        expect(result.isError, call.name).toBe(true)
+        expect(result.content, call.name).toEqual(
+          expect.stringContaining(`Unknown argument "${call.unknown}". Allowed arguments: `)
+        )
+      }
+    })
+  )
+
+  it.effect('describes every text tool module', () =>
+    Effect.gen(function* () {
+      const modules = yield* makeNodeTextToolModules()
+
+      for (const toolModule of modules) {
+        expect(toolModule.description, toolModule.id).toEqual(expect.stringMatching(/\S/))
       }
     })
   )

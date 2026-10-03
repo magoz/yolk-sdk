@@ -150,7 +150,9 @@ type NestedResolution =
   | { readonly ok: false; readonly message: string }
 
 /** What a nested call resolves to: `structuredContent` for tools with an output schema (when
- * present), text content otherwise; error results reject with their text.
+ * present), text content otherwise; error results reject with their text. A tool that declares an
+ * output schema but returns no `structuredContent` resolves to its text: that is a tool bug, kept
+ * readable rather than turned into a failure.
  */
 const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
   const text = nestedText(result.content)
@@ -317,13 +319,13 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
             (args, { signal }) => {
               if (signal.aborted) {
-                return Promise.reject(new Error(`tools.${tool.identifier} was cancelled.`))
+                return Promise.reject(new Error(`${tool.callLabel} was cancelled.`))
               }
 
               if (records.length >= limits.maxNestedCalls) {
                 return Promise.reject(
                   new Error(
-                    `Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
+                    `${tool.callLabel}: Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
                   )
                 )
               }
@@ -375,8 +377,8 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     reject(
                       new Error(
                         Cause.hasInterruptsOnly(exit.cause)
-                          ? `tools.${tool.identifier} was cancelled.`
-                          : `tools.${tool.identifier} failed unexpectedly.`
+                          ? `${tool.callLabel} was cancelled.`
+                          : `${tool.callLabel} failed unexpectedly.`
                       )
                     )
 
@@ -388,7 +390,8 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   if (resolution.ok) {
                     resolve(resolution.value)
                   } else {
-                    reject(new Error(resolution.message))
+                    // The script sees which call failed; the nested-call record keeps the raw text.
+                    reject(new Error(`${tool.callLabel}: ${resolution.message}`))
                   }
                 })
               })
@@ -399,6 +402,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             description: tool.description,
             inputSchema: tool.inputSchema,
             outputSchema: tool.outputSchema,
+            callLabel: tool.callLabel,
             execute: callTool(tool)
           }))
 

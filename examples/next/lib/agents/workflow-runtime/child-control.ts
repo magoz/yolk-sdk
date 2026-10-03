@@ -62,9 +62,11 @@ const LookupParams = Schema.Struct({
   )
 })
 
-const lookupModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
+/** Top-level Workflow runtime modules for reading children launched earlier. */
+export const lookupModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
   {
     id: 'workflow-subagent-control',
+    description: 'Check on and wait for previously launched child agents.',
     tools: ['subagent_status', 'subagent_wait'].map(name =>
       makeTool({
         name,

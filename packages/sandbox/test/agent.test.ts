@@ -1,7 +1,8 @@
 import { Effect, Option } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { resolveTools } from '@yolk-sdk/agent/tools'
+import { resolveTools, toolJsonSchemaFromSchema } from '@yolk-sdk/agent/tools'
 import {
   SandboxCommandResult,
   SandboxExpiredError,
@@ -12,8 +13,10 @@ import {
 import {
   makeSandboxToolModuleFromApi,
   makeSandboxToolResult,
+  SandboxToolOutput,
   sandboxToolName
 } from '../src/agent.ts'
+import { sandboxToolOutputLimit } from '../src/lifecycle.ts'
 
 const state = VercelSandboxState.make({
   name: 'sandbox-test',
@@ -109,6 +112,8 @@ describe('sandbox agent tool', () => {
       timedOut: false,
       truncated: false,
       workspaceReset: false,
+      stdout: 'ok',
+      stderr: '',
       previewUrls: [{ port: 3000, url: 'https://3000.example.test' }],
       state: {
         _tag: 'Vercel',
@@ -120,6 +125,51 @@ describe('sandbox agent tool', () => {
       }
     })
   })
+
+  it('declares its output and describes the module', () => {
+    const api: SandboxApi = {
+      run: () => Effect.succeed(commandResult({})),
+      currentState: Effect.succeed(Option.none()),
+      delete: Effect.void
+    }
+
+    const toolModule = makeSandboxToolModuleFromApi(api)
+
+    expect(toolModule.description).toEqual(expect.stringContaining('sandbox workspace'))
+    expect(toolModule.tools[0]?.def.outputSchema).toEqual(
+      toolJsonSchemaFromSchema(SandboxToolOutput)
+    )
+  })
+
+  it.effect(
+    'returns the same bounded stdout/stderr slices as the text, as JSON of its output',
+    () =>
+      Effect.gen(function* () {
+        const stdout = 'o'.repeat(sandboxToolOutputLimit)
+        const stderr = 'e'.repeat(100)
+
+        const result = makeSandboxToolResult({
+          callId: 'call_1',
+          result: commandResult({ exitCode: 2, stdout, stderr })
+        })
+
+        const structured = yield* Schema.decodeUnknownEffect(Schema.toCodecJson(SandboxToolOutput))(
+          result.structuredContent
+        )
+
+        const encoded = yield* Schema.encodeEffect(Schema.toCodecJson(SandboxToolOutput))(
+          structured
+        )
+
+        expect(encoded).toStrictEqual(result.structuredContent)
+        expect(result.isError).toBe(true)
+        expect(structured.truncated).toBe(true)
+        expect(structured.stderr).toBe(stderr)
+        expect(structured.stdout.length + structured.stderr.length).toBe(sandboxToolOutputLimit)
+        expect(result.content).toContain(`<stdout>\n${structured.stdout}\n</stdout>`)
+        expect(result.content).toContain(`<stderr>\n${structured.stderr}\n</stderr>`)
+      })
+  )
 
   it.effect('returns model-visible expired errors', () =>
     Effect.gen(function* () {

@@ -44,6 +44,7 @@ const draftComposerRegistration = makeInputTool({
  * subagents/child workflows, which lack nested HITL resume. */
 export const draftComposerToolModule: ToolModule<AgentToolContext> = {
   id: 'draft-composer',
+  description: 'Ask the user to fill in an email draft (to, subject, body); never sends.',
   tools: [
     {
       ...draftComposerRegistration,

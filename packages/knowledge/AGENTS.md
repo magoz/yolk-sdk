@@ -8,7 +8,10 @@
 - Provide store contracts for app-owned DB/R2 adapters.
 - Provide pure pinned context assembly helpers.
 - Expose chunking, embedding, extraction, summarization, ingestion, and search helpers.
-- Expose `makeKnowledgeLookupTool` and `makeKnowledgeManageTool`; apps own handler policy.
+- Expose `makeKnowledgeLookupTool` and `makeKnowledgeManageTool`; apps own handler policy. They declare
+  `KnowledgeLookupOutput`/`KnowledgeManageOutput` and return their `Schema.toCodecJson` encoding as
+  `structuredContent` (ISO date strings) beside unchanged text; a handler value that does not encode
+  is an `execution` `ToolError`.
 
 ## Boundaries
 

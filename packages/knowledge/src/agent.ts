@@ -5,6 +5,7 @@ import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeTool, withToolArgumentsErrorHint, type ToolRegistration } from '@yolk-sdk/agent/tools'
 import {
   KnowledgeAvailabilitySchema,
+  KnowledgeDocumentSchema,
   NonNegativeInteger,
   NonEmptyTrimmedString,
   PositiveInteger,
@@ -65,6 +66,48 @@ const KnowledgeManageParams = Schema.Union([
     target: KnowledgeTargetParamsSchema
   })
 ])
+
+const KnowledgeLookupResultSchema = Schema.Struct({
+  document: KnowledgeDocumentSchema,
+  score: Schema.optionalKey(Schema.Number),
+  context: Schema.optionalKey(Schema.Array(Schema.Struct({ content: Schema.String })))
+})
+
+/** Declared output of `makeKnowledgeLookupTool`; `structuredContent` is its JSON encoding
+ * (`Schema.toCodecJson`: document dates become ISO strings). */
+export const KnowledgeLookupOutput = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal('search'),
+    results: Schema.Array(KnowledgeLookupResultSchema)
+  }),
+  Schema.Struct({
+    operation: Schema.Literal('get'),
+    document: KnowledgeDocumentSchema
+  })
+])
+
+export type KnowledgeLookupOutput = typeof KnowledgeLookupOutput.Type
+
+/** Declared output of `makeKnowledgeManageTool`; `structuredContent` is its JSON encoding. */
+export const KnowledgeManageOutput = Schema.Struct({
+  operation: Schema.Literals(['upsert', 'set_availability', 'rename_slug', 'delete']),
+  document: Schema.Struct({ id: Schema.String, slug: Schema.String, title: Schema.String })
+})
+
+export type KnowledgeManageOutput = typeof KnowledgeManageOutput.Type
+
+const encodeLookupOutput = Schema.encodeEffect(Schema.toCodecJson(KnowledgeLookupOutput))
+
+const encodeManageOutput = Schema.encodeEffect(Schema.toCodecJson(KnowledgeManageOutput))
+
+/** A handler result that does not encode to the declared output is a host bug, not a model
+ * mistake: fail with a safe message (no values). */
+const outputError = (tool: string) => () =>
+  new ToolError({
+    tool,
+    message: `${tool} produced a result that does not match its output schema.`,
+    cause: 'execution'
+  })
 
 type KnowledgeTargetParams = typeof KnowledgeTargetParamsSchema.Type
 
@@ -179,6 +222,45 @@ const formatSaved = (verb: string, document: KnowledgeSavedDocument) =>
     '\n'
   )
 
+type KnowledgeLookupResultOutput = {
+  readonly document: KnowledgeDocument
+  score?: number
+  context?: ReadonlyArray<{ readonly content: string }>
+}
+
+const lookupResultOutput = (result: KnowledgeLookupResult) => {
+  const output: KnowledgeLookupResultOutput = { document: result.document }
+
+  if (result.score !== undefined) output.score = result.score
+
+  if (result.context !== undefined) {
+    output.context = result.context.map(chunk => ({ content: chunk.content }))
+  }
+
+  return output
+}
+
+const savedResult = (input: {
+  readonly name: string
+  readonly callId: string
+  readonly verb: string
+  readonly operation: KnowledgeManageOutput['operation']
+  readonly document: KnowledgeSavedDocument
+}) =>
+  encodeManageOutput({
+    operation: input.operation,
+    document: { id: input.document.id, slug: input.document.slug, title: input.document.title }
+  }).pipe(
+    Effect.mapError(outputError(input.name)),
+    Effect.map(structuredContent =>
+      ToolResult.make({
+        toolCallId: input.callId,
+        content: formatSaved(input.verb, input.document),
+        structuredContent
+      })
+    )
+  )
+
 export const makeKnowledgeLookupTool = <Context>(
   handlers: KnowledgeLookupHandlers<Context>,
   options: { readonly name?: string; readonly description?: string } = {}
@@ -191,6 +273,7 @@ export const makeKnowledgeLookupTool = <Context>(
       options.description ??
       'Look up durable knowledge. Search for semantic discovery; get when document_id or slug is known.',
     parameters: KnowledgeLookupParams,
+    output: KnowledgeLookupOutput,
     access: 'read',
     invalidParamsMessage: error =>
       withToolArgumentsErrorHint(
@@ -208,7 +291,16 @@ export const makeKnowledgeLookupTool = <Context>(
             contextChunks: optionalValue(params.contextChunks)
           })
 
-          return ToolResult.make({ toolCallId: call.id, content: formatSearchResults(results) })
+          const structuredContent = yield* encodeLookupOutput({
+            operation: 'search',
+            results: results.map(lookupResultOutput)
+          }).pipe(Effect.mapError(outputError(name)))
+
+          return ToolResult.make({
+            toolCallId: call.id,
+            content: formatSearchResults(results),
+            structuredContent
+          })
         }
 
         const document = yield* handlers.get({
@@ -217,7 +309,15 @@ export const makeKnowledgeLookupTool = <Context>(
           target: optionalTargetFromParams(params.target)
         })
 
-        return ToolResult.make({ toolCallId: call.id, content: formatDocument(document) })
+        const structuredContent = yield* encodeLookupOutput({ operation: 'get', document }).pipe(
+          Effect.mapError(outputError(name))
+        )
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatDocument(document),
+          structuredContent
+        })
       })
   })
 }
@@ -234,6 +334,7 @@ export const makeKnowledgeManageTool = <Context>(
       options.description ??
       'Create, replace, pin, archive, rename, or delete durable knowledge. Use only when explicitly asked.',
     parameters: KnowledgeManageParams,
+    output: KnowledgeManageOutput,
     access: 'write',
     invalidParamsMessage: error =>
       withToolArgumentsErrorHint(
@@ -254,9 +355,12 @@ export const makeKnowledgeManageTool = <Context>(
               availability: params.availability
             })
 
-            return ToolResult.make({
-              toolCallId: call.id,
-              content: formatSaved('Knowledge upserted', document)
+            return yield* savedResult({
+              name,
+              callId: call.id,
+              verb: 'Knowledge upserted',
+              operation: 'upsert',
+              document
             })
           }
 
@@ -267,9 +371,12 @@ export const makeKnowledgeManageTool = <Context>(
               availability: params.availability
             })
 
-            return ToolResult.make({
-              toolCallId: call.id,
-              content: formatSaved('Knowledge availability updated', document)
+            return yield* savedResult({
+              name,
+              callId: call.id,
+              verb: 'Knowledge availability updated',
+              operation: 'set_availability',
+              document
             })
           }
 
@@ -280,9 +387,12 @@ export const makeKnowledgeManageTool = <Context>(
               nextSlug: params.nextSlug
             })
 
-            return ToolResult.make({
-              toolCallId: call.id,
-              content: formatSaved('Knowledge slug renamed', document)
+            return yield* savedResult({
+              name,
+              callId: call.id,
+              verb: 'Knowledge slug renamed',
+              operation: 'rename_slug',
+              document
             })
           }
 
@@ -292,9 +402,12 @@ export const makeKnowledgeManageTool = <Context>(
               target: targetFromParams(params.target)
             })
 
-            return ToolResult.make({
-              toolCallId: call.id,
-              content: formatSaved('Knowledge deleted', document)
+            return yield* savedResult({
+              name,
+              callId: call.id,
+              verb: 'Knowledge deleted',
+              operation: 'delete',
+              document
             })
           }
         }

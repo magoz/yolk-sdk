@@ -69,6 +69,10 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
 
+`makeConnectorToolModule` uses the connector `description` as the module description (override
+with `description`) and returns each action result as the JSON encoding of its `outputSchema`
+(`Chunk`s become arrays, dates ISO strings) in both `structuredContent` and the text.
+
 ## Portable metadata
 
 `ConnectorIntegration.metadata` and `CredentialBinding.metadata` use the exported

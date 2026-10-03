@@ -133,3 +133,10 @@ const manageTool = makeKnowledgeManageTool(manageHandlers)
 ```
 
 Use `knowledge_lookup` for search/get and `knowledge_manage` for explicit saves, pins, archives, renames, or deletes. Your app owns authorization and scope resolution.
+
+Both tools declare an output schema (`KnowledgeLookupOutput`, `KnowledgeManageOutput`) and return
+its JSON encoding as `structuredContent` next to the text, which code mode scripts receive:
+
+- lookup: `{ operation: 'search', results }` or `{ operation: 'get', document }`, with ISO date
+  strings in documents;
+- manage: `{ operation, document }`, where `document` is `{ id, slug, title }`.

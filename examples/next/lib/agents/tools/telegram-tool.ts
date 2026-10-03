@@ -3,7 +3,7 @@ import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
+import { makeTool, withToolArgumentsErrorHint, type ToolModule } from '@yolk-sdk/agent/tools'
 import {
   ApiKeyCredential,
   ConnectorError,
@@ -162,6 +162,7 @@ export const makeAppTelegramToolModule = (
 
   return {
     id: 'telegram',
+    description: 'Send Telegram messages to the configured chat.',
     tools: [
       makeTool({
         name: telegramToolName,
@@ -172,7 +173,10 @@ export const makeAppTelegramToolModule = (
         isEnabled: context =>
           Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
         invalidParamsMessage: error =>
-          `Invalid Telegram message arguments: ${schemaErrorToMessage(error)}`,
+          withToolArgumentsErrorHint(
+            `Invalid Telegram message arguments: ${schemaErrorToMessage(error)}`,
+            error
+          ),
         execute: ({ call, params }) =>
           TelegramConnector.invoke({
             integration,

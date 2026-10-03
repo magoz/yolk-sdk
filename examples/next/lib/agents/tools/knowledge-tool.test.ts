@@ -368,3 +368,113 @@ describe('knowledge tool', () => {
     })
   })
 })
+
+describe('knowledge tool code mode readiness', () => {
+  const context = { surface: 'text' as const, route: '/agent/next', userId: 'user_1' }
+
+  const toolModule = makeKnowledgeToolModule({
+    list: () => Effect.succeed([{ ...documentSummary, summary: undefined }]),
+    search: () => Effect.succeed([searchResult]),
+    getContext: () => Effect.succeed(contextWindow)
+  })
+
+  it.effect('declares outputs and returns their JSON encoding as structuredContent', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({ modules: [toolModule], context })
+
+      expect(toolModule.description).toEqual(expect.stringContaining('knowledge'))
+      expect(toolSet.tools.map(tool => [tool.name, tool.outputSchema !== undefined])).toEqual([
+        ['list_knowledge_documents', true],
+        ['search_knowledge', true],
+        ['get_knowledge_context', true]
+      ])
+
+      const list = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'list_knowledge_documents', params: {} })
+      )
+
+      expect(list.structuredContent).toStrictEqual({
+        documents: [
+          {
+            id: 'object_1',
+            slug: 'project-memory-object_1',
+            title: 'Project memory',
+            purpose: 'User knowledge note',
+            origin: 'manual_text',
+            status: 'ready',
+            availability: 'searchable',
+            summary: null,
+            fileCount: 0,
+            chunkCount: 1,
+            files: [],
+            createdAt: '2026-05-18T00:00:00.000Z',
+            updatedAt: '2026-05-18T00:00:00.000Z'
+          }
+        ]
+      })
+
+      const search = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_2', name: 'search_knowledge', params: { queries: ['memory'] } })
+      )
+
+      expect(search.structuredContent).toStrictEqual({
+        queries: [
+          {
+            query: 'memory',
+            results: [
+              {
+                citation: 1,
+                score: 0.91,
+                vectorScore: 0.9,
+                textScore: 0.5,
+                documentId: 'object_1',
+                title: 'Project memory',
+                purpose: 'User knowledge note',
+                origin: 'manual_text',
+                availability: 'searchable',
+                chunkId: 'chunk_1',
+                text: 'matched durable fact'
+              }
+            ]
+          }
+        ]
+      })
+
+      const window = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_3',
+          name: 'get_knowledge_context',
+          params: { documentId: 'object_1' }
+        })
+      )
+
+      expect(window.structuredContent).toMatchObject({
+        context: { documentId: 'object_1', anchorChunkId: 'chunk_1', hasAfter: true }
+      })
+      expect(JSON.parse(JSON.stringify(window.structuredContent))).toStrictEqual(
+        window.structuredContent
+      )
+    })
+  )
+
+  it.effect('names unknown arguments and the allowed keys', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({ modules: [toolModule], context })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'search_knowledge',
+          params: { queries: ['memory'], limt: 3 }
+        })
+      )
+
+      expect(result.isError).toBe(true)
+      expect(result.content).toEqual(
+        expect.stringContaining(
+          'Unknown argument "limt". Allowed arguments: queries, limit, minScore, contextChunks.'
+        )
+      )
+    })
+  )
+})

@@ -10,6 +10,7 @@ import {
   modelVisibleToolErrorResult,
   type ModelVisibleToolError,
   type ModelVisibleToolErrorReason,
+  withToolArgumentsErrorHint,
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
@@ -516,7 +517,11 @@ export const makeWebFetchToolRegistration = (
     parameters: WebFetchParams,
     access: 'read',
     isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-    invalidParamsMessage: error => `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
+    invalidParamsMessage: error =>
+      withToolArgumentsErrorHint(
+        `Invalid web fetch arguments: ${schemaErrorToMessage(error)}`,
+        error
+      ),
     execute: ({ call, params }) =>
       fetchWebPage(params, deps).pipe(
         Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
@@ -527,6 +532,7 @@ export const makeWebFetchToolModule = (
   deps: WebFetchToolDependencies
 ): ToolModule<AgentToolContext> => ({
   id: 'browser',
+  description: 'Fetch public web pages as readable text.',
   tools: [makeWebFetchToolRegistration(deps)]
 })
 

@@ -141,6 +141,11 @@ const manageTool = makeKnowledgeManageTool({
 The callbacks are host adapters and receive the agent tool context. Hosts own authorization,
 storage, scope enforcement, and safe `ToolError` mapping.
 
+Both tools declare an output (`KnowledgeLookupOutput`, `KnowledgeManageOutput`) and return its JSON
+encoding as `structuredContent` (dates as ISO strings) next to the text, so code mode scripts get
+`{ operation: 'search', results }`, `{ operation: 'get', document }`, or
+`{ operation, document: { id, slug, title } }`.
+
 ## Ingestion semantics
 
 `ingestKnowledgeDocument` upserts a `processing` index record, extracts, chunks, embeds and

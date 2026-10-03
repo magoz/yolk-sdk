@@ -4,6 +4,7 @@ import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
   modelVisibleToolError,
+  withToolArgumentsErrorHint,
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
@@ -59,7 +60,7 @@ const skillTool: ToolRegistration<AgentToolContext> = makeTool({
         context.skillset.skills.length > 0
     ),
   invalidParamsMessage: error =>
-    `Invalid skill arguments: ${error instanceof Error ? error.message : String(error)}`,
+    withToolArgumentsErrorHint(`Invalid skill arguments: ${error.message}`, error),
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {
       const skillset = context.skillset
@@ -95,5 +96,6 @@ const skillTool: ToolRegistration<AgentToolContext> = makeTool({
 
 export const skillToolModule: ToolModule<AgentToolContext> = {
   id: 'skillset',
+  description: 'Load project skill instructions by name.',
   tools: [skillTool]
 }

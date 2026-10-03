@@ -67,6 +67,22 @@ describe('code mode catalog', () => {
     expect(catalog[0]?.outputSchema).toEqual({ type: 'string' })
   })
 
+  it('labels each tool the way scripts reach it: first identifier wins, then the raw name', () => {
+    const catalog = codeModeCatalog([
+      nestedTool('a', '123'),
+      nestedTool('a', 'a-b'),
+      nestedTool('a', 'a.b'),
+      nestedTool('a', 'plain')
+    ])
+
+    expect(catalog.map(tool => tool.callLabel)).toEqual([
+      'tools._23',
+      'tools.a_b',
+      'tools["a.b"]',
+      'tools.plain'
+    ])
+  })
+
   it('lists listed tools with declarations, direct tools with one line, and never search tools', () => {
     const description = renderCodeModeDescription({
       tools: [

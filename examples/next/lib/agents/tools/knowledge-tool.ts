@@ -1,10 +1,11 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { ToolError } from '@yolk-sdk/agent/loop'
+import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
   modelVisibleToolError,
+  withToolArgumentsErrorHint,
   type ModelVisibleToolError,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
@@ -114,6 +115,94 @@ const KnowledgeContextParams = Schema.Struct({
   )
 })
 
+// Declared outputs: `structuredContent` is the JSON encoding of these (dates become ISO strings;
+// absent keys stay absent, `undefined`-valued `Schema.optional` keys encode as null).
+const KnowledgeSearchOutput = Schema.Struct({
+  queries: Schema.Array(
+    Schema.Struct({
+      query: Schema.String,
+      results: Schema.Array(
+        Schema.Struct({
+          citation: Schema.Number,
+          score: Schema.Number,
+          vectorScore: Schema.optional(Schema.Number),
+          textScore: Schema.optional(Schema.Number),
+          documentId: Schema.String,
+          title: Schema.String,
+          purpose: Schema.String,
+          origin: Schema.String,
+          availability: KnowledgeAvailabilitySchema,
+          chunkId: Schema.String,
+          text: Schema.String
+        })
+      )
+    })
+  )
+})
+
+const KnowledgeListOutput = Schema.Struct({
+  documents: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      slug: Schema.String,
+      title: Schema.String,
+      purpose: Schema.String,
+      origin: Schema.String,
+      status: Schema.Literals(['processing', 'ready', 'error']),
+      availability: KnowledgeAvailabilitySchema,
+      summary: Schema.optional(Schema.String),
+      fileCount: Schema.Number,
+      chunkCount: Schema.Number,
+      files: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          mediaType: Schema.optional(Schema.String),
+          byteSize: Schema.optional(Schema.Number)
+        })
+      ),
+      createdAt: Schema.Date,
+      updatedAt: Schema.Date
+    })
+  )
+})
+
+const KnowledgeContextOutput = Schema.Struct({
+  context: Schema.Struct({
+    documentId: Schema.String,
+    title: Schema.String,
+    anchorChunkId: Schema.String,
+    anchorPosition: Schema.Number,
+    startPosition: Schema.Number,
+    endPosition: Schema.Number,
+    hasBefore: Schema.Boolean,
+    hasAfter: Schema.Boolean,
+    text: Schema.String,
+    textTruncated: Schema.Boolean,
+    textCharacters: Schema.Number,
+    chunks: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        position: Schema.Number,
+        tokenCount: Schema.Number,
+        content: Schema.String
+      })
+    )
+  })
+})
+
+const encodeSearchOutput = Schema.encodeEffect(Schema.toCodecJson(KnowledgeSearchOutput))
+
+const encodeListOutput = Schema.encodeEffect(Schema.toCodecJson(KnowledgeListOutput))
+
+const encodeContextOutput = Schema.encodeEffect(Schema.toCodecJson(KnowledgeContextOutput))
+
+const outputError = (tool: string) => () =>
+  new ToolError({
+    tool,
+    message: `${tool} produced a result that does not match its output schema.`,
+    cause: 'execution'
+  })
+
 type KnowledgeListParams = typeof KnowledgeListParams.Type
 
 type KnowledgeSearchParams = typeof KnowledgeSearchParams.Type
@@ -154,7 +243,8 @@ export type KnowledgeToolHandlers = {
 const isKnowledgeToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const schemaErrorMessage = (error: Schema.SchemaError) => error.message
+const invalidArgumentsMessage = (label: string) => (error: Schema.SchemaError) =>
+  withToolArgumentsErrorHint(`Invalid ${label} arguments: ${error.message}`, error)
 
 const makeModelVisibleError = (tool: string, message: string) =>
   modelVisibleToolError({
@@ -419,10 +509,6 @@ const formatDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSumma
   ].join('\n\n')
 }
 
-const structuredDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSummary>) => ({
-  documents
-})
-
 const formatContextWindow = (window: KnowledgeContextWindow) =>
   [
     `Knowledge context: ${window.document.title}`,
@@ -467,10 +553,10 @@ const searchTool = (
     description:
       'Search durable user knowledge. Use this for source-backed facts, uploaded knowledge, decisions, notes, and non-pinned knowledge not already in context.',
     parameters: KnowledgeSearchParams,
+    output: KnowledgeSearchOutput,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error =>
-      `Invalid knowledge search arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
+    invalidParamsMessage: invalidArgumentsMessage('knowledge search'),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeParams(params)
@@ -488,6 +574,10 @@ const searchTool = (
           { concurrency: 'unbounded' }
         )
 
+        const structuredContent = yield* encodeSearchOutput({
+          queries: items.map(item => structuredResult(item.query, item.results))
+        }).pipe(Effect.mapError(outputError(knowledgeSearchToolName)))
+
         return ToolResult.make({
           toolCallId: call.id,
           content: [
@@ -495,9 +585,7 @@ const searchTool = (
             '',
             ...items.map(item => formatResults(item.query, item.results))
           ].join('\n\n'),
-          structuredContent: {
-            queries: items.map(item => structuredResult(item.query, item.results))
-          }
+          structuredContent
         })
       })
   })
@@ -508,19 +596,23 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
     description:
       'List durable user knowledge documents and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge document IDs are unclear.',
     parameters: KnowledgeListParams,
+    output: KnowledgeListOutput,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error =>
-      `Invalid knowledge listing arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
+    invalidParamsMessage: invalidArgumentsMessage('knowledge listing'),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeListParams(params)
         const documents = yield* list({ userId: context.userId, ...normalized })
 
+        const structuredContent = yield* encodeListOutput({ documents }).pipe(
+          Effect.mapError(outputError(knowledgeListToolName))
+        )
+
         return ToolResult.make({
           toolCallId: call.id,
           content: formatDocumentSummaries(documents),
-          structuredContent: structuredDocumentSummaries(documents)
+          structuredContent
         })
       })
   })
@@ -533,19 +625,23 @@ const contextTool = (
     description:
       'Read surrounding chunks from a specific durable knowledge document. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
     parameters: KnowledgeContextParams,
+    output: KnowledgeContextOutput,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error =>
-      `Invalid knowledge context arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
+    invalidParamsMessage: invalidArgumentsMessage('knowledge context'),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeContextParams(params)
         const window = yield* getContext({ userId: context.userId, ...normalized })
 
+        const structuredContent = yield* encodeContextOutput({
+          context: structuredContextWindow(window)
+        }).pipe(Effect.mapError(outputError(knowledgeContextToolName)))
+
         return ToolResult.make({
           toolCallId: call.id,
           content: formatContextWindow(window),
-          structuredContent: { context: structuredContextWindow(window) }
+          structuredContent
         })
       })
   })
@@ -558,4 +654,9 @@ const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolCo
 
 export const makeKnowledgeToolModule = (
   handlers: KnowledgeToolHandlers
-): ToolModule<AgentToolContext> => ({ id: 'knowledge', tools: knowledgeTools(handlers) })
+): ToolModule<AgentToolContext> => ({
+  id: 'knowledge',
+  description:
+    "The user's durable knowledge documents: list them, search them, and read nearby chunks.",
+  tools: knowledgeTools(handlers)
+})

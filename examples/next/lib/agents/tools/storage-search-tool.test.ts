@@ -353,3 +353,87 @@ describe('storage knowledge search tool', () => {
     })
   })
 })
+
+describe('storage tool code mode readiness', () => {
+  const context = { surface: 'text' as const, route: '/agent/next', userId: 'user_1' }
+
+  const source = {
+    id: 'source_1',
+    name: 'notes.pdf',
+    sourceType: 'file',
+    status: 'ready',
+    createdAt: '2026-05-17T00:00:00.000Z'
+  }
+
+  const toolModule = makeStorageSearchToolModule({
+    search: () => Effect.succeed([{ ...searchResult, scores: { vector: 0.8 } }]),
+    listSources: () => Effect.succeed([source]),
+    getSource: () =>
+      Effect.succeed({ ...source, text: 'full text', textTruncated: false, textCharacters: 9 })
+  })
+
+  it.effect('declares outputs and returns their JSON encoding as structuredContent', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({ modules: [toolModule], context })
+
+      expect(toolModule.description).toEqual(expect.stringContaining('storage'))
+      expect(toolSet.tools.map(tool => [tool.name, tool.outputSchema !== undefined])).toEqual([
+        ['search_storage', true],
+        ['list_storage_sources', true],
+        ['get_storage_source', true]
+      ])
+
+      const search = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'search_storage', params: { queries: ['notes'] } })
+      )
+
+      expect(search.structuredContent).toStrictEqual({
+        queries: [
+          {
+            query: 'notes',
+            results: [
+              {
+                score: 0.87,
+                scores: { vector: 0.8 },
+                citation: 1,
+                documentId: 'doc_1',
+                source: 'Project note',
+                chunkId: 'chunk_1',
+                text: 'context chunk'
+              }
+            ]
+          }
+        ]
+      })
+
+      const list = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_2', name: 'list_storage_sources', params: {} })
+      )
+
+      expect(list.structuredContent).toStrictEqual({ sources: [source] })
+
+      const detail = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_3', name: 'get_storage_source', params: { id: 'source_1' } })
+      )
+
+      expect(detail.structuredContent).toStrictEqual({
+        source: { ...source, text: 'full text', textTruncated: false, textCharacters: 9 }
+      })
+    })
+  )
+
+  it.effect('names unknown arguments and the allowed keys', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({ modules: [toolModule], context })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'get_storage_source', params: { id: 'x', max: 5 } })
+      )
+
+      expect(result.isError).toBe(true)
+      expect(result.content).toEqual(
+        expect.stringContaining('Unknown argument "max". Allowed arguments: id, maxChars.')
+      )
+    })
+  )
+})
