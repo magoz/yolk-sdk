@@ -992,8 +992,9 @@ export const resolveTools = <Context>(
      * No adapter means interaction tools are unavailable, never an in-memory fallback.
      */
     readonly interactionHost?: InteractionHost
-    /** Durable tool-call ledger: ledgered calls (default every non-`read` tool, top-level and
-     * nested) run at most once per ledger key across re-executions. Absent: unchanged behavior.
+    /** Durable tool-call ledger: ledgered calls (default every non-`read` tool and the built-in
+     * `subagent` tool, top-level and nested) run at most once per ledger key across
+     * re-executions. Absent: unchanged behavior.
      */
     readonly ledger?: ToolLedgerOptions
   } = {}

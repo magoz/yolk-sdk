@@ -250,6 +250,41 @@ describe('subagent tool', () => {
     })
   )
 
+  it.effect('ledgers subagent calls by default, so a re-executed call never runs again', () =>
+    Effect.gen(function* () {
+      let runs = 0
+      const store = makeInMemoryToolLedgerStore()
+
+      const subagentModule = makeSubagentToolModule<TestContext>({
+        subagents,
+        execute: ({ call }) =>
+          Effect.sync(() => {
+            runs++
+
+            return ToolResult.make({ toolCallId: call.id, content: `child run ${runs}` })
+          })
+      })
+
+      // One resolution per step execution, as a host re-executing a step would do.
+      const execute = Effect.gen(function* () {
+        const toolSet = yield* resolveTools(
+          [subagentModule],
+          { sessionId: 'session_1' },
+          { ledger: { store } }
+        )
+
+        return yield* toolSet.execute(subagentCall('call_1'))
+      })
+
+      const first = yield* execute
+      const second = yield* execute
+
+      expect(runs).toBe(1)
+      expect(second).toEqual(first)
+      expect((yield* store.entries).map(entry => entry.toolName)).toEqual([subagentToolName])
+    })
+  )
+
   it.effect('preserves configured model IDs as opaque values', () =>
     Effect.gen(function* () {
       const opaqueModelId = '  host/model id  '

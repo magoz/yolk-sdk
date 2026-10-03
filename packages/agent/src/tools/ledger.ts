@@ -11,6 +11,7 @@ import {
   type Content,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
+import { subagentToolName } from '../protocol/tool.ts'
 import type { ToolAccess } from './registry.ts'
 import { sha256Hex } from './sha256.ts'
 
@@ -177,8 +178,15 @@ export type ToolLedgerPolicyInput = {
   readonly parentCallId?: string
 }
 
-/** Default policy: every tool whose access is not `read`. */
-export const defaultToolLedgerPolicy = (input: ToolLedgerPolicyInput) => input.access !== 'read'
+/**
+ * Default policy: every tool whose access is not `read`, plus the built-in `subagent` tool. A
+ * subagent call is `read` but runs a whole child run whose tool calls get fresh ids, so only
+ * ledgering the call itself keeps a re-executed step from running the child (and its writes)
+ * again. Hosts with their own delegation tools add them through `isLedgered`, for example
+ * `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`.
+ */
+export const defaultToolLedgerPolicy = (input: ToolLedgerPolicyInput) =>
+  input.access !== 'read' || input.call.name === subagentToolName
 
 /** What an abandoned call's registration sees to build its result (see `abandonedResult`). */
 export type ToolLedgerAbandonedInput = {
@@ -231,7 +239,9 @@ type DecisionEventFields = {
 /** `resolveTools` ledger option. Without it, tool execution is unchanged. */
 export type ToolLedgerOptions = {
   readonly store: ToolLedgerStore
-  /** Which calls are ledgered. Default `defaultToolLedgerPolicy` (every non-`read` tool). */
+  /** Which calls are ledgered. Default `defaultToolLedgerPolicy` (every non-`read` tool and the
+   * built-in `subagent` tool).
+   */
   readonly isLedgered?: (input: ToolLedgerPolicyInput) => boolean
   /** Lease of a running call. Default 30000. */
   readonly leaseMs?: number
