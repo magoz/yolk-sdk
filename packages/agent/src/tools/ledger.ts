@@ -184,8 +184,12 @@ export const defaultToolLedgerPolicy = (input: ToolLedgerPolicyInput) => input.a
 export type ToolLedgerAbandonedInput = {
   readonly call: ToolCall
   readonly entry: ToolLedgerEntry
-  /** The call's nested entries (`list(call.id)`), ordered by sequence number. */
-  readonly nested: ReadonlyArray<ToolLedgerEntry>
+  /**
+   * The call's nested entries (`list(call.id)`), ordered by sequence number; `undefined` when
+   * `list` failed. Then the nested calls are unknown (any of them may have been applied): report
+   * the listing as unavailable, never as empty.
+   */
+  readonly nested: ReadonlyArray<ToolLedgerEntry> | undefined
 }
 
 /**
@@ -731,13 +735,18 @@ export const executeLedgered = (input: {
     const abandoned = (entry: ToolLedgerEntry): Effect.Effect<ToolResult, ToolError> => {
       const abandonedResult = input.abandonedResult
 
+      // A failed listing keeps the abandoned result (the call may have been applied); only the
+      // nested entries are reported as unavailable.
       return abandonedResult === undefined
         ? Effect.succeed(abandonedToolCallResult(call))
         : store.list(key).pipe(
-            Effect.mapError(ledgerUnavailable(call)),
-            Effect.map(nested =>
-              abandonedResult({ call, entry, nested: sortToolLedgerEntries(nested) })
-            )
+            Effect.map(sortToolLedgerEntries),
+            Effect.catch(error =>
+              Effect.logWarning(
+                `Tool ledger could not list the nested calls of abandoned ${key}: ${error.message}`
+              ).pipe(Effect.as(undefined))
+            ),
+            Effect.map(nested => abandonedResult({ call, entry, nested }))
           )
     }
 

@@ -13,10 +13,12 @@ import {
   makeTool,
   resolveTools,
   toolLedgerArgs,
+  ToolLedgerError,
   ToolLedgerFailed,
   ToolLedgerSucceeded,
   type ToolLedgerArgs,
   type ToolLedgerOptions,
+  type ToolLedgerStore,
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
@@ -217,6 +219,47 @@ describe('code mode with a tool ledger', () => {
       yield* runLedgered(modules, { store })
       expect(state.runs).toBe(1)
       expect(log).toHaveLength(2)
+    })
+  )
+
+  it.effect('keeps the interrupted warning when the nested calls cannot be listed', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const memory = makeInMemoryToolLedgerStore()
+
+      const { executor, state } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 'first' })
+        await call('sales_manage', { note: 'second' })
+
+        return 'done'
+      })
+
+      const modules = codeModeModules(executor, [salesManage(log, { block: 'second' })])
+      const crashed = yield* Effect.forkChild(runLedgered(modules, { store: memory }))
+
+      yield* waitUntil(() => log.length === 2)
+      yield* Fiber.interrupt(crashed)
+      yield* TestClock.adjust('1 minute')
+
+      const store: ToolLedgerStore = {
+        ...memory,
+        list: () => Effect.fail(new ToolLedgerError({ message: 'replica lagging' }))
+      }
+
+      const result = yield* runLedgered(modules, { store })
+      const content = text(result.content)
+
+      expect(state.runs).toBe(1)
+      expect(log).toHaveLength(2)
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toEqual({
+        codemode: { ok: false, interrupted: true, interruptedCallsUnavailable: true }
+      })
+      expect(content).toContain('The script was not run again.')
+      expect(content).toContain('could not be listed')
+      expect(content).toContain('may already have been applied')
+      expect(content).toContain('Verify the state')
+      expect(content).not.toContain('No ledgered nested tool calls')
     })
   )
 

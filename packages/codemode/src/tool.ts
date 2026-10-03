@@ -647,7 +647,8 @@ const interruptedCalls = (
  * no result recorded). The script never runs again: the result lists that execution's ledgered
  * nested calls as applied, failed, or unknown, and says they were not undone. The text is bounded
  * by `maxOutputChars`; `structuredContent.codemode.interruptedCalls` carries the same entries for
- * hosts, bounded like `nestedCalls`.
+ * hosts, bounded like `nestedCalls`. When the ledger cannot list them, the result stays
+ * interrupted, says they may have been applied, and sets `interruptedCallsUnavailable` instead.
  */
 const abandonedScriptResult =
   (limits: Required<CodeModeLimits>) =>
@@ -655,15 +656,17 @@ const abandonedScriptResult =
     const maxChars = limits.maxOutputChars
 
     const listing =
-      nested.length === 0
-        ? 'No ledgered nested tool calls were recorded for that execution.'
-        : [
-            `Ledgered nested tool calls of that execution (they were not undone):`,
-            ...nested.map(
-              entry =>
-                `- ${entry.key} ${entry.toolName} ${truncateCodePoints(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
-            )
-          ].join('\n')
+      nested === undefined
+        ? 'Its ledgered nested tool calls could not be listed (the tool ledger is unavailable), so any of them may already have been applied.'
+        : nested.length === 0
+          ? 'No ledgered nested tool calls were recorded for that execution.'
+          : [
+              `Ledgered nested tool calls of that execution (they were not undone):`,
+              ...nested.map(
+                entry =>
+                  `- ${entry.key} ${entry.toolName} ${truncateCodePoints(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
+              )
+            ].join('\n')
 
     const text = [
       `Script interrupted: an earlier execution of this ${call.name} call (${call.id}) started but never recorded a result. The script was not run again.`,
@@ -672,11 +675,14 @@ const abandonedScriptResult =
     ].join('\n\n')
 
     const structuredContent: CodeModeStructuredContent = {
-      codemode: {
-        ok: false,
-        interrupted: true,
-        interruptedCalls: interruptedCalls(nested, limits.maxNestedCalls)
-      }
+      codemode:
+        nested === undefined
+          ? { ok: false, interrupted: true, interruptedCallsUnavailable: true }
+          : {
+              ok: false,
+              interrupted: true,
+              interruptedCalls: interruptedCalls(nested, limits.maxNestedCalls)
+            }
     }
 
     return ToolResult.make({

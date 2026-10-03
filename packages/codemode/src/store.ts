@@ -14,6 +14,10 @@ export type CodeModeStructuredContent = {
     readonly interrupted?: true
     /** With `interrupted`: the abandoned execution's ledgered nested calls. */
     readonly interruptedCalls?: CodeModeInterruptedCalls
+    /** With `interrupted`, instead of `interruptedCalls`: the nested calls could not be listed
+     * (the ledger's `list` failed), so any of them may have been applied.
+     */
+    readonly interruptedCallsUnavailable?: true
   }
 }
 
