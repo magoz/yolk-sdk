@@ -1,4 +1,4 @@
-import { type Duration, Effect, Exit, Fiber, Logger, Predicate } from 'effect'
+import { type Duration, Effect, Exit, Fiber, Logger, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
@@ -174,6 +174,47 @@ describe('tool ledger', () => {
         reason: 'timeout',
         details: { type: 'tool_ledger', state: 'in_flight', key: 'call_1' }
       })
+      expect(probe.runs).toEqual(['hot lead'])
+
+      yield* Fiber.interrupt(first)
+    })
+  )
+
+  it.effect('bounds a stalled polling claim by the remaining wait budget', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const tools = [noteTool(probe, { sleep: '1 minute' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store: memory }))
+
+      yield* TestClock.adjust('1 second')
+
+      let claims = 0
+
+      // The duplicate's first claim sees the call in flight; every later poll stalls.
+      const stalling: ToolLedgerStore = {
+        ...memory,
+        claim: request => (claims++ === 0 ? memory.claim(request) : Effect.never)
+      }
+
+      const second = yield* Effect.forkChild(
+        execute(tools, noteCall(), { store: stalling, maxWaitMs: 5_000, pollIntervalMs: 1_000 })
+      )
+
+      const joined = yield* Effect.forkChild(
+        Fiber.join(second).pipe(Effect.timeoutOption('10 seconds'))
+      )
+
+      yield* TestClock.adjust('11 seconds')
+
+      const result = yield* Fiber.join(joined)
+
+      expect(Option.isSome(result)).toBe(true)
+      expect(Option.getOrUndefined(result)?.structuredContent).toMatchObject({
+        reason: 'timeout',
+        details: { type: 'tool_ledger', state: 'in_flight', key: 'call_1' }
+      })
+      expect(claims).toBe(2)
       expect(probe.runs).toEqual(['hot lead'])
 
       yield* Fiber.interrupt(first)

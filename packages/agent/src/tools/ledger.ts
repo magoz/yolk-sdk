@@ -1,4 +1,4 @@
-import { Clock, Data, Duration, Effect, Predicate, Result } from 'effect'
+import { Clock, Data, Duration, Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -249,7 +249,9 @@ export type ToolLedgerOptions = {
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */
   readonly pollIntervalMs?: number
-  /** Longest wait for an in-flight call. Default 150000. */
+  /** Longest wait for an in-flight call, store polls included (a poll still pending when the
+   * wait ends is abandoned and the call times out). Default 150000.
+   */
   readonly maxWaitMs?: number
   /** Epoch milliseconds by which a wait must end (for example the step's function budget). */
   readonly deadline?: () => number | undefined
@@ -683,17 +685,28 @@ export const executeLedgered = (input: {
         yield* reportDecision(options.onLedgerDecision, event)
       })
 
+    const waitTimedOut = decide('in_flight_timeout').pipe(Effect.as(inFlightTimeoutResult(call)))
+
+    // Every wait step, store polls included, stays within the wait budget: a stalled poll ends in
+    // the timeout result, never in running the call.
     while (ToolLedgerClaim.$is('InFlight')(current) && matches(current.entry)) {
       const now = yield* Clock.currentTimeMillis
 
-      if (now >= waitUntil) {
-        yield* decide('in_flight_timeout')
-
-        return inFlightTimeoutResult(call)
-      }
+      if (now >= waitUntil) return yield* waitTimedOut
 
       yield* Effect.sleep(Duration.millis(Math.min(options.pollIntervalMs, waitUntil - now)))
-      current = yield* claim(yield* Clock.currentTimeMillis)
+
+      const polledAt = yield* Clock.currentTimeMillis
+
+      if (polledAt >= waitUntil) return yield* waitTimedOut
+
+      const polled = yield* claim(polledAt).pipe(
+        Effect.timeoutOption(Duration.millis(waitUntil - polledAt))
+      )
+
+      if (Option.isNone(polled)) return yield* waitTimedOut
+
+      current = polled.value
     }
 
     const heartbeat = Effect.gen(function* () {
