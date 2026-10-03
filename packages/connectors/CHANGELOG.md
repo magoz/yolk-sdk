@@ -1,5 +1,40 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.97
+
+### Minor Changes
+
+- 6567cc9: Add the experimental `@yolk-sdk/connectors/afloat/conformance` subpath: the Afloat target, seeds, and fixtures for the generic `@yolk-sdk/mcp/conformance` cases. It holds no case code and never imports `@yolk-sdk/mcp` (a devDependency for its tests only). `makeAfloatMcpConformanceTarget()` runs the real `afloat.mcp_auth` action over the host's `CredentialResolver` and answers the target value: `https://useafloat.com/mcp`, the modern `2026-07-28` era, `Authorization: Bearer <afloat_ key>`, and the public reserved invalid key `afloat_yolkconformanceinvalid0000` for the auth case. `afloatMcpConformanceLiveSeeds` name a published nine-tool subset of the provider's catalog (`afloatMcpConformanceTools`, in the provider's listing order: two invoice reads (`list-invoices`, `get-invoice`), five download-grant tools, and two receipt-upload tools, with the source's names, titles, schemas, and annotations; the descriptions and server instructions are rewritten generically) and the two tools that write, and no read tool; `afloatMcpConformanceFixtureSeeds` add a synthetic `list-invoices` call and invalid arguments. The eight fixtures (`afloatMcpConformanceFixtures`; every case but `mcp.legacy.session`, which does not apply to a modern server) are derived from the provider's source, not a live recording: the pinned official MCP server SDK run in-process with the provider's handler options over synthetic data, `evidence: 'unverified'`. The shared fixture credential scan and the runner's report sanitizer now also flag Afloat-shaped keys (`afloat_` followed by 16 or more letters and digits), as does the R2 emulator's copied token list. `@yolk-sdk/emulators/mcp` gains a third profile, `afloat`, on `https://useafloat.com/mcp`, answering the Afloat fixtures (copied as data in `mcpEmulatorAfloatFixtures`, with a drift test, including its two derived `tools/call` answers) with every existing guarantee (fail-closed constant refusals, the output guard, canonical recordings, three more unverified read rows); its credential rule recognises a bearer there only as `afloat_<remainder>` whose remainder is a recognisable bearer, and guards the remainder. New exports: `mcpEmulatorAfloatOrigin`, `mcpEmulatorAfloatPath`, `mcpEmulatorAfloatKeyPrefix`, `mcpEmulatorAfloatReservedInvalidCredential`, and `mcpEmulatorAfloatFixtures`. No case is observed live yet.
+- bdb29d0: Connector agent tools return JSON that matches their declared output. `makeConnectorToolRegistration` now Effect-encodes a successful action value with `Schema.toCodecJson(action.outputSchema)` before building the text content and `structuredContent`, so both match `ToolDef.outputSchema`: a `Chunk` becomes an array (instead of `{"_id":"Chunk","values":[...]}`), a `DateTime` an ISO string, and class instances plain objects. Fields not declared in `outputSchema` are not returned (Effect `toCodecJson` encoding drops undeclared keys and requires JSON values for `Schema.Unknown`). A value that does not encode fails the call with an `execution` `ToolError` with a value-free message. Provider failures keep their text, and their `structuredContent` is the JSON-encoded `ProviderFailure`; a non-JSON `underlying` (for example a wrapped error) is dropped. Unknown actions keep returning the value as is.
+
+  `makeConnectorToolModule` passes the connector's `description` as the `ToolModule.description` (shown by code mode under the namespace and indexed for tool search); the new `description` option overrides it.
+
+- b5c2b69: Upgrade the coordinated Effect runtime and platform dependencies to the stable Effect 4.0.0 release. Hosts must use the matching Effect version.
+
+  Effect 4.0.0 removes the `effect/unstable/*` entrypoints: import from `effect/http`, `effect/socket`, `effect/sql`, `effect/process` and the other `effect/<area>` paths, and take `Arbitrary` from `effect`. The former `effect/Encoding` module is split into `effect/encoding/*` (for example `Base64.encode` from `effect/encoding/Base64`).
+
+  Effect 4.0.0 exports `Schema.isPattern` to JSON Schema only when the regex flags are `u` (optionally with `d`, `g` or `y`; not `v`, and not `u` with `i`, `m` or `s`). Yolk's connector, emulator and conformance patterns now use `u`, so connector tool parameters keep their model-visible `pattern` hints with unchanged runtime validation; the Fortnox identifier pattern is advertised as its equivalent BMP-only character class. Add `u` to `Schema.isPattern` regexes in host tool parameter schemas to keep their patterns. String `Schema.isMinLength(n)` and the `Schema.isBetweenLength` minimum (n ≥ 2) are now advertised as `minLength: ceil(n / 2)`. See the migration guide.
+
+- 4f24fe8: Accept tool arguments exactly as advertised: `null` for optional fields is accepted, and unknown keys are rejected. `ToolDef.parameters` describes the schema's canonical JSON codec, which advertises every `Schema.optional(X)` field as `X | null` and every object as closed (`additionalProperties: false`), but `makeTool` decoded calls with the type-side schema: it rejected the advertised `null`, so models (especially strict-mode providers) failed validation on unused optional fields, and it silently stripped unknown keys.
+
+  `makeTool` (`validate` and `execute`, so background calls too), `makeInputTool`/`makeInteractionTool` call parameters, and the loop-owned `question` decode now use `Schema.toCodecJson(parameters)`. `null` on `Schema.optional(X)` decodes as omitted and `Schema.withDecodingDefault` still applies; `Schema.optional(Schema.NullOr(X))` keeps `null`; required non-nullable fields still reject it with a model-visible validation error. Non-finite numbers, which the JSON codec decodes from `"NaN"`/`"Infinity"`/`"-Infinity"`, remain validation errors. `undefined`-valued keys from in-process callers count as absent. Advertised schemas are unchanged.
+
+  Breaking (0.x minor): unknown keys at any depth are now model-visible validation errors (`onExcessProperty: 'error'`) instead of being silently stripped, so a model never believes it set a field (a filter, a start time) that was ignored. This also selects the union member that declares every sent key and keeps closed-input declarations closed through the JSON codec. Callers or fixtures that sent extra keys now get a validation error. Argument errors (the default `makeTool` message, interaction/input/`question` errors, and Yolk's own tool overrides) report every issue at once and name each unknown key with the allowed keys at that path; the new `withToolArgumentsErrorHint` export lets custom `invalidParamsMessage` callbacks do the same.
+
+  `resolveTools` also drops `null` where the advertised schema marks a property optional without admitting `null` (`Schema.optionalKey(X)`, the subagent `model`/`reasoning_effort`, raw MCP schemas) before any registration validates, executes, or forwards the call. The new `omitNullOptionalToolArguments` export on `@yolk-sdk/agent/tools` exposes that step for hosts that dispatch registrations themselves. User-submitted input/interaction responses keep strict decoding.
+
+  Connector agent tools (`makeConnectorToolModule`) follow the same policy: unknown keys are rejected instead of stripped. For example, `outlook.list_messages` rejects the search-only `query`, and Fortnox invoice update tools reject provider-managed fields such as `Booked` or `Sent`. `execute` and `executeTyped` are unchanged.
+
+  The knowledge (`knowledge_lookup`, `knowledge_manage`) and sandbox agent tools follow the same policy: unknown keys are rejected with a hint instead of being stripped.
+
+### Patch Changes
+
+- Updated dependencies [6567cc9]
+- Updated dependencies [b5c2b69]
+- Updated dependencies [4f24fe8]
+  - @yolk-sdk/conformance@0.1.0-canary.97
+  - @yolk-sdk/agent@0.1.0-canary.97
+
 ## 0.1.0-canary.96
 
 ### Patch Changes

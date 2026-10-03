@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/emulators",
-  "version": "0.1.0-canary.96",
+  "version": "0.1.0-canary.97",
   "description": "Experimental emulators for outside services: an Effect HttpClient router, Vercel AI Gateway, OpenAI Chat Completions, Anthropic Messages, OpenAI Responses (Codex, xAI Grok), and OpenCode Go fetch-handler emulators with subscription-usage routes, fixture-driven fake EmailClient and R2 (R2Presigner, R2ObjectClient) backends, stateful Fortnox, Microsoft Graph, Dropbox, Notion, Todoist, Telegram, GitHub, Google (Gmail, Calendar, Drive), LinkedIn search (Exa, Enrich Layer), and synthetic and Afloat MCP emulators, and a loopback Node server.",
   "license": "MIT",
   "type": "module",
