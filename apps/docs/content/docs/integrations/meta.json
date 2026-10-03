@@ -7,6 +7,7 @@
     "connectors",
     "mcp-tools",
     "knowledge-search",
+    "file-extraction",
     "connector-tool",
     "sandbox",
     "code-mode",

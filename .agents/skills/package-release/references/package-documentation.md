@@ -54,6 +54,12 @@ findings only; the parent applies approved fixes and runs validation.
 - Do not promise API stability during canary.
 - Do not list private packages as public npm packages.
 - Do not invent exports; verify every import exists.
+- Text that ships to npm (README, JSDoc that ends up in `dist/*.d.mts`, changesets and the
+  generated `CHANGELOG.md`) must not name private apps (`examples/*`, `cloudflare/*`, `apps/*`) or
+  internal app paths. Describe what the host does, not where a private app does it.
+- A new package's README, JSDoc, and first changeset describe current behavior, not deltas
+  ("now", "no longer", "replaces the per-app copies"); npm users have no previous version.
+  Migration history belongs in owner `AGENTS.md`, ADRs, or the docs-site migration page.
 - Do not duplicate long parent docs in child README files.
 - Keep package roots tiny and explicit; docs should reinforce subpath imports.
 - Do not put dense package-specific rules back into root `packages/AGENTS.md`; move them to package-local AGENTS or package architecture patterns.
