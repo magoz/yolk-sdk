@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.98
+
+### Patch Changes
+
+- def9f9c: Advance unchanged public packages in lockstep with the new `@yolk-sdk/extractors` package. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [def9f9c]
+  - @yolk-sdk/agent@0.1.0-canary.98
+
 ## 0.1.0-canary.97
 
 ### Minor Changes
