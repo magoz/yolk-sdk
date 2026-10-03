@@ -33,7 +33,9 @@ import {
 // Real worker threads running the package's worker entry (from source here; the built
 // `dist` bundle is the default and is covered by `pnpm packages:smoke`) with the real parsers and
 // the installed SheetJS. No wall-clock assertions: the timeout and queue cases only use deadlines
-// nothing can meet, and admission is asserted on the pool's counts.
+// nothing can meet, and admission is asserted on the pool's counts. Each case starts real workers
+// (the heap case runs three back to back), so the suite allows 30 s per test instead of Vitest's
+// 5 s default, which a loaded CI runner can exceed.
 
 const inWorker = (input: FileInput, isolation: WorkerIsolationOptions = {}) =>
   extractWith(input, { isolation: { workerUrl: sourceWorkerUrl, ...isolation } })
@@ -151,7 +153,7 @@ const heapHeavyWorkbook = () => {
   return zipParts(singleSheetParts(worksheet(sheetData.join(''), `A1:J${rows}`)))
 }
 
-describe('isolated extraction in a worker thread', () => {
+describe('isolated extraction in a worker thread', { timeout: 30_000 }, () => {
   for (const input of inputs) {
     it.effect(`extracts ${input.filename} in a worker exactly as in-process`, () =>
       Effect.gen(function* () {
