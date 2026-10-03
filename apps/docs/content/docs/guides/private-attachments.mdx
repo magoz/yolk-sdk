@@ -176,8 +176,9 @@ emitted deltas, and does not retry a second overflow. See [durable compaction](.
 - Assistant media is traversed for protocol reuse, but Claude/Codex assistant text lowering still
   rejects media. Nested provider tool results are preserved by the helper, not newly replayed as
   native vendor tool results by those adapters.
-- Office/text extraction, archive-inflation limits, scanning, private storage, and cleanup stay
-  app-owned. Do not put a whole email materializer or extraction dependency into the agent loop.
+- Office/text extraction and archive-inflation limits (or wiring `@yolk-sdk/extractors`),
+  scanning, private storage, and cleanup stay app-owned. Do not put a whole email materializer or extraction
+  dependency into the agent loop.
 
 ### Bound connector downloads before buffering
 

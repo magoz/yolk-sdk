@@ -37,7 +37,7 @@ export const FileExtractorLimits = Schema.Struct({
 
 export type FileExtractorLimits = typeof FileExtractorLimits.Type
 
-/** Defaults hardened in production by the 10x app. */
+/** Default limits; override any of them through `makeFileExtractorLayer({ limits })`. */
 export const defaultFileExtractorLimits: FileExtractorLimits = {
   maxInputBytes: 50 * 1024 * 1024,
   maxArchiveEntries: 10_000,

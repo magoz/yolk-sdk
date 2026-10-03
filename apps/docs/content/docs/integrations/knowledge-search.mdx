@@ -28,6 +28,8 @@ These are trusted example constants. Decode external/persisted IDs with
 [Knowledge identities](../knowledge#search-documents). Your app still checks permissions.
 
 Your app provides extraction, chunking, embedding, summarization, and store layers.
+For file bytes, `@yolk-sdk/extractors/knowledge` can provide the extraction layer; see
+[Ingestion pipeline](../knowledge/ingestion-pipeline).
 The pipeline updates `SearchIndexStore`, not `KnowledgeStore`, and is not a cross-operation
 transaction; your adapter owns atomic chunk replacement and rollback policy.
 

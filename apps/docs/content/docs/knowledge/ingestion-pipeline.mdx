@@ -23,6 +23,20 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect@4.0.0
 | `KnowledgeEmbedder`   | embedding provider                                                          |
 | `KnowledgeSummarizer` | title/summary provider; use `NoopKnowledgeSummarizerLive` for simple hosts  |
 
+For PDF, DOCX, XLSX, PPTX, and text bytes, `@yolk-sdk/extractors` can provide `KnowledgeExtractor`
+(fragment):
+
+```ts
+import { Layer } from 'effect'
+import { FileKnowledgeExtractorLayer } from '@yolk-sdk/extractors/knowledge'
+import { FileExtractorLayer } from '@yolk-sdk/extractors/node'
+
+const HostExtractorLayer = FileKnowledgeExtractorLayer.pipe(Layer.provide(FileExtractorLayer))
+```
+
+`@yolk-sdk/extractors/node` is server-only, and XLSX needs the optional SheetJS peer; see
+[Installation](../installation).
+
 ## Ingest a document
 
 Fragment; supply the host layers and `loadedSource` below:

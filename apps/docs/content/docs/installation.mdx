@@ -17,7 +17,9 @@ Add sibling packages as needed:
 ```bash
 pnpm add @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary
 pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary workflow@^5.0.0-beta.42
-pnpm add @yolk-sdk/harness@canary @yolk-sdk/codemode@canary
+pnpm add @yolk-sdk/harness@canary @yolk-sdk/codemode@canary @yolk-sdk/extractors@canary
+# Only for XLSX extraction with @yolk-sdk/extractors: SheetJS from its CDN, not the npm `xlsx`.
+pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 ```
 
 For tests, add the experimental conformance and emulator packages as dev dependencies:
@@ -28,7 +30,8 @@ pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
 
 `@yolk-sdk/harness` is available from `0.1.0-canary.77`. `@yolk-sdk/codemode`,
 `@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from `0.1.0-canary.96`; they are
-unavailable in `0.1.0-canary.95` and earlier. `@yolk-sdk/conformance` and `@yolk-sdk/emulators`
+unavailable in `0.1.0-canary.95` and earlier. `@yolk-sdk/extractors` is available from
+`0.1.0-canary.98`. `@yolk-sdk/conformance` and `@yolk-sdk/emulators`
 are experimental and meant for tests only; see [Test with emulators](./guides/testing-with-emulators).
 Keep every package on the same lockstep version as the other public packages.
 
@@ -40,6 +43,7 @@ Keep every package on the same lockstep version as the other public packages.
 | Module format | ESM only                                                                                                                                                    |
 | Effect        | Runtime dependency during canary                                                                                                                            |
 | React         | Optional peer only for `@yolk-sdk/agent/react`                                                                                                              |
+| SheetJS       | Optional peer (`xlsx >=0.20.3`) only for XLSX extraction in `@yolk-sdk/extractors/node`; install the tarball from `cdn.sheetjs.com`                         |
 | Workflow      | Required only by `@yolk-sdk/vercel-workflows` hosts; `workflow@^5.0.0-beta.42` (5.x region-pins runs — 4.x streams were `iad1`-only and burst cross-region) |
 
 ## Canary policy
