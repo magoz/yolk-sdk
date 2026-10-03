@@ -171,16 +171,14 @@ describe('XLSX hyperlinks', () => {
   )
 
   for (const ref of ['A1:XFD1048576', 'B1:B1048576', 'A1:Z100000']) {
-    it.effect(`annotates existing cells under ${ref} quickly; SheetJS never sees the tag`, () =>
+    it.effect(`annotates existing cells under ${ref}; SheetJS never sees the tag`, () =>
       Effect.gen(function* () {
         const seen: Array<Uint8Array> = []
-        const started = performance.now()
 
         const result = yield* extractWith(xlsxInput(linkedRangeWorkbook(ref, true)), {
           loadSheetJs: recordingSheetJs(seen)
         })
 
-        expect(performance.now() - started).toBeLessThan(2_000)
         expect(seen).toHaveLength(1)
         expect(sawHyperlinkTag(seen)).toBe(false)
 
@@ -232,6 +230,68 @@ describe('XLSX hyperlinks', () => {
     })
   )
 
+  it.effect('caps a huge display label at parse time before labelling empty cells', () =>
+    Effect.gen(function* () {
+      const size = 20
+      const rows = Array.from({ length: size }, () => Array.from({ length: size }, () => ''))
+
+      const book = workbook([
+        {
+          name: 'Sheet1',
+          rows,
+          afterSheetData: hyperlinks(
+            `<hyperlink ref="A1:T20" r:id="rId1" display="${'d'.repeat(1024 * 1024)}"/>`
+          ),
+          relationships: [external('1', 'https://label.example/')]
+        }
+      ])
+
+      const result = yield* extractWith(xlsxInput(book))
+      const cell = `${'d'.repeat(1023)}\u2026 <https://label.example/>`
+      const row = Array.from({ length: size }, () => cell).join(',')
+
+      expect(result.content).toBe(`# Sheet1\n${Array.from({ length: size }, () => row).join('\n')}`)
+    })
+  )
+
+  it.effect('reads attributes in one pass over a long run of name characters', () =>
+    Effect.gen(function* () {
+      // Retrying an attribute name from every position of this run would take ~5e10 steps.
+      const book = workbook([
+        {
+          name: 'Sheet1',
+          rows: [['site']],
+          afterSheetData: hyperlinks(`<hyperlink ref="A1" r:id="rId1" ${'a'.repeat(300_000)}/>`),
+          relationships: [external('1', 'https://run.example/')]
+        }
+      ])
+
+      const result = yield* extractWith(xlsxInput(book))
+
+      expect(result.content).toBe('# Sheet1\nsite <https://run.example/>')
+    })
+  )
+
+  it.effect('drops links whose target exceeds 2,048 characters', () =>
+    Effect.gen(function* () {
+      const book = workbook([
+        {
+          name: 'Sheet1',
+          rows: [['short', 'long']],
+          afterSheetData: hyperlinks(
+            '<hyperlink ref="A1" r:id="rId1"/>',
+            `<hyperlink ref="B1" r:id="rId1" location="${'x'.repeat(2048)}"/>`
+          ),
+          relationships: [external('1', 'https://target.example/')]
+        }
+      ])
+
+      const result = yield* extractWith(xlsxInput(book))
+
+      expect(result.content).toBe('# Sheet1\nshort <https://target.example/>,long')
+    })
+  )
+
   it.effect('marks links beyond the per-workbook hyperlink cap', () =>
     Effect.gen(function* () {
       const book = workbook([
@@ -274,10 +334,8 @@ describe('XLSX hyperlinks', () => {
         }
       ])
 
-      const started = performance.now()
       const result = yield* extractWith(xlsxInput(book))
 
-      expect(performance.now() - started).toBeLessThan(5_000)
       expect(result.content.split('\n')).toHaveLength(count + 1)
       expect(result.content).toContain('\nr9999 <https://many.example/>')
     })

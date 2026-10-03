@@ -10,7 +10,7 @@ import { KnowledgeExtractor } from '@yolk-sdk/knowledge/extraction'
 import type { LoadedKnowledgeSource } from '@yolk-sdk/knowledge/extraction'
 import { FileExtractionError, FileExtractor } from '../src/index.ts'
 import type { FileInput } from '../src/index.ts'
-import { FileKnowledgeExtractorLayer } from '../src/knowledge.ts'
+import { FileKnowledgeExtractorLayer, makeFileKnowledgeExtractor } from '../src/knowledge.ts'
 import { FileExtractorLayer } from '../src/node/index.ts'
 import { encode, workbook, xlsxMediaType } from './fixtures.ts'
 
@@ -122,6 +122,32 @@ describe('FileKnowledgeExtractorLayer', () => {
         { filename: 'My Report.docx', mediaType: 'application/octet-stream' },
         { filename: 'text', mediaType: 'text/plain' }
       ])
+    })
+  )
+
+  it.effect('keeps malformed percent-escapes in URL filenames instead of throwing', () =>
+    Effect.gen(function* () {
+      const inputs: Array<FileInput> = []
+
+      const extractor = makeFileKnowledgeExtractor({
+        extract: input =>
+          Effect.sync(() => {
+            inputs.push(input)
+
+            return { content: 'text', metadata: { format: 'text' } }
+          })
+      })
+
+      const urls = ['https://example.test/%FF.txt', 'https://example.test/a%zz.pdf']
+
+      // Building the Effect must not throw synchronously (decodeURIComponent raises URIError).
+      const effects = urls.map(url =>
+        extractor.extract({ source: KnowledgeUrlSource.make({ url }), content: encode('hello') })
+      )
+
+      for (const effect of effects) yield* effect
+
+      expect(inputs.map(input => input.filename)).toEqual(['%FF.txt', 'a%zz.pdf'])
     })
   )
 

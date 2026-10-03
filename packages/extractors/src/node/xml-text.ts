@@ -40,7 +40,9 @@ const decodeXmlEntity = (raw: string, entity: string) => {
 export const decodeXmlEntities = (text: string) =>
   text.replace(xmlEntity, (raw, entity: string) => decodeXmlEntity(raw, entity))
 
-const attributePattern = /([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
+// A name may only start after a non-name character, so a long run of name characters is scanned
+// once rather than once per starting position.
+const attributePattern = /(?<![\w.:-])([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
 
 /** Attributes of one start tag, entity-decoded, keyed by their qualified name. */
 export const xmlAttributes = (tag: string): ReadonlyMap<string, string> => {

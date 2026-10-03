@@ -16,19 +16,55 @@ const xmlName = '[A-Za-z_][\\w.-]*'
 
 const optionalXmlPrefix = `(?:${xmlName}:)?`
 
-const paragraphXml = new RegExp(
-  `<${optionalXmlPrefix}p\\b[^>]*>[\\s\\S]*?</${optionalXmlPrefix}p>`,
-  'g'
-)
+// Every pattern stops at the next `<` (`[^<>]`), and elements are paired in one forward pass, so
+// extraction stays linear in the part size even for unterminated or unbalanced markup.
+type XmlElement = { readonly start: RegExp; readonly end: RegExp }
 
-const textXml = new RegExp(
-  `<${optionalXmlPrefix}t\\b[^>]*>([\\s\\S]*?)</${optionalXmlPrefix}t>`,
-  'g'
-)
+const xmlElement = (localName: string): XmlElement => ({
+  start: new RegExp(`<${optionalXmlPrefix}${localName}\\b[^<>]*>`, 'g'),
+  end: new RegExp(`</${optionalXmlPrefix}${localName}>`, 'g')
+})
 
-const lineBreakXml = new RegExp(`<${optionalXmlPrefix}br\\b[^>]*/>`, 'g')
+const paragraphXml = xmlElement('p')
 
-const tabXml = new RegExp(`<${optionalXmlPrefix}tab\\b[^>]*/>`, 'g')
+const textXml = xmlElement('t')
+
+const lineBreakXml = new RegExp(`<${optionalXmlPrefix}br\\b[^<>]*/>`, 'g')
+
+const tabXml = new RegExp(`<${optionalXmlPrefix}tab\\b[^<>]*/>`, 'g')
+
+type ElementMatch = {
+  /** Start tag through end tag. */
+  readonly outer: string
+  /** Text between the start and end tags. */
+  readonly inner: string
+}
+
+/** Each start tag paired with the next end tag after it (the old lazy `[\s\S]*?` match). */
+const elementMatches = (xml: string, element: XmlElement): ReadonlyArray<ElementMatch> => {
+  const matches: Array<ElementMatch> = []
+  let position = 0
+
+  for (;;) {
+    element.start.lastIndex = position
+    const start = element.start.exec(xml)
+
+    if (start === null) return matches
+
+    const contentStart = start.index + start[0].length
+    element.end.lastIndex = contentStart
+    const end = element.end.exec(xml)
+
+    // No end tag after this start means none after any later start either.
+    if (end === null) return matches
+
+    position = end.index + end[0].length
+    matches.push({
+      outer: xml.slice(start.index, position),
+      inner: xml.slice(contentStart, end.index)
+    })
+  }
+}
 
 const indexedXmlFile = (
   fileName: string,
@@ -56,30 +92,17 @@ const comparePptxXmlFiles = (left: PptxXmlFile, right: PptxXmlFile) =>
   left.index - right.index ||
   left.fileName.localeCompare(right.fileName)
 
-const extractMatches = (
-  text: string,
-  pattern: RegExp,
-  groupIndex: number
-): ReadonlyArray<string> => {
-  const matches: Array<string> = []
-
-  for (const match of text.matchAll(pattern)) {
-    const value = match[groupIndex]
-
-    if (value !== undefined) matches.push(value)
-  }
-
-  return matches
-}
-
 const extractParagraphText = (paragraph: string) => {
   const xml = paragraph.replace(lineBreakXml, '<a:t>\n</a:t>').replace(tabXml, '<a:t>\t</a:t>')
 
-  return extractMatches(xml, textXml, 1).map(decodeXmlEntities).join('').trim()
+  return elementMatches(xml, textXml)
+    .map(match => decodeXmlEntities(match.inner))
+    .join('')
+    .trim()
 }
 
 const extractXmlText = (xml: string) => {
-  const paragraphs = extractMatches(xml, paragraphXml, 0)
+  const paragraphs = elementMatches(xml, paragraphXml).map(match => match.outer)
   const textSources = paragraphs.length > 0 ? paragraphs : [xml]
 
   return textSources

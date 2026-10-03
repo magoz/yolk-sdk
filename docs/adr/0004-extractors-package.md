@@ -17,6 +17,7 @@ into a public package, `@yolk-sdk/extractors`, that the apps consume.
 | Subpaths   | Root: portable contract and service tag. `./node`: the implementation. `./knowledge`: `KnowledgeExtractor` adapter.           |
 | SheetJS    | Optional peer `xlsx >=0.20.3`, lazily imported, version-checked at runtime. Hosts install the SheetJS CDN tarball.            |
 | Archives   | Every DOCX, XLSX, and PPTX goes through bounded ZIP validation and is rebuilt as a stored archive before any parser reads it. |
+| Routing    | XLSX input SheetJS would parse as XLSB, ODS, or Numbers is rejected; SheetJS never receives `.bin` parts.                     |
 | Hyperlinks | Read and removed before SheetJS parses; external targets shown as `text <url>` through an indexed lookup.                     |
 | UTF-16     | XLSX parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag are rejected.                                |
 | Limits     | The 10x defaults, configurable per layer.                                                                                     |
@@ -64,7 +65,8 @@ published package must not depend on a URL, so `xlsx` is an optional peer (`>=0.
 
 `./node` loads SheetJS only when an XLSX file arrives, through an injectable loader (default
 `() => import('xlsx')`). It then checks the module: `read` must be a function and `version` must
-be at least 0.20.3. A missing, foreign, or outdated module fails with `SheetJsUnavailableError`
+be strict SemVer and at least 0.20.3 by SemVer precedence (a 0.20.3 prerelease is below it;
+anything that is not strict SemVer is `invalid`). A missing, foreign, or outdated module fails with `SheetJsUnavailableError`
 (`missing | invalid | outdated`), whose message carries the install command. A host that ignores
 peer warnings therefore cannot silently run 0.18.5. Tests swap SheetJS through the loader instead
 of mocking modules.
@@ -93,6 +95,27 @@ mammoth (JSZip) and the PPTX reader (fflate) are exposed to the same zip bombs. 
 tightening, OOXML input missing `[Content_Types].xml` or its main part (`word/document.xml`,
 `xl/workbook.xml`, `ppt/presentation.xml`) now fails with `FileExtractionError`.
 
+### SheetJS parser routing
+
+SheetJS chooses its parser from the archive contents. `parse_zip` checks `META-INF/manifest.xml`,
+`objectdata.xml` (ODS/UOC) and `Index/Document.iwa` (Numbers) case-insensitively before it reads
+content types, and falls back to any `Index.zip` (matched by base name). Every part whose path
+ends in `.bin` goes to a binary (XLSB) parser: the workbook named by a `[Content_Types].xml`
+workbook override, shared strings, styles, external links, and metadata named by overrides, sheets
+named by workbook relationships, and comments named by worksheet relationships. `parse_ws_bin`
+expands each `BrtHLink` range into per-cell objects and `parse_ods` expands repeated rows and
+columns, and none of those parts pass through the XML hyperlink strip. So XLSX input is rejected
+before SheetJS loads when it contains an ODS or Numbers marker entry, a `Root Entry/` name (the
+SheetJS container strips that prefix), an `<Override>` with an XLSB content type, a workbook part
+other than `/xl/workbook.xml`, or a `.bin` part outside an allowlist of content types SheetJS never
+parses, or a `.bin` relationship target outside an allowlist of relationship types SheetJS never
+follows into a parser (printer settings, OLE objects, ActiveX binaries, custom properties, toolbars,
+images, hyperlinks). Targets are compared raw and after SheetJS's unescaping (entities, `_xHHHH_`,
+CDATA), across UTF-16 views. `<Default>` entries are ignored: SheetJS does not route by them, and
+its own XLSX writer declares `bin` as the XLSB workbook type. As an allowlist backstop, the archive
+handed to SheetJS omits every `.bin` part, so the binary parsers cannot receive data even if a
+check misses a path; `normalizeOfficeArchive` keeps those parts so stored files still open.
+
 ## Hyperlinks
 
 SheetJS 0.18.5 and 0.20.3 (`parse_ws_xml_hlinks`) expand every `<hyperlink ref>` range into
@@ -100,8 +123,10 @@ per-cell objects before any caller budget runs. A 6 KB workbook with `ref="A1:XF
 a 1 GB Node heap. LMK's fix stripped hyperlinks, which drops the links. The package keeps them
 without the blow-up:
 
-1. While validating the archive, every `<hyperlink>` tag in every part is removed with LMK's regex
-   (`/<\/?(?:[\w.-]+:)?hyperlink\b[^>]*>/gi`) on a Latin-1 view, so other bytes are unchanged.
+1. While validating the archive, every `<hyperlink>` tag in every part is removed with
+   `/<\/?(?:[\w.-]+:)?hyperlink\b[^<>]*>/gi` on a Latin-1 view, so other bytes are unchanged. It
+   matches everything SheetJS's `hlinkregex` (`/<(?:\w+:)?hyperlink [^<>]*>/`) matches. LMK's
+   original `[^>]*` let each unterminated start scan to the end of the part, which is quadratic.
    Relationship targets need not end in `.xml`. Each tag becomes a space so fragments cannot join
    into a new tag (`<hyper<hyperlink …/>link …/>`). Start tags are captured as they are removed,
    at most `maxXlsxHyperlinks` (10,000) per workbook.
@@ -109,7 +134,8 @@ without the blow-up:
    workbook relationships, and the worksheet relationships (`r:id` → `Target`,
    `TargetMode="External"`). `location` is appended as a fragment, as SheetJS does. `display`
    labels existing cells that have no text.
-3. Only normalized `http:`, `https:`, and `mailto:` URLs (at most 2,048 characters) are shown.
+3. Only normalized `http:`, `https:`, and `mailto:` URLs (at most 2,048 characters; longer links
+   are dropped) are shown. `display` labels are cut to 1,024 characters ending in `…`.
    Internal `#Sheet!A1` locations and other schemes (`javascript:`, `file:`) are omitted, because
    they carry little meaning for a model and cost budget.
 4. In the bounded text, each existing cell of the visited range that falls inside a link is
@@ -122,7 +148,9 @@ without the blow-up:
    then spend only the leftover budget, in document order. When one does not fit, or links exceed
    the cap, the cell stays plain and the output ends with one
    `[Some hyperlinks omitted: output limit]` (or `hyperlink limit`) marker. Its space is reserved
-   whenever links exist, so the output never exceeds the limit.
+   whenever links exist, so the output never exceeds the limit, and `maxXlsxTextCharacters` must
+   exceed it (at least 62). An annotation's length is checked against the leftover budget before
+   it is built or CSV-scanned, so a long label over many empty cells costs constant time per cell.
 
 Measured with `node --max-old-space-size=1024` on the research files (`/tmp/xlsx-research`). Times
 are for `extract` only. RSS includes about 220 MB of tsx and module loading, measured before the

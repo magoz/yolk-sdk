@@ -179,3 +179,47 @@ export const unzipText = (archive: Uint8Array) =>
       Buffer.from(bytes).toString('latin1')
     ])
   )
+
+const littleEndian32 = (value: number) => {
+  const bytes = Buffer.alloc(4)
+  bytes.writeUInt32LE(value)
+
+  return bytes
+}
+
+const xlsbWideString = (text: string) =>
+  Buffer.concat([littleEndian32(text.length), Buffer.from(text, 'utf16le')])
+
+/** One BIFF12 record: variable-length type and size, then the payload. */
+const xlsbRecord = (type: number, payload: Uint8Array = new Uint8Array()) =>
+  Buffer.concat([
+    Buffer.from(type < 0x80 ? [type] : [(type & 0x7f) | 0x80, type >> 7]),
+    Buffer.from([payload.length]),
+    payload
+  ])
+
+/**
+ * A binary (XLSB) worksheet stream whose single `BrtHLink` record (0x01EE) covers rows and
+ * columns `0..last`. SheetJS's `parse_ws_bin` creates one cell object per covered cell, so tests
+ * keep `last` small: a regression then fails instead of exhausting the runner.
+ */
+export const xlsbHyperlinkSheet = (last: number) =>
+  Buffer.concat([
+    xlsbRecord(0x81),
+    xlsbRecord(0x91),
+    xlsbRecord(0x92),
+    xlsbRecord(
+      0x1ee,
+      Buffer.concat([
+        littleEndian32(0),
+        littleEndian32(last),
+        littleEndian32(0),
+        littleEndian32(last),
+        xlsbWideString('rId1'),
+        xlsbWideString(''),
+        xlsbWideString(''),
+        xlsbWideString('')
+      ])
+    ),
+    xlsbRecord(0x82)
+  ])

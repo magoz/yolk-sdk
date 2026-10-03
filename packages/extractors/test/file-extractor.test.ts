@@ -9,7 +9,9 @@ import {
   SheetJsUnavailableError,
   UnsupportedFileFormatError
 } from '../src/index.ts'
+import { minimumXlsxTextCharacters } from '../src/limits.ts'
 import { withAcquiredPdfDocument } from '../src/node/live-layer.ts'
+import { omittedHyperlinksMarkerReserve } from '../src/node/xlsx-text.ts'
 import { encode, extractWith, workbookParts, xlsxInput, zipParts } from './fixtures.ts'
 
 const zipText = (text: string) => Uint8Array.from(strToU8(text))
@@ -158,6 +160,29 @@ describe('FileExtractor', () => {
     })
   )
 
+  it.effect('reads PPTX text in one pass over unterminated tags', () =>
+    Effect.gen(function* () {
+      // 100k unterminated starts per element: a pattern scanning past the next `<`, or a lazy
+      // match retried from every start, would do ~1e10 steps here.
+      const runs = ['<a:p ', '<a:t ', '<a:br ', '<a:p>', '<a:t>'].map(tag => tag.repeat(100_000))
+
+      const deck = zipSync({
+        '[Content_Types].xml': zipText('<Types/>'),
+        'ppt/presentation.xml': zipText('<p:presentation/>'),
+        'ppt/slides/slide1.xml': zipText(runs.join('')),
+        'ppt/slides/slide2.xml': zipText('<a:p><a:r><a:t>Second</a:t></a:r></a:p>')
+      })
+
+      const extracted = yield* extractWith({
+        filename: 'deck.pptx',
+        mediaType: pptxMediaType,
+        bytes: deck
+      })
+
+      expect(extracted.content).toBe('Second')
+    })
+  )
+
   it.effect('rejects OOXML archives missing the content types or main part', () =>
     Effect.gen(function* () {
       const error = yield* extractWith({
@@ -246,6 +271,24 @@ describe('FileExtractor', () => {
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
     })
   )
+  it.effect('treats an XLSX text limit too small for the omitted-links marker as a defect', () =>
+    Effect.gen(function* () {
+      const input = { filename: 'a.txt', mediaType: 'text/plain', bytes: encode('a') }
+
+      const tooSmall = yield* extractWith(input, {
+        limits: { maxXlsxTextCharacters: omittedHyperlinksMarkerReserve }
+      }).pipe(Effect.exit)
+
+      expect(Exit.isFailure(tooSmall) && Cause.hasDies(tooSmall.cause)).toBe(true)
+
+      const smallest = yield* extractWith(input, {
+        limits: { maxXlsxTextCharacters: omittedHyperlinksMarkerReserve + 1 }
+      })
+
+      expect(smallest.content).toBe('a')
+      expect(minimumXlsxTextCharacters).toBe(omittedHyperlinksMarkerReserve + 1)
+    })
+  )
 })
 
 describe('SheetJS loading', () => {
@@ -274,6 +317,45 @@ describe('SheetJS loading', () => {
         }).pipe(Effect.flip)
 
         expect(error.message).toContain(`SheetJS ${version} is older than 0.20.3`)
+      }
+    })
+  )
+
+  it.effect('refuses prereleases of 0.20.3 and fails closed on malformed versions', () =>
+    Effect.gen(function* () {
+      const refused = [
+        ['0.20.3-rc.0', 'outdated'],
+        ['0.20.3-0', 'outdated'],
+        ['0.20.3junk', 'invalid'],
+        ['0.20.3.1', 'invalid'],
+        ['v0.20.3', 'invalid'],
+        ['00.20.3', 'invalid'],
+        ['0.20.3-', 'invalid'],
+        ['1.0', 'invalid'],
+        ['', 'invalid']
+      ] as const
+
+      for (const [version, reason] of refused) {
+        const error = yield* extractWith(xlsxInput(sheetJsBytes()), {
+          loadSheetJs: async () => ({ version, read: XLSX.read })
+        }).pipe(Effect.flip)
+
+        expect([version, error instanceof SheetJsUnavailableError && error.reason]).toEqual([
+          version,
+          reason
+        ])
+      }
+    })
+  )
+
+  it.effect('accepts 0.20.3 and later releases, build metadata, and later prereleases', () =>
+    Effect.gen(function* () {
+      for (const version of ['0.20.3', '0.20.3+build.7', '0.20.4', '0.21.0-rc.1', '1.0.0']) {
+        const result = yield* extractWith(xlsxInput(sheetJsBytes()), {
+          loadSheetJs: async () => ({ version, read: XLSX.read })
+        })
+
+        expect(result.content).toContain('Alpha,2')
       }
     })
   )

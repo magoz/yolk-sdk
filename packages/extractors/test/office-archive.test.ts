@@ -1,4 +1,6 @@
 import { Buffer } from 'node:buffer'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Result } from 'effect'
 import { strToU8, unzipSync, zipSync } from 'fflate'
@@ -267,11 +269,82 @@ describe('XLSX hyperlink stripping', () => {
         zipSync(entries),
         'xlsx',
         defaultFileExtractorLimits,
-        3
+        { maxHyperlinkTags: 3 }
       )
 
       expect(normalized.hyperlinkTags.get('xl/worksheets/sheet1.xml')).toEqual(links.slice(0, 3))
       expect(decode(normalized.parts['xl/worksheets/sheet1.xml'])).not.toMatch(/hyperlink\b/)
+    })
+  )
+})
+
+/** SheetJS's own `hlinkregex`, read from the installed build so the parity test cannot drift. */
+const sheetJsHyperlinkPattern = () => {
+  const source = readFileSync(createRequire(import.meta.url).resolve('xlsx'), 'utf8')
+  const literal = /var hlinkregex = \/(.+)\/(\w*);/.exec(source)
+
+  if (literal?.[1] === undefined) throw new Error('SheetJS hlinkregex not found')
+
+  return new RegExp(literal[1], literal[2])
+}
+
+describe('XLSX hyperlink strip pattern', () => {
+  const normalizedSheet = (afterSheetData: string) =>
+    Effect.gen(function* () {
+      const entries = sheetJsWorkbook('cell')
+      const sheet = entries['xl/worksheets/sheet1.xml']
+
+      if (sheet === undefined) throw new Error('Missing fixture worksheet')
+
+      entries['xl/worksheets/sheet1.xml'] = strToU8(
+        decode(sheet).replace('</worksheet>', `${afterSheetData}</worksheet>`)
+      )
+
+      const normalized = yield* normalizeOfficeArchive(zipSync(entries), 'xlsx')
+      const part = unzipSync(normalized)['xl/worksheets/sheet1.xml']
+
+      return Buffer.from(part ?? new Uint8Array()).toString('latin1')
+    })
+
+  it.effect('removes everything SheetJS hlinkregex matches', () =>
+    Effect.gen(function* () {
+      const pattern = sheetJsHyperlinkPattern()
+
+      const cases = [
+        '<hyperlink ref="A1:B2" location="A1"/>',
+        '<x:hyperlink ref="A1:B2" r:id="rId1"></x:hyperlink>',
+        '<ns_1:hyperlink ref="A1" display="a>b"/>',
+        '<hyper<hyperlink ref="A1"/>link ref="A1:B2"/>',
+        '<hyp<x:hyperlink ref="A1"/>erlink ref="A1:B2" location="A1"/>',
+        '<hyperlink\tref="A1"/><hyperlink ref="C3" location="A1" >',
+        '<HYPERLINK ref="A1"/><hyperlinks><hyperlink ref="Z9"/></hyperlinks>'
+      ]
+
+      for (const tags of cases) {
+        // Control: SheetJS would expand a range from this markup.
+        expect(tags).toMatch(pattern)
+
+        const stripped = yield* normalizedSheet(tags)
+
+        expect(stripped.match(pattern)).toBeNull()
+      }
+    })
+  )
+
+  it.effect('never lets a tag candidate span a `<`, so the strip stays linear', () =>
+    Effect.gen(function* () {
+      // An unterminated start before another tag: SheetJS's `[^<>]*>` cannot match it either.
+      const unterminated = '<hyperlink ref="A1:B2" <b>kept</b>'
+      const stripped = yield* normalizedSheet(unterminated)
+
+      expect(stripped).toContain(unterminated)
+      expect(stripped.match(sheetJsHyperlinkPattern())).toBeNull()
+
+      // 200k starts without `>`: a pattern that scans past the next `<` does ~2e11 steps here.
+      const run = '<hyperlink '.repeat(200_000)
+      const scanned = yield* normalizedSheet(run)
+
+      expect(scanned).toContain(run)
     })
   )
 })

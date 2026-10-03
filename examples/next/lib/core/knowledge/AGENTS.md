@@ -11,7 +11,7 @@ App-owned knowledge use-cases and agent context helpers.
 ## Current scope
 
 - Manual text and file knowledge creation; file text extraction reuses `FileExtractor` from `@yolk-sdk/extractors`.
-- File upload is presigned R2 PUT + finalize action; finalize clones downloaded bytes before extraction because PDF parsing may detach ArrayBuffers.
+- File upload is presigned R2 PUT + finalize action; finalize clones downloaded bytes before extraction as defence in depth (`@yolk-sdk/extractors` already copies PDF input, so the caller buffer is never detached).
 - `listUserKnowledgeDocuments` returns document summaries for agent discovery before search/traversal.
 - Search ingestion uses `KnowledgeChunker` + `KnowledgeEmbedder` and writes chunk rows.
 - Core create/index writers encode jsonb metadata with `encodePersistedMetadata` before insert. Invalid metadata fails `PersistenceError` for the owning table entity.

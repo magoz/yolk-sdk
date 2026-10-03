@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultFileExtractorLimits } from '../src/limits.ts'
 import { extractBoundedXlsxText } from '../src/node/xlsx-text.ts'
 import type { XlsxWorkbook } from '../src/node/xlsx-text.ts'
+import { encodeCellAddress } from '../src/node/xlsx-range.ts'
 
 const limits = defaultFileExtractorLimits
 
@@ -146,5 +147,37 @@ describe('bounded XLSX extraction', () => {
     expect(() => extract(workbook(sheet))).toThrow('text exceeds the output limit')
     expect(visited).toBeGreaterThan(0)
     expect(visited).toBeLessThan(300)
+  })
+
+  it('rejects an oversized link label in constant time over many existing empty cells', () => {
+    // 10,000 existing empty cells under one link whose label (4 MiB) can never fit. Building and
+    // CSV-scanning the annotation per cell would touch ~40 GiB of characters.
+    const cells = Array.from({ length: 100 * 100 }, (_, index) => [
+      encodeCellAddress({ r: Math.floor(index / 100), c: index % 100 }),
+      { t: 's', v: '' }
+    ])
+
+    const sheet = { '!ref': 'A1:CV100', ...Object.fromEntries(cells) }
+
+    const label = 'L'.repeat(4 * 1024 * 1024)
+
+    const output = extractBoundedXlsxText(workbook(sheet), limits, {
+      hyperlinks: new Map([
+        [
+          'Sheet1',
+          [
+            {
+              range: { start: { r: 0, c: 0 }, end: { r: 99, c: 99 } },
+              target: 'https://label.example/',
+              display: label
+            }
+          ]
+        ]
+      ])
+    })
+
+    const plain = `# Sheet1\n${Array.from({ length: 100 }, () => ','.repeat(99)).join('\n')}`
+
+    expect(output).toBe(`${plain}\n\n[Some hyperlinks omitted: output limit]`)
   })
 })

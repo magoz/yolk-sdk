@@ -6,20 +6,38 @@ import { prefixedAttribute, xmlAttributes } from './xml-text.ts'
 
 export type XlsxHyperlink = {
   readonly range: CellRange
-  /** Normalized `http:`, `https:`, or `mailto:` URL. */
+  /** Normalized `http:`, `https:`, or `mailto:` URL, at most 2,048 characters. */
   readonly target: string
+  /** Label for cells without text, at most 1,024 characters (longer labels end in `…`). */
   readonly display?: string
 }
 
 /** Hyperlinks per worksheet name, in document order (a later link wins on overlap). */
 export type XlsxHyperlinks = ReadonlyMap<string, ReadonlyArray<XlsxHyperlink>>
 
-const maxTargetCharacters = 2048
+/** Longer targets are dropped: a truncated URL would point somewhere else. */
+const maxHyperlinkTargetCharacters = 2048
+
+/** Longer display labels are cut to this many characters, ending with an ellipsis. */
+const maxHyperlinkDisplayCharacters = 1024
+
+const capDisplay = (display: string) => {
+  if (display.length <= maxHyperlinkDisplayCharacters) return display
+
+  let kept = display.slice(0, maxHyperlinkDisplayCharacters - 1)
+  const last = kept.charCodeAt(kept.length - 1)
+
+  // Never leave half of a surrogate pair before the ellipsis.
+  if (last >= 0xd800 && last <= 0xdbff) kept = kept.slice(0, -1)
+
+  return `${kept}\u2026`
+}
 
 const shownProtocols = new Set(['http:', 'https:', 'mailto:'])
 
+// `[^<>]` keeps each candidate inside one tag, so scans stay linear in the part size.
 const startTagPattern = (localName: string) =>
-  new RegExp(`<(?:[\\w.-]+:)?${localName}\\b[^>]*>`, 'g')
+  new RegExp(`<(?:[\\w.-]+:)?${localName}\\b[^<>]*>`, 'g')
 
 const sheetTag = startTagPattern('sheet')
 
@@ -66,11 +84,12 @@ const relationships = (xml: string): ReadonlyMap<string, Relationship> => {
 }
 
 const shownTarget = (target: string) => {
-  if (target.length > maxTargetCharacters || !URL.canParse(target)) return undefined
+  if (target.length > maxHyperlinkTargetCharacters || !URL.canParse(target)) return undefined
 
   const url = new URL(target)
 
-  if (!shownProtocols.has(url.protocol) || url.href.length > maxTargetCharacters) return undefined
+  if (!shownProtocols.has(url.protocol) || url.href.length > maxHyperlinkTargetCharacters)
+    return undefined
 
   return url.href
 }
@@ -104,7 +123,7 @@ const hyperlinkFrom = (
 
   return display === undefined || display.length === 0
     ? { range, target }
-    : { range, target, display }
+    : { range, target, display: capDisplay(display) }
 }
 
 /**

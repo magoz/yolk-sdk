@@ -32,9 +32,9 @@ publish times, and a URL tarball has none. Because the peer is optional, SheetJS
 transitively: each host adds it directly.
 
 If SheetJS is missing, is not a SheetJS build, or is older than 0.20.3 (for example a leftover npm
-`xlsx@0.18.5`), XLSX extraction fails with `SheetJsUnavailableError` (`reason: 'missing' |
-'invalid' | 'outdated'`). Its message includes the install command. Other formats never load
-SheetJS.
+`xlsx@0.18.5`, or a 0.20.3 prerelease), XLSX extraction fails with `SheetJsUnavailableError`
+(`reason: 'missing' | 'invalid' | 'outdated'`). A `version` that is not strict SemVer counts as
+`invalid`. Its message includes the install command. Other formats never load SheetJS.
 
 ## Subpaths
 
@@ -107,7 +107,7 @@ through `makeFileExtractorLayer({ limits })`. Invalid values are a defect when t
 | `maxExpandedBytes`      | 50 MiB  | Inflated bytes of an Office archive, counted while inflating              |
 | `maxXlsxSheets`         | 100     | Worksheets                                                                |
 | `maxXlsxCellVisits`     | 100,000 | Cells inside every sheet's declared range, absent cells included          |
-| `maxXlsxTextCharacters` | 512 Ki  | XLSX text, hyperlink annotations and the omission marker included         |
+| `maxXlsxTextCharacters` | 512 Ki  | XLSX text, annotations and the omission marker included; at least 62      |
 | `maxXlsxHyperlinks`     | 10,000  | Hyperlinks read per workbook. Extra links are dropped but still stripped. |
 
 Exceeding a limit fails the extraction with `FileExtractionError`. The exceptions are hyperlink
@@ -123,6 +123,15 @@ annotations and links beyond the cap, described below.
   Parsers then get a fresh stored-entry archive built from the validated bytes. This is a
   deliberate tightening: OOXML input missing `[Content_Types].xml` or its main part
   (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) now fails.
+- **XLSX parser routing.** SheetJS picks its parser from the archive, not the file name. XLSX
+  input it would send to its binary (XLSB), ODS, or Numbers parsers is rejected before SheetJS
+  loads, because those parsers expand ranges per cell and none of their parts pass through the
+  hyperlink strip. That covers ODS and Numbers marker entries (`META-INF/manifest.xml`,
+  `objectdata.xml`, `Index/Document.iwa`, `Index.zip`, any case), XLSB content types and
+  workbook parts other than `/xl/workbook.xml` in `[Content_Types].xml`, and `.bin` part names or
+  relationship targets except for types SheetJS never parses (printer settings, OLE and ActiveX
+  binaries, custom properties). As a backstop, the archive handed to SheetJS leaves out every
+  `.bin` part; `normalizeOfficeArchive` keeps them.
 - **XLSX hyperlinks.** Before parsing, SheetJS (0.18.5 and 0.20.3) expands every
   `<hyperlink ref>` range into per-cell objects. A 6 KB file with `ref="A1:XFD1048576"`
   exhausts a 1 GB heap. So the extractor reads each `<hyperlink>` itself (`ref`, `r:id` to the
@@ -131,18 +140,21 @@ annotations and links beyond the cap, described below.
   cannot join into a new tag. SheetJS never sees one. In the text, every existing cell of the
   visited range that falls inside a link is written as `text <url>`. An indexed lookup over the
   visited range keeps this at O((links + cells) · log) instead of a scan of every link per cell.
-  Only `http:`, `https:`, and `mailto:` targets are shown (normalized, at most 2,048 characters).
-  Internal `#Sheet!A1` locations and other schemes are omitted. Plain text is rendered first and
-  links use only the budget left over. When an annotation does not fit, or links exceed the cap,
-  the cell is written plain and the output ends with one
+  Only `http:`, `https:`, and `mailto:` targets are shown (normalized; links whose target is
+  longer than 2,048 characters are dropped). `display` labels are cut to 1,024 characters ending
+  in `…`, and an annotation that cannot fit the remaining budget is rejected by its length before
+  it is built. Internal `#Sheet!A1` locations and other schemes are omitted. Plain text is
+  rendered first and links use only the budget left over. When an annotation does not fit, or
+  links exceed the cap, the cell is written plain and the output ends with one
   `[Some hyperlinks omitted: output limit]` (or `hyperlink limit`) marker, inside the budget.
 - **UTF-16 parts.** SheetJS decodes BOM-marked UTF-16 parts itself, and the byte-level strip
   cannot see tags inside them. Any XLSX part whose stripped bytes would decode as UTF-16 with a
   hyperlink tag is rejected. Excel never writes UTF-16 parts.
 - **Bounded XLSX text.** Every sheet range is checked strictly against Excel's grid, and the
   cell-visit total is checked before any cell is read. CSV is generated incrementally against
-  the character budget (never `sheet_to_csv`). Cells and sheets are read as own properties only,
-  and number formats are never executed.
+  the character budget (never `sheet_to_csv`). Cells and sheets are read as own properties only.
+  The CSV renderer uses parser-provided display text and does not re-evaluate number-format
+  templates.
 - **SheetJS version.** Only SheetJS 0.20.3+ is used (see above). The prototype-pollution
   regression (CVE-2023-30533) is covered by a test with a crafted comment.
 

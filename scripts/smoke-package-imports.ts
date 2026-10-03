@@ -223,8 +223,8 @@ const main = async () => {
         // Dependencies of @yolk-sdk/extractors (./node); SheetJS is its optional peer, installed
         // from the SheetJS CDN like consumers do (npm `xlsx` stops at the vulnerable 0.18.5).
         fflate: '^0.8.3',
-        mammoth: '^1.12.0',
-        unpdf: '^1.6.2',
+        mammoth: '^1.13.0',
+        unpdf: '^1.8.1',
         xlsx: 'https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',

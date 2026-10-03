@@ -30,8 +30,11 @@ const hyperlinkLimitReason = 'hyperlink limit'
 const omittedHyperlinksMarker = (reasons: ReadonlyArray<string>) =>
   `\n\n[Some hyperlinks omitted: ${reasons.join(' and ')}]`
 
-/** Space reserved for the marker whenever a workbook has hyperlinks, so it always fits. */
-const omittedHyperlinksMarkerReserve = omittedHyperlinksMarker([
+/**
+ * Space reserved for the marker whenever a workbook has hyperlinks, so it always fits.
+ * `maxXlsxTextCharacters` must exceed it (`minimumXlsxTextCharacters`).
+ */
+export const omittedHyperlinksMarkerReserve = omittedHyperlinksMarker([
   outputLimitReason,
   hyperlinkLimitReason
 ]).length
@@ -91,15 +94,25 @@ const cellText = (cell: object, maxCharacters: number): string => {
   throw new FileExtractionError({ format: 'xlsx', message: 'Invalid XLSX cell value.' })
 }
 
-const csvField = (text: string) => {
+/**
+ * CSV length of `text` (quotes doubled, wrapped when needed). The scan stops once the length
+ * exceeds `limit`; the returned length is then only known to be above it.
+ */
+const csvField = (text: string, limit = Number.POSITIVE_INFINITY) => {
   let quoteCount = 0
   let quote = text === 'ID'
 
-  for (const character of text) {
-    if (character === '"') quoteCount += 1
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text.charCodeAt(index)
 
-    if (character === '"' || character === ',' || character === '\n' || character === '\r')
+    // '"', ',', '\n', '\r'
+    if (character === 34) quoteCount += 1
+
+    if (character === 34 || character === 44 || character === 10 || character === 13) {
       quote = true
+
+      if (text.length + quoteCount + 2 > limit) break
+    }
   }
 
   return { quote, length: text.length + quoteCount + (quote ? 2 : 0) }
@@ -138,7 +151,7 @@ const renderSheets = (
   const appendCell = (text: string) => {
     if (text.length > budget - characters) throw outputTooLarge()
 
-    const field = csvField(text)
+    const field = csvField(text, budget - characters)
 
     if (field.length > budget - characters) throw outputTooLarge()
 
@@ -249,8 +262,18 @@ export const extractBoundedXlsxText = (
     if (link === undefined || link.target === text) return undefined
 
     const label = text.length > 0 ? text : (link.display ?? '')
+    const plainLength = csvField(text).length
+    const annotatedLength = label.length + (label.length > 0 ? 3 : 2) + link.target.length
+
+    // Constant-time bound first (CSV escaping only adds), then a scan capped at the budget.
+    if (annotatedLength - plainLength > spare) {
+      dropped = true
+
+      return undefined
+    }
+
     const annotated = label.length > 0 ? `${label} <${link.target}>` : `<${link.target}>`
-    const extra = csvField(annotated).length - csvField(text).length
+    const extra = csvField(annotated, plainLength + spare).length - plainLength
 
     if (extra > spare) {
       dropped = true

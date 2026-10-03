@@ -7,6 +7,13 @@ import { OfficeArchiveError } from '../errors.ts'
 import type { OfficeFileFormat } from '../format.ts'
 import { defaultFileExtractorLimits } from '../limits.ts'
 import type { FileExtractorLimits } from '../limits.ts'
+import {
+  contentTypesRouteToBinary,
+  isAlternateFormatEntry,
+  relationshipsRouteToBinary,
+  sheetJsTextViews,
+  withoutBinaryParts
+} from './xlsx-routing.ts'
 
 export type OfficeArchiveLimits = Pick<
   FileExtractorLimits,
@@ -148,43 +155,39 @@ const archiveEntries = (bytes: Buffer, limits: OfficeArchiveLimits) => {
   return entries
 }
 
-const hyperlinkTag = /<\/?(?:[\w.-]+:)?hyperlink\b[^>]*>/gi
+/**
+ * A superset of SheetJS's `hlinkregex` (`/<(?:\w+:)?hyperlink [^<>]*>/`). A candidate never spans
+ * a `<`, so each scan stops at the next tag and the strip stays linear in the part size.
+ */
+const hyperlinkTag = /<\/?(?:[\w.-]+:)?hyperlink\b[^<>]*>/gi
 
 const hyperlinkTagStart = /<\/?(?:[\w.-]+:)?hyperlink\b/i
-
-const swapUtf16ByteOrder = (bytes: Buffer) =>
-  Buffer.from(bytes.subarray(0, bytes.length - (bytes.length % 2))).swap16()
 
 /**
  * Whether a part SheetJS would decode as BOM-marked UTF-16 contains a hyperlink tag. Covers
  * SheetJS `cc2str` UTF-16 BOM decoding (little- and big-endian from byte 2, including its
  * `arr[1]/arr[2]` Buffer check) plus an extra odd-offset big-endian decode.
  */
-export const utf16PartHasHyperlink = (content: Uint8Array) => {
-  const littleEndian = content[0] === 0xff && content[1] === 0xfe
-  const bigEndian = content[0] === 0xfe && content[1] === 0xff
-  const offsetBigEndian = content[1] === 0xfe && content[2] === 0xff
+export const utf16PartHasHyperlink = (content: Uint8Array) =>
+  sheetJsTextViews(content)
+    .slice(1)
+    .some(text => hyperlinkTagStart.test(text))
 
-  if (!littleEndian && !bigEndian && !offsetBigEndian) return false
-
-  const bytes = Buffer.from(content.buffer, content.byteOffset, content.byteLength)
-
-  const candidates = [
-    bytes.subarray(2).toString('utf16le'),
-    swapUtf16ByteOrder(bytes.subarray(2)).toString('utf16le'),
-    swapUtf16ByteOrder(bytes.subarray(3)).toString('utf16le')
-  ]
-
-  return candidates.some(text => hyperlinkTagStart.test(text))
-}
+const unsupportedXlsxParts = () =>
+  new OfficeArchiveError({
+    message: 'XLSX archive contains binary (XLSB), ODS, or Numbers parts.'
+  })
 
 /** Hyperlink start tags (Latin-1 text of the original bytes) found while stripping, per part. */
 export type StrippedHyperlinkTags = ReadonlyMap<string, ReadonlyArray<string>>
 
 export type NormalizedOfficeArchive = {
-  /** A fresh stored-entry ZIP built only from validated (and, for XLSX, stripped) parts. */
+  /**
+   * A fresh stored-entry ZIP built only from validated (and, for XLSX, stripped) parts; without
+   * `.bin` parts when `omitBinaryParts` is set.
+   */
   readonly archive: Uint8Array
-  /** Validated part bytes by entry name, identical to the archive contents. */
+  /** Every validated part by entry name (including any `.bin` parts left out of `archive`). */
   readonly parts: Readonly<Record<string, Uint8Array>>
   /** XLSX only: removed hyperlink tags, at most `maxHyperlinkTags` across the workbook. */
   readonly hyperlinkTags: StrippedHyperlinkTags
@@ -227,19 +230,31 @@ const inflateEntry = async (compressed: Buffer, record: (chunk: Buffer) => void)
   }
 }
 
+export type ReadOfficeArchiveOptions = {
+  /** XLSX: hyperlink start tags to capture across the workbook (default 0). */
+  readonly maxHyperlinkTags?: number
+  /**
+   * XLSX: leave `.bin` parts out of `archive`. SheetJS reaches its binary parsers only through a
+   * path ending in `.bin` and can read only entries that exist, so this is the backstop behind
+   * the content-type and relationship checks. Use it only for bytes handed to SheetJS.
+   */
+  readonly omitBinaryParts?: boolean
+}
+
 /**
  * Inflate bounded input chunks, count actual output, then discard the attacker's ZIP index.
  * Parsers receive only a fresh stored-entry archive built from the validated bytes.
  *
  * For XLSX, every part loses its `<hyperlink>` tags before SheetJS sees it: SheetJS expands each
  * hyperlink range into per-cell objects before any budget runs, so one `ref="A1:XFD1048576"`
- * exhausts memory. The removed tags are returned so links can still be shown.
+ * exhausts memory. The removed tags are returned so links can still be shown. XLSX input that
+ * SheetJS would route to its binary (XLSB), ODS, or Numbers parsers is rejected.
  */
 export const readOfficeArchive = (
   input: Uint8Array,
   format: OfficeFileFormat,
   limits: OfficeArchiveLimits,
-  maxHyperlinkTags = 0
+  options: ReadOfficeArchiveOptions = {}
 ) =>
   Effect.tryPromise({
     try: async (): Promise<NormalizedOfficeArchive> => {
@@ -249,6 +264,10 @@ export const readOfficeArchive = (
 
       const entries = archiveEntries(bytes, limits)
       const mainPart = mainParts[format]
+      const maxHyperlinkTags = options.maxHyperlinkTags ?? 0
+
+      if (format === 'xlsx' && entries.some(entry => isAlternateFormatEntry(entry.name)))
+        throw unsupportedXlsxParts()
 
       if (
         !entries.some(entry => entry.name === '[Content_Types].xml') ||
@@ -311,12 +330,26 @@ export const readOfficeArchive = (
         // bytes SheetJS will parse; Excel never writes UTF-16 parts, so reject rather than rewrite.
         if (utf16PartHasHyperlink(rewritten)) throw invalid()
 
+        // Content types and relationships decide which parser SheetJS runs on each part.
+        const lowerName = entry.name.toLowerCase()
+
+        if (
+          (lowerName === '[content_types].xml' && contentTypesRouteToBinary(rewritten)) ||
+          (lowerName.endsWith('.rels') && relationshipsRouteToBinary(rewritten))
+        )
+          throw unsupportedXlsxParts()
+
         if (tags.length > 0) hyperlinkTags.set(entry.name, tags)
 
         validated[entry.name] = rewritten
       }
 
-      return { archive: zipSync(validated, { level: 0 }), parts: validated, hyperlinkTags }
+      const archived =
+        format === 'xlsx' && options.omitBinaryParts === true
+          ? withoutBinaryParts(validated)
+          : validated
+
+      return { archive: zipSync(archived, { level: 0 }), parts: validated, hyperlinkTags }
     },
     // Out-of-range header reads (RangeError) and inflate failures are malformed archives too.
     catch: error => (error instanceof OfficeArchiveError ? error : invalid())
@@ -324,8 +357,9 @@ export const readOfficeArchive = (
 
 /**
  * Validate a DOCX, XLSX, or PPTX archive with bounded inflation and return a fresh stored-entry
- * ZIP of its validated parts (XLSX parts without hyperlink tags). `FileExtractor` already runs
- * this; call it directly to validate Office bytes you store or pass to other parsers.
+ * ZIP of its validated parts (XLSX parts without hyperlink tags; XLSX input SheetJS would parse
+ * as XLSB, ODS, or Numbers is rejected). `FileExtractor` already runs this; call it directly to
+ * validate Office bytes you store or pass to other parsers.
  */
 export const normalizeOfficeArchive = (
   bytes: Uint8Array,

@@ -7,13 +7,22 @@ import type { ExtractedFile } from './format.ts'
 import { FileExtractor } from './service.ts'
 import type { FileExtractorApi } from './service.ts'
 
+/** Percent-decode a path segment; malformed escapes (`%zz`, invalid UTF-8) stay encoded. */
+const decodeSegment = (segment: string) => {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
 const urlFilename = (url: string) => {
   if (!URL.canParse(url)) return url
 
   const segments = new URL(url).pathname.split('/').filter(segment => segment.length > 0)
   const last = segments.at(-1)
 
-  return last === undefined ? url : decodeURIComponent(last)
+  return last === undefined ? url : decodeSegment(last)
 }
 
 /** The filename used for format detection: file name or ref, URL path, or text label. */

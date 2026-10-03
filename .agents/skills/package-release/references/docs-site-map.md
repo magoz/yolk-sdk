@@ -66,7 +66,10 @@ Map changed code to docs that must be inspected or updated.
 | XLSX hyperlinks, archive validation, UTF-16 rule | `packages/extractors/README.md`, `packages/extractors/AGENTS.md`, ADR 0004        |
 | knowledge adapter                                | `packages/extractors/README.md`, `packages/knowledge/README.md` (extraction note) |
 
-No docs-site page exists yet for `@yolk-sdk/extractors`.
+The docs site lists `@yolk-sdk/extractors` (role and subpaths) in `index.mdx` and
+`reference/packages.mdx`, and its `extractors/knowledge -> knowledge` edge in
+`reference/architecture.mdx`; update those with the package list or dependency direction. There
+is no dedicated API page yet; the README is the API reference.
 
 ## Conformance and emulators packages
 

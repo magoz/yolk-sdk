@@ -5,7 +5,17 @@ const PositiveSafeInteger = Schema.Int.pipe(
   Schema.check(Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER))
 )
 
-/** Work and output bounds for one `extract` call. Every value is a positive integer. */
+/**
+ * Smallest `maxXlsxTextCharacters`: one more than the space always reserved for the
+ * `[Some hyperlinks omitted: output limit and hyperlink limit]` marker (61 characters with its
+ * leading blank line), so a workbook with links can still produce text.
+ */
+export const minimumXlsxTextCharacters = 62
+
+/**
+ * Work and output bounds for one `extract` call. Every value is a positive integer, and
+ * `maxXlsxTextCharacters` is at least `minimumXlsxTextCharacters`.
+ */
 export const FileExtractorLimits = Schema.Struct({
   /** Input bytes accepted for any format. */
   maxInputBytes: PositiveSafeInteger,
@@ -17,8 +27,10 @@ export const FileExtractorLimits = Schema.Struct({
   maxXlsxSheets: PositiveSafeInteger,
   /** Cells visited across all worksheet ranges (absent cells count too). */
   maxXlsxCellVisits: PositiveSafeInteger,
-  /** Characters of XLSX text, including hyperlink annotations. */
-  maxXlsxTextCharacters: PositiveSafeInteger,
+  /** Characters of XLSX text, including hyperlink annotations and the omitted-links marker. */
+  maxXlsxTextCharacters: PositiveSafeInteger.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(minimumXlsxTextCharacters))
+  ),
   /** Hyperlinks read per workbook; later ones are ignored (still removed before SheetJS). */
   maxXlsxHyperlinks: PositiveSafeInteger
 })

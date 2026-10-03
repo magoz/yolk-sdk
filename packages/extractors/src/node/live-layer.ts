@@ -125,7 +125,10 @@ const validatedArchive = (
     input.bytes,
     format,
     limits,
-    format === 'xlsx' ? limits.maxXlsxHyperlinks + 1 : 0
+    // One extra tag detects a workbook over the cap; SheetJS never gets `.bin` parts.
+    format === 'xlsx'
+      ? { maxHyperlinkTags: limits.maxXlsxHyperlinks + 1, omitBinaryParts: true }
+      : {}
   ).pipe(
     Effect.mapError(
       error => new FileExtractionError({ message: error.message, format, cause: error })

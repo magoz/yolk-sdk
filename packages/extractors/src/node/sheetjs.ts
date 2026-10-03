@@ -13,25 +13,39 @@ export type SheetJs = {
   readonly read: (bytes: Uint8Array) => unknown
 }
 
-const versionParts = (version: string) => {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version)
+/** SemVer 2.0.0: `major.minor.patch`, optional `-prerelease`, optional `+build`. */
+const semver =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/
 
-  return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])]
+type ParsedVersion = {
+  readonly release: readonly [number, number, number]
+  readonly prerelease: boolean
 }
 
-const isAtLeastMinimumVersion = (version: string) => {
-  const installed = versionParts(version)
-  const minimum = versionParts(minimumSheetJsVersion)
+const parseVersion = (version: string): ParsedVersion | undefined => {
+  const match = semver.exec(version)
 
-  if (installed === undefined || minimum === undefined) return false
+  if (match === null) return undefined
 
-  for (const [index, part] of installed.entries()) {
-    const required = minimum[index] ?? 0
+  const release = [Number(match[1]), Number(match[2]), Number(match[3])] as const
+
+  return release.every(Number.isSafeInteger)
+    ? { release, prerelease: match[4] !== undefined }
+    : undefined
+}
+
+/**
+ * Compare by SemVer precedence against the minimum release: a prerelease of 0.20.3 is below it,
+ * prereleases of later releases are above it, and build metadata is ignored.
+ */
+const meetsMinimumVersion = (installed: ParsedVersion, minimum: ParsedVersion) => {
+  for (const [index, part] of installed.release.entries()) {
+    const required = minimum.release[index] ?? 0
 
     if (part !== required) return part > required
   }
 
-  return true
+  return !installed.prerelease
 }
 
 const isMissingModule = (cause: unknown) =>
@@ -51,7 +65,10 @@ const sheetJsExports = (namespace: unknown): object | undefined => {
   return undefined
 }
 
-/** Load SheetJS lazily and refuse anything that is not SheetJS 0.20.3 or newer. */
+/**
+ * Load SheetJS lazily and refuse anything that is not SheetJS 0.20.3 or newer. The version must be
+ * strict SemVer; anything else fails closed as `invalid`.
+ */
 export const loadSheetJs = (loader: SheetJsLoader) =>
   Effect.gen(function* () {
     const namespace = yield* Effect.tryPromise({
@@ -75,8 +92,16 @@ export const loadSheetJs = (loader: SheetJsLoader) =>
       return yield* Effect.fail(new SheetJsUnavailableError({ reason: 'invalid' }))
 
     const { read, version } = exports
+    const installed = parseVersion(version)
+    const minimum = parseVersion(minimumSheetJsVersion)
 
-    if (!isAtLeastMinimumVersion(version))
+    // A version that is not strict SemVer is not a SheetJS release we can vouch for.
+    if (installed === undefined || minimum === undefined)
+      return yield* Effect.fail(
+        new SheetJsUnavailableError({ reason: 'invalid', installedVersion: version })
+      )
+
+    if (!meetsMinimumVersion(installed, minimum))
       return yield* Effect.fail(
         new SheetJsUnavailableError({ reason: 'outdated', installedVersion: version })
       )
