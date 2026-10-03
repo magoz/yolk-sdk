@@ -78,30 +78,43 @@ export type SandboxToolModuleOptions<Context> = {
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
 }
 
-type PlainSandboxPreviewUrl = {
-  readonly port: number
-  readonly url: string
-}
+const SandboxToolPreviewUrl = Schema.Struct({ port: Schema.Number, url: Schema.String })
 
-type PlainSandboxState = {
-  readonly _tag: 'Vercel'
-  readonly name: string
-  readonly createdAtMs: number
-  readonly lastUsedAtMs: number
-  readonly expiresAtMs: number
-  readonly maxExpiresAtMs: number
-}
+const SandboxToolState = Schema.Struct({
+  _tag: Schema.Literal('Vercel'),
+  name: Schema.String,
+  createdAtMs: Schema.Number,
+  lastUsedAtMs: Schema.Number,
+  expiresAtMs: Schema.Number,
+  maxExpiresAtMs: Schema.Number
+})
 
-export type SandboxToolStructuredContent = {
-  readonly exitCode: number | null
-  readonly durationMs: number
-  readonly timedOut: boolean
-  readonly truncated: boolean
-  readonly workspaceReset: boolean
-  readonly backgroundId?: string
-  readonly previewUrls: ReadonlyArray<PlainSandboxPreviewUrl>
-  readonly state: PlainSandboxState
-}
+/**
+ * Declared output of the `sandbox` tool. `structuredContent` is plain JSON of this shape (already
+ * its JSON encoding); `stdout`/`stderr` are the same bounded slices as the text content, and
+ * `truncated` tells whether they were cut.
+ */
+export const SandboxToolOutput = Schema.Struct({
+  exitCode: Schema.NullOr(Schema.Number),
+  durationMs: Schema.Number,
+  timedOut: Schema.Boolean,
+  truncated: Schema.Boolean,
+  workspaceReset: Schema.Boolean,
+  backgroundId: Schema.optionalKey(Schema.String),
+  stdout: Schema.String,
+  stderr: Schema.String,
+  previewUrls: Schema.Array(SandboxToolPreviewUrl),
+  state: SandboxToolState
+})
+
+export type SandboxToolStructuredContent = typeof SandboxToolOutput.Type
+
+type PlainSandboxPreviewUrl = typeof SandboxToolPreviewUrl.Type
+
+type PlainSandboxState = typeof SandboxToolState.Type
+
+const sandboxToolModuleDescription =
+  'Run shell commands in a host-provided sandbox workspace (files, project commands, background servers).'
 
 type OutputSlice = {
   readonly stdout: string
@@ -259,13 +272,13 @@ type SandboxToolStructuredContentFields = {
 
 const structuredContent = (
   result: SandboxCommandResult,
-  truncated: boolean
+  output: OutputSlice
 ): SandboxToolStructuredContent => {
   const content: SandboxToolStructuredContentFields = {
     exitCode: result.exitCode,
     durationMs: result.durationMs,
     timedOut: result.timedOut,
-    truncated,
+    truncated: output.truncated,
     workspaceReset: result.workspaceReset
   }
 
@@ -275,6 +288,8 @@ const structuredContent = (
 
   return {
     ...content,
+    stdout: output.stdout,
+    stderr: output.stderr,
     previewUrls: result.previewUrls.map(plainSandboxPreviewUrl),
     state: plainSandboxState(result.state)
   }
@@ -291,7 +306,7 @@ export const makeSandboxToolResult = (input: {
     content: formatSandboxToolContent(input.result, output),
     isError:
       input.result.timedOut || (input.result.exitCode !== null && input.result.exitCode !== 0),
-    structuredContent: structuredContent(input.result, output.truncated)
+    structuredContent: structuredContent(input.result, output)
   })
 }
 
@@ -326,11 +341,13 @@ export const makeSandboxToolModuleFromApi = <Context>(
   options: SandboxToolModuleOptions<Context> = {}
 ): ToolModule<Context> => ({
   id: 'sandbox',
+  description: sandboxToolModuleDescription,
   tools: [
     makeTool({
       name: sandboxToolName,
       description: sandboxToolDescription(options),
       parameters: SandboxToolParams,
+      output: SandboxToolOutput,
       access: 'destructive',
       isEnabled: options.isEnabled,
       invalidParamsMessage: error =>

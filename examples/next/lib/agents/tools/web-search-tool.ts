@@ -10,6 +10,7 @@ import {
   modelVisibleToolError,
   modelVisibleToolErrorResult,
   type ModelVisibleToolErrorReason,
+  withToolArgumentsErrorHint,
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
@@ -471,7 +472,11 @@ export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = mak
   parameters: WebSearchParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  invalidParamsMessage: error => `Invalid web search arguments: ${schemaErrorToMessage(error)}`,
+  invalidParamsMessage: error =>
+    withToolArgumentsErrorHint(
+      `Invalid web search arguments: ${schemaErrorToMessage(error)}`,
+      error
+    ),
   execute: ({ call, params }) =>
     searchWeb(params, liveWebSearchDependencies).pipe(
       Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
@@ -480,5 +485,6 @@ export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = mak
 
 export const webSearchToolModule: ToolModule<AgentToolContext> = {
   id: 'web-search',
+  description: 'Search the public web.',
   tools: [webSearchToolRegistration]
 }

@@ -21,6 +21,7 @@ const questionToolRegistration = makeQuestionToolRegistration<AgentToolContext>(
 
 const questionToolModule = {
   id: 'question',
+  description: 'Ask the user a question and wait for the answer.',
   tools: [
     {
       ...questionToolRegistration,

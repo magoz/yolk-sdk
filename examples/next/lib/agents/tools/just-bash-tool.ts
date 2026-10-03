@@ -3,7 +3,12 @@ import * as Schema from 'effect/Schema'
 import { Bash } from 'just-bash/browser'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  withToolArgumentsErrorHint,
+  type ToolModule,
+  type ToolRegistration
+} from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const justBashToolName = 'just_bash'
@@ -190,7 +195,11 @@ const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
   parameters: JustBashParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
-  invalidParamsMessage: error => `Invalid just-bash arguments: ${schemaErrorToMessage(error)}`,
+  invalidParamsMessage: error =>
+    withToolArgumentsErrorHint(
+      `Invalid just-bash arguments: ${schemaErrorToMessage(error)}`,
+      error
+    ),
   execute: ({ call, params }) =>
     Effect.gen(function* () {
       const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
@@ -202,5 +211,6 @@ const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
 
 export const justBashToolModule: ToolModule<AgentToolContext> = {
   id: 'just-bash',
+  description: 'Run bash scripts in a fresh in-memory virtual filesystem (no host files).',
   tools: [justBashTool]
 }

@@ -186,7 +186,7 @@ export const selectCodeModeListing = (
 const intro = [
   'Run a JavaScript script that calls tools and returns only what matters.',
   '`code` is the body of an async function: top-level `await` and `return` work. Write plain JavaScript; simple TypeScript annotations are stripped. There is no Node.js, network, filesystem, `require`, `fetch`, or timers.',
-  'Call tools as `await tools.<id>(args)`. A call resolves to the declared result type and rejects with an Error when the tool fails. Calls still running when the script ends are cancelled, so await every call (use `Promise.all` for parallel calls).',
+  'Call tools as `await tools.<id>(args)`. Arguments must be plain JSON (no `NaN`, `undefined` array items, `Map`, or functions). A call resolves to the declared result type and rejects with an Error whose message starts with `tools.<id>:` when the tool fails. Calls still running when the script ends are cancelled, so await every call (use `Promise.all` for parallel calls).',
   'Only the script output and its return value come back to you: filter and aggregate inside the script and return a small JSON value.'
 ].join('\n')
 

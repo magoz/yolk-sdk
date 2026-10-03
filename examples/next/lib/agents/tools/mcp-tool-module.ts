@@ -94,6 +94,7 @@ export const makeMcpToolModule = (
 
     return {
       id: `mcp-${sanitizeMcpName('configured')}`,
+      description: 'Tools of the configured remote MCP servers.',
       tools
     }
   })

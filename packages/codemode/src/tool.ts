@@ -150,7 +150,9 @@ type NestedResolution =
   | { readonly ok: false; readonly message: string }
 
 /** What a nested call resolves to: `structuredContent` for tools with an output schema (when
- * present), text content otherwise; error results reject with their text.
+ * present), text content otherwise; error results reject with their text. A tool that declares an
+ * output schema but returns no `structuredContent` resolves to its text: that is a tool bug, kept
+ * readable rather than turned into a failure.
  */
 const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
   const text = nestedText(result.content)
@@ -388,7 +390,8 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   if (resolution.ok) {
                     resolve(resolution.value)
                   } else {
-                    reject(new Error(resolution.message))
+                    // The script sees which call failed; the nested-call record keeps the raw text.
+                    reject(new Error(`tools.${tool.identifier}: ${resolution.message}`))
                   }
                 })
               })

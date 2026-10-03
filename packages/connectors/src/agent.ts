@@ -13,7 +13,7 @@ import { ToolResult, type ToolExposure } from '@yolk-sdk/agent/protocol'
 import type { ConnectorAction, ConnectorActionAccess } from './action.ts'
 import type { Connector } from './connector.ts'
 import type { ConnectorIntegration } from './integration.ts'
-import type { ProviderFailure } from './result.ts'
+import { ProviderFailure } from './result.ts'
 
 export type ConnectorIntegrationResolver<Context> =
   | ConnectorIntegration
@@ -36,6 +36,10 @@ export type MakeConnectorToolModuleOptions<Context, Env> = {
   readonly integration: ConnectorIntegrationResolver<Context>
   readonly layer: Layer.Layer<Env>
   readonly moduleId?: string
+  /** `ToolModule.description` (shown by code mode under the namespace and indexed for tool
+   * search). Default: the connector's `description`.
+   */
+  readonly description?: string
   readonly namePrefix?: string
   readonly access?: ConnectorToolAccessResolver
   /** Applied through `makeTool`'s `callableBy`/`discovery`; `resolveTools` still rejects invalid
@@ -75,6 +79,35 @@ const resolveExposure = (
 
 const failureContent = (failure: ProviderFailure) => `${failure.code}: ${failure.message}`
 
+const encodeProviderFailure = Schema.encodeUnknownEffect(Schema.toCodecJson(ProviderFailure))
+
+type ProviderFailureSummary = {
+  readonly code: string
+  readonly message: string
+  status?: number
+  retryAfterMs?: number
+}
+
+const providerFailureSummary = (failure: ProviderFailure) => {
+  const summary: ProviderFailureSummary = { code: failure.code, message: failure.message }
+
+  if (failure.status !== undefined) summary.status = failure.status
+
+  if (failure.retryAfterMs !== undefined) summary.retryAfterMs = failure.retryAfterMs
+
+  return summary
+}
+
+/** The JSON encoding of a provider failure; a non-JSON `underlying` (for example a wrapped
+ * error) is dropped. */
+const failureStructuredContent = (failure: ProviderFailure) =>
+  encodeProviderFailure(failure).pipe(
+    Effect.catch(() =>
+      encodeProviderFailure(ProviderFailure.make(providerFailureSummary(failure)))
+    ),
+    Effect.orElseSucceed(() => providerFailureSummary(failure))
+  )
+
 const successContent = (value: unknown) => {
   if (Predicate.isString(value)) {
     return value
@@ -86,6 +119,14 @@ const successContent = (value: unknown) => {
 const toolName = (prefix: string | undefined, actionId: string) =>
   prefix === undefined ? actionId : `${prefix}.${actionId}`
 
+/**
+ * One connector action as an agent tool. Success values are returned as the JSON encoding of the
+ * action `outputSchema` (`Schema.toCodecJson`): `structuredContent` and the text content match the
+ * declared `ToolDef.outputSchema` (a `Chunk` becomes an array, a `DateTime` an ISO string). A value
+ * that does not encode fails the call with an `execution` `ToolError`. Provider failures become
+ * error results whose `structuredContent` is the JSON encoding of the `ProviderFailure` (a
+ * non-JSON `underlying` is dropped).
+ */
 export const makeConnectorToolRegistration = <Context, Env = never, Error = never>(
   connector: Connector<Env, Error>,
   actionId: string,
@@ -93,6 +134,26 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
 ): ToolRegistration<Context> => {
   const action = connector.actions.find(item => item.id === actionId)
   const name = toolName(options.namePrefix, actionId)
+
+  const encode =
+    action === undefined
+      ? undefined
+      : Schema.encodeUnknownEffect(Schema.toCodecJson(action.outputSchema))
+
+  // Without a declared action there is no output schema to encode to: keep the value as is.
+  const encodeOutput = (value: unknown): Effect.Effect<unknown, ToolError> =>
+    encode === undefined
+      ? Effect.succeed(value)
+      : encode(value).pipe(
+          Effect.mapError(
+            () =>
+              new ToolError({
+                tool: name,
+                message: `${name} returned a result that does not match its output schema.`,
+                cause: 'execution'
+              })
+          )
+        )
 
   return makeTool({
     ...resolveExposure(options.exposure, actionId, action),
@@ -117,26 +178,6 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
             })
             .pipe(Effect.provide(options.layer))
         ),
-        Effect.map(result =>
-          Match.value(result).pipe(
-            Match.tag('Success', current =>
-              ToolResult.make({
-                toolCallId: call.id,
-                content: successContent(current.value),
-                structuredContent: current.value
-              })
-            ),
-            Match.tag('Failure', current =>
-              ToolResult.make({
-                toolCallId: call.id,
-                content: failureContent(current.error),
-                isError: true,
-                structuredContent: current.error
-              })
-            ),
-            Match.exhaustive
-          )
-        ),
         Effect.mapError(
           error =>
             new ToolError({
@@ -144,17 +185,52 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
               message: error instanceof Error ? error.message : String(error),
               cause: 'execution'
             })
+        ),
+        Effect.flatMap(result =>
+          Match.value(result).pipe(
+            Match.tag('Success', current =>
+              encodeOutput(current.value).pipe(
+                Effect.map(value =>
+                  ToolResult.make({
+                    toolCallId: call.id,
+                    content: successContent(value),
+                    structuredContent: value
+                  })
+                )
+              )
+            ),
+            Match.tag('Failure', current =>
+              failureStructuredContent(current.error).pipe(
+                Effect.map(structuredContent =>
+                  ToolResult.make({
+                    toolCallId: call.id,
+                    content: failureContent(current.error),
+                    isError: true,
+                    structuredContent
+                  })
+                )
+              )
+            ),
+            Match.exhaustive
+          )
         )
       )
   })
 }
 
+/** All actions of a connector as one tool module (`id` defaults to the connector id,
+ * `description` to the connector description). */
 export const makeConnectorToolModule = <Context, Env = never, Error = never>(
   connector: Connector<Env, Error>,
   options: MakeConnectorToolModuleOptions<Context, Env>
-): ToolModule<Context> => ({
-  id: options.moduleId ?? connector.id,
-  tools: connector.actions.map(action =>
+): ToolModule<Context> => {
+  const description = options.description ?? connector.description
+
+  const tools = connector.actions.map(action =>
     makeConnectorToolRegistration(connector, action.id, options)
   )
-})
+
+  const id = options.moduleId ?? connector.id
+
+  return description === undefined ? { id, tools } : { id, description, tools }
+}

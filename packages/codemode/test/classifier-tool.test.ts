@@ -361,7 +361,7 @@ describe('makeClassifierTool', () => {
       )
 
       expect(text(result.content)).toContain(
-        'Return value:\n["Invalid classification request: too many options","Classifier provider failed with status 503","Classification answers do not fit their questions: missing_answer"]'
+        'Return value:\n["tools.classify: Invalid classification request: too many options","tools.classify: Classifier provider failed with status 503","tools.classify: Classification answers do not fit their questions: missing_answer"]'
       )
       expect(result.nestedCalls?.calls.map(call => call.status)).toEqual([
         'error',

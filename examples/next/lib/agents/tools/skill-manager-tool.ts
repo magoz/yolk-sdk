@@ -2,7 +2,12 @@ import { Data, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, modelVisibleToolError, type ToolModule } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  modelVisibleToolError,
+  withToolArgumentsErrorHint,
+  type ToolModule
+} from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const skillManagerToolName = 'manage_skills'
@@ -147,6 +152,7 @@ export const makeSkillManagerToolModule = (
   manageSkills: SkillManagerHandler
 ): ToolModule<AgentToolContext> => ({
   id: 'skill-manager',
+  description: "Create, list, and update the user's saved skills.",
   tools: [
     makeTool({
       name: skillManagerToolName,
@@ -155,7 +161,7 @@ export const makeSkillManagerToolModule = (
       access: 'write',
       isEnabled: context => Effect.succeed(context.surface === 'text' && context.subagent !== true),
       invalidParamsMessage: error =>
-        `Invalid skill manager arguments: ${error instanceof Error ? error.message : String(error)}`,
+        withToolArgumentsErrorHint(`Invalid skill manager arguments: ${error.message}`, error),
       execute: ({ call, context, params }) =>
         Effect.gen(function* () {
           const action = yield* paramsToAction(params, context.userId)

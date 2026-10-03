@@ -200,6 +200,68 @@ describe('nested call failures, hooks, and backstops', () => {
     })
   )
 
+  it.effect('prefixes error-result rejections with the tool but records the raw error', () =>
+    Effect.gen(function* () {
+      const executor = callingExecutor(async options => ({
+        ok: true,
+        value: [
+          await settle(callFirstTool(options, { query: 'x' })),
+          await settle(callFirstTool(options, { query: 'y' }))
+        ],
+        output: []
+      }))
+
+      const result = yield* runCode(
+        [
+          moduleOf('host', [makeCodeModeTool<TestContext>({ executor })]),
+          moduleOf('docs', [
+            rawTool('docs-lookup', () =>
+              Effect.succeed(
+                ToolResult.make({ toolCallId: 'x', content: 'Not found.', isError: true })
+              )
+            )
+          ])
+        ],
+        'ignored'
+      )
+
+      expect(text(result.content)).toContain(
+        'Return value:\n[{"ok":false,"message":"tools.docs_lookup: Not found."},{"ok":false,"message":"tools.docs_lookup: Not found."}]'
+      )
+      expect(result.nestedCalls?.calls.map(call => [call.status, call.error])).toEqual([
+        ['error', 'Not found.'],
+        ['error', 'Not found.']
+      ])
+    })
+  )
+
+  it.effect('rejects empty error results with the fallback text under the prefix', () =>
+    Effect.gen(function* () {
+      const executor = callingExecutor(async options => ({
+        ok: true,
+        value: await settle(callFirstTool(options, { query: 'x' })),
+        output: []
+      }))
+
+      const result = yield* runCode(
+        [
+          moduleOf('host', [makeCodeModeTool<TestContext>({ executor })]),
+          moduleOf('docs', [
+            rawTool('silent', () =>
+              Effect.succeed(ToolResult.make({ toolCallId: 'x', content: '', isError: true }))
+            )
+          ])
+        ],
+        'ignored'
+      )
+
+      expect(text(result.content)).toContain(
+        '{"ok":false,"message":"tools.silent: Tool silent failed."}'
+      )
+      expect(result.nestedCalls?.calls[0]).toMatchObject({ status: 'error', error: '' })
+    })
+  )
+
   it.effect('reports cancellation only for interrupts', () =>
     Effect.gen(function* () {
       const executor = callingExecutor(async options => ({
@@ -283,8 +345,9 @@ describe('nested call failures, hooks, and backstops', () => {
 
       expect(seen).toEqual(['call_1/1:lookup:tenant_1', 'call_1/2:lookup:tenant_1'])
       expect(log).toEqual(['lookup:allowed:tenant_1'])
+      // The script sees which call failed; the record keeps the raw message.
       expect(text(result.content)).toContain(
-        '{"ok":false,"message":"The run is no longer active."}'
+        '{"ok":false,"message":"tools.lookup: The run is no longer active."}'
       )
       expect(
         result.nestedCalls?.calls.map(call => [call.id, call.status, call.error ?? ''])

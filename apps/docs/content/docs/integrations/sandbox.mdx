@@ -41,3 +41,8 @@ const sandboxToolModule = await Effect.runPromise(
 ```
 
 The sandbox tool is `destructive`. Add approvals and audit logs before enabling it for broad use.
+
+The tool declares `SandboxToolOutput` as its output: `structuredContent` carries `exitCode`,
+`durationMs`, `timedOut`, `truncated`, `workspaceReset`, optional `backgroundId`, the same bounded
+`stdout` and `stderr` slices as the text, `previewUrls`, and `state`. A non-zero exit or timeout is
+still an error result.

@@ -1,11 +1,12 @@
 import { Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { ToolError } from '@yolk-sdk/agent/loop'
+import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
   makeTool,
   modelVisibleToolError,
+  withToolArgumentsErrorHint,
   type ModelVisibleToolError,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
@@ -72,6 +73,73 @@ const StorageGetSourceParams = Schema.Struct({
     })
   )
 })
+
+const StorageSourceSummaryFields = {
+  id: Schema.String,
+  name: Schema.String,
+  sourceType: Schema.String,
+  status: Schema.optional(Schema.String),
+  summary: Schema.optional(Schema.String),
+  chunkCount: Schema.optional(Schema.Number),
+  tokenCount: Schema.optional(Schema.Number),
+  createdAt: Schema.String
+}
+
+// Declared outputs: `structuredContent` is the JSON encoding of these (absent optional values
+// encode as null).
+const StorageSearchOutput = Schema.Struct({
+  queries: Schema.Array(
+    Schema.Struct({
+      query: Schema.String,
+      results: Schema.Array(
+        Schema.Struct({
+          score: Schema.Number,
+          scores: Schema.optional(
+            Schema.Struct({
+              vector: Schema.optional(Schema.Number),
+              text: Schema.optional(Schema.Number),
+              fused: Schema.optional(Schema.Number)
+            })
+          ),
+          citation: Schema.Number,
+          documentId: Schema.String,
+          source: Schema.String,
+          chunkId: Schema.String,
+          text: Schema.String
+        })
+      )
+    })
+  )
+})
+
+const StorageListSourcesOutput = Schema.Struct({
+  sources: Schema.Array(Schema.Struct(StorageSourceSummaryFields))
+})
+
+const StorageGetSourceOutput = Schema.Struct({
+  source: Schema.Struct({
+    ...StorageSourceSummaryFields,
+    mediaType: Schema.optional(Schema.String),
+    byteSize: Schema.optional(Schema.Number),
+    contentHash: Schema.optional(Schema.String),
+    text: Schema.String,
+    textTruncated: Schema.Boolean,
+    textCharacters: Schema.Number
+  })
+})
+
+const encodeSearchOutput = Schema.encodeEffect(Schema.toCodecJson(StorageSearchOutput))
+
+const encodeListSourcesOutput = Schema.encodeEffect(Schema.toCodecJson(StorageListSourcesOutput))
+
+const encodeGetSourceOutput = Schema.encodeEffect(Schema.toCodecJson(StorageGetSourceOutput))
+
+const outputError = (tool: string) => () =>
+  new ToolError({
+    tool,
+    message: `${tool} produced a result that does not match its output schema.`,
+    cause: 'execution'
+  })
 
 type StorageSearchParams = typeof StorageSearchParams.Type
 
@@ -141,7 +209,8 @@ const storageGetSourceToolDescription = [
 const isStorageToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const schemaErrorMessage = (error: Schema.SchemaError) => error.message
+const invalidArgumentsMessage = (label: string) => (error: Schema.SchemaError) =>
+  withToolArgumentsErrorHint(`Invalid ${label} arguments: ${error.message}`, error)
 
 const makeModelVisibleError = (message: string, tool = storageSearchToolName) =>
   modelVisibleToolError({
@@ -371,10 +440,10 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
     name: storageSearchToolName,
     description: storageSearchToolDescription,
     parameters: StorageSearchParams,
+    output: StorageSearchOutput,
     access: 'read',
     isEnabled: isStorageToolEnabled,
-    invalidParamsMessage: error =>
-      `Invalid storage search arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
+    invalidParamsMessage: invalidArgumentsMessage('storage search'),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageSearchParams(params)
@@ -392,10 +461,14 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
           { concurrency: 'unbounded' }
         )
 
+        const structuredContent = yield* encodeSearchOutput(structuredSearchResult(items)).pipe(
+          Effect.mapError(outputError(storageSearchToolName))
+        )
+
         return ToolResult.make({
           toolCallId: call.id,
           content: formatSearchResults(items),
-          structuredContent: structuredSearchResult(items)
+          structuredContent
         })
       })
   })
@@ -407,18 +480,23 @@ const listSourcesTool = (
     name: storageListSourcesToolName,
     description: storageListSourcesToolDescription,
     parameters: StorageListSourcesParams,
+    output: StorageListSourcesOutput,
     access: 'read',
     isEnabled: isStorageToolEnabled,
     execute: ({ call, context }) =>
-      listSources({ userId: context.userId }).pipe(
-        Effect.map(sources =>
-          ToolResult.make({
-            toolCallId: call.id,
-            content: formatSources(sources),
-            structuredContent: { sources }
-          })
+      Effect.gen(function* () {
+        const sources = yield* listSources({ userId: context.userId })
+
+        const structuredContent = yield* encodeListSourcesOutput({ sources }).pipe(
+          Effect.mapError(outputError(storageListSourcesToolName))
         )
-      )
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatSources(sources),
+          structuredContent
+        })
+      })
   })
 
 const getSourceTool = (
@@ -428,10 +506,10 @@ const getSourceTool = (
     name: storageGetSourceToolName,
     description: storageGetSourceToolDescription,
     parameters: StorageGetSourceParams,
+    output: StorageGetSourceOutput,
     access: 'read',
     isEnabled: isStorageToolEnabled,
-    invalidParamsMessage: error =>
-      `Invalid storage source read arguments: ${Schema.isSchemaError(error) ? schemaErrorMessage(error) : 'Invalid arguments'}`,
+    invalidParamsMessage: invalidArgumentsMessage('storage source read'),
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageGetSourceParams(params)
@@ -442,10 +520,14 @@ const getSourceTool = (
           maxChars: normalizedParams.maxChars
         })
 
+        const structuredContent = yield* encodeGetSourceOutput({ source }).pipe(
+          Effect.mapError(outputError(storageGetSourceToolName))
+        )
+
         return ToolResult.make({
           toolCallId: call.id,
           content: formatSourceDetail(source),
-          structuredContent: { source }
+          structuredContent
         })
       })
   })
@@ -467,5 +549,7 @@ export const makeStorageSearchToolModule = (
   handlers: StorageKnowledgeSearchToolHandlers
 ): ToolModule<AgentToolContext> => ({
   id: 'storage-search',
+  description:
+    "The user's storage sources (uploaded files and pages): search, list, and read them.",
   tools: storageTools(handlers)
 })

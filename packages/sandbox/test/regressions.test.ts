@@ -240,6 +240,8 @@ describe('sandbox anti-slop regressions', () => {
       timedOut: false,
       truncated: false,
       workspaceReset: false,
+      stdout: 'ok',
+      stderr: '',
       previewUrls: [],
       state: {
         _tag: state._tag,
@@ -259,6 +261,8 @@ describe('sandbox anti-slop regressions', () => {
       'timedOut',
       'truncated',
       'workspaceReset',
+      'stdout',
+      'stderr',
       'previewUrls',
       'state'
     ])
@@ -280,6 +284,8 @@ describe('sandbox anti-slop regressions', () => {
       truncated: false,
       workspaceReset: false,
       backgroundId: 'cmd_1',
+      stdout: 'ok',
+      stderr: '',
       previewUrls: [],
       state: {
         _tag: state._tag,
@@ -298,6 +304,8 @@ describe('sandbox anti-slop regressions', () => {
       'truncated',
       'workspaceReset',
       'backgroundId',
+      'stdout',
+      'stderr',
       'previewUrls',
       'state'
     ])
@@ -365,7 +373,7 @@ describe('sandbox anti-slop regressions', () => {
     const content = structuredContentRecord(toolResult)
 
     expect(JSON.stringify(content)).toBe(
-      '{"exitCode":0,"durationMs":1,"timedOut":false,"truncated":false,"workspaceReset":false,"previewUrls":[],"state":{"_tag":"Vercel","name":"fixture","createdAtMs":0,"lastUsedAtMs":0,"expiresAtMs":100,"maxExpiresAtMs":200}}'
+      '{"exitCode":0,"durationMs":1,"timedOut":false,"truncated":false,"workspaceReset":false,"stdout":"ok","stderr":"","previewUrls":[],"state":{"_tag":"Vercel","name":"fixture","createdAtMs":0,"lastUsedAtMs":0,"expiresAtMs":100,"maxExpiresAtMs":200}}'
     )
     expect(Object.keys(content)).toEqual([
       'exitCode',
@@ -373,6 +381,8 @@ describe('sandbox anti-slop regressions', () => {
       'timedOut',
       'truncated',
       'workspaceReset',
+      'stdout',
+      'stderr',
       'previewUrls',
       'state'
     ])

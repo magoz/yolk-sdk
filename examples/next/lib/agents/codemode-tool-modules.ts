@@ -111,6 +111,7 @@ export const withAgentCodeMode = (
 
     const codeModeModule: ToolModule<AgentToolContext> = {
       id: 'codemode',
+      description: 'Run scripts that call the other tools and return only what matters.',
       tools: [
         makeCodeModeTool<AgentToolContext>(
           options.beforeNestedCall === undefined
@@ -129,7 +130,12 @@ export const withAgentCodeMode = (
       {
         onNone: () => [],
         onSome: model => [
-          { id: 'classifier', tools: [makeClassifierTool<AgentToolContext>({ classify: model })] }
+          {
+            id: 'classifier',
+            description:
+              'Classify one item per call with a classifier model (yes/no, choice, or score).',
+            tools: [makeClassifierTool<AgentToolContext>({ classify: model })]
+          }
         ]
       }
     )

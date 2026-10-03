@@ -16,7 +16,15 @@ export type CodeModeToolContext = {
  * A function a script can call. Tools are called as `tools.<identifier>(args)` and
  * `tools["<name>"](args)`; the identifier replaces characters that are not valid in a JavaScript
  * identifier with `_`. Arguments and results make a JSON round trip; a rejection surfaces in the
- * script as an `Error` with the same message.
+ * script as an `Error` with the same message (`makeCodeModeTool` rejects with
+ * `tools.<identifier>: <message>`).
+ *
+ * `args` is the JSON value of the script's first argument (`undefined` when there is none).
+ * Executors reject, inside the script and without calling `execute`, values that JSON would
+ * silently change instead of coercing them: non-finite numbers, `undefined`/function/symbol array
+ * items and holes, function/symbol/bigint values, cycles, and non-plain objects without `toJSON`
+ * (`Map`, `Set`, `RegExp`, `Error`, class instances). `undefined`-valued object keys count as
+ * absent, as JSON drops them; `toJSON` values (`Date`) pass as their JSON.
  */
 export type CodeModeExecutorTool = {
   readonly name: string
@@ -90,7 +98,8 @@ export type CodeModeExecuteOptions = {
  * may carry TypeScript annotations: executors strip them or report a `script` error. The promise
  * resolves for every script outcome, including failures, timeouts, and aborts; a rejection is
  * treated as a `sandbox` failure. Running tool calls must be cancelled through their signal when
- * the script ends.
+ * the script ends. Tool arguments follow the JSON rules of `CodeModeExecutorTool`: pass their JSON
+ * value and reject what JSON would silently change.
  *
  * `@yolk-sdk/codemode/node` provides `makePiCodeModeExecutor`; hosts on other runtimes supply their
  * own engine behind this interface.

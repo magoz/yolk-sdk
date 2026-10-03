@@ -96,6 +96,112 @@ const wrapperPrefix = 'async function __yolkCodeMode() {\n'
 
 const wrapperSuffix = '\n}'
 
+/**
+ * Evaluated in the VM before the script runs: `(tools) => guardedTools`. Each `tools.<name>(args)`
+ * first walks `args` (cycle-safe; at most 10000 values and 64 levels deep, beyond which the host
+ * still validates) and rejects with a `TypeError` naming the tool and path when JSON would change
+ * the value instead of carrying it: non-finite numbers, `undefined`/function/symbol array items
+ * and holes, function/symbol/bigint values, cycles, and objects that are neither plain (prototype
+ * `Object.prototype` or `null`), arrays, nor have a `toJSON` method (`Date`). `undefined`-valued
+ * keys stay allowed: JSON drops them, which means absent. A rejected call never reaches the host.
+ * Unknown members fall through to pi's `tools` proxy (close-match suggestions). Not a security
+ * boundary (`globalThis.tools` is unguarded): arguments are still decoded by the host.
+ */
+const toolsGuardSource = `(function (tools) {
+  const plainJson = 'pass plain JSON (objects, arrays, strings, finite numbers, booleans, null)'
+  const maxValues = 10000
+  const maxDepth = 64
+  const keyPath = (path, key) =>
+    /^[A-Za-z_$][\\w$]*$/.test(key)
+      ? (path === '' ? key : path + '.' + key)
+      : path + '[' + JSON.stringify(key) + ']'
+  const typeName = value => {
+    const proto = Object.getPrototypeOf(value)
+    const name = proto && typeof proto.constructor === 'function' ? proto.constructor.name : ''
+    return name ? (/^[AEIOU]/.test(name) ? 'an ' : 'a ') + name : 'a non-plain object'
+  }
+  // Why JSON would not carry the value unchanged ("at <path> is ..."), or undefined.
+  const check = (value, path, slot, ancestors, budget) => {
+    const at = path === '' ? 'is ' : 'at ' + path + ' is '
+    budget.values++
+    switch (typeof value) {
+      case 'string':
+      case 'boolean':
+        return undefined
+      case 'number':
+        return Number.isFinite(value)
+          ? undefined
+          : at + value + '; pass a finite number' + (slot === 'key' ? ' or omit the key' : '')
+      case 'undefined':
+        return slot === 'item' ? at + 'undefined; arrays cannot hold undefined' : undefined
+      case 'bigint':
+      case 'function':
+      case 'symbol':
+        return at + 'a ' + typeof value + '; ' + plainJson
+    }
+    if (value === null || typeof value.toJSON === 'function') return undefined
+    if (ancestors.includes(value)) return at + 'a circular reference; ' + plainJson
+    if (ancestors.length >= maxDepth) return undefined
+    const isArray = Array.isArray(value)
+    const proto = Object.getPrototypeOf(value)
+    if (!isArray && proto !== Object.prototype && proto !== null) {
+      return at + typeName(value) + '; ' + plainJson
+    }
+    const keys = isArray ? undefined : Object.keys(value)
+    const length = isArray ? value.length : keys.length
+    let found
+    ancestors.push(value)
+    for (let i = 0; i < length && found === undefined && budget.values < maxValues; i++) {
+      found = isArray
+        ? check(value[i], path + '[' + i + ']', 'item', ancestors, budget)
+        : check(value[keys[i]], keyPath(path, keys[i]), 'key', ancestors, budget)
+    }
+    ancestors.pop()
+    return found
+  }
+  const wrap = (label, call) => async (...args) => {
+    const found = check(args[0], '', 'root', [], { values: 0 })
+    if (found !== undefined) throw new TypeError(label + ': argument ' + found)
+    return call(...args)
+  }
+  const guarded = Object.create(null)
+  const wrappers = new Map()
+  // pi defines each identifier before its raw name, so the label is tools.<identifier>.
+  for (const key of Object.keys(tools)) {
+    const call = tools[key]
+    if (!wrappers.has(call)) wrappers.set(call, wrap('tools.' + key, call))
+    guarded[key] = wrappers.get(call)
+  }
+  return new Proxy(Object.freeze(guarded), {
+    get: (target, key) => (key in target ? target[key] : tools[key])
+  })
+})`
+
+// pi runs `(async (tools, console) => {<code>\n})`. The script runs in an inner function of the
+// same shape whose `tools` is guarded; the prefix shares line 1 with the script (only line-1
+// columns shift) and the guard follows the script, so its line numbers are unchanged.
+const guardPrefix = 'return (async (tools, console) => {'
+
+const guardSuffix = `\n})(${toolsGuardSource}(tools), console)`
+
+const lineTerminators = /\r\n?|[\n\u2028\u2029]/g
+
+/** Lines of the script as QuickJS counts them (at least; never fewer). */
+const scriptLineCount = (code: string) => (code.match(lineTerminators)?.length ?? 0) + 1
+
+const scriptFrame = /codemode\.js:(\d+):\d+/
+
+/** Drops stack frames of the wrapper and guard, which sit below the script's last line. */
+const withoutWrapperFrames = (stack: string, scriptLines: number) =>
+  stack
+    .split('\n')
+    .filter(line => {
+      const frame = scriptFrame.exec(line)
+
+      return frame === null || Number(frame[1]) <= scriptLines
+    })
+    .join('\n')
+
 const ErrorWithCode = Schema.Struct({ code: Schema.String })
 
 const errorCode = (error: unknown) =>
@@ -205,7 +311,7 @@ type MutableExecutionResult = {
   storeWrites?: CodeModeStoreWrites
 }
 
-const fromPiResult = (result: CodemodeResult): CodeModeExecutionResult => {
+const fromPiResult = (result: CodemodeResult, scriptLines: number): CodeModeExecutionResult => {
   if (result.ok) {
     const storeWrites = decodeStoreWrites(result.storeWrites)
 
@@ -235,7 +341,7 @@ const fromPiResult = (result: CodemodeResult): CodeModeExecutionResult => {
     message: named ? `${name}: ${message}` : message
   }
 
-  if (stack !== undefined) error.stack = stack
+  if (stack !== undefined) error.stack = withoutWrapperFrames(stack, scriptLines)
 
   return { ok: false, error, output: result.output }
 }
@@ -245,7 +351,8 @@ const describeError = (error: unknown) => (error instanceof Error ? error.messag
 /**
  * A `CodeModeExecutor` on `@earendil-works/pi-codemode`: every execution gets a fresh QuickJS VM
  * (WebAssembly) in a fresh worker thread, closed when the execution ends. Applies the timeout,
- * heap cap, abort signal, and store, strips TypeScript annotations first, and caps concurrent
+ * heap cap, abort signal, and store, strips TypeScript annotations first, rejects tool arguments
+ * that JSON would silently change inside the script (see `CodeModeExecutorTool`), and caps concurrent
  * executions per executor; create one executor per process (module scope) so the cap is
  * per process.
  *
@@ -299,11 +406,12 @@ export const makePiCodeModeExecutor = (
 
     try {
       return fromPiResult(
-        await sandbox.execute(stripped.code, {
+        await sandbox.execute(`${guardPrefix}${stripped.code}${guardSuffix}`, {
           signal: execution.signal,
           store: execution.store,
           timeoutMs
-        })
+        }),
+        scriptLineCount(stripped.code)
       )
     } finally {
       await sandbox.close()

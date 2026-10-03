@@ -26,6 +26,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Default `callableBy: 'all'` for curated read/compute tools (`web_fetch`, `web_search`, `just_bash`, knowledge, storage) and remote MCP tools.
 - Only while the flag is on, `skill`, `manage_skills`, `telegram_send_message`, and Workflow `subagent_status`/`subagent_wait` become `callableBy: 'model'`: instruction loading, persistent writes, and outbound messages stay deliberate model calls; the Workflow lookups are orchestrator-intercepted polls.
 - `question`, `compose_draft`, `subagent`, and approval tools are fail-closed by the package. `classify` is package-default `codemode` + `listed`.
+- Every module has a short `description`. Knowledge and storage tools declare `output` and return its `Schema.toCodecJson` encoding as `structuredContent` (scripts receive it); custom `invalidParamsMessage` callbacks end with `withToolArgumentsErrorHint`.
 
 ## Rules
 

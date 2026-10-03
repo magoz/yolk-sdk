@@ -66,6 +66,21 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   function wrapper (positions preserved) and maps failures to `script` errors; one sandbox (worker +
   VM) per execution, closed in `finally`; the per-executor concurrency cap counts queue time against
   the timeout.
+- Tool arguments make a JSON round trip. The pi executor runs the script in an inner
+  `(async (tools, console) => {...})` whose `tools` is a guard proxy (`toolsGuardSource` in
+  `node.ts`): the prefix shares line 1 (only line-1 columns shift) and the guard follows the
+  script, whose frames are dropped from error stacks. Before a call leaves the VM the guard walks
+  the first argument (cycle-safe, at most 10000 values and 64 levels) and rejects with a
+  `TypeError` `tools.<id>: argument at <path> is ...` (non-finite numbers, `undefined`/function/
+  symbol array items and holes, function/symbol/bigint values, cycles, non-plain objects without
+  `toJSON`); `undefined` keys are allowed (absent) and `toJSON` values (`Date`) pass. Rejected calls
+  are never sent to the host or recorded. Unknown members fall through to pi's proxy (suggestions).
+  It is not a security boundary (`globalThis.tools` is unguarded); the registry still decodes.
+  Other executors must apply the same rules (`CodeModeExecutorTool` docs).
+- Nested calls rejected for an error result or a `beforeNestedCall` failure reject with
+  `tools.<identifier>: <text>` (fallback text `Tool <name> failed.`); nested-call records keep the
+  raw text. A tool with an output schema but no `structuredContent` resolves to its text (a tool
+  bug, kept readable).
 - Code mode access is `write`; nested calls keep their own access metadata.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
   host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
@@ -84,7 +99,9 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
   backstops), bounding, store rebuild and bounds.
-- `test/pi-executor.test.ts` also covers store and image limits, cancellation, and the executor
-  concurrency cap.
+- `test/pi-executor.test.ts` also covers store and image limits, cancellation, the executor
+  concurrency cap, argument JSON rules and the guard (messages, never executed or recorded), the
+  unknown-key hint, the `tools.<id>:` prefix, line numbers, `return`, and `exit()`.
+- `test/tool.test.ts` also covers the rejection prefix and unprefixed nested-call records.
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

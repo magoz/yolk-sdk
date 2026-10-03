@@ -1,4 +1,5 @@
 import { Deferred, Effect, Fiber, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { providerToolDefs, ToolApprovalPolicy, ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeQuestionToolRegistration, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
@@ -69,7 +70,9 @@ describe('code mode with the pi executor', () => {
       )
 
       expect(log).toEqual([])
-      expect(text(result.content)).toContain('rejected: Invalid search_docs arguments')
+      expect(text(result.content)).toContain(
+        'rejected: tools.search_docs: Invalid search_docs arguments'
+      )
       expect(result.nestedCalls?.calls[0]?.status).toBe('error')
     })
   )
@@ -187,8 +190,10 @@ describe('code mode with the pi executor', () => {
 
       expect(result.isError).toBe(true)
       expect(body).toMatch(/^Script failed after \d+ ms\./)
-      expect(body).toContain('Output:\nbefore\ncaught: broken failed for c')
-      expect(body).toContain('Script error: script: TypeError: boom')
+      expect(body).toContain('Output:\nbefore\ncaught: tools.broken: broken failed for c')
+      expect(body).toContain(
+        'Script error: script: TypeError: boom\n    at <anonymous> (codemode.js:5:'
+      )
       expect(body).toContain(
         'Tool calls made before the failure (they are not undone): send: 2 ok; broken: 1 error.'
       )
@@ -197,6 +202,156 @@ describe('code mode with the pi executor', () => {
         id: 'call_1/3',
         status: 'error',
         error: 'broken failed for c'
+      })
+    })
+  )
+
+  const ProbeParams = Schema.Struct({
+    query: Schema.String,
+    limit: Schema.optional(Schema.Number),
+    tags: Schema.optional(Schema.Array(Schema.String)),
+    since: Schema.optional(Schema.String)
+  })
+
+  /** Answers with the decoded params as JSON and logs every execution. */
+  const probeTool = (log: ToolLog) =>
+    makeTool<TestContext, typeof ProbeParams>({
+      name: 'args-probe',
+      description: 'Echoes its decoded arguments',
+      parameters: ProbeParams,
+      access: 'read',
+      execute: ({ call, params }) =>
+        Effect.sync(() => {
+          log.push(JSON.stringify(params))
+
+          return ToolResult.make({ toolCallId: call.id, content: JSON.stringify(params) })
+        })
+    })
+
+  it.live('carries arguments as JSON: undefined keys and null optionals are absent', () =>
+    Effect.gen(function* () {
+      const log: ToolLog = []
+
+      const result = yield* runCode(
+        [moduleOf('host', [codemode()]), moduleOf('docs', [probeTool(log)])],
+        `return [
+           await tools.args_probe({ query: 'a', limit: undefined, tags: undefined }),
+           await tools.args_probe({ query: 'b', limit: null, tags: null, since: null }),
+           await tools['args-probe']({ query: 'c', since: new Date(0) })
+         ]`
+      )
+
+      expect(result.isError).toBeUndefined()
+      expect(log).toEqual([
+        '{"query":"a"}',
+        '{"query":"b"}',
+        '{"query":"c","since":"1970-01-01T00:00:00.000Z"}'
+      ])
+      // Records keep the arguments as sent (compact JSON), before the registry drops nulls.
+      expect(result.nestedCalls?.calls.map(call => call.args)).toEqual([
+        '{"query":"a"}',
+        '{"query":"b","limit":null,"tags":null,"since":null}',
+        '{"query":"c","since":"1970-01-01T00:00:00.000Z"}'
+      ])
+    })
+  )
+
+  it.live('rejects arguments JSON would change inside the script without calling the tool', () =>
+    Effect.gen(function* () {
+      const log: ToolLog = []
+
+      const result = yield* runCode(
+        [moduleOf('host', [codemode()]), moduleOf('docs', [probeTool(log)])],
+        `const attempts = [
+           { query: 'a', limit: NaN },
+           { query: 'a', limit: Infinity },
+           { query: 'a', limit: -Infinity },
+           { query: 'a', tags: ['x', undefined] },
+           { query: 'a', tags: new Map() },
+           { query: 'a', tags: [() => 1] }
+         ]
+         const messages = []
+         for (const args of attempts) {
+           try { await tools.args_probe(args) } catch (error) { messages.push(error.name + ': ' + error.message) }
+         }
+         return messages`
+      )
+
+      const plain = 'pass plain JSON (objects, arrays, strings, finite numbers, booleans, null)'
+
+      expect(returnValue(result)).toEqual([
+        'TypeError: tools.args_probe: argument at limit is NaN; pass a finite number or omit the key',
+        'TypeError: tools.args_probe: argument at limit is Infinity; pass a finite number or omit the key',
+        'TypeError: tools.args_probe: argument at limit is -Infinity; pass a finite number or omit the key',
+        'TypeError: tools.args_probe: argument at tags[1] is undefined; arrays cannot hold undefined',
+        `TypeError: tools.args_probe: argument at tags is a Map; ${plain}`,
+        `TypeError: tools.args_probe: argument at tags[0] is a function; ${plain}`
+      ])
+      // Rejected before leaving the VM: never executed and never recorded.
+      expect(log).toEqual([])
+      expect(result.nestedCalls?.calls).toEqual([])
+    })
+  )
+
+  it.live('rejects unknown keys with a hint naming the allowed keys, prefixed by the tool', () =>
+    Effect.gen(function* () {
+      const log: ToolLog = []
+
+      const result = yield* runCode(
+        [moduleOf('host', [codemode()]), moduleOf('docs', [probeTool(log)])],
+        `try { await tools.args_probe({ query: 'a', limt: 5 }) } catch (error) { return error.message }`
+      )
+
+      const message = returnValue(result)
+
+      expect(log).toEqual([])
+      expect(message).toEqual(
+        expect.stringMatching(/^tools\.args_probe: Invalid args-probe arguments/)
+      )
+      expect(message).toEqual(
+        expect.stringContaining(
+          'Unknown argument "limt". Allowed arguments: query, limit, tags, since.'
+        )
+      )
+      // The record keeps the tool's own message, without the script-side prefix.
+      expect(result.nestedCalls?.calls[0]?.error).toMatch(/^Invalid args-probe arguments/)
+    })
+  )
+
+  it.live('keeps script line numbers, return, and exit() with the guarded tools', () =>
+    Effect.gen(function* () {
+      const modules = [moduleOf('host', [codemode()]), moduleOf('docs', [probeTool([])])]
+
+      const thrown = yield* runCode(modules, `const a = 1\nconst b = 2\nnull.x`)
+
+      expect(text(thrown.content)).toContain(
+        "Script error: script: TypeError: cannot read property 'x' of null\n    at <anonymous> (codemode.js:3:1)\n\nTool calls"
+      )
+
+      const guarded = yield* runCode(
+        modules,
+        `const a = 1\nawait tools.args_probe({ query: 'a', limit: NaN })`
+      )
+
+      expect(text(guarded.content)).toMatch(
+        /Script error: script: TypeError: tools\.args_probe: argument at limit is NaN; pass a finite number or omit the key\n {4}at <anonymous> \(codemode\.js:2:\d+\)\n\nTool calls/
+      )
+
+      const exited = yield* runCode(modules, `text('a'); exit(); text('b')`)
+
+      expect(exited.isError).toBeUndefined()
+      expect(text(exited.content)).toContain('Output:\na')
+      expect(text(exited.content)).not.toContain('Output:\na\nb')
+
+      const returned = yield* runCode(
+        modules,
+        `const value = await tools.args_probe({ query: 'r' })\nreturn { value, keys: Object.keys(tools), has: 'args_probe' in tools }`
+      )
+
+      expect(returnValue(returned)).toEqual({
+        value: '{"query":"r"}',
+        keys: ['args_probe', 'args-probe'],
+        has: true
       })
     })
   )

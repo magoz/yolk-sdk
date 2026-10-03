@@ -58,8 +58,15 @@ const program = Effect.gen(function* () {
   truncated error, and usage. Nested results never reach the model; only the script output and
   return value do.
 - A call resolves to `structuredContent` for tools with an output schema and to the text content
-  otherwise; error results reject with an `Error` carrying their text. Calls still running when
-  the script ends are cancelled and recorded as `cancelled`.
+  otherwise; error results reject with an `Error` whose message is `tools.<id>: <text>` (the
+  nested-call record keeps the raw text). Calls still running when the script ends are cancelled
+  and recorded as `cancelled`.
+- Arguments make a JSON round trip: `undefined` keys and `null` optionals are absent, unknown keys
+  reject with a hint naming the allowed keys, and values JSON would silently change (`NaN`,
+  `Infinity`, `undefined` array items, `Map`, `Set`, functions, class instances) reject in the
+  script before the call, with messages such as
+  `tools.search: argument at limit is NaN; pass a finite number or omit the key`. A `Date` passes
+  as its ISO string. Custom executors follow the same rules (`CodeModeExecutorTool`).
 - The tool description lists the globals and the nested tools by namespace, with the module's
   `ToolModule.description` under each heading. `codemode` + `listed` tools get TypeScript
   declarations within `inlineBudget` (default 3,000 estimated tokens, filled fairly across
