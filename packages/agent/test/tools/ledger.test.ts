@@ -187,6 +187,41 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('replays a call that completes in the last poll interval of the wait', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const decisions: Array<ToolLedgerDecisionEvent> = []
+
+      // Completes at 5.2 s, after the regular poll at 5 s and before the wait ends at 6 s.
+      const tools = [noteTool(probe, { sleep: '5200 millis' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store }))
+
+      yield* TestClock.adjust('1 second')
+
+      const second = yield* Effect.forkChild(
+        execute(tools, noteCall(), {
+          store,
+          maxWaitMs: 5_000,
+          pollIntervalMs: 1_000,
+          onLedgerDecision: event => {
+            decisions.push(event)
+          }
+        })
+      )
+
+      yield* TestClock.adjust('5 seconds')
+
+      const [firstResult, secondResult] = [yield* Fiber.join(first), yield* Fiber.join(second)]
+
+      expect(secondResult).toEqual(firstResult)
+      expect(decisions).toEqual([
+        { key: 'call_1', toolName: 'append_note', decision: 'in_flight_wait', waitedMs: 4_500 }
+      ])
+      expect(probe.runs).toEqual(['hot lead'])
+    })
+  )
+
   it.effect('bounds a stalled polling claim by the remaining wait budget', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
@@ -969,11 +1004,12 @@ describe('tool ledger', () => {
         { key: 'call_b', toolName: 'append_note', decision: 'fresh' },
         { key: 'call_b', toolName: 'append_note', decision: 'in_flight_wait', waitedMs: 2_000 },
         { key: 'call_c', toolName: 'append_note', decision: 'fresh' },
+        // The final poll runs half an interval before the 2 s wait ends; it is the last one.
         {
           key: 'call_c',
           toolName: 'append_note',
           decision: 'in_flight_timeout',
-          waitedMs: 2_000
+          waitedMs: 1_750
         },
         { key: 'call_c', toolName: 'append_note', decision: 'abandoned' },
         { key: 'call_a', toolName: 'append_note', decision: 'conflict' }

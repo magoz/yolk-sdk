@@ -250,8 +250,12 @@ export type ToolLedgerOptions = {
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */
   readonly pollIntervalMs?: number
-  /** Longest wait for an in-flight call, store polls included (a poll still pending when the
-   * wait ends is abandoned and the call times out). Default 150000.
+  /**
+   * Longest wait for an in-flight call, measured from the first claim: it bounds the sleeps and the
+   * polling claims after the first one (each poll gets at most the remaining wait; one still
+   * pending when the wait ends is abandoned and the call times out). The last sleep is shortened
+   * so one final poll starts within the wait. It does not bound the first claim, the call's own
+   * execution, or the recording of its outcome. Default 150000.
    */
   readonly maxWaitMs?: number
   /** Epoch milliseconds by which a wait must end (for example the step's function budget). A
@@ -765,14 +769,26 @@ export const executeLedgered = (input: {
 
     const waitTimedOut = decide('in_flight_timeout').pipe(Effect.as(inFlightTimeoutResult(call)))
 
+    const stillInFlight = (claimed: ToolLedgerClaim) =>
+      ToolLedgerClaim.$is('InFlight')(claimed) && matches(claimed.entry)
+
     // Every wait step, store polls included, stays within the wait budget: a stalled poll ends in
-    // the timeout result, never in running the call.
-    while (ToolLedgerClaim.$is('InFlight')(current) && matches(current.entry)) {
+    // the timeout result, never in running the call. Polls run every `pollIntervalMs`; within the
+    // last interval the sleep is shortened so one final poll still starts half an interval (or
+    // less, what remains) before the wait ends, and a call completing then is replayed.
+    while (stillInFlight(current)) {
       const now = yield* Clock.currentTimeMillis
+      const remaining = waitUntil - now
 
-      if (now >= waitUntil) return yield* waitTimedOut
+      if (remaining <= 0) return yield* waitTimedOut
 
-      yield* Effect.sleep(Duration.millis(Math.min(options.pollIntervalMs, waitUntil - now)))
+      const final = remaining <= options.pollIntervalMs
+
+      const sleepMs = final
+        ? Math.max(0, remaining - Math.ceil(options.pollIntervalMs / 2))
+        : options.pollIntervalMs
+
+      if (sleepMs > 0) yield* Effect.sleep(Duration.millis(sleepMs))
 
       const polledAt = yield* Clock.currentTimeMillis
 
@@ -785,6 +801,8 @@ export const executeLedgered = (input: {
       if (Option.isNone(polled)) return yield* waitTimedOut
 
       current = polled.value
+
+      if (final && stillInFlight(current)) return yield* waitTimedOut
     }
 
     const heartbeat = Effect.gen(function* () {
