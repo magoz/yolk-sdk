@@ -11,8 +11,7 @@ import {
   contentTypesRouteToBinary,
   isAlternateFormatEntry,
   relationshipsRouteToBinary,
-  sheetJsTextViews,
-  withoutBinaryParts
+  sheetJsTextViews
 } from './xlsx-routing.ts'
 
 export type OfficeArchiveLimits = Pick<
@@ -71,6 +70,7 @@ const archiveEntries = (bytes: Buffer, limits: OfficeArchiveLimits) => {
     throw invalid()
 
   const entries: Array<ArchiveEntry> = []
+  // OPC part names are case-insensitive, and SheetJS looks entries up ignoring case.
   const names = new Set<string>()
   let offset = directoryOffset
   let declaredTotal = 0
@@ -105,16 +105,18 @@ const archiveEntries = (bytes: Buffer, limits: OfficeArchiveLimits) => {
     const nameBytes = bytes.subarray(offset + 46, offset + 46 + nameSize)
     const name = new TextDecoder('utf-8', { fatal: true }).decode(nameBytes)
 
+    // `//` is rejected (SheetJS collapses the first one), but directory entries ending in `/` stay.
     if (
       /[\\\u0000-\u001f]/.test(name) ||
       name.startsWith('/') ||
+      name.includes('//') ||
       name.split('/').some(part => part === '..' || part === '.') ||
-      names.has(name) ||
+      names.has(name.toLowerCase()) ||
       /vbaProject\.bin$/i.test(name)
     )
       throw invalid()
 
-    names.add(name)
+    names.add(name.toLowerCase())
 
     if (
       bytes.readUInt32LE(local) !== 0x04034b50 ||
@@ -182,12 +184,7 @@ const unsupportedXlsxParts = () =>
 export type StrippedHyperlinkTags = ReadonlyMap<string, ReadonlyArray<string>>
 
 export type NormalizedOfficeArchive = {
-  /**
-   * A fresh stored-entry ZIP built only from validated (and, for XLSX, stripped) parts; without
-   * `.bin` parts when `omitBinaryParts` is set.
-   */
-  readonly archive: Uint8Array
-  /** Every validated part by entry name (including any `.bin` parts left out of `archive`). */
+  /** Every validated (and, for XLSX, hyperlink-stripped) part by entry name. */
   readonly parts: Readonly<Record<string, Uint8Array>>
   /** XLSX only: removed hyperlink tags, at most `maxHyperlinkTags` across the workbook. */
   readonly hyperlinkTags: StrippedHyperlinkTags
@@ -233,22 +230,21 @@ const inflateEntry = async (compressed: Buffer, record: (chunk: Buffer) => void)
 export type ReadOfficeArchiveOptions = {
   /** XLSX: hyperlink start tags to capture across the workbook (default 0). */
   readonly maxHyperlinkTags?: number
-  /**
-   * XLSX: leave `.bin` parts out of `archive`. SheetJS reaches its binary parsers only through a
-   * path ending in `.bin` and can read only entries that exist, so this is the backstop behind
-   * the content-type and relationship checks. Use it only for bytes handed to SheetJS.
-   */
-  readonly omitBinaryParts?: boolean
 }
 
+/** A fresh stored-entry ZIP of validated parts; the attacker's ZIP index is never reused. */
+export const storedArchive = (parts: Readonly<Record<string, Uint8Array>>) =>
+  zipSync({ ...parts }, { level: 0 })
+
 /**
- * Inflate bounded input chunks, count actual output, then discard the attacker's ZIP index.
- * Parsers receive only a fresh stored-entry archive built from the validated bytes.
+ * Inflate bounded input chunks, count actual output, and return the validated parts. The
+ * attacker's ZIP index is discarded: parsers only get archives rebuilt from these parts.
  *
- * For XLSX, every part loses its `<hyperlink>` tags before SheetJS sees it: SheetJS expands each
- * hyperlink range into per-cell objects before any budget runs, so one `ref="A1:XFD1048576"`
- * exhausts memory. The removed tags are returned so links can still be shown. XLSX input that
- * SheetJS would route to its binary (XLSB), ODS, or Numbers parsers is rejected.
+ * For XLSX, every part loses its `<hyperlink>` tags: SheetJS expands each hyperlink range into
+ * per-cell objects before any budget runs, so one `ref="A1:XFD1048576"` exhausts memory. The
+ * removed tags are returned so links can still be shown. XLSX input that SheetJS would route to
+ * its binary (XLSB), ODS, or Numbers parsers is rejected early with a clear error; the guarantee
+ * is that SheetJS only receives `buildSheetJsInput`'s allowlisted archive.
  */
 export const readOfficeArchive = (
   input: Uint8Array,
@@ -344,22 +340,21 @@ export const readOfficeArchive = (
         validated[entry.name] = rewritten
       }
 
-      const archived =
-        format === 'xlsx' && options.omitBinaryParts === true
-          ? withoutBinaryParts(validated)
-          : validated
-
-      return { archive: zipSync(archived, { level: 0 }), parts: validated, hyperlinkTags }
+      return { parts: validated, hyperlinkTags }
     },
     // Out-of-range header reads (RangeError) and inflate failures are malformed archives too.
     catch: error => (error instanceof OfficeArchiveError ? error : invalid())
   })
 
 /**
- * Validate a DOCX, XLSX, or PPTX archive with bounded inflation and return a fresh stored-entry
- * ZIP of its validated parts (XLSX parts without hyperlink tags; XLSX input SheetJS would parse
- * as XLSB, ODS, or Numbers is rejected). `FileExtractor` already runs this; call it directly to
- * validate Office bytes you store or pass to other parsers.
+ * Validate a DOCX, XLSX, or PPTX archive with bounded inflation and return a rebuilt stored-entry
+ * ZIP of every validated part, for storage or for other parsers. XLSX parts lose their hyperlink
+ * tags, and XLSX input with ODS or Numbers marker entries or XLSB parts is rejected; `.bin` parts
+ * SheetJS never parses (printer settings, OLE objects) are kept so stored files still open.
+ *
+ * The output is not SheetJS input. Never run SheetJS on it directly: extract XLSX text through
+ * `FileExtractor`, which hands SheetJS only an allowlisted archive it builds itself (worksheet,
+ * shared-string, style, and core-property parts with generated content types and relationships).
  */
 export const normalizeOfficeArchive = (
   bytes: Uint8Array,
@@ -370,4 +365,4 @@ export const normalizeOfficeArchive = (
     maxArchiveEntries: limits.maxArchiveEntries ?? defaultFileExtractorLimits.maxArchiveEntries,
     maxExpandedBytes: limits.maxExpandedBytes ?? defaultFileExtractorLimits.maxExpandedBytes,
     maxInputBytes: limits.maxInputBytes ?? defaultFileExtractorLimits.maxInputBytes
-  }).pipe(Effect.map(normalized => normalized.archive))
+  }).pipe(Effect.map(normalized => storedArchive(normalized.parts)))

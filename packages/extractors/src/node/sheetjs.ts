@@ -9,9 +9,46 @@ export const defaultSheetJsLoader: SheetJsLoader = () => import('xlsx')
 
 export type SheetJs = {
   readonly version: string
-  /** Parse workbook bytes; the result is checked before use. */
+  /** Parse workbook bytes with `sheetJsReadOptions`; the result is checked before use. */
   readonly read: (bytes: Uint8Array) => unknown
 }
+
+/**
+ * SheetJS `read` options: cell values and display text (`cell.w`) only.
+ *
+ * - `cellFormula: false`: no formula text. SheetJS otherwise copies a shifted master formula onto
+ *   every shared-formula dependent and scans every earlier array formula for each cell, before
+ *   any extractor budget runs. Cached values still render; formula-only cells render empty.
+ * - `cellHTML: false`: no rich-text HTML (`cell.h`) we never read.
+ * - `cellText: true`: keep the formatted display text (`cell.w`) the CSV uses.
+ * - `cellNF`, `cellStyles`, `cellDates: false`: no format strings or style objects; dates stay
+ *   serial numbers whose `cell.w` carries the formatted date (`cellStyles` would also force
+ *   `sheetStubs`).
+ * - `sheetStubs: false`: no objects for empty cells.
+ * - `bookDeps`, `bookFiles`, `bookProps`, `bookSheets`, `bookVBA: false`: no calculation chain,
+ *   raw archive, or VBA blob, and a full parse (not the properties-only or names-only modes).
+ * - `dense: false`: sheets keyed by address, as `xlsx-text.ts` reads them.
+ * - `WTF: false`: per-sheet parse errors skip the sheet instead of throwing.
+ *
+ * A fresh copy is passed on every call because SheetJS writes defaults into the options object.
+ */
+export const sheetJsReadOptions = {
+  type: 'array',
+  cellFormula: false,
+  cellHTML: false,
+  cellText: true,
+  cellNF: false,
+  cellStyles: false,
+  cellDates: false,
+  sheetStubs: false,
+  bookDeps: false,
+  bookFiles: false,
+  bookProps: false,
+  bookSheets: false,
+  bookVBA: false,
+  dense: false,
+  WTF: false
+} as const
 
 /** SemVer 2.0.0: `major.minor.patch`, optional `-prerelease`, optional `+build`. */
 const semver =
@@ -108,7 +145,7 @@ export const loadSheetJs = (loader: SheetJsLoader) =>
 
     const sheetJs: SheetJs = {
       version,
-      read: bytes => read(bytes, { type: 'array' })
+      read: bytes => read(bytes, { ...sheetJsReadOptions })
     }
 
     return sheetJs

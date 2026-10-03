@@ -1,37 +1,28 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { unzipSync } from 'fflate'
-import * as XLSX from 'xlsx'
 import { makeHyperlinkLookup } from '../src/node/xlsx-hyperlinks.ts'
 import type { XlsxHyperlink } from '../src/node/xlsx-hyperlinks.ts'
-import type { SheetJsLoader } from '../src/node/sheetjs.ts'
 import {
   decode,
+  expectAllowlisted,
   extractWith,
   hyperlinks,
   linkedRangeWorkbook,
+  recordingSheetJs,
   workbook,
   xlsxInput
 } from './fixtures.ts'
+import type { SheetJsCall } from './fixtures.ts'
 
-/** Real SheetJS 0.20.3, recording every archive it is asked to parse. */
-const recordingSheetJs =
-  (seen: Array<Uint8Array>): SheetJsLoader =>
-  async () => ({
-    version: XLSX.version,
-    read: (bytes: Uint8Array) => {
-      seen.push(bytes)
+const sawHyperlinkTag = (calls: ReadonlyArray<SheetJsCall>) =>
+  calls.some(({ bytes, names }) => {
+    expectAllowlisted(names)
 
-      return XLSX.read(bytes, { type: 'array' })
-    }
-  })
-
-const sawHyperlinkTag = (archives: ReadonlyArray<Uint8Array>) =>
-  archives.some(archive =>
-    Object.values(unzipSync(archive)).some(part =>
+    return Object.values(unzipSync(bytes)).some(part =>
       /<\/?(?:[\w.-]+:)?hyperlink\b/i.test(decode(part))
     )
-  )
+  })
 
 const external = (id: string, target: string) => ['rId' + id, 'hyperlink', target, true] as const
 
@@ -153,7 +144,7 @@ describe('XLSX hyperlinks', () => {
         { name: 'Plain', rows: [['no links']] },
         {
           name: 'R&D <2026>',
-          path: 'xl/worksheets/research.data',
+          path: 'xl/worksheets/research.xml',
           rows: [['paper']],
           afterSheetData:
             '<x:hyperlinks xmlns:x="urn:x"><x:hyperlink ref="A1" rel:id="rId7"/></x:hyperlinks>',
@@ -173,7 +164,7 @@ describe('XLSX hyperlinks', () => {
   for (const ref of ['A1:XFD1048576', 'B1:B1048576', 'A1:Z100000']) {
     it.effect(`annotates existing cells under ${ref}; SheetJS never sees the tag`, () =>
       Effect.gen(function* () {
-        const seen: Array<Uint8Array> = []
+        const seen: Array<SheetJsCall> = []
 
         const result = yield* extractWith(xlsxInput(linkedRangeWorkbook(ref, true)), {
           loadSheetJs: recordingSheetJs(seen)
@@ -194,7 +185,7 @@ describe('XLSX hyperlinks', () => {
 
     it.effect(`drops internal ${ref} links without expanding them`, () =>
       Effect.gen(function* () {
-        const seen: Array<Uint8Array> = []
+        const seen: Array<SheetJsCall> = []
 
         const result = yield* extractWith(xlsxInput(linkedRangeWorkbook(ref)), {
           loadSheetJs: recordingSheetJs(seen)

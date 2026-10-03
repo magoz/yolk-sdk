@@ -1,10 +1,14 @@
 import { Buffer } from 'node:buffer'
+import { expect } from '@effect/vitest'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import { Effect } from 'effect'
+import * as XLSX from 'xlsx'
 import { FileExtractor } from '../src/service.ts'
 import type { FileInput } from '../src/format.ts'
 import { makeFileExtractorLayer } from '../src/node/live-layer.ts'
 import type { FileExtractorOptions } from '../src/node/live-layer.ts'
+import type { SheetJsLoader } from '../src/node/sheetjs.ts'
+import { isSheetJsInputName } from '../src/node/xlsx-sheetjs-input.ts'
 
 export const xlsxMediaType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -223,3 +227,48 @@ export const xlsbHyperlinkSheet = (last: number) =>
     ),
     xlsbRecord(0x82)
   ])
+
+/** One `read` call made through a recording loader. */
+export type SheetJsCall = {
+  /** The archive SheetJS received. */
+  readonly bytes: Uint8Array
+  /** Entry names of that archive. */
+  readonly names: ReadonlyArray<string>
+  /** The options the extractor passed, copied before SheetJS adds its defaults. */
+  readonly options: XLSX.ParsingOptions
+  readonly workbook: XLSX.WorkBook
+}
+
+/** Real SheetJS 0.20.3 behind the extractor's loader, recording every call. */
+export const recordingSheetJs =
+  (calls: Array<SheetJsCall>): SheetJsLoader =>
+  async () => ({
+    version: XLSX.version,
+    read: (bytes: Uint8Array, options: XLSX.ParsingOptions) => {
+      const requested = { ...options }
+      const workbook = XLSX.read(bytes, options)
+
+      // Unzip only the archive the extractor built, never attacker input.
+      calls.push({ bytes, names: Object.keys(unzipSync(bytes)), options: requested, workbook })
+
+      return workbook
+    }
+  })
+
+/** Every entry SheetJS received is one of the canonical names the allowlist emits. */
+export const expectAllowlisted = (names: ReadonlyArray<string>) => {
+  expect(names.filter(name => !isSheetJsInputName(name))).toEqual([])
+  expect(names).toContain('xl/workbook.xml')
+}
+
+/** Cells SheetJS created for a sheet (own keys that are not `!` metadata). */
+export const cellCount = (sheet: object | undefined) =>
+  sheet === undefined ? 0 : Object.keys(sheet).filter(key => !key.startsWith('!')).length
+
+/** Every cell object SheetJS created across the workbook. */
+export const allCells = (workbook: XLSX.WorkBook): ReadonlyArray<XLSX.CellObject> =>
+  Object.values(workbook.Sheets).flatMap(sheet =>
+    Object.entries(sheet).flatMap(([key, cell]: [string, XLSX.CellObject]) =>
+      key.startsWith('!') ? [] : [cell]
+    )
+  )

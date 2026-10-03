@@ -63,20 +63,13 @@ const ownProperty = (target: object, key: string): unknown => {
   return 'value' in descriptor ? descriptor.value : descriptor.get?.call(target)
 }
 
-const cellText = (cell: object, maxCharacters: number): string => {
+const cellText = (cell: object): string => {
   if (ownProperty(cell, 't') === 'z') return ''
 
   const value = ownProperty(cell, 'v')
 
-  if (value === undefined || value === null) {
-    const formula = ownProperty(cell, 'f')
-
-    if (!Predicate.isString(formula) || ownProperty(cell, 'F') !== undefined) return ''
-
-    if (formula.length >= maxCharacters) throw outputTooLarge()
-
-    return `=${formula}`
-  }
+  // SheetJS runs with `cellFormula: false`: only cached values exist, formula-only cells are empty.
+  if (value === undefined || value === null) return ''
 
   // Prefer parser-provided display text. Do not run an untrusted format template here.
   const display = ownProperty(cell, 'w')
@@ -184,7 +177,7 @@ const renderSheets = (
           continue
         }
 
-        const text = cellText(cell, budget)
+        const text = cellText(cell)
 
         appendCell(decorate?.({ sheet: visited, row, column, text }) ?? text)
       }

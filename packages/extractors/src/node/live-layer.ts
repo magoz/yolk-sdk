@@ -16,12 +16,13 @@ import { defaultFileExtractorLimits, FileExtractorLimits } from '../limits.ts'
 import { sanitizeExtractedText } from '../sanitize.ts'
 import { FileExtractor } from '../service.ts'
 import type { FileExtractorApi } from '../service.ts'
-import { readOfficeArchive } from './office-archive.ts'
+import { readOfficeArchive, storedArchive } from './office-archive.ts'
 import type { NormalizedOfficeArchive } from './office-archive.ts'
 import { extractPptxText } from './pptx-text.ts'
 import { asXlsxWorkbook, defaultSheetJsLoader, loadSheetJs, workbookTitle } from './sheetjs.ts'
 import type { SheetJsLoader } from './sheetjs.ts'
 import { resolveXlsxHyperlinks } from './xlsx-hyperlinks.ts'
+import { buildSheetJsInput } from './xlsx-sheetjs-input.ts'
 import { extractBoundedXlsxText } from './xlsx-text.ts'
 
 export type FileExtractorOptions = {
@@ -125,10 +126,8 @@ const validatedArchive = (
     input.bytes,
     format,
     limits,
-    // One extra tag detects a workbook over the cap; SheetJS never gets `.bin` parts.
-    format === 'xlsx'
-      ? { maxHyperlinkTags: limits.maxXlsxHyperlinks + 1, omitBinaryParts: true }
-      : {}
+    // One extra tag detects a workbook over the cap.
+    format === 'xlsx' ? { maxHyperlinkTags: limits.maxXlsxHyperlinks + 1 } : {}
   ).pipe(
     Effect.mapError(
       error => new FileExtractionError({ message: error.message, format, cause: error })
@@ -137,10 +136,10 @@ const validatedArchive = (
 
 const extractDocx = (input: FileInput, limits: FileExtractorLimits) =>
   Effect.gen(function* () {
-    const { archive } = yield* validatedArchive(input, 'docx', limits)
+    const { parts } = yield* validatedArchive(input, 'docx', limits)
 
     const result = yield* Effect.tryPromise({
-      try: () => mammoth.extractRawText({ buffer: Buffer.from(archive) }),
+      try: () => mammoth.extractRawText({ buffer: Buffer.from(storedArchive(parts)) }),
       catch: cause =>
         new FileExtractionError({ message: 'Could not extract DOCX text', format: 'docx', cause })
     })
@@ -151,10 +150,20 @@ const extractDocx = (input: FileInput, limits: FileExtractorLimits) =>
 const extractXlsx = (input: FileInput, limits: FileExtractorLimits, loader: SheetJsLoader) =>
   Effect.gen(function* () {
     const normalized = yield* validatedArchive(input, 'xlsx', limits)
+
+    // SheetJS never sees the uploaded archive: only this allowlisted rebuild of its parts.
+    const sheetJsInput = yield* Effect.try({
+      try: () => buildSheetJsInput(normalized.parts, limits.maxXlsxSheets),
+      catch: cause =>
+        cause instanceof FileExtractionError
+          ? cause
+          : new FileExtractionError({ message: 'Could not read XLSX', format: 'xlsx', cause })
+    })
+
     const sheetJs = yield* loadSheetJs(loader)
 
     const parsed = yield* Effect.try({
-      try: () => sheetJs.read(normalized.archive),
+      try: () => sheetJs.read(sheetJsInput.archive),
       catch: cause =>
         new FileExtractionError({ message: 'Could not read XLSX', format: 'xlsx', cause })
     })

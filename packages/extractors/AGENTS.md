@@ -14,8 +14,9 @@ upload size policy, auth, storage, and what the text is used for.
 
 Root files: `errors.ts`, `format.ts`, `limits.ts`, `sanitize.ts`, `service.ts`. Node files (`src/node/`):
 `live-layer.ts` (dispatch, PDF/DOCX/PPTX/XLSX), `office-archive.ts` (bounded ZIP validation,
-hyperlink strip, UTF-16 guard), `xlsx-routing.ts` (SheetJS XLSB/ODS/Numbers routing checks and the
-`.bin` backstop), `sheetjs.ts` (lazy loader, version check, workbook guards),
+hyperlink strip, UTF-16 guard), `xlsx-sheetjs-input.ts` (the allowlisted archive SheetJS reads),
+`xlsx-routing.ts` (early XLSB/ODS/Numbers rejection), `xlsx-parts.ts` (part lookup, workbook
+sheets, relationships), `sheetjs.ts` (lazy loader, version check, read options, workbook guards),
 `xlsx-text.ts` (bounded CSV + annotations), `xlsx-hyperlinks.ts` (tag resolution, indexed lookup),
 `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `xml-text.ts` (entities, attributes).
 
@@ -35,24 +36,44 @@ hyperlink strip, UTF-16 guard), `xlsx-routing.ts` (SheetJS XLSB/ODS/Numbers rout
   `SheetJsUnavailableError`. Map archive failures (`OfficeArchiveError`) to `FileExtractionError`
   with the archive error as `cause`; keep messages user-safe (no parser payloads).
 - Every OOXML input goes through `readOfficeArchive` before any parser: bounded inflation counted
-  against declared sizes and `maxExpandedBytes`, strict ZIP directory checks, and a fresh
-  stored-entry archive. DOCX gets the normalized archive, PPTX reads the validated parts directly.
+  against declared sizes and `maxExpandedBytes`, strict ZIP directory checks (no `..`, `.`, `//`,
+  absolute, backslash, or control-character names, no names equal ignoring case; directory
+  entries ending in `/` are fine). DOCX gets `storedArchive(parts)`, PPTX reads the validated
+  parts directly, and SheetJS gets only `buildSheetJsInput(parts)`.
 - XLSX: strip every `<hyperlink>` tag (`/<\/?(?:[\w.-]+:)?hyperlink\b[^<>]*>/gi`, a superset of
   SheetJS's `hlinkregex`, replaced with a space) from every part, whatever its name or type,
   Latin-1 round-trip so other bytes are unchanged, before SheetJS.
   Capture start tags as they are removed (`maxXlsxHyperlinks` + 1 to detect truncation), then
   reject parts whose stripped bytes decode as BOM-marked UTF-16 with a hyperlink tag.
-- XLSX: reject input SheetJS would route to its binary (XLSB), ODS, or Numbers parsers before
-  loading SheetJS (`xlsx-routing.ts`): marker entries (`META-INF/manifest.xml`, `objectdata.xml`,
-  `Index/Document.iwa`, any `Index.zip`, `Root Entry/…`, any case); `<Override>` XLSB content types,
-  workbook parts other than `/xl/workbook.xml`, or `.bin` parts outside the allowlisted types; and
-  `.bin` relationship targets (raw or SheetJS-unescaped) outside the allowlisted relationship
-  types. `<Default>` entries are ignored (SheetJS's own XLSX writer emits a binary `bin` Default).
-- Backstop: the archive handed to SheetJS omits every `.bin` part (`omitBinaryParts`), so its
-  binary parsers never receive data even if a routing check misses a path. `normalizeOfficeArchive`
-  keeps `.bin` parts. Never pass SheetJS an archive built without this option.
+- XLSX: SheetJS never receives the uploaded archive, only `buildSheetJsInput`'s rebuild (the
+  security guarantee). Allowlist, emitted under these canonical names: generated
+  `[Content_Types].xml`, `_rels/.rels` (never read by SheetJS 0.20.3; keeps the input a valid
+  OPC package), and `xl/_rels/workbook.xml.rels` (no attacker override, part name, type, or target
+  reaches SheetJS); `xl/workbook.xml` (sheet names, order, date system); sheet `n`'s worksheet as
+  `xl/worksheets/sheet<n>.xml`, only when its workbook relationship is a worksheet resolving to
+  `xl/worksheets/*.xml` (SheetJS's own fallback name, each source part once); `xl/sharedStrings.xml`
+  (cell text); `xl/styles.xml` (number formats behind `cell.w`); `docProps/core.xml` (title).
+  Themes (read only with `cellStyles`), `docProps/app.xml` (sheet names come from the workbook),
+  worksheet relationships, comments, VML, drawings, `.bin`, markers, external links, pivot caches,
+  calc chains, metadata, and `customXml` are excluded. Source parts are found ignoring case and
+  must end in `.xml`. Adding a part needs proof that SheetJS needs it for cell values or display
+  text, and a test that it cannot reach a non-XLSX parser.
+- SheetJS `read` options live in `sheetJsReadOptions` (`sheetjs.ts`): `cellFormula: false`
+  (shared-formula copies and array-formula scans), `cellHTML`, `cellNF`, `cellStyles`,
+  `cellDates`, `sheetStubs`, `book*` off, `dense: false`, `cellText: true`. Pass a fresh copy per
+  call (SheetJS writes defaults into it). Formula-only cells render empty; never re-add `=formula`.
+- XLSX early rejection (`xlsx-routing.ts`, clear error only, not the guarantee): marker entries
+  after SheetJS normalisation (`sheetJsEntryPath`: first `//` collapsed, `Root Entry/` stripped,
+  `\` as `/`, lower case), any `Root Entry/` name, XLSB content types in overrides, and `Target` or
+  `PartName` paths ending in `.bin` outside the type allowlists. Scan with SheetJS's `tagregex1`
+  and read attributes as `parsexmltag` does (exact-case keys); never match `.bin` against the whole
+  tag. `normalizeOfficeArchive` keeps every part and is never SheetJS input.
 - Every regex over part text must stop at the next `<` (`[^<>]`) or otherwise stay linear; no
-  lazy `[\s\S]*?` retried from every start (see `pptx-text.ts` `elementMatches`).
+  lazy `[\s\S]*?` retried from every start (see `pptx-text.ts` `elementMatches`). The one
+  exception is the routing scan's copy of SheetJS `tagregex1`: a quoted value may hold `<`, but
+  each attempt stops at the next quote of its kind, so the scan stays linear.
+- `buildSheetJsInput` fails a workbook with more `<sheet>` elements than `maxXlsxSheets` before
+  SheetJS runs.
 - Links resolve through `xl/workbook.xml` sheet `r:id` → workbook rels → worksheet part (any
   extension) → worksheet rels `TargetMode="External"`. Show only normalized `http:`/`https:`/`mailto:`
   targets (≤ 2,048 characters, longer links dropped), append `#location` like SheetJS; omit
@@ -70,13 +91,20 @@ hyperlink strip, UTF-16 guard), `xlsx-routing.ts` (SheetJS XLSB/ODS/Numbers rout
 
 - `test/file-extractor.test.ts`: every format end to end, limits, empty/unsupported, SheetJS
   missing/outdated/invalid/CommonJS and strict SemVer (prereleases, malformed versions),
-  CVE-2023-30533 regression, PDF lifecycle, linear PPTX scan, minimum text limit, `fileFormatFor`.
+  CVE-2023-30533 regression (comment never handed over; SheetJS itself not polluted), PDF lifecycle, linear PPTX scan, minimum text limit, `fileFormatFor`.
 - `test/office-archive.test.ts`: 10x archive tests, zip bombs, LMK hyperlink strip variants, taus
   UTF-16 guard (direct and through `FileExtractor`), parity with SheetJS's `hlinkregex` read from
   the installed build, and a linear-strip regression.
 - `test/xlsx-routing.test.ts`: XLSB worksheets/workbooks (a hand-built `BrtHLink` record), content
-  type overrides, ODS/Numbers markers, allowed `.bin` parts, and the `.bin` backstop. Real-SheetJS
-  controls show each expanding route; a recording loader proves SheetJS is never called.
+  type overrides, lower-case `type`, `<` inside quoted `Target`/`PartName`, ODS/Numbers markers
+  including `//` and `Root Entry/` names, allowed `.bin` parts (toolbars too), and `.bin` false
+  positives. Real-SheetJS controls show each expanding route, a recording loader proves SheetJS is
+  never called, and `buildSheetJsInput` on the unchecked parts shows the allowlist alone holds.
+- `test/xlsx-sheetjs-input.test.ts`: shared/array formulas and many comments (controls expand,
+  extraction does not), cached vs formula-only cells, generated parts, canonical names, sheet
+  limit, and positive controls (SheetJS-written and Excel-like workbooks, text and title).
+- Every test that reaches SheetJS uses `recordingSheetJs` and `expectAllowlisted` from
+  `test/fixtures.ts`.
 - `test/xlsx-text.test.ts`: 10x bounded CSV tests (ranges, quoting, budgets, visit preflight).
 - `test/xlsx-hyperlinks.test.ts`: link output, schemes, overlap, sheet mapping, full-sheet/column
   ranges (SheetJS never sees a tag, via a recording loader), budget marker, cap, display/target

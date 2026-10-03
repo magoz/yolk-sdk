@@ -1,5 +1,16 @@
 import { Buffer } from 'node:buffer'
 import type { StrippedHyperlinkTags } from './office-archive.ts'
+import {
+  directoryOf,
+  indexParts,
+  relationships,
+  relationshipsPathFor,
+  resolvePartPath,
+  utf8Text,
+  workbookPartPath,
+  workbookSheets
+} from './xlsx-parts.ts'
+import type { Relationship } from './xlsx-parts.ts'
 import { parseCellRange } from './xlsx-range.ts'
 import type { CellRange } from './xlsx-range.ts'
 import { prefixedAttribute, xmlAttributes } from './xml-text.ts'
@@ -34,54 +45,6 @@ const capDisplay = (display: string) => {
 }
 
 const shownProtocols = new Set(['http:', 'https:', 'mailto:'])
-
-// `[^<>]` keeps each candidate inside one tag, so scans stay linear in the part size.
-const startTagPattern = (localName: string) =>
-  new RegExp(`<(?:[\\w.-]+:)?${localName}\\b[^<>]*>`, 'g')
-
-const sheetTag = startTagPattern('sheet')
-
-const relationshipTag = startTagPattern('Relationship')
-
-const utf8Text = (bytes: Uint8Array | undefined) =>
-  bytes === undefined ? '' : Buffer.from(bytes).toString('utf8')
-
-const resolvePartPath = (baseDirectory: string, target: string) => {
-  const segments: Array<string> = []
-  const path = target.startsWith('/') ? target.slice(1) : `${baseDirectory}${target}`
-
-  for (const segment of path.split('/')) {
-    if (segment === '..') segments.pop()
-    else if (segment !== '.' && segment !== '') segments.push(segment)
-  }
-
-  return segments.join('/')
-}
-
-const directoryOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1)
-
-const relationshipsPathFor = (partPath: string) =>
-  `${directoryOf(partPath)}_rels/${partPath.slice(partPath.lastIndexOf('/') + 1)}.rels`
-
-type Relationship = {
-  readonly target: string
-  readonly external: boolean
-}
-
-const relationships = (xml: string): ReadonlyMap<string, Relationship> => {
-  const byId = new Map<string, Relationship>()
-
-  for (const [tag] of xml.matchAll(relationshipTag)) {
-    const attributes = xmlAttributes(tag)
-    const id = attributes.get('Id')
-    const target = attributes.get('Target')
-
-    if (id !== undefined && target !== undefined && !byId.has(id))
-      byId.set(id, { target, external: attributes.get('TargetMode') === 'External' })
-  }
-
-  return byId
-}
 
 const shownTarget = (target: string) => {
   if (target.length > maxHyperlinkTargetCharacters || !URL.canParse(target)) return undefined
@@ -138,23 +101,24 @@ export const resolveXlsxHyperlinks = (
 
   if (hyperlinkTags.size === 0) return bySheet
 
-  const workbookPath = 'xl/workbook.xml'
-  const workbookRelationships = relationships(utf8Text(parts[relationshipsPathFor(workbookPath)]))
+  const index = indexParts(parts)
+  const text = (path: string) => utf8Text(index.find(path)?.bytes)
+  const workbookRelationships = relationships(text(relationshipsPathFor(workbookPartPath)))
 
-  for (const [tag] of utf8Text(parts[workbookPath]).matchAll(sheetTag)) {
-    const attributes = xmlAttributes(tag)
-    const name = attributes.get('name')
-    const id = prefixedAttribute(attributes, 'id')
+  for (const { name, id } of workbookSheets(text(workbookPartPath))) {
     const relationship = id === undefined ? undefined : workbookRelationships.get(id)
 
     if (name === undefined || relationship === undefined || bySheet.has(name)) continue
 
-    const sheetPath = resolvePartPath(directoryOf(workbookPath), relationship.target)
-    const tags = hyperlinkTags.get(sheetPath)
+    const sheetPart = index.find(
+      resolvePartPath(directoryOf(workbookPartPath), relationship.target)
+    )
 
-    if (tags === undefined) continue
+    const tags = sheetPart === undefined ? undefined : hyperlinkTags.get(sheetPart.name)
 
-    const sheetRelationships = relationships(utf8Text(parts[relationshipsPathFor(sheetPath)]))
+    if (sheetPart === undefined || tags === undefined) continue
+
+    const sheetRelationships = relationships(text(relationshipsPathFor(sheetPart.name)))
 
     const links = tags.flatMap(linkTag => {
       const link = hyperlinkFrom(linkTag, sheetRelationships)

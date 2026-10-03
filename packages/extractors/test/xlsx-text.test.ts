@@ -83,17 +83,18 @@ describe('bounded XLSX extraction', () => {
     ).toBe('# Sheet1\n"a,b","quoted ""text""",42\nTRUE,"line\nbreak",50%')
   })
 
-  it('writes formulas without cached values and skips stub cells', () => {
+  it('leaves cells without a cached value empty, formulas included, and skips stub cells', () => {
     expect(
       extract(
         workbook({
-          '!ref': 'A1:C1',
+          '!ref': 'A1:D1',
           A1: { t: 'n', f: 'SUM(B1:C1)' },
           B1: { t: 'z' },
-          C1: { t: 'd', v: new Date(Date.UTC(2026, 0, 2)) }
+          C1: { t: 'd', v: new Date(Date.UTC(2026, 0, 2)) },
+          D1: { t: 'e', f: '1/0' }
         })
       )
-    ).toBe('# Sheet1\n=SUM(B1:C1),,2026-01-02T00:00:00.000Z')
+    ).toBe('# Sheet1\n,,2026-01-02T00:00:00.000Z,')
   })
 
   it('rejects non-finite numeric cells and keeps Infinity out of CSV', () => {

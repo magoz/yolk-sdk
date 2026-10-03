@@ -1,11 +1,11 @@
 import { Buffer } from 'node:buffer'
 
 /**
- * Keep XLSX input on SheetJS's XML path. SheetJS 0.20.3 `parse_zip` routes an archive to its ODS
- * or Numbers parsers when certain entries exist (checked before content types), and hands any
- * part whose path ends in `.bin` to its binary (XLSB) parsers. `parse_ws_bin` expands every
- * `BrtHLink` range into per-cell objects, and `parse_ods` expands repeated rows and columns, both
- * before any extractor budget runs. None of those parts pass through the XML hyperlink strip.
+ * Early, exact rejection of XLSX input that SheetJS 0.20.3 would hand to its ODS, Numbers, or
+ * binary (XLSB) parsers, so users get a clear error instead of "Could not read XLSX". These checks
+ * are not the security guarantee: SheetJS only ever receives the allowlisted archive built by
+ * `buildSheetJsInput` (`xlsx-sheetjs-input.ts`), which contains no marker entries and no `.bin`
+ * parts whatever these checks decide.
  */
 
 const swapUtf16ByteOrder = (bytes: Buffer) =>
@@ -33,7 +33,19 @@ export const sheetJsTextViews = (content: Uint8Array): ReadonlyArray<string> => 
   ]
 }
 
-/** Entries `parse_zip` checks before content types (case-insensitive full paths). */
+/**
+ * An entry name as SheetJS looks it up: its ZIP reader (`cfb_add`) keeps a name that already
+ * starts with `Root Entry/` and otherwise stores `"Root Entry/" + name` with the first `//`
+ * collapsed; `safegetzipfile` strips `Root Entry/`, treats `\` and `/` alike, and compares
+ * lower-cased names.
+ */
+export const sheetJsEntryPath = (name: string) =>
+  (name.startsWith('Root Entry/') ? name : `Root Entry/${name}`.replace('//', '/'))
+    .replace(/^Root Entry\//, '')
+    .replaceAll('\\', '/')
+    .toLowerCase()
+
+/** Entries `parse_zip` checks before content types (SheetJS-normalized paths). */
 const alternateFormatEntries = new Set([
   'meta-inf/manifest.xml',
   'objectdata.xml',
@@ -41,84 +53,90 @@ const alternateFormatEntries = new Set([
 ])
 
 /**
- * Whether SheetJS would treat this entry name as an ODS, UOC, or Numbers marker. `CFB.find`
- * matches `Index.zip` by base name, and the CFB container strips a leading `Root Entry/`, so such
- * names are rejected outright.
+ * Whether SheetJS would treat this entry as an ODS, UOC, or Numbers marker. `CFB.find` matches
+ * `Index.zip` by base name, and any `Root Entry/` name (any case) is rejected outright.
  */
 export const isAlternateFormatEntry = (name: string) => {
-  const lower = name.toLowerCase()
+  const path = sheetJsEntryPath(name)
 
   return (
-    alternateFormatEntries.has(lower) ||
-    lower.startsWith('root entry/') ||
-    lower.slice(lower.lastIndexOf('/') + 1) === 'index.zip'
+    name.toLowerCase().startsWith('root entry/') ||
+    alternateFormatEntries.has(path) ||
+    path.slice(path.lastIndexOf('/') + 1) === 'index.zip'
   )
 }
 
-/** SheetJS dispatches to a binary parser only for paths ending in `.bin`. */
-export const isBinaryPartName = (name: string) => name.toLowerCase().endsWith('.bin')
+/**
+ * SheetJS's own tag pattern (`tagregex1`, used for every part it parses): quoted values may hold
+ * `<` and `>`. Each attempt stops at the next quote of its kind, so a scan stays linear.
+ */
+const sheetJsTag =
+  /<[/?]?[a-zA-Z0-9:_-]+(?:\s+[^"\s?<>/]+\s*=\s*(?:"[^"]*"|'[^']*'|[^'"<>\s=]+))*\s*[/?]?>/gm
 
-/** Parts SheetJS may read during extraction: everything except `.bin` parts (the backstop). */
-export const withoutBinaryParts = (parts: Readonly<Record<string, Uint8Array>>) => {
-  const kept: Record<string, Uint8Array> = Object.create(null)
+/** SheetJS `attregexg`. */
+const sheetJsAttribute = /\s([^"\s?>/]+)\s*=\s*((?:")([^"]*)(?:")|(?:')([^']*)(?:')|([^'">\s]+))/g
 
-  for (const [name, bytes] of Object.entries(parts)) {
-    if (!isBinaryPartName(name)) kept[name] = bytes
-  }
-
-  return kept
-}
-
-// Tag candidates never span a `<`, so every scan is linear in the part size. The quote-aware
-// pattern also keeps `>` inside quoted values; the plain one tolerates unbalanced quotes.
-const plainTag = /<[^<>]*>/g
-
-const quotedTag = /<[^<>"']*(?:(?:"[^"<]*"|'[^'<]*')[^<>"']*)*>/g
-
-const tagName = /^<[/?]?([^\s/>]*)/
-
-/** Attributes as SheetJS `parsexmltag` reads them: preceded by whitespace, any quoting. */
-const attributePattern = /(?<=\s)([^"\s?>/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^'">\s]+))/g
-
-/** Start tags whose local name (any prefix, any case) is `localName`, from every view. */
-const tagsNamed = (content: Uint8Array, localName: string) => {
-  const tags = new Set<string>()
-
-  for (const text of sheetJsTextViews(content)) {
-    for (const pattern of [plainTag, quotedTag]) {
-      for (const [tag] of text.matchAll(pattern)) {
-        const name = tagName.exec(tag)?.[1] ?? ''
-
-        if (name.slice(name.indexOf(':') + 1).toLowerCase() === localName) tags.add(tag)
-      }
-    }
-  }
-
-  return tags
+type SheetJsTag = {
+  /** The tag up to its first space, line feed, or carriage return (SheetJS `y[0]`). */
+  readonly head: string
+  readonly attributes: ReadonlyMap<string, string>
 }
 
 /**
- * Every value of the attribute keys SheetJS would read as `key` (compared case-insensitively):
- * a namespace prefix is dropped, and an unprefixed name is cut at its first `_`, as SheetJS does.
+ * Port of SheetJS `parsexmltag`: exact-case keys (plus lower-cased copies), a namespace prefix
+ * dropped, an unprefixed name cut at its first `_`, the last value winning. Values are raw.
  */
-const attributeValues = (tag: string, key: string) => {
-  const values: Array<string> = []
+const parseSheetJsTag = (tag: string): SheetJsTag => {
+  let end = 0
 
-  for (const match of tag.matchAll(attributePattern)) {
-    const name = match[1] ?? ''
-    const colon = name.indexOf(':')
-    const underscore = name.indexOf('_')
+  for (; end < tag.length; end += 1) {
+    const code = tag.charCodeAt(end)
 
-    const local =
-      colon >= 0 ? name.slice(colon + 1) : underscore > 0 ? name.slice(0, underscore) : name
-
-    const value = match[2] ?? match[3] ?? match[4]
-
-    if (value !== undefined && local.toLowerCase() === key) values.push(value)
+    if (code === 32 || code === 10 || code === 13) break
   }
 
-  return values
+  const attributes = new Map<string, string>()
+
+  if (end === tag.length) return { head: tag, attributes }
+
+  for (const [match] of tag.matchAll(sheetJsAttribute)) {
+    const text = match.slice(1)
+    let equals = text.indexOf('=')
+    let name = text.slice(0, equals).trim()
+
+    while (text.charCodeAt(equals + 1) === 32) equals += 1
+
+    const quoteCode = text.charCodeAt(equals + 1)
+    const quoted = quoteCode === 34 || quoteCode === 39 ? 1 : 0
+    const value = text.slice(equals + 1 + quoted, text.length - quoted)
+    const colon = name.indexOf(':')
+
+    if (colon < 0) {
+      if (name.indexOf('_') > 0) name = name.slice(0, name.indexOf('_'))
+    } else {
+      const local = (colon === 5 && name.startsWith('xmlns') ? 'xmlns' : '') + name.slice(colon + 1)
+
+      if (attributes.has(local) && name.slice(colon - 3, colon) === 'ext') continue
+
+      name = local
+    }
+
+    attributes.set(name, value)
+    attributes.set(name.toLowerCase(), value)
+  }
+
+  return { head: tag.slice(0, end), attributes }
 }
+
+/** Whether any tag SheetJS would parse from any view of `content` satisfies `test`. */
+const someSheetJsTag = (content: Uint8Array, test: (tag: SheetJsTag) => boolean) =>
+  sheetJsTextViews(content).some(text => {
+    for (const [tag] of text.matchAll(sheetJsTag)) {
+      if (test(parseSheetJsTag(tag))) return true
+    }
+
+    return false
+  })
 
 const namedEntities: ReadonlyMap<string, string> = new Map([
   ['quot', '"'],
@@ -146,14 +164,29 @@ const unescapeLikeSheetJs = (text: string): string =>
       String.fromCharCode(Number.parseInt(code, 16))
     )
 
-/** A `.bin` path anywhere in the tag text, raw or after SheetJS unescaping. */
-const binaryPathPattern = /\.bin\b/i
+/** SheetJS `resolve_path` from the directory of `xl/…` (only the final segment matters here). */
+const resolveLikeSheetJs = (target: string) => {
+  if (target.startsWith('/')) return target.slice(1)
 
-const mentionsBinaryPart = (tag: string) =>
-  binaryPathPattern.test(tag) || binaryPathPattern.test(unescapeLikeSheetJs(tag))
+  const segments = ['xl']
 
-const normalizedValues = (values: ReadonlyArray<string>) =>
-  values.flatMap(value => [value, unescapeLikeSheetJs(value)]).map(value => value.trim())
+  for (const step of target.split('/')) {
+    if (step === '..') segments.pop()
+    else if (step !== '.') segments.push(step)
+  }
+
+  return segments.join('/')
+}
+
+/**
+ * Whether a `Target` or `PartName` names a path ending in `.bin`, the only suffix SheetJS hands
+ * to a binary parser. Checked raw and SheetJS-unescaped, as written and resolved.
+ */
+const namesBinaryPart = (value: string) =>
+  [value, unescapeLikeSheetJs(value)].some(
+    path =>
+      path.toLowerCase().endsWith('.bin') || resolveLikeSheetJs(path).toLowerCase().endsWith('.bin')
+  )
 
 /**
  * Relationship types whose `.bin` targets SheetJS never parses: it follows workbook
@@ -171,74 +204,54 @@ const binaryRelationshipTypes = new Set([
 ])
 
 /**
- * Whether a relationships part names a `.bin` target under a relationship type outside the
- * allowlist. Every tag naming a `.bin` path must carry only allowlisted types.
+ * Whether a relationships part has a `<Relationship>` whose `Target` ends in `.bin` and whose
+ * `Type` (read exactly as SheetJS reads it: case-sensitive, missing counts as a sheet) is not on
+ * the allowlist.
  */
-export const relationshipsRouteToBinary = (content: Uint8Array) => {
-  for (const tag of tagsNamed(content, 'relationship')) {
-    if (!mentionsBinaryPart(tag)) continue
+export const relationshipsRouteToBinary = (content: Uint8Array) =>
+  someSheetJsTag(content, ({ head, attributes }) => {
+    const target = attributes.get('Target')
 
-    const types = normalizedValues(attributeValues(tag, 'type'))
+    if (head !== '<Relationship' || target === undefined || !namesBinaryPart(target)) return false
 
-    if (
-      types.length === 0 ||
-      !types.every(type => binaryRelationshipTypes.has(type.slice(type.lastIndexOf('/') + 1)))
-    )
-      return true
-  }
+    const type = attributes.get('Type')
 
-  return false
-}
-
-/** Content types SheetJS maps to its workbook parser (`ct2type` "workbooks"), lower-cased. */
-const workbookContentTypes = new Set([
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
-  'application/vnd.ms-excel.sheet.macroenabled.main+xml',
-  'application/vnd.ms-excel.sheet.binary.macroenabled.main',
-  'application/vnd.ms-excel.addin.macroenabled.main+xml',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml'
-])
+    return type === undefined || !binaryRelationshipTypes.has(type.slice(type.lastIndexOf('/') + 1))
+  })
 
 /** Content types of `.bin` parts SheetJS never parses, lower-cased. */
 const binaryPartContentTypes = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.printersettings',
   'application/vnd.ms-office.activex',
   'application/vnd.openxmlformats-officedocument.oleobject',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.customproperty'
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.customproperty',
+  'application/vnd.ms-excel.attachedtoolbars'
 ])
 
-/** XLSB part types: `application/vnd.ms-excel.*` without an `+xml` suffix. */
+/** XLSB part types: `application/vnd.ms-excel.*` without an `+xml` suffix (toolbars excepted). */
 const isBinarySpreadsheetType = (contentType: string) =>
-  contentType.startsWith('application/vnd.ms-excel.') && !contentType.endsWith('+xml')
+  contentType.startsWith('application/vnd.ms-excel.') &&
+  !contentType.endsWith('+xml') &&
+  !binaryPartContentTypes.has(contentType)
 
 /**
- * Whether `[Content_Types].xml` sends SheetJS to a binary parser: an `<Override>` with an XLSB
- * content type, a workbook part other than `/xl/workbook.xml`, or a `.bin` part whose content
- * type is outside the allowlist. `<Default>` entries are ignored: SheetJS does not route by them,
- * and its own XLSX writer emits `<Default Extension="bin">` with the XLSB workbook type.
+ * Whether `[Content_Types].xml` has an `<Override>` (any prefix, as SheetJS reads it) with an
+ * XLSB content type, or a `PartName` ending in `.bin` whose content type is not on the allowlist.
+ * `<Default>` entries are ignored: SheetJS does not route by them, and its own XLSX writer emits
+ * `<Default Extension="bin">` with the XLSB workbook type.
  */
-export const contentTypesRouteToBinary = (content: Uint8Array) => {
-  for (const tag of tagsNamed(content, 'override')) {
-    const contentTypes = normalizedValues(attributeValues(tag, 'contenttype')).map(type =>
-      type.toLowerCase()
+export const contentTypesRouteToBinary = (content: Uint8Array) =>
+  someSheetJsTag(content, ({ head, attributes }) => {
+    if (head.replace(/<\w*:/, '<') !== '<Override') return false
+
+    const contentType = attributes.get('ContentType')?.toLowerCase()
+    const partName = attributes.get('PartName')
+
+    if (contentType !== undefined && isBinarySpreadsheetType(contentType)) return true
+
+    return (
+      partName !== undefined &&
+      namesBinaryPart(partName) &&
+      (contentType === undefined || !binaryPartContentTypes.has(contentType))
     )
-
-    const partNames = normalizedValues(attributeValues(tag, 'partname'))
-
-    if (contentTypes.some(isBinarySpreadsheetType)) return true
-
-    if (
-      contentTypes.some(type => workbookContentTypes.has(type)) &&
-      (partNames.length === 0 || partNames.some(name => name !== '/xl/workbook.xml'))
-    )
-      return true
-
-    if (
-      mentionsBinaryPart(tag) &&
-      (contentTypes.length === 0 || !contentTypes.every(type => binaryPartContentTypes.has(type)))
-    )
-      return true
-  }
-
-  return false
-}
+  })

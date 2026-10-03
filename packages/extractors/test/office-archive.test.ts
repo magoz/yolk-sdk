@@ -6,6 +6,8 @@ import { Effect, Result } from 'effect'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import * as XLSX from 'xlsx'
 import { normalizeOfficeArchive } from '../src/node/index.ts'
+import { sheetJsReadOptions } from '../src/node/sheetjs.ts'
+import { buildSheetJsInput } from '../src/node/xlsx-sheetjs-input.ts'
 import {
   officeInflateChunkBytes,
   readOfficeArchive,
@@ -241,9 +243,12 @@ describe('XLSX hyperlink stripping', () => {
         expect(decode(parts[targetPath])).not.toMatch(/<hyperlink\b/)
         expect(parts['custom/binary.data']).toEqual(binary)
 
-        const parsed = XLSX.read(normalized, { type: 'array' })
+        // SheetJS only ever reads the allowlisted rebuild, which skips non-XML worksheet parts.
+        const parsed = XLSX.read(buildSheetJsInput(parts, 100).archive, { ...sheetJsReadOptions })
 
-        expect(parsed.Sheets.Sheet1?.A1?.v).toBe('Säker cell')
+        expect(parsed.Sheets.Sheet1?.A1?.v).toBe(
+          variant === 'nested tag' ? 'Säker cell' : undefined
+        )
         expect(parsed.Sheets.Sheet1?.B2).toBeUndefined()
       })
     )

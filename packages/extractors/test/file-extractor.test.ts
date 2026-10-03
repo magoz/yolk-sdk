@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Cause, Effect, Exit } from 'effect'
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, unzipSync, zipSync } from 'fflate'
 import * as XLSX from 'xlsx'
 import {
   FileExtractionError,
@@ -12,7 +12,16 @@ import {
 import { minimumXlsxTextCharacters } from '../src/limits.ts'
 import { withAcquiredPdfDocument } from '../src/node/live-layer.ts'
 import { omittedHyperlinksMarkerReserve } from '../src/node/xlsx-text.ts'
-import { encode, extractWith, workbookParts, xlsxInput, zipParts } from './fixtures.ts'
+import {
+  encode,
+  expectAllowlisted,
+  extractWith,
+  recordingSheetJs,
+  workbookParts,
+  xlsxInput,
+  zipParts
+} from './fixtures.ts'
+import type { SheetJsCall } from './fixtures.ts'
 
 const zipText = (text: string) => Uint8Array.from(strToU8(text))
 
@@ -271,6 +280,7 @@ describe('FileExtractor', () => {
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
     })
   )
+
   it.effect('treats an XLSX text limit too small for the omitted-links marker as a defect', () =>
     Effect.gen(function* () {
       const input = { filename: 'a.txt', mediaType: 'text/plain', bytes: encode('a') }
@@ -394,7 +404,8 @@ describe('SheetJS loading', () => {
   it.effect('does not let a crafted comment pollute Object.prototype (CVE-2023-30533)', () =>
     Effect.gen(function* () {
       // SheetJS before 0.19.3 inserted comments with `sheet[ref]`, so `ref="__proto__"` made
-      // `Object.prototype.c` a comment list.
+      // `Object.prototype.c` a comment list. Comments never reach SheetJS now, and 0.20.3 itself
+      // is checked separately on the crafted file.
       const parts = workbookParts([
         {
           name: 'Sheet1',
@@ -407,9 +418,26 @@ describe('SheetJS loading', () => {
         '<?xml version="1.0"?><comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>a</author></authors><commentList><comment ref="__proto__" authorId="0"><text><t>polluted</t></text></comment></commentList></comments>'
       )
 
-      const result = yield* extractWith(xlsxInput(zipParts(parts)))
+      const calls: Array<SheetJsCall> = []
+
+      const result = yield* extractWith(xlsxInput(zipParts(parts)), {
+        loadSheetJs: recordingSheetJs(calls)
+      })
 
       expect(result.content).toBe('# Sheet1\nsafe')
+      expect(calls).toHaveLength(1)
+      expectAllowlisted(calls[0]?.names ?? [])
+
+      // The crafted comment and the worksheet relationship naming it never reach SheetJS.
+      const handed = Object.values(unzipSync(calls[0]?.bytes ?? new Uint8Array()))
+
+      expect(handed.some(part => new TextDecoder().decode(part).includes('__proto__'))).toBe(false)
+      expect(Object.hasOwn(Object.prototype, 'c')).toBe(false)
+
+      // SheetJS 0.20.3 on its own: parsing the crafted file directly does not pollute either.
+      const direct = XLSX.read(zipParts(parts), { type: 'array' })
+
+      expect(direct.Sheets.Sheet1?.A1?.v).toBe('safe')
       expect(Object.getOwnPropertyNames(Object.prototype)).not.toContain('c')
       expect(Object.hasOwn(Object.prototype, 'c')).toBe(false)
     })
