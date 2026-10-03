@@ -222,6 +222,41 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('polls once within a wait shorter than the poll interval', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+      const decisions: Array<ToolLedgerDecisionEvent> = []
+
+      // Completes 800 ms after the duplicate starts waiting 2 s with a 5 s poll interval.
+      const tools = [noteTool(probe, { sleep: '1800 millis' })]
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), { store }))
+
+      yield* TestClock.adjust('1 second')
+
+      const second = yield* Effect.forkChild(
+        execute(tools, noteCall(), {
+          store,
+          maxWaitMs: 2_000,
+          pollIntervalMs: 5_000,
+          onLedgerDecision: event => {
+            decisions.push(event)
+          }
+        })
+      )
+
+      yield* TestClock.adjust('2 seconds')
+
+      const [firstResult, secondResult] = [yield* Fiber.join(first), yield* Fiber.join(second)]
+
+      expect(secondResult).toEqual(firstResult)
+      expect(decisions).toEqual([
+        { key: 'call_1', toolName: 'append_note', decision: 'in_flight_wait', waitedMs: 1_000 }
+      ])
+      expect(probe.runs).toEqual(['hot lead'])
+    })
+  )
+
   it.effect('bounds a stalled polling claim by the remaining wait budget', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
@@ -1051,7 +1086,7 @@ describe('tool ledger', () => {
         { key: 'call_b', toolName: 'append_note', decision: 'fresh' },
         { key: 'call_b', toolName: 'append_note', decision: 'in_flight_wait', waitedMs: 2_000 },
         { key: 'call_c', toolName: 'append_note', decision: 'fresh' },
-        // The final poll runs half an interval before the 2 s wait ends; it is the last one.
+        // The final poll runs halfway through the last 500 ms of the 2 s wait; it is the last one.
         {
           key: 'call_c',
           toolName: 'append_note',

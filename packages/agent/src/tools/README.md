@@ -149,10 +149,10 @@ const resolveStepTools = Effect.gen(function* () {
   clock, such as a database `now()`, which avoids skew between instances) and the caller's
   `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
 - Override the policy with `isLedgered` (add your own delegation tools, for example
-  `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing
-  with `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin,
-  not a guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s from the first claim; the polls
-  after it stay within the wait, the last one shortly before it ends), and `deadline` (non-finite
+  `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing with
+  `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin, not a
+  guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s from the first claim; the polls after it
+  stay within the wait, the last one halfway through the final interval), and `deadline` (non-finite
   values ignored). A failed poll fails closed.
 - `deadline` bounds only waiting for an in-flight duplicate. A call that runs is not cut at it, and
   recording its outcome can take up to three `complete` attempts of `toolLedgerCompleteTimeoutMs`

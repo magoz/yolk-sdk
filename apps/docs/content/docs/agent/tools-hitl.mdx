@@ -161,9 +161,9 @@ const resolveStepTools = Effect.gen(function* () {
 - Change which calls are ledgered with `isLedgered`. Include your own delegation tools, for
   example `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`. Without
   `ledger`, execution is unchanged.
-- Waits, store polls included, end at `maxWaitMs` or `deadline` (one final poll runs shortly before
-  the end); a failed poll fails closed. Each `heartbeat` and each of up to three `complete`
-  attempts is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
+- Waits, store polls included, end at `maxWaitMs` or `deadline` (one final poll runs halfway through
+  the last interval); a failed poll fails closed. Each `heartbeat` and each of up to three
+  `complete` attempts is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
 - `deadline` bounds only waiting for a duplicate. A call that runs is not cut at it, and recording
   its outcome can take up to about 15 s (three 5 s attempts) after the call returns, so reserve
   that finalization time before the platform stops the step.

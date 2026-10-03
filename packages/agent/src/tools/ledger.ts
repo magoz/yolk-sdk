@@ -821,8 +821,8 @@ export const executeLedgered = (input: {
 
     // Every wait step, store polls included, stays within the wait budget: a stalled poll ends in
     // the timeout result, never in running the call. Polls run every `pollIntervalMs`; within the
-    // last interval the sleep is shortened so one final poll still starts half an interval (or
-    // less, what remains) before the wait ends, and a call completing then is replayed.
+    // last interval one final poll runs halfway through what remains (its own budget is the other
+    // half), so a call completing before it is replayed instead of timing out.
     while (stillInFlight(current)) {
       const now = yield* Clock.currentTimeMillis
       const remaining = waitUntil - now
@@ -831,9 +831,7 @@ export const executeLedgered = (input: {
 
       const final = remaining <= options.pollIntervalMs
 
-      const sleepMs = final
-        ? Math.max(0, remaining - Math.ceil(options.pollIntervalMs / 2))
-        : options.pollIntervalMs
+      const sleepMs = final ? Math.floor(remaining / 2) : options.pollIntervalMs
 
       if (sleepMs > 0) yield* Effect.sleep(Duration.millis(sleepMs))
 
