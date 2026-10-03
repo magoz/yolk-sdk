@@ -295,7 +295,7 @@ export const graphSevenDigitDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d
 const localDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,7}))?$/
 
 /** ISO-8601 instant in UTC (`Z`) with at most millisecond precision, as hosts supply seeds. */
-export const isoUtcInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
+export const isoUtcInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u
 
 const fromLocalUtc = (dateTime: string): Instant | undefined => {
   const match = localDateTimePattern.exec(dateTime)

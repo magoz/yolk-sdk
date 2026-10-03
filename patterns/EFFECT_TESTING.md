@@ -281,7 +281,7 @@ export class User extends Schema.Class<User>('User')({
   id: Schema.String,
   name: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty())),
   age: Schema.Int.check(Schema.isBetween(0, 150)),
-  email: Schema.String.pipe(Schema.check(Schema.isPattern(/^[^@]+@[^@]+\.[^@]+$/)))
+  email: Schema.String.pipe(Schema.check(Schema.isPattern(/^[^@]+@[^@]+\.[^@]+$/u)))
 }) {}
 
 const userArb = Arbitrary.schema(User)

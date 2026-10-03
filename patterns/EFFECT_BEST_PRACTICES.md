@@ -511,7 +511,7 @@ const entry = JournalEntry.make({ id, description: '...' })
 
 ### Schema Decoding/Encoding - Use Effect Variants
 
-Since rc.115 (still true on Effect 4.0.0), `Schema.SchemaError` is a native `Error`; `makeEffect` fails with `SchemaIssue.Issue`, while synchronous makers throw a native `Error` whose `cause` is that issue. Format a retained issue with `new Schema.SchemaError(issue).message`; do not rely on `issue.toString()`. Input values are omitted from diagnostics by default—do not enable input reporting just to restore old error strings.
+`Schema.SchemaError` is a native `Error` (since rc.115); `makeEffect` fails with `SchemaIssue.Issue`, while synchronous makers throw a native `Error` whose `cause` is that issue. Format a retained issue with `new Schema.SchemaError(issue).message`; do not rely on `issue.toString()`. Input values are omitted from diagnostics by default—do not enable input reporting just to restore old error strings.
 
 `parseOptions` annotations no longer enforce strictness. Use decoder options; strict union members such as Calendar boundaries must enforce excess-property rejection inside each member. Struct decoding alone is not an own-data-property guard: reject inherited/accessor claims before decoding when the boundary promises getter safety.
 

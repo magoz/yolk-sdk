@@ -26,10 +26,10 @@ const unusedHost = Layer.mergeAll(
   })
 )
 
-// Effect 4 exports `Schema.isPattern` to JSON Schema only for `u`-flag regexes. These
+// Effect 4 exports `Schema.isPattern` to JSON Schema only for Unicode-mode (`u`) regexes. These
 // model-visible hints must survive tool lowering; runtime decoding stays authoritative.
-const parametersOf = <Error>(
-  connector: Connector<CredentialResolver | ConnectorHttpClient, Error>,
+const parametersOf = <E>(
+  connector: Connector<CredentialResolver | ConnectorHttpClient, E>,
   connectorId: string,
   actionId: string
 ) =>

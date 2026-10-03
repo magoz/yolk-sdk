@@ -32,8 +32,9 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 This source upgrade targets the stable `effect@4.0.0` release; it is not a claim that an
 already-published canary uses that version. Upgrade matching Yolk packages and Effect together when
-the corresponding canary is available, and keep `effect` and every `@effect/*` package on the same
-version.
+the corresponding canary is available, and keep `effect` and the coordinated Effect runtime packages
+(`@effect/platform-*`, `@effect/sql-*`, `@effect/opentelemetry`, `@effect/vitest`) on the same
+version. Tooling such as `@effect/language-service` is versioned independently.
 
 - Effect 4.0.0 removes the `effect/unstable/*` entrypoints. Drop the `unstable` segment:
   `effect/unstable/http` becomes `effect/http`, likewise `effect/socket`, `effect/sql`,
@@ -46,15 +47,16 @@ version.
   `Schema.isBetweenProperties` and `Scope.close` accepting only a `Scope.Closeable`. Follow
   Effect's release notes for semantic changes in your own code; for example, `Array`, `Chunk`,
   `Effect` and `Record` `partition` now return successes before failures.
-- Tool JSON Schemas: Effect 4.0.0 exports `Schema.isPattern` only for regexes with the `u` flag and
-  silently omits other patterns. Yolk's connector schemas now use `u`, so connector tool
+- Tool JSON Schemas: Effect 4.0.0 exports `Schema.isPattern` only when the regex flags are `u`,
+  optionally with `d`, `g` or `y`, and silently omits other patterns (including `v`-mode regexes and
+  `u` combined with `i`, `m` or `s`). Yolk's connector schemas now use `u`, so connector tool
   parameters keep their `pattern` hints with unchanged runtime validation; the Fortnox identifier
   pattern is advertised as the equivalent BMP-only class
   `^(?!\.{1,2}$)[\u0020-\u007e\u0080-\ud7ff\ue000-\uffff]+$`. Add `u` to `Schema.isPattern` in
   your own tool parameter schemas to keep their hints, and check that `u` does not change what
   your regex accepts (surrogate ranges and bounded quantifiers over astral characters can).
-- String `Schema.isMinLength(n)` with `n >= 2` is advertised as `minLength: ceil(n / 2)` code
-  points. Tool execution still validates against the original Effect Schema.
+- String `Schema.isMinLength(n)` and the minimum of `Schema.isBetweenLength` (`n >= 2`) are
+  advertised as `minLength: ceil(n / 2)` code points. Tool execution still validates against the original Effect Schema.
 
 ### Canary.96: code mode, classifier models, conformance, and emulators
 

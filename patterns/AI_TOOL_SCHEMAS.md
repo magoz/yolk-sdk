@@ -24,10 +24,13 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
 ## Effect Schema checks
 
 - Write `Schema.isPattern` regexes with the `u` flag. Effect 4 exports `pattern` to JSON Schema only
-  for Unicode-mode regexes and silently omits other patterns from the tool schema. Adding `u` can
-  change what a negated class or surrogate range accepts; keep runtime acceptance identical.
-- Effect 4 exports string `Schema.isMinLength(n)` as `minLength: ceil(n / 2)` code points
-  (`n >= 2`). Runtime checks are unchanged; do not rely on exact advertised string minimums.
+  when the regex flags are `u`, optionally with `d`, `g` or `y`; it silently omits every other
+  pattern from the tool schema, including `v`-mode regexes and `u` combined with `i`, `m` or `s`.
+  Adding `u` can change what a negated class or surrogate range accepts; keep runtime acceptance
+  identical.
+- Effect 4 exports string `Schema.isMinLength(n)` and the minimum of `Schema.isBetweenLength` as
+  `minLength: ceil(n / 2)` code points (`n >= 2`). Runtime checks are unchanged; do not rely on
+  exact advertised string minimums.
 
 ## OpenAI-compatible function parameters
 
