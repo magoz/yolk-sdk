@@ -14,12 +14,12 @@ import {
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
+  boundNestedToolCallArgs,
   makeNestedToolCallRecorder,
-  nestedToolCallMaxArgsBytes,
   nestedToolCallMaxErrorChars,
-  nestedToolCallMaxTotalArgsBytes,
   nestedToolCallResultFields,
   recordNestedToolCall,
+  truncateCodePoints,
   contentPartText,
   ToolCall,
   ToolResult,
@@ -585,41 +585,6 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
 
 const argsPreviewChars = 200
 
-const truncateCharacters = (text: string, maxCharacters: number) => {
-  const characters = Array.from(text)
-
-  return characters.length <= maxCharacters
-    ? text
-    : `${characters.slice(0, maxCharacters - 1).join('')}…`
-}
-
-const textEncoder = new TextEncoder()
-
-const utf8Bytes = (text: string) => textEncoder.encode(text).length
-
-// Cuts on code point boundaries so surrogate pairs and multi-byte characters stay whole.
-const truncateUtf8 = (text: string, maxBytes: number) => {
-  if (utf8Bytes(text) <= maxBytes) return text
-
-  const budget = maxBytes - utf8Bytes('…')
-
-  if (budget < 0) return ''
-
-  let bytes = 0
-  let kept = ''
-
-  for (const character of text) {
-    const size = utf8Bytes(character)
-
-    if (bytes + size > budget) break
-
-    kept += character
-    bytes += size
-  }
-
-  return `${kept}…`
-}
-
 const interruptedCallStatus = (entry: ToolLedgerEntry): CodeModeInterruptedCallStatus => {
   const outcome = entry.outcome
 
@@ -638,7 +603,7 @@ const nestedEntryState = (entry: ToolLedgerEntry) => {
   }
 
   if (Predicate.isTagged(outcome, 'Failed'))
-    return `completed with an error: ${truncateCharacters(outcome.error.message, nestedToolCallMaxErrorChars)}`
+    return `completed with an error: ${truncateCodePoints(outcome.error.message, nestedToolCallMaxErrorChars)}`
 
   return outcome.result.isError === true ? 'completed with an error result' : 'applied'
 }
@@ -665,16 +630,11 @@ const interruptedCalls = (
       continue
     }
 
-    const limit = Math.max(
-      0,
-      Math.min(nestedToolCallMaxArgsBytes, nestedToolCallMaxTotalArgsBytes - argsBytes)
-    )
+    const { args, bytes, truncated } = boundNestedToolCallArgs(entry.args, argsBytes)
 
-    const args = truncateUtf8(entry.args, limit)
+    if (truncated) complete = false
 
-    if (args !== entry.args) complete = false
-
-    argsBytes += utf8Bytes(args)
+    argsBytes += bytes
     calls.push({ key: entry.key, toolName: entry.toolName, args, status })
   }
 
@@ -700,7 +660,7 @@ const abandonedScriptResult =
             `Ledgered nested tool calls of that execution (they were not undone):`,
             ...nested.map(
               entry =>
-                `- ${entry.key} ${entry.toolName} ${truncateCharacters(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
+                `- ${entry.key} ${entry.toolName} ${truncateCodePoints(entry.args, argsPreviewChars)}: ${nestedEntryState(entry)}`
             )
           ].join('\n')
 

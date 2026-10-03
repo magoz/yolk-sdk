@@ -2,8 +2,11 @@ import { Clock, Data, Duration, Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
+  compactToolArguments,
   contentText,
   TextPart,
+  truncateUtf8,
+  utf8ByteLength,
   ToolResult,
   type Content,
   type ToolCall
@@ -251,32 +254,6 @@ export const toolLedgerMaxArgsBytes = 8 * 1024
  */
 export const toolIdempotencyKey = (scope: string, key: string) => `${scope}:${key}`
 
-const textEncoder = new TextEncoder()
-
-const utf8Bytes = (text: string) => textEncoder.encode(text).length
-
-const truncationMarker = '…'
-
-// Cuts on code point boundaries so surrogate pairs and multi-byte characters stay whole.
-const truncateUtf8 = (text: string, maxBytes: number) => {
-  if (utf8Bytes(text) <= maxBytes) return text
-
-  const budget = maxBytes - utf8Bytes(truncationMarker)
-  let bytes = 0
-  let kept = ''
-
-  for (const character of text) {
-    const size = utf8Bytes(character)
-
-    if (bytes + size > budget) break
-
-    kept += character
-    bytes += size
-  }
-
-  return `${kept}${truncationMarker}`
-}
-
 const compactJson = (value: unknown): string | undefined =>
   Result.match(
     Result.try(() => JSON.stringify(value)),
@@ -288,7 +265,7 @@ const compactJson = (value: unknown): string | undefined =>
 
 /** Compact JSON of call arguments within `toolLedgerMaxArgsBytes`. */
 export const toolLedgerArgs = (params: unknown) =>
-  truncateUtf8(compactJson(params) ?? '[unserializable arguments]', toolLedgerMaxArgsBytes)
+  truncateUtf8(compactToolArguments(params), toolLedgerMaxArgsBytes)
 
 const jsonValue = (value: unknown): Result.Result<unknown, undefined> => {
   const encoded = compactJson(value)
@@ -326,7 +303,7 @@ const withNote = (content: Content): Content =>
     ? `${content}\n\n${reducedNote}`
     : [...content, TextPart.make({ text: `\n\n${reducedNote}` })]
 
-const resultBytes = (fields: StoredResultFields) => utf8Bytes(compactJson(fields) ?? '')
+const resultBytes = (fields: StoredResultFields) => utf8ByteLength(compactJson(fields) ?? '')
 
 /**
  * The stored copy of a result: wire-safe (`structuredContent` made plain JSON through a JSON round

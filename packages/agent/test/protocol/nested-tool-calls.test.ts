@@ -5,6 +5,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
   makeNestedToolCallRecorder,
   nestedToolCallMaxArgsBytes,
@@ -15,6 +16,9 @@ import {
   recordNestedToolCall,
   ToolResult,
   toolResultMessageFromResult,
+  truncateCodePoints,
+  truncateUtf8,
+  utf8ByteLength,
   type NestedToolCallInput,
   type NestedToolCallRecorder
 } from '@yolk-sdk/agent/protocol'
@@ -200,4 +204,42 @@ describe('nested tool call record', () => {
       expect(JSON.stringify(message)).not.toContain('call_parent/1')
     })
   )
+})
+
+describe('bounded text helpers', () => {
+  it('never exceed the UTF-8 budget, even below the marker size', () => {
+    expect(truncateUtf8('abcdef', 2)).toBe('')
+    expect(truncateUtf8('abcdef', 3)).toBe('…')
+    expect(truncateUtf8('abcdef', 5)).toBe('ab…')
+    expect(truncateUtf8('ééé', 6)).toBe('ééé')
+    expect(truncateUtf8('éééé', 6)).toBe('é…')
+    expect(truncateUtf8('😀😀', 6)).toBe('…')
+
+    for (const budget of [0, 1, 2, 3, 4, 7, 10]) {
+      expect(utf8ByteLength(truncateUtf8('a😀é\u0001b'.repeat(4), budget))).toBeLessThanOrEqual(
+        budget
+      )
+    }
+
+    expect(utf8ByteLength('a😀é')).toBe(utf8Bytes('a😀é'))
+    expect(truncateCodePoints('😀😀😀', 2)).toBe('😀…')
+    expect(truncateCodePoints('abc', 0)).toBe('')
+  })
+
+  it('bounds one call within the per-call and remaining total budgets', () => {
+    const big = 'x'.repeat(nestedToolCallMaxArgsBytes + 10)
+
+    expect(boundNestedToolCallArgs('{"a":1}', 0)).toEqual({
+      args: '{"a":1}',
+      bytes: 7,
+      truncated: false
+    })
+    expect(boundNestedToolCallArgs(big, 0).bytes).toBe(nestedToolCallMaxArgsBytes)
+    expect(boundNestedToolCallArgs(big, nestedToolCallMaxTotalArgsBytes - 5)).toEqual({
+      args: 'xx…',
+      bytes: 5,
+      truncated: true
+    })
+    expect(boundNestedToolCallArgs(big, nestedToolCallMaxTotalArgsBytes).args).toBe('')
+  })
 })

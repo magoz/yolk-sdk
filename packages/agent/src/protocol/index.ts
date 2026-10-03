@@ -223,6 +223,15 @@ export {
 } from './tool.ts'
 
 export {
+  compactToolArguments,
+  truncateCodePoints,
+  truncateUtf8,
+  truncationMarker,
+  utf8ByteLength
+} from './bounded-text.ts'
+
+export {
+  boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
   makeNestedToolCallRecorder,
   NestedToolCallCounts,
@@ -238,6 +247,7 @@ export {
 } from './nested-tool-calls.ts'
 
 export type {
+  BoundedNestedToolCallArgs,
   NestedToolCallInput,
   NestedToolCallRecorder,
   NestedToolCallResultFields
