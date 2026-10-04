@@ -31,6 +31,10 @@ export {
 
 export { collectModelTurn, collectModelTurnAttempt } from './collect.ts'
 
+export { completeText } from './complete-text.ts'
+
+export type { CompleteTextOptions, CompleteTextResult } from './complete-text.ts'
+
 export type {
   CollectModelTurnAttemptResult,
   ModelTurnCollection,

@@ -175,6 +175,35 @@ const LoopLayer = makeAgentLoopLayer({
 
 Guide source: [Loop and runtime](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/agent/loop-runtime.mdx#compose-the-loop-layer).
 
+## Single-shot text calls
+
+`completeText(request, { maxCharacters, timeout })` runs one bounded model call against the
+current `LLMProvider` — useful inside a tool that needs a snippet from a brief using the same
+provider as the agent loop. It concatenates only assistant text deltas (reasoning and tool-call
+events are discarded), sums usage deltas, and returns `{ text, usage, finishReason, truncated }`.
+When `maxCharacters` or `timeout` is hit, consumption stops — cancelling the in-flight provider
+request — and the text so far is returned with `truncated: true`. Provider max-token stops already
+surface as non-retryable `invalid_response` `LLMError`s, so they fail the Effect instead of
+setting `truncated`.
+
+```ts
+import { Effect } from 'effect'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { completeText, LLMProvider } from '@yolk-sdk/agent/loop'
+
+const snippet = (brief: string) =>
+  completeText(
+    {
+      model: 'host-model-id',
+      systemPrompt: 'Emit only the requested snippet.',
+      messages: [UserMessage.make({ content: brief })],
+      tools: [],
+      maxOutputTokens: 500
+    },
+    { maxCharacters: 4_000, timeout: '30 seconds' }
+  ).pipe(Effect.provide(hostProviderLayer))
+```
+
 ## OAuth credentials
 
 `@yolk-sdk/agent/oauth` defines provider-neutral access-token, broker, freshness, and credential-source
@@ -209,9 +238,12 @@ limits or apply hidden fallbacks.
 | `makeXAiGrokProviderLayer`         | `maxOutputTokens`     |
 
 The public `toOpenAiRequestBody`, `toAnthropicClaudeRequestBody`, and `toXAiGrokRequestBody` helpers
-require the matching limit configuration. ChatGPT subscription Codex rejects vendor
-`max_output_tokens`, so `makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the
-optional deprecated `maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both
+require the matching limit configuration. A per-request `LLMRequest.maxOutputTokens` (positive
+integer) overrides the configured default for one call and lowers to the same native field
+(`max_tokens`, `max_completion_tokens`/`max_tokens`, or `max_output_tokens`); when omitted, request
+bodies are unchanged. ChatGPT subscription Codex rejects vendor
+`max_output_tokens`, so `makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore both the
+optional deprecated `maxOutputTokens` compatibility field and a per-request `LLMRequest.maxOutputTokens`. `OpenAiProviderLayer` reads both
 `OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
 OpenCode Go uses API-key authentication with an explicit host-selected `protocol`:

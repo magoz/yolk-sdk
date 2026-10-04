@@ -65,6 +65,40 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 }
 
 describe('xAI Grok subscription provider', () => {
+  it.effect('prefers request maxOutputTokens over the configured limit', () =>
+    Effect.gen(function* () {
+      const body = yield* toXAiGrokRequestBody(
+        {
+          model: 'grok-build',
+          systemPrompt: 'Be concise.',
+          messages: [UserMessage.make({ content: 'Hello' })],
+          tools: [],
+          maxOutputTokens: 456
+        },
+        { maxOutputTokens: 30_000 }
+      )
+
+      expect(body.max_output_tokens).toBe(456)
+    })
+  )
+
+  it.effect('fails invalid request maxOutputTokens', () =>
+    Effect.gen(function* () {
+      const error = yield* toXAiGrokRequestBody(
+        {
+          model: 'grok-build',
+          systemPrompt: 'Be concise.',
+          messages: [UserMessage.make({ content: 'Hello' })],
+          tools: [],
+          maxOutputTokens: 0
+        },
+        { maxOutputTokens: 30_000 }
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'validation_error' })
+    })
+  )
+
   for (const format of ['json', 'completion-only'] as const) {
     it.effect(`${format}: retains flattened text before calls when Go ordering is disabled`, () =>
       Effect.gen(function* () {

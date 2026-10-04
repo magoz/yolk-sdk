@@ -13,6 +13,12 @@ export type LLMRequest = {
   readonly model: string
   readonly systemPrompt: string
   readonly reasoningEffort?: AgentReasoningEffort
+  /**
+   * Optional per-request output-token cap. Must be a positive integer when present.
+   * Each provider adapter lowers it to its native field; when omitted the
+   * adapter keeps its configured default and the request body is unchanged.
+   */
+  readonly maxOutputTokens?: number
 }
 
 export class LLMProvider extends Context.Service<

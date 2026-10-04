@@ -113,7 +113,10 @@ export const toXAiGrokRequestBody = (
     providerName: xAiGrokProviderDescriptor.providerName,
     alwaysIncludeReasoning: false
   }).pipe(
-    Effect.map(body => ({ ...body, max_output_tokens: config.maxOutputTokens })),
+    Effect.map(body => ({
+      ...body,
+      max_output_tokens: request.maxOutputTokens ?? config.maxOutputTokens
+    })),
     Effect.mapError(error =>
       withOpenAiResponsesProviderName(xAiGrokProviderDescriptor.providerName, error)
     )

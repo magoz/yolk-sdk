@@ -17,7 +17,8 @@ import {
   UserMessage,
   inlineBase64Source,
   type AgentMessage,
-  type AgentReasoningEffort
+  type AgentReasoningEffort,
+  type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
@@ -84,26 +85,38 @@ const runProvider = (
   request: {
     readonly model?: string
     readonly reasoningEffort?: AgentReasoningEffort
+    readonly maxOutputTokens?: number
     readonly messages?: ReadonlyArray<AgentMessage>
   } = {}
 ) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
 
-    const streamInput = {
+    type GatewayStreamRequest = {
+      model: string
+      systemPrompt: string
+      messages: ReadonlyArray<AgentMessage>
+      tools: ReadonlyArray<ToolDef>
+      reasoningEffort?: AgentReasoningEffort
+      maxOutputTokens?: number
+    }
+
+    const streamRequest: GatewayStreamRequest = {
       model: request.model ?? 'anthropic/claude-sonnet',
       systemPrompt: 'Be concise.',
       messages: request.messages ?? [UserMessage.make({ content: 'Hello' })],
       tools: []
     }
 
-    return yield* provider
-      .stream(
-        request.reasoningEffort === undefined
-          ? streamInput
-          : { ...streamInput, reasoningEffort: request.reasoningEffort }
-      )
-      .pipe(Stream.runCollect)
+    if (request.reasoningEffort !== undefined) {
+      streamRequest.reasoningEffort = request.reasoningEffort
+    }
+
+    if (request.maxOutputTokens !== undefined) {
+      streamRequest.maxOutputTokens = request.maxOutputTokens
+    }
+
+    return yield* provider.stream(streamRequest).pipe(Stream.runCollect)
   }).pipe(
     Effect.provide(
       makeVercelAiGatewayProviderLayer(config).pipe(
@@ -164,6 +177,30 @@ describe('Vercel AI Gateway provider', () => {
         LLMTextDelta.make({ text: 'Hello from Gateway' }),
         LLMDone.make({ stopReason: 'stop' })
       ])
+    })
+  )
+
+  it.effect('prefers request maxOutputTokens over the configured limit', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      yield* runProvider(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'Hello from Gateway' } }]
+          }),
+          { status: 200 }
+        ),
+        requests,
+        {
+          apiKey: Redacted.make('gateway-key'),
+          maxCompletionTokens: 2_000
+        },
+        { maxOutputTokens: 456 }
+      )
+
+      expect(readCapturedBody(requests)).toMatchObject({ max_tokens: 456 })
+      expect(readCapturedBody(requests)).not.toHaveProperty('max_completion_tokens')
     })
   )
 

@@ -183,8 +183,11 @@ export const toOpenAiCodexRequestBody = (
   } = {}
 ): Effect.Effect<OpenAiCodexRequestBody, LLMError> => {
   const { maxOutputTokens: _maxOutputTokens, ...requestConfig } = config
+  // The Codex subscription endpoint rejects max_output_tokens, so a per-request
+  // LLMRequest.maxOutputTokens is ignored here just like the config field.
+  const { maxOutputTokens: _requestMaxOutputTokens, ...requestWithoutOutputLimit } = request
 
-  return toOpenAiResponsesRequestBodyWithReasoning(request, {
+  return toOpenAiResponsesRequestBodyWithReasoning(requestWithoutOutputLimit, {
     ...requestConfig,
     providerName: openAiCodexProviderDescriptor.providerName,
     unsupportedContentProviderName: 'OpenAI Codex OAuth'
@@ -198,6 +201,12 @@ export const toOpenAiCodexRequestBody = (
 export const streamOpenAiCodexResponse = (response: HttpClientResponse.HttpClientResponse) =>
   streamOpenAiResponsesResponse(openAiCodexProviderDescriptor, response)
 
+const withoutOutputLimit = (request: LLMRequest): LLMRequest => {
+  const { maxOutputTokens: _maxOutputTokens, ...rest } = request
+
+  return rest
+}
+
 export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) => {
   // The Codex subscription endpoint rejects max_output_tokens.
   const { maxOutputTokens: _maxOutputTokens, ...sharedConfig } = config
@@ -207,7 +216,8 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
       stream: request =>
         Stream.fromEffect(Ref.make(false)).pipe(
           Stream.flatMap(hasToolCallRef =>
-            provider.stream(request).pipe(
+            // Strip the per-request limit before delegating: the endpoint rejects it.
+            provider.stream(withoutOutputLimit(request)).pipe(
               Stream.mapEffect(noteCodexToolCall(hasToolCallRef)),
               Stream.catchTags({
                 LLMError: error =>

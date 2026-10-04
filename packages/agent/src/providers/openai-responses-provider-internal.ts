@@ -622,9 +622,11 @@ export const toOpenAiResponsesRequestBody = (
   }
 ): Effect.Effect<OpenAiResponsesRequestBody, LLMError> =>
   Effect.gen(function* () {
+    const maxOutputTokens = request.maxOutputTokens ?? config.maxOutputTokens
+
     if (
-      config.maxOutputTokens !== undefined &&
-      (!Number.isSafeInteger(config.maxOutputTokens) || config.maxOutputTokens <= 0)
+      maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0)
     ) {
       return yield* Effect.fail(
         new LLMError({
@@ -675,8 +677,8 @@ export const toOpenAiResponsesRequestBody = (
       stream: true
     }
 
-    if (config.maxOutputTokens !== undefined) {
-      body.max_output_tokens = config.maxOutputTokens
+    if (maxOutputTokens !== undefined) {
+      body.max_output_tokens = maxOutputTokens
     }
 
     if (reasoning !== undefined) {
