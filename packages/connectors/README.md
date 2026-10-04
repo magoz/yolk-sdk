@@ -539,7 +539,7 @@ guest list when given.
 Calendar create, update, and delete accept optional `sendUpdates` (`GoogleCalendarSendUpdates`),
 sent as Google's `sendUpdates` query parameter: `all` notifies every guest, `externalOnly` only
 guests who do not use Google Calendar, and `none` nobody (Google warns `none` can stop the event
-syncing to guests' other calendars). Without it, Google's default sends no invitation, update, or
+syncing to guests' other calendars or lose it for some guests). Without it, Google's default sends no invitation, update, or
 cancellation email (Google notes some emails might still be sent), so hosts that want guests
 notified must pass it. `calendar.delete_event` takes `GoogleCalendarDeleteEventInput`.
 

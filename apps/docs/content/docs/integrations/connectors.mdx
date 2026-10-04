@@ -466,7 +466,7 @@ Google's default for API writes notifies no guests (Google notes some emails mig
 sent). `calendar.create_event`, `calendar.update_event`, and `calendar.delete_event` accept an
 optional `sendUpdates`, sent as Google's `sendUpdates` query parameter, never in the event body:
 `all` notifies every guest, `externalOnly` only guests who do not use Google Calendar, and `none`
-nobody (Google warns `none` can stop the event syncing to guests' other calendars). Omitting it
+nobody (Google warns `none` can stop the event syncing to guests' other calendars or lose it for some guests). Omitting it
 normally sends no invitation, update, or cancellation email.
 
 ### Drive actions

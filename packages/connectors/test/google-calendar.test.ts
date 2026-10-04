@@ -13,11 +13,15 @@ import {
 } from '@yolk-sdk/connectors'
 import {
   googleCalendarCreateEventAction,
+  GoogleCalendarCreateEventInput,
   googleCalendarDeleteEventAction,
   GoogleCalendarDeleteEventInput,
   GoogleCalendarEventDateTime,
+  GoogleCalendarEventIdInput,
   googleCalendarEventsScope,
+  googleCalendarGetEventAction,
   googleCalendarUpdateEventAction,
+  GoogleCalendarUpdateEventInput,
   googleConnectorId,
   GoogleOAuthCredentialSlot
 } from '@yolk-sdk/connectors/google'
@@ -258,6 +262,105 @@ describe('Google Calendar sendUpdates', () => {
         value: { deleted: true, eventId: 'event_1' }
       })
       expect(requests[0]?.url).toBe(`${eventsUrl}/event_1?sendUpdates=all`)
+    })
+  )
+
+  it.effect.each(writeCases)('$name sends an explicit "none"', write =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      yield* write
+        .execute({
+          integration: calendarIntegration,
+          input: { ...write.input, sendUpdates: 'none' }
+        })
+        .pipe(
+          Effect.provide(
+            Layer.merge(calendarCredentials, recordingCalendarHttp(requests, write.status))
+          )
+        )
+
+      expect(requests[0]?.url).toBe(`${write.url}?sendUpdates=none`)
+    })
+  )
+
+  it.effect('keeps accepting existing GoogleCalendarEventIdInput deletes on executeTyped', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const result = yield* googleCalendarDeleteEventAction
+        .executeTyped({
+          integration: calendarIntegration,
+          input: GoogleCalendarEventIdInput.make({ eventId: 'event_1' })
+        })
+        .pipe(
+          Effect.provide(Layer.merge(calendarCredentials, recordingCalendarHttp(requests, 204)))
+        )
+
+      expect(result).toMatchObject({ _tag: 'Success' })
+      expect(requests[0]?.url).toBe(`${eventsUrl}/event_1`)
+    })
+  )
+
+  it.effect('sends sendUpdates through executeTyped on create and update', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const layer = Layer.merge(calendarCredentials, recordingCalendarHttp(requests))
+
+      yield* googleCalendarCreateEventAction
+        .executeTyped({
+          integration: calendarIntegration,
+          input: GoogleCalendarCreateEventInput.make({
+            summary: 'Planning',
+            start: { dateTime: '2026-05-21T10:00:00Z' },
+            end: { dateTime: '2026-05-21T10:30:00Z' },
+            sendUpdates: 'all'
+          })
+        })
+        .pipe(Effect.provide(layer))
+
+      yield* googleCalendarUpdateEventAction
+        .executeTyped({
+          integration: calendarIntegration,
+          input: GoogleCalendarUpdateEventInput.make({ eventId: 'event_1', sendUpdates: 'all' })
+        })
+        .pipe(Effect.provide(layer))
+
+      expect(requests.map(request => request.url)).toEqual([
+        `${eventsUrl}?sendUpdates=all`,
+        `${eventsUrl}/event_1?sendUpdates=all`
+      ])
+    })
+  )
+
+  it('tells the model that omitted sendUpdates normally notifies nobody', () => {
+    for (const action of [
+      googleCalendarCreateEventAction,
+      googleCalendarUpdateEventAction,
+      googleCalendarDeleteEventAction
+    ]) {
+      expect(action.description).toMatch(/Without sendUpdates "all".*Google normally/)
+    }
+
+    expect(googleCalendarUpdateEventAction.description).toContain('replace the whole guest list')
+  })
+
+  it.effect('leaves get_event without sendUpdates', () =>
+    Effect.gen(function* () {
+      const registration = makeTool({
+        name: googleCalendarGetEventAction.id,
+        description: googleCalendarGetEventAction.description ?? '',
+        parameters: googleCalendarGetEventAction.inputSchema,
+        access: 'read',
+        execute: () => Effect.die('schema-only test')
+      })
+
+      const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(registration.def.parameters)
+
+      expect(objectKeys(objectField(parameters, 'properties')).sort()).toEqual([
+        'calendarId',
+        'eventId'
+      ])
     })
   )
 

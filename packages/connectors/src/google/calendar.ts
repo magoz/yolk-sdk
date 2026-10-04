@@ -117,7 +117,7 @@ export class GoogleCalendarListEventsOutput extends Schema.Class<GoogleCalendarL
  */
 export const GoogleCalendarSendUpdates = Schema.Literals(['all', 'externalOnly', 'none']).annotate({
   description:
-    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none" (Google warns this can stop the event syncing to guests\' other calendars). Omitted: Google\'s default, which normally sends no invitation, update, or cancellation email.'
+    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none" (Google warns this can stop the event syncing to guests\' other calendars or lose it for some guests). Omitted: Google\'s default, which normally sends no invitation, update, or cancellation email.'
 })
 
 export type GoogleCalendarSendUpdates = typeof GoogleCalendarSendUpdates.Type
@@ -247,7 +247,7 @@ export const googleCalendarListEventsAction = defineAction({
 export const googleCalendarCreateEventAction = defineAction({
   id: 'calendar.create_event',
   description:
-    'Create a Google Calendar event for the integration account. Attendees are emailed an invitation only when sendUpdates is "all" or "externalOnly"; without it, Google normally adds guests silently.',
+    'Create a Google Calendar event for the integration account. Without sendUpdates "all" (every guest) or "externalOnly" (only guests who do not use Google Calendar), Google normally adds guests without emailing an invitation.',
   inputSchema: GoogleCalendarCreateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -421,7 +421,9 @@ export const googleCalendarDeleteEventAction = defineAction({
   id: 'calendar.delete_event',
   description:
     'Delete a Google Calendar event. Without sendUpdates "all" or "externalOnly", Google normally emails guests no cancellation.',
-  inputSchema: GoogleCalendarDeleteEventInput,
+  // A Struct over the Class fields keeps existing GoogleCalendarEventIdInput instances valid on
+  // executeTyped (a Class schema accepts only its own instances).
+  inputSchema: Schema.Struct(GoogleCalendarDeleteEventInput.fields),
   outputSchema: Schema.Struct({ deleted: Schema.Boolean, eventId: Schema.String }),
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
