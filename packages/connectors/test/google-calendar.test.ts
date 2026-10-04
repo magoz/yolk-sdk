@@ -220,7 +220,6 @@ describe('Google Calendar sendUpdates', () => {
 
       expect(requests).toHaveLength(1)
       expect(requests[0]?.url).toBe(`${write.url}?sendUpdates=externalOnly`)
-      // The notification choice is a query parameter only, never part of the event body.
       expect(requests[0]?.body ?? '').not.toContain('sendUpdates')
     })
   )

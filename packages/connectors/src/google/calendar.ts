@@ -117,7 +117,7 @@ export class GoogleCalendarListEventsOutput extends Schema.Class<GoogleCalendarL
  */
 export const GoogleCalendarSendUpdates = Schema.Literals(['all', 'externalOnly', 'none']).annotate({
   description:
-    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none" (Google warns this can stop the event syncing to guests\' other calendars). Omitted: Google sends no invitation, update, or cancellation email.'
+    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none" (Google warns this can stop the event syncing to guests\' other calendars). Omitted: Google\'s default, which normally sends no invitation, update, or cancellation email.'
 })
 
 export type GoogleCalendarSendUpdates = typeof GoogleCalendarSendUpdates.Type
@@ -247,7 +247,7 @@ export const googleCalendarListEventsAction = defineAction({
 export const googleCalendarCreateEventAction = defineAction({
   id: 'calendar.create_event',
   description:
-    'Create a Google Calendar event for the integration account. Attendees are emailed an invitation only when sendUpdates is "all" or "externalOnly"; without it, guests are added silently.',
+    'Create a Google Calendar event for the integration account. Attendees are emailed an invitation only when sendUpdates is "all" or "externalOnly"; without it, Google normally adds guests silently.',
   inputSchema: GoogleCalendarCreateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -374,7 +374,7 @@ export const googleCalendarGetEventAction = defineAction({
 export const googleCalendarUpdateEventAction = defineAction({
   id: 'calendar.update_event',
   description:
-    'Update a Google Calendar event (PATCH): omitted fields stay unchanged, but attendees, when given, replace the whole guest list, so include everyone who should stay invited. Guests are emailed about the change only when sendUpdates is "all" or "externalOnly".',
+    'Update a Google Calendar event (PATCH): omitted fields stay unchanged, but attendees, when given, replace the whole guest list, so include everyone who should stay invited. Without sendUpdates "all" or "externalOnly", Google normally emails guests nothing about the change.',
   inputSchema: GoogleCalendarUpdateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -420,7 +420,7 @@ export const googleCalendarUpdateEventAction = defineAction({
 export const googleCalendarDeleteEventAction = defineAction({
   id: 'calendar.delete_event',
   description:
-    'Delete a Google Calendar event. Guests are emailed a cancellation only when sendUpdates is "all" or "externalOnly".',
+    'Delete a Google Calendar event. Without sendUpdates "all" or "externalOnly", Google normally emails guests no cancellation.',
   inputSchema: GoogleCalendarDeleteEventInput,
   outputSchema: Schema.Struct({ deleted: Schema.Boolean, eventId: Schema.String }),
   execute: ({ integration, input }) =>
