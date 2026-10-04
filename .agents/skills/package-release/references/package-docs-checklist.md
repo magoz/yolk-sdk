@@ -30,6 +30,7 @@ Do not require READMEs for private workspaces unless useful internally.
 - feature/API subpaths match `package.json` exports; the standard `./package.json` metadata export may stay centralized in `patterns/PACKAGE_ARCHITECTURE.md`
 - imports use real exported symbols
 - examples do not depend on app internals
+- links leaving the package directory are absolute GitHub URLs (see `package-documentation.md`)
 - host-owned responsibilities explicit
 - package boundaries explicit
 - canary instability not overpromised
