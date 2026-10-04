@@ -541,7 +541,7 @@ sent as Google's `sendUpdates` query parameter: `all` notifies every guest, `ext
 guests who do not use Google Calendar, and `none` nobody (Google warns `none` can stop the event
 syncing to guests' other calendars or lose it for some guests). Without it, Google's default sends no invitation, update, or
 cancellation email (Google notes some emails might still be sent), so hosts that want guests
-notified must pass it. `calendar.delete_event` takes `GoogleCalendarDeleteEventInput`.
+notified must pass it. `calendar.delete_event` takes `GoogleCalendarDeleteEventInput` (existing `GoogleCalendarEventIdInput` values still work).
 
 Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
 

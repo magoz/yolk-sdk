@@ -300,6 +300,14 @@ response. The content hash is not verified. Dropbox scope exports now include
 timeZone? }`. Create/update boundaries require exactly one non-empty `date` or `dateTime` and reject
 null, missing, empty, and dual-field values before provider execution.
 
+`GoogleCalendarSendUpdates` is the `'all' | 'externalOnly' | 'none'` literal union for the optional
+`sendUpdates` field of `GoogleCalendarCreateEventInput`, `GoogleCalendarUpdateEventInput`, and
+`GoogleCalendarDeleteEventInput`; it is sent only as Google's `sendUpdates` query parameter.
+`googleCalendarDeleteEventAction` validates a struct over `GoogleCalendarDeleteEventInput`'s fields,
+so `executeTyped` accepts both `GoogleCalendarDeleteEventInput` and existing
+`GoogleCalendarEventIdInput` values. `googleCalendarGetEventAction` keeps
+`GoogleCalendarEventIdInput`.
+
 Google Drive's principal contracts are `GoogleDriveFile`, `GoogleDriveUser`,
 `GoogleDriveCapabilities`, `GoogleDriveListFilesInput`, `GoogleDriveSearchFilesInput`,
 `GoogleDriveListFilesOutput`, `GoogleDriveFileIdInput`, `GoogleDriveCreateFolderInput`, and

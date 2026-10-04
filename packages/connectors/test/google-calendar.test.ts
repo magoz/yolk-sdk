@@ -333,17 +333,64 @@ describe('Google Calendar sendUpdates', () => {
     })
   )
 
-  it('tells the model that omitted sendUpdates normally notifies nobody', () => {
+  // Action descriptions always reach the model; providers that flatten tool schemas (Anthropic)
+  // drop an optional enum's values and description, so each write description must explain them.
+  it('explains every sendUpdates value and the default in each write description', () => {
     for (const action of [
       googleCalendarCreateEventAction,
       googleCalendarUpdateEventAction,
       googleCalendarDeleteEventAction
     ]) {
-      expect(action.description).toMatch(/Without sendUpdates "all".*Google normally/)
+      expect(action.description).toContain('"all" every guest')
+      expect(action.description).toContain(
+        '"externalOnly" only guests who do not use Google Calendar'
+      )
+      expect(action.description).toContain('"none" nobody')
+      expect(action.description).toContain('Without sendUpdates, Google normally notifies nobody')
     }
 
     expect(googleCalendarUpdateEventAction.description).toContain('replace the whole guest list')
   })
+
+  it.effect('keeps the sendUpdates description in the registry tool schema', () =>
+    Effect.gen(function* () {
+      const registration = makeTool({
+        name: googleCalendarUpdateEventAction.id,
+        description: googleCalendarUpdateEventAction.description ?? '',
+        parameters: googleCalendarUpdateEventAction.inputSchema,
+        access: 'write',
+        execute: () => Effect.die('schema-only test')
+      })
+
+      const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(registration.def.parameters)
+      const sendUpdates = objectField(objectField(parameters, 'properties'), 'sendUpdates')
+
+      expect(JSON.stringify(sendUpdates)).toContain('only guests who do not use Google Calendar')
+    })
+  )
+
+  it.effect('encodes calendar and event ids before the sendUpdates query', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      yield* googleCalendarDeleteEventAction
+        .execute({
+          integration: calendarIntegration,
+          input: {
+            calendarId: 'team@group.calendar.google.com',
+            eventId: 'a/b?c',
+            sendUpdates: 'all'
+          }
+        })
+        .pipe(
+          Effect.provide(Layer.merge(calendarCredentials, recordingCalendarHttp(requests, 204)))
+        )
+
+      expect(requests[0]?.url).toBe(
+        'https://www.googleapis.com/calendar/v3/calendars/team%40group.calendar.google.com/events/a%2Fb%3Fc?sendUpdates=all'
+      )
+    })
+  )
 
   it.effect('leaves get_event without sendUpdates', () =>
     Effect.gen(function* () {
