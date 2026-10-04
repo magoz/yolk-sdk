@@ -305,6 +305,7 @@ Requirements before dispatch:
 - `v<version>` tag does not exist
 - normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm format:check`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
+- the test suites also pass on the `node-version` pinned in `.github/workflows/publish.yml` when it differs from your local Node (commands in the `package-release` skill)
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. It publishes with `--provenance`, so each Action-published version carries an npm provenance attestation; versions published locally (first publish or emergency) have none.
 
