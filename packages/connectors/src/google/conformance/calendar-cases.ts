@@ -14,6 +14,7 @@ import {
   googleCalendarCreateEventAction,
   GoogleCalendarCreateEventInput,
   googleCalendarDeleteEventAction,
+  GoogleCalendarDeleteEventInput,
   googleCalendarGetEventAction,
   googleCalendarListEventsAction,
   GoogleCalendarEventIdInput,
@@ -54,10 +55,11 @@ const getEvent = (calendarId: string, eventId: string) =>
     input: GoogleCalendarEventIdInput.make({ calendarId, eventId })
   })
 
+// No `sendUpdates`: conformance events never have attendees, and the cases claim no notification.
 const deleteEvent = (calendarId: string, eventId: string) =>
   googleCalendarDeleteEventAction.executeTyped({
     integration,
-    input: GoogleCalendarEventIdInput.make({ calendarId, eventId })
+    input: GoogleCalendarDeleteEventInput.make({ calendarId, eventId })
   })
 
 /** A failure whose status says the event is gone (404 or 410). */

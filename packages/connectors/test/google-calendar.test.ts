@@ -1,10 +1,24 @@
-import { Effect, Predicate } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
+  ConnectorHttpClient,
+  ConnectorHttpResponse,
+  CredentialResolver,
+  makeCredentialBinding,
+  makeIntegration,
+  OAuthCredential,
+  type ConnectorHttpRequest
+} from '@yolk-sdk/connectors'
+import {
   googleCalendarCreateEventAction,
-  GoogleCalendarEventDateTime
+  googleCalendarDeleteEventAction,
+  GoogleCalendarEventDateTime,
+  googleCalendarEventsScope,
+  googleCalendarUpdateEventAction,
+  googleConnectorId,
+  GoogleOAuthCredentialSlot
 } from '@yolk-sdk/connectors/google'
 
 const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
@@ -111,6 +125,164 @@ describe('Google Calendar event date/time boundaries', () => {
       expect(objectField(dateTime, 'type')).toBe('string')
       expect(JSON.stringify(date)).not.toContain('null')
       expect(JSON.stringify(dateTime)).not.toContain('null')
+    })
+  )
+})
+
+const calendarIntegration = makeIntegration({
+  connectorId: googleConnectorId,
+  credentialBindings: [
+    makeCredentialBinding({ slotId: GoogleOAuthCredentialSlot.id, credentialRef: 'google' })
+  ]
+})
+
+const calendarCredentials = Layer.succeed(
+  CredentialResolver,
+  CredentialResolver.of({
+    resolve: () =>
+      Effect.succeed(
+        OAuthCredential.make({
+          provider: 'google',
+          accessToken: 'access-token',
+          expiresAt: Date.now() + 60_000,
+          scopes: [googleCalendarEventsScope]
+        })
+      )
+  })
+)
+
+/** Records every request; answers each with `status` and an empty JSON event. */
+const recordingCalendarHttp = (requests: Array<ConnectorHttpRequest>, status = 200) =>
+  Layer.succeed(
+    ConnectorHttpClient,
+    ConnectorHttpClient.of({
+      request: request => {
+        requests.push(request)
+
+        return Effect.succeed(
+          ConnectorHttpResponse.make({
+            status,
+            headers: { 'content-type': 'application/json' },
+            body: status === 204 ? '' : '{}'
+          })
+        )
+      }
+    })
+  )
+
+const eventsUrl = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+
+const writeCases = [
+  {
+    name: 'create',
+    execute: googleCalendarCreateEventAction.execute,
+    status: 200,
+    input: {
+      summary: 'Planning',
+      start: { dateTime: '2026-05-21T10:00:00Z' },
+      end: { dateTime: '2026-05-21T10:30:00Z' },
+      attendees: [{ email: 'guest@example.test' }]
+    },
+    url: eventsUrl
+  },
+  {
+    name: 'update',
+    execute: googleCalendarUpdateEventAction.execute,
+    status: 200,
+    input: { eventId: 'event_1', summary: 'Renamed' },
+    url: `${eventsUrl}/event_1`
+  },
+  {
+    name: 'delete',
+    execute: googleCalendarDeleteEventAction.execute,
+    status: 204,
+    input: { eventId: 'event_1' },
+    url: `${eventsUrl}/event_1`
+  }
+] as const
+
+describe('Google Calendar sendUpdates', () => {
+  it.effect.each(writeCases)('$name sends the chosen sendUpdates as a query parameter', write =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      yield* write
+        .execute({
+          integration: calendarIntegration,
+          input: { ...write.input, sendUpdates: 'externalOnly' }
+        })
+        .pipe(
+          Effect.provide(
+            Layer.merge(calendarCredentials, recordingCalendarHttp(requests, write.status))
+          )
+        )
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.url).toBe(`${write.url}?sendUpdates=externalOnly`)
+      // The notification choice is a query parameter only, never part of the event body.
+      expect(requests[0]?.body ?? '').not.toContain('sendUpdates')
+    })
+  )
+
+  it.effect.each(writeCases)('$name sends no sendUpdates when the caller omits it', write =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      yield* write
+        .execute({ integration: calendarIntegration, input: write.input })
+        .pipe(
+          Effect.provide(
+            Layer.merge(calendarCredentials, recordingCalendarHttp(requests, write.status))
+          )
+        )
+
+      expect(requests[0]?.url).toBe(write.url)
+    })
+  )
+
+  it.effect.each(writeCases)('$name rejects an unknown sendUpdates before any request', write =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const result = yield* write
+        .execute({
+          integration: calendarIntegration,
+          input: { ...write.input, sendUpdates: 'everyone' }
+        })
+        .pipe(
+          Effect.provide(
+            Layer.merge(calendarCredentials, recordingCalendarHttp(requests, write.status))
+          ),
+          Effect.result
+        )
+
+      expect(result._tag).toBe('Failure')
+      expect(requests).toHaveLength(0)
+    })
+  )
+
+  it.effect('advertises sendUpdates as an optional enum on the create tool', () =>
+    Effect.gen(function* () {
+      const registration = makeTool({
+        name: googleCalendarCreateEventAction.id,
+        description: googleCalendarCreateEventAction.description ?? '',
+        parameters: googleCalendarCreateEventAction.inputSchema,
+        access: 'write',
+        execute: () => Effect.die('schema-only test')
+      })
+
+      const parameters = yield* Schema.decodeUnknownEffect(Schema.Json)(registration.def.parameters)
+      const sendUpdates = objectField(objectField(parameters, 'properties'), 'sendUpdates')
+
+      // Optional fields lower to `anyOf: [<schema>, null]`; null decodes as absent.
+      const alternatives = objectField(sendUpdates, 'anyOf')
+
+      const enumMember = Array.isArray(alternatives)
+        ? alternatives.find(member => objectField(member, 'enum') !== undefined)
+        : undefined
+
+      expect(objectField(enumMember, 'enum')).toEqual(['all', 'externalOnly', 'none'])
+      expect(objectField(parameters, 'required')).not.toContain('sendUpdates')
     })
   )
 })

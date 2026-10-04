@@ -533,6 +533,13 @@ scanning, and extraction.
 Calendar create/update boundaries use exactly one non-empty field: `{ date, timeZone? }` for an
 all-day boundary or `{ dateTime, timeZone? }` for a date-time boundary. `start` and `end` reject
 `null`, empty values, missing boundary fields, and objects that provide both `date` and `dateTime`.
+`calendar.update_event` is a PATCH: omitted fields stay unchanged, but `attendees` replaces the whole
+guest list when given.
+
+Calendar create, update, and delete accept optional `sendUpdates` (`all`, `externalOnly`, or
+`none`; `GoogleCalendarSendUpdates`), sent as Google's `sendUpdates` query parameter. Without it
+Google emails no guest about API writes, so hosts that want invitations, updates, or cancellations
+delivered must pass it. `calendar.delete_event` takes `GoogleCalendarDeleteEventInput`.
 
 Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
 

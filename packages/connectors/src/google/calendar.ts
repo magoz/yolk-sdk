@@ -111,6 +111,17 @@ export class GoogleCalendarListEventsOutput extends Schema.Class<GoogleCalendarL
   nextPageToken: Schema.optional(Schema.String)
 }) {}
 
+/**
+ * Google's `sendUpdates` query parameter: which guests receive email about the change. When it is
+ * omitted, Google sends no notifications for API writes.
+ */
+export const GoogleCalendarSendUpdates = Schema.Literals(['all', 'externalOnly', 'none']).annotate({
+  description:
+    'Who gets email about this change: "all" guests, "externalOnly" (guests outside the calendar\'s Google Workspace domain), or "none". Omitted sends no email.'
+})
+
+export type GoogleCalendarSendUpdates = typeof GoogleCalendarSendUpdates.Type
+
 export class GoogleCalendarCreateEventInput extends Schema.Class<GoogleCalendarCreateEventInput>(
   'GoogleCalendarCreateEventInput'
 )({
@@ -120,7 +131,8 @@ export class GoogleCalendarCreateEventInput extends Schema.Class<GoogleCalendarC
   location: Schema.optional(Schema.String),
   start: GoogleCalendarEventDateTime,
   end: GoogleCalendarEventDateTime,
-  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String })))
+  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String }))),
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
 
 export class GoogleCalendarEventIdInput extends Schema.Class<GoogleCalendarEventIdInput>(
@@ -128,6 +140,14 @@ export class GoogleCalendarEventIdInput extends Schema.Class<GoogleCalendarEvent
 )({
   calendarId: Schema.optional(Schema.String),
   eventId: Schema.String
+}) {}
+
+export class GoogleCalendarDeleteEventInput extends Schema.Class<GoogleCalendarDeleteEventInput>(
+  'GoogleCalendarDeleteEventInput'
+)({
+  calendarId: Schema.optional(Schema.String),
+  eventId: Schema.String,
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
 
 export class GoogleCalendarUpdateEventInput extends Schema.Class<GoogleCalendarUpdateEventInput>(
@@ -140,8 +160,18 @@ export class GoogleCalendarUpdateEventInput extends Schema.Class<GoogleCalendarU
   location: Schema.optional(Schema.String),
   start: Schema.optional(GoogleCalendarEventDateTime),
   end: Schema.optional(GoogleCalendarEventDateTime),
-  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String })))
+  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String }))),
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
+
+/** `?sendUpdates=…` for a write, or nothing when the caller did not choose. */
+const sendUpdatesQuery = (sendUpdates: GoogleCalendarSendUpdates | undefined) => {
+  const params = new URLSearchParams()
+  appendSearchParam(params, 'sendUpdates', sendUpdates)
+  const query = params.toString()
+
+  return query === '' ? '' : `?${query}`
+}
 
 const calendarIdOrPrimary = (calendarId: string | undefined) => calendarId ?? 'primary'
 
@@ -217,7 +247,8 @@ export const googleCalendarListEventsAction = defineAction({
 
 export const googleCalendarCreateEventAction = defineAction({
   id: 'calendar.create_event',
-  description: 'Create a Google Calendar event for the integration account.',
+  description:
+    'Create a Google Calendar event for the integration account. Attendees are emailed an invitation only when sendUpdates is "all" or "externalOnly"; without it, guests are added silently.',
   inputSchema: GoogleCalendarCreateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -232,7 +263,7 @@ export const googleCalendarCreateEventAction = defineAction({
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
-          url: `${googleCalendarApiBaseUrl}/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events`,
+          url: `${googleCalendarApiBaseUrl}/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events${sendUpdatesQuery(input.sendUpdates)}`,
           headers: {
             ...googleAuthorizationHeaders(token),
             'content-type': 'application/json'
@@ -343,7 +374,8 @@ export const googleCalendarGetEventAction = defineAction({
 
 export const googleCalendarUpdateEventAction = defineAction({
   id: 'calendar.update_event',
-  description: 'Update a Google Calendar event.',
+  description:
+    'Update a Google Calendar event (PATCH): omitted fields stay unchanged, but attendees, when given, replace the whole guest list, so include everyone who should stay invited. Guests are emailed about the change only when sendUpdates is "all" or "externalOnly".',
   inputSchema: GoogleCalendarUpdateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -359,7 +391,7 @@ export const googleCalendarUpdateEventAction = defineAction({
         calendarRequest({
           token,
           method: 'PATCH',
-          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}`,
+          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}${sendUpdatesQuery(input.sendUpdates)}`,
           body: {
             summary: input.summary,
             description: input.description,
@@ -388,8 +420,9 @@ export const googleCalendarUpdateEventAction = defineAction({
 
 export const googleCalendarDeleteEventAction = defineAction({
   id: 'calendar.delete_event',
-  description: 'Delete a Google Calendar event.',
-  inputSchema: GoogleCalendarEventIdInput,
+  description:
+    'Delete a Google Calendar event. Guests are emailed a cancellation only when sendUpdates is "all" or "externalOnly".',
+  inputSchema: GoogleCalendarDeleteEventInput,
   outputSchema: Schema.Struct({ deleted: Schema.Boolean, eventId: Schema.String }),
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
@@ -404,7 +437,7 @@ export const googleCalendarDeleteEventAction = defineAction({
         calendarRequest({
           token,
           method: 'DELETE',
-          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}`
+          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}${sendUpdatesQuery(input.sendUpdates)}`
         })
       )
 
