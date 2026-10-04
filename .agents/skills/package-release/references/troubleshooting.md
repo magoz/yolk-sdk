@@ -15,15 +15,16 @@ Fix:
 ## Publish Action fails tests that passed locally
 
 Cause: the Action validates on the Node version pinned in `.github/workflows/publish.yml`, which can
-differ from your local Node. Runtime limits differ between versions; for example, Node 22 overflows
-`JSON.stringify` on nesting that Node 24 handles. The Validate step stops before packing, so
+differ from your local Node. Runtime limits differ between versions; for example (canary.99), Node 22
+overflowed `JSON.stringify` on nesting that Node 24 handles. The Validate step stops before packing, so
 nothing is published or tagged.
 
 Fix:
 
-- Reproduce with the pinned version (`npx -y node@<pin> node_modules/vitest/vitest.mjs run` in the
-  failing package) and make the test independent of runtime limits (measure them in the test
-  rather than hardcoding a size).
+- Reproduce with the pinned version from the failing package, which uses the root Vitest install:
+  `NODE_ENV=test npx -y node@<pin> ../../node_modules/vitest/vitest.mjs run` (add
+  `--config vitest.workflow.config.ts` for the Workflow suite). Make the test independent of runtime
+  limits (measure them in the test rather than hardcoding a size).
 - Land the fix as a separate PR on `main`, then rerun the Action for the same version; no version
   bump is needed because nothing was published or tagged.
 

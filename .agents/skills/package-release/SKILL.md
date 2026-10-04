@@ -188,9 +188,18 @@ pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
 The Publish Action validates on the Node version pinned in `.github/workflows/publish.yml`
-(`node-version`). When your local Node differs from that pin, also run the test suites on it, for
-example `NODE_ENV=test npx -y node@<pin> node_modules/vitest/vitest.mjs run` at the root and in each
-`packages/*` directory: stack depth and other runtime limits differ between Node versions.
+(`node-version`). When your local Node differs from that pin, also run the test suites on it after
+`pnpm test:run` (which prepares the test database and environment): stack depth and other runtime
+limits differ between Node versions. Packages use the root Vitest install.
+
+```bash
+pin=<node-version from publish.yml>
+NODE_ENV=test npx -y node@$pin node_modules/vitest/vitest.mjs run --passWithNoTests
+for dir in packages/*/; do
+  (cd "$dir" && NODE_ENV=test npx -y node@$pin ../../node_modules/vitest/vitest.mjs run --passWithNoTests)
+done
+(cd packages/vercel-workflows && NODE_ENV=test npx -y node@$pin ../../node_modules/vitest/vitest.mjs run --config vitest.workflow.config.ts)
+```
 
 If readiness work touched `apps/docs`, also run `pnpm docs:check` and `pnpm build:docs`.
 Run docs check/build and `pnpm tsc` serially: they regenerate shared docs types.
