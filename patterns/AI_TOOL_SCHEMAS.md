@@ -49,7 +49,7 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
 - Flatten root and nested combinators into object/property schemas with merged `properties`, `required`, and `$defs`.
 - Merge repeated `allOf` object fields structurally. Preserve combined `properties`, `required`, and `$defs`; keep other keywords valid with right-biased replacement instead of manufacturing object-valued combinators for scalar keywords.
 - Provider-facing normalization may widen constraints that cannot be represented without combinators. Tool execution still validates calls against the original Effect Schema, decoded through its JSON codec (see Tool arguments).
-- An optional enum or literal param (`Schema.optional(X)`, advertised as `anyOf [X, null]`) flattens to an unconstrained property: only keys shared by every member survive (`commonVariantFields`), so its values and description are lost. Put any meaning the model needs in the tool description, which Anthropic receives unchanged (see the Google Calendar `sendUpdates` actions).
+- An optional enum or literal param (`Schema.optional(X)`, advertised as `anyOf [X, null]`) flattens to an unconstrained property in Claude compatibility mode: only allowlisted keys with identical values in every member survive (`commonVariantFields`), so values and a description on the member are lost (keys on the wrapper next to `anyOf` are kept). Put any meaning the model needs in the tool description, which Anthropic receives unchanged (see the Google Calendar `sendUpdates` actions).
 
 ## Tool arguments
 
