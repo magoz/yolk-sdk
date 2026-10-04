@@ -187,6 +187,11 @@ pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
+The Publish Action validates on the Node version pinned in `.github/workflows/publish.yml`
+(`node-version`). When your local Node differs from that pin, also run the test suites on it, for
+example `NODE_ENV=test npx -y node@<pin> node_modules/vitest/vitest.mjs run` at the root and in each
+`packages/*` directory: stack depth and other runtime limits differ between Node versions.
+
 If readiness work touched `apps/docs`, also run `pnpm docs:check` and `pnpm build:docs`.
 Run docs check/build and `pnpm tsc` serially: they regenerate shared docs types.
 If `.agents/skills/**` changed, run `pnpm skillset:build`, inspect the documented generated
