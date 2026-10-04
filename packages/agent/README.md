@@ -554,7 +554,7 @@ tool/provider payloads alone. Resolution does not add provider media capabilitie
 Host apps own upload, authorization, byte/MIME limits, retention, and fresh signing. Put a host
 resolving provider wrapper inside `makeContextOverflowRetryProvider` so compaction sees refs and each
 retry signs the effective context afresh. Never persist the resolved copy. See the
-[private attachment guide](../../apps/docs/content/docs/guides/private-attachments.mdx) for the
+[private attachment guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/guides/private-attachments.mdx) for the
 host-owned composition and bounded connector transport.
 
 OpenAI Codex preserves text, image, and document `ToolResultMessage` parts as native function output
@@ -915,7 +915,7 @@ Without a host, definitions, approval ids, and inline behavior are unchanged.
 
 ## Code mode tool contract
 
-These options are the tool contract that [`@yolk-sdk/codemode`](../codemode/README.md) builds on.
+These options are the tool contract that [`@yolk-sdk/codemode`](https://github.com/magoz/yolk-sdk/blob/main/packages/codemode/README.md) builds on.
 This package declares them; it does not run scripts.
 
 - `makeTool({ output })` adds declaration-only `ToolDef.outputSchema`, lowered like `parameters`.

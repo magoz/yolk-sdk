@@ -56,7 +56,11 @@ findings only; the parent applies approved fixes and runs validation.
 - Do not invent exports; verify every import exists.
 - Text that ships to npm (README, JSDoc that ends up in `dist/*.d.mts`, changesets and the
   generated `CHANGELOG.md`) must not name private apps (`examples/*`, `cloudflare/*`, `apps/*`) or
-  internal app paths. Describe what the host does, not where a private app does it.
+  internal app paths. Describe what the host does, not where a private app does it. Exception:
+  absolute GitHub links to public docs-site guides (next rule).
+- README links that leave the package directory (`../../apps/...`, `../<package>/...`) use absolute
+  `https://github.com/magoz/yolk-sdk/blob/main/...` URLs, never relative paths: the npm tarball holds
+  only the package, so relative links outside it break.
 - A new package's README, JSDoc, and first changeset describe current behavior, not deltas
   ("now", "no longer", "replaces the per-app copies"); npm users have no previous version.
   Migration history belongs in owner `AGENTS.md`, ADRs, or the docs-site migration page.
