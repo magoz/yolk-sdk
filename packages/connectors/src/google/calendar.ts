@@ -111,6 +111,22 @@ export class GoogleCalendarListEventsOutput extends Schema.Class<GoogleCalendarL
   nextPageToken: Schema.optional(Schema.String)
 }) {}
 
+/**
+ * Google's `sendUpdates` query parameter: which guests are notified of the change. When it is
+ * omitted, Google's default sends no notifications (Google notes some emails might still be sent).
+ */
+export const GoogleCalendarSendUpdates = Schema.Literals(['all', 'externalOnly', 'none']).annotate({
+  description:
+    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none", nobody (Google warns this can stop the event syncing to guests\' other calendars or lose it for some guests). Omitted: Google\'s default, which normally sends no invitation, update, or cancellation email.'
+})
+
+export type GoogleCalendarSendUpdates = typeof GoogleCalendarSendUpdates.Type
+
+// Repeated in each write description: providers that flatten tool schemas (Anthropic) drop an
+// optional enum's values and description, so the action description must carry their meaning.
+const sendUpdatesGuidance =
+  'sendUpdates chooses who Google notifies: "all" every guest, "externalOnly" only guests who do not use Google Calendar, "none" nobody (Google warns "none" can stop the event syncing to guests\' other calendars). Without sendUpdates, Google normally notifies nobody.'
+
 export class GoogleCalendarCreateEventInput extends Schema.Class<GoogleCalendarCreateEventInput>(
   'GoogleCalendarCreateEventInput'
 )({
@@ -120,7 +136,8 @@ export class GoogleCalendarCreateEventInput extends Schema.Class<GoogleCalendarC
   location: Schema.optional(Schema.String),
   start: GoogleCalendarEventDateTime,
   end: GoogleCalendarEventDateTime,
-  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String })))
+  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String }))),
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
 
 export class GoogleCalendarEventIdInput extends Schema.Class<GoogleCalendarEventIdInput>(
@@ -128,6 +145,14 @@ export class GoogleCalendarEventIdInput extends Schema.Class<GoogleCalendarEvent
 )({
   calendarId: Schema.optional(Schema.String),
   eventId: Schema.String
+}) {}
+
+export class GoogleCalendarDeleteEventInput extends Schema.Class<GoogleCalendarDeleteEventInput>(
+  'GoogleCalendarDeleteEventInput'
+)({
+  calendarId: Schema.optional(Schema.String),
+  eventId: Schema.String,
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
 
 export class GoogleCalendarUpdateEventInput extends Schema.Class<GoogleCalendarUpdateEventInput>(
@@ -140,8 +165,17 @@ export class GoogleCalendarUpdateEventInput extends Schema.Class<GoogleCalendarU
   location: Schema.optional(Schema.String),
   start: Schema.optional(GoogleCalendarEventDateTime),
   end: Schema.optional(GoogleCalendarEventDateTime),
-  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String })))
+  attendees: Schema.optional(Schema.Array(Schema.Struct({ email: Schema.String }))),
+  sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
+
+const sendUpdatesQuery = (sendUpdates: GoogleCalendarSendUpdates | undefined) => {
+  const params = new URLSearchParams()
+  appendSearchParam(params, 'sendUpdates', sendUpdates)
+  const query = params.toString()
+
+  return query === '' ? '' : `?${query}`
+}
 
 const calendarIdOrPrimary = (calendarId: string | undefined) => calendarId ?? 'primary'
 
@@ -217,7 +251,7 @@ export const googleCalendarListEventsAction = defineAction({
 
 export const googleCalendarCreateEventAction = defineAction({
   id: 'calendar.create_event',
-  description: 'Create a Google Calendar event for the integration account.',
+  description: `Create a Google Calendar event for the integration account. Attendees normally get no emailed invitation unless sendUpdates asks for one. ${sendUpdatesGuidance}`,
   inputSchema: GoogleCalendarCreateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -232,7 +266,7 @@ export const googleCalendarCreateEventAction = defineAction({
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
-          url: `${googleCalendarApiBaseUrl}/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events`,
+          url: `${googleCalendarApiBaseUrl}/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events${sendUpdatesQuery(input.sendUpdates)}`,
           headers: {
             ...googleAuthorizationHeaders(token),
             'content-type': 'application/json'
@@ -343,7 +377,7 @@ export const googleCalendarGetEventAction = defineAction({
 
 export const googleCalendarUpdateEventAction = defineAction({
   id: 'calendar.update_event',
-  description: 'Update a Google Calendar event.',
+  description: `Update a Google Calendar event (PATCH): omitted fields stay unchanged, but attendees, when given, replace the whole guest list, so include everyone who should stay invited. ${sendUpdatesGuidance}`,
   inputSchema: GoogleCalendarUpdateEventInput,
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
@@ -359,7 +393,7 @@ export const googleCalendarUpdateEventAction = defineAction({
         calendarRequest({
           token,
           method: 'PATCH',
-          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}`,
+          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}${sendUpdatesQuery(input.sendUpdates)}`,
           body: {
             summary: input.summary,
             description: input.description,
@@ -388,8 +422,10 @@ export const googleCalendarUpdateEventAction = defineAction({
 
 export const googleCalendarDeleteEventAction = defineAction({
   id: 'calendar.delete_event',
-  description: 'Delete a Google Calendar event.',
-  inputSchema: GoogleCalendarEventIdInput,
+  description: `Delete a Google Calendar event. Guests normally get no emailed cancellation unless sendUpdates asks for one. ${sendUpdatesGuidance}`,
+  // A Struct over the Class fields keeps existing GoogleCalendarEventIdInput instances valid on
+  // executeTyped (a Class schema accepts only its own instances).
+  inputSchema: Schema.Struct(GoogleCalendarDeleteEventInput.fields),
   outputSchema: Schema.Struct({ deleted: Schema.Boolean, eventId: Schema.String }),
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
@@ -404,7 +440,7 @@ export const googleCalendarDeleteEventAction = defineAction({
         calendarRequest({
           token,
           method: 'DELETE',
-          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}`
+          path: `/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events/${encodeURIComponent(input.eventId)}${sendUpdatesQuery(input.sendUpdates)}`
         })
       )
 

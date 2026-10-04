@@ -9,6 +9,7 @@ export {
   googleCalendarListEventsAction,
   googleCalendarUpdateEventAction,
   GoogleCalendarCreateEventInput,
+  GoogleCalendarDeleteEventInput,
   GoogleCalendarEvent,
   GoogleCalendarEventDateTime,
   GoogleCalendarEventIdInput,
@@ -17,6 +18,7 @@ export {
   GoogleCalendarListEventsInput,
   GoogleCalendarListEventsOutput,
   GoogleCalendarRef,
+  GoogleCalendarSendUpdates,
   GoogleCalendarUpdateEventInput
 } from './calendar.ts'
 
