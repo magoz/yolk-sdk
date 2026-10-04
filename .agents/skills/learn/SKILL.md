@@ -1,6 +1,8 @@
 ---
 name: learn
 description: Capture durable Yolk codebase knowledge from the current session. Use after implementation, debugging, or architectural decisions reveal non-obvious rules that belong in AGENTS.md, patterns, or project skills.
+metadata:
+  opencode/slash: 'true'
 ---
 
 # Learn

@@ -1,6 +1,8 @@
 ---
 name: conform
 description: Audits and fixes code against Yolk repo patterns. Use when code should align with AGENTS.md, patterns/*.md, examples/next/patterns/*.md, and package/cloudflare boundaries.
+metadata:
+  opencode/slash: 'true'
 ---
 
 # Conform
