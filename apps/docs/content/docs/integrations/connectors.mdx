@@ -462,10 +462,12 @@ the provider request.
 `calendar.update_event` is a PATCH: omitted fields stay unchanged, but `attendees`, when given,
 replaces the whole guest list.
 
-Google sends no guest email for API writes unless asked. `calendar.create_event`,
-`calendar.update_event`, and `calendar.delete_event` accept an optional `sendUpdates`
-(`all`, `externalOnly`, or `none`), sent as Google's `sendUpdates` query parameter, never in the
-event body. Omitting it sends no invitation, update, or cancellation email.
+Google's default for API writes notifies no guests (Google notes some emails might still be
+sent). `calendar.create_event`, `calendar.update_event`, and `calendar.delete_event` accept an
+optional `sendUpdates`, sent as Google's `sendUpdates` query parameter, never in the event body:
+`all` notifies every guest, `externalOnly` only guests who do not use Google Calendar, and `none`
+nobody (Google warns `none` can stop the event syncing to guests' other calendars). Omitting it
+sends no invitation, update, or cancellation email.
 
 ### Drive actions
 

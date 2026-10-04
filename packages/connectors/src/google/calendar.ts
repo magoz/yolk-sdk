@@ -112,12 +112,12 @@ export class GoogleCalendarListEventsOutput extends Schema.Class<GoogleCalendarL
 }) {}
 
 /**
- * Google's `sendUpdates` query parameter: which guests receive email about the change. When it is
- * omitted, Google sends no notifications for API writes.
+ * Google's `sendUpdates` query parameter: which guests are notified of the change. When it is
+ * omitted, Google's default sends no notifications (Google notes some emails might still be sent).
  */
 export const GoogleCalendarSendUpdates = Schema.Literals(['all', 'externalOnly', 'none']).annotate({
   description:
-    'Who gets email about this change: "all" guests, "externalOnly" (guests outside the calendar\'s Google Workspace domain), or "none". Omitted sends no email.'
+    'Who is notified of this change: "all" guests; "externalOnly", only guests who do not use Google Calendar; or "none" (Google warns this can stop the event syncing to guests\' other calendars). Omitted: Google sends no invitation, update, or cancellation email.'
 })
 
 export type GoogleCalendarSendUpdates = typeof GoogleCalendarSendUpdates.Type
@@ -164,7 +164,6 @@ export class GoogleCalendarUpdateEventInput extends Schema.Class<GoogleCalendarU
   sendUpdates: Schema.optional(GoogleCalendarSendUpdates)
 }) {}
 
-/** `?sendUpdates=…` for a write, or nothing when the caller did not choose. */
 const sendUpdatesQuery = (sendUpdates: GoogleCalendarSendUpdates | undefined) => {
   const params = new URLSearchParams()
   appendSearchParam(params, 'sendUpdates', sendUpdates)

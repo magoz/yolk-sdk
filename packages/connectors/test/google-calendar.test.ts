@@ -14,6 +14,7 @@ import {
 import {
   googleCalendarCreateEventAction,
   googleCalendarDeleteEventAction,
+  GoogleCalendarDeleteEventInput,
   GoogleCalendarEventDateTime,
   googleCalendarEventsScope,
   googleCalendarUpdateEventAction,
@@ -240,6 +241,27 @@ describe('Google Calendar sendUpdates', () => {
     })
   )
 
+  it.effect('deletes through executeTyped with GoogleCalendarDeleteEventInput', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const result = yield* googleCalendarDeleteEventAction
+        .executeTyped({
+          integration: calendarIntegration,
+          input: GoogleCalendarDeleteEventInput.make({ eventId: 'event_1', sendUpdates: 'all' })
+        })
+        .pipe(
+          Effect.provide(Layer.merge(calendarCredentials, recordingCalendarHttp(requests, 204)))
+        )
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { deleted: true, eventId: 'event_1' }
+      })
+      expect(requests[0]?.url).toBe(`${eventsUrl}/event_1?sendUpdates=all`)
+    })
+  )
+
   it.effect.each(writeCases)('$name rejects an unknown sendUpdates before any request', write =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
@@ -261,12 +283,16 @@ describe('Google Calendar sendUpdates', () => {
     })
   )
 
-  it.effect('advertises sendUpdates as an optional enum on the create tool', () =>
+  it.effect.each([
+    googleCalendarCreateEventAction,
+    googleCalendarUpdateEventAction,
+    googleCalendarDeleteEventAction
+  ])('advertises sendUpdates as an optional enum on $id', action =>
     Effect.gen(function* () {
       const registration = makeTool({
-        name: googleCalendarCreateEventAction.id,
-        description: googleCalendarCreateEventAction.description ?? '',
-        parameters: googleCalendarCreateEventAction.inputSchema,
+        name: action.id,
+        description: action.description ?? '',
+        parameters: action.inputSchema,
         access: 'write',
         execute: () => Effect.die('schema-only test')
       })
