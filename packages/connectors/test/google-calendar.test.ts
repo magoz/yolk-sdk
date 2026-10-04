@@ -333,8 +333,6 @@ describe('Google Calendar sendUpdates', () => {
     })
   )
 
-  // Action descriptions always reach the model; providers that flatten tool schemas (Anthropic)
-  // drop an optional enum's values and description, so each write description must explain them.
   it('explains every sendUpdates value and the default in each write description', () => {
     for (const action of [
       googleCalendarCreateEventAction,
