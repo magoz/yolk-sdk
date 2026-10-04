@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.100
+
+### Patch Changes
+
+- 36620a8: Advance unchanged public packages in lockstep with the Google Calendar `sendUpdates` support in `@yolk-sdk/connectors`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [36620a8]
+  - @yolk-sdk/agent@0.1.0-canary.100
+  - @yolk-sdk/conformance@0.1.0-canary.100
+
 ## 0.1.0-canary.99
 
 ### Patch Changes
