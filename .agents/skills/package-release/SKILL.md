@@ -1,6 +1,8 @@
 ---
 name: package-release
 description: Prepare and release @yolk-sdk packages end to end. Use for release-readiness audits, package README and docs-site updates, Changesets coverage, canary/stable versioning, validation, and approved GitHub Actions publishing.
+metadata:
+  opencode/slash: 'true'
 ---
 
 # Package Release

@@ -1,6 +1,8 @@
 ---
 name: tidy
 description: Maintains Yolk repo knowledge docs. Use when cleaning AGENTS.md, patterns, monorepo docs, stale paths, duplicated rules, or docs after repo structure changes.
+metadata:
+  opencode/slash: 'true'
 ---
 
 # Tidy
