@@ -554,7 +554,7 @@ tool/provider payloads alone. Resolution does not add provider media capabilitie
 Host apps own upload, authorization, byte/MIME limits, retention, and fresh signing. Put a host
 resolving provider wrapper inside `makeContextOverflowRetryProvider` so compaction sees refs and each
 retry signs the effective context afresh. Never persist the resolved copy. See the
-[private attachment guide](../../apps/docs/content/docs/guides/private-attachments.mdx) for the
+[private attachment guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/guides/private-attachments.mdx) for the
 host-owned composition and bounded connector transport.
 
 OpenAI Codex preserves text, image, and document `ToolResultMessage` parts as native function output

@@ -254,7 +254,7 @@ schema-validated. Outputs never contain raw MIME. `email.get_message` additional
 `List-Unsubscribe` when the mail carries it); hosts fetch them via IMAP `BODY.PEEK[HEADER]` or
 POP3 `TOP` without marking the message read. Successful host output is schema-validated, so a
 missing `headers` array fails. List summaries carry no headers. The package root exports the pure
-`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the [unsubscribe recipe](../../apps/docs/content/docs/integrations/connectors.mdx#unsubscribe-from-mailing-lists-and-report-spam). When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+`parseUnsubscribeMethods` helper for `List-Unsubscribe` discovery; see the [unsubscribe recipe](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/integrations/connectors.mdx#unsubscribe-from-mailing-lists-and-report-spam). When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
@@ -384,7 +384,7 @@ without `listMessages` fallback, `\Drafts` discovery, `set_read`/`set_flag`, tra
 INBOX, moves returning destination ids (the stale source id must answer the `message_not_found`
 failure code, `emailMessageNotFoundCode`), POP3 rejections of every mutation action, Sent-copy statuses (including the legacy
 `unsupported`/`skipped` synthesis), and SMTP acceptance that is not delivery. Case table:
-[Email conformance guide](../../apps/docs/content/docs/connectors/email.mdx#conformance-cases).
+[Email conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/email.mdx#conformance-cases).
 
 The subpath also ships a small bridge for conformance and tests only: `emailClientLayerFromBackend`
 (and `emailClientFromBackend`) turn any plain-JSON backend `{ call(method, request) }` into the
@@ -512,11 +512,10 @@ and capped at 100 entries each; labels are never created. Permanent deletion iss
 combined/default consent. It is immediate deletion, not trash, and claims no backup erasure.
 
 Gmail discovery omits invalid optional attachment sizes; present sizes are nonnegative integers.
-Best-effort malformed **optional** sizes (`-1`, `1.5`, `null`, `"12"`, missing) still omit size and
-keep siblings, including zero. Null / array-shaped / non-object parts are skipped.
-`message/rfc822` stays an attachment (no nested body recursion). Attachment identity and bytes are
-unchanged. Public action classes, `GmailUnknownOutput`, and `gmail.get_attachment` (`size` plus
-base64url `data`) are unchanged.
+Best-effort malformed **optional** sizes (`-1`, `1.5`, `null`, `"12"`, missing) omit size and keep
+siblings, including zero. Null / array-shaped / non-object parts are skipped.
+`message/rfc822` is an attachment (no nested body recursion). Size normalization never changes
+attachment identity or bytes; `gmail.get_attachment` returns `size` plus base64url `data`.
 
 `gmail.get_thread` and `gmail.list_attachments` admit internal MIME `payload` as `Schema.Json` after
 `Schema.fromJsonString(Schema.Unknown)`. `Schema.Json` requires finite numbers: raw HTTP JSON `1e999` parses to
@@ -667,7 +666,7 @@ class: build typed inputs with `FortnoxCreateCustomerInput.make` /
 `FortnoxUpdateCustomerInput.make`; decoding those classes directly strips unknown keys. Action
 descriptions document Fortnox update semantics (partial customer updates, invoice row replacement,
 pre-existing referenced records). See the
-[Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx) for the action table and schema
+[Fortnox guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/fortnox.mdx) for the action table and schema
 conventions.
 
 List inputs support `page` (at least 1), `limit` (1–500; provider default 100), `lastModified`, and
@@ -716,7 +715,7 @@ test company (practice account). Cases never hard-code account data; a missing s
 with a `precondition:` mismatch before any request. Credentials bind through
 `fortnoxConformanceIntegration` (`fortnox.oauth`, credential ref `fortnox.conformance`). The case
 table, seeds, and claims live in the
-[Fortnox guide](../../apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases).
+[Fortnox guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases).
 
 The row and customer mutation cases read the original state first, always restore it afterwards
 (also after a failed assertion or interruption), verify the restore by reading back, and fail with
@@ -889,7 +888,7 @@ paging, case-insensitive path lookups, the HTTP 409 error envelope, folder confl
 not-found, single-item copy/move metadata, and the upload rev precondition. Credentials bind through
 `dropboxConformanceIntegration` (`dropbox.oauth`, credential ref `dropbox.conformance`). The case
 table, seeds, and claims live in the
-[Dropbox conformance guide](../../apps/docs/content/docs/connectors/dropbox.mdx#conformance-cases).
+[Dropbox conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/dropbox.mdx#conformance-cases).
 The Dropbox emulator (`@yolk-sdk/emulators/dropbox`) passes every case offline.
 
 Every write case works only inside its own `yolk-conformance-<runId>-<case>` folder under the
@@ -1288,7 +1287,7 @@ actions yet:** the four calendar cases send raw Graph v1.0 requests through the 
 resolution, and Graph failure mapping, and pin expected Graph behaviour (unverified until a live
 run) for hosts and the Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Credentials bind through `microsoftConformanceIntegration` (`microsoft.oauth`, credential
 ref `microsoft.conformance`). The case table, seeds, and claims live in the
-[Microsoft conformance guide](../../apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
+[Microsoft conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/microsoft.mdx#conformance-cases).
 
 Every write case creates its own event, recipient-free draft, or folder and registers its id for
 cleanup before any claim runs (the create and the registration are not interruptible, and the
@@ -1327,7 +1326,7 @@ page to the trash. **Every action sends `Notion-Version: 2025-09-03`**; the pinn
 observes that header at the `ConnectorHttpClient` port and sends no request of its own. Credentials bind through
 `notionConformanceIntegration` (`notion.api_token`, credential ref `notion.conformance`). The case
 table, seeds, and claims live in the
-[Notion conformance guide](../../apps/docs/content/docs/connectors/notion.mdx#conformance-cases).
+[Notion conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/notion.mdx#conformance-cases).
 The Notion emulator (`@yolk-sdk/emulators/notion`) passes every case offline.
 
 The write case creates its own page under the `parentPageId` seed and registers its id before any
@@ -1363,7 +1362,7 @@ the HTTP 404 error body, task labels as label names, the create/get/update/close
 answering a due dated 2030-01-15 (its representation unchecked), project `parent_id`, and delete then
 not-found. Credentials bind through `todoistConformanceIntegration` (`todoist.api_token`, credential
 ref `todoist.conformance`). The case table, seeds, and claims live in the
-[Todoist conformance guide](../../apps/docs/content/docs/connectors/todoist.mdx#conformance-cases).
+[Todoist conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/todoist.mdx#conformance-cases).
 
 Every write case creates its own `yolk-conformance-<runId>-<case>` project under the
 `workProjectId` seed and works only inside it. The `runId` seed makes that namespace unique per
@@ -1408,7 +1407,7 @@ cover `telegram.validate` (one `getChat`, not `getMe`), errors as a 4xx status w
 `telegram.send_message`. Credentials bind through `telegramConformanceIntegration(chatId)`
 (`telegram.bot_token`, credential ref `telegram.conformance`). The case table, seeds, and claims
 live in the
-[Telegram conformance guide](../../apps/docs/content/docs/connectors/telegram.mdx#conformance-cases).
+[Telegram conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/telegram.mdx#conformance-cases).
 
 **The send case is write-irreversible:** it posts a real message naming the run id to the seeded
 chat, and the connector cannot delete it. It never runs under `allowWrites: 'reversible'`; a runner
@@ -1446,7 +1445,7 @@ through `Link` `rel="next"`, the 404 and 422 error envelopes the connector maps,
 contents, a comment created and deleted by id, a label added and removed, and the issue
 create/get/update/close lifecycle. Credentials bind through `githubConformanceIntegration(owner, repo)`
 (`github.token`, credential ref `github.conformance`). The case table, seeds, and claims live in the
-[GitHub conformance guide](../../apps/docs/content/docs/connectors/github.mdx#conformance-cases).
+[GitHub conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/github.mdx#conformance-cases).
 
 Every write names the invocation-unique `runId` (the fixtures replay with `run-synthetic`; the live
 runner generates a fresh random id every time) or touches only the seeded work issue and label. The
@@ -1488,7 +1487,7 @@ updated, and deleted, trash and untrash, a send to the practice address, Calenda
 event lifecycle and its deleted state, Drive folder paging, the `get_file` field selection, and a
 folder trashed and deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`,
 credential ref `google.conformance`). The case table, seeds, and claims live in the
-[Google conformance guide](../../apps/docs/content/docs/connectors/google.mdx#conformance-cases).
+[Google conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/google.mdx#conformance-cases).
 
 Every write names the invocation-unique `runId` (the fixtures replay with `run-synthetic`; the live
 runner generates a fresh random id every time) or touches only the seeded work message. The create,
@@ -1542,7 +1541,7 @@ other non-2xx answer and reads no `Retry-After`. Credentials bind through
 reads, and a strict allowlist test (`test/linkedin-search-conformance.test.ts`, whose comment lists
 exactly what it enforces) refuses anything in a 2xx body, request query, or seed that is not
 obviously synthetic. The case table, seeds, and claims live in the
-[LinkedIn search conformance guide](../../apps/docs/content/docs/connectors/linkedin-search.mdx#conformance-cases).
+[LinkedIn search conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/linkedin-search.mdx#conformance-cases).
 For offline tests, the experimental LinkedIn search emulator
 (`@yolk-sdk/emulators/linkedin-search`) is a stateful, fixture-only stand-in for the Exa and Enrich
 Layer routes that passes these cases, answering each from a fixture byte for byte (the recorded 401
@@ -1584,7 +1583,7 @@ case, raw or percent-, JSON-, `\x`-, or HTML-escape-decoded up to the stated dep
 fixture-driven fake in `@yolk-sdk/emulators/r2` plugs into `r2PortsLayerFromBackend` the same way
 (connectors never depend on emulators). Live verification needs a host implementation of both ports;
 no live R2 runner ships. The case table lives in the
-[R2 conformance guide](../../apps/docs/content/docs/connectors/r2-storage.mdx#conformance-cases).
+[R2 conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/r2-storage.mdx#conformance-cases).
 
 ## Host-only file capabilities
 
@@ -1592,7 +1591,7 @@ New byte helpers are separate from connector actions and generic agent serializa
 root `ConnectorFileTransferBudget` (`maxBytes`, `maxMetadataBytes`, `maxErrorBodyBytes`) and fail
 with `ConnectorFileTransferError` carrying only `code` plus an optional HTTP `status` number. Existing Dropbox/OneDrive download APIs and all
 base64 attachment actions remain unchanged. Full API/policy reference:
-[Transfer connector files](../../apps/docs/content/docs/connectors/files.mdx).
+[Transfer connector files](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/files.mdx).
 
 | Subpath      | Retrieval helpers                                                             | Create/update helpers                                              |
 | ------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
