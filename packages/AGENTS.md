@@ -30,6 +30,7 @@ Package-local boundaries and exceptions live in each package `AGENTS.md`.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
 - Package-specific boundaries/design rules live in each package `AGENTS.md`.
 - When public packages/subpaths change, update package `exports`, `publishConfig.exports`, `scripts/check-package-exports.ts`, and `scripts/smoke-package-imports.ts` together.
+- `scripts/smoke-package-imports.ts` hard-codes conformance case/fixture/safety counts and emulator manifest route counts; a change that adds cases or routes updates them in the same PR and runs `pnpm packages:smoke` (`pnpm test:run` does not run it).
 
 ## Commands
 
