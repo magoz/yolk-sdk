@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.101
+
+### Patch Changes
+
+- 0a0067e: Add `gmail.list_threads` (`gmailListThreadsAction`): `GET /users/me/threads` with the `gmail.list` filters (`GmailListThreadsInput`: `query`, `labelId`, `maxResults`, `pageToken`, `isRead`, `isFlagged`), returning decoded `GmailListThreadsOutput` `{ threads?: [{ id, snippet?, historyId? }], nextPageToken?, resultSizeEstimate? }` through the `gmail.readonly` slot; failures map like the other Gmail reads (`gmail_list_threads_failed`). `gmail.get_message` and `gmail.get_thread` accept optional `metadataHeaders` (`GmailMetadataHeaders`: 1 to 50 `GmailMetadataHeaderName` values), sent as repeated `metadataHeaders` query parameters and valid only with `format: 'metadata'` (other combinations fail decoding, and `make` throws); with a selection `gmail.get_thread` keeps exactly the selected headers instead of its default allowlist. Omitted, requests and outputs are unchanged. New Google conformance cases `google.gmail.list-threads-page-token` and `google.gmail.metadata-headers` with synthetic fixtures; the Google emulator serves the thread listing (`impliedThreads` seed entities, `gmailThreadPageRepeats` drill) and `metadataHeaders` selections on message and metadata thread reads (`metadataHeadersIgnored` drill), and the attachment message gains a `From` header and a recorded metadata rendering.
+
 ## 0.1.0-canary.100
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.101
+
+### Patch Changes
+
+- 6afe855: Advance unchanged public packages in lockstep with the `gmail.list_threads` thread listing and `metadataHeaders` selections in `@yolk-sdk/connectors` and the matching Google emulator support in `@yolk-sdk/emulators`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [6afe855]
+  - @yolk-sdk/agent@0.1.0-canary.101
+
 ## 0.1.0-canary.100
 
 ### Patch Changes
