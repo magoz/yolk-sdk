@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.102
+
+### Patch Changes
+
+- b3584f5: Advance unchanged public packages in lockstep with the Gmail draft `multipart/alternative` bodies, the optional draft `contentType`, and the `gmail.get_thread` decoding fix in `@yolk-sdk/connectors`, and the matching Google emulator draft MIME in `@yolk-sdk/emulators`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [b3584f5]
+  - @yolk-sdk/agent@0.1.0-canary.102
+
 ## 0.1.0-canary.101
 
 ### Patch Changes

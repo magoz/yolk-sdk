@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/extractors",
-  "version": "0.1.0-canary.101",
+  "version": "0.1.0-canary.102",
   "description": "Bounded text extraction for PDF, DOCX, XLSX, PPTX, and text files: an Effect FileExtractor service with Office archive validation, hyperlink-safe XLSX text, and a knowledge extractor adapter.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/codemode",
-  "version": "0.1.0-canary.101",
+  "version": "0.1.0-canary.102",
   "description": "Code mode for Yolk agents: one tool that runs model-written JavaScript calling the host's resolved tools, plus a Node executor on a confined QuickJS sandbox.",
   "license": "MIT",
   "type": "module",
