@@ -491,10 +491,10 @@ nextPageToken?, resultSizeEstimate? }`, one page per call; failures map like the
 
 `gmail.get_message` and `gmail.get_thread` accept optional `metadataHeaders`
 (`GmailMetadataHeaders`: 1 to `gmailMetadataHeadersMaxItems` (50) `GmailMetadataHeaderName`
-values, each an RFC 5322 field name of printable ASCII without `:`), sent as repeated
-`metadataHeaders` query parameters so Gmail answers only those headers. It is valid only with
-`format: 'metadata'`: any other combination fails input validation before credentials or HTTP, and
-`GmailGetMessageInput.make` / `GmailGetThreadInput.make` throw on it. With a selection,
+values, each an RFC 5322 field name of 1 to 128 printable ASCII characters without `:`), sent as
+repeated `metadataHeaders` query parameters so Gmail answers only those headers. It is valid only
+with `format: 'metadata'`: any other combination fails input validation before credentials or
+HTTP, and `GmailGetMessageInput.make` / `GmailGetThreadInput.make` throw on it. With a selection,
 `gmail.get_thread` keeps exactly the selected headers (case-insensitive) instead of its default
 conversation headers. Omitted, requests and outputs are unchanged.
 
