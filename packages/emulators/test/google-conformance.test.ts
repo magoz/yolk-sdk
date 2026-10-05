@@ -207,7 +207,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           const report = yield* runAll(emulators, { kind: 'in-process' }, inProcessLayer)
 
           expectAllPassed(report)
-          expect(readCaseIds).toHaveLength(6)
+          expect(readCaseIds).toHaveLength(8)
           expect(report.results.find(result => result.id === sendCaseId)?.safety, sendCaseId).toBe(
             'write-irreversible'
           )
@@ -489,6 +489,23 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
         id: 'google.gmail.not-found-envelope',
         tag: 'ConformanceMismatch',
         message: 'expected the not-found body to be JSON with a non-empty error.message'
+      }
+    ],
+    [
+      { gmailThreadPageRepeats: true },
+      {
+        id: 'google.gmail.list-threads-page-token',
+        tag: 'ConformanceMismatch',
+        message: 'expected a later page to repeat no thread from an earlier page'
+      }
+    ],
+    [
+      { metadataHeadersIgnored: true },
+      {
+        id: 'google.gmail.metadata-headers',
+        tag: 'ConformanceMismatch',
+        message:
+          'expected get_message with metadataHeaders to answer exactly the selected headers of the unfiltered read'
       }
     ],
     [

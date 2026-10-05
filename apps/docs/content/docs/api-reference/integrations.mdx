@@ -330,10 +330,24 @@ Constants also include `googleDriveApiBaseUrl`, `googleDriveFolderMimeType`, and
 
 Google's normalized attachment and thread contracts are `GmailListAttachmentsInput`,
 `GmailListAttachmentsOutput`, `GmailGetAttachmentInput`, `GmailGetAttachmentOutput`,
-`GmailAttachmentBase64Url`, `GmailAttachmentBase64`, `GmailGetThreadInput`,
-`GmailThreadAttachment`, `GmailThreadMessage`, and `GmailThreadOutput`.
+`GmailAttachmentBase64Url`, `GmailAttachmentBase64`, `GmailGetThreadInput`, `GmailGetMessageInput`,
+`GmailMetadataHeaders`, `GmailMetadataHeaderName`, `gmailMetadataHeadersMaxItems`,
+`GmailListThreadsInput`, `GmailListThreadsOutput`, `GmailThreadRef`, `GmailThreadAttachment`,
+`GmailThreadMessage`, and `GmailThreadOutput`.
 
-- `GmailGetThreadInput`: required `threadId` and `format: 'full' | 'metadata' | 'minimal'`.
+- `GmailGetThreadInput`: required `threadId` and `format: 'full' | 'metadata' | 'minimal'`;
+  optional `metadataHeaders` (`GmailMetadataHeaders`), only with `format: 'metadata'`.
+- `GmailGetMessageInput`: required `id`; optional `format: 'minimal' | 'full' | 'raw' | 'metadata'`
+  and `metadataHeaders`, only with `format: 'metadata'`. Another combination fails decoding, and
+  `make` throws on it.
+- `GmailMetadataHeaders`: 1 to `gmailMetadataHeadersMaxItems` (50) `GmailMetadataHeaderName` values
+  (RFC 5322 field names: 1 to 128 printable ASCII characters without `:`), sent as repeated
+  `metadataHeaders` query parameters. On `gmail.get_thread`, each message keeps exactly the selected
+  headers (case-insensitive) instead of the default allowlist.
+- `GmailListThreadsInput` (`gmail.list_threads`): the `GmailListInput` fields (`query`, `labelId`,
+  `maxResults`, `pageToken`, `isRead`, `isFlagged`).
+- `GmailListThreadsOutput`: optional `threads` (`GmailThreadRef`: required `id`; optional `snippet`
+  and `historyId`), `nextPageToken`, and `resultSizeEstimate`.
 - `GmailThreadOutput`: required `id` and `messages`; optional `historyId`.
 - `GmailThreadMessage`: required `id`, `headers`, and `attachments`; optional `threadId`, `labelIds`,
   `snippet`, `internalDate`, `body`, and `bodyMimeType`.
@@ -347,8 +361,8 @@ Google's normalized attachment and thread contracts are `GmailListAttachmentsInp
 
 Non-success provider responses return `ActionResult.failure`; authorization failures use
 `google_unauthorized`, while action-specific failures use `gmail_get_thread_failed`,
-`gmail_list_attachments_failed`, or `gmail_get_attachment_failed`. Invalid JSON or response shape
-fails with `ConnectorError { cause: 'validation_failed' }`.
+`gmail_list_threads_failed`, `gmail_list_attachments_failed`, or `gmail_get_attachment_failed`.
+Invalid JSON or response shape fails with `ConnectorError { cause: 'validation_failed' }`.
 
 Gmail label contracts are `GmailLabel` (with `GmailLabelMessageListVisibility`,
 `GmailLabelListVisibility`, and `GmailLabelType`), `GmailCreateLabelInput`, `GmailLabelIdInput`,

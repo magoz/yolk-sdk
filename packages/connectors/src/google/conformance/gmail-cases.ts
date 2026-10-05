@@ -34,6 +34,8 @@ import {
   gmailListAttachmentsAction,
   GmailListAttachmentsInput,
   GmailListInput,
+  gmailListThreadsAction,
+  GmailListThreadsInput,
   GmailMessageIdInput,
   gmailModifyLabelsAction,
   GmailModifyLabelsInput,
@@ -45,6 +47,8 @@ import { gmailAttachmentFixture } from './gmail-attachment.ts'
 import { gmailDraftLifecycleFixture } from './gmail-draft-lifecycle.ts'
 import { gmailLabelLifecycleFixture } from './gmail-label-lifecycle.ts'
 import { gmailListPagingFixture } from './gmail-list-paging.ts'
+import { gmailListThreadsPagingFixture } from './gmail-list-threads-paging.ts'
+import { gmailMetadataHeadersFixture } from './gmail-metadata-headers.ts'
 import { gmailNotFoundEnvelopeFixture } from './gmail-not-found-envelope.ts'
 import { gmailSendPracticeFixture } from './gmail-send-practice.ts'
 import { gmailTrashUntrashFixture } from './gmail-trash-untrash.ts'
@@ -77,9 +81,16 @@ const GmailMessageLabels = Schema.Struct({
   labelIds: Schema.optionalKey(Schema.Array(Schema.String))
 })
 
-/** One `gmail.list` page: message ids and the opaque `nextPageToken`. */
+/** One `gmail.list` page: message ids (with their thread ids) and the opaque `nextPageToken`. */
 const GmailListPage = Schema.Struct({
-  messages: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.NonEmptyString }))),
+  messages: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        threadId: Schema.optionalKey(Schema.NonEmptyString)
+      })
+    )
+  ),
   nextPageToken: Schema.optionalKey(Schema.NonEmptyString)
 })
 
@@ -169,6 +180,74 @@ const pageCap = 10
 /** Page size of the single listing the pages are compared with. */
 const singleListingSize = 100
 
+/** The item ids of one listing page and its opaque `nextPageToken`. */
+type IdPage = { readonly ids: ReadonlyArray<string>; readonly nextPageToken: string | undefined }
+
+/**
+ * The paging claim shared by the message and thread listings: `single` (one large page) lists 3 to
+ * 20 items without a `nextPageToken` (a precondition), and pages of `listPageSize` fetched through
+ * `page`, each `nextPageToken` fed back, list exactly those items, none repeated.
+ */
+const pagesMatchSingleListing = <E, R>(
+  noun: 'message' | 'thread',
+  single: IdPage,
+  page: (pageToken: string | undefined) => Effect.Effect<IdPage, E, R>
+) =>
+  Effect.gen(function* () {
+    const all = single.ids
+
+    if (
+      single.nextPageToken !== undefined ||
+      all.length <= listPageSize ||
+      all.length > listPageSize * pageCap
+    ) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: the paging label must hold ${listPageSize + 1} to ${listPageSize * pageCap} ${noun}s`
+      })
+    }
+
+    const seen: Array<string> = []
+    let pageToken: string | undefined
+
+    for (let pageNumber = 1; ; pageNumber++) {
+      const listing = yield* page(pageToken)
+      const ids = listing.ids
+
+      yield* expectConformance(
+        ids.length <= listPageSize,
+        `expected at most maxResults ${noun}s on every page`,
+        { actual: ids.length }
+      )
+      yield* expectConformance(
+        new Set(ids).size === ids.length,
+        `expected every page to list each ${noun} once`
+      )
+      yield* expectConformance(
+        ids.every(id => !seen.includes(id)),
+        `expected a later page to repeat no ${noun} from an earlier page`
+      )
+      seen.push(...ids)
+
+      if (listing.nextPageToken === undefined) {
+        break
+      }
+
+      if (pageNumber >= pageCap) {
+        return yield* new ConformanceMismatch({
+          message: `expected the listing to end within ${pageCap} pages`
+        })
+      }
+
+      pageToken = listing.nextPageToken
+    }
+
+    yield* expectEqual(
+      [...seen].sort(),
+      [...all].sort(),
+      `expected the pages to list exactly the ${noun}s of the single listing`
+    )
+  })
+
 /** One `gmail.list` page of the label's messages. */
 const listPage = (labelId: string, maxResults: number, pageToken?: string) =>
   gmailListAction
@@ -183,6 +262,12 @@ const listPage = (labelId: string, maxResults: number, pageToken?: string) =>
       Effect.flatMap(decodeOutput(GmailListPage, 'gmail.list to answer messages and nextPageToken'))
     )
 
+const messageIdPage = (labelId: string, maxResults: number, pageToken?: string) =>
+  Effect.map(listPage(labelId, maxResults, pageToken), (listing): IdPage => ({
+    ids: (listing.messages ?? []).map(message => message.id),
+    nextPageToken: listing.nextPageToken
+  }))
+
 export const gmailListPagingCase: GoogleConformanceCase = defineConformanceCase({
   id: 'google.gmail.list-page-token',
   title: 'A label listing pages through nextPageToken to the same messages as one large page',
@@ -192,58 +277,72 @@ export const gmailListPagingCase: GoogleConformanceCase = defineConformanceCase(
   fixtures: [gmailListPagingFixture.id],
   run: Effect.gen(function* () {
     const labelId = yield* requireSeed('pagingLabelId')
-    const single = yield* listPage(labelId, singleListingSize)
-    const all = (single.messages ?? []).map(message => message.id)
+    const single = yield* messageIdPage(labelId, singleListingSize)
 
-    if (
-      single.nextPageToken !== undefined ||
-      all.length <= listPageSize ||
-      all.length > listPageSize * pageCap
-    ) {
+    yield* pagesMatchSingleListing('message', single, pageToken =>
+      messageIdPage(labelId, listPageSize, pageToken)
+    )
+  })
+})
+
+/** One `gmail.list_threads` page of the label's threads. */
+const threadIdPage = (labelId: string, maxResults: number, pageToken?: string) =>
+  gmailListThreadsAction
+    .executeTyped({
+      integration,
+      input: GmailListThreadsInput.make(
+        pageToken === undefined ? { labelId, maxResults } : { labelId, maxResults, pageToken }
+      )
+    })
+    .pipe(
+      Effect.flatMap(successValue(gmailListThreadsAction.id)),
+      Effect.map((listing): IdPage => ({
+        ids: (listing.threads ?? []).map(thread => thread.id),
+        nextPageToken: listing.nextPageToken
+      }))
+    )
+
+export const gmailListThreadsPagingCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.list-threads-page-token',
+  title:
+    "A label's thread listing names the threads of its messages and pages through nextPageToken",
+  safety: 'read',
+  docs: '`gmail.list_threads` sends GET /gmail/v1/users/me/threads with `labelIds`, `maxResults`, and an opaque `pageToken` passed through unchanged (the same filters as `gmail.list`), and decodes `threads` of `{ id, snippet?, historyId? }`, `nextPageToken`, and `resultSizeEstimate` (a missing `threads` reads as none); callers page by feeding `nextPageToken` back as `pageToken`.',
+  wire: 'For the seeded paging label (3 to 20 threads), `gmail.list_threads` with that `labelId` and `maxResults: 100` answers every thread on one page (no `nextPageToken`), each with a non-empty id, and those ids are exactly the distinct `threadId`s `gmail.list` answers for the label on one page (unverified: that Gmail lists a thread when any of its messages carries the label, and never a thread none of them carries); with `maxResults: 2` each page answers at most two thread ids and a `nextPageToken` while threads remain, and feeding each token back as `pageToken` lists exactly the threads of the single page, none repeated within or across pages. `snippet`, `historyId`, and `resultSizeEstimate` are not compared (the connector only decodes them).',
+  fixtures: [gmailListThreadsPagingFixture.id],
+  run: Effect.gen(function* () {
+    const labelId = yield* requireSeed('pagingLabelId')
+    const single = yield* threadIdPage(labelId, singleListingSize)
+
+    yield* expectConformance(
+      single.ids.every(id => id !== ''),
+      'expected every listed thread to carry a non-empty id'
+    )
+
+    const messages = yield* listPage(labelId, singleListingSize)
+
+    if (messages.nextPageToken !== undefined) {
       return yield* new ConformanceMismatch({
-        message: `precondition: the paging label must hold ${listPageSize + 1} to ${listPageSize * pageCap} messages`
+        message: `precondition: the paging label must hold at most ${singleListingSize} messages`
       })
     }
 
-    const seen: Array<string> = []
-    let pageToken: string | undefined
+    const threadIds = (messages.messages ?? []).flatMap(message =>
+      message.threadId === undefined ? [] : [message.threadId]
+    )
 
-    for (let page = 1; ; page++) {
-      const listing = yield* listPage(labelId, listPageSize, pageToken)
-      const ids = (listing.messages ?? []).map(message => message.id)
-
-      yield* expectConformance(
-        ids.length <= listPageSize,
-        'expected at most maxResults messages on every page',
-        { actual: ids.length }
-      )
-      yield* expectConformance(
-        new Set(ids).size === ids.length,
-        'expected every page to list each message once'
-      )
-      yield* expectConformance(
-        ids.every(id => !seen.includes(id)),
-        'expected a later page to repeat no message from an earlier page'
-      )
-      seen.push(...ids)
-
-      if (listing.nextPageToken === undefined) {
-        break
-      }
-
-      if (page >= pageCap) {
-        return yield* new ConformanceMismatch({
-          message: `expected the listing to end within ${pageCap} pages`
-        })
-      }
-
-      pageToken = listing.nextPageToken
-    }
-
+    yield* expectConformance(
+      threadIds.length === (messages.messages ?? []).length,
+      'expected gmail.list to answer a threadId for every message'
+    )
     yield* expectEqual(
-      [...seen].sort(),
-      [...all].sort(),
-      'expected the pages to list exactly the messages of the single listing'
+      [...single.ids].sort(),
+      [...new Set(threadIds)].sort(),
+      'expected the thread listing to name exactly the threads of the label messages'
+    )
+
+    yield* pagesMatchSingleListing('thread', single, pageToken =>
+      threadIdPage(labelId, listPageSize, pageToken)
     )
   })
 })
@@ -340,6 +439,92 @@ export const gmailNotFoundEnvelopeCase: GoogleConformanceCase = defineConformanc
       failure.message,
       `Gmail get message failed: ${body.error.message}`,
       'expected the connector message to carry the body error.message'
+    )
+  })
+})
+
+/** The header names the metadata case selects, in their usual spelling. */
+const gmailMetadataHeaderSelection: ReadonlyArray<string> = ['Subject', 'From']
+
+const headerLines = (
+  headers: ReadonlyArray<{ readonly name: string; readonly value: string }>
+): ReadonlyArray<string> => headers.map(entry => `${entry.name}: ${entry.value}`)
+
+/** `gmail.get_message` of `id` with `format: "metadata"` and the optional selection. */
+const getMessageMetadata = (id: string, metadataHeaders?: ReadonlyArray<string>) =>
+  gmailGetMessageAction
+    .executeTyped({
+      integration,
+      input: GmailGetMessageInput.make(
+        metadataHeaders === undefined
+          ? { id, format: 'metadata' }
+          : { id, format: 'metadata', metadataHeaders }
+      )
+    })
+    .pipe(Effect.flatMap(successValue(gmailGetMessageAction.id)))
+
+export const gmailMetadataHeadersCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.metadata-headers',
+  title:
+    'A metadata read with metadataHeaders answers only the requested headers, for a message and in its thread',
+  safety: 'read',
+  docs: '`gmail.get_message` and `gmail.get_thread` send `format=metadata` and, when `metadataHeaders` is given (1 to 50 header names, accepted only with `format: "metadata"`), one `metadataHeaders` query parameter per name, in order. `gmail.get_message` decodes `payload.headers` as answered; `gmail.get_thread` keeps for each message the top-level `payload.headers` whose names are among the requested ones (compared case-insensitively) instead of its default conversation headers.',
+  wire: 'For the seeded attachment message, `gmail.get_message` with `format: "metadata"` answers its `threadId` and headers, among them `Subject` and at least one header named neither `Subject` nor `From` (a precondition, so the selection has something to leave out); with `metadataHeaders: ["Subject", "From"]` it answers exactly the headers of that unfiltered read named `Subject` or `From` (compared case-insensitively; unverified: that Gmail also matches a header spelled in another case), in the same order (unverified: that Gmail keeps the order of the unfiltered read) with the same values, and no other header; `gmail.get_thread` of its `threadId` with the same format and selection lists the message with exactly those headers. Bodies and labels are not compared.',
+  fixtures: [gmailMetadataHeadersFixture.id],
+  run: Effect.gen(function* () {
+    const messageId = yield* requireSeed('attachmentMessageId')
+    const unfiltered = yield* getMessageMetadata(messageId)
+    const all = unfiltered.payload?.headers ?? []
+    const selected = new Set(gmailMetadataHeaderSelection.map(name => name.toLowerCase()))
+    const isSelected = (entry: { readonly name: string }) => selected.has(entry.name.toLowerCase())
+
+    if (!all.some(entry => entry.name.toLowerCase() === 'subject') || all.every(isSelected)) {
+      return yield* new ConformanceMismatch({
+        message:
+          'precondition: attachmentMessageId must carry a Subject header and a header other than Subject and From'
+      })
+    }
+
+    const threadId = unfiltered.threadId
+
+    if (threadId === undefined) {
+      return yield* new ConformanceMismatch({
+        message: 'expected the metadata read to answer the message threadId'
+      })
+    }
+
+    const expected = headerLines(all.filter(isSelected))
+    const filtered = yield* getMessageMetadata(messageId, gmailMetadataHeaderSelection)
+
+    yield* expectEqual(
+      headerLines(filtered.payload?.headers ?? []),
+      expected,
+      'expected get_message with metadataHeaders to answer exactly the selected headers of the unfiltered read'
+    )
+
+    const thread = yield* gmailGetThreadAction
+      .executeTyped({
+        integration,
+        input: GmailGetThreadInput.make({
+          threadId,
+          format: 'metadata',
+          metadataHeaders: gmailMetadataHeaderSelection
+        })
+      })
+      .pipe(Effect.flatMap(successValue(gmailGetThreadAction.id)))
+
+    const inThread = thread.messages.find(entry => entry.id === messageId)
+
+    if (inThread === undefined) {
+      return yield* new ConformanceMismatch({
+        message: 'expected get_thread of the message threadId to list the message'
+      })
+    }
+
+    yield* expectEqual(
+      headerLines(inThread.headers),
+      expected,
+      'expected get_thread with metadataHeaders to keep exactly the selected headers of the message'
     )
   })
 })

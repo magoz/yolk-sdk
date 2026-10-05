@@ -5,15 +5,15 @@
  *
  * It never imports SDK code: its wire shapes, error envelopes, and default seed are copied as data
  * from the synthetic Google conformance fixtures, and every route names the conformance cases it
- * follows in `googleEmulatorRoutes`. Only the routes those thirteen cases (with their cleanup)
- * send are emulated: Gmail on `https://gmail.googleapis.com` (`/gmail/v1/users/me/...` and the
- * multipart send upload), Calendar and Drive on `https://www.googleapis.com` (`/calendar/v3` and
- * `/drive/v3`). Each route answers only on its recorded origin (`fetchOn(origin)` serves one
- * origin behind a loopback rewrite). Response behaviour comes only from the fixtures: anything
- * they do not show answers one ledgered 400 not-emulated, writes nothing, and uses up no fault.
- * That includes an empty listing and every read of the leftover lookup
- * (`findGoogleConformanceLeftovers`, whose label listing, draft search, and free-text event query
- * no fixture records): the lookup fails, and runners print their lookup-failed WARN.
+ * follows in `googleEmulatorRoutes`. Only the routes those fifteen cases (with their cleanup) send
+ * are emulated: Gmail on `https://gmail.googleapis.com` (`/gmail/v1/users/me/...` and the multipart
+ * send upload), Calendar and Drive on `https://www.googleapis.com` (`/calendar/v3` and
+ * `/drive/v3`). Each route answers only on its recorded origin (`fetchOn(origin)` serves one origin
+ * behind a loopback rewrite). Response behaviour comes only from the fixtures: anything they do not
+ * show answers one ledgered 400 not-emulated, writes nothing, and uses up no fault. That includes
+ * an empty listing and every read of the leftover lookup (`findGoogleConformanceLeftovers`, whose
+ * label listing, draft search, and free-text event query no fixture records): the lookup fails, and
+ * runners print their lookup-failed WARN.
  *
  * The practice send (`google.gmail.send-practice-address`) is irreversible on Gmail. Here it is
  * only recorded in the state (the sent message reads back; nothing is delivered anywhere), and only
@@ -58,22 +58,26 @@
  * the fixtures' `run-synthetic`, because the recorded `sizeEstimate` of the draft and sent messages
  * (answered by their message reads and the draft thread) covers the subject; on the practice send,
  * a `content-type` of exactly `multipart/related; boundary=<b>` with any one unquoted boundary of 1
- * to 70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` `maxResults` from 1 to
- * 500, a `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize`
- * from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour
- * 0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the
- * state holds where a fixture has an id (writes: only items created here, plus label changes,
- * trash, and untrash of a stored non-draft message); and, for an id the state does not hold, only
- * the recorded not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
- * `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read). A seed
- * may set another `practiceAddress`, but then every send is refused, since the recorded
- * `sizeEstimate` of the sent message also covers the address: the send answers only while the
- * seeded address is the recorded `practice@example.test`. On the draft compose and update routes,
- * `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
- * route, the run id aside; any other `message.raw` (line-wrapped, the standard alphabet, padded,
- * with a stray character, or with MIME-level encodings such as RFC 2047 encoded-words,
- * quoted-printable, or UTF-16) is refused before anything is recorded or a fault is decided, as a
- * constant entry with the route's own declared reason
+ * to 70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` or `gmail.list_threads`
+ * `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1 to 2500, and a
+ * `drive.list_files` `pageSize` from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants
+ * with a real calendar date, hour 0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric
+ * offset); any id of an item the state holds where a fixture has an id (writes: only items created
+ * here, plus label changes, trash, and untrash of a stored non-draft message); and, for an id the
+ * state does not hold, only the recorded not-found answers (a `format=minimal` read of a
+ * 16-hex-digit message id, a read of a `Label_<1 to 999999999>` label, a delete of an `r-<digits>`
+ * draft, and a Drive file read); on a `format=metadata` message read, and on a `format=metadata`
+ * read of a thread of stored non-draft messages (a thread read in that format takes a selection), a
+ * `metadataHeaders` selection, repeated in any order, of 1 to 50 distinct header names each spelled
+ * exactly as a header of the recorded metadata rendering, answered as that rendering with only the
+ * selected headers, in recorded order. A seed may set another `practiceAddress`, but then every
+ * send is refused, since the recorded `sizeEstimate` of the sent message also covers the address:
+ * the send answers only while the seeded address is the recorded `practice@example.test`. On the
+ * draft compose and update routes, `message.raw` must be canonical unpadded base64url of exactly
+ * the recorded draft MIME of that route, the run id aside; any other `message.raw` (line-wrapped,
+ * the standard alphabet, padded, with a stray character, or with MIME-level encodings such as RFC
+ * 2047 encoded-words, quoted-printable, or UTF-16) is refused before anything is recorded or a
+ * fault is decided, as a constant entry with the route's own declared reason
  * (`message.raw must be canonical base64url UTF-8 MIME`,
  * `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
  * 13-character run-id reason, or `message has a key this route does not take`), or
@@ -248,6 +252,8 @@ export const makeGoogleEmulator = async (
       gmailPageRepeats: drills.gmailPageRepeats === true,
       attachmentStandardBase64: drills.attachmentStandardBase64 === true,
       notFoundWithoutMessage: drills.notFoundWithoutMessage === true,
+      gmailThreadPageRepeats: drills.gmailThreadPageRepeats === true,
+      metadataHeadersIgnored: drills.metadataHeadersIgnored === true,
       labelDeleteKeepsOnMessages: drills.labelDeleteKeepsOnMessages === true,
       draftUpdateKeepsContent: drills.draftUpdateKeepsContent === true,
       trashAnswerOmitsTrash: drills.trashAnswerOmitsTrash === true,

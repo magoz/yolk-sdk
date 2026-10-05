@@ -991,13 +991,14 @@ const httpLayer = InProcessHttpClient.layer([
 ])
 ```
 
-It serves the Gmail routes the cases use (label listings with page tokens, message reads in the
-`format` renderings a fixture records, attachments, the label lifecycle, adding a created label,
-trash and untrash, the draft lifecycle and its thread, and the multipart practice send), the
-Calendar event routes (time-range listings with page tokens, and a run event created, read, renamed
-by `PATCH`, deleted to `cancelled`, and answered the recorded 410 when deleted again), and the
-Drive file routes (folder listings with page tokens, reads with the connector `fields` selection,
-and a run folder created, trashed, and deleted, then the recorded 404). Every route needs
+It serves the Gmail routes the cases use (label listings of messages and of threads with page
+tokens, message reads in the `format` renderings a fixture records, with an optional
+`metadataHeaders` selection, attachments, the label lifecycle, adding a created label, trash and
+untrash, the draft lifecycle and its thread, and the multipart practice send), the Calendar event
+routes (time-range listings with page tokens, and a run event created, read, renamed by `PATCH`,
+deleted to `cancelled`, and answered the recorded 410 when deleted again), and the Drive file routes
+(folder listings with page tokens, reads with the connector `fields` selection, and a run folder
+created, trashed, and deleted, then the recorded 404). Every route needs
 `Authorization: Bearer <token>` (a recognisable bearer) and answers only on its recorded origin:
 `fetch` reads the origin from the request URL; behind a loopback rewrite, serve `fetchOn(origin)`
 for each origin on its own server.
@@ -1034,14 +1035,15 @@ every seeded label number, draft, message, event, and folder ids in forms seeds 
 tokens (the fixtures' values on first issuance, `<token>.g<generation>` after a reset or seed, and a
 distinct `<token>.v<k>` for another list or page size or a changed list: token values are globally
 unique and never rebound), and timestamps from the `now` clock. Entities a fixture only names (the
-paging label, the messages its listing names, the practice Drive folder) are implied: references
-resolve through them, but no answer renders them. A page token is accepted only when this emulator
-issued it for the same list since the last reset or seed and the list renders exactly as when it was
-issued. Anything else answers one ledgered 400 not-emulated, writes nothing, and uses up no fault,
-including an empty listing and every read of `findGoogleConformanceLeftovers` (its label listing,
-draft search, free-text event query, and trashed-included Drive listing have no fixture): the lookup
-fails with `GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400), which the live
-runner reports as its lookup-failed `WARN`.
+paging label, the messages its listing names, their threads (named by the thread listing), the
+practice Drive folder) are implied: references resolve through them, but no answer renders them. A
+page token is accepted only when this emulator issued it for the same list since the last reset or
+seed and the list renders exactly as when it was issued. Anything else answers one ledgered 400
+not-emulated, writes nothing, and uses up no fault, including an empty listing and every read of
+`findGoogleConformanceLeftovers` (its label listing, draft search, free-text event query, and
+trashed-included Drive listing have no fixture): the lookup fails with
+`GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400), which the live runner
+reports as its lookup-failed `WARN`.
 
 - Request-shape latitude (`/google`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
@@ -1055,15 +1057,19 @@ runner reports as its lookup-failed `WARN`.
   recorded `sizeEstimate` of the draft and sent messages (answered by their message reads and the
   draft thread) covers the subject; on the practice send, a `content-type` of exactly
   `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to 70 `[A-Za-z0-9_]`
-  characters and no other parameter; a `gmail.list` `maxResults` from 1 to 500, a
-  `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize` from 1 to
-  1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour 0 to 23,
-  minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the state
-  holds where a fixture has an id (writes: only items created here, plus label changes, trash, and
-  untrash of a stored non-draft message); and, for an id the state does not hold, only the recorded
-  not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
-  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read). A seed
-  may set another `practiceAddress`, but then every send is refused, since the recorded
+  characters and no other parameter; a `gmail.list` or `gmail.list_threads` `maxResults` from 1 to
+  500, a `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize`
+  from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour
+  0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the
+  state holds where a fixture has an id (writes: only items created here, plus label changes, trash,
+  and untrash of a stored non-draft message); and, for an id the state does not hold, only the
+  recorded not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
+  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read); on a
+  `format=metadata` message read, and on a `format=metadata` read of a thread of stored non-draft
+  messages (a thread read in that format takes a selection), a `metadataHeaders` selection, repeated
+  in any order, of 1 to 50 distinct header names each spelled exactly as a header of the recorded
+  metadata rendering, answered as that rendering with only the selected headers, in recorded order.
+  A seed may set another `practiceAddress`, but then every send is refused, since the recorded
   `sizeEstimate` of the sent message also covers the address: the send answers only while the seeded
   address is the recorded `practice@example.test`. On the draft compose and update routes,
   `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
@@ -1089,7 +1095,7 @@ profiles `default` and `empty`. A reversible case ends at the seed except the co
 event cases, its own event, which stays readable as `cancelled`; the send leaves its sent message.
 Faults, the ledger, clock-free recovery, and the control plane behave as in the Dropbox emulator; a
 429 fault with `retry-after` reaches the connector as `google_rate_limited`. The `drills` option
-(thirteen booleans, one per Google case) is a test-only knob that makes exactly the matching
+(fifteen booleans, one per Google case) is a test-only knob that makes exactly the matching
 conformance case fail.
 
 ## LinkedIn search emulator

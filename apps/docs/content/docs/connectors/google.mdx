@@ -26,6 +26,8 @@ are as currently understood; none is observed live yet.
 | `google.gmail.list-page-token`             | `read`               | `pagingLabelId`                                  | `gmail.list` pages of two chain through `nextPageToken`, repeat no message, and list exactly the messages of one large page                                                                                                                                                                      |
 | `google.gmail.attachment-base64url`        | `read`               | `attachmentMessageId`                            | An attachment `get_attachment` answers base64url `data` (no `+` or `/`) decoding to exactly `size` bytes                                                                                                                                                                                         |
 | `google.gmail.not-found-envelope`          | `read`               | none                                             | An unused message id answers 404 (unverified), mapped to `google_not_found`, with a JSON `error.message` the connector appends to its message                                                                                                                                                    |
+| `google.gmail.list-threads-page-token`     | `read`               | `pagingLabelId`                                  | `gmail.list_threads` names exactly the threads of the label's messages (unverified), and pages of two chain through `nextPageToken`, repeat no thread, and list exactly the threads of one large page                                                                                            |
+| `google.gmail.metadata-headers`            | `read`               | `attachmentMessageId`                            | A `format: "metadata"` read with `metadataHeaders: ["Subject", "From"]` answers exactly those headers of the unfiltered read (unverified: case-insensitive matching), for the message and in `get_thread`                                                                                        |
 | `google.gmail.label-create-apply-delete`   | `write-reversible`   | `workMessageId`, `runId`                         | A run label is created, applied to the work message, listed on it, deleted by id (204, empty body), reads `google_not_found`, and is gone from the message                                                                                                                                       |
 | `google.gmail.draft-compose-update-delete` | `write-reversible`   | `runId`                                          | A draft without recipients, proven the run's own before adoption, round-trips its ASCII subject and non-ASCII body through `get_thread`, before and after an update, then deletes (204, empty body); its message then answers not found, and stays gone after a second delete (2xx or not found) |
 | `google.gmail.trash-untrash`               | `write-reversible`   | `workMessageId`                                  | Trash adds `TRASH`, and untrash removes it; the cleanup restores and verifies every earlier label                                                                                                                                                                                                |
@@ -40,6 +42,11 @@ are as currently understood; none is observed live yet.
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
 
 - An unused 16-hex-digit message id answers 404 rather than 400 `Invalid id value`.
+- Gmail lists a thread under a label when any of its messages carries it, and never a thread none
+  of them carries.
+- A `metadataHeaders` selection matches header names case-insensitively (the connector filters
+  `get_thread` headers that way; the case selects the usual spelling), and Gmail keeps the selected
+  headers in the order of the unfiltered read.
 - A metadata read of a fresh draft returns the `DRAFT` label and the subject exactly as sent (the
   draft ownership check relies on it; if not, the case refuses its own draft and the leftover
   lookup reports it).
@@ -62,22 +69,21 @@ rather than claim connector behavior: whether untrash restores every earlier lab
 the `get_attachment` answer (the connector never relies on them matching).
 
 `GoogleConformanceConfig` holds the seeds: `practiceAddress` (a practice mailbox **the owner
-controls**: the only address the send case ever sends to; exactly one plain address
-`local@domain`, typed as the branded `GooglePracticeAddress`),
-`pagingLabelId` (a Gmail user label on 3 to 20 practice messages, none in Trash or Spam),
-`attachmentMessageId` (a practice message with a file attachment Gmail stores apart),
-`workMessageId` (a practice message, not in Trash, which the label and trash cases change and
-restore), `calendarId` (a practice calendar the account owns), `eventRangeStart` and
-`eventRangeEnd` (RFC 3339 instants around 3 to 20 events in it, away from the case events on
-2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20 untrashed items the token may
-write into; trashed items are not counted), `driveFileId` (a practice file directly inside it), and
-`runId` (the branded `GoogleConformanceRunId`). Cases never hard-code account data. `practiceAddress`
-and `runId` are branded schema types, so a host building the config by hand constructs them
-(`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or decodes the whole config
-with `GoogleConformanceSeeds`; a plain string is a type error. Each case also decodes every seed it
-reads again, so a host that bypasses the types (JSON, a cast) is still refused: a missing or
-invalid seed fails the case with a `precondition:` mismatch before any request.
-Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
+controls**: the only address the send case ever sends to; exactly one plain address `local@domain`,
+typed as the branded `GooglePracticeAddress`), `pagingLabelId` (a Gmail user label on 3 to 20
+practice messages in 3 to 20 distinct threads, none in Trash or Spam), `attachmentMessageId` (a
+practice message with a file attachment Gmail stores apart), `workMessageId` (a practice message,
+not in Trash, which the label and trash cases change and restore), `calendarId` (a practice calendar
+the account owns), `eventRangeStart` and `eventRangeEnd` (RFC 3339 instants around 3 to 20 events in
+it, away from the case events on 2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20
+untrashed items the token may write into; trashed items are not counted), `driveFileId` (a practice
+file directly inside it), and `runId` (the branded `GoogleConformanceRunId`). Cases never hard-code
+account data. `practiceAddress` and `runId` are branded schema types, so a host building the config
+by hand constructs them (`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or
+decodes the whole config with `GoogleConformanceSeeds`; a plain string is a type error. Each case
+also decodes every seed it reads again, so a host that bypasses the types (JSON, a cast) is still
+refused: a missing or invalid seed fails the case with a `precondition:` mismatch before any
+request. Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
 `google.conformance`).
 
 ### Write ownership and cleanup

@@ -51,6 +51,8 @@ import {
   gmailLabelLifecycleFixture,
   gmailListPagingCase,
   gmailListPagingFixture,
+  gmailListThreadsPagingFixture,
+  gmailMetadataHeadersFixture,
   gmailNotFoundEnvelopeFixture,
   gmailSendPracticeCase,
   gmailSendPracticeFixture,
@@ -154,6 +156,8 @@ const caseIds = [
   ['google.gmail.list-page-token', 'read'],
   ['google.gmail.attachment-base64url', 'read'],
   ['google.gmail.not-found-envelope', 'read'],
+  ['google.gmail.list-threads-page-token', 'read'],
+  ['google.gmail.metadata-headers', 'read'],
   ['google.gmail.label-create-apply-delete', 'write-reversible'],
   ['google.gmail.draft-compose-update-delete', 'write-reversible'],
   ['google.gmail.trash-untrash', 'write-reversible'],
@@ -220,6 +224,9 @@ describe('Google conformance cases', () => {
       )
     ).toEqual([
       'google.gmail.not-found-envelope',
+      'google.gmail.list-threads-page-token',
+      'google.gmail.metadata-headers',
+      'google.gmail.metadata-headers',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
@@ -265,7 +272,7 @@ describe('Google conformance cases', () => {
       })
 
       expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 13,
+        passed: 15,
         failed: 0,
         skipped: 0
       })
@@ -292,7 +299,7 @@ describe('Google conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(13)
+      expect(report.summary.passed).toBe(15)
 
       for (const testCase of googleConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -525,6 +532,23 @@ const tampers: ReadonlyArray<{
     message: 'expected an unused message id to map to google_not_found'
   },
   {
+    // The first thread page drops nextPageToken while three threads remain.
+    fixture: replaceResponse(gmailListThreadsPagingFixture, 2, () =>
+      json(200, { ...jsonOf(gmailListThreadsPagingFixture, 2), nextPageToken: undefined })
+    ),
+    message: 'expected the pages to list exactly the threads of the single listing'
+  },
+  {
+    // The selected read answers every header, as if metadataHeaders were ignored.
+    fixture: replaceResponse(
+      gmailMetadataHeadersFixture,
+      1,
+      () => exchangeAt(gmailMetadataHeadersFixture, 0).response
+    ),
+    message:
+      'expected get_message with metadataHeaders to answer exactly the selected headers of the unfiltered read'
+  },
+  {
     // The deleted label still shows on the message.
     fixture: replaceResponse(
       gmailLabelLifecycleFixture,
@@ -643,6 +667,45 @@ describe('Google conformance drills (one per case)', () => {
         replaceInBody('18f00000000000c3', '18f00000000000c1')
       ),
       'expected a later page to repeat no message from an earlier page'
+    ],
+    [
+      'a repeated thread id on a later page',
+      replaceResponse(
+        gmailListThreadsPagingFixture,
+        3,
+        replaceInBody('18f00000000000c3', '18f00000000000c1')
+      ),
+      'expected a later page to repeat no thread from an earlier page'
+    ],
+    [
+      'a thread listing naming a thread none of the label messages is in',
+      replaceResponse(
+        gmailListThreadsPagingFixture,
+        0,
+        replaceInBody('18f00000000000c5', '18f00000000000f5')
+      ),
+      'expected the thread listing to name exactly the threads of the label messages'
+    ],
+    [
+      'a selected thread read without the From header',
+      replaceResponse(
+        gmailMetadataHeadersFixture,
+        2,
+        replaceInBody('{"name":"From","value":"practice@example.test"},', '')
+      ),
+      'expected get_thread with metadataHeaders to keep exactly the selected headers of the message'
+    ],
+    [
+      'a message without a header the selection leaves out',
+      replaceResponse(
+        gmailMetadataHeadersFixture,
+        0,
+        replaceInBody(
+          ',{"name":"Content-Type","value":"multipart/mixed; boundary=\\"synthetic\\""}',
+          ''
+        )
+      ),
+      'precondition: attachmentMessageId must carry a Subject header and a header other than Subject and From'
     ],
     [
       'a not-found body without error.message',

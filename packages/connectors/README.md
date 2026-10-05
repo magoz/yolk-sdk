@@ -481,6 +481,23 @@ model tool allowlists when it is intended only for a host-owned reviewed action.
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
+`gmail.list_threads` (`gmailListThreadsAction`, read, `gmail.readonly` slot) sends
+`GET /users/me/threads` with the `gmail.list` filters (`GmailListThreadsInput`: `query`, `labelId`,
+`maxResults`, `pageToken`, `isRead`, `isFlagged`, composed into `q` exactly as for `gmail.list`) and
+returns decoded `GmailListThreadsOutput` `{ threads?: [{ id, snippet?, historyId? }],
+nextPageToken?, resultSizeEstimate? }`, one page per call; failures map like the other Gmail reads
+(`gmail_list_threads_failed` otherwise). A thread listing costs 10 Gmail quota units against 5 for
+`messages.list`, but names each conversation once.
+
+`gmail.get_message` and `gmail.get_thread` accept optional `metadataHeaders`
+(`GmailMetadataHeaders`: 1 to `gmailMetadataHeadersMaxItems` (50) `GmailMetadataHeaderName`
+values, each an RFC 5322 field name of printable ASCII without `:`), sent as repeated
+`metadataHeaders` query parameters so Gmail answers only those headers. It is valid only with
+`format: 'metadata'`: any other combination fails input validation before credentials or HTTP, and
+`GmailGetMessageInput.make` / `GmailGetThreadInput.make` throw on it. With a selection,
+`gmail.get_thread` keeps exactly the selected headers (case-insensitive) instead of its default
+conversation headers. Omitted, requests and outputs are unchanged.
+
 Gmail labels use `gmail.list_labels`, `gmail.create_label`, `gmail.get_label`,
 `gmail.update_label`, `gmail.delete_label`, and `gmail.modify_labels`, plus `gmail.set_starred`
 for starring via the `STARRED` system label. Label reads use the
@@ -1475,18 +1492,20 @@ listing (no fixture records it), so that lookup fails closed against it.
 
 ### Google conformance cases (experimental)
 
-`@yolk-sdk/connectors/google/conformance` exports thirteen conformance cases for
+`@yolk-sdk/connectors/google/conformance` exports fifteen conformance cases for
 `@yolk-sdk/conformance/runner` (`googleConformanceCases`), synthetic replay fixtures
 (`googleConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
 (`googleConformanceFixtureSeeds`). Every case runs the real Gmail, Calendar, and Drive actions over
 `ConnectorHttpClient` and `CredentialResolver` plus `GoogleConformanceConfig`, which holds a
 practice mailbox address, practice messages and a label, a practice calendar and time range, and a
-practice Drive folder and file. They cover `gmail.list` paging through `nextPageToken`, base64url
-attachment data, the 404 error envelope, a label created, applied, and deleted, a draft composed,
-updated, and deleted, trash and untrash, a send to the practice address, Calendar range paging, an
-event lifecycle and its deleted state, Drive folder paging, the `get_file` field selection, and a
-folder trashed and deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`,
-credential ref `google.conformance`). The case table, seeds, and claims live in the
+practice Drive folder and file. They cover `gmail.list` and `gmail.list_threads` paging through
+`nextPageToken` (the thread listing naming exactly the threads of the label's messages), base64url
+attachment data, the 404 error envelope, a `metadataHeaders` selection on `gmail.get_message` and
+`gmail.get_thread`, a label created, applied, and deleted, a draft composed, updated, and deleted,
+trash and untrash, a send to the practice address, Calendar range paging, an event lifecycle and its
+deleted state, Drive folder paging, the `get_file` field selection, and a folder trashed and
+deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
+`google.conformance`). The case table, seeds, and claims live in the
 [Google conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/google.mdx#conformance-cases).
 
 Every write names the invocation-unique `runId` (the fixtures replay with `run-synthetic`; the live

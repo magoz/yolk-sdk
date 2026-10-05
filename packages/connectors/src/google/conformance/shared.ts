@@ -79,9 +79,16 @@ export const GoogleConformanceSeeds = Schema.Struct({
    * controls (the practice account's own address works). Never a person's address.
    */
   practiceAddress: Schema.optionalKey(GooglePracticeAddress),
-  /** A user label on 3 to 20 practice messages, none of them in Trash or Spam. */
+  /**
+   * A user label on 3 to 20 practice messages in 3 to 20 distinct threads (the thread listing case
+   * pages through the threads), none of them in Trash or Spam.
+   */
   pagingLabelId: Schema.optionalKey(GmailId),
-  /** A practice message with at least one file attachment Gmail stores apart (an `attachmentId`). */
+  /**
+   * A practice message with at least one file attachment Gmail stores apart (an `attachmentId`).
+   * The metadata-headers case also reads its headers: it needs a `Subject` header and one header
+   * other than `Subject` and `From`, which every ordinary message has.
+   */
   attachmentMessageId: Schema.optionalKey(GmailId),
   /**
    * A practice message (not in Trash) the label and trash cases change and restore: they apply and

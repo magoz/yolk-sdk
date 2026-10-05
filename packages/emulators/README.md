@@ -1599,10 +1599,10 @@ GitHub case, only to prove that case catches it.
 
 `await makeGoogleEmulator(options?)` returns
 `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
-state; `await close()` when done. It emulates only the Gmail, Calendar, and Drive routes the
-thirteen Google conformance cases (with their cleanup) send, so the Google connector actions and the
-cases run unchanged against it, the irreversible practice send included. Each route answers only on
-the origin its fixtures record: Gmail (the API and the multipart send upload) on
+state; `await close()` when done. It emulates only the Gmail, Calendar, and Drive routes the fifteen
+Google conformance cases (with their cleanup) send, so the Google connector actions and the cases
+run unchanged against it, the irreversible practice send included. Each route answers only on the
+origin its fixtures record: Gmail (the API and the multipart send upload) on
 `https://gmail.googleapis.com` (`googleEmulatorGmailOrigin`), Calendar and Drive on
 `https://www.googleapis.com` (`googleEmulatorApisOrigin`). `fetch` takes the origin from the request
 URL (in-process routing keeps it); behind a loopback rewrite, which loses it, serve
@@ -1636,23 +1636,24 @@ the live runner turns that into its lookup-failed `WARN`.
 Routes (every request needs `Authorization: Bearer <token>`, a recognisable bearer; bodies are
 JSON unless noted; Drive requests also send `accept: application/json`, as recorded):
 
-| Route                                                            | Behavior                                                                                      |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `GET /gmail/v1/users/me/messages`                                | `labelIds`, `maxResults`, `pageToken`: `{ messages: [{ id, threadId }], nextPageToken? }`     |
-| `GET /gmail/v1/users/me/messages/{messageId}`                    | `format=minimal`, `metadata`, or `full`, as recorded for that message; the recorded 404       |
-| `GET /gmail/v1/users/me/messages/{messageId}/attachments/{id}`   | `{ size, data }` (base64url) of a seeded attachment                                           |
-| `POST /gmail/v1/users/me/messages/{messageId}/modify`            | `{ addLabelIds: [<created label>] }`: `{ id, threadId, labelIds }`                            |
-| `POST /gmail/v1/users/me/messages/{messageId}/trash`, `/untrash` | No body: adds or removes `TRASH`, answering `{ id, threadId, labelIds }`                      |
-| `POST /gmail/v1/users/me/labels`                                 | `{ name: "yolk-conformance <runId> label" }`: the created user label (`Label_9101` first)     |
-| `GET`, `DELETE /gmail/v1/users/me/labels/{labelId}`              | Delete a created label (204; it leaves every message); a read of an absent label answers 404  |
-| `POST /gmail/v1/users/me/drafts`, `PUT .../drafts/{draftId}`     | The recorded run draft without recipients: `{ id, message: { id, threadId, labelIds } }`      |
-| `DELETE /gmail/v1/users/me/drafts/{draftId}`                     | 204 (the draft and its message go); an absent draft answers the recorded 404                  |
-| `GET /gmail/v1/users/me/threads/{threadId}`                      | `format=full`: a draft thread created here                                                    |
-| `POST /upload/gmail/v1/users/me/messages/send`                   | `uploadType=multipart`, `multipart/related`: the practice message only (see below)            |
-| `GET`, `POST /calendar/v3/calendars/{calendarId}/events`         | Range listing (`singleEvents=true`, `orderBy=startTime`) with page tokens; the run event      |
-| `GET`, `PATCH`, `DELETE .../events/{eventId}`                    | Read (cancelled too), the recorded rename, delete to `cancelled` (204), then the recorded 410 |
-| `GET`, `POST /drive/v3/files`                                    | Folder listing (`'<folder>' in parents and trashed = false`) with page tokens; the run folder |
-| `GET`, `PATCH`, `DELETE /drive/v3/files/{fileId}`                | Read with the connector `fields` (absent: the recorded 404), `{ trashed: true }`, delete 204  |
+| Route                                                            | Behavior                                                                                              |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GET /gmail/v1/users/me/messages`                                | `labelIds`, `maxResults`, `pageToken`: `{ messages: [{ id, threadId }], nextPageToken? }`             |
+| `GET /gmail/v1/users/me/threads`                                 | `labelIds`, `maxResults`, `pageToken`: `{ threads: [{ id, snippet, historyId }], nextPageToken? }`    |
+| `GET /gmail/v1/users/me/messages/{messageId}`                    | `format=minimal`, `metadata` (optional `metadataHeaders`), or `full`, as recorded; the recorded 404   |
+| `GET /gmail/v1/users/me/messages/{messageId}/attachments/{id}`   | `{ size, data }` (base64url) of a seeded attachment                                                   |
+| `POST /gmail/v1/users/me/messages/{messageId}/modify`            | `{ addLabelIds: [<created label>] }`: `{ id, threadId, labelIds }`                                    |
+| `POST /gmail/v1/users/me/messages/{messageId}/trash`, `/untrash` | No body: adds or removes `TRASH`, answering `{ id, threadId, labelIds }`                              |
+| `POST /gmail/v1/users/me/labels`                                 | `{ name: "yolk-conformance <runId> label" }`: the created user label (`Label_9101` first)             |
+| `GET`, `DELETE /gmail/v1/users/me/labels/{labelId}`              | Delete a created label (204; it leaves every message); a read of an absent label answers 404          |
+| `POST /gmail/v1/users/me/drafts`, `PUT .../drafts/{draftId}`     | The recorded run draft without recipients: `{ id, message: { id, threadId, labelIds } }`              |
+| `DELETE /gmail/v1/users/me/drafts/{draftId}`                     | 204 (the draft and its message go); an absent draft answers the recorded 404                          |
+| `GET /gmail/v1/users/me/threads/{threadId}`                      | `format=full`: a draft thread created here; `format=metadata` with `metadataHeaders`: a stored thread |
+| `POST /upload/gmail/v1/users/me/messages/send`                   | `uploadType=multipart`, `multipart/related`: the practice message only (see below)                    |
+| `GET`, `POST /calendar/v3/calendars/{calendarId}/events`         | Range listing (`singleEvents=true`, `orderBy=startTime`) with page tokens; the run event              |
+| `GET`, `PATCH`, `DELETE .../events/{eventId}`                    | Read (cancelled too), the recorded rename, delete to `cancelled` (204), then the recorded 410         |
+| `GET`, `POST /drive/v3/files`                                    | Folder listing (`'<folder>' in parents and trashed = false`) with page tokens; the run folder         |
+| `GET`, `PATCH`, `DELETE /drive/v3/files/{fileId}`                | Read with the connector `fields` (absent: the recorded 404), `{ trashed: true }`, delete 204          |
 
 **The practice send is recorded, never delivered.** `google.gmail.send-practice-address` is
 irreversible on Gmail. The emulator accepts only the recorded 7-bit message whose sole recipient
@@ -1702,23 +1703,27 @@ emulator mints (it never mints anything else):
   forms no seeded id or thread id may use. All come from counters in the state that only advance.
   Event `created` / `updated`, folder `createdTime` / `modifiedTime` / `trashedTime`, and the sent
   `Date` header come from the injectable `now` clock. Page tokens are the fixtures' values
-  (`synthetic-gmail-page-2`, ...) in the generation that first issued them, and
-  `<token>.g<generation>` after a reset or seed (each starts a generation); a token is never
-  rebound: token values are globally unique, so another list or page size, or a changed list, gets a
-  distinct `<token>.v<k>`.
+  (`synthetic-gmail-page-2`, `synthetic-gmail-threads-page-2`, ...) in the generation that first
+  issued them, and `<token>.g<generation>` after a reset or seed (each starts a generation); a token
+  is never rebound: token values are globally unique, so another list or page size, or a changed
+  list, gets a distinct `<token>.v<k>`.
 - **Implied entities.** The paging label (`impliedLabelIds`), the five messages its listing names
-  (`impliedMessages`, rendered only as `{ id, threadId }` list entries), and the practice Drive
-  folder (`impliedFolderIds`) are only named by the fixtures: references resolve through them (a
-  label listing, a folder parent), but an answer that would render one is not emulated.
+  (`impliedMessages`, rendered only as `{ id, threadId }` list entries), their five threads
+  (`impliedThreads`, rendered only as `{ id, snippet, historyId }` thread listing entries), and the
+  practice Drive folder (`impliedFolderIds`) are only named by the fixtures: references resolve
+  through them (a label listing, a folder parent), but an answer that would render one is not
+  emulated.
 - **Recorded renderings.** A Gmail message answers only the formats a fixture records for it (the
-  work message `minimal`, the attachment message `full`, a composed draft `metadata` and `full`, an
-  updated draft `full`, a sent message `metadata`); another format is not emulated.
+  work message `minimal`, the attachment message `metadata` and `full`, a composed draft `metadata`
+  and `full`, an updated draft `full`, a sent message `metadata`); another format is not emulated. A
+  `metadataHeaders` selection (only with `format=metadata`) answers the recorded metadata rendering
+  with only the selected headers, in recorded order.
 - **What writes leave.** A reversible case ends at the seed except the counters, plus each event
   case's own event, which Calendar keeps readable as `cancelled` (the fixtures read it back); the
   send leaves its sent message. Deleting a label removes it from every message.
 - **Page tokens.** A token is accepted only when this emulator issued it for the same list (label
-  and `maxResults`; calendar, range, and `maxResults`; folder and `pageSize`) since the last reset
-  or seed, and the list renders exactly as when it was issued.
+  and `maxResults` for messages and for threads; calendar, range, and `maxResults`; folder and
+  `pageSize`) since the last reset or seed, and the list renders exactly as when it was issued.
 - **Request-shape latitude (`/google`, the only accepted deviations).** Any bearer value in the RFC
   6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
   character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
@@ -1731,22 +1736,26 @@ emulator mints (it never mints anything else):
   fixtures' `run-synthetic`, because the recorded `sizeEstimate` of the draft and sent messages
   (answered by their message reads and the draft thread) covers the subject; on the practice send, a
   `content-type` of exactly `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to
-  70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` `maxResults` from 1 to 500, a
-  `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize` from 1 to
-  1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour 0 to 23,
-  minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the state
-  holds where a fixture has an id (writes: only items created here, plus label changes, trash, and
-  untrash of a stored non-draft message); and, for an id the state does not hold, only the recorded
-  not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
-  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read). A seed
-  may set another `practiceAddress`, but then every send is refused, since the recorded
-  `sizeEstimate` of the sent message also covers the address: the send answers only while the seeded
-  address is the recorded `practice@example.test`. On the draft compose and update routes,
-  `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
-  route, the run id aside; any other `message.raw` (line-wrapped, the standard alphabet, padded,
-  with a stray character, or with MIME-level encodings such as RFC 2047 encoded-words,
-  quoted-printable, or UTF-16) is refused before anything is recorded or a fault is decided, as a
-  constant entry with the route's own declared reason
+  70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` or `gmail.list_threads`
+  `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1 to 2500, and a
+  `drive.list_files` `pageSize` from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants
+  with a real calendar date, hour 0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric
+  offset); any id of an item the state holds where a fixture has an id (writes: only items created
+  here, plus label changes, trash, and untrash of a stored non-draft message); and, for an id the
+  state does not hold, only the recorded not-found answers (a `format=minimal` read of a
+  16-hex-digit message id, a read of a `Label_<1 to 999999999>` label, a delete of an `r-<digits>`
+  draft, and a Drive file read); on a `format=metadata` message read, and on a `format=metadata`
+  read of a thread of stored non-draft messages (a thread read in that format takes a selection), a
+  `metadataHeaders` selection, repeated in any order, of 1 to 50 distinct header names each spelled
+  exactly as a header of the recorded metadata rendering, answered as that rendering with only the
+  selected headers, in recorded order. A seed may set another `practiceAddress`, but then every send
+  is refused, since the recorded `sizeEstimate` of the sent message also covers the address: the
+  send answers only while the seeded address is the recorded `practice@example.test`. On the draft
+  compose and update routes, `message.raw` must be canonical unpadded base64url of exactly the
+  recorded draft MIME of that route, the run id aside; any other `message.raw` (line-wrapped, the
+  standard alphabet, padded, with a stray character, or with MIME-level encodings such as RFC 2047
+  encoded-words, quoted-printable, or UTF-16) is refused before anything is recorded or a fault is
+  decided, as a constant entry with the route's own declared reason
   (`message.raw must be canonical base64url UTF-8 MIME`,
   `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
   13-character run-id reason, or `message has a key this route does not take`), or
@@ -1785,10 +1794,8 @@ Faults and the control plane behave as in the Dropbox emulator (the ledger recor
 `content-type` request header); a 429 fault with `retry-after` reaches the connector as
 `google_rate_limited` with `retryAfterMs`.
 
-**Drill knobs (tests only).** `drills: { gmailPageRepeats, attachmentStandardBase64,
-notFoundWithoutMessage, labelDeleteKeepsOnMessages, draftUpdateKeepsContent,
-trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventPatchKeepsSummary,
-repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, listIncludesTrashed }`
+**Drill knobs (tests only).**
+`drills: { gmailPageRepeats, attachmentStandardBase64, notFoundWithoutMessage, gmailThreadPageRepeats, metadataHeadersIgnored, labelDeleteKeepsOnMessages, draftUpdateKeepsContent, trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventPatchKeepsSummary, repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, listIncludesTrashed }`
 (booleans) each make the emulator disagree with exactly one Google case, only to prove that case
 catches it.
 

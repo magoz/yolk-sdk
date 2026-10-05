@@ -151,9 +151,10 @@ while original file bytes use host-only `downloadDropboxFile` with `ConnectorBin
 the `files.content.read` scope. Host-only create/update require `files.content.write`.
 
 Google's `gmail.get_thread` action returns normalized messages with decoded message text and
-attachment metadata, without raw MIME or attachment content. See the
-[Connectors catalog](../integrations/connectors#fetch-a-normalized-gmail-thread) for its required
-format and output contract.
+attachment metadata, without raw MIME or attachment content. See the [Connectors
+catalog](../integrations/connectors#fetch-a-normalized-gmail-thread) for its required format, its
+optional `metadataHeaders` selection (also on `gmail.get_message`, only with `format: 'metadata'`),
+and output contract.
 
 Google Drive actions stay in the provider-level `google` subpath and share the existing
 `google.oauth` credential binding with Gmail and Calendar. Metadata reads request
@@ -176,12 +177,13 @@ inputs, permissions, and safe IMAP adapter requirements.
 
 Gmail reports read state from the `UNREAD` label and flag state from the `STARRED` label through
 optional `isRead`/`isFlagged` fields (absent when labels are omitted), with matching typed filters
-on `gmail.search` and `gmail.list`. `gmail.set_read` flips `UNREAD` via `gmail.modify` consent and
-returns the normalized message. Outlook reports `isRead` plus follow-up flag state as
-`isFlagged` (flagged is true; not-flagged and completed are false; anything else asserts
-nothing), with matching typed filters composed into `$filter` on `outlook.list_messages`. These
-are provider-native models: Gmail labels, Outlook flags/folders/categories, and IMAP
-flags/keywords/folders are not identical, and the connector never pretends they are.
+on `gmail.search`, `gmail.list`, and `gmail.list_threads` (one decoded page of thread ids, snippets,
+and history ids). `gmail.set_read` flips `UNREAD` via `gmail.modify` consent and returns the
+normalized message. Outlook reports `isRead` plus follow-up flag state as `isFlagged` (flagged is
+true; not-flagged and completed are false; anything else asserts nothing), with matching typed
+filters composed into `$filter` on `outlook.list_messages`. These are provider-native models: Gmail
+labels, Outlook flags/folders/categories, and IMAP flags/keywords/folders are not identical, and the
+connector never pretends they are.
 
 Explicit batch actions cover 1-100 unique messages with complete per-ID outcomes in `messageIds`
 order (`succeeded`, `failed`, `unknown`, `not_attempted`) plus exact summary counts, sanitized codes

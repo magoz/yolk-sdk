@@ -198,6 +198,7 @@ describe('route evidence manifest', () => {
 
     expect(googleEmulatorRoutes.map(route => `${route.method} ${route.path}`)).toEqual([
       'GET /gmail/v1/users/me/messages',
+      'GET /gmail/v1/users/me/threads',
       'GET /gmail/v1/users/me/messages/{messageId}',
       'GET /gmail/v1/users/me/messages/{messageId}/attachments/{attachmentId}',
       'POST /gmail/v1/users/me/messages/{messageId}/modify',
@@ -2106,6 +2107,191 @@ describe('empty listings are no fixture answer', () => {
   })
 })
 
+describe('thread listings and metadataHeaders selections', () => {
+  const attachmentMessage = '18f00000000000a1'
+
+  const metadataUrl = (query: string) => `${gm}/messages/${attachmentMessage}?${query}`
+
+  const headerNames = async (response: Response) => {
+    expect(response.status).toBe(200)
+
+    const body: unknown = await response.json()
+    const payload = field(body, 'payload')
+    const headers = field(payload, 'headers')
+
+    return Array.isArray(headers) ? headers.map(header => field(header, 'name')) : []
+  }
+
+  it('lists the paging threads, paged with the recorded tokens', async () => {
+    const target = await emulator()
+
+    const all: unknown = await (
+      await call(target, 'GET', `${gm}/threads?maxResults=100&labelIds=Label_9001`)
+    ).json()
+
+    expect(field(all, 'nextPageToken')).toBeUndefined()
+    expect(field(all, 'resultSizeEstimate')).toBe(5)
+    expect(field(all, 'threads')).toHaveLength(5)
+
+    const first: unknown = await (
+      await call(target, 'GET', `${gm}/threads?labelIds=Label_9001&maxResults=4`)
+    ).json()
+
+    expect(field(first, 'nextPageToken')).toBe('synthetic-gmail-threads-page-2')
+
+    const second: unknown = await (
+      await call(
+        target,
+        'GET',
+        `${gm}/threads?labelIds=Label_9001&maxResults=4&pageToken=synthetic-gmail-threads-page-2`
+      )
+    ).json()
+
+    expect(field(second, 'threads')).toEqual([
+      { id: '18f00000000000c5', snippet: 'Synthetic paging message 5.', historyId: '900105' }
+    ])
+  })
+
+  it('refuses thread listings no fixture records', async () => {
+    const target = await emulator()
+
+    const rows: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'a message token on the thread listing',
+        `${gm}/threads?labelIds=Label_9001&maxResults=2&pageToken=synthetic-gmail-page-2`,
+        'a pageToken this emulator did not issue for this list since the last reset is not emulated'
+      ],
+      [
+        'a query',
+        `${gm}/threads?labelIds=Label_9001&maxResults=2&q=is%3Aunread`,
+        'a query parameter this route does not take is not emulated'
+      ],
+      [
+        'no label',
+        `${gm}/threads?maxResults=2`,
+        'requests without query parameter labelIds are not emulated on this route'
+      ],
+      [
+        'a system label the state does not list',
+        `${gm}/threads?labelIds=INBOX&maxResults=2`,
+        'listing a label the state does not hold is not emulated'
+      ]
+    ]
+
+    for (const [label, url, reason] of rows) {
+      await expectRefusedWithoutFault(target, () => call(target, 'GET', url), label, reason)
+    }
+  })
+
+  it('refuses a listing naming a thread no thread listing fixture names', async () => {
+    const target = await emulator({ seed: { impliedThreads: [] } })
+
+    await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', `${gm}/threads?labelIds=Label_9001&maxResults=2`),
+      'no implied threads',
+      'listing a thread no thread listing fixture names is not emulated'
+    )
+  })
+
+  it('keeps only the selected recorded headers, in recorded order, for any selection order', async () => {
+    const target = await emulator()
+
+    expect(await headerNames(await call(target, 'GET', metadataUrl('format=metadata')))).toEqual([
+      'From',
+      'Subject',
+      'Content-Type'
+    ])
+    expect(
+      await headerNames(
+        await call(
+          target,
+          'GET',
+          metadataUrl('metadataHeaders=Content-Type&format=metadata&metadataHeaders=From')
+        )
+      )
+    ).toEqual(['From', 'Content-Type'])
+    expect(
+      await headerNames(
+        await call(target, 'GET', metadataUrl('format=metadata&metadataHeaders=Subject'))
+      )
+    ).toEqual(['Subject'])
+  })
+
+  it('refuses selections no fixture records', async () => {
+    const target = await emulator()
+
+    const rows: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'with format=full',
+        metadataUrl('format=full&metadataHeaders=From'),
+        'metadataHeaders with a format other than metadata is not emulated'
+      ],
+      [
+        'a repeated name',
+        metadataUrl('format=metadata&metadataHeaders=From&metadataHeaders=From'),
+        'metadataHeaders must be 1 to 50 distinct header names'
+      ],
+      [
+        'an empty name',
+        metadataUrl('format=metadata&metadataHeaders='),
+        'metadataHeaders must be 1 to 50 distinct header names'
+      ],
+      [
+        '51 names',
+        metadataUrl(
+          `format=metadata&${Array.from({ length: 51 }, (_, index) => `metadataHeaders=X-${index}`).join('&')}`
+        ),
+        'metadataHeaders must be 1 to 50 distinct header names'
+      ],
+      [
+        'a header the rendering lacks',
+        metadataUrl('format=metadata&metadataHeaders=Reply-To'),
+        'a metadataHeaders selection naming a header the recorded rendering lacks is not emulated'
+      ],
+      [
+        'a header in another case',
+        metadataUrl('format=metadata&metadataHeaders=from'),
+        'a metadataHeaders selection naming a header the recorded rendering lacks is not emulated'
+      ],
+      [
+        'a repeated format',
+        metadataUrl('format=metadata&format=metadata&metadataHeaders=From'),
+        'repeated query parameters are not emulated'
+      ],
+      [
+        'an absent message',
+        `${gm}/messages/ffffffffffffffff?format=minimal&metadataHeaders=From`,
+        'metadataHeaders with a format other than metadata is not emulated'
+      ],
+      [
+        'a thread read with format=metadata and no selection',
+        `${gm}/threads/${attachmentMessage}?format=metadata`,
+        'a thread read other than format=full, or format=metadata with metadataHeaders, is not emulated'
+      ],
+      [
+        'a full read of a seeded thread',
+        `${gm}/threads/${attachmentMessage}?format=full`,
+        'a thread other than a draft thread created here is not emulated'
+      ],
+      [
+        'a thread of a message a fixture only names',
+        `${gm}/threads/18f00000000000c1?format=metadata&metadataHeaders=From`,
+        'a thread holding a message a fixture only names is not emulated'
+      ],
+      [
+        'a thread whose message has no metadata rendering',
+        `${gm}/threads/${workMessage}?format=metadata&metadataHeaders=From`,
+        'a thread with a message without a metadata rendering is not emulated'
+      ]
+    ]
+
+    for (const [label, url, reason] of rows) {
+      await expectRefusedWithoutFault(target, () => call(target, 'GET', url), label, reason)
+    }
+  })
+})
+
 describe('a draft message.raw the route would refuse is never ledgered (fail closed)', () => {
   /** Base64 (standard alphabet) or base64url of bytes. */
   const base64Of = (bytes: Uint8Array, url: boolean) => {
@@ -2518,7 +2704,7 @@ describe('control plane', () => {
 
     const coverage = await (await control('GET', 'coverage')).json()
 
-    expect(field(coverage, 'routes')).toHaveLength(24)
+    expect(field(coverage, 'routes')).toHaveLength(25)
 
     expect(await (await control('POST', 'seed', { profile: 'empty' })).json()).toEqual({
       seeded: true,

@@ -315,6 +315,7 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.search`              | search Gmail messages                  |
 | `gmail.get_message`         | fetch one message                      |
 | `gmail.list`                | list messages                          |
+| `gmail.list_threads`        | list threads (id, snippet, historyId)  |
 | `gmail.list_drafts`         | list drafts                            |
 | `gmail.get_thread`          | fetch normalized thread                |
 | `gmail.list_labels`         | list labels                            |
@@ -344,18 +345,22 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 | `gmail.list_accounts`       | list accessible Gmail accounts         |
 
 Label creation takes `{ name, messageListVisibility?, labelListVisibility? }`. Get/delete take
-`{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at
-least one changed field. Visibility values are `show | hide` and
+`{ id }`; update takes `{ id, name?, messageListVisibility?, labelListVisibility? }` with at least
+one changed field. Visibility values are `show | hide` and
 `labelShow | labelShowIfUnread | labelHide`, respectively. Reads use `gmail.readonly`; lifecycle
 mutations and message assignment reuse `gmail.modify`. System labels cannot be renamed or deleted.
 Delete returns `{ id, deleted: true }`; it deletes the label, not messages. Assign/remove labels
 with `gmail.modify_labels` and `{ messageId, addLabelIds?, removeLabelIds? }`. Star/unstar with
-`gmail.set_starred` and `{ messageId, isStarred }`, which assigns the `STARRED` system label.
-Mark read/unread with `gmail.set_read` and `{ messageId, isRead }`, which flips the `UNREAD`
-system label via `gmail.modify` consent and returns the normalized message with `isRead`/`isFlagged`
-derived from `labelIds`. `gmail.search` and `gmail.list` accept optional `isRead`/`isFlagged`
-boolean filters composed into the Gmail query (`is:read`/`is:unread`, `is:starred`/`-is:starred`)
-alongside any raw query.
+`gmail.set_starred` and `{ messageId, isStarred }`, which assigns the `STARRED` system label. Mark
+read/unread with `gmail.set_read` and `{ messageId, isRead }`, which flips the `UNREAD` system label
+via `gmail.modify` consent and returns the normalized message with `isRead`/`isFlagged` derived from
+`labelIds`. `gmail.search`, `gmail.list`, and `gmail.list_threads` accept optional
+`isRead`/`isFlagged` boolean filters composed into the Gmail query (`is:read`/`is:unread`,
+`is:starred`/`-is:starred`) alongside any raw query. `gmail.list_threads` takes the `gmail.list`
+input (`query`, `labelId`, `maxResults`, `pageToken`, `isRead`, `isFlagged`) and returns decoded
+`{ threads?: [{ id, snippet?, historyId? }], nextPageToken?, resultSizeEstimate? }` through the
+`gmail.readonly` slot; failures map like the other Gmail reads (`gmail_list_threads_failed`
+otherwise).
 
 Batch actions take `{ messageIds, ... }` with 1-100 unique nonempty path-safe IDs and return
 complete per-ID outcomes (`succeeded`, `failed`, `unknown`, `not_attempted`) in `messageIds` order,
@@ -411,7 +416,11 @@ proposing another send. A deterministic Message-ID is not an idempotency guarant
 ### Fetch a normalized Gmail thread
 
 `gmail.get_thread` requires `{ threadId, format }`, where `format` is `full`, `metadata`, or
-`minimal`. Use `full` when decoded message bodies are required.
+`minimal`. Use `full` when decoded message bodies are required. With `format: 'metadata'`, optional
+`metadataHeaders` (1 to 50 header names, sent as repeated `metadataHeaders` query parameters) asks
+Gmail for only those headers, and each message keeps exactly the selected headers instead of the
+default allowlist below. `gmail.get_message` takes the same optional `metadataHeaders`. Any other
+format with `metadataHeaders` fails input validation before any request.
 
 The action returns `GmailThreadOutput`. Each `GmailThreadMessage` includes selected root headers,
 attachment metadata, and an optional decoded message `body` with `bodyMimeType`. Plain text is
@@ -642,19 +651,19 @@ preserve them and this is not compliance erasure.
 #### Unsubscribe from mailing lists and report spam
 
 No provider exposes unsubscribe as an API; use the required message headers instead. Read headers
-with `gmail.get_message` (`full` or `metadata` format via `payload.headers`; `gmail.get_thread`
-returns only its fixed selected-header allowlist, never `List-Unsubscribe`), `outlook.get_message`,
-or `email.get_message`, then
-call the pure `parseUnsubscribeMethods(headers)` helper from `@yolk-sdk/connectors` (no IO) to get
-`mailto` address methods and HTTP methods with a `oneClick` flag from
-`List-Unsubscribe-Post`. Executing a method stays host-owned: send `mailto:` removals through
-`outlook.send_mail`, `email.send_message`, or host-generated MIME via `gmail.send_message`
-(reusing the URI `subject` when present, after host authorization), and perform HTTP methods with a
-host network call — plain GET, or POST with `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
-for one-click endpoints. Verify authentication results (DKIM covering the list headers) before
-automatic one-click POSTs and apply the same public-network policy as other host fetches. Never
-route publisher URLs through the provider `ConnectorHttpClient`
-port; that port is for provider APIs under host transport policy.
+with `gmail.get_message` (`full` or `metadata` format via `payload.headers`; or `gmail.get_thread`
+with `format: 'metadata'` and `metadataHeaders: ['List-Unsubscribe', 'List-Unsubscribe-Post']`;
+without a selection `gmail.get_thread` returns only its fixed selected-header allowlist, never
+`List-Unsubscribe`), `outlook.get_message`, or `email.get_message`, then call the pure
+`parseUnsubscribeMethods(headers)` helper from `@yolk-sdk/connectors` (no IO) to get `mailto`
+address methods and HTTP methods with a `oneClick` flag from `List-Unsubscribe-Post`. Executing a
+method stays host-owned: send `mailto:` removals through `outlook.send_mail`, `email.send_message`,
+or host-generated MIME via `gmail.send_message` (reusing the URI `subject` when present, after host
+authorization), and perform HTTP methods with a host network call — plain GET, or POST with
+`List-Unsubscribe-Post: List-Unsubscribe=One-Click` for one-click endpoints. Verify authentication
+results (DKIM covering the list headers) before automatic one-click POSTs and apply the same
+public-network policy as other host fetches. Never route publisher URLs through the provider
+`ConnectorHttpClient` port; that port is for provider APIs under host transport policy.
 
 Report spam with existing actions and no new code: add the `SPAM` label through
 `gmail.modify_labels`, move to the `junkemail` well-known folder through

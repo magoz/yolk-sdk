@@ -1202,6 +1202,21 @@ describe('constant-text shape checks (exactBodyKeys, exactQuery)', () => {
       'requests without query parameter a are not emulated on this route'
     )
   })
+
+  it('exactQuery with repeatable lets only the listed keys repeat, leaving them out of the record', () => {
+    const query = request('a=1&h=x&h=y')
+
+    expect(exactQuery(query, ['a'], ['h'], { repeatable: ['h'] })).toEqual({ a: '1' })
+    expect(query.query.getAll('h')).toEqual(['x', 'y'])
+    expect(exactQuery(request('a=1'), ['a'], ['h'], { repeatable: ['h'] })).toEqual({ a: '1' })
+    expect(reasonOf(exactQuery(request('a=1&a=2&h=x'), ['a'], ['h'], { repeatable: ['h'] }))).toBe(
+      'repeated query parameters are not emulated'
+    )
+    expect(reasonOf(exactQuery(request('a=1&z=1'), ['a'], ['h'], { repeatable: ['h'] }))).toBe(
+      'a query parameter this route does not take is not emulated'
+    )
+  })
+
   it('exactQuery with rawNames compares every raw parameter name with its plain name', () => {
     const raw = (query: string): EmulatedRequest => ({ ...request(query), rawQuery: query })
     const plain = 'the_name=https%3A%2F%2Fx.example.test%2Fa'

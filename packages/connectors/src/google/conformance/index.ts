@@ -22,6 +22,8 @@ import { gmailAttachmentFixture } from './gmail-attachment.ts'
 import { gmailDraftLifecycleFixture } from './gmail-draft-lifecycle.ts'
 import { gmailLabelLifecycleFixture } from './gmail-label-lifecycle.ts'
 import { gmailListPagingFixture } from './gmail-list-paging.ts'
+import { gmailListThreadsPagingFixture } from './gmail-list-threads-paging.ts'
+import { gmailMetadataHeadersFixture } from './gmail-metadata-headers.ts'
 import { gmailNotFoundEnvelopeFixture } from './gmail-not-found-envelope.ts'
 import { gmailSendPracticeFixture } from './gmail-send-practice.ts'
 import { gmailTrashUntrashFixture } from './gmail-trash-untrash.ts'
@@ -38,6 +40,8 @@ export {
   gmailDraftLifecycleCase,
   gmailLabelLifecycleCase,
   gmailListPagingCase,
+  gmailListThreadsPagingCase,
+  gmailMetadataHeadersCase,
   gmailNotFoundEnvelopeCase,
   gmailSendPracticeCase,
   gmailTrashUntrashCase,
@@ -72,6 +76,8 @@ export {
   gmailDraftLifecycleFixture,
   gmailLabelLifecycleFixture,
   gmailListPagingFixture,
+  gmailListThreadsPagingFixture,
+  gmailMetadataHeadersFixture,
   gmailNotFoundEnvelopeFixture,
   gmailSendPracticeFixture,
   gmailTrashUntrashFixture
@@ -82,6 +88,8 @@ export const googleConformanceFixtures: ReadonlyArray<WireFixture> = [
   gmailListPagingFixture,
   gmailAttachmentFixture,
   gmailNotFoundEnvelopeFixture,
+  gmailListThreadsPagingFixture,
+  gmailMetadataHeadersFixture,
   gmailLabelLifecycleFixture,
   gmailDraftLifecycleFixture,
   gmailTrashUntrashFixture,

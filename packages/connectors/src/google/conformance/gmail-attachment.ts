@@ -40,6 +40,7 @@ export const gmailAttachmentFixture: WireFixture = {
           mimeType: 'multipart/mixed',
           filename: '',
           headers: [
+            { name: 'From', value: 'practice@example.test' },
             { name: 'Subject', value: 'Synthetic practice attachment' },
             { name: 'Content-Type', value: 'multipart/mixed; boundary="synthetic"' }
           ],
