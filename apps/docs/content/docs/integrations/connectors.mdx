@@ -382,9 +382,11 @@ body (line breaks as CRLF) and a text/html part derived from it (HTML-escaped, `
 break, runs of spaces kept, `http(s)` URLs linked to themselves, inside one `<div dir="ltr">`), both
 `charset=UTF-8` and quoted-printable with lines of at most 76 characters. Gmail web opens a
 text/plain-only draft in its plain-text composer and hard-wraps it at about 70 columns when a person
-sends it; the HTML alternative keeps it in rich mode, so paragraphs reach recipients unwrapped.
-Write each paragraph as one line. An `html` body is sent as a single quoted-printable text/html
-part. `gmail.get_thread` prefers the text/plain part, so reading a text draft back answers its body.
+sends it; the HTML alternative keeps it in rich mode, so the HTML that recipients' mail clients
+show keeps each paragraph unwrapped. (On send, Gmail web regenerates the text/plain alternative from
+the HTML and wraps it at about 76 columns, as it does for any message composed there.) Write each
+paragraph as one line. An `html` body is sent as a single quoted-printable text/html part.
+`gmail.get_thread` prefers the text/plain part, so reading a text draft back answers its body.
 
 ### Submit a reviewed Gmail message
 

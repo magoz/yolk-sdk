@@ -8,6 +8,7 @@
  * body becomes `multipart/alternative`: the exact text, then HTML derived from it, both
  * quoted-printable with lines of at most 76 characters. An HTML body is one text/html part.
  */
+import type { GmailDraftContentType } from './gmail.ts'
 
 /**
  * The `multipart/alternative` boundary. `=_` never occurs in quoted-printable output (every `=`
@@ -63,7 +64,7 @@ const quotedPrintableLine = (line: string): ReadonlyArray<string> => {
 }
 
 /** `text` with CRLF and lone CR line breaks normalized to LF. */
-export const normalizeGmailDraftLineBreaks = (text: string) =>
+const normalizeGmailDraftLineBreaks = (text: string) =>
   text.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
 
 /**
@@ -99,16 +100,26 @@ const trailingUrlPunctuation = new Set(['.', ',', ';', ':', '!', '?'])
 
 const count = (text: string, char: string) => text.split(char).length - 1
 
-/** A matched URL without the sentence punctuation (and unbalanced `)`) that follows it. */
+const closingBrackets = new Map([
+  [')', '('],
+  [']', '[']
+])
+
+/** A matched URL without the sentence punctuation (and unbalanced `)` or `]`) that follows it. */
 const trimUrl = (url: string): string => {
   let trimmed = url
 
   for (;;) {
     const last = trimmed.at(-1)
+    const opening = last === undefined ? undefined : closingBrackets.get(last)
 
     if (last !== undefined && trailingUrlPunctuation.has(last)) {
       trimmed = trimmed.slice(0, -1)
-    } else if (last === ')' && count(trimmed, ')') > count(trimmed, '(')) {
+    } else if (
+      last !== undefined &&
+      opening !== undefined &&
+      count(trimmed, last) > count(trimmed, opening)
+    ) {
       trimmed = trimmed.slice(0, -1)
     } else {
       return trimmed
@@ -162,7 +173,7 @@ const quotedPrintablePart = (contentType: string, content: string) =>
  * `multipart/alternative` (text/plain with the exact body, then the derived text/html), an `html`
  * body a single text/html part.
  */
-export const gmailDraftBodyMime = (body: string, contentType: 'text' | 'html'): string => {
+export const gmailDraftBodyMime = (body: string, contentType: GmailDraftContentType): string => {
   if (contentType === 'html') {
     return ['MIME-Version: 1.0', quotedPrintablePart('text/html', body)].join('\r\n')
   }

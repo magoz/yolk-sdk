@@ -190,6 +190,12 @@ describe('Gmail draft body MIME', () => {
     )
   })
 
+  it('leaves unbalanced closing brackets out of links', () => {
+    expect(gmailDraftHtmlFromText('[https://x.example/a] [https://x.example/b[1]]')).toBe(
+      '<div dir="ltr">[<a href="https://x.example/a">https://x.example/a</a>] [<a href="https://x.example/b[1]">https://x.example/b[1]</a>]</div>'
+    )
+  })
+
   it('never lets the body produce a boundary delimiter', () => {
     const body = `--${gmailDraftAlternativeBoundary}\n--${gmailDraftAlternativeBoundary}--\n${gmailDraftAlternativeBoundary}`
     const { mime } = expectRoundTrip(body)
