@@ -226,6 +226,7 @@ describe('Google conformance cases', () => {
       'google.gmail.not-found-envelope',
       'google.gmail.list-threads-page-token',
       'google.gmail.metadata-headers',
+      'google.gmail.metadata-headers',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',

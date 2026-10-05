@@ -611,10 +611,7 @@ const gmailPartHeaders = (part: Schema.Json | undefined) => {
   })
 }
 
-/**
- * The headers a thread message keeps: the caller's `metadataHeaders` selection when given (names
- * compared case-insensitively), else the default conversation allowlist.
- */
+/** The headers whose lower-cased name is in `selection`. */
 const selectedGmailPartHeaders = (
   headers: ReadonlyArray<GmailThreadHeaderFields>,
   selection: ReadonlySet<string>
@@ -902,6 +899,10 @@ const normalizeGmailThreadMessage = (
   )
 }
 
+/**
+ * Normalize a thread; each message keeps the caller's `metadataHeaders` selection when given (names
+ * compared case-insensitively), else the default conversation allowlist.
+ */
 const normalizeGmailThread = (
   thread: typeof GmailThreadWireOutput.Type,
   metadataHeaders: ReadonlyArray<string> | undefined

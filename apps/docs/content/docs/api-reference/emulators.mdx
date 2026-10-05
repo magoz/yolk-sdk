@@ -1035,14 +1035,15 @@ every seeded label number, draft, message, event, and folder ids in forms seeds 
 tokens (the fixtures' values on first issuance, `<token>.g<generation>` after a reset or seed, and a
 distinct `<token>.v<k>` for another list or page size or a changed list: token values are globally
 unique and never rebound), and timestamps from the `now` clock. Entities a fixture only names (the
-paging label, the messages its listing names, the practice Drive folder) are implied: references
-resolve through them, but no answer renders them. A page token is accepted only when this emulator
-issued it for the same list since the last reset or seed and the list renders exactly as when it was
-issued. Anything else answers one ledgered 400 not-emulated, writes nothing, and uses up no fault,
-including an empty listing and every read of `findGoogleConformanceLeftovers` (its label listing,
-draft search, free-text event query, and trashed-included Drive listing have no fixture): the lookup
-fails with `GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400), which the live
-runner reports as its lookup-failed `WARN`.
+paging label, the messages its listing names, their threads (named by the thread listing), the
+practice Drive folder) are implied: references resolve through them, but no answer renders them. A
+page token is accepted only when this emulator issued it for the same list since the last reset or
+seed and the list renders exactly as when it was issued. Anything else answers one ledgered 400
+not-emulated, writes nothing, and uses up no fault, including an empty listing and every read of
+`findGoogleConformanceLeftovers` (its label listing, draft search, free-text event query, and
+trashed-included Drive listing have no fixture): the lookup fails with
+`GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400), which the live runner
+reports as its lookup-failed `WARN`.
 
 - Request-shape latitude (`/google`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in

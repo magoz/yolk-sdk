@@ -79,7 +79,10 @@ export const GoogleConformanceSeeds = Schema.Struct({
    * controls (the practice account's own address works). Never a person's address.
    */
   practiceAddress: Schema.optionalKey(GooglePracticeAddress),
-  /** A user label on 3 to 20 practice messages, none of them in Trash or Spam. */
+  /**
+   * A user label on 3 to 20 practice messages in 3 to 20 distinct threads (the thread listing case
+   * pages through the threads), none of them in Trash or Spam.
+   */
   pagingLabelId: Schema.optionalKey(GmailId),
   /**
    * A practice message with at least one file attachment Gmail stores apart (an `attachmentId`).

@@ -45,7 +45,8 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
 - Gmail lists a thread under a label when any of its messages carries it, and never a thread none
   of them carries.
 - A `metadataHeaders` selection matches header names case-insensitively (the connector filters
-  `get_thread` headers that way; the case selects the usual spelling).
+  `get_thread` headers that way; the case selects the usual spelling), and Gmail keeps the selected
+  headers in the order of the unfiltered read.
 - A metadata read of a fresh draft returns the `DRAFT` label and the subject exactly as sent (the
   draft ownership check relies on it; if not, the case refuses its own draft and the leftover
   lookup reports it).
@@ -68,22 +69,21 @@ rather than claim connector behavior: whether untrash restores every earlier lab
 the `get_attachment` answer (the connector never relies on them matching).
 
 `GoogleConformanceConfig` holds the seeds: `practiceAddress` (a practice mailbox **the owner
-controls**: the only address the send case ever sends to; exactly one plain address
-`local@domain`, typed as the branded `GooglePracticeAddress`),
-`pagingLabelId` (a Gmail user label on 3 to 20 practice messages, none in Trash or Spam),
-`attachmentMessageId` (a practice message with a file attachment Gmail stores apart),
-`workMessageId` (a practice message, not in Trash, which the label and trash cases change and
-restore), `calendarId` (a practice calendar the account owns), `eventRangeStart` and
-`eventRangeEnd` (RFC 3339 instants around 3 to 20 events in it, away from the case events on
-2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20 untrashed items the token may
-write into; trashed items are not counted), `driveFileId` (a practice file directly inside it), and
-`runId` (the branded `GoogleConformanceRunId`). Cases never hard-code account data. `practiceAddress`
-and `runId` are branded schema types, so a host building the config by hand constructs them
-(`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or decodes the whole config
-with `GoogleConformanceSeeds`; a plain string is a type error. Each case also decodes every seed it
-reads again, so a host that bypasses the types (JSON, a cast) is still refused: a missing or
-invalid seed fails the case with a `precondition:` mismatch before any request.
-Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
+controls**: the only address the send case ever sends to; exactly one plain address `local@domain`,
+typed as the branded `GooglePracticeAddress`), `pagingLabelId` (a Gmail user label on 3 to 20
+practice messages in 3 to 20 distinct threads, none in Trash or Spam), `attachmentMessageId` (a
+practice message with a file attachment Gmail stores apart), `workMessageId` (a practice message,
+not in Trash, which the label and trash cases change and restore), `calendarId` (a practice calendar
+the account owns), `eventRangeStart` and `eventRangeEnd` (RFC 3339 instants around 3 to 20 events in
+it, away from the case events on 2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20
+untrashed items the token may write into; trashed items are not counted), `driveFileId` (a practice
+file directly inside it), and `runId` (the branded `GoogleConformanceRunId`). Cases never hard-code
+account data. `practiceAddress` and `runId` are branded schema types, so a host building the config
+by hand constructs them (`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or
+decodes the whole config with `GoogleConformanceSeeds`; a plain string is a type error. Each case
+also decodes every seed it reads again, so a host that bypasses the types (JSON, a cast) is still
+refused: a missing or invalid seed fails the case with a `precondition:` mismatch before any
+request. Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
 `google.conformance`).
 
 ### Write ownership and cleanup

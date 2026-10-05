@@ -89,7 +89,8 @@ export const googleSeedSources: ReadonlyArray<SeedSource<GoogleConformanceSeedKe
     key: 'pagingLabelId',
     flag: '--paging-label',
     env: 'GOOGLE_CONFORMANCE_PAGING_LABEL',
-    description: 'Gmail user label id on 3 to 20 practice messages (none in Trash or Spam)'
+    description:
+      'Gmail user label id on 3 to 20 practice messages in 3 to 20 distinct threads (none in Trash or Spam)'
   },
   {
     key: 'attachmentMessageId',
