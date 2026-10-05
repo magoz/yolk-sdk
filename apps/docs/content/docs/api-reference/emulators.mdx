@@ -1075,8 +1075,8 @@ reports as its lookup-failed `WARN`.
   `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
   route, the run id aside; any other `message.raw` (line-wrapped, the standard alphabet, padded,
   with a stray character, or with MIME-level encodings such as RFC 2047 encoded-words,
-  quoted-printable, or UTF-16) is refused before anything is recorded or a fault is decided, as a
-  constant entry with the route's own declared reason
+  quoted-printable other than the recorded parts, or UTF-16) is refused before anything is
+  recorded or a fault is decided, as a constant entry with the route's own declared reason
   (`message.raw must be canonical base64url UTF-8 MIME`,
   `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
   13-character run-id reason, or `message has a key this route does not take`), or

@@ -26,6 +26,7 @@ import {
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { gmailDraftBodyMime } from '../src/google/gmail-draft-mime.ts'
 import {
   afloatMcpAuthAction,
   AfloatApiKeyCredentialSlot,
@@ -153,6 +154,7 @@ const rawTextEmail = (input: {
   readonly from?: string
   readonly inReplyTo?: string
   readonly references?: string
+  readonly contentType?: 'text' | 'html'
 }) => {
   const headers = [
     ...(input.from === undefined ? [] : [`From: ${input.from}`]),
@@ -162,10 +164,11 @@ const rawTextEmail = (input: {
     `Subject: ${input.subject}`,
     ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${input.inReplyTo}`]),
     ...(input.references === undefined ? [] : [`References: ${input.references}`]),
-    'Content-Type: text/plain; charset=utf-8'
+    // The body MIME has its own byte-for-byte tests (gmail-draft-mime.test.ts).
+    gmailDraftBodyMime(input.body, input.contentType ?? 'text')
   ]
 
-  return encodeBase64Url(`${headers.join('\r\n')}\r\n\r\n${input.body}`)
+  return encodeBase64Url(headers.join('\r\n'))
 }
 
 const testAction = defineAction({
@@ -4148,7 +4151,8 @@ describe('@yolk-sdk/connectors', () => {
   it.effect('normalizes Gmail threads without MIME or attachment content', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
-      const quotedPrintableData = encodeBase64Url('Hej=20Elina=0AAndra=20raden')
+      // Gmail answers `body.data` transfer-decoded, whatever the part's Content-Transfer-Encoding.
+      const quotedPrintableData = encodeBase64Url('Hej Elina\nAndra raden: ?date=2026-10-05 =C3')
       const htmlData = encodeBase64Url('<p>HTML fallback</p>')
       const attachmentData = encodeBase64Url('SECRET_ATTACHMENT_BYTES')
       const textAttachmentData = encodeBase64Url('SECRET_TEXT_ATTACHMENT')
@@ -4234,7 +4238,10 @@ describe('@yolk-sdk/connectors', () => {
                 threadId: 'thread_1',
                 payload: {
                   mimeType: 'text/html',
-                  headers: [{ name: 'Date', value: 'Thu, 23 Jul 2026 10:00:00 +0200' }],
+                  headers: [
+                    { name: 'Date', value: 'Thu, 23 Jul 2026 10:00:00 +0200' },
+                    { name: 'Content-Transfer-Encoding', value: 'base64' }
+                  ],
                   body: { size: 20, data: htmlData }
                 }
               },
@@ -4284,7 +4291,7 @@ describe('@yolk-sdk/connectors', () => {
                 { name: 'From', value: 'Lead <lead@example.com>' },
                 { name: 'Subject', value: 'Avtal' }
               ],
-              body: 'Hej Elina\nAndra raden',
+              body: 'Hej Elina\nAndra raden: ?date=2026-10-05 =C3',
               bodyMimeType: 'text/plain',
               attachments: [
                 {
@@ -4601,6 +4608,94 @@ describe('@yolk-sdk/connectors', () => {
           }
         })
       })
+    })
+  )
+
+  it.effect('sends Gmail text drafts as 7-bit multipart/alternative with short lines', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const paragraph = `Hej Åsa! ${'Vi hjälper små företag att få fler bokningar. '.repeat(8)}`
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"id":"draft_1"}')
+      ])
+
+      const result = yield* gmailDraftComposeAction
+        .execute({
+          integration: googleIntegration,
+          input: { to: ['lead@example.com'], subject: 'Hej', body: `${paragraph}\n\nElina` }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      const body = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ message: Schema.Struct({ raw: Schema.String }) }))
+      )(requests.at(0)?.body)
+
+      const mime = Buffer.from(body.message.raw, 'base64url').toString('latin1')
+      const lines = mime.split('\r\n')
+
+      expect(result._tag).toBe('Success')
+      expect(paragraph.length).toBeGreaterThan(300)
+      expect(lines.slice(0, 4)).toEqual([
+        'To: lead@example.com',
+        'Subject: Hej',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/alternative; boundary="=_yolk-draft-alternative"'
+      ])
+      expect(lines.filter(line => line.startsWith('Content-Type: text/'))).toEqual([
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Type: text/html; charset=UTF-8'
+      ])
+      expect(lines.every(line => line.length <= 76 && /^[\x20-\x7e]*$/.test(line))).toBe(true)
+    })
+  )
+
+  it.effect('sends Gmail html reply drafts as one text/html part', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'msg_1',
+            threadId: 'thread_1',
+            payload: {
+              headers: [
+                { name: 'From', value: 'lead@example.com' },
+                { name: 'Message-ID', value: '<msg_1@example.com>' },
+                { name: 'Subject', value: 'Hej' }
+              ]
+            }
+          })
+        ),
+        jsonHttpResponse('{"emailAddress":"elina@speldosa.app"}'),
+        jsonHttpResponse('{"sendAs":[{"sendAsEmail":"elina@speldosa.app"}]}'),
+        jsonHttpResponse('{"id":"draft_1"}')
+      ])
+
+      const result = yield* gmailDraftReplyAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'msg_1', body: '<p>Tack</p>', contentType: 'html' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result._tag).toBe('Success')
+      expect(requests.at(3)?.body).toBe(
+        JSON.stringify({
+          message: {
+            threadId: 'thread_1',
+            raw: rawTextEmail({
+              to: ['lead@example.com'],
+              subject: 'Re: Hej',
+              body: '<p>Tack</p>',
+              contentType: 'html',
+              inReplyTo: '<msg_1@example.com>',
+              references: '<msg_1@example.com>'
+            })
+          }
+        })
+      )
     })
   )
 

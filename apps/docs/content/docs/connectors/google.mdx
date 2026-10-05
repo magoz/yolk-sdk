@@ -50,10 +50,11 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
 - A metadata read of a fresh draft returns the `DRAFT` label and the subject exactly as sent (the
   draft ownership check relies on it; if not, the case refuses its own draft and the leftover
   lookup reports it).
-- Gmail keeps the 8-bit text/plain draft part as the connector wrote it, so `get_thread` decodes
-  exactly the UTF-8 the case sent; deleting a draft deletes its message; whether deleting a deleted
-  draft answers 2xx or 404 (the case and the cleanup accept either, then verify the message is
-  gone).
+- Gmail keeps the `multipart/alternative` draft as the connector wrote it and answers its
+  text/plain part's `body.data` transfer-decoded (the part keeps its quoted-printable header), so
+  `get_thread` decodes exactly the UTF-8 the case sent; deleting a draft deletes its message;
+  whether deleting a deleted draft answers 2xx or 404 (the case and the cleanup accept either, then
+  verify the message is gone).
 - A deleted event reads back as 404, 410, or the event with `status: "cancelled"` (the case accepts
   any of them, never a live event); whether deleting a deleted event answers 2xx, 404, or 410 (the
   case and the cleanup accept any of them, then verify the event still reads gone).

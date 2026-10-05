@@ -661,8 +661,9 @@ There is no root export or barrel.
   `To: <the seeded practiceAddress>`, and only while that address is the recorded
   `practice@example.test` (a seed may set another; then every send is refused). The draft and sent
   messages answer the recorded `sizeEstimate` (which covers the subject and address) and `body.size`
-  (64, 88), so draft and send subjects take only a run id of the fixtures' length (13 characters);
-  other run-scoped names take any. A Gmail message answers only the `format` renderings a fixture
+  (0 for the draft's `multipart/alternative` payload, 88 for the sent message), so draft and send
+  subjects take only a run id of the fixtures' length (13 characters); other run-scoped names take
+  any. A Gmail message answers only the `format` renderings a fixture
   records for it (a `metadataHeaders` selection keeps only the selected recorded headers); the
   paging label, the five messages its listing names, their five threads (named by the thread
   listing), and the practice Drive folder are implied (named, never rendered). Absent ids answer
@@ -715,8 +716,8 @@ There is no root export or barrel.
   `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
   route, the run id aside; any other `message.raw` (line-wrapped, the standard alphabet, padded,
   with a stray character, or with MIME-level encodings such as RFC 2047 encoded-words,
-  quoted-printable, or UTF-16) is refused before anything is recorded or a fault is decided, as a
-  constant entry with the route's own declared reason
+  quoted-printable other than the recorded parts, or UTF-16) is refused before anything is
+  recorded or a fault is decided, as a constant entry with the route's own declared reason
   (`message.raw must be canonical base64url UTF-8 MIME`,
   `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
   13-character run-id reason, or `message has a key this route does not take`), or

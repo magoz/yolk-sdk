@@ -16,6 +16,7 @@ import {
   type ConnectorHttpClientApi
 } from '../http.ts'
 import { ActionResult } from '../result.ts'
+import { gmailDraftBodyMime } from './gmail-draft-mime.ts'
 import {
   GoogleGmailComposeOAuthCredentialSlot,
   GoogleGmailDraftReplyOAuthCredentialSlot,
@@ -288,12 +289,22 @@ const gmailMultipartSendBody = (mime: string, threadId: string | undefined) => {
   }
 }
 
+/**
+ * How a draft `body` is read: `text` (the default when omitted) is plain text, sent as
+ * `multipart/alternative` with a derived HTML rendering so Gmail web never hard-wraps it; `html` is
+ * HTML, sent as one text/html part.
+ */
+export const GmailDraftContentType = Schema.Literals(['text', 'html'])
+
+export type GmailDraftContentType = typeof GmailDraftContentType.Type
+
 export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>(
   'GmailDraftComposeInput'
 )({
   to: Schema.Array(Schema.String),
   subject: Schema.String,
   body: Schema.String,
+  contentType: Schema.optional(GmailDraftContentType),
   cc: Schema.optional(Schema.Array(Schema.String)),
   bcc: Schema.optional(Schema.Array(Schema.String)),
   from: Schema.optional(Schema.String)
@@ -304,6 +315,7 @@ export class GmailDraftReplyInput extends Schema.Class<GmailDraftReplyInput>(
 )({
   messageId: Schema.String,
   body: Schema.String,
+  contentType: Schema.optional(GmailDraftContentType),
   from: Schema.optional(Schema.String)
 }) {}
 
@@ -314,6 +326,7 @@ export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
   to: Schema.Array(Schema.String),
   subject: Schema.String,
   body: Schema.String,
+  contentType: Schema.optional(GmailDraftContentType),
   cc: Schema.optional(Schema.Array(Schema.String)),
   bcc: Schema.optional(Schema.Array(Schema.String)),
   from: Schema.optional(Schema.String)
@@ -620,10 +633,8 @@ const selectedGmailPartHeaders = (
 const gmailPartHeader = (headers: ReadonlyArray<GmailThreadHeaderFields>, name: string) =>
   headers.find(header => header.name.toLowerCase() === name.toLowerCase())?.value
 
-const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
-  const compact = value.replaceAll(/\s/g, '')
-
-  const normalized = urlEncoded ? compact.replaceAll('-', '+').replaceAll('_', '/') : compact
+const decodeBase64Url = (value: string) => {
+  const normalized = value.replaceAll(/\s/g, '').replaceAll('-', '+').replaceAll('_', '/')
 
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1) {
     return undefined
@@ -645,41 +656,12 @@ const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
   return bytes
 }
 
-const decodeQuotedPrintable = (value: string) => {
-  const withoutSoftBreaks = value.replaceAll(/=\r?\n/g, '')
-  const bytes: Array<number> = []
-  const encoder = new TextEncoder()
-
-  for (let index = 0; index < withoutSoftBreaks.length; index += 1) {
-    const character = withoutSoftBreaks[index]
-    const pair = withoutSoftBreaks.slice(index + 1, index + 3)
-
-    if (character === '=' && /^[A-Fa-f0-9]{2}$/.test(pair)) {
-      bytes.push(Number.parseInt(pair, 16))
-      index += 2
-      continue
-    }
-
-    if (character !== undefined) {
-      bytes.push(...encoder.encode(character))
-    }
-  }
-
-  return new TextDecoder().decode(new Uint8Array(bytes))
-}
-
-const decodeCapturedGmailTextBody = (value: string, transferEncoding: string | undefined) => {
-  if (transferEncoding === 'quoted-printable') return decodeQuotedPrintable(value)
-
-  if (transferEncoding === 'base64') {
-    const transferredBytes = decodeBase64Bytes(value, false)
-
-    return transferredBytes === undefined ? undefined : new TextDecoder().decode(transferredBytes)
-  }
-
-  return value
-}
-
+/**
+ * The text of a `format=full` part. Gmail answers `body.data` already transfer-decoded (base64url
+ * of the part's content bytes) while the part keeps its original `Content-Transfer-Encoding`
+ * header, so that header is never applied again: decoding quoted-printable twice corrupts text
+ * such as `?date=2026`, and decoding base64 twice drops the body.
+ */
 const decodeGmailTextBody = (part: Schema.JsonObject) => {
   const body = gmailJsonField(part, 'body')
 
@@ -689,18 +671,9 @@ const decodeGmailTextBody = (part: Schema.JsonObject) => {
 
   if (data === undefined) return undefined
 
-  const bytes = decodeBase64Bytes(data, true)
+  const bytes = decodeBase64Url(data)
 
-  if (bytes === undefined) return undefined
-
-  const value = new TextDecoder().decode(bytes)
-
-  const transferEncoding = gmailPartHeader(
-    gmailPartHeaders(part),
-    'content-transfer-encoding'
-  )?.toLowerCase()
-
-  return decodeCapturedGmailTextBody(value, transferEncoding)
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes)
 }
 
 type GmailThreadAttachmentFields = {
@@ -1006,10 +979,12 @@ const composeGmailQuery = (input: {
   return `(${input.query}) ${suffix}`
 }
 
+/** A draft's MIME, base64url-encoded: address, subject, and threading headers, then the body. */
 const rawEmail = (input: {
   readonly to: ReadonlyArray<string>
   readonly subject: string
   readonly body: string
+  readonly contentType?: GmailDraftContentType | undefined
   readonly cc?: ReadonlyArray<string>
   readonly bcc?: ReadonlyArray<string>
   readonly from?: string
@@ -1024,10 +999,10 @@ const rawEmail = (input: {
     `Subject: ${encodeRfc2047(input.subject)}`,
     ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${sanitizeHeader(input.inReplyTo)}`]),
     ...(input.references === undefined ? [] : [`References: ${sanitizeHeader(input.references)}`]),
-    'Content-Type: text/plain; charset=utf-8'
+    gmailDraftBodyMime(input.body, input.contentType ?? 'text')
   ]
 
-  return base64UrlEncode(`${headers.join('\r\n')}\r\n\r\n${input.body}`)
+  return base64UrlEncode(headers.join('\r\n'))
 }
 
 const sanitizeHeader = (value: string) => value.replaceAll('\r', ' ').replaceAll('\n', ' ').trim()
@@ -1850,9 +1825,12 @@ export const gmailSendMessageAction = defineAction({
     })
 })
 
+const gmailDraftBodyGuidance =
+  'The body is plain text unless contentType is "html": write each paragraph as one line (never wrap lines by hand) and separate paragraphs with a blank line. Plain text is sent with an HTML rendering of it, so Gmail keeps the lines unwrapped when the draft is sent.'
+
 export const gmailDraftComposeAction = defineAction({
   id: 'gmail.draft_compose',
-  description: 'Create a Gmail draft message.',
+  description: `Create a Gmail draft message. ${gmailDraftBodyGuidance}`,
   inputSchema: GmailDraftComposeInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
@@ -1894,7 +1872,7 @@ export const gmailDraftComposeAction = defineAction({
 
 export const gmailDraftUpdateAction = defineAction({
   id: 'gmail.draft_update',
-  description: 'Update a Gmail draft message.',
+  description: `Update a Gmail draft message. ${gmailDraftBodyGuidance}`,
   inputSchema: GmailDraftUpdateInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
@@ -1972,7 +1950,7 @@ export const gmailDraftDeleteAction = defineAction({
 
 export const gmailDraftReplyAction = defineAction({
   id: 'gmail.draft_reply',
-  description: 'Create a simple Gmail reply draft.',
+  description: `Create a simple Gmail reply draft. ${gmailDraftBodyGuidance}`,
   inputSchema: GmailDraftReplyInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
@@ -2075,6 +2053,7 @@ export const gmailDraftReplyAction = defineAction({
                 to: recipients,
                 subject: replySubject(headerValue(original, 'Subject')),
                 body: input.body,
+                contentType: input.contentType,
                 from: fromAddress,
                 inReplyTo: messageId,
                 references: references === '' ? undefined : references

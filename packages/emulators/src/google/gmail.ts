@@ -741,8 +741,48 @@ const decodeBase64UrlText = (raw: string): string | undefined => {
   }
 }
 
-const draftMimePattern =
-  /^Subject: ([^\r\n]*)\r\nContent-Type: text\/plain; charset=utf-8\r\n\r\n([\s\S]*)$/
+const draftBoundary = '=_yolk-draft-alternative'
+
+const draftContentType = `multipart/alternative; boundary="${draftBoundary}"`
+
+/** The quoted-printable part of the recorded draft MIME. */
+const recordedDraftPart = (type: 'plain' | 'html', encoded: string): string =>
+  `Content-Type: text/${type}; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${encoded}`
+
+/** The draft MIME the draft fixture records after the `Subject` line, for each draft kind. */
+const recordedDraftMime = (plain: string, html: string): string =>
+  [
+    'MIME-Version: 1.0',
+    `Content-Type: ${draftContentType}`,
+    '',
+    `--${draftBoundary}`,
+    recordedDraftPart('plain', plain),
+    `--${draftBoundary}`,
+    recordedDraftPart('html', html),
+    `--${draftBoundary}--`
+  ].join('\r\n')
+
+const recordedDrafts: Record<
+  'compose' | 'update',
+  { readonly text: string; readonly mime: string }
+> = {
+  compose: {
+    text: draftText,
+    mime: recordedDraftMime(
+      'Synthetic conformance draft, safe to delete: gr=C3=BC=C3=9Fe =E2=9C=93',
+      '<div dir=3D"ltr">Synthetic conformance draft, safe to delete: gr=C3=BC=\r\n=C3=9Fe =E2=9C=93</div>'
+    )
+  },
+  update: {
+    text: updatedDraftText,
+    mime: recordedDraftMime(
+      'Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93',
+      '<div dir=3D"ltr">Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93=\r\n</div>'
+    )
+  }
+}
+
+const draftMimePattern = /^Subject: ([^\r\n]*)\r\n([\s\S]*)$/
 
 type DraftContent = { readonly subject: string; readonly body: string }
 
@@ -788,16 +828,16 @@ const readDraftRaw = (message: Schema.Json | undefined, kind: 'compose' | 'updat
 
   const parts = draftMimePattern.exec(decoded)
   const subject = parts?.[1] ?? ''
-  const body = parts?.[2] ?? ''
+  const rest = parts?.[2] ?? ''
 
   const runId =
     kind === 'compose'
       ? runIdOf(subject, 'draft', draftSubjectRest)
       : runIdOf(subject, 'draft updated', draftSubjectRest)
 
-  const recordedBody = kind === 'compose' ? draftText : updatedDraftText
+  const recorded = recordedDrafts[kind]
 
-  if (parts === null || runId === undefined || body !== recordedBody) {
+  if (parts === null || runId === undefined || rest !== recorded.mime) {
     return { decoded, content: notEmulated(otherDraftReason(kind)) }
   }
 
@@ -805,7 +845,7 @@ const readDraftRaw = (message: Schema.Json | undefined, kind: 'compose' | 'updat
     decoded,
     content:
       runId.length === recordedRunIdLength
-        ? { subject, body }
+        ? { subject, body: recorded.text }
         : notEmulated(sizedRunIdReason('draft'))
   }
 }
@@ -842,15 +882,35 @@ const draftRawViews =
     return decoded === undefined ? [] : [decoded]
   }
 
-const textPayload = (subject: string, body: Schema.JsonObject): Schema.JsonObject => ({
+/** A draft's `multipart/alternative` payload as the draft fixture's metadata read records it. */
+const draftPayload = (subject: string): Schema.JsonObject => ({
   partId: '',
-  mimeType: 'text/plain',
+  mimeType: 'multipart/alternative',
   filename: '',
   headers: [
     { name: 'Subject', value: subject },
-    { name: 'Content-Type', value: 'text/plain; charset=utf-8' }
+    { name: 'Content-Type', value: draftContentType }
   ],
-  body
+  body: { size: 0 }
+})
+
+/** A `format=full` text part, its `body.data` transfer-decoded as the draft fixture records it. */
+const draftTextPart = (
+  partId: string,
+  type: 'plain' | 'html',
+  content: string
+): Schema.JsonObject => ({
+  partId,
+  mimeType: `text/${type}`,
+  filename: '',
+  headers: [
+    { name: 'Content-Type', value: `text/${type}; charset=UTF-8` },
+    { name: 'Content-Transfer-Encoding', value: 'quoted-printable' }
+  ],
+  body: {
+    size: new TextEncoder().encode(content).byteLength,
+    data: base64UrlOfText(content)
+  }
 })
 
 /** A draft message as the draft fixture records it (the metadata rendering only on compose). */
@@ -868,11 +928,14 @@ const draftMessage = (
   historyId: '900020',
   internalDate: recordedInternalDate,
   minimal: false,
-  metadataPayload: withMetadata ? textPayload(content.subject, { size: 64 }) : null,
-  fullPayload: textPayload(content.subject, {
-    size: new TextEncoder().encode(content.body).byteLength,
-    data: base64UrlOfText(content.body)
-  })
+  metadataPayload: withMetadata ? draftPayload(content.subject) : null,
+  fullPayload: {
+    ...draftPayload(content.subject),
+    parts: [
+      draftTextPart('0', 'plain', content.body),
+      draftTextPart('1', 'html', `<div dir="ltr">${content.body}</div>`)
+    ]
+  }
 })
 
 const draftAnswer = (draftId: string, message: GoogleEmulatorGmailMessage): Response =>
