@@ -7,7 +7,9 @@
  * `googleConformanceFixtureSeeds`, copied as data (the same ids, labels, payloads, timestamps, and
  * links), never imported from SDK code. Entities a fixture only names are implied: the paging
  * label (`impliedLabelIds`), the five messages its listing names by id (`impliedMessages`, which
- * only ever render as `{ id, threadId }` list entries), and the practice Drive folder
+ * only ever render as `{ id, threadId }` list entries), their five threads, which the thread
+ * listing names (`impliedThreads`, which only ever render as `{ id, snippet, historyId }` list
+ * entries), and the practice Drive folder
  * (`impliedFolderIds`, a parent whose own metadata no fixture shows). References resolve through
  * them, but no answer renders them.
  *
@@ -78,6 +80,18 @@ export const GoogleEmulatorImpliedMessage = Schema.Struct({
 })
 
 export type GoogleEmulatorImpliedMessage = typeof GoogleEmulatorImpliedMessage.Type
+
+/**
+ * A thread a fixture only names in a thread listing (`{ id, snippet, historyId }`): its messages
+ * are the stored and implied messages with that `threadId`.
+ */
+export const GoogleEmulatorImpliedThread = Schema.Struct({
+  id: GmailId,
+  snippet: Schema.String,
+  historyId: Schema.String
+})
+
+export type GoogleEmulatorImpliedThread = typeof GoogleEmulatorImpliedThread.Type
 
 /** A label created here (`POST .../labels`), answered as the label fixture records it. */
 export const GoogleEmulatorGmailLabel = Schema.Struct({
@@ -193,6 +207,7 @@ export const GoogleEmulatorStateSchema = Schema.Struct({
   practiceAddress: GoogleEmulatorPracticeAddress,
   messages: Schema.Array(GoogleEmulatorGmailMessage),
   impliedMessages: Schema.Array(GoogleEmulatorImpliedMessage),
+  impliedThreads: Schema.Array(GoogleEmulatorImpliedThread),
   impliedLabelIds: Schema.Array(GmailId),
   labels: Schema.Array(GoogleEmulatorGmailLabel),
   attachments: Schema.Array(GoogleEmulatorAttachment),
@@ -212,6 +227,7 @@ export type GoogleEmulatorState = {
   practiceAddress: string
   messages: ReadonlyArray<GoogleEmulatorGmailMessage>
   impliedMessages: ReadonlyArray<GoogleEmulatorImpliedMessage>
+  impliedThreads: ReadonlyArray<GoogleEmulatorImpliedThread>
   impliedLabelIds: ReadonlyArray<string>
   labels: ReadonlyArray<GoogleEmulatorGmailLabel>
   attachments: ReadonlyArray<GoogleEmulatorAttachment>
@@ -237,6 +253,7 @@ export const GoogleEmulatorSeed = Schema.Struct({
   practiceAddress: Schema.optionalKey(GoogleEmulatorPracticeAddress),
   messages: Schema.optionalKey(Schema.Array(GoogleEmulatorGmailMessage)),
   impliedMessages: Schema.optionalKey(Schema.Array(GoogleEmulatorImpliedMessage)),
+  impliedThreads: Schema.optionalKey(Schema.Array(GoogleEmulatorImpliedThread)),
   impliedLabelIds: Schema.optionalKey(Schema.Array(GmailId)),
   attachments: Schema.optionalKey(Schema.Array(GoogleEmulatorAttachment)),
   calendars: Schema.optionalKey(Schema.Array(GoogleEmulatorCalendar)),
@@ -330,7 +347,17 @@ const attachmentText = 'Synthetic practice message with an attachment.'
 
 const attachmentId = 'ANGjdJ_synthetic_attachment_0001'
 
-/** The seeded attachment message (`format=full`, as the attachment fixture reads it). */
+/** The attachment message's top-level headers (its metadata and full renderings). */
+const attachmentHeaders: ReadonlyArray<Schema.JsonObject> = [
+  { name: 'From', value: 'practice@example.test' },
+  { name: 'Subject', value: 'Synthetic practice attachment' },
+  { name: 'Content-Type', value: 'multipart/mixed; boundary="synthetic"' }
+]
+
+/**
+ * The seeded attachment message (`format=full`, as the attachment fixture reads it, and
+ * `format=metadata`, as the metadata-headers fixture reads it).
+ */
 const attachmentMessage: GoogleEmulatorGmailMessage = {
   id: '18f00000000000a1',
   threadId: '18f00000000000a1',
@@ -340,15 +367,18 @@ const attachmentMessage: GoogleEmulatorGmailMessage = {
   historyId: '900010',
   internalDate: recordedInternalDate,
   minimal: false,
-  metadataPayload: null,
+  metadataPayload: {
+    partId: '',
+    mimeType: 'multipart/mixed',
+    filename: '',
+    headers: [...attachmentHeaders],
+    body: { size: 0 }
+  },
   fullPayload: {
     partId: '',
     mimeType: 'multipart/mixed',
     filename: '',
-    headers: [
-      { name: 'Subject', value: 'Synthetic practice attachment' },
-      { name: 'Content-Type', value: 'multipart/mixed; boundary="synthetic"' }
-    ],
+    headers: [...attachmentHeaders],
     body: { size: 0 },
     parts: [
       {
@@ -380,6 +410,13 @@ const pagingMessages: ReadonlyArray<GoogleEmulatorImpliedMessage> = [1, 2, 3, 4,
   id: `18f00000000000c${index}`,
   threadId: `18f00000000000c${index}`,
   labelIds: [pagingLabelId]
+}))
+
+/** The five single-message threads of those messages, as the thread listing fixture names them. */
+const pagingThreads: ReadonlyArray<GoogleEmulatorImpliedThread> = [1, 2, 3, 4, 5].map(index => ({
+  id: `18f00000000000c${index}`,
+  snippet: `Synthetic paging message ${index}.`,
+  historyId: `90010${index}`
 }))
 
 const calendarId = 'practice-calendar@example.test'
@@ -517,6 +554,7 @@ const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
         practiceAddress: googleEmulatorDefaultPracticeAddress,
         messages: [attachmentMessage, workMessage],
         impliedMessages: pagingMessages,
+        impliedThreads: pagingThreads,
         impliedLabelIds: [pagingLabelId],
         attachments: [{ messageId: attachmentMessage.id, attachmentId, size: 6, data: '-_-_Pj_-' }],
         calendars: [practiceCalendar],
@@ -528,6 +566,7 @@ const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
         practiceAddress: googleEmulatorDefaultPracticeAddress,
         messages: [],
         impliedMessages: [],
+        impliedThreads: [],
         impliedLabelIds: [],
         attachments: [],
         calendars: [],
@@ -551,6 +590,7 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
   const duplicates: ReadonlyArray<readonly [string, string | undefined]> = [
     ['message id', duplicate(messageIds)],
     ['label id', duplicate(entities.impliedLabelIds)],
+    ['thread id', duplicate(entities.impliedThreads.map(thread => thread.id))],
     [
       'attachment',
       duplicate(entities.attachments.map(item => `${item.messageId} ${item.attachmentId}`))
@@ -635,6 +675,7 @@ const stateFromSeed = (seed: GoogleEmulatorSeed): GoogleEmulatorState | string =
     practiceAddress: seed.practiceAddress ?? profile.practiceAddress,
     messages: seed.messages ?? profile.messages,
     impliedMessages: seed.impliedMessages ?? profile.impliedMessages,
+    impliedThreads: seed.impliedThreads ?? profile.impliedThreads,
     impliedLabelIds: seed.impliedLabelIds ?? profile.impliedLabelIds,
     attachments: seed.attachments ?? profile.attachments,
     calendars: seed.calendars ?? profile.calendars,

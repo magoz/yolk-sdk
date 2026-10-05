@@ -95,7 +95,8 @@ export const googleSeedSources: ReadonlyArray<SeedSource<GoogleConformanceSeedKe
     key: 'attachmentMessageId',
     flag: '--attachment-message',
     env: 'GOOGLE_CONFORMANCE_ATTACHMENT_MESSAGE',
-    description: 'Gmail practice message id with a file attachment'
+    description:
+      'Gmail practice message id with a file attachment (the metadata-headers case also reads its headers)'
   },
   {
     key: 'workMessageId',
@@ -161,6 +162,22 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
     fileName: 'gmail-not-found-envelope.ts',
     exportName: 'gmailNotFoundEnvelopeFixture',
     doc: '`gmail.get_message` of an id the practice mailbox never holds, with the Google error envelope.'
+  },
+  {
+    caseId: 'google.gmail.list-threads-page-token',
+    seeds: ['pagingLabelId'],
+    optionalSeeds: [],
+    fileName: 'gmail-list-threads-paging.ts',
+    exportName: 'gmailListThreadsPagingFixture',
+    doc: "The seeded paging label's threads listed on one page, its messages listed for their thread ids, then the threads in `gmail.list_threads` pages of two chained through `nextPageToken`."
+  },
+  {
+    caseId: 'google.gmail.metadata-headers',
+    seeds: ['attachmentMessageId'],
+    optionalSeeds: [],
+    fileName: 'gmail-metadata-headers.ts',
+    exportName: 'gmailMetadataHeadersFixture',
+    doc: 'The seeded attachment message read with `format=metadata`, again with the `Subject` and `From` `metadataHeaders` selection, then its thread with the same selection.'
   },
   {
     caseId: 'google.gmail.label-create-apply-delete',

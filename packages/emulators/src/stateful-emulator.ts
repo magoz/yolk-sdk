@@ -782,6 +782,12 @@ export type ExactQueryOptions = {
    * emulated. Omitted: names are compared decoded, as before.
    */
   readonly rawNames?: boolean
+  /**
+   * Opt-in: these keys (each also listed in `required` or `optional`) may occur more than once.
+   * They are left out of the returned record; a route reads them in order with
+   * `request.query.getAll`. Omitted: every key occurs once, as before.
+   */
+  readonly repeatable?: ReadonlyArray<string>
 }
 
 /** The raw parameter names of a raw query, in order (`[]` for an empty query). */
@@ -792,7 +798,8 @@ const rawQueryNames = (raw: string): ReadonlyArray<string> =>
  * Constant-text query check (for fail-closed emulators): exactly the `required` query keys plus
  * any of the `optional` ones, each once, as a record of their values; or not emulated. A reason
  * never echoes a request's own key; it names only a missing key from the route's own list. With
- * `rawNames`, every raw parameter name must also be the plain name it decodes to.
+ * `rawNames`, every raw parameter name must also be the plain name it decodes to; with
+ * `repeatable`, the listed keys may repeat and are read with `request.query.getAll` instead.
  */
 export const exactQuery = (
   request: EmulatedRequest,
@@ -801,8 +808,10 @@ export const exactQuery = (
   options: ExactQueryOptions = {}
 ): Readonly<Record<string, string>> | NotEmulated => {
   const keys = [...request.query.keys()]
+  const repeatable = options.repeatable ?? []
+  const once = keys.filter(key => !repeatable.includes(key))
 
-  if (keys.length !== new Set(keys).size) {
+  if (once.length !== new Set(once).size) {
     return notEmulated('repeated query parameters are not emulated')
   }
 
@@ -821,7 +830,7 @@ export const exactQuery = (
   const missing = required.find(key => !keys.includes(key))
 
   return missing === undefined
-    ? Object.fromEntries(request.query)
+    ? Object.fromEntries([...request.query].filter(([key]) => !repeatable.includes(key)))
     : notEmulated(`requests without query parameter ${missing} are not emulated on this route`)
 }
 

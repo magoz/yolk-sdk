@@ -76,6 +76,8 @@ import {
   gmailDraftLifecycleCase,
   gmailLabelLifecycleCase,
   gmailListPagingCase,
+  gmailListThreadsPagingCase,
+  gmailMetadataHeadersCase,
   gmailNotFoundEnvelopeCase,
   gmailSendPracticeCase,
   gmailTrashUntrashCase
@@ -114,6 +116,8 @@ export {
   gmailDraftLifecycleCase,
   gmailLabelLifecycleCase,
   gmailListPagingCase,
+  gmailListThreadsPagingCase,
+  gmailMetadataHeadersCase,
   gmailNotFoundEnvelopeCase,
   gmailSendPracticeCase,
   gmailTrashUntrashCase
@@ -300,6 +304,8 @@ export const googleConformanceCases: ReadonlyArray<GoogleConformanceCase> = [
   gmailListPagingCase,
   gmailAttachmentCase,
   gmailNotFoundEnvelopeCase,
+  gmailListThreadsPagingCase,
+  gmailMetadataHeadersCase,
   gmailLabelLifecycleCase,
   gmailDraftLifecycleCase,
   gmailTrashUntrashCase,

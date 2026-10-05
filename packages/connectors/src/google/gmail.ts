@@ -58,17 +58,60 @@ export class GmailSearchOutput extends Schema.Class<GmailSearchOutput>('GmailSea
   resultSizeEstimate: Schema.optional(Schema.Number)
 }) {}
 
+/** Most header names one `metadataHeaders` selection may carry. */
+export const gmailMetadataHeadersMaxItems = 50
+
+/**
+ * One RFC 5322 header field name (printable ASCII except `:`, at most 128 characters), sent as one
+ * `metadataHeaders` query value.
+ */
+export const GmailMetadataHeaderName = Schema.String.check(
+  Schema.isPattern(/^[!-9;-~]{1,128}$/u)
+).annotate({ description: 'An RFC 5322 header field name, such as From or Subject.' })
+
+export type GmailMetadataHeaderName = typeof GmailMetadataHeaderName.Type
+
+/**
+ * 1 to 50 header names a `format: 'metadata'` read keeps (Gmail answers only these headers), sent
+ * as repeated `metadataHeaders` query parameters. Omit it to read every header.
+ */
+export const GmailMetadataHeaders = Schema.Array(GmailMetadataHeaderName)
+  .check(Schema.isBetweenLength(1, gmailMetadataHeadersMaxItems))
+  .annotate({
+    description:
+      "Only with format 'metadata': 1 to 50 header names to return (omit for every header)."
+  })
+
+export type GmailMetadataHeaders = typeof GmailMetadataHeaders.Type
+
+// Gmail ignores metadataHeaders outside format=metadata: reject the combination rather than send
+// a selection that silently returns every header (or none).
+const metadataHeadersRequireMetadataFormat = Schema.makeFilter<{
+  readonly format?: string | undefined
+  readonly metadataHeaders?: ReadonlyArray<string> | undefined
+}>(input =>
+  input.metadataHeaders === undefined || input.format === 'metadata'
+    ? undefined
+    : { path: ['metadataHeaders'], issue: "metadataHeaders requires format 'metadata'" }
+)
+
 export class GmailGetMessageInput extends Schema.Class<GmailGetMessageInput>(
   'GmailGetMessageInput'
-)({
-  id: Schema.String,
-  format: Schema.optional(Schema.Literals(['minimal', 'full', 'raw', 'metadata']))
-}) {}
+)(
+  Schema.Struct({
+    id: Schema.String,
+    format: Schema.optional(Schema.Literals(['minimal', 'full', 'raw', 'metadata'])),
+    metadataHeaders: Schema.optional(GmailMetadataHeaders)
+  }).check(metadataHeadersRequireMetadataFormat)
+) {}
 
-export class GmailGetThreadInput extends Schema.Class<GmailGetThreadInput>('GmailGetThreadInput')({
-  threadId: Schema.String,
-  format: Schema.Literals(['full', 'metadata', 'minimal'])
-}) {}
+export class GmailGetThreadInput extends Schema.Class<GmailGetThreadInput>('GmailGetThreadInput')(
+  Schema.Struct({
+    threadId: Schema.String,
+    format: Schema.Literals(['full', 'metadata', 'minimal']),
+    metadataHeaders: Schema.optional(GmailMetadataHeaders)
+  }).check(metadataHeadersRequireMetadataFormat)
+) {}
 
 export class GmailMessageIdInput extends Schema.Class<GmailMessageIdInput>('GmailMessageIdInput')({
   messageId: Schema.String
@@ -85,6 +128,25 @@ export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput
   pageToken: Schema.optional(Schema.String),
   isRead: Schema.optional(Schema.Boolean),
   isFlagged: Schema.optional(Schema.Boolean)
+}) {}
+
+/** `gmail.list_threads` input: the `gmail.list` filters, applied to threads. */
+export class GmailListThreadsInput extends Schema.Class<GmailListThreadsInput>(
+  'GmailListThreadsInput'
+)(GmailListInput.fields) {}
+
+export class GmailThreadRef extends Schema.Class<GmailThreadRef>('GmailThreadRef')({
+  id: Schema.String,
+  snippet: Schema.optional(Schema.String),
+  historyId: Schema.optional(Schema.String)
+}) {}
+
+export class GmailListThreadsOutput extends Schema.Class<GmailListThreadsOutput>(
+  'GmailListThreadsOutput'
+)({
+  threads: Schema.optional(Schema.Array(GmailThreadRef)),
+  nextPageToken: Schema.optional(Schema.String),
+  resultSizeEstimate: Schema.optional(Schema.Number)
 }) {}
 
 const gmailRawMessagePattern =
@@ -549,8 +611,14 @@ const gmailPartHeaders = (part: Schema.Json | undefined) => {
   })
 }
 
-const selectedGmailPartHeaders = (headers: ReadonlyArray<GmailThreadHeaderFields>) =>
-  headers.filter(header => gmailThreadHeaderNames.has(header.name.toLowerCase()))
+/**
+ * The headers a thread message keeps: the caller's `metadataHeaders` selection when given (names
+ * compared case-insensitively), else the default conversation allowlist.
+ */
+const selectedGmailPartHeaders = (
+  headers: ReadonlyArray<GmailThreadHeaderFields>,
+  selection: ReadonlySet<string>
+) => headers.filter(header => selection.has(header.name.toLowerCase()))
 
 const gmailPartHeader = (headers: ReadonlyArray<GmailThreadHeaderFields>, name: string) =>
   headers.find(header => header.name.toLowerCase() === name.toLowerCase())?.value
@@ -777,7 +845,8 @@ const gmailAttachmentsFromPayload = (payload: Schema.Json | undefined) => {
 }
 
 const normalizeGmailThreadMessage = (
-  message: typeof GmailThreadWireMessage.Type
+  message: typeof GmailThreadWireMessage.Type,
+  headerSelection: ReadonlySet<string>
 ): GmailThreadMessage => {
   const collected: GmailCollectedParts = { plain: [], html: [], attachments: [] }
   collectGmailParts(message.payload, collected)
@@ -809,7 +878,7 @@ const normalizeGmailThreadMessage = (
 
       const fields: GmailThreadMessageWithHeadersFields = {
         ...prefix,
-        headers: selectedGmailPartHeaders(gmailPartHeaders(message.payload))
+        headers: selectedGmailPartHeaders(gmailPartHeaders(message.payload), headerSelection)
       }
 
       if (body !== undefined) {
@@ -833,8 +902,16 @@ const normalizeGmailThreadMessage = (
   )
 }
 
-const normalizeGmailThread = (thread: typeof GmailThreadWireOutput.Type) =>
-  new GmailThreadOutput(
+const normalizeGmailThread = (
+  thread: typeof GmailThreadWireOutput.Type,
+  metadataHeaders: ReadonlyArray<string> | undefined
+) => {
+  const headerSelection =
+    metadataHeaders === undefined
+      ? gmailThreadHeaderNames
+      : new Set(metadataHeaders.map(name => name.toLowerCase()))
+
+  return new GmailThreadOutput(
     (() => {
       const fields: GmailThreadOutputFields = {
         id: thread.id
@@ -844,9 +921,15 @@ const normalizeGmailThread = (thread: typeof GmailThreadWireOutput.Type) =>
         fields.historyId = thread.historyId
       }
 
-      return { ...fields, messages: (thread.messages ?? []).map(normalizeGmailThreadMessage) }
+      return {
+        ...fields,
+        messages: (thread.messages ?? []).map(message =>
+          normalizeGmailThreadMessage(message, headerSelection)
+        )
+      }
     })()
   )
+}
 
 const base64UrlToBase64 = (value: string) => {
   const withoutPadding = value.replace(/=+$/, '')
@@ -1138,7 +1221,8 @@ const replySubject = (subject: string | undefined) => {
   return subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`
 }
 
-const runGmailJsonAction = (
+const runGmailDecodedAction = <A>(
+  outputSchema: Schema.Schema<A> & { readonly DecodingServices: never },
   integration: Parameters<typeof resolveGoogleAccessToken>[0],
   request: (token: string) => ConnectorHttpRequest,
   errorCode: string,
@@ -1154,10 +1238,41 @@ const runGmailJsonAction = (
       return yield* gmailProviderFailure(errorCode, errorMessage, response.status, response.body)
     }
 
-    const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+    const output = yield* decodeJsonResponse(outputSchema, response)
 
     return ActionResult.success(output)
   })
+
+const runGmailJsonAction = (
+  integration: Parameters<typeof resolveGoogleAccessToken>[0],
+  request: (token: string) => ConnectorHttpRequest,
+  errorCode: string,
+  errorMessage: string,
+  credentialSlot: CredentialSlot = GoogleGmailReadonlyOAuthCredentialSlot
+) =>
+  runGmailDecodedAction(
+    GmailUnknownOutput,
+    integration,
+    request,
+    errorCode,
+    errorMessage,
+    credentialSlot
+  )
+
+/** `format`, then one `metadataHeaders` parameter per selected header name (in order). */
+const gmailFormatParams = (input: {
+  readonly format?: string | undefined
+  readonly metadataHeaders?: ReadonlyArray<string> | undefined
+}) => {
+  const params = new URLSearchParams()
+  appendSearchParam(params, 'format', input.format)
+
+  for (const name of input.metadataHeaders ?? []) {
+    params.append('metadataHeaders', name)
+  }
+
+  return params
+}
 
 export const gmailSearchAction = defineAction({
   id: 'gmail.search',
@@ -1204,7 +1319,8 @@ export const gmailSearchAction = defineAction({
 
 export const gmailGetMessageAction = defineAction({
   id: 'gmail.get_message',
-  description: 'Get a Gmail message by id for the integration account.',
+  description:
+    "Get a Gmail message by id for the integration account. With format 'metadata', optional metadataHeaders (1 to 50 header names, such as From and Subject) limits payload.headers to those headers; metadataHeaders with any other format is rejected.",
   inputSchema: GmailGetMessageInput,
   outputSchema: GmailMessageOutput,
   execute: ({ integration, input }) =>
@@ -1215,9 +1331,7 @@ export const gmailGetMessageAction = defineAction({
       )
 
       const http = yield* ConnectorHttpClient
-      const params = new URLSearchParams()
-      appendSearchParam(params, 'format', input.format)
-      const query = params.toString()
+      const query = gmailFormatParams(input).toString()
       const url = `${googleGmailApiBaseUrl}/users/me/messages/${encodeURIComponent(input.id)}${query === '' ? '' : `?${query}`}`
 
       const response = yield* http.request(
@@ -1271,6 +1385,35 @@ export const gmailListAction = defineAction({
     )
 })
 
+export const gmailListThreadsAction = defineAction({
+  id: 'gmail.list_threads',
+  description:
+    'List Gmail threads (id, snippet, historyId) for the integration account, one page at a time. Optional isRead/isFlagged filters are composed into the Gmail query as is:read/is:unread and is:starred/-is:starred; labelId, maxResults, and pageToken (the previous nextPageToken) are passed through. Read messages with gmail.get_thread.',
+  inputSchema: GmailListThreadsInput,
+  outputSchema: GmailListThreadsOutput,
+  execute: ({ integration, input }) =>
+    runGmailDecodedAction(
+      GmailListThreadsOutput,
+      integration,
+      token => {
+        const params = new URLSearchParams()
+        appendSearchParam(params, 'q', composeGmailQuery(input))
+        appendSearchParam(params, 'labelIds', input.labelId)
+        appendNumberSearchParam(params, 'maxResults', input.maxResults)
+        appendSearchParam(params, 'pageToken', input.pageToken)
+        const query = params.toString()
+
+        return gmailRequest({
+          token,
+          method: 'GET',
+          path: `/users/me/threads${query === '' ? '' : `?${query}`}`
+        })
+      },
+      'gmail_list_threads_failed',
+      'Gmail list threads failed'
+    )
+})
+
 export const gmailListDraftsAction = defineAction({
   id: 'gmail.list_drafts',
   description: 'List Gmail drafts for the integration account.',
@@ -1301,7 +1444,7 @@ export const gmailListDraftsAction = defineAction({
 export const gmailGetThreadAction = defineAction({
   id: 'gmail.get_thread',
   description:
-    'Get normalized Gmail thread messages; full adds decoded bodies. Attachments are metadata-only; fetch entries with attachmentId via gmail.get_attachment.',
+    "Get normalized Gmail thread messages; full adds decoded bodies. With format 'metadata', optional metadataHeaders (1 to 50 header names, such as From and List-Unsubscribe) asks Gmail for only those headers and each message keeps exactly them instead of the default conversation headers (From, To, Cc, Bcc, Subject, Date, Message-ID, ...); metadataHeaders with any other format is rejected. Attachments are metadata-only; fetch entries with attachmentId via gmail.get_attachment.",
   inputSchema: GmailGetThreadInput,
   outputSchema: GmailThreadOutput,
   execute: ({ integration, input }) =>
@@ -1312,8 +1455,7 @@ export const gmailGetThreadAction = defineAction({
       )
 
       const http = yield* ConnectorHttpClient
-      const params = new URLSearchParams()
-      appendSearchParam(params, 'format', input.format)
+      const params = gmailFormatParams(input)
 
       const response = yield* http.request(
         gmailRequest({
@@ -1334,7 +1476,7 @@ export const gmailGetThreadAction = defineAction({
 
       const output = yield* decodeJsonResponse(GmailThreadWireOutput, response)
 
-      return ActionResult.success(normalizeGmailThread(output))
+      return ActionResult.success(normalizeGmailThread(output, input.metadataHeaders))
     })
 })
 
@@ -2639,6 +2781,7 @@ export const gmailDeletePermanentlyAction = defineAction({
 export const gmailActions = [
   gmailSearchAction,
   gmailListAction,
+  gmailListThreadsAction,
   gmailListDraftsAction,
   gmailGetMessageAction,
   gmailDraftReplyAction,

@@ -1,6 +1,7 @@
 /**
- * Gmail routes of the Google emulator (internal): message listing by label with page tokens,
- * message reads in the recorded formats, attachments, the label lifecycle, label changes, trash and
+ * Gmail routes of the Google emulator (internal): message and thread listing by label with page
+ * tokens, message and thread reads in the recorded formats (a `metadataHeaders` selection keeps
+ * only the selected recorded headers), attachments, the label lifecycle, label changes, trash and
  * untrash, the draft lifecycle with its thread, and the multipart practice send.
  *
  * Every answer comes from the Gmail fixtures, through the seed or the request, or is minted. The
@@ -19,6 +20,7 @@ import {
   isJsonObject,
   isNotEmulated,
   mediaType,
+  type EmulatedRequest,
   notEmulated,
   parseJsonText,
   statefulRoute,
@@ -65,6 +67,10 @@ const listCase = 'google.gmail.list-page-token'
 const attachmentCase = 'google.gmail.attachment-base64url'
 
 const notFoundCase = 'google.gmail.not-found-envelope'
+
+const listThreadsCase = 'google.gmail.list-threads-page-token'
+
+const metadataHeadersCase = 'google.gmail.metadata-headers'
 
 const labelCase = 'google.gmail.label-create-apply-delete'
 
@@ -215,7 +221,7 @@ type ListInput = {
 }
 
 const listMessages: GoogleRoute = statefulRoute(
-  gmail('GET', '/messages', false, [listCase]),
+  gmail('GET', '/messages', false, [listCase, listThreadsCase]),
   'none',
   (request): ListInput | NotEmulated => {
     const query = exactQuery(request, ['labelIds', 'maxResults'], ['pageToken'])
@@ -277,34 +283,204 @@ const listMessages: GoogleRoute = statefulRoute(
   }
 )
 
+// Thread listing by label.
+
+type ThreadsPageHead = {
+  readonly threads: ReadonlyArray<Schema.Json>
+  nextPageToken?: string
+}
+
+const listThreads: GoogleRoute = statefulRoute(
+  gmail('GET', '/threads', false, [listThreadsCase]),
+  'none',
+  (request): ListInput | NotEmulated => {
+    const query = exactQuery(request, ['labelIds', 'maxResults'], ['pageToken'])
+
+    if (isNotEmulated(query)) return query
+
+    const labelId = query['labelIds'] ?? ''
+
+    if (!gmailIdSegment.test(labelId)) return notEmulated('labelIds must be one label id')
+
+    const maxResults = pageSize(query['maxResults'], 'maxResults', 1, 500)
+
+    if (isNotEmulated(maxResults)) return maxResults
+
+    const pageToken = query['pageToken']
+
+    return pageToken === ''
+      ? notEmulated('an empty pageToken is not emulated')
+      : { labelId, maxResults, pageToken }
+  },
+  (state, input, { env }) => {
+    const known =
+      state.impliedLabelIds.includes(input.labelId) ||
+      state.labels.some(label => label.id === input.labelId)
+
+    if (!known) return notEmulated('listing a label the state does not hold is not emulated')
+
+    const messages: ReadonlyArray<GoogleEmulatorGmailMessage | GoogleEmulatorImpliedMessage> = [
+      ...state.messages,
+      ...state.impliedMessages
+    ]
+
+    const matches = messages.filter(message => message.labelIds.includes(input.labelId))
+
+    if (matches.length === 0) {
+      return notEmulated('a listing without threads is not emulated (no fixture records one)')
+    }
+
+    const threadIds = [...new Set(matches.map(message => message.threadId))]
+
+    // Gmail leaves out threads in Trash or Spam; no fixture records that, so refuse it.
+    const hidden = messages.some(
+      message =>
+        threadIds.includes(message.threadId) &&
+        message.labelIds.some(id => id === 'TRASH' || id === 'SPAM')
+    )
+
+    if (hidden) {
+      return notEmulated('a listing that would leave out threads in Trash or Spam is not emulated')
+    }
+
+    const threads = threadIds.map(id => state.impliedThreads.find(thread => thread.id === id))
+
+    if (threads.some(thread => thread === undefined)) {
+      return notEmulated('listing a thread no thread listing fixture names is not emulated')
+    }
+
+    return listPage(
+      env,
+      'gmail-threads',
+      `gmail-threads\u0000${input.labelId}\u0000${input.maxResults}`,
+      threads.flatMap(thread =>
+        thread === undefined
+          ? []
+          : [{ id: thread.id, snippet: thread.snippet, historyId: thread.historyId }]
+      ),
+      input.maxResults,
+      input.pageToken,
+      env.drills.gmailThreadPageRepeats,
+      (page, nextPageToken) => {
+        const head: ThreadsPageHead = { threads: [...page] }
+
+        // The last page carries no `nextPageToken`.
+        if (nextPageToken !== undefined) head.nextPageToken = nextPageToken
+
+        return googleJson(200, { ...head, resultSizeEstimate: threads.length })
+      }
+    )
+  }
+)
+
 // Message reads.
 
-type MessageRead = { readonly id: string; readonly format: MessageFormat }
+/** Header names of one `metadataHeaders` selection, in request order (`undefined`: none sent). */
+type HeaderSelection = ReadonlyArray<string> | undefined
+
+type MessageRead = {
+  readonly id: string
+  readonly format: MessageFormat
+  readonly metadataHeaders: HeaderSelection
+}
 
 const formats: ReadonlyArray<string> = ['minimal', 'metadata', 'full']
 
 const isFormat = (value: string | undefined): value is MessageFormat =>
   value !== undefined && formats.includes(value)
 
+/** The connector's bound on one selection (`gmailMetadataHeadersMaxItems`), copied as data. */
+const metadataHeadersMaxItems = 50
+
+/** One RFC 5322 header field name, as the connector sends it. */
+const headerNamePattern = /^[!-9;-~]{1,128}$/
+
+/**
+ * The `format` and the `metadataHeaders` selection of a read: the selection only with
+ * `format=metadata`, 1 to 50 distinct header names; not emulated otherwise.
+ */
+const readFormat = (
+  request: EmulatedRequest
+): { readonly format: MessageFormat; readonly metadataHeaders: HeaderSelection } | NotEmulated => {
+  const query = exactQuery(request, ['format'], ['metadataHeaders'], {
+    repeatable: ['metadataHeaders']
+  })
+
+  if (isNotEmulated(query)) return query
+
+  const format = query['format']
+
+  if (!isFormat(format)) return notEmulated('format must be minimal, metadata, or full')
+
+  const names = request.query.getAll('metadataHeaders')
+
+  if (names.length === 0) return { format, metadataHeaders: undefined }
+
+  if (format !== 'metadata') {
+    return notEmulated('metadataHeaders with a format other than metadata is not emulated')
+  }
+
+  const valid =
+    names.length <= metadataHeadersMaxItems &&
+    new Set(names).size === names.length &&
+    names.every(name => headerNamePattern.test(name))
+
+  return valid
+    ? { format, metadataHeaders: names }
+    : notEmulated('metadataHeaders must be 1 to 50 distinct header names')
+}
+
+const isHeader = (value: Schema.Json): value is Schema.JsonObject & { readonly name: string } =>
+  isJsonObject(value) && Predicate.isString(value.name)
+
+/**
+ * `rendered` (a metadata rendering) keeping only the recorded top-level headers the selection
+ * names, in recorded order; not emulated when a selected name is not exactly the name of one of its
+ * recorded headers (no fixture records a selection of an absent header or in another case).
+ * `ignore` (a drill) answers the rendering unchanged.
+ */
+const selectHeaders = (
+  rendered: Schema.JsonObject,
+  selection: HeaderSelection,
+  ignore: boolean
+): Schema.JsonObject | NotEmulated => {
+  if (selection === undefined) return rendered
+
+  const payload = rendered.payload
+  const headers = isJsonObject(payload) && Array.isArray(payload.headers) ? payload.headers : []
+  const recorded = headers.filter(isHeader)
+
+  if (
+    !isJsonObject(payload) ||
+    recorded.length !== headers.length ||
+    !selection.every(name => recorded.some(header => header.name === name))
+  ) {
+    return notEmulated(
+      'a metadataHeaders selection naming a header the recorded rendering lacks is not emulated'
+    )
+  }
+
+  if (ignore) return rendered
+
+  return {
+    ...rendered,
+    payload: { ...payload, headers: recorded.filter(header => selection.includes(header.name)) }
+  }
+}
+
 const getMessage: GoogleRoute = statefulRoute(
   gmail(
     'GET',
     '/messages/{messageId}',
     false,
-    [attachmentCase, notFoundCase, labelCase, draftCase, trashCase, sendCase],
+    [attachmentCase, notFoundCase, metadataHeadersCase, labelCase, draftCase, trashCase, sendCase],
     ['messageId']
   ),
   'none',
   (request): MessageRead | NotEmulated => {
-    const query = exactQuery(request, ['format'])
+    const read = readFormat(request)
 
-    if (isNotEmulated(query)) return query
-
-    const format = query['format']
-
-    return isFormat(format)
-      ? { id: param(request, 'messageId'), format }
-      : notEmulated('format must be minimal, metadata, or full')
+    return isNotEmulated(read) ? read : { id: param(request, 'messageId'), ...read }
   },
   (state, input, { env }) => {
     const message = findMessage(state, input.id)
@@ -312,9 +488,17 @@ const getMessage: GoogleRoute = statefulRoute(
     if (message !== undefined) {
       const rendered = renderMessage(message, input.format)
 
-      return rendered === undefined
-        ? notEmulated(`no fixture records this message with format=${input.format}`)
-        : answer(() => googleJson(200, rendered))
+      if (rendered === undefined) {
+        return notEmulated(`no fixture records this message with format=${input.format}`)
+      }
+
+      const selected = selectHeaders(
+        rendered,
+        input.metadataHeaders,
+        env.drills.metadataHeadersIgnored
+      )
+
+      return isNotEmulated(selected) ? selected : answer(() => googleJson(200, selected))
     }
 
     if (isImpliedMessage(state, input.id)) {
@@ -322,7 +506,9 @@ const getMessage: GoogleRoute = statefulRoute(
     }
 
     // The recorded not-found answer: a minimal read of an id the mailbox does not hold.
-    return input.format === 'minimal' && absentMessageIdPattern.test(input.id)
+    return input.format === 'minimal' &&
+      input.metadataHeaders === undefined &&
+      absentMessageIdPattern.test(input.id)
       ? answer(() => notFound(env))
       : notEmulated('only a format=minimal read of an absent 16-hex-digit id is recorded')
   }
@@ -802,39 +988,84 @@ const deleteDraft: GoogleRoute = statefulRoute(
   }
 )
 
+type ThreadRead = {
+  readonly threadId: string
+  readonly format: MessageFormat
+  readonly metadataHeaders: HeaderSelection
+}
+
 const getThread: GoogleRoute = statefulRoute(
-  gmail('GET', '/threads/{threadId}', false, [draftCase], ['threadId']),
+  gmail('GET', '/threads/{threadId}', false, [draftCase, metadataHeadersCase], ['threadId']),
   'none',
-  (request): string | NotEmulated => {
-    const query = exactQuery(request, ['format'])
+  (request): ThreadRead | NotEmulated => {
+    const read = readFormat(request)
 
-    if (isNotEmulated(query)) return query
+    if (isNotEmulated(read)) return read
 
-    return recordedValue(query, 'format', 'full') ?? param(request, 'threadId')
+    // Recorded: a full read of a draft thread, and a metadata read with a metadataHeaders selection.
+    if (
+      read.format === 'minimal' ||
+      (read.format === 'metadata') !== (read.metadataHeaders !== undefined)
+    ) {
+      return notEmulated(
+        'a thread read other than format=full, or format=metadata with metadataHeaders, is not emulated'
+      )
+    }
+
+    return { threadId: param(request, 'threadId'), ...read }
   },
-  (state, threadId) => {
-    const messages = state.messages.filter(message => message.threadId === threadId)
+  (state, input, { env }) => {
+    const messages = state.messages.filter(message => message.threadId === input.threadId)
 
-    // Only draft threads created here are recorded (a seeded message's thread is not).
+    if (state.impliedMessages.some(message => message.threadId === input.threadId)) {
+      return notEmulated('a thread holding a message a fixture only names is not emulated')
+    }
+
     const createdDrafts = messages.every(
       message => isDraftMessage(message) && mintedMessageIdPattern.test(message.id)
     )
 
-    if (messages.length === 0 || !createdDrafts) {
-      return notEmulated('a thread other than a draft thread created here is not emulated')
+    // Full: only draft threads created here are recorded (a seeded message's thread is not).
+    // Metadata: only threads of stored messages that are not drafts are recorded.
+    const recorded =
+      messages.length > 0 &&
+      (input.format === 'full' ? createdDrafts : !messages.some(isDraftMessage))
+
+    if (!recorded) {
+      return notEmulated(
+        input.format === 'full'
+          ? 'a thread other than a draft thread created here is not emulated'
+          : 'a metadata read of a thread holding a draft is not emulated'
+      )
     }
 
-    const rendered = messages.map(message => renderMessage(message, 'full'))
+    const rendered: Array<Schema.JsonObject> = []
 
-    if (rendered.some(item => item === undefined)) {
-      return notEmulated('a thread with a message without a full rendering is not emulated')
+    for (const message of messages) {
+      const rendering = renderMessage(message, input.format)
+
+      if (rendering === undefined) {
+        return notEmulated(
+          `a thread with a message without a ${input.format} rendering is not emulated`
+        )
+      }
+
+      const selected = selectHeaders(
+        rendering,
+        input.metadataHeaders,
+        env.drills.metadataHeadersIgnored
+      )
+
+      if (isNotEmulated(selected)) return selected
+
+      rendered.push(selected)
     }
 
     return answer(() =>
       googleJson(200, {
-        id: threadId,
+        id: input.threadId,
         historyId: messages.at(-1)?.historyId ?? '',
-        messages: rendered.flatMap(item => (item === undefined ? [] : [item]))
+        messages: rendered
       })
     )
   }
@@ -995,6 +1226,7 @@ const sendMessage: GoogleRoute = statefulRoute(
 /** The Gmail routes, in manifest order. */
 export const gmailRoutes: ReadonlyArray<GoogleRoute> = [
   listMessages,
+  listThreads,
   getMessage,
   getAttachment,
   modifyMessage,

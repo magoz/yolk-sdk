@@ -30,6 +30,10 @@ export type GoogleEmulatorDrills = {
   readonly attachmentStandardBase64?: boolean
   /** Gmail 404 envelopes carry no `error.message`. */
   readonly notFoundWithoutMessage?: boolean
+  /** A later `gmail.list_threads` page starts one thread early. */
+  readonly gmailThreadPageRepeats?: boolean
+  /** Message reads ignore `metadataHeaders` and answer every recorded header. */
+  readonly metadataHeadersIgnored?: boolean
   /** Deleting a label leaves it on the messages that carry it. */
   readonly labelDeleteKeepsOnMessages?: boolean
   /** A draft update keeps the earlier subject and body (it ignores the new message). */
@@ -56,6 +60,8 @@ export const googleEmulatorDrillKnobs: ReadonlyArray<keyof GoogleEmulatorDrills>
   'gmailPageRepeats',
   'attachmentStandardBase64',
   'notFoundWithoutMessage',
+  'gmailThreadPageRepeats',
+  'metadataHeadersIgnored',
   'labelDeleteKeepsOnMessages',
   'draftUpdateKeepsContent',
   'trashAnswerOmitsTrash',

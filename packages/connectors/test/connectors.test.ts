@@ -856,6 +856,7 @@ describe('@yolk-sdk/connectors', () => {
     expect(GoogleConnector.actions.map(action => action.id)).toEqual([
       'gmail.search',
       'gmail.list',
+      'gmail.list_threads',
       'gmail.list_drafts',
       'gmail.get_message',
       'gmail.draft_reply',

@@ -196,6 +196,8 @@ describe('run-google-conformance plan', () => {
         'RUN   google.gmail.list-page-token  [read]  needs --paging-label',
         'RUN   google.gmail.attachment-base64url  [read]  needs --attachment-message',
         'RUN   google.gmail.not-found-envelope  [read]',
+        'RUN   google.gmail.list-threads-page-token  [read]  needs --paging-label',
+        'RUN   google.gmail.metadata-headers  [read]  needs --attachment-message',
         'SKIP  google.gmail.label-create-apply-delete  [write-reversible]  writes-not-allowed',
         'SKIP  google.gmail.draft-compose-update-delete  [write-reversible]  writes-not-allowed',
         'SKIP  google.gmail.trash-untrash  [write-reversible]  writes-not-allowed',

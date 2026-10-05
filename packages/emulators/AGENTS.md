@@ -653,7 +653,7 @@ There is no root export or barrel.
   own constant reasons, the 13-character run-id reason among them), which the wrapper ledgers in the
   constant entry, or a repeat when the raw decodes cleanly to text holding the bearer, and no
   refused `message.raw` is ever ledgered), and the wrapper's constant-reason `exactQuery` and
-  `exactBodyKeys`. It emulates only the Gmail, Calendar, and Drive routes the thirteen Google cases
+  `exactBodyKeys`. It emulates only the Gmail, Calendar, and Drive routes the fifteen Google cases
   (with their cleanup) send, each on its recorded origin (`https://gmail.googleapis.com` for Gmail
   and the multipart send upload, `https://www.googleapis.com` for Calendar and Drive). The practice
   send is irreversible on Gmail: the emulator only records the sent message in the state (never
@@ -663,26 +663,28 @@ There is no root export or barrel.
   messages answer the recorded `sizeEstimate` (which covers the subject and address) and `body.size`
   (64, 88), so draft and send subjects take only a run id of the fixtures' length (13 characters);
   other run-scoped names take any. A Gmail message answers only the `format` renderings a fixture
-  records for it; the paging label, the five messages its listing names, and the practice Drive
-  folder are implied (named, never rendered). Absent ids answer only the recorded not-found
-  envelopes (a `format=minimal` read of a 16-hex-digit message id, a `Label_<1 to 999999999>` label
-  read, an `r-<digits>` draft delete, a Drive file read); everything else about an absent or implied
-  item is not emulated. Minted ids: created label ids start above every seeded label number
-  (`Label_9101` first, the fixture's value; seeded `Label_<digits>` ids must be
-  `Label_<1 to 999999999>`, and a create when no number is left is refused before any fault); draft,
-  draft message (also the draft's thread id), sent message, event, and folder ids use forms no
-  seeded id or thread id may use; all come from counters in the state that only advance. A draft
-  thread answers only when every message in it was created here. Page tokens are the fixtures'
-  values in the generation that first issued them and `<token>.g<generation>` afterwards; a token is
-  never rebound to another position or list rendering (token values are globally unique: another
-  list or page size, or a changed list, gets a distinct `<token>.v<k>`), and it is accepted only
-  when this emulator issued it for the same list since the last reset or seed and the list is
-  unchanged. Writes end at the seed except the counters, the event cases' own `cancelled` events
-  (the fixtures read them back), and the sent message. `test/google.test.ts` replays every fixture
-  in suite order on one emulator byte for byte with no substitution (the clock set to each recorded
-  write's instant), and each fixture alone substituting only the minted event id (and its derived
-  `htmlLink` / `iCalUID`) at exact paths. Drill knobs (`drills`, booleans) each fail exactly one
-  case.
+  records for it (a `metadataHeaders` selection keeps only the selected recorded headers); the
+  paging label, the five messages its listing names, their five threads (named by the thread
+  listing), and the practice Drive folder are implied (named, never rendered). Absent ids answer
+  only the recorded not-found envelopes (a `format=minimal` read of a 16-hex-digit message id, a
+  `Label_<1 to 999999999>` label read, an `r-<digits>` draft delete, a Drive file read); everything
+  else about an absent or implied item is not emulated. Minted ids: created label ids start above
+  every seeded label number (`Label_9101` first, the fixture's value; seeded `Label_<digits>` ids
+  must be `Label_<1 to 999999999>`, and a create when no number is left is refused before any
+  fault); draft, draft message (also the draft's thread id), sent message, event, and folder ids use
+  forms no seeded id or thread id may use; all come from counters in the state that only advance. A
+  `format=full` thread read answers only a draft thread whose every message was created here; a
+  `format=metadata` thread read takes a `metadataHeaders` selection and answers only a thread of
+  stored non-draft messages that all have a metadata rendering. Page tokens are the fixtures' values
+  in the generation that first issued them and `<token>.g<generation>` afterwards; a token is never
+  rebound to another position or list rendering (token values are globally unique: another list or
+  page size, or a changed list, gets a distinct `<token>.v<k>`), and it is accepted only when this
+  emulator issued it for the same list since the last reset or seed and the list is unchanged.
+  Writes end at the seed except the counters, the event cases' own `cancelled` events (the fixtures
+  read them back), and the sent message. `test/google.test.ts` replays every fixture in suite order
+  on one emulator byte for byte with no substitution (the clock set to each recorded write's
+  instant), and each fixture alone substituting only the minted event id (and its derived `htmlLink`
+  / `iCalUID`) at exact paths. Drill knobs (`drills`, booleans) each fail exactly one case.
 - Request-shape latitude (`/google`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (Google's
@@ -695,15 +697,19 @@ There is no root export or barrel.
   recorded `sizeEstimate` of the draft and sent messages (answered by their message reads and the
   draft thread) covers the subject; on the practice send, a `content-type` of exactly
   `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to 70 `[A-Za-z0-9_]`
-  characters and no other parameter; a `gmail.list` `maxResults` from 1 to 500, a
-  `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize` from 1 to
-  1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour 0 to 23,
-  minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the state
-  holds where a fixture has an id (writes: only items created here, plus label changes, trash, and
-  untrash of a stored non-draft message); and, for an id the state does not hold, only the recorded
-  not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
-  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read). A seed
-  may set another `practiceAddress`, but then every send is refused, since the recorded
+  characters and no other parameter; a `gmail.list` or `gmail.list_threads` `maxResults` from 1 to
+  500, a `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize`
+  from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour
+  0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the
+  state holds where a fixture has an id (writes: only items created here, plus label changes, trash,
+  and untrash of a stored non-draft message); and, for an id the state does not hold, only the
+  recorded not-found answers (a `format=minimal` read of a 16-hex-digit message id, a read of a
+  `Label_<1 to 999999999>` label, a delete of an `r-<digits>` draft, and a Drive file read); on a
+  `format=metadata` message read, and on a `format=metadata` read of a thread of stored non-draft
+  messages (a thread read in that format takes a selection), a `metadataHeaders` selection, repeated
+  in any order, of 1 to 50 distinct header names each spelled exactly as a header of the recorded
+  metadata rendering, answered as that rendering with only the selected headers, in recorded order.
+  A seed may set another `practiceAddress`, but then every send is refused, since the recorded
   `sizeEstimate` of the sent message also covers the address: the send answers only while the seeded
   address is the recorded `practice@example.test`. On the draft compose and update routes,
   `message.raw` must be canonical unpadded base64url of exactly the recorded draft MIME of that
@@ -1029,14 +1035,15 @@ bearer, a 13-character `run-<bearer>` id included), every `message.raw` the rout
 quoted-printable, UTF-16, and a malformed draft without the bearer) refused with the route's
 declared reason, or as a repeat when it decodes cleanly to the bearer, with no `raw` in the ledger,
 and stray escape introducers beside its first character, checked against the real response, the
-state, and every `/_emulate/*` read), the multipart boundary parser, RFC 3339 range checks, label
+state, and every `/_emulate/*` read), the multipart boundary parser, thread listings and
+`metadataHeaders` selections (answers and refusals), RFC 3339 range checks, label
 ids at the edge of the minted range, seeded thread ids in a minted form, a seeded draft's thread
 refused, page tokens by issuance, globally unique (never rebound after a change or reused by another
 page size), and across resets, 429 faults through the real connector, clock-safe recovery (a
 throwing, non-finite, or out-of-range clock), seeds and minted ids, control plane),
 `test/google-conformance.test.ts` (cross-checks A and B: every case in-process and over loopback
 sockets, one per origin, each emulator ending at its seed except the counters, the event cases'
-cancelled events, and the one sent message; all thirteen cases sequentially on one shared emulator;
+cancelled events, and the one sent message; all fifteen cases sequentially on one shared emulator;
 another 13-character run id; the leftover lookup failing closed before and after; and one drill per
 case failing exactly that case), `test/linkedin-search.test.ts` (manifest, the data copies and error
 bodies, the drift test replaying every fixture byte for byte with no substitution, alone and all in
