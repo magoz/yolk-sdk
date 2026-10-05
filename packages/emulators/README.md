@@ -1786,9 +1786,10 @@ State and seeds: `practiceAddress`, Gmail `messages` (with their recorded render
 Calendar `calendars` and `events`, Drive `files` and `impliedFolderIds`, and the counters. The
 default seed is the synthetic fixture entities with the ids of `googleConformanceFixtureSeeds`.
 Pass `seed: { profile?, practiceAddress?, messages?, impliedMessages?, impliedThreads?,
-impliedLabelIds?, attachments?, calendars?, events?, files?, impliedFolderIds? }` (lists replace the profile's; labels and drafts
-are never seeded) with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and
-`snapshot()` behave as in the Dropbox emulator; reset and seed also clear issued page tokens.
+impliedLabelIds?, attachments?, calendars?, events?, files?, impliedFolderIds? }` (lists replace
+the profile's; labels and drafts are never seeded) with profiles `'default'` or `'empty'`.
+`reset()`, `seed(next)`, and `snapshot()` behave as in the Dropbox emulator; reset and seed also
+clear issued page tokens.
 
 Faults and the control plane behave as in the Dropbox emulator (the ledger records only the
 `content-type` request header); a 429 fault with `retry-after` reaches the connector as
