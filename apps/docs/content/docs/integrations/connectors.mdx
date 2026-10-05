@@ -373,6 +373,19 @@ confirms success; 404 is a definitive rejection) and requires opt-in full-mail
 (`https://mail.google.com/`) consent, which is never added to combined/default consent. It is
 immediate permanent deletion, not trash, and claims no backup erasure.
 
+### Gmail draft bodies
+
+`gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` take an optional
+`contentType: 'text' | 'html'` next to `body` (`text` when omitted, as on the Outlook draft
+actions). A `text` body is sent as 7-bit `multipart/alternative`: a text/plain part with the exact
+body (line breaks as CRLF) and a text/html part derived from it (HTML-escaped, `<br>` per line
+break, runs of spaces kept, `http(s)` URLs linked to themselves, inside one `<div dir="ltr">`), both
+`charset=UTF-8` and quoted-printable with lines of at most 76 characters. Gmail web opens a
+text/plain-only draft in its plain-text composer and hard-wraps it at about 70 columns when a person
+sends it; the HTML alternative keeps it in rich mode, so paragraphs reach recipients unwrapped.
+Write each paragraph as one line. An `html` body is sent as a single quoted-printable text/html
+part. `gmail.get_thread` prefers the text/plain part, so reading a text draft back answers its body.
+
 ### Submit a reviewed Gmail message
 
 `gmail.send_message` accepts `{ raw, threadId? }`, where `raw` is a complete RFC 5322 MIME

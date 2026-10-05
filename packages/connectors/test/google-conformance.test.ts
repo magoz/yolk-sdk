@@ -757,21 +757,24 @@ describe('Google conformance drills (one per case)', () => {
 
   it.effect('a draft body Gmail stored changed fails the draft case and still deletes it', () =>
     Effect.gen(function* () {
-      const changed = replaceResponse(gmailDraftLifecycleFixture, 2, response =>
-        json(200, {
+      const changed = replaceResponse(gmailDraftLifecycleFixture, 2, response => {
+        const message = JSON.parse(textBody(response)).messages[0]
+        const [plain, html] = message.payload.parts
+
+        return json(200, {
           ...JSON.parse(textBody(response)),
           messages: [
             {
-              ...JSON.parse(textBody(response)).messages[0],
+              ...message,
               id: '18f00000000000d1',
               payload: {
-                ...JSON.parse(textBody(response)).messages[0].payload,
-                body: { size: 5, data: 'b3RoZXI' }
+                ...message.payload,
+                parts: [{ ...plain, body: { size: 5, data: 'b3RoZXI' } }, html]
               }
             }
           ]
         })
-      )
+      })
 
       const { failure, entries } = yield* drill(
         gmailDraftLifecycleCase,

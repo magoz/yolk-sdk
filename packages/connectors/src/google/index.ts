@@ -65,6 +65,7 @@ export {
   GmailDeleteLabelOutput,
   gmailDraftComposeAction,
   GmailDraftComposeInput,
+  GmailDraftContentType,
   gmailDraftDeleteAction,
   GmailDraftIdInput,
   gmailDraftReplyAction,

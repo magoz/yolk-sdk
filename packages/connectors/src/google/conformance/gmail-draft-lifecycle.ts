@@ -23,14 +23,66 @@ const subject = 'yolk-conformance run-synthetic draft: synthetic conformance dra
 const updatedSubject =
   'yolk-conformance run-synthetic draft updated: synthetic conformance draft, safe to delete'
 
-/** The MIME the connector builds for a draft without recipients, base64url-encoded. */
-const raw = (draftSubject: string, body: string) =>
-  base64UrlOfText(
-    `Subject: ${draftSubject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+const boundary = '=_yolk-draft-alternative'
+
+const alternativeContentType = `multipart/alternative; boundary="${boundary}"`
+
+/**
+ * The quoted-printable text/plain and text/html parts the connector writes for a draft text (the
+ * HTML is the text inside `<div dir="ltr">`; soft breaks keep lines within 76 characters).
+ */
+type EncodedParts = { readonly plain: string; readonly html: string }
+
+const draftParts: EncodedParts = {
+  plain: 'Synthetic conformance draft, safe to delete: gr=C3=BC=C3=9Fe =E2=9C=93',
+  html: '<div dir=3D"ltr">Synthetic conformance draft, safe to delete: gr=C3=BC=\r\n=C3=9Fe =E2=9C=93</div>'
+}
+
+const updatedDraftParts: EncodedParts = {
+  plain: 'Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93',
+  html: '<div dir=3D"ltr">Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93=\r\n</div>'
+}
+
+/**
+ * The MIME the connector builds for a draft without recipients, base64url-encoded: 7-bit
+ * `multipart/alternative` with the exact text and its HTML rendering, both quoted-printable.
+ */
+const raw = (draftSubject: string, { plain, html }: EncodedParts) => {
+  const part = (type: string, content: string) =>
+    `Content-Type: text/${type}; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${content}`
+
+  return base64UrlOfText(
+    [
+      `Subject: ${draftSubject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: ${alternativeContentType}`,
+      '',
+      `--${boundary}`,
+      part('plain', plain),
+      `--${boundary}`,
+      part('html', html),
+      `--${boundary}--`
+    ].join('\r\n')
   )
+}
 
 const draftAnswer = (messageId: string) =>
   googleJson(200, { id: draftId, message: { id: messageId, threadId, labelIds: ['DRAFT'] } })
+
+/** A `format=full` part whose `body.data` is transfer-decoded, as Gmail answers it. */
+const textPart = (partId: string, type: 'plain' | 'html', content: string) => ({
+  partId,
+  mimeType: `text/${type}`,
+  filename: '',
+  headers: [
+    { name: 'Content-Type', value: `text/${type}; charset=UTF-8` },
+    { name: 'Content-Transfer-Encoding', value: 'quoted-printable' }
+  ],
+  body: {
+    size: new TextEncoder().encode(content).byteLength,
+    data: base64UrlOfText(content)
+  }
+})
 
 /** A `format=full` thread holding the draft message with `draftSubject` and `body`. */
 const thread = (messageId: string, draftSubject: string, body: string) =>
@@ -48,16 +100,17 @@ const thread = (messageId: string, draftSubject: string, body: string) =>
         internalDate: '1790000000000',
         payload: {
           partId: '',
-          mimeType: 'text/plain',
+          mimeType: 'multipart/alternative',
           filename: '',
           headers: [
             { name: 'Subject', value: draftSubject },
-            { name: 'Content-Type', value: 'text/plain; charset=utf-8' }
+            { name: 'Content-Type', value: alternativeContentType }
           ],
-          body: {
-            size: new TextEncoder().encode(body).byteLength,
-            data: base64UrlOfText(body)
-          }
+          body: { size: 0 },
+          parts: [
+            textPart('0', 'plain', body),
+            textPart('1', 'html', `<div dir="ltr">${body}</div>`)
+          ]
         }
       }
     ]
@@ -78,13 +131,13 @@ const draftMetadata = googleJson(200, {
   internalDate: '1790000000000',
   payload: {
     partId: '',
-    mimeType: 'text/plain',
+    mimeType: 'multipart/alternative',
     filename: '',
     headers: [
       { name: 'Subject', value: subject },
-      { name: 'Content-Type', value: 'text/plain; charset=utf-8' }
+      { name: 'Content-Type', value: alternativeContentType }
     ],
-    body: { size: 64 }
+    body: { size: 0 }
   }
 })
 
@@ -117,7 +170,7 @@ export const gmailDraftLifecycleFixture: WireFixture = {
         method: 'POST',
         url: `${gmailSyntheticApi}/drafts`,
         headers: googleJsonRequestHeaders,
-        body: { message: { raw: raw(subject, gmailConformanceDraftText) } }
+        body: { message: { raw: raw(subject, draftParts) } }
       },
       response: draftAnswer(firstMessageId)
     },
@@ -139,7 +192,7 @@ export const gmailDraftLifecycleFixture: WireFixture = {
         headers: googleJsonRequestHeaders,
         body: {
           id: draftId,
-          message: { raw: raw(updatedSubject, gmailConformanceUpdatedDraftText) }
+          message: { raw: raw(updatedSubject, updatedDraftParts) }
         }
       },
       response: draftAnswer(updatedMessageId)

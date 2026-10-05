@@ -1664,8 +1664,9 @@ a minted `Message-ID`), and delivers nothing anywhere; only `reset` or `seed` dr
 set another `practiceAddress`, but then every send answers 400 not-emulated (the reason names the
 recorded `practice@example.test`): the recorded `sizeEstimate` of the sent message covers its
 address, as it covers its subject, so draft and send subjects need a run id of the fixtures' length
-(13 characters; see the latitude below). The draft metadata `body.size` (64) and the sent message
-`body.size` (88) are the fixtures' recorded values, answered as recorded.
+(13 characters; see the latitude below). The draft payload `body.size` (0, the draft is
+`multipart/alternative`) and the sent message `body.size` (88) are the fixtures' recorded values,
+answered as recorded.
 
 **Fail closed: the shared rule.** Google follows the shared fail-closed rule of the stateful
 wrapper, exactly as the GitHub emulator states it above: every route parameter has a raw pattern
@@ -1754,8 +1755,9 @@ emulator mints (it never mints anything else):
   compose and update routes, `message.raw` must be canonical unpadded base64url of exactly the
   recorded draft MIME of that route, the run id aside; any other `message.raw` (line-wrapped, the
   standard alphabet, padded, with a stray character, or with MIME-level encodings such as RFC 2047
-  encoded-words, quoted-printable, or UTF-16) is refused before anything is recorded or a fault is
-  decided, as a constant entry with the route's own declared reason
+  encoded-words, quoted-printable other than the recorded parts, or UTF-16) is refused before
+  anything is recorded or a fault is decided, as a constant entry with the route's own declared
+  reason
   (`message.raw must be canonical base64url UTF-8 MIME`,
   `a draft compose other than the recorded run draft is not emulated` or its `update` form, the
   13-character run-id reason, or `message has a key this route does not take`), or

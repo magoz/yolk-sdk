@@ -571,15 +571,52 @@ const base64Url = (text: string) => {
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
-const draftRaw = (subject: string, body: string, extra = '') =>
-  base64Url(`${extra}Subject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`)
-
 const draftSubject =
   'yolk-conformance run-synthetic draft: synthetic conformance draft, safe to delete'
 
 const draftText = 'Synthetic conformance draft, safe to delete: grüße ✓'
 
 const updatedDraftText = 'Updated synthetic conformance draft: ¡hola! ✓'
+
+/**
+ * The quoted-printable text/plain and text/html parts the draft fixture records for its two
+ * texts; any other body is put in both parts unencoded (a draft the routes refuse anyway).
+ */
+const draftParts = (body: string): readonly [string, string] =>
+  body === draftText
+    ? [
+        'Synthetic conformance draft, safe to delete: gr=C3=BC=C3=9Fe =E2=9C=93',
+        '<div dir=3D"ltr">Synthetic conformance draft, safe to delete: gr=C3=BC=\r\n=C3=9Fe =E2=9C=93</div>'
+      ]
+    : body === updatedDraftText
+      ? [
+          'Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93',
+          '<div dir=3D"ltr">Updated synthetic conformance draft: =C2=A1hola! =E2=9C=93=\r\n</div>'
+        ]
+      : [body, body]
+
+/** The draft MIME the connector writes (the recorded one for the fixture's texts). */
+const draftMime = (subject: string, body: string) => {
+  const [plain, html] = draftParts(body)
+
+  const part = (type: string, content: string) =>
+    `Content-Type: text/${type}; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${content}`
+
+  return [
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="=_yolk-draft-alternative"',
+    '',
+    '--=_yolk-draft-alternative',
+    part('plain', plain),
+    '--=_yolk-draft-alternative',
+    part('html', html),
+    '--=_yolk-draft-alternative--'
+  ].join('\r\n')
+}
+
+const draftRaw = (subject: string, body: string, extra = '') =>
+  base64Url(`${extra}${draftMime(subject, body)}`)
 
 const runDraftSubject = (runId: string, kind = 'draft') =>
   `yolk-conformance ${runId} ${kind}: synthetic conformance draft, safe to delete`
@@ -2300,8 +2337,7 @@ describe('a draft message.raw the route would refuse is never ledgered (fail clo
     return url ? standard.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '') : standard
   }
 
-  const mime = (subject: string, body = draftText) =>
-    `Subject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+  const mime = (subject: string, body = draftText) => draftMime(subject, body)
 
   const utf8 = (text: string) => new TextEncoder().encode(text)
 
