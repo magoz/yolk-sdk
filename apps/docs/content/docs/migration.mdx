@@ -29,6 +29,24 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.102: Gmail draft bodies and thread body decoding
+
+`gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` keep their inputs and outputs,
+plus a new optional `contentType: 'text' | 'html'` (`GmailDraftContentType`, `text` when omitted).
+The draft MIME they write changes:
+
+- A `text` body is now 7-bit `multipart/alternative` (a quoted-printable text/plain part and a
+  derived text/html part) instead of one unencoded text/plain part, so Gmail web no longer
+  hard-wraps it when a person sends the draft. An `html` body is one quoted-printable text/html
+  part. Write each paragraph as one line. See
+  [Gmail draft bodies](./integrations/connectors#gmail-draft-bodies).
+- Tests, fakes, or recorded fixtures that compare a draft's exact `message.raw` need updating.
+- `gmail.get_thread` no longer applies a part's `Content-Transfer-Encoding` to Gmail's already
+  decoded `body.data`: quoted-printable text holding `=XX` (such as `?date=2026`) and base64-encoded
+  parts now read back correctly. Remove any host workaround for those bodies.
+
+`gmail.send_message` is unchanged.
+
 ### Canary.99: durable tool-call ledger
 
 New, opt-in: `resolveTools(modules, context, { ledger: { store } })` runs ledgered tool calls at

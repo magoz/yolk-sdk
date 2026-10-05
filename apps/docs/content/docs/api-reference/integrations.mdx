@@ -371,6 +371,13 @@ Gmail label contracts are `GmailLabel` (with `GmailLabelMessageListVisibility`,
 `GmailSetStarredInput` stars through the `STARRED` system label. Label mutations reuse the existing
 `gmail.modify` slot; reads use the readonly slot.
 
+Gmail draft contracts are `GmailDraftComposeInput` (`to`, `subject`, `body`, optional
+`contentType`, `cc`, `bcc`, `from`), `GmailDraftUpdateInput` (the same fields plus `draftId`),
+`GmailDraftReplyInput` (`messageId`, `body`, optional `contentType`, `from`), `GmailDraftIdInput`
+(`draftId`), and `GmailDraftContentType` (`'text' | 'html'`; `text` when omitted). A `text` body is
+sent as `multipart/alternative` with a derived HTML part; see
+[Gmail draft bodies](../integrations/connectors#gmail-draft-bodies).
+
 See [Connectors catalog](../integrations/connectors) for action ids.
 
 ## Sandbox
