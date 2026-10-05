@@ -389,6 +389,15 @@ folder; `not_downloadable` is a Paper or other export-only entry; `unexpected_re
 adapter returned a 3xx that the helper refuses to follow. `partial_content` covers incomplete or
 ranged 200 responses and a body whose length differs from the served metadata `size`. Host-only writes use a separate port; see [Transfer connector files](./connectors/files).
 
+### Gmail draft lines are hard-wrapped after sending
+
+Drafts from `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` before
+`0.1.0-canary.102` were plain text only, which Gmail web opens in its plain-text composer and wraps
+at about 70 columns when a person sends them. Upgrade, and write each paragraph of a `text` body as
+one line (never wrap by hand). Recipients then see the HTML part unwrapped; the text/plain
+alternative Gmail web regenerates on send is still wrapped at about 76 columns, as for any message
+composed there. See [Gmail draft bodies](./integrations/connectors#gmail-draft-bodies).
+
 ### Gmail submission is unconfirmed or its send scope is rejected
 
 `gmail.send_message` forwards host-generated base64url MIME unchanged. Its input validation checks

@@ -439,7 +439,8 @@ format with `metadataHeaders` fails input validation before any request.
 
 The action returns `GmailThreadOutput`. Each `GmailThreadMessage` includes selected root headers,
 attachment metadata, and an optional decoded message `body` with `bodyMimeType`. Plain text is
-preferred when available; otherwise HTML is used. Text and nested-message attachments do not enter
+preferred when available; otherwise HTML is used. Gmail answers each part's `body.data` already
+transfer-decoded, so the part's `Content-Transfer-Encoding` is never applied again. Text and nested-message attachments do not enter
 the message body. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`, `From`, `In-Reply-To`,
 `Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
 
