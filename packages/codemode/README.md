@@ -15,10 +15,10 @@ Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is 
 
 ## Subpaths
 
-| Subpath                   | Purpose                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `@yolk-sdk/codemode`      | Runtime-neutral: `makeCodeModeTool`, the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
-| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0    |
+| Subpath                   | Purpose                                                                                                                                                   |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`      | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
+| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                     |
 
 ## Example
 
@@ -133,11 +133,16 @@ When the resolution has plans (`resolveTools(..., { interactionHost, plans: { st
 plan review tool (`makePlanReviewTool` from `@yolk-sdk/agent/tools`), scripts get
 `await stage(name, args)` for approval-gated tools marked `staging`. `stage` validates the arguments
 and records the call without running or ledgering it. Once a script stages, it may only run read
-tools; duplicates and calls past `maxCalls`/`maxArgsBytes` are rejected. A successful script saves
+tools, and `stage` is rejected after a direct write; duplicates and calls past
+`maxCalls`/`maxArgsBytes` are rejected. A successful script saves
 the plan once and its result tells the model to call `review_plan({ planId, planDigest })`
 (`structuredContent.codemode.plan`); a failed script discards its staged calls. Approval-gated tools
 stay fail-closed for `tools.<name>()`. Pass `staging: false` to turn it off or `staging: { maxCalls }`
-to lower the cap. See ADR 0005.
+to lower the cap.
+
+Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
+decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. See
+[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md).
 
 ## Limits
 
@@ -168,7 +173,8 @@ permits. Nested-call records carry token usage; cost stays in the result's
   `ResolvedToolSet.execute`) do not see nested calls. Use `beforeNestedCall` or registration-level
   wrappers for per-call checks.
   Approval, input, interaction, background, `question`, and `subagent` tools never run from code
-  mode.
+  mode (stageable approval tools are only staged, and run after review through the plan review
+  tool, whose `beforeCall` is their per-call check).
 - Where the tool is advertised (voice sessions do not get it in v1), deadlines, and limits.
 - Next.js: `serverExternalPackages: ['@yolk-sdk/codemode', '@earendil-works/pi-codemode', 'quickjs-wasi']`.
 - Vercel Workflow: run the code mode call inside the tool-batch step (`'use step'`), never inside a

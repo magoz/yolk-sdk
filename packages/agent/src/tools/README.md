@@ -17,6 +17,8 @@ Generic host tool registration and resolution.
 - The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
   reference store, so a re-executed ledgered call (by default writes and `subagent`) never runs
   twice under the same ledger key.
+- Staged tool plans: stageable approval-gated tools, the `ToolPlanStore` contract, and the
+  `makePlanReviewTool` interaction that applies a person's selection once.
 
 ## Use it when
 
@@ -70,7 +72,7 @@ reference (acceptance is separate from claim; no product or provider integration
 
 ## Staged tool plans
 
-`docs/adr/0005-staged-tool-plans.md`. Approval-gated tools marked `staging` (`makeTool({ approval,
+See `docs/adr/0005-staged-tool-plans.md`. Approval-gated tools marked `staging` (`makeTool({ approval,
 staging })`) can be staged by nested-access registrations (code mode's `stage(name, args)`) through
 `nested.staging`, and applied only after a person accepts a `makePlanReviewTool` interaction
 selecting the staged keys. `resolveTools(..., { plans: { store }, interactionHost })` with exactly one

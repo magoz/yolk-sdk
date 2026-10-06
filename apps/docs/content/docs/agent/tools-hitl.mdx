@@ -470,8 +470,9 @@ const resolveHostTools = (context: HostContext) =>
   correctness.
 - On execution Yolk re-reads the receipt, claims the plan once (`ToolPlanStore.claim`), and runs
   the selected calls in staged order through the resolved execute path and ledger, with ids
-  `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, or `not_run`
-  in `structuredContent.result`; decode it with the `ToolPlanOutcome` Schema.
+  `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, `not_run`, or
+  `unknown` in `structuredContent.result` (`state` is `applied`, `refused`, or `interrupted`);
+  decode it with the `ToolPlanOutcome` Schema.
 - **Per-call authority:** applied calls run inside the review action, so code mode's
   `beforeNestedCall` and decorators around your `ToolExecutor` never see them. `beforeCall` is the
   only per-call hook: wire the same run-authority or write authorizer you use for nested calls.

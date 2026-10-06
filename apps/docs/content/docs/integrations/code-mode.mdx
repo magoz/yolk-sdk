@@ -19,10 +19,10 @@ Requires Node.js 22.19 or later. The executor is server-only.
 
 ## Subpaths
 
-| Subpath                   | Use for                                                                                                                                |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`      | `makeCodeModeTool`, the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
-| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                               |
+| Subpath                   | Use for                                                                                                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`      | `makeCodeModeTool` (with the `stage` global for staged plans), the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
+| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                                                                          |
 
 ## Set up
 

@@ -29,6 +29,34 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.103: staged tool plans
+
+New, opt-in: code mode scripts can stage approval-gated tool calls with `stage(name, args)`, and a
+person reviews the plan once through `makePlanReviewTool` before Yolk applies the selected calls.
+It is available from `0.1.0-canary.103` and needs `makeTool({ approval, staging })` on the tools,
+`resolveTools(..., { interactionHost, plans: { store } })`, and one plan review tool. Without them,
+tool execution and code mode are unchanged. See
+[Stage approval-gated writes](./integrations/code-mode#stage-approval-gated-writes) and
+[Review a staged plan](./agent/tools-hitl#review-a-staged-plan).
+
+Type changes that may need code updates even if you don't use staged plans:
+
+- `prepareToolBatch` now returns `Effect<PreparedToolBatch, ToolError>`. It fails with `ToolError`
+  `unavailable` only when host storage read by an interaction call validator is unavailable;
+  nothing runs, so fail the step and retry it.
+- Interaction call validators (`InteractionCallValidator`) and `validateAction` may fail with
+  `InteractionHostError` for a storage outage, and `validateInteractionSubmission` then answers the
+  new `InteractionAdmissionError` cause `unavailable`: treat it as retryable, not as invalid input.
+- `ToolRegistryError` has three new causes: `staging_unsupported_policy`,
+  `staging_validation_required`, and `plan_review_duplicate`. Update exhaustive matches.
+- Interaction action `validate` inputs now also receive the interaction `call`, and interaction
+  registrations accept an optional `unknownOutcome` hook. Existing handlers keep working.
+
+If you adopt staged plans with a tool ledger, resolve the review step with the same ledger scope on
+every redelivery, keep ledger entries as long as review receipts, and wire your per-call write
+authorizer as `makePlanReviewTool({ beforeCall })`: applied calls bypass `beforeNestedCall` and
+`ToolExecutor` decorators.
+
 ### Canary.102: Gmail draft bodies and thread body decoding
 
 `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` keep their inputs and outputs,
