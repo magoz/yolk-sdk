@@ -49,7 +49,7 @@ import {
   ToolPlanStoreError,
   ToolLedgerError,
   type ToolPlanStore,
-  ToolChangePreview,
+  type ToolChangePreview,
   type ToolRegistration
 } from '../../src/tools/index.ts'
 import { makeFakeInteractionHost } from './interaction-host.ts'
@@ -63,8 +63,6 @@ const manual = ToolApprovalPolicy.make({ mode: 'manual' })
 const Link = Schema.Struct({ resource: Schema.String, curriculum: Schema.String })
 
 const Query = Schema.Struct({ query: Schema.String })
-
-const isChangePreview = Schema.is(ToolChangePreview)
 
 const linkPreview = (ctx: Ctx, params: typeof Link.Type): ToolChangePreview => ({
   target: { label: params.resource, kind: 'resource', id: params.resource },
@@ -1326,6 +1324,27 @@ describe('previewToolPlan', () => {
     })
   )
 
+  it.effect('decodes entries with a preview, a preview error, or neither, never both', () =>
+    Effect.gen(function* () {
+      const decode = Schema.decodeUnknownEffect(ToolPlanPreview)
+      const base = { key: 'p/s1', status: 'ok', toolName: 'link_curriculum', params: {} }
+      const preview = linkPreview(context, { resource: 'r1', curriculum: 'LGR22' })
+      const previewError = { cause: 'failed', message: 'cms is down' }
+
+      const withPreview = yield* decode({ ...base, preview })
+      const withError = yield* decode({ ...base, previewError })
+      const plain = yield* decode(base)
+      const both = yield* decode({ ...base, preview, previewError }).pipe(Effect.flip)
+      const invalid = yield* decode({ ...base, preview: { changes: 'x' } }).pipe(Effect.flip)
+
+      expect(withPreview).toEqual({ ...base, preview })
+      expect(withError).toEqual({ ...base, previewError })
+      expect(plain).toEqual(base)
+      expect(both._tag).toBe('SchemaError')
+      expect(invalid._tag).toBe('SchemaError')
+    })
+  )
+
   it.effect('keeps the staged arguments with a preview error when the hook fails', () =>
     Effect.gen(function* () {
       const env = yield* setup()
@@ -1566,7 +1585,7 @@ describe('previewStoredToolPlan', () => {
       // The staged calls make one change on 60 targets: a host renders it once.
       const groups = groupToolChangePreviews(
         [...decoded, ...last.previews].flatMap(entry =>
-          entry.status === 'ok' && 'preview' in entry && isChangePreview(entry.preview)
+          entry.status === 'ok' && entry.preview !== undefined
             ? [{ key: entry.key, toolName: entry.toolName, preview: entry.preview }]
             : []
         )

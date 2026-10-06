@@ -50,7 +50,8 @@ numbers, booleans, or `null`. The Schemas are plain JSON and decode across proce
 `ToolChangePreviewError` (`failed`, `invalid`, `too_large`, `timeout`) says why a preview is
 missing, and its wire form `ToolChangePreviewFailure` (`{ cause, message }`) is the `previewError`
 of approval requests and plan previews. Plan preview entries are separate Schema members with
-`preview`, with `previewError`, or with neither, so both never decode together; producers of
+`preview`, with `previewError`, or with neither (the absent field is declared `Never`), so an
+entry with both fails to decode; producers of
 approval requests set at most one (the request class keeps two optional fields so earlier requests
 still decode). Defects of host hooks are logged as warnings.
 

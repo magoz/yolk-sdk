@@ -438,12 +438,6 @@ export type ToolPlanRuntime<Context> = {
   }) => Effect.Effect<ToolPlanApplyResult>
 }
 
-/** One entry of `previewToolPlan`: the staged arguments with the tool's bounded change preview
- * (`changePreview`, the hook direct approvals use) or `previewError` when that hook failed (show
- * the arguments instead), or `status: 'error'` when the key cannot be reviewed (not a staged call,
- * or the tool can no longer be applied from a plan). Plain JSON; decode it with this Schema across
- * process or network boundaries.
- */
 const stagedEntryFields = {
   key: Schema.String,
   status: Schema.Literal('ok'),
@@ -451,13 +445,20 @@ const stagedEntryFields = {
   params: Schema.Json
 }
 
+// Declares a field absent: any value fails decoding, and the type is `?: never` for narrowing.
+const absent = Schema.optionalKey(Schema.Never)
+
+/** One entry of `previewToolPlan`: the staged arguments with the tool's bounded change preview
+ * (`changePreview`, the hook direct approvals use), `previewError` when that preview is
+ * unavailable (show the arguments instead), or neither when the tool has no hook; never both.
+ * `status: 'error'` when the key cannot be reviewed (not a staged call, or the tool can no longer
+ * be applied from a plan). Plain JSON; decode it with this Schema across process or network
+ * boundaries.
+ */
 export const ToolPlanPreview = Schema.Union([
-  /** The tool has a `changePreview` hook and it succeeded. */
-  Schema.Struct({ ...stagedEntryFields, preview: ToolChangePreview }),
-  /** The tool has a `changePreview` hook and the preview is unavailable. */
-  Schema.Struct({ ...stagedEntryFields, previewError: ToolChangePreviewFailure }),
-  /** The tool has no `changePreview` hook. */
-  Schema.Struct(stagedEntryFields),
+  Schema.Struct({ ...stagedEntryFields, preview: ToolChangePreview, previewError: absent }),
+  Schema.Struct({ ...stagedEntryFields, preview: absent, previewError: ToolChangePreviewFailure }),
+  Schema.Struct({ ...stagedEntryFields, preview: absent, previewError: absent }),
   Schema.Struct({
     key: Schema.String,
     status: Schema.Literal('error'),

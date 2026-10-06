@@ -301,10 +301,10 @@ empty `changes` means the call changes nothing.
   never silently: `Set.unchanged` goes first, then values are capped at an equal share. Cut
   strings and item arrays keep one window, which for a `before`/`after` pair starts shortly before
   their first difference; a cut `Structured` value becomes `null`. Each cut value has a
-  `truncated` marker with `unit` (`chars`, `items`, `bytes`), `originalSize`, and an optional `offset` (absent: 0). Check
-  `truncated` before rendering a `Structured` `null`. Labels, the target, `summary`, `warnings`,
-  and `blocked` are never cut: a preview they alone push past the bound reports `previewError`
-  (`too_large`).
+  `truncated` marker with `unit` (`chars`, `items`, `bytes`), `originalSize`, and an optional
+  `offset` (absent: 0). Check `truncated` before rendering a `Structured` `null`. Labels, the
+  target, `summary`, `warnings`, and `blocked` are never cut: a preview they alone push past the
+  bound reports `previewError` (`too_large`).
 - **When it is computed.** Previews run server-side when the approval request is raised, at most
   8 at a time per batch, against the state before any call of the batch runs. Two siblings that
   touch the same record are both previewed against its current state. Durable hosts that resume
