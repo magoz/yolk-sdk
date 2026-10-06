@@ -1,5 +1,4 @@
 ---
-'@yolk-sdk/codemode': patch
 '@yolk-sdk/conformance': patch
 '@yolk-sdk/connectors': patch
 '@yolk-sdk/emulators': patch
@@ -11,4 +10,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Advance unchanged public packages in lockstep with tool change previews in `@yolk-sdk/agent` (one before → after preview for approval-gated calls, shown on direct approvals and staged plan reviews). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version. Code mode hosts that stage tool calls: plan review previews now come from each tool's `changePreview` hook in `@yolk-sdk/agent`, which replaces `staging.preview`.
+Advance unchanged public packages in lockstep with tool change previews in `@yolk-sdk/agent` (one before → after preview for approval-gated calls, shown on direct approvals and staged plan reviews). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
