@@ -119,6 +119,7 @@ const stagingSetup = (
   script: (call: Call, stage: Stage) => Promise<unknown>,
   options: {
     readonly plans?: boolean
+    readonly planId?: ToolPlanOptions['planId']
     readonly ledger?: boolean
     readonly codemode?: Partial<MakeCodeModeToolOptions<TestContext>>
   } = {}
@@ -140,7 +141,9 @@ const stagingSetup = (
 
     const resolveOptions: ResolveOptionFields = { interactionHost: unusedHost }
 
-    if (options.plans !== false) resolveOptions.plans = { store }
+    if (options.plans !== false)
+      resolveOptions.plans =
+        options.planId === undefined ? { store } : { store, planId: options.planId }
 
     if (options.ledger === true) resolveOptions.ledger = { store: ledgerStore }
 
@@ -209,6 +212,22 @@ describe('code mode staging', () => {
       )
       expect(text(result.content)).toContain('{"staged":true,"key":"call_1/s1","index":1}')
       expect(result.nestedCalls?.calls.map(nested => nested.name)).toEqual(['lookup'])
+    })
+  )
+
+  it.effect('reports the host plan id in the result and the review instruction', () =>
+    Effect.gen(function* () {
+      const env = yield* stagingSetup(
+        (_call, stage) => stage('link_curriculum', { resource: 'r1', curriculum: 'LGR22' }),
+        { planId: ({ call }) => `turn_3:${call.id}` }
+      )
+
+      const result = yield* env.run()
+      const stored = yield* env.store.get('turn_3:call_1')
+
+      expect((yield* codemodeOf(result)).plan?.id).toBe('turn_3:call_1')
+      expect(stored?.plan.calls.map(staged => staged.key)).toEqual(['turn_3:call_1/s1'])
+      expect(text(result.content)).toContain('"planId":"turn_3:call_1"')
     })
   )
 

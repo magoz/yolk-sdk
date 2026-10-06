@@ -1479,6 +1479,7 @@ export const resolveTools = <Context>(
             host: interactionHost,
             context,
             reviewToolName: reviewRegistration.tool.def.name,
+            planId: call => (plans.planId === undefined ? call.id : plans.planId({ call })),
             stageableTools: stageableRegistrations.map(nestedToolOf),
             stageable: name =>
               stageableRegistrations.find(item => item.tool.def.name === name)?.tool,

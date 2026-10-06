@@ -13,7 +13,7 @@ import { sha256HexSync } from './sha256.ts'
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 /**
- * One call a script staged instead of running (ADR 0005). `key` is `<codemodeCallId>/s<n>`
+ * One call a script staged instead of running (ADR 0005). `key` is `<planId>/s<n>`
  * (1-based, staging order); `params` are the raw JSON arguments the script passed, validated by the
  * tool's side-effect-free decoder; `argsDigest` is their `toolLedgerArgs` digest, so the applied
  * call's ledger entry carries the same digest.
@@ -197,6 +197,14 @@ export type ToolPlanOptions = {
   readonly maxCalls?: number
   /** Canonical JSON bytes of all staged arguments of a plan; `stage` rejects past it. Default 1 MiB. */
   readonly maxArgsBytes?: number
+  /**
+   * The plan id of a staging (code mode) call; default the call id. Staged keys are
+   * `<planId>/s<n>`. Return an id unique within the store's scope and stable for the same call
+   * across re-executions (a re-executed script must save the same id), for example the run, turn,
+   * and call id when provider call ids repeat across turns. Empty or untrimmed ids disable `stage`
+   * for that call.
+   */
+  readonly planId?: (input: { readonly call: ToolCall }) => string
 }
 
 /**
@@ -286,7 +294,7 @@ export type ToolPlanStaging = {
   readonly reviewToolName: string
   readonly maxCalls: number
   readonly maxArgsBytes: number
-  /** Starts this call's plan (id: the call id). `maxCalls` may only lower the resolution cap. */
+  /** Starts this call's plan (id: `ToolPlanOptions.planId`, default the call id). `maxCalls` may only lower the resolution cap. */
   readonly begin: (options?: { readonly maxCalls?: number }) => ToolPlanBuilder
 }
 
@@ -303,7 +311,7 @@ export type ToolPlanFailurePolicy = 'stop' | 'continue'
 export type ToolPlanCallStatus = 'applied' | 'failed' | 'skipped' | 'not_run' | 'unknown'
 
 export type ToolPlanCallOutcome = {
-  /** The staged key (`<codemodeCallId>/s<n>`). */
+  /** The staged key (`<planId>/s<n>`). */
   readonly key: string
   readonly toolName: string
   readonly status: ToolPlanCallStatus

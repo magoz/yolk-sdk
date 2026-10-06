@@ -141,7 +141,12 @@ const scriptTool = (box: Box): ToolRegistration<Ctx> =>
 
 type LinkToolOptions = { failOn?: string; dieOn?: string }
 
-type PlanOptionFields = { store: ToolPlanStore; maxCalls?: number; maxArgsBytes?: number }
+type PlanOptionFields = {
+  store: ToolPlanStore
+  maxCalls?: number
+  maxArgsBytes?: number
+  planId?: ToolPlanOptions['planId']
+}
 
 type ResolveOptionFields = {
   interactionHost?: InteractionHost
@@ -157,6 +162,7 @@ type SetupOptions = {
   readonly ledger?: boolean
   readonly maxCalls?: number
   readonly maxArgsBytes?: number
+  readonly planId?: ToolPlanOptions['planId']
   readonly failOn?: string
   readonly dieOn?: string
   readonly settlement?: 'fail'
@@ -194,6 +200,8 @@ const setup = (options: SetupOptions = {}) =>
     if (options.maxCalls !== undefined) plans.maxCalls = options.maxCalls
 
     if (options.maxArgsBytes !== undefined) plans.maxArgsBytes = options.maxArgsBytes
+
+    if (options.planId !== undefined) plans.planId = options.planId
 
     const resolveOptions: ResolveOptionFields = {}
 
@@ -572,6 +580,49 @@ describe('plan persistence', () => {
       )
 
       expect(Result.isFailure(put)).toBe(true)
+    })
+  )
+})
+
+describe('host plan ids', () => {
+  it.effect('prefixes plans and keys with the host id, and applies them by it', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ planId: ({ call }) => `run_7:turn_2:${call.id}` })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const { result } = yield* reviewAndApply(env, plan, ['run_7:turn_2:script_1/s2'])
+      const outcome = yield* outcomeOf(result)
+
+      expect(plan.id).toBe('run_7:turn_2:script_1')
+      expect(plan.calls.map(call => call.key)).toEqual([
+        'run_7:turn_2:script_1/s1',
+        'run_7:turn_2:script_1/s2'
+      ])
+      expect(outcome.result?.calls.map(call => [call.key, call.status])).toEqual([
+        ['run_7:turn_2:script_1/s1', 'skipped'],
+        ['run_7:turn_2:script_1/s2', 'applied']
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r2'])
+    })
+  )
+
+  it.effect('disables stage for empty, untrimmed, or throwing host ids', () =>
+    Effect.gen(function* () {
+      const ids: ReadonlyArray<ToolPlanOptions['planId']> = [
+        () => '',
+        () => ' padded',
+        () => {
+          throw new Error('host bug')
+        }
+      ]
+
+      for (const planId of ids) {
+        const env = yield* setup({ planId })
+        const failure = yield* stageLinks(builderOf(env), ['r1']).pipe(Effect.flip)
+
+        expect(failure.reason).toBe('not_stageable')
+        expect(failure.message).toContain('plan id')
+        expect(yield* env.store.plans).toEqual([])
+      }
     })
   )
 })

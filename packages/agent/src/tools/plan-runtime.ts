@@ -57,6 +57,8 @@ export type ToolPlanResolution<Context> = {
   readonly host: InteractionHost
   readonly context: Context
   readonly reviewToolName: string
+  /** The plan id of a staging call (`ToolPlanOptions.planId`, default the call id). */
+  readonly planId: (call: ToolCall) => string
   readonly stageableTools: ReadonlyArray<NestedTool>
   /** A resolved, enabled, stageable registration by tool name. */
   readonly stageable: (name: string) => ToolRegistration<Context> | undefined
@@ -99,9 +101,13 @@ const toolList = (tools: ReadonlyArray<NestedTool>) => {
       : listed
 }
 
+// Plan ids become key prefixes and `ToolPlan.id`: non-empty and trimmed, no whitespace or `/`
+// confusion at the ends (keys are `<planId>/s<n>`).
+const isValidPlanId = (id: string) => id.length > 0 && id.trim() === id
+
 const makeBuilder = <Context>(
   resolution: ToolPlanResolution<Context>,
-  parent: ToolCall,
+  planId: string,
   maxCalls: number
 ): ToolPlanBuilder => {
   const calls: Array<StagedCall> = []
@@ -118,6 +124,12 @@ const makeBuilder = <Context>(
     )
 
   const checkRoom = (name: string) => {
+    if (!isValidPlanId(planId))
+      return stageError(
+        'not_stageable',
+        'Staging is unavailable: the host plan id for this call is empty or not trimmed.'
+      )
+
     if (finishing || Option.isSome(saved))
       return stageError('order', 'The plan of this script is already saved.')
 
@@ -179,7 +191,7 @@ const makeBuilder = <Context>(
             stageError('not_stageable', `${name} has no side-effect-free validator.`)
           )
 
-        const probe = ToolCall.make({ id: `${parent.id}/s${calls.length + 1}`, name, params })
+        const probe = ToolCall.make({ id: `${planId}/s${calls.length + 1}`, name, params })
 
         yield* validate(resolution.businessCall(registration, probe)).pipe(
           Effect.mapError(error => stageError('invalid_arguments', error.message))
@@ -216,7 +228,7 @@ const makeBuilder = <Context>(
             )
 
           const index = calls.length + 1
-          const key = `${parent.id}/s${index}`
+          const key = `${planId}/s${index}`
 
           calls.push(stagedCall({ key, toolName: name, params, argsDigest }))
           bytes += size
@@ -239,7 +251,7 @@ const makeBuilder = <Context>(
       }
 
       const plan = ToolPlan.make({
-        id: parent.id,
+        id: planId,
         scope: resolution.store.scope,
         digest: toolPlanDigest(calls),
         calls: [first, ...rest]
@@ -272,7 +284,11 @@ export const makeToolPlanStaging = <Context>(
   begin: options =>
     makeBuilder(
       resolution,
-      parent,
+      // A throwing host callback disables staging for this call (an invalid id), never the script.
+      Result.getOrElse(
+        Result.try(() => resolution.planId(parent)),
+        () => ''
+      ),
       Math.min(resolution.maxCalls, positiveInteger(options?.maxCalls) ?? resolution.maxCalls)
     )
 })

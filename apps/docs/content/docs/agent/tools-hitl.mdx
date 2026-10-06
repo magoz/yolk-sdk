@@ -468,8 +468,10 @@ const resolveHostTools = (context: HostContext) =>
 `ToolPlanStore` is a port over host storage: `put` is idempotent by plan id and digest (another
 digest under the same id is a conflict), `get` returns the plan and its claim, and `claim(planId,
 submissionId)` returns `claimed`, `same`, or `taken`; a plan is applied at most once. Scope it to
-the conversation, since reviews usually run in a later turn than the script.
-`makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
+the conversation, since reviews usually run in a later turn than the script. Plan ids default to the
+code mode call id; provider call ids can repeat across turns, so pass
+`plans: { store, planId: ({ call }) => \`${runId}:${turn}:${call.id}\` }`(host-owned values) when
+the store outlives a turn. The id must stay the same when the same call runs again.`makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
 reports exactly which calls ran.
 
 ## Let the model choose background execution

@@ -16,9 +16,10 @@ exactly those recorded calls.
 
 - **Stageable tool**: an approval-gated tool the host marks `staging` (`ToolDef.staging: true`).
 - **Staged call**: `{ key, toolName, params, argsDigest }` a script recorded with
-  `stage(name, args)`. `key` is `<codemodeCallId>/s<n>`.
-- **Tool plan**: the ordered staged calls of one successful script, with `id` (the code mode call
-  id), the plan store `scope`, and `digest` (SHA-256 over the ordered `[toolName, argsDigest]`).
+  `stage(name, args)`. `key` is `<planId>/s<n>`.
+- **Tool plan**: the ordered staged calls of one successful script, with `id` (the host's
+  `plans.planId({ call })` for the code mode call, default its call id), the plan store `scope`,
+  and `digest` (SHA-256 over the ordered `[toolName, argsDigest]`).
 - **Plan review**: the `review_plan` interaction tool (`makePlanReviewTool`) whose accepted
   submission selects which staged calls to apply.
 
@@ -69,7 +70,10 @@ Guardrails:
 
 At script end a successful script's calls are saved once (`ToolPlanStore.put`, idempotent by id;
 the same id with another digest is a conflict, so a re-executed step stages the same plan or
-fails). A failed script's staged calls are discarded: a partial plan is never offered. The result
+fails). Provider call ids can repeat across turns, so hosts whose plan store outlives one turn pass
+`plans.planId` (for example run, turn, and call id): it must be unique within the store scope and
+stable across re-executions of the same call. An empty, untrimmed, or throwing id disables `stage`
+for that call. A failed script's staged calls are discarded: a partial plan is never offered. The result
 text tells the model `review_plan({ planId, planDigest })`; hosts get
 `structuredContent.codemode.plan: { id, digest, count, reviewToolName }`.
 
