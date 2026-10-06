@@ -51,9 +51,9 @@ numbers, booleans, or `null`. The Schemas are plain JSON and decode across proce
 missing, and its wire form `ToolChangePreviewFailure` (`{ cause, message }`) is the `previewError`
 of approval requests and plan previews. Plan preview entries are separate Schema members with
 `preview`, with `previewError`, or with neither (the absent field is declared `Never`), so an
-entry with both fails to decode; producers of
-approval requests set at most one (the request class keeps two optional fields so earlier requests
-still decode). Defects of host hooks are logged as warnings.
+entry with both fails to decode; producers of approval requests set at most one (the request class
+keeps two optional fields so earlier requests still decode). Defects of host hooks are logged as
+warnings.
 
 ## One hook
 
@@ -113,7 +113,8 @@ Previews are bounded to `maxBytes` UTF-8 bytes of compact JSON (`resolveTools(..
    visible. A `Structured` value over the cap becomes `null`.
 4. Each cut value has a `truncated` marker with `unit` (`chars`, `items`, or `bytes`),
    `originalSize`, and an optional `offset`. Hosts check it before rendering a `Structured`
-   `null`. A value the hook already cut keeps its marker's original size, and the offsets add up.
+   `null`. A value the hook already cut keeps its marker's original size, and the offsets add up;
+   a hook marker in another unit is kept unchanged (the value stays marked as cut).
 5. Labels, the target, `summary`, `warnings`, and `blocked` are never cut. When they alone exceed
    the bound, the preview fails `too_large` and hosts show the arguments.
 

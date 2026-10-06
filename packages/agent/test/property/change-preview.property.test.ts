@@ -1,7 +1,12 @@
-import { Arbitrary, Predicate, Result } from 'effect'
+import { Arbitrary, Match, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { boundToolChangePreview, ToolChangePreview } from '../../src/tools/index.ts'
+import {
+  boundToolChangePreview,
+  ToolChangePreview,
+  type ToolChangeCut,
+  type ToolFieldChange
+} from '../../src/tools/index.ts'
 import { propertyOptions } from './property-options'
 
 const Input = Schema.Struct({
@@ -12,6 +17,40 @@ const Input = Schema.Struct({
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length
 
 const isPreview = Schema.is(ToolChangePreview)
+
+type Side = 'before' | 'after' | 'added' | 'removed'
+
+// Each cuttable side of a change with its marker (`Set.unchanged` is dropped, not cut).
+const sidesOf = (
+  change: ToolFieldChange
+): ReadonlyArray<readonly [Side, ToolChangeCut | undefined]> =>
+  Predicate.isTagged(change, 'Set')
+    ? [
+        ['added', change.truncated?.added],
+        ['removed', change.truncated?.removed]
+      ]
+    : [
+        ['before', change.truncated?.before],
+        ['after', change.truncated?.after]
+      ]
+
+const sizeOf = (value: unknown) =>
+  Predicate.isString(value)
+    ? Array.from(value).length
+    : Array.isArray(value)
+      ? value.length
+      : bytes(value)
+
+const originalSizeOf = (change: ToolFieldChange, side: Side) =>
+  Match.value(change).pipe(
+    Match.tagsExhaustive({
+      Value: value => sizeOf(side === 'before' ? value.before : value.after),
+      Text: text => sizeOf(side === 'before' ? text.before : text.after),
+      Set: set => sizeOf(side === 'added' ? set.added : set.removed),
+      List: list => sizeOf(side === 'before' ? list.before : list.after),
+      Structured: structured => bytes(side === 'before' ? structured.before : structured.after)
+    })
+  )
 
 describe('boundToolChangePreview properties', () => {
   it.prop(
@@ -45,16 +84,14 @@ describe('boundToolChangePreview properties', () => {
         if (JSON.stringify(change) !== JSON.stringify(original))
           expect(change.truncated).toBeDefined()
 
-        // A marker the bound added records the full original size.
-        if (Predicate.isTagged(change, 'Text') && Predicate.isTagged(original, 'Text')) {
-          if (change.truncated?.after !== undefined && original.truncated?.after === undefined)
-            expect(change.truncated.after.originalSize).toBe(Array.from(original.after).length)
-        }
+        // A marker the bound added records the full original size of that value.
+        if (original !== undefined)
+          sidesOf(change).forEach(([side, cut]) => {
+            const before = sidesOf(original).find(([name]) => name === side)
 
-        if (Predicate.isTagged(change, 'Set') && Predicate.isTagged(original, 'Set')) {
-          if (change.truncated?.added !== undefined && original.truncated?.added === undefined)
-            expect(change.truncated.added.originalSize).toBe(original.added.length)
-        }
+            if (cut !== undefined && before !== undefined && before[1] === undefined)
+              expect(cut.originalSize).toBe(originalSizeOf(original, side))
+          })
       })
 
       // A bounded preview is a fixed point.

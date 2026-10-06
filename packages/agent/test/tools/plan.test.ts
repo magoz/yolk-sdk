@@ -1342,6 +1342,18 @@ describe('previewToolPlan', () => {
       expect(plain).toEqual(base)
       expect(both._tag).toBe('SchemaError')
       expect(invalid._tag).toBe('SchemaError')
+
+      // Each member encodes to the same JSON and decodes back.
+      const codec = Schema.toCodecJson(ToolPlanPreview)
+
+      for (const entry of [withPreview, withError, plain]) {
+        const encoded = yield* Schema.encodeUnknownEffect(codec)(entry)
+
+        expect(encoded).toEqual(entry)
+        expect(
+          yield* Schema.decodeUnknownEffect(codec)(JSON.parse(JSON.stringify(encoded)))
+        ).toEqual(entry)
+      }
     })
   )
 
