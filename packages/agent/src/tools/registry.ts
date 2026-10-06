@@ -1068,13 +1068,14 @@ const executeInteractionTool = <Context>(input: {
 
         const unknown: InteractionOutcome = { status: 'unknown', result: genericUnknownResult() }
 
-        // Bounded finalization attempts durable uncertainty on defects/interruption. It does
+        // Bounded finalization attempts durable uncertainty on defects/interruption (described by
+        // the registration when it can, for example a plan review's ledgered calls). It does
         // not replace the original Cause, nor mask the business Effect indefinitely.
-        const recoverSettlement = Effect.suspend(() => host.settle(claim.token, unknown)).pipe(
-          Effect.interruptible,
-          Effect.timeout('5 seconds'),
-          Effect.exit
-        )
+        const recoverSettlement = Effect.suspend(() =>
+          unknownResult().pipe(
+            Effect.flatMap(result => host.settle(claim.token, { status: 'unknown', result }))
+          )
+        ).pipe(Effect.interruptible, Effect.timeout('5 seconds'), Effect.exit)
 
         const sealUnknown = recoverSettlement.pipe(Effect.asVoid)
 

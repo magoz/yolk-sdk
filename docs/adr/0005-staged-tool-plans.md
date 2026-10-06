@@ -97,8 +97,15 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
      `applied`, `failed`, `skipped`, or `not_run`.
 - **Crash**: the receipt stays `started`; re-execution never runs again and returns `unknown`
   with the ledger's per-key states (`applied`, `failed`, `unknown`), or `ledgerUnavailable` when
-  there is no ledger (never an empty listing). Interactions gain an optional `unknownOutcome` hook
-  for this.
+  there is no ledger (never an empty listing). A defect or interruption seals the receipt with the
+  same listing (bounded to 5 s, else the generic notice). Interactions gain an optional
+  `unknownOutcome` hook for this.
+- **Integrity**: staged keys are positional (`<planId>/s<n>`), so a key moved to another call in
+  storage fails the integrity check; the executor also requires the receipt to name the resolved
+  review tool.
+- **Known limitation**: two concurrent executions of one accepted review (a redelivered step) both
+  re-validate before the receipt claim; the loser can see "already applied" as a validation error
+  instead of the winner's outcome. At most once still holds (the plan claim decides).
 - **Cancel** applies nothing. Deny-all is cancel; an empty selection is invalid.
 
 `previewToolPlan({ toolSet, plan, keys })` returns bounded per-key previews for host review screens

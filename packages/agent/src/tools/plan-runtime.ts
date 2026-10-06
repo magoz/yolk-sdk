@@ -108,6 +108,8 @@ const makeBuilder = <Context>(
   let bytes = 0
   let firstWrite: string | undefined
   let saved: Option.Option<ToolPlan | undefined> = Option.none()
+  // Set before the save starts, so no stage can commit into a plan that is being saved.
+  let finishing = false
 
   const orderError = (name: string) =>
     stageError(
@@ -116,7 +118,7 @@ const makeBuilder = <Context>(
     )
 
   const checkRoom = (name: string) => {
-    if (Option.isSome(saved))
+    if (finishing || Option.isSome(saved))
       return stageError('order', 'The plan of this script is already saved.')
 
     if (firstWrite !== undefined) return orderError(firstWrite)
@@ -225,6 +227,8 @@ const makeBuilder = <Context>(
     staged: Effect.sync(() => [...calls]),
     finish: Effect.suspend(() => {
       if (Option.isSome(saved)) return Effect.succeed(saved.value)
+
+      finishing = true
 
       const [first, ...rest] = calls
 
@@ -349,6 +353,7 @@ const sameKeys = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
 const receiptMatches = (
   receipt: InteractionReceipt | undefined,
   input: {
+    readonly reviewToolName: string
     readonly reviewCall: ToolCall
     readonly submissionId: string
     readonly planId: string
@@ -364,6 +369,7 @@ const receiptMatches = (
     receipt.slot !== interactionRequestId(input.reviewCall) ||
     receipt.call.id !== input.reviewCall.id ||
     receipt.call.name !== input.reviewCall.name ||
+    receipt.call.name !== input.reviewToolName ||
     !interactionJsonEquals(receipt.call.params, input.reviewCall.params)
   )
     return false
@@ -578,7 +584,7 @@ export const makeToolPlanRuntime = <Context>(
       if (Result.isFailure(receipt))
         return yield* refused(`the review receipt could not be read (${receipt.failure.message}).`)
 
-      if (!receiptMatches(receipt.success, input))
+      if (!receiptMatches(receipt.success, { ...input, reviewToolName: resolution.reviewToolName }))
         return yield* refused('no accepted review of this plan and selection was found.')
 
       const stored = yield* store.get(planId).pipe(Effect.result)

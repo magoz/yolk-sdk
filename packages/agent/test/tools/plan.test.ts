@@ -842,6 +842,34 @@ describe('plan review', () => {
     })
   )
 
+  it.effect('settles an apply that fails unexpectedly as unknown with the ledger listing', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, dieOn: 'r2' })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const failed = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+      const receipt = env.fake.receiptFor(interactionRequestId(call))
+      const replayed = yield* env.toolSet.execute(call, { interaction: ref })
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(failed._tag).toBe('Failure')
+      expect(receipt?.status).toBe('settled')
+      expect(outcome.outcome).toBe('unknown')
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'applied'],
+        ['script_1/s2', 'unknown']
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r1'])
+    })
+  )
+
   it.effect('reports the listing as unavailable without a ledger', () =>
     Effect.gen(function* () {
       const env = yield* setup({ dieOn: 'r1', settlement: 'fail' })
@@ -950,6 +978,55 @@ describe('privileged plan executor', () => {
       expect(loaded.message).toContain('does not match its digest')
       expect(preview.cause).toBe('invalid_plan')
       expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('refuses a plan whose keys were moved to other calls', () =>
+    Effect.gen(function* () {
+      const box: RuntimeBox = {}
+      const env = yield* setup({ reviewRegistration: capturingReview(box) })
+      const runtime = runtimeOf(box)
+
+      const call = (key: string, resource: string) =>
+        StagedCall.make({
+          key,
+          toolName: 'link_curriculum',
+          params: { resource, curriculum: 'LGR22' },
+          argsDigest: stagedCallDigest({ resource, curriculum: 'LGR22' })
+        })
+
+      // Every digest matches, but s1 now names the second call.
+      const first = call('script_8/s2', 'keep')
+      const second = call('script_8/s1', 'drop')
+
+      const swapped = ToolPlan.make({
+        id: 'script_8',
+        scope: 'conversation_1',
+        digest: toolPlanDigest([first, second]),
+        calls: [first, second]
+      })
+
+      yield* env.store.put(swapped)
+
+      const loaded = yield* runtime
+        .load({ planId: swapped.id, planDigest: swapped.digest })
+        .pipe(Effect.flip)
+
+      expect(loaded.message).toContain('out of place')
+    })
+  )
+
+  it.effect('rejects stages once the plan is saved', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const builder = builderOf(env)
+
+      yield* stageLinks(builder, ['r1'])
+      yield* builder.finish
+
+      const late = yield* stageLinks(builder, ['r2']).pipe(Effect.flip)
+
+      expect(late.reason).toBe('order')
     })
   )
 })

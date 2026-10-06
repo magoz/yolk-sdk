@@ -71,8 +71,10 @@ export const toolPlanIntegrityProblem = (plan: ToolPlan): string | undefined => 
 
   if (mismatch !== undefined) return `Staged call ${mismatch.key} does not match its digest.`
 
-  if (new Set(plan.calls.map(call => call.key)).size !== plan.calls.length)
-    return 'The plan repeats a staged call key.'
+  // Keys are positional: a key moved to another call would select a call nobody reviewed.
+  const misplaced = plan.calls.find((call, index) => call.key !== `${plan.id}/s${index + 1}`)
+
+  if (misplaced !== undefined) return `Staged call ${misplaced.key} is out of place in the plan.`
 
   return toolPlanDigest(plan.calls) === plan.digest
     ? undefined
