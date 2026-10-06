@@ -181,8 +181,10 @@ type LinkToolOptions = {
   gate?: Gate
 }
 
-/** Toggles a plan store outage: every operation fails while `down`. */
-type Outage = { down: boolean }
+/** Toggles a plan store outage: every operation fails while `down`; with `getsLeft`, `get`
+ * starts failing once that many more reads succeeded.
+ */
+type Outage = { down: boolean; getsLeft?: number }
 
 const withOutage = (store: ToolPlanStore, outage: Outage): ToolPlanStore => {
   const down = () => new ToolPlanStoreError({ cause: 'storage', message: 'database is down' })
@@ -190,7 +192,16 @@ const withOutage = (store: ToolPlanStore, outage: Outage): ToolPlanStore => {
   return {
     scope: store.scope,
     put: plan => (outage.down ? Effect.fail(down()) : store.put(plan)),
-    get: planId => (outage.down ? Effect.fail(down()) : store.get(planId)),
+    get: planId =>
+      Effect.suspend(() => {
+        if (outage.getsLeft !== undefined) {
+          if (outage.getsLeft <= 0) return Effect.fail(down())
+
+          outage.getsLeft -= 1
+        }
+
+        return outage.down ? Effect.fail(down()) : store.get(planId)
+      }),
     claim: input => (outage.down ? Effect.fail(down()) : store.claim(input))
   }
 }
@@ -1687,6 +1698,55 @@ describe('concurrent apply deliveries', () => {
         ])
         expect(env.applied).toEqual([])
         expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+      })
+  )
+})
+
+describe('review hardening', () => {
+  it.effect('a fresh fence is not proof when the plan claim shows an apply ran', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1', 'script_1/s2'])
+
+      // An apply under another ledger scope (or with its fence entry deleted) claimed the plan.
+      yield* env.fake.host.claim(ref)
+      yield* env.store.claim({ planId: plan.id, submissionId: ref.submissionId })
+
+      const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.calls.map(item => item.status)).toEqual(['unknown', 'unknown'])
+    })
+  )
+
+  it.effect(
+    'an outage after the receipt claim applies nothing and leaves the plan reviewable',
+    () =>
+      Effect.gen(function* () {
+        const outage: Outage = { down: false }
+        const env = yield* setup({ outage })
+        const plan = yield* stagedPlan(env, ['r1'])
+        const call = reviewCall(plan)
+        const ref = yield* accept(env, call, ['script_1/s1'])
+
+        // Call and selection validation still read the plan; the apply's own read fails.
+        outage.getsLeft = 2
+
+        const failedResult = yield* env.toolSet.execute(call, { interaction: ref })
+        const failed = yield* outcomeOf(failedResult)
+
+        outage.getsLeft = undefined
+
+        const { result } = yield* reviewAndApply(env, plan, ['script_1/s1'], 'review_2')
+
+        expect(failed.outcome).toBe('failed')
+        expect(failed.result?.state).toBe('refused')
+        expect(textOf(failedResult)).toContain('The plan is unchanged and can still be applied')
+        expect(env.fake.receiptFor(ref.slot)?.status).toBe('settled')
+        expect((yield* outcomeOf(result)).outcome).toBe('completed')
+        expect(env.applied.map(item => item.resource)).toEqual(['r1'])
       })
   )
 })

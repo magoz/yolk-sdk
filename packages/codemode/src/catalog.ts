@@ -224,12 +224,22 @@ const intro = [
 const stageLine = (reviewToolName: string) =>
   `- \`await stage(name, args)\`: record a call of a stageable tool for review instead of running it; resolves to \`{ staged: true, key, index }\`. Nothing runs until a person approves the plan through the \`${reviewToolName}\` tool, which the result tells you how to call. Once a script stages, it may only run read tools; a script that already ran a write tool cannot stage.`
 
-const stageableSection = (staging: CodeModeStagingDescription) =>
-  [
+/** Stageable tool names listed in the description; the rest are summarized with a count. */
+const maxListedStageableTools = 20
+
+const stageableSection = (staging: CodeModeStagingDescription) => {
+  const names = staging.tools.map(tool => tool.def.name)
+  const hidden = names.length - maxListedStageableTools
+
+  return [
     '## Stageable tools',
     'Approval-gated tools a script cannot call through `tools`, only stage with `await stage("<name>", args)` (arguments as for the tool of the same name):',
-    ...staging.tools.map(tool => `- \`${tool.def.name}\``)
+    ...names.slice(0, maxListedStageableTools).map(name => `- \`${name}\``),
+    ...(hidden > 0
+      ? [`- … and ${hidden} more (an unknown name rejects with the stageable tools).`]
+      : [])
   ].join('\n')
+}
 
 const globalLines = (store: boolean) => [
   '- `text(value)` and `console.log(...values)`: append text to the output.',

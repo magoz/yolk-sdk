@@ -90,9 +90,10 @@ const decodedResponse = (data: unknown) =>
  *   staged order through the registry's execute path (decoding, wrappers, the tool ledger under
  *   `<reviewCallId>/<n>` with the review call as parent), calling `beforeCall` first. Unselected
  *   calls are `skipped`; under `onFailure: 'stop'` calls after a failure are `not_run`. A partial
- *   apply is a `completed` outcome listing every call. An apply that started and never recorded an
- *   outcome replays as `unknown`, listing the ledger's per-call states; it never runs again.
- *   Cancelling the interaction applies nothing.
+ *   apply is a `completed` outcome listing every call. Another execution of a started review
+ *   never runs it again: with a tool ledger it waits behind the apply fence and returns the real
+ *   outcome, otherwise (or past the wait) it lists each call, `not_run` only when provable (ADR
+ *   0005, "Apply fence"). Cancelling the interaction applies nothing.
  */
 export const makePlanReviewTool = <Context>(
   options: MakePlanReviewToolOptions<Context> = {}

@@ -113,11 +113,17 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
   - waits while the apply is in flight (polls, up to the ledger's `maxWaitMs` or `deadline`, as for
     duplicate ledgered calls) and then returns the apply's real outcome (or the receipt's
     settlement, when recorded meanwhile);
-  - holds the fence itself when no apply passed it: nothing ran and nothing will (an apply that
+  - holds the fence itself when no apply passed it, and the durable plan claim agrees (the plan is
+    not claimed by this review, the ledger lists no call of it, the plan and selection are known):
+    nothing ran and nothing will (an apply that
     arrives later replays that result instead of running), so it reports every selected call
     `not_run` with outcome `failed` (known no effect; the plan stays unclaimed and reviewable);
   - otherwise (the wait ends while the apply still runs, or its lease expired) falls back to the
     listing below.
+- **Fence scope**: the fence assumes every execution of a review call resolves with the same
+  ledger scope (for example run + turn of the review step) and that the host keeps the fence entry
+  at least as long as the receipt. A fresh fence in another scope, or after the entry was deleted,
+  is not taken as proof on its own: the plan claim must agree, else the listing stays uncertain.
 - **Listing without an outcome**: it combines the receipt's selection, the plan claim, and the
   ledger. Ledger entries give `applied`, `failed`, or `unknown`; unselected calls are `skipped`. A
   selected call without an entry is `not_run` only when that is provable: another review owns the
@@ -134,8 +140,13 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
   `InteractionHostError`s (protocol `InteractionCallValidator`). Loop preflight fails the batch
   closed (`prepareToolBatch` fails with `ToolError` `unavailable`, like `loadInteractionReceipts`),
   so the step can be retried with the review intact; admission answers `InteractionAdmissionError`
-  `unavailable` (nothing is consumed). During execution an outage fails closed as a model-visible
-  `unavailable` `ToolError`, as ledger claim failures do; nothing runs.
+  `unavailable` (nothing is consumed). During execution, before the receipt claim, an outage fails
+  closed as a model-visible `unavailable` `ToolError`, as ledger claim failures do; nothing runs
+  and the review stays accepted. After the receipt claim the review attempt cannot be retried (a
+  started receipt is never taken over): an outage reading the receipt or plan, or claiming the
+  fence, settles it `failed` with nothing applied and tells the model the plan is unchanged and can
+  be reviewed again; an outage claiming the plan settles it `failed` noting the plan may now be
+  locked. No call runs in either case.
 - **Concurrent deliveries**: when an accepted review's call or selection no longer validates,
   preflight still dispatches it, and the executor re-reads the receipt before reporting a
   validation error: a receipt another delivery started or settled meanwhile yields that outcome

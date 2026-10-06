@@ -486,8 +486,13 @@ const resolveHostTools = (context: HostContext) =>
 - A plan store outage is never a verdict: loop preflight fails the batch with an `unavailable`
   `ToolError` (retry the step; the review stays accepted), admission answers
   `InteractionAdmissionError` `unavailable`, and an outage that starts mid-step fails the call
-  closed. A delivery that finds the receipt already started or settled by another delivery reports
-  that outcome instead of an invalid-arguments error.
+  closed. Once the receipt is claimed, an outage ends that review attempt with `failed` and nothing
+  applied; the model is told the plan is unchanged and can open a new review. A delivery that finds
+  the receipt already started or settled by another delivery reports that outcome instead of an
+  invalid-arguments error.
+- The apply's ledger entry must be visible to every redelivery of the review step: resolve the
+  review step with the same ledger scope each time and keep ledger entries at least as long as the
+  review receipts.
 - Calls apply one after another in one tool step: keep plans small enough to fit your step budget
   (lower `staging.maxCalls` on the code mode tool).
 

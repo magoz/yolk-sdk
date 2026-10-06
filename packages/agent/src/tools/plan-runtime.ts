@@ -396,6 +396,12 @@ const notableLines = (calls: ReadonlyArray<ToolPlanCallOutcome>) => {
 const countsText = (counts: ToolPlanCallCounts) =>
   `${counts.applied} applied, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.not_run} not run`
 
+/** Appended to refusals caused by an outage before the plan was claimed: the review attempt
+ * ended, but the plan is intact and a new review can apply it.
+ */
+const reviewAgain =
+  'The plan is unchanged and can still be applied: open a new review (call the review tool again).'
+
 const refusedResult = (planId: string, message: string): ToolPlanApplyResult => {
   const structuredContent: ToolPlanOutcome = {
     type: 'tool_plan_outcome',
@@ -822,14 +828,48 @@ export const makeToolPlanRuntime = <Context>(
       if (phase === 'seal') return listingOf('ended', yield* listNested(reviewCall))
 
       // A replay: wait for an in-flight apply behind the fence and return its real outcome, or
-      // hold the fence itself when no apply passed it (then nothing ran and nothing will).
+      // hold the fence itself. A fresh fence alone is not proof that no apply ran (another ledger
+      // scope, or an entry the host already deleted), so the durable plan claim, which every
+      // apply takes inside the fence before its first call, must agree: nothing ran only when the
+      // plan and selection are known, the plan is not claimed by this review, and the ledger
+      // lists no call of it.
+      const holdingFence = Effect.gen(function* () {
+        const entries = yield* listNested(reviewCall)
+
+        const current =
+          planId === undefined ? undefined : yield* store.get(planId).pipe(Effect.result)
+
+        const claimedBy =
+          current !== undefined && Result.isSuccess(current)
+            ? current.success?.claimedBy
+            : stored?.claimedBy
+
+        const proven =
+          resolution.fence !== undefined &&
+          current !== undefined &&
+          Result.isSuccess(current) &&
+          current.success !== undefined &&
+          stored?.plan !== undefined &&
+          selection !== undefined &&
+          claimedBy !== submissionId &&
+          entries !== undefined &&
+          entries.length === 0
+
+        return listing({
+          reviewCall,
+          submissionId,
+          planId,
+          plan: stored?.plan,
+          claimedBy,
+          selection,
+          entries,
+          basis: proven ? 'fenced' : 'uncertain'
+        })
+      })
+
       return yield* fenced({
         reviewCall,
-        execute: listNested(reviewCall).pipe(
-          Effect.map(entries =>
-            listingOf(resolution.fence === undefined ? 'uncertain' : 'fenced', entries)
-          )
-        ),
+        execute: holdingFence,
         uncertain: entries => listingOf('uncertain', entries),
         unavailable: () =>
           listNested(reviewCall).pipe(Effect.map(entries => listingOf('uncertain', entries)))
@@ -848,7 +888,9 @@ export const makeToolPlanRuntime = <Context>(
         .pipe(Effect.result)
 
       if (Result.isFailure(receipt))
-        return yield* refused(`the review receipt could not be read (${receipt.failure.message}).`)
+        return yield* refused(
+          `the review receipt could not be read (${receipt.failure.message}). ${reviewAgain}`
+        )
 
       if (!receiptMatches(receipt.success, { ...input, reviewToolName: resolution.reviewToolName }))
         return yield* refused('no accepted review of this plan and selection was found.')
@@ -856,7 +898,9 @@ export const makeToolPlanRuntime = <Context>(
       const stored = yield* store.get(planId).pipe(Effect.result)
 
       if (Result.isFailure(stored))
-        return yield* refused(`the plan store is unavailable (${stored.failure.message}).`)
+        return yield* refused(
+          `the plan store is unavailable (${stored.failure.message}). ${reviewAgain}`
+        )
 
       const plan = stored.success?.plan
 
@@ -895,10 +939,14 @@ export const makeToolPlanRuntime = <Context>(
           .pipe(Effect.result)
 
         if (Result.isFailure(claim))
-          return yield* refused(`the plan could not be claimed (${claim.failure.message}).`)
+          return yield* refused(
+            `the plan could not be claimed (${claim.failure.message}); it may now be locked against other reviews.`
+          )
 
         if (claim.success === 'taken')
-          return yield* refused('another review already applied this plan; a plan is applied once.')
+          return yield* refused(
+            'another review already claimed this plan; a plan is applied at most once.'
+          )
 
         // Claimed earlier outside this fence: never run again.
         if (claim.success === 'same') return uncertain(yield* listNested(reviewCall))
@@ -1001,7 +1049,8 @@ export const makeToolPlanRuntime = <Context>(
         reviewCall,
         execute: run,
         uncertain,
-        unavailable: message => refused(`the tool ledger is unavailable (${message}).`)
+        unavailable: message =>
+          refused(`the tool ledger is unavailable (${message}). ${reviewAgain}`)
       })
     })
 
