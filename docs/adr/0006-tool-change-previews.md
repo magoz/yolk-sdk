@@ -49,8 +49,10 @@ An absent `before` means unknown or new; `null` means known empty. Scalars are s
 numbers, booleans, or `null`. The Schemas are plain JSON and decode across process boundaries;
 `ToolChangePreviewError` (`failed`, `invalid`, `too_large`, `timeout`) says why a preview is
 missing, and its wire form `ToolChangePreviewFailure` (`{ cause, message }`) is the `previewError`
-of approval requests and plan previews (never set together with `preview`). Failures and defects
-of host hooks are logged as warnings.
+of approval requests and plan previews. Plan preview entries are separate Schema members with
+`preview`, with `previewError`, or with neither, so both never decode together; producers of
+approval requests set at most one (the request class keeps two optional fields so earlier requests
+still decode). Defects of host hooks are logged as warnings.
 
 ## One hook
 

@@ -49,7 +49,7 @@ import {
   ToolPlanStoreError,
   ToolLedgerError,
   type ToolPlanStore,
-  type ToolChangePreview,
+  ToolChangePreview,
   type ToolRegistration
 } from '../../src/tools/index.ts'
 import { makeFakeInteractionHost } from './interaction-host.ts'
@@ -63,6 +63,8 @@ const manual = ToolApprovalPolicy.make({ mode: 'manual' })
 const Link = Schema.Struct({ resource: Schema.String, curriculum: Schema.String })
 
 const Query = Schema.Struct({ query: Schema.String })
+
+const isChangePreview = Schema.is(ToolChangePreview)
 
 const linkPreview = (ctx: Ctx, params: typeof Link.Type): ToolChangePreview => ({
   target: { label: params.resource, kind: 'resource', id: params.resource },
@@ -1564,7 +1566,7 @@ describe('previewStoredToolPlan', () => {
       // The staged calls make one change on 60 targets: a host renders it once.
       const groups = groupToolChangePreviews(
         [...decoded, ...last.previews].flatMap(entry =>
-          entry.status === 'ok' && entry.preview !== undefined
+          entry.status === 'ok' && 'preview' in entry && isChangePreview(entry.preview)
             ? [{ key: entry.key, toolName: entry.toolName, preview: entry.preview }]
             : []
         )

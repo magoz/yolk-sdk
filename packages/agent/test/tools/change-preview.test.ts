@@ -251,8 +251,8 @@ describe('boundToolChangePreview', () => {
       ToolTextChange.make({
         field: 'body',
         label: 'Body',
-        before: `${shared} old ending`,
-        after: `${shared} new ending`
+        before: `${shared}X${'b'.repeat(3000)}`,
+        after: `${shared}Y${'c'.repeat(3000)}`
       })
     ])
 
@@ -260,11 +260,46 @@ describe('boundToolChangePreview', () => {
     const twice = bounded(once, 1024)
     const change = twice.changes[0]
 
+    // The second bound really cuts again.
+    expect(bytes(once)).toBeGreaterThan(1024)
+    expect(twice).not.toEqual(once)
+    expect(bytes(twice)).toBeLessThanOrEqual(1024)
     expect(change?.truncated).toEqual({
-      before: { unit: 'chars', originalSize: 5011, offset: 4937 },
-      after: { unit: 'chars', originalSize: 5011, offset: 4937 }
+      before: { unit: 'chars', originalSize: 8001, offset: 4936 },
+      after: { unit: 'chars', originalSize: 8001, offset: 4936 }
     })
-    expect(change?._tag === 'Text' && change.after.endsWith('new ending')).toBe(true)
+  })
+
+  it('composes with markers the hook set: original size kept, offsets added', () => {
+    const shared = 'p'.repeat(500)
+    const hookCut = { unit: 'chars' as const, originalSize: 9000, offset: 100 }
+
+    const value = preview([
+      ToolTextChange.make({
+        field: 'body',
+        label: 'Body',
+        before: `${shared}X${'b'.repeat(3000)}`,
+        after: `${shared}Y${'c'.repeat(3000)}`,
+        truncated: { before: hookCut, after: hookCut }
+      }),
+      ToolListChange.make({
+        field: 'steps',
+        label: 'Steps',
+        after: Array.from({ length: 300 }, (_, index) => ({ id: `s${index}`, label: 'Step' })),
+        // Another unit than the bound cuts in: kept as the hook wrote it.
+        truncated: { after: { unit: 'bytes', originalSize: 50_000 } }
+      })
+    ])
+
+    const result = bounded(value, 2048)
+    const [text, list] = result.changes
+
+    expect(text?.truncated).toEqual({
+      before: { unit: 'chars', originalSize: 9000, offset: 536 },
+      after: { unit: 'chars', originalSize: 9000, offset: 536 }
+    })
+    expect(list?._tag === 'List' && list.after.length < 300).toBe(true)
+    expect(list?.truncated).toEqual({ after: { unit: 'bytes', originalSize: 50_000 } })
   })
 
   it('fails too_large when the parts it never cuts do not fit', () => {

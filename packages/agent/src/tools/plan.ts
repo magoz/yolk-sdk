@@ -444,17 +444,20 @@ export type ToolPlanRuntime<Context> = {
  * or the tool can no longer be applied from a plan). Plain JSON; decode it with this Schema across
  * process or network boundaries.
  */
+const stagedEntryFields = {
+  key: Schema.String,
+  status: Schema.Literal('ok'),
+  toolName: Schema.String,
+  params: Schema.Json
+}
+
 export const ToolPlanPreview = Schema.Union([
-  Schema.Struct({
-    key: Schema.String,
-    status: Schema.Literal('ok'),
-    toolName: Schema.String,
-    params: Schema.Json,
-    /** The tool's change preview, when it has a `changePreview` hook that succeeded. */
-    preview: Schema.optionalKey(ToolChangePreview),
-    /** Why the tool's change preview is missing, when it has a hook (never with `preview`). */
-    previewError: Schema.optionalKey(ToolChangePreviewFailure)
-  }),
+  /** The tool has a `changePreview` hook and it succeeded. */
+  Schema.Struct({ ...stagedEntryFields, preview: ToolChangePreview }),
+  /** The tool has a `changePreview` hook and the preview is unavailable. */
+  Schema.Struct({ ...stagedEntryFields, previewError: ToolChangePreviewFailure }),
+  /** The tool has no `changePreview` hook. */
+  Schema.Struct(stagedEntryFields),
   Schema.Struct({
     key: Schema.String,
     status: Schema.Literal('error'),

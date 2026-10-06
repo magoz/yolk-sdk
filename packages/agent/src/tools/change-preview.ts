@@ -177,9 +177,12 @@ const structuredSlot = (
   }
 }
 
-// A value the hook already cut keeps its own original size, and the offsets add up.
+// A value the hook already cut keeps its own original size, and the offsets add up. A hook marker
+// in another unit cannot be composed and is kept as the hook wrote it.
 const composeCut = (existing: ToolChangeCut | undefined, cut: ToolChangeCut): ToolChangeCut => {
   if (existing === undefined) return cut
+
+  if (existing.unit !== cut.unit) return existing
 
   const offset = (existing.offset ?? 0) + (cut.offset ?? 0)
 

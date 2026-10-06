@@ -41,10 +41,11 @@ Breaking changes for staged plan hosts:
 
 - `staging.preview` is removed. Move it to the tool's `changePreview` and return a
   `ToolChangePreview` (`{ target, changes, ... }`) instead of arbitrary JSON.
-- `ToolPlanPreview` `ok` entries carry `preview: ToolChangePreview` or `previewError`
-  (`{ cause, message }`). A failing
-  preview no longer turns the entry into `status: 'error'`; it keeps `params`. Oversized previews
-  are truncated with markers instead of becoming error entries.
+- `ToolPlanPreview` `ok` entries carry `params` and either `preview: ToolChangePreview`,
+  `previewError` (`{ cause, message }`), or neither (no hook); they are separate Schema members,
+  so narrow with `'preview' in entry`. A failing preview no longer turns the entry into
+  `status: 'error'`, and oversized previews are truncated with markers instead of becoming error
+  entries.
 - `maxToolPlanPreviewBytes` is removed. Use `defaultToolChangePreviewMaxBytes` (16 KiB) and set
   the bound with `resolveTools(..., { changePreview: { maxBytes } })`.
 - `ToolRegistryError` has a new cause, `change_preview_unsupported_policy` (a `changePreview` on a

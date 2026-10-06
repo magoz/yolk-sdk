@@ -1,4 +1,4 @@
-import { Arbitrary, Result } from 'effect'
+import { Arbitrary, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { boundToolChangePreview, ToolChangePreview } from '../../src/tools/index.ts'
@@ -40,8 +40,21 @@ describe('boundToolChangePreview properties', () => {
       )
 
       bounded.changes.forEach((change, index) => {
-        if (JSON.stringify(change) !== JSON.stringify(preview.changes[index]))
+        const original = preview.changes[index]
+
+        if (JSON.stringify(change) !== JSON.stringify(original))
           expect(change.truncated).toBeDefined()
+
+        // A marker the bound added records the full original size.
+        if (Predicate.isTagged(change, 'Text') && Predicate.isTagged(original, 'Text')) {
+          if (change.truncated?.after !== undefined && original.truncated?.after === undefined)
+            expect(change.truncated.after.originalSize).toBe(Array.from(original.after).length)
+        }
+
+        if (Predicate.isTagged(change, 'Set') && Predicate.isTagged(original, 'Set')) {
+          if (change.truncated?.added !== undefined && original.truncated?.added === undefined)
+            expect(change.truncated.added.originalSize).toBe(original.added.length)
+        }
       })
 
       // A bounded preview is a fixed point.
