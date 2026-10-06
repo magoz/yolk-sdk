@@ -476,8 +476,13 @@ const resolveHostTools = (context: HostContext) =>
   `beforeNestedCall` and decorators around your `ToolExecutor` never see them. `beforeCall` is the
   only per-call hook: wire the same run-authority or write authorizer you use for nested calls.
   `beforeCall` and any custom `planReview` handler are trusted host code.
-- If the apply crashes, the receipt stays started; re-execution never runs it again and returns an
-  `unknown` outcome listing each staged call (from the ledger, the selection, and the plan claim).
+- Steps can be redelivered while the first execution is still applying (Vercel queues are
+  at-least-once). With a tool ledger, each apply runs behind a ledger entry for the review call: a
+  redelivery waits for the running apply (up to the ledger's `maxWaitMs` or `deadline`) and returns
+  its real outcome. If the wait ends first, or the apply crashed, it returns an `unknown` outcome
+  listing each staged call; a call is `not_run` only when Yolk can prove it never ran and never
+  will, otherwise `unknown`. The apply is never run twice. Give the ledger wait room for your
+  largest plan.
 - A plan store outage is never a verdict: loop preflight fails the batch with an `unavailable`
   `ToolError` (retry the step; the review stays accepted), admission answers
   `InteractionAdmissionError` `unavailable`, and an outage that starts mid-step fails the call

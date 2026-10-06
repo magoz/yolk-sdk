@@ -104,15 +104,32 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
   `beforeNestedCall` and decorators around the `ToolExecutor` never see them. `beforeCall` is the
   only per-call host authority hook: hosts must wire their run-authority (nested-write) authorizer
   there. Registration wrappers and the ledger still apply.
-- **Crash**: the receipt stays `started`; re-execution never runs again and returns `unknown`. The
-  listing combines the receipt's selection, the plan claim, and the ledger: ledger entries give
-  `applied`, `failed`, or `unknown`; unselected calls are `skipped`; a selected call without an
-  entry is `not_run` when its tool is ledgered (the claim precedes execution) or the plan is not
-  claimed by this review, and `unknown` otherwise (no ledger, or a tool the policy skips). Without a
-  ledger the result also carries `ledgerUnavailable` (never an empty listing). A defect or
-  interruption seals the receipt with the same listing: the description has its own 3 s bound
+- **Apply fence**: with a tool ledger, each apply runs behind one ledger entry keyed by the review
+  call id (whatever the ledger policy), claimed before the plan claim and before any call, heartbeated
+  while the calls run, and completed with the apply's result. Another execution of the same review
+  (a redelivered step, which Vercel queues do while the first is still running) finds the receipt
+  `started` and claims the same entry, so it:
+  - replays the recorded result when the apply completed;
+  - waits while the apply is in flight (polls, up to the ledger's `maxWaitMs` or `deadline`, as for
+    duplicate ledgered calls) and then returns the apply's real outcome (or the receipt's
+    settlement, when recorded meanwhile);
+  - holds the fence itself when no apply passed it: nothing ran and nothing will (an apply that
+    arrives later replays that result instead of running), so it reports every selected call
+    `not_run` with outcome `failed` (known no effect; the plan stays unclaimed and reviewable);
+  - otherwise (the wait ends while the apply still runs, or its lease expired) falls back to the
+    listing below.
+- **Listing without an outcome**: it combines the receipt's selection, the plan claim, and the
+  ledger. Ledger entries give `applied`, `failed`, or `unknown`; unselected calls are `skipped`. A
+  selected call without an entry is `not_run` only when that is provable: another review owns the
+  plan, this execution holds the fence that no apply passed, or the apply itself ended (its own
+  seal, for a tool the ledger records). While an apply may still be running it is `unknown`: a lease
+  expiry or a timed-out wait does not prove the apply stopped, and it may still reach that call.
+  Without a ledger there is no fence and selected calls without proof are `unknown`, with
+  `ledgerUnavailable` (never an empty listing). A defect or interruption seals the receipt with the
+  apply's own listing (`unknownOutcome` phase `seal`): the description has its own 3 s bound
   (falling back to the generic notice) and settlement keeps its full 5 s. Interactions gain an
-  optional `unknownOutcome` hook for this.
+  optional `unknownOutcome({ call, submissionId, phase })` hook for this; in phase `replay` it may
+  return an `outcome` the registration proves from its own durable record (here, the fence).
 - **Storage outages are never verdicts**: plan store errors in call validation and admission are
   `InteractionHostError`s (protocol `InteractionCallValidator`). Loop preflight fails the batch
   closed (`prepareToolBatch` fails with `ToolError` `unavailable`, like `loadInteractionReceipts`),
@@ -132,7 +149,12 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
     the model must open a fresh review. Making it a step failure would need a retryable error
     channel on `ToolExecutor.execute` (all `ToolError`s are tool results today); deferred.
   - Staged calls apply sequentially in one tool step: size plans (`staging.maxCalls`) so the
-    selected calls fit the host's step budget.
+    selected calls fit the host's step budget, and give the ledger's wait (`maxWaitMs`,
+    `deadline`) room for the apply, so a redelivery returns the real outcome instead of the
+    `unknown` listing.
+  - A redelivery that waits for an apply returns the apply's outcome, but the receipt keeps the
+    settlement of the execution that ran it; if that execution dies after the fence completed and
+    before settling, the receipt stays `started` and later replays return the fence's result.
   - A `ToolError` from an applied call is reported `failed`, as in code mode listings, even though
     a timeout does not prove no effect; the review outcome stays `completed`, never `failed`.
   - The review tool stays advertised when the resolution has no plans (it answers unavailable),
@@ -203,6 +225,8 @@ single-use claims (`taken`, `same`), the plan executor refusing without a starte
 started receipt of another selection, digest, or tool, or with mismatched or moved keys,
 `onFailure`, `beforeCall`, crash mid-apply (`unknown` with per-key listings, ledgered and
 unledgered tools), plan store outages at preflight, admission, and execution, concurrent
-deliveries reporting the winner's outcome, argument snapshots, bounded precheck concurrency, host
+deliveries reporting the winner's outcome, redeliveries during an in-flight apply (waiting for its
+real outcome, the wait-deadline fallback listing unknown calls, the no-ledger listing, and a fence
+held first proving nothing ran), argument snapshots, bounded precheck concurrency, host
 plan ids, nested ledger keys, cancel, paged stored previews with Schema decoding, and the pi
 executor end to end.

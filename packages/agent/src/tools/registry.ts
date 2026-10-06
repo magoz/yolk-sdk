@@ -331,13 +331,21 @@ export type InteractionToolRegistration<Context> = {
   readonly validateResponse: InteractionResponseValidator
   /** Server-defined named actions keyed by action id. */
   readonly actions: Readonly<Record<string, InteractionActionHandler<Context>>>
-  /** Describes an accepted action that started and has no recorded outcome (for example after a
-   * crash), instead of the generic notice. The result stays `unknown`; nothing runs again.
+  /**
+   * Describes an accepted action that started and has no recorded receipt outcome, instead of the
+   * generic notice; nothing runs again. `phase` is `replay` when another execution (a redelivered
+   * step, a concurrent duplicate) finds the receipt started, possibly while the first one is still
+   * running, and `seal` when the executing action itself ended without an outcome (a defect or
+   * interruption) and the receipt is being sealed. Only in `replay` may the registration report a
+   * final `outcome` it can prove from its own durable record (for example a ledger entry the action
+   * completed); otherwise the result is `unknown`. Seal descriptions are bounded to 3 s.
    */
   readonly unknownOutcome?: (input: {
     readonly call: ToolCall
     readonly submissionId: string
+    readonly phase: 'replay' | 'seal'
   }) => Effect.Effect<{
+    readonly outcome?: InteractionBusinessOutcome
     readonly content: ToolResult['content']
     readonly structuredContent?: unknown
   }>
@@ -962,20 +970,30 @@ const executeInteractionTool = <Context>(input: {
       })
 
     // A started action without a recorded outcome: the registration may describe what it knows
-    // (for example a plan review's ledgered calls); any failure keeps the generic notice.
-    const unknownResult = (): Effect.Effect<ToolResult> => {
+    // (for example a plan review's ledgered calls); any failure keeps the generic notice. Replays
+    // may report an outcome the registration proves; seals are always unknown and bounded, so
+    // settlement keeps its budget (finalizers run with a pending interrupt, so each bounded step
+    // is interruptible only inside its own timeout).
+    const unknownResult = (phase: 'replay' | 'seal'): Effect.Effect<ToolResult> => {
       const describe = handler?.unknownOutcome
 
       if (describe === undefined) return Effect.succeed(genericUnknownResult())
 
-      return Effect.suspend(() =>
-        describe({ call: stored.call, submissionId: stored.submissionId })
-      ).pipe(
-        // Interruptible only inside its own bound (finalizers run with a pending interrupt).
-        Effect.interruptible,
-        Effect.timeoutOption(interactionUnknownDescriptionTimeout),
-        Effect.map(described =>
-          Option.isNone(described)
+      const described = Effect.suspend(() =>
+        describe({ call: stored.call, submissionId: stored.submissionId, phase })
+      )
+
+      const bounded =
+        phase === 'seal'
+          ? described.pipe(
+              Effect.interruptible,
+              Effect.timeoutOption(interactionUnknownDescriptionTimeout)
+            )
+          : described.pipe(Effect.map(Option.some))
+
+      return bounded.pipe(
+        Effect.map(result =>
+          Option.isNone(result)
             ? genericUnknownResult()
             : makeInteractionToolResult({
                 toolCallId: stored.call.id,
@@ -983,9 +1001,9 @@ const executeInteractionTool = <Context>(input: {
                 slot: stored.slot,
                 submissionId: stored.submissionId,
                 actionId: stored.actionId ?? '',
-                outcome: 'unknown',
-                content: described.value.content,
-                structuredContent: described.value.structuredContent
+                outcome: phase === 'replay' ? (result.value.outcome ?? 'unknown') : 'unknown',
+                content: result.value.content,
+                structuredContent: result.value.structuredContent
               })
         ),
         Effect.catchDefect(defect =>
@@ -996,7 +1014,22 @@ const executeInteractionTool = <Context>(input: {
       )
     }
 
-    if (stored.status === 'started') return yield* unknownResult()
+    // A replay prefers the receipt's own settlement when the first execution recorded it while
+    // this one was describing (for example after waiting for it).
+    const replayResult = Effect.gen(function* () {
+      const described = yield* unknownResult('replay')
+
+      const latest = yield* host.read(stored.slot).pipe(Effect.orElseSucceed(() => undefined))
+
+      return latest !== undefined &&
+        latest.status === 'settled' &&
+        latest.result !== undefined &&
+        validInteractionReceipt(latest, input.call, ref)
+        ? latest.result
+        : described
+    })
+
+    if (stored.status === 'started') return yield* replayResult
 
     // Receipts bind the original call; validators and handlers see normalized arguments.
     const businessCall =
@@ -1052,7 +1085,7 @@ const executeInteractionTool = <Context>(input: {
       if (current !== undefined && validInteractionReceipt(current, input.call, ref)) {
         if (current.status === 'settled' && current.result !== undefined) return current.result
 
-        if (current.status === 'started') return yield* unknownResult()
+        if (current.status === 'started') return yield* replayResult
       }
 
       return yield* Effect.fail(
@@ -1079,7 +1112,7 @@ const executeInteractionTool = <Context>(input: {
         if (Predicate.isTagged(claim, 'Existing')) {
           return claim.receipt.status === 'settled' && claim.receipt.result !== undefined
             ? claim.receipt.result
-            : yield* restore(unknownResult())
+            : yield* restore(replayResult)
         }
 
         if (
@@ -1099,7 +1132,7 @@ const executeInteractionTool = <Context>(input: {
         // not replace the original Cause, nor mask the business Effect indefinitely.
         // The description has its own bound (falling back to the generic notice), so settlement
         // always keeps its full budget and the receipt is sealed.
-        const recoverSettlement = unknownResult().pipe(
+        const recoverSettlement = unknownResult('seal').pipe(
           Effect.flatMap(result =>
             Effect.suspend(() => host.settle(claim.token, { status: 'unknown', result })).pipe(
               Effect.interruptible,
@@ -1543,7 +1576,21 @@ export const resolveTools = <Context>(
                       })
                     )
                   },
-            listNested: ledger === undefined ? undefined : ledger.store.list
+            listNested: ledger === undefined ? undefined : ledger.store.list,
+            // The apply fence: one ledger entry per review call (whatever the ledger policy), so
+            // a redelivered execution waits for an in-flight apply instead of guessing.
+            fence:
+              ledger === undefined
+                ? undefined
+                : fence =>
+                    executeLedgered({
+                      options: ledger,
+                      call: fence.call,
+                      parentKey: undefined,
+                      execute: fence.execute,
+                      abandonedResult: fence.abandonedResult,
+                      inFlightTimeoutResult: fence.inFlightTimeoutResult
+                    })
           }
 
     const boundPlanReview =

@@ -190,8 +190,8 @@ export const makePlanReviewTool = <Context>(
             )
         }
       },
-      unknownOutcome: ({ call, submissionId }) =>
-        runtime.interrupted({ reviewCall: call, submissionId })
+      unknownOutcome: ({ call, submissionId, phase }) =>
+        runtime.interrupted({ reviewCall: call, submissionId, phase })
     })
   }
 }

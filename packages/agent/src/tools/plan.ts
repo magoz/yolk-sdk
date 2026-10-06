@@ -432,10 +432,16 @@ export type ToolPlanRuntime<Context> = {
     readonly beforeCall?: ToolPlanBeforeCall<Context> | undefined
     readonly onFailure: ToolPlanFailurePolicy
   }) => Effect.Effect<ToolPlanApplyResult>
-  /** The listing for an apply that started and recorded no outcome (outcome `unknown`). */
+  /**
+   * The result for an apply that started and has no receipt outcome. `replay` (another execution
+   * found the receipt started): with a ledger it waits behind the apply fence and returns the
+   * apply's real outcome, else a listing that never claims a call the apply may still reach was
+   * not run. `seal` (the apply ended here without an outcome): a listing of what it reached.
+   */
   readonly interrupted: (input: {
     readonly reviewCall: ToolCall
     readonly submissionId: string
+    readonly phase: 'replay' | 'seal'
   }) => Effect.Effect<ToolPlanApplyResult>
 }
 

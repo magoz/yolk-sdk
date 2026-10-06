@@ -115,7 +115,9 @@ Staged tool plans ([ADR 0005](../docs/adr/0005-staged-tool-plans.md)) reuse this
 and its action applies only those staged calls after re-reading the started receipt. Hosts add a
 conversation-scoped `ToolPlanStore` (`resolveTools(..., { plans })`) next to the receipt port and
 wire their per-call write authorizer as `beforeCall` (applied calls bypass `beforeNestedCall` and
-executor decorators).
+executor decorators). With a tool ledger, a redelivered review (receipt `started`) waits behind the
+apply's ledger entry for the real outcome; listings never call a call `not_run` while an earlier
+execution may still reach it.
 
 Call validators and `validateAction` may read host storage (`InteractionCallValidator`); an
 unavailable store fails with `InteractionHostError`, never a verdict: `prepareToolBatch` fails the

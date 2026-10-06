@@ -1,4 +1,5 @@
-import { Effect, Predicate, Result } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Result } from 'effect'
+import { TestClock } from 'effect/testing'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { prepareToolBatch } from '@yolk-sdk/agent/loop'
@@ -14,7 +15,8 @@ import {
   interactionRequestId,
   isCodeModeCallable,
   isToolStageable,
-  type InteractionHost
+  type InteractionHost,
+  type InteractionRef
 } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
@@ -86,12 +88,20 @@ const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
         })
     },
     execute: ({ call, params, idempotencyKey }) =>
-      Effect.suspend(() => {
-        if (params.resource === options.dieOn) return Effect.die(new Error('process crashed'))
+      Effect.gen(function* () {
+        if (params.resource === options.dieOn)
+          return yield* Effect.die(new Error('process crashed'))
+
+        const gate = options.gate
+
+        if (gate !== undefined && gate.resource === params.resource) {
+          yield* Deferred.succeed(gate.reached, undefined)
+          yield* Deferred.await(gate.release)
+        }
 
         applied.push({ resource: params.resource, key: idempotencyKey })
 
-        return Effect.succeed(
+        return yield* Effect.succeed(
           params.resource === options.failOn
             ? ToolResult.make({
                 toolCallId: call.id,
@@ -157,7 +167,19 @@ const scriptTool = (box: Box): ToolRegistration<Ctx> =>
 
 type PrecheckTracker = { active: number; max: number }
 
-type LinkToolOptions = { failOn?: string; dieOn?: string; prechecks?: PrecheckTracker }
+/** Blocks the apply of `resource` until `release`, after signalling `reached`. */
+type Gate = {
+  readonly resource: string
+  readonly reached: Deferred.Deferred<void>
+  readonly release: Deferred.Deferred<void>
+}
+
+type LinkToolOptions = {
+  failOn?: string
+  dieOn?: string
+  prechecks?: PrecheckTracker
+  gate?: Gate
+}
 
 /** Toggles a plan store outage: every operation fails while `down`. */
 type Outage = { down: boolean }
@@ -178,6 +200,13 @@ type PlanOptionFields = {
   maxCalls?: number
   maxArgsBytes?: number
   planId?: ToolPlanOptions['planId']
+}
+
+type LedgerOptionFields = {
+  store: ToolLedgerOptions['store']
+  isLedgered?: ToolLedgerOptions['isLedgered']
+  maxWaitMs?: number
+  onLedgerDecision?: ToolLedgerOptions['onLedgerDecision']
 }
 
 type ResolveOptionFields = {
@@ -201,6 +230,9 @@ type SetupOptions = {
   readonly outage?: Outage
   readonly unledgered?: boolean
   readonly prechecks?: PrecheckTracker
+  readonly gate?: Gate
+  readonly maxWaitMs?: number
+  readonly decisions?: Array<string>
 }
 
 const setup = (options: SetupOptions = {}) =>
@@ -227,6 +259,8 @@ const setup = (options: SetupOptions = {}) =>
 
     if (options.prechecks !== undefined) linkOptions.prechecks = options.prechecks
 
+    if (options.gate !== undefined) linkOptions.gate = options.gate
+
     const modules: ReadonlyArray<ToolModule<Ctx>> = [
       { id: 'host', tools: review === undefined ? [scriptTool(box)] : [scriptTool(box), review] },
       { id: 'cms', tools: [linkTool(applied, linkOptions), lookupTool, noteTool(notes)] }
@@ -248,11 +282,21 @@ const setup = (options: SetupOptions = {}) =>
 
     if (options.plans !== false) resolveOptions.plans = plans
 
-    if (options.ledger === true)
-      resolveOptions.ledger =
-        options.unledgered === true
-          ? { store: ledgerStore, isLedgered: () => false }
-          : { store: ledgerStore }
+    if (options.ledger === true) {
+      const ledger: LedgerOptionFields = { store: ledgerStore }
+      const decisions = options.decisions
+
+      if (options.unledgered === true) ledger.isLedgered = () => false
+
+      if (options.maxWaitMs !== undefined) ledger.maxWaitMs = options.maxWaitMs
+
+      if (decisions !== undefined)
+        ledger.onLedgerDecision = event => {
+          decisions.push(`${event.key}:${event.decision}`)
+        }
+
+      resolveOptions.ledger = ledger
+    }
 
     const toolSet = yield* resolveTools(modules, context, resolveOptions)
 
@@ -353,6 +397,16 @@ const PlanReviewOutcome = Schema.Struct({
 
 const outcomeOf = (result: ToolResult) =>
   Schema.decodeUnknownEffect(PlanReviewOutcome)(result.structuredContent).pipe(Effect.orDie)
+
+/** Runs `effect` while the test clock passes the default ledger lease (30 s). */
+const afterLeaseExpiry = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.gen(function* () {
+    const fiber = yield* effect.pipe(Effect.forkChild)
+
+    yield* TestClock.adjust('31 seconds')
+
+    return yield* Fiber.join(fiber)
+  })
 
 const textOf = (result: ToolResult) =>
   Predicate.isString(result.content) ? result.content : contentText(result.content)
@@ -911,17 +965,18 @@ describe('plan review', () => {
       expect(crashed._tag).toBe('Failure')
       expect(env.fake.receiptFor(interactionRequestId(call))?.status).toBe('started')
 
-      const replayed = yield* env.toolSet.execute(call, { interaction: ref })
+      // The redelivery waits behind the apply fence until the crashed apply's lease expires.
+      const replayed = yield* afterLeaseExpiry(env.toolSet.execute(call, { interaction: ref }))
       const outcome = yield* outcomeOf(replayed)
 
       expect(replayed.isError).toBe(true)
       expect(outcome.outcome).toBe('unknown')
       expect(outcome.result?.state).toBe('interrupted')
-      // s3 is ledgered and has no entry: its claim never happened, so it never started.
+      // A lease expiry does not prove the apply stopped: s3 has no entry but stays unknown.
       expect(outcome.result?.calls.map(item => [item.key, item.callId, item.status])).toEqual([
         ['script_1/s1', 'review_1/1', 'applied'],
         ['script_1/s2', 'review_1/2', 'unknown'],
-        ['script_1/s3', undefined, 'not_run']
+        ['script_1/s3', undefined, 'unknown']
       ])
       expect(textOf(replayed)).toContain('It was not run again')
       expect(env.applied.map(item => item.resource)).toEqual(['r1'])
@@ -1351,7 +1406,9 @@ describe('staging snapshots, listings, and prechecks', () => {
 
       yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
 
-      const outcome = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+      const outcome = yield* outcomeOf(
+        yield* afterLeaseExpiry(env.toolSet.execute(call, { interaction: ref }))
+      )
 
       expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
         ['script_1/s1', 'skipped'],
@@ -1437,5 +1494,199 @@ describe('previewStoredToolPlan', () => {
       expect(decoded).toHaveLength(50)
       expect(toolPlanKeyPages(plan).map(page => page.length)).toEqual([50, 10])
     })
+  )
+})
+
+describe('concurrent apply deliveries', () => {
+  const makeGate = (resource: string) =>
+    Effect.gen(function* () {
+      const gate: Gate = {
+        resource,
+        reached: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>()
+      }
+
+      return gate
+    })
+
+  // Lets forked fibers run until they block (for example on a ledger poll sleep).
+  const settle = Effect.forEach(Array.from({ length: 50 }), () => Effect.yieldNow, {
+    discard: true
+  })
+
+  /** Delivery A applies until it blocks inside r2 (r1 applied); returns its fiber. */
+  const applyUntilGate = (env: Env, gate: Gate, call: ToolCall, ref: InteractionRef) =>
+    Effect.gen(function* () {
+      const first = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* Deferred.await(gate.reached)
+
+      return first
+    })
+
+  it.effect('a redelivery waits for the in-flight apply and returns its real outcome', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const decisions: Array<string> = []
+      const env = yield* setup({ ledger: true, gate, decisions })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+
+      // Delivery B finds the receipt started and waits behind the apply fence.
+      const second = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* settle
+      yield* Deferred.succeed(gate.release, undefined)
+
+      const winner = yield* Fiber.join(first)
+
+      yield* TestClock.adjust('2 seconds')
+
+      const redelivered = yield* Fiber.join(second)
+      const outcome = yield* outcomeOf(redelivered)
+
+      expect(redelivered).toEqual(winner)
+      expect(outcome.outcome).toBe('completed')
+      expect(outcome.result?.calls.map(item => item.status)).toEqual([
+        'applied',
+        'applied',
+        'applied'
+      ])
+      expect(decisions).toContain('review_1:in_flight_wait')
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect('past the wait, a redelivery lists calls the apply may still reach as unknown', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const env = yield* setup({ ledger: true, gate, maxWaitMs: 5_000 })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+
+      const second = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* settle
+      yield* TestClock.adjust('6 seconds')
+
+      const listed = yield* outcomeOf(yield* Fiber.join(second))
+
+      // The first delivery is still running and goes on to apply r2 and r3.
+      yield* Deferred.succeed(gate.release, undefined)
+      yield* Fiber.join(first)
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'applied'],
+        ['script_1/s2', 'unknown'],
+        ['script_1/s3', 'unknown']
+      ])
+      expect(listed.result?.calls.some(item => item.status === 'not_run')).toBe(false)
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect('without a ledger, a redelivery never claims a call was not run', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const env = yield* setup({ gate })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+      const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+      yield* Deferred.succeed(gate.release, undefined)
+      yield* Fiber.join(first)
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.ledgerUnavailable).toBe(true)
+      expect(listed.result?.calls.map(item => item.status)).toEqual([
+        'unknown',
+        'unknown',
+        'unknown'
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect(
+    'a redelivery that holds the fence first proves nothing ran, and blocks the apply',
+    () =>
+      Effect.gen(function* () {
+        type RuntimeBox = { runtime?: ToolPlanRuntime<Ctx> }
+
+        const box: RuntimeBox = {}
+        const review = makePlanReviewTool<Ctx>()
+        const bind = review.planReview
+
+        if (bind === undefined) throw new Error('Missing plan review binding')
+
+        const env = yield* setup({
+          ledger: true,
+          reviewRegistration: {
+            ...review,
+            planReview: runtime => {
+              box.runtime = runtime
+
+              return bind(runtime)
+            }
+          }
+        })
+
+        const plan = yield* stagedPlan(env, ['r1', 'r2'])
+        const call = reviewCall(plan)
+        const ref = yield* accept(env, call, ['script_1/s1', 'script_1/s2'])
+
+        // Delivery A claimed the receipt and stopped before reaching the apply fence.
+        yield* env.fake.host.claim(ref)
+
+        const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+        // If A's apply resumes now, it finds the fence completed and runs nothing.
+        const runtime = box.runtime
+
+        if (runtime === undefined) throw new Error('Missing runtime')
+
+        const resumed = yield* runtime.apply({
+          reviewCall: call,
+          submissionId: ref.submissionId,
+          planId: plan.id,
+          planDigest: plan.digest,
+          keys: ['script_1/s1', 'script_1/s2'],
+          onFailure: 'stop'
+        })
+
+        expect(listed.outcome).toBe('failed')
+        expect(listed.result?.calls.map(item => item.status)).toEqual(['not_run', 'not_run'])
+        expect(resumed.structuredContent.calls.map(item => item.status)).toEqual([
+          'not_run',
+          'not_run'
+        ])
+        expect(env.applied).toEqual([])
+        expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+      })
   )
 })
