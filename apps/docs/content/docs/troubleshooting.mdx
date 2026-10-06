@@ -216,6 +216,23 @@ means you marked tools `callableBy: 'codemode'` but did not register the code mo
 `nestedToolAccess` registration) in the same resolution. See
 [Choose what scripts can call](./integrations/code-mode#choose-what-scripts-can-call).
 
+Staged tool plans add three causes:
+
+- `staging_unsupported_policy`: a tool sets `staging` without `approval`, or combines it with
+  input, an interaction, background execution, nested tool access, or `callableBy: 'model'`.
+- `staging_validation_required`: a raw stageable registration has no side-effect-free `validate`.
+- `plan_review_duplicate`: more than one `makePlanReviewTool` registration resolves.
+
+### `stage` is not defined, or `review_plan` is unavailable
+
+Scripts get `stage(name, args)`, and the review tool becomes available, only when the resolution
+has `plans`, an `interactionHost`, and exactly one plan review tool, and the code mode tool does
+not set `staging: false`. Voice and subagent resolutions without them never get it.
+
+A plan store outage is never reported as invalid input: `prepareToolBatch` fails with `ToolError`
+`unavailable` (retry the step) and admission answers `InteractionAdmissionError` `unavailable`. See
+[Review a staged plan](./agent/tools-hitl#review-a-staged-plan).
+
 ### Code mode worker or `quickjs.wasm` not found
 
 The Node executor loads a worker file and `quickjs.wasm` from disk. When a bundler inlines the

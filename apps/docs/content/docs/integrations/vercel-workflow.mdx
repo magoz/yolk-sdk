@@ -41,6 +41,12 @@ Run [code mode](./code-mode#vercel-workflow) calls inside your tool-batch step, 
 Workflow stop or run-admission check, do not see nested calls; pass the same check to
 `makeCodeModeTool` as `beforeNestedCall`.
 
+Calls applied from a [staged tool plan](../agent/tools-hitl#review-a-staged-plan) bypass both
+those decorators and `beforeNestedCall`: pass the same check to `makePlanReviewTool` as
+`beforeCall`. A step redelivered while a plan applies waits for the running apply when the review
+step is resolved with the same tool ledger scope on every delivery; keep ledger entries as long as
+the review receipts.
+
 ## Tool steps run at least once
 
 Vercel's queue can deliver a tool-batch step again after a crash, or while the first execution is

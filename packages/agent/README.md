@@ -20,47 +20,47 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                                  | Purpose                                                                                       |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                               | Wire messages, events, content, usage, tool schemas                                           |
-| `@yolk-sdk/agent/loop`                                   | Stateless LLM/tool loop                                                                       |
-| `@yolk-sdk/agent/loop/testing`                           | Faux provider and tool executor test helpers                                                  |
-| `@yolk-sdk/agent/runtime`                                | Transcript or append-backed runtime orchestration                                             |
-| `@yolk-sdk/agent/client`                                 | HTTP/NDJSON transport, HITL resume, retry/error state helpers                                 |
-| `@yolk-sdk/agent/compaction`                             | Host-owned compaction budgets, checkpoints, formatting, retry                                 |
-| `@yolk-sdk/agent/classification`                         | Classifier model contract: typed questions, answers, usage, errors                            |
-| `@yolk-sdk/agent/tools`                                  | Tool registry, typed inputs, interactions, subagents/questions, durable tool ledger           |
-| `@yolk-sdk/agent/react`                                  | Headless React chat hook, reducer, selectors, and render model                                |
-| `@yolk-sdk/agent/oauth`                                  | Provider-neutral OAuth token and broker contracts                                             |
-| `@yolk-sdk/agent/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                         |
-| `@yolk-sdk/agent/providers/openai/codex`                 | OpenAI Codex request and auth helpers                                                         |
-| `@yolk-sdk/agent/providers/openai/codex-usage`           | Codex subscription-allowance snapshots                                                        |
-| `@yolk-sdk/agent/providers/openai/codex-provider`        | Codex LLM provider factory                                                                    |
-| `@yolk-sdk/agent/providers/openai/provider`              | OpenAI-compatible LLM provider factory                                                        |
-| `@yolk-sdk/agent/providers/openai/conformance`           | Synthetic OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases        |
-| `@yolk-sdk/agent/providers/openai/realtime`              | OpenAI Realtime session config and event codecs                                               |
-| `@yolk-sdk/agent/providers/openai/speech`                | OpenAI text-to-speech and transcription adapters                                              |
-| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`   | Vercel AI Gateway Chat Completions provider factory                                           |
-| `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` | Vercel AI Gateway classifier (`POST /v1/evaluate`) layer                                      |
-| `@yolk-sdk/agent/providers/vercel/conformance`           | Verified Gateway chat fixtures, synthetic classifier fixtures, and conformance cases          |
-| `@yolk-sdk/agent/providers/opencode/go-provider`         | OpenCode Go Chat Completions, Messages, and Responses provider                                |
-| `@yolk-sdk/agent/providers/opencode/usage`               | OpenCode Go subscription-allowance snapshots                                                  |
-| `@yolk-sdk/agent/providers/opencode/conformance`         | Synthetic OpenCode Go (per protocol, commentary replay, usage) fixtures and conformance cases |
-| `@yolk-sdk/agent/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                     |
-| `@yolk-sdk/agent/providers/anthropic/claude`             | Claude request and auth helpers                                                               |
-| `@yolk-sdk/agent/providers/anthropic/usage`              | Claude subscription-allowance snapshots                                                       |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude LLM provider factory                                                                   |
-| `@yolk-sdk/agent/providers/anthropic/conformance`        | Synthetic Anthropic Messages and Claude usage fixtures and conformance cases                  |
-| `@yolk-sdk/agent/providers/xai`                          | Grok subscription OAuth and token broker helpers                                              |
-| `@yolk-sdk/agent/providers/xai/grok`                     | Grok subscription request and auth helpers                                                    |
-| `@yolk-sdk/agent/providers/xai/grok-provider`            | Grok subscription LLM provider factory                                                        |
-| `@yolk-sdk/agent/providers/xai/usage`                    | Grok subscription-allowance snapshots                                                         |
-| `@yolk-sdk/agent/providers/xai/conformance`              | Synthetic Grok Responses and Grok usage fixtures and conformance cases                        |
-| `@yolk-sdk/agent/providers/subscription-usage`           | Shared allowance snapshot and safe error schemas                                              |
-| `@yolk-sdk/agent/skillset`                               | Portable skill and slash-command parsing/catalogs                                             |
-| `@yolk-sdk/agent/voice`                                  | Voice protocol, controller, tool handler, projection, speech                                  |
-| `@yolk-sdk/agent/voice/browser`                          | Browser WebRTC voice transport                                                                |
-| `@yolk-sdk/agent/voice/react`                            | Headless browser voice React hook                                                             |
+| Subpath                                                  | Purpose                                                                                                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/agent/protocol`                               | Wire messages, events, content, usage, tool schemas                                                    |
+| `@yolk-sdk/agent/loop`                                   | Stateless LLM/tool loop                                                                                |
+| `@yolk-sdk/agent/loop/testing`                           | Faux provider and tool executor test helpers                                                           |
+| `@yolk-sdk/agent/runtime`                                | Transcript or append-backed runtime orchestration                                                      |
+| `@yolk-sdk/agent/client`                                 | HTTP/NDJSON transport, HITL resume, retry/error state helpers                                          |
+| `@yolk-sdk/agent/compaction`                             | Host-owned compaction budgets, checkpoints, formatting, retry                                          |
+| `@yolk-sdk/agent/classification`                         | Classifier model contract: typed questions, answers, usage, errors                                     |
+| `@yolk-sdk/agent/tools`                                  | Tool registry, typed inputs, interactions, subagents/questions, durable tool ledger, staged tool plans |
+| `@yolk-sdk/agent/react`                                  | Headless React chat hook, reducer, selectors, and render model                                         |
+| `@yolk-sdk/agent/oauth`                                  | Provider-neutral OAuth token and broker contracts                                                      |
+| `@yolk-sdk/agent/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                  |
+| `@yolk-sdk/agent/providers/openai/codex`                 | OpenAI Codex request and auth helpers                                                                  |
+| `@yolk-sdk/agent/providers/openai/codex-usage`           | Codex subscription-allowance snapshots                                                                 |
+| `@yolk-sdk/agent/providers/openai/codex-provider`        | Codex LLM provider factory                                                                             |
+| `@yolk-sdk/agent/providers/openai/provider`              | OpenAI-compatible LLM provider factory                                                                 |
+| `@yolk-sdk/agent/providers/openai/conformance`           | Synthetic OpenAI chat, Codex Responses, and Codex usage fixtures and conformance cases                 |
+| `@yolk-sdk/agent/providers/openai/realtime`              | OpenAI Realtime session config and event codecs                                                        |
+| `@yolk-sdk/agent/providers/openai/speech`                | OpenAI text-to-speech and transcription adapters                                                       |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider`   | Vercel AI Gateway Chat Completions provider factory                                                    |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-classifier` | Vercel AI Gateway classifier (`POST /v1/evaluate`) layer                                               |
+| `@yolk-sdk/agent/providers/vercel/conformance`           | Verified Gateway chat fixtures, synthetic classifier fixtures, and conformance cases                   |
+| `@yolk-sdk/agent/providers/opencode/go-provider`         | OpenCode Go Chat Completions, Messages, and Responses provider                                         |
+| `@yolk-sdk/agent/providers/opencode/usage`               | OpenCode Go subscription-allowance snapshots                                                           |
+| `@yolk-sdk/agent/providers/opencode/conformance`         | Synthetic OpenCode Go (per protocol, commentary replay, usage) fixtures and conformance cases          |
+| `@yolk-sdk/agent/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                              |
+| `@yolk-sdk/agent/providers/anthropic/claude`             | Claude request and auth helpers                                                                        |
+| `@yolk-sdk/agent/providers/anthropic/usage`              | Claude subscription-allowance snapshots                                                                |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude LLM provider factory                                                                            |
+| `@yolk-sdk/agent/providers/anthropic/conformance`        | Synthetic Anthropic Messages and Claude usage fixtures and conformance cases                           |
+| `@yolk-sdk/agent/providers/xai`                          | Grok subscription OAuth and token broker helpers                                                       |
+| `@yolk-sdk/agent/providers/xai/grok`                     | Grok subscription request and auth helpers                                                             |
+| `@yolk-sdk/agent/providers/xai/grok-provider`            | Grok subscription LLM provider factory                                                                 |
+| `@yolk-sdk/agent/providers/xai/usage`                    | Grok subscription-allowance snapshots                                                                  |
+| `@yolk-sdk/agent/providers/xai/conformance`              | Synthetic Grok Responses and Grok usage fixtures and conformance cases                                 |
+| `@yolk-sdk/agent/providers/subscription-usage`           | Shared allowance snapshot and safe error schemas                                                       |
+| `@yolk-sdk/agent/skillset`                               | Portable skill and slash-command parsing/catalogs                                                      |
+| `@yolk-sdk/agent/voice`                                  | Voice protocol, controller, tool handler, projection, speech                                           |
+| `@yolk-sdk/agent/voice/browser`                          | Browser WebRTC voice transport                                                                         |
+| `@yolk-sdk/agent/voice/react`                            | Headless browser voice React hook                                                                      |
 
 ## Imports
 
@@ -866,6 +866,10 @@ not this marker. These child observations are separate from generic background t
 `prepareToolBatch` from `@yolk-sdk/agent/loop` exposes the same HITL preflight used by the loop.
 Durable orchestration must check `pendingRequests` before dispatching **any** tool, even calls
 listed in `callsToExecute`. Preserve synthetic results and original call ordering when committing.
+It fails with `ToolError` `unavailable` only when host storage read by an interaction call
+validator (for example a plan review's plan store) is unavailable; nothing runs, so fail the step
+and retry it. Admission (`validateInteractionSubmission`) answers `InteractionAdmissionError`
+`unavailable` for the same outage.
 
 Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
 
@@ -922,8 +926,8 @@ This package declares them; it does not run scripts.
 - `callableBy: 'all' | 'model' | 'codemode'` (default `all`) decides who may call a tool. For
   `codemode` only, `discovery: 'listed' | 'search'` (default `listed`) decides how scripts find it.
   Codemode-only tools never reach providers. Approval, input, interaction, activated background,
-  `question`, `subagent`, and nested-access tools never run from code mode; `resolveTools` rejects
-  `callableBy: 'codemode'` on them.
+  `question`, `subagent`, and nested-access tools never run from code mode (stageable approval tools
+  are only staged; see Staged tool plans); `resolveTools` rejects `callableBy: 'codemode'` on them.
 - `nestedToolAccess: true` gives a registration's `execute` a `nested` executor over the other
   code-mode-callable tools of the same resolution and host context. Nested calls run through the
   resolved execute path and fail closed with model-visible error results. Assign nested call ids as

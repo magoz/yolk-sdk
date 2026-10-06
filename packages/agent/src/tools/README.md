@@ -17,6 +17,8 @@ Generic host tool registration and resolution.
 - The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
   reference store, so a re-executed ledgered call (by default writes and `subagent`) never runs
   twice under the same ledger key.
+- Staged tool plans: stageable approval-gated tools, the `ToolPlanStore` contract, and the
+  `makePlanReviewTool` interaction that applies a person's selection once.
 
 ## Use it when
 
@@ -48,7 +50,8 @@ identities, not authentication or payload-derived provider idempotency guarantee
 Pass `interactionHost` to `resolveTools`, then pass both `toolSet.interactions` and
 `toolSet.interactionHost` into `run`/`runToolBatch`/runtime configs. For durable preflight, load
 `loadInteractionReceipts(calls, host)` first and pass its result as `interactionReceipts` to
-`prepareToolBatch`. Repeated preparation has no reads, claims, settlement or business effects;
+`prepareToolBatch`. Repeated preparation has no receipt reads, claims, settlement or business
+effects (interaction call validators may read host storage, failing the batch `unavailable`);
 all pending siblings fence execution. Historical receipts replay before current schemas/actions,
 even if the current tool was removed; missing handlers never authorize new execution.
 
@@ -70,7 +73,7 @@ reference (acceptance is separate from claim; no product or provider integration
 
 ## Staged tool plans
 
-`docs/adr/0005-staged-tool-plans.md`. Approval-gated tools marked `staging` (`makeTool({ approval,
+See `docs/adr/0005-staged-tool-plans.md`. Approval-gated tools marked `staging` (`makeTool({ approval,
 staging })`) can be staged by nested-access registrations (code mode's `stage(name, args)`) through
 `nested.staging`, and applied only after a person accepts a `makePlanReviewTool` interaction
 selecting the staged keys. `resolveTools(..., { plans: { store }, interactionHost })` with exactly one

@@ -74,7 +74,8 @@ Expected `.changeset/config.json` traits:
 - Add changesets in the feature PR that introduces the user-facing package change.
 - Do not version packages in feature PRs; release PRs consume pending changesets.
 - Include all public packages for lockstep canaries when preparing a broad SDK release.
-- Use patch for canaries unless user requests otherwise.
+- In canaries use `patch` for fixes and lockstep notes and `minor` for new API or breaking changes
+  (both stay on the `0.1.0-canary.x` line); never `major`, which would leave it.
 - Do not include private Cloudflare package.
 - Keep changeset text user-facing and concise.
 - Changesets become npm-shipped `CHANGELOG.md` text: never name private apps (`examples/*`,

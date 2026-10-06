@@ -19,10 +19,10 @@ Requires Node.js 22.19 or later. The executor is server-only.
 
 ## Subpaths
 
-| Subpath                   | Use for                                                                                                                                |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`      | `makeCodeModeTool`, the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
-| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                               |
+| Subpath                   | Use for                                                                                                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`      | `makeCodeModeTool` (with the `stage` global for staged plans), the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
+| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                                                                          |
 
 ## Set up
 
@@ -270,12 +270,7 @@ they do not want. Nothing runs while the script runs.
 ```ts
 import { Effect } from 'effect'
 import { ToolApprovalPolicy } from '@yolk-sdk/agent/protocol'
-import {
-  makeInMemoryToolPlanStore,
-  makePlanReviewTool,
-  makeTool,
-  resolveTools
-} from '@yolk-sdk/agent/tools'
+import { makePlanReviewTool, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
 
 const setCurriculum = makeTool<HostContext, typeof SetCurriculumParams>({
   name: 'set_curriculum',

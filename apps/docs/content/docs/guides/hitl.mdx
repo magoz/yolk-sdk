@@ -46,6 +46,10 @@ Keep submission pending until server acceptance, and acceptance active until a r
 An unknown outcome is not definite failure or permission to retry. Hosts own reconciliation.
 Voice and background execution do not support action-backed interactions.
 
+A plan review (`makePlanReviewTool`) is an action-backed interaction too: a person reviews a code
+mode script's staged approval-gated calls once and selects the calls to apply. Follow
+[Review a staged plan](../agent/tools-hitl#review-a-staged-plan).
+
 ## Related APIs
 
 - `AgentAwaitingInput` from `@yolk-sdk/agent/protocol`
@@ -56,6 +60,7 @@ Voice and background execution do not support action-backed interactions.
 - `InteractionRequest`, `InteractionResponse`, `InteractionHost` from `@yolk-sdk/agent/protocol`
 - `validateInteractionSubmission` from `@yolk-sdk/agent/protocol`
 - `makeInteractionTool` from `@yolk-sdk/agent/tools`
+- `makePlanReviewTool`, `previewStoredToolPlan` from `@yolk-sdk/agent/tools`
 - `loadInteractionReceipts` from `@yolk-sdk/agent/loop`
 - `plainHitlResponse` from `@yolk-sdk/agent/protocol`
 - `questionResponseStructuredContent` from `@yolk-sdk/agent/protocol`
