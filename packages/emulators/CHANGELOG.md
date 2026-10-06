@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.103
+
+### Patch Changes
+
+- 1d51430: Advance unchanged public packages in lockstep with staged tool plans in `@yolk-sdk/agent` and `@yolk-sdk/codemode` (code mode scripts stage approval-gated tool calls that a person reviews once before they are applied). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.102
 
 ### Patch Changes

@@ -1,5 +1,25 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.103
+
+### Minor Changes
+
+- e4ca456: Add staged tool plans (ADR 0005): code mode scripts stage approval-gated writes for one human review instead of running them, and Yolk applies exactly the calls the person selects.
+
+  - Mark tools stageable with `makeTool({ approval, staging })` (`ToolDef.staging`, `isToolStageable`; optional `staging.precheck`/`staging.preview` hooks). Stageable tools need `approval` and side-effect-free validation (new `ToolRegistryError` causes `staging_unsupported_policy`, `staging_validation_required`). Direct script calls of approval-gated tools stay fail-closed.
+  - Staging requires `resolveTools(..., { interactionHost, plans: { store } })` and one `makePlanReviewTool` registration (multiple registrations fail with `plan_review_duplicate`); voice and subagent resolutions without them never get it. New `ToolPlanStore` port with `makeInMemoryToolPlanStore`, `ToolPlan`/`StagedCall` Schemas, `NestedToolExecutor.staging`, and `ResolvedToolSet.plans`. `plans.planId({ call })` sets plan ids (default the code mode call id; staged keys are `<planId>/s<n>`).
+  - Code mode scripts get a `stage(name, args)` global (`makeCodeModeTool({ staging })`; `false` turns it off, `{ maxCalls }` lowers the cap). `stage` validates the arguments and executes or ledgers nothing. It rejects duplicates, calls past `maxCalls`/`maxArgsBytes`, and mixing with direct writes in one script. Only a successful script saves its plan, reported in `CodeModeStructuredContent.codemode.plan`; a failed script discards its staged calls.
+  - A person reviews once through `review_plan({ planId, planDigest })` (response `{ selectedKeys }`, untick only). Yolk applies exactly the selected calls, in staged order and at most once, through the normal execute path and tool ledger (`<reviewCallId>/<n>`), with `onFailure: 'stop' | 'continue'`. A partial apply is `completed` with per-call statuses. `previewToolPlan`, `previewStoredToolPlan`, and `toolPlanKeyPages` page bounded previews; `ToolPlanOutcome`, `ToolPlanCallOutcome`, `ToolPlanPreview`, and `ToolPlanPreviewPage` are Effect Schemas.
+  - `beforeCall` is the only per-call host authority hook for applied calls: they bypass `beforeNestedCall` and `ToolExecutor` decorators.
+  - With a tool ledger, each apply runs behind a ledger entry for its review call, so a redelivered step waits for an in-flight apply and returns its real outcome; listings report a call `not_run` only when provable, else `unknown`. Resolve the review step with the same ledger scope on every delivery and keep ledger entries as long as the review receipts.
+  - Interactions: an optional `unknownOutcome({ call, submissionId, phase })` hook (`'replay' | 'seal'`; only `replay` may report a proven `outcome`), and raw registrations' action `validate` (`InteractionActionHandler.validate`) now receives the normalized `call` (`makeInteractionTool` action `validate` is unchanged). An accepted receipt whose call no longer validates is dispatched, so the executor reports a receipt another delivery already started or settled instead of invalid arguments.
+  - Breaking types: interaction call validators (`InteractionCallValidator`) and `InteractionPreflight.validateAction` may fail with `InteractionHostError` when host storage is unavailable. `prepareToolBatch` then fails with `ToolError` `unavailable` (a new error channel; retry the step), `validateInteractionSubmission` answers the new `InteractionAdmissionError` cause `unavailable`, and execution fails closed.
+
+### Patch Changes
+
+- Updated dependencies [e4ca456]
+  - @yolk-sdk/agent@0.1.0-canary.103
+
 ## 0.1.0-canary.102
 
 ### Patch Changes
