@@ -5,6 +5,7 @@ import {
   contentText,
   interactionJsonEquals,
   interactionRequestId,
+  InteractionHostError,
   InteractionValidationError,
   ToolCall,
   type InteractionHost,
@@ -34,6 +35,8 @@ import {
   ToolPlanStageError,
   toolPlanDigest,
   toolPlanIntegrityProblem,
+  toolPlanPrecheckConcurrency,
+  toolPlanReviewActionId,
   type StagedCallReceipt,
   type ToolPlanApplyResult,
   type ToolPlanBuilder,
@@ -42,6 +45,7 @@ import {
   type ToolPlanCallStatus,
   type ToolPlanOutcome,
   type ToolPlanPreview,
+  type ToolPlanPreviewPage,
   type ToolPlanRuntime,
   type ToolPlanStaging,
   type ToolPlanStore
@@ -72,6 +76,10 @@ export type ToolPlanResolution<Context> = {
     call: ToolCall,
     parentCallId: string
   ) => Effect.Effect<ToolResult, ToolError>
+  /** Whether the ledger records an applied call (its `isLedgered` policy), with a ledger. */
+  readonly ledgered:
+    | ((registration: ToolRegistration<Context>, call: ToolCall, parentCallId: string) => boolean)
+    | undefined
   /** The ledger's `list`, when the resolution has a ledger. */
   readonly listNested:
     | ((parentKey: string) => Effect.Effect<ReadonlyArray<ToolLedgerEntry>, ToolLedgerError>)
@@ -82,6 +90,8 @@ const stageError = (reason: ToolPlanStageError['reason'], message: string) =>
   new ToolPlanStageError({ reason, message })
 
 const isJson = Schema.is(Schema.Json)
+
+const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 const stagedCall = (fields: {
   readonly key: string
@@ -101,8 +111,8 @@ const toolList = (tools: ReadonlyArray<NestedTool>) => {
       : listed
 }
 
-// Plan ids become key prefixes and `ToolPlan.id`: non-empty and trimmed, no whitespace or `/`
-// confusion at the ends (keys are `<planId>/s<n>`).
+// Plan ids become key prefixes (`<planId>/s<n>`) and `ToolPlan.id`: non-empty and trimmed. Any
+// other characters, `/` included, are the host's choice: positional keys stay unambiguous.
 const isValidPlanId = (id: string) => id.length > 0 && id.trim() === id
 
 const makeBuilder = <Context>(
@@ -179,10 +189,12 @@ const makeBuilder = <Context>(
 
         if (early !== undefined) return yield* Effect.fail(early)
 
-        if (!isJson(params))
-          return yield* Effect.fail(
-            stageError('invalid_arguments', `${name}: staged arguments must be plain JSON.`)
-          )
+        const notJson = stageError(
+          'invalid_arguments',
+          `${name}: staged arguments must be plain JSON.`
+        )
+
+        if (!isJson(params)) return yield* Effect.fail(notJson)
 
         const validate = registration.validate
 
@@ -191,15 +203,22 @@ const makeBuilder = <Context>(
             stageError('not_stageable', `${name} has no side-effect-free validator.`)
           )
 
-        const probe = ToolCall.make({ id: `${planId}/s${calls.length + 1}`, name, params })
+        // One snapshot of the arguments is validated, digested, and stored: later changes to the
+        // caller's value cannot diverge from what was checked.
+        const canonical = canonicalToolArguments(params)
+        const snapshot = yield* decodeSnapshot(canonical).pipe(Effect.mapError(() => notJson))
+        const size = utf8ByteLength(canonical)
+        const argsDigest = sha256HexSync(canonical)
+
+        const probe = ToolCall.make({
+          id: `${planId}/s${calls.length + 1}`,
+          name,
+          params: snapshot
+        })
 
         yield* validate(resolution.businessCall(registration, probe)).pipe(
           Effect.mapError(error => stageError('invalid_arguments', error.message))
         )
-
-        const canonical = canonicalToolArguments(params)
-        const size = utf8ByteLength(canonical)
-        const argsDigest = sha256HexSync(canonical)
 
         // Committed synchronously: concurrent stages re-check every limit here.
         return yield* Effect.suspend((): Effect.Effect<StagedCallReceipt, ToolPlanStageError> => {
@@ -230,7 +249,7 @@ const makeBuilder = <Context>(
           const index = calls.length + 1
           const key = `${planId}/s${index}`
 
-          calls.push(stagedCall({ key, toolName: name, params, argsDigest }))
+          calls.push(stagedCall({ key, toolName: name, params: snapshot, argsDigest }))
           bytes += size
 
           return Effect.succeed({ staged: true, key, index })
@@ -269,7 +288,8 @@ const makeBuilder = <Context>(
   }
 }
 
-const positiveInteger = (value: number | undefined) =>
+/** A positive finite limit, floored; otherwise `undefined` (callers pick the default). */
+export const positiveInteger = (value: number | undefined) =>
   value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 
 /** `NestedToolExecutor.staging` for one nested-access call. */
@@ -398,6 +418,7 @@ const receiptMatches = (
     receipt === undefined ||
     receipt.status !== 'started' ||
     receipt.outcome !== 'submitted' ||
+    receipt.actionId !== toolPlanReviewActionId ||
     receipt.submissionId !== input.submissionId ||
     receipt.slot !== interactionRequestId(input.reviewCall) ||
     receipt.call.id !== input.reviewCall.id ||
@@ -453,8 +474,15 @@ export const makeToolPlanRuntime = <Context>(
 
   const load: ToolPlanRuntime<Context>['load'] = ({ planId, planDigest }) =>
     store.get(planId).pipe(
-      Effect.mapError(error => invalid(`The plan store is unavailable: ${error.message}`)),
-      Effect.flatMap(stored => {
+      // An outage is never a verdict on the review: callers fail closed and retry.
+      Effect.mapError(
+        error =>
+          new InteractionHostError({
+            cause: 'storage',
+            message: `The plan store is unavailable: ${error.message}`
+          })
+      ),
+      Effect.flatMap((stored): Effect.Effect<ToolPlan, InteractionValidationError> => {
         if (stored === undefined || stored.plan.id !== planId)
           return Effect.fail(invalid(`Plan ${planId} was not found.`))
 
@@ -490,6 +518,11 @@ export const makeToolPlanRuntime = <Context>(
       if (new Set(keys).size !== keys.length)
         return yield* Effect.fail(invalid('The selection repeats a staged call.'))
 
+      const selected: Array<{
+        readonly staged: StagedCall
+        readonly registration: ToolRegistration<Context>
+      }> = []
+
       for (const key of keys) {
         const staged = plan.calls.find(call => call.key === key)
 
@@ -503,26 +536,45 @@ export const makeToolPlanRuntime = <Context>(
             invalid(`${staged.toolName} (${key}) can no longer be applied from a plan.`)
           )
 
-        const precheck = registration.staging?.precheck
-
-        if (precheck !== undefined)
-          yield* Effect.suspend(() =>
-            precheck({
-              call: stagedCallFor(registration, staged, staged.key),
-              context: resolution.context
-            })
-          ).pipe(Effect.mapError(error => invalid(`${key}: ${error.message}`)))
+        selected.push({ staged, registration })
       }
+
+      yield* Effect.forEach(
+        selected,
+        ({ staged, registration }) => {
+          const precheck = registration.staging?.precheck
+
+          return precheck === undefined
+            ? Effect.void
+            : Effect.suspend(() =>
+                precheck({
+                  call: stagedCallFor(registration, staged, staged.key),
+                  context: resolution.context
+                })
+              ).pipe(Effect.mapError(error => invalid(`${staged.key}: ${error.message}`)))
+        },
+        { concurrency: toolPlanPrecheckConcurrency, discard: true }
+      )
     })
 
-  const interrupted: ToolPlanRuntime<Context>['interrupted'] = ({ reviewCall }) =>
+  const interrupted: ToolPlanRuntime<Context>['interrupted'] = ({ reviewCall, submissionId }) =>
     Effect.gen(function* () {
-      const planId = Option.match(decodeReviewParams(reviewCall.params), {
-        onNone: () => reviewCall.id,
-        onSome: params => params.planId
-      })
+      const planId = Option.getOrUndefined(decodeReviewParams(reviewCall.params))?.planId
 
-      const stored = yield* store.get(planId).pipe(Effect.orElseSucceed(() => undefined))
+      // Best-effort reads: a failing read only makes the listing less precise, never empty.
+      const stored =
+        planId === undefined
+          ? undefined
+          : yield* store.get(planId).pipe(Effect.orElseSucceed(() => undefined))
+
+      const receipt = yield* resolution.host
+        .read(interactionRequestId(reviewCall))
+        .pipe(Effect.orElseSucceed(() => undefined))
+
+      const selection =
+        receipt === undefined
+          ? undefined
+          : Option.getOrUndefined(decodeReviewResponse(receipt.data))?.selectedKeys
 
       const entries =
         resolution.listNested === undefined
@@ -536,72 +588,87 @@ export const makeToolPlanRuntime = <Context>(
               )
             )
 
-      const stagedKey = (entry: ToolLedgerEntry) => {
-        const index = Number(entry.key.slice(entry.key.lastIndexOf('/') + 1))
+      const fromEntry = (key: string, entry: ToolLedgerEntry) => {
+        const error = ledgerError(entry)
+        const fields = { key, toolName: entry.toolName, status: ledgerStatus(entry) }
 
-        return stored?.plan.calls[index - 1]?.key ?? entry.key
+        return callOutcome(
+          error === undefined
+            ? { ...fields, callId: entry.key }
+            : { ...fields, callId: entry.key, error }
+        )
       }
 
+      const plan = stored?.plan
+
+      // With the plan and the accepted selection, every staged call is accounted for: unselected
+      // calls are skipped; a selected call without a ledger entry never started when its tool is
+      // ledgered (the claim precedes execution) or when this review never claimed the plan, and
+      // is unknown otherwise (no ledger, or a tool the ledger policy skips).
       const calls =
-        entries?.map(entry => {
-          const error = ledgerError(entry)
+        plan !== undefined && selection !== undefined
+          ? plan.calls.map((staged, position) => {
+              const base = { key: staged.key, toolName: staged.toolName }
 
-          return callOutcome(
-            error === undefined
-              ? {
-                  key: stagedKey(entry),
-                  toolName: entry.toolName,
-                  status: ledgerStatus(entry),
-                  callId: entry.key
-                }
-              : {
-                  key: stagedKey(entry),
-                  toolName: entry.toolName,
-                  status: ledgerStatus(entry),
-                  callId: entry.key,
-                  error
-                }
-          )
-        }) ?? []
+              if (!selection.includes(staged.key))
+                return callOutcome({ ...base, status: 'skipped' })
 
-      const recorded = countsOf(calls)
+              const callId = `${reviewCall.id}/${position + 1}`
+              const entry = entries?.find(candidate => candidate.key === callId)
+
+              if (entry !== undefined) return fromEntry(staged.key, entry)
+
+              if (stored?.claimedBy !== submissionId)
+                return callOutcome({ ...base, status: 'not_run' })
+
+              const registration = resolution.stageable(staged.toolName)
+
+              const ledgered =
+                entries !== undefined &&
+                registration !== undefined &&
+                resolution.ledgered?.(
+                  registration,
+                  ToolCall.make({ id: callId, name: staged.toolName, params: staged.params }),
+                  reviewCall.id
+                ) === true
+
+              return callOutcome({ ...base, status: ledgered ? 'not_run' : 'unknown' })
+            })
+          : (entries?.map(entry => {
+              const position = Number(entry.key.slice(entry.key.lastIndexOf('/') + 1))
+
+              return fromEntry(plan?.calls[position - 1]?.key ?? entry.key, entry)
+            }) ?? [])
+
+      const counts = countsOf(calls)
+      const label = planId ?? `of review ${reviewCall.id}`
 
       const listing =
-        entries === undefined
-          ? 'Its applied calls cannot be listed (no tool ledger is available), so any selected call may already have been applied.'
-          : calls.length === 0
-            ? 'The tool ledger recorded no applied calls for it.'
-            : [
-                `Calls the tool ledger recorded (they were not undone): ${recorded.applied} applied, ${recorded.failed} failed, ${recorded.unknown} unknown.`,
-                ...notableLines(calls)
-              ].join('\n')
+        calls.length === 0
+          ? entries === undefined
+            ? 'Its calls cannot be listed (no tool ledger is available), so any selected call may already have been applied.'
+            : 'The tool ledger recorded no applied calls for it.'
+          : [
+              `Calls as recorded now (none were undone): ${counts.applied} applied, ${counts.failed} failed, ${counts.unknown} unknown, ${counts.not_run} not started.`,
+              ...notableLines(calls)
+            ].join('\n')
 
-      const structuredContent: ToolPlanOutcome =
-        entries === undefined
-          ? {
-              type: 'tool_plan_outcome',
-              planId,
-              state: 'interrupted',
-              calls,
-              counts: countsOf(calls),
-              ledgerUnavailable: true
-            }
-          : {
-              type: 'tool_plan_outcome',
-              planId,
-              state: 'interrupted',
-              calls,
-              counts: countsOf(calls)
-            }
+      const outcome: ToolPlanOutcome = {
+        type: 'tool_plan_outcome',
+        planId: planId ?? '',
+        state: 'interrupted',
+        calls,
+        counts
+      }
 
       return {
         outcome: 'unknown',
         content: [
-          `Applying plan ${planId} has no recorded outcome: an earlier execution started applying it and recorded none (it crashed or is still running). It was not run again.`,
+          `Applying plan ${label} has no recorded outcome: an earlier execution started applying it and recorded none (it crashed or is still running). It was not run again.`,
           listing,
-          'Calls not listed were not started or are not ledgered. Verify the current state before staging any of them again.'
+          'Unknown calls may have been applied; calls not started were not. Verify the current state before staging any of them again.'
         ].join('\n\n'),
-        structuredContent
+        structuredContent: entries === undefined ? { ...outcome, ledgerUnavailable: true } : outcome
       }
     })
 
@@ -655,7 +722,8 @@ export const makeToolPlanRuntime = <Context>(
       if (claim.success === 'taken')
         return yield* refused('another review already applied this plan; a plan is applied once.')
 
-      if (claim.success === 'same') return yield* interrupted({ reviewCall })
+      if (claim.success === 'same')
+        return yield* interrupted({ reviewCall, submissionId: input.submissionId })
 
       const outcomes: Array<ToolPlanCallOutcome> = []
       let stopped = false
@@ -676,34 +744,46 @@ export const makeToolPlanRuntime = <Context>(
         const callId = `${reviewCall.id}/${position + 1}`
         const registration = resolution.stageable(staged.toolName)
 
-        const attempt: Effect.Effect<string | undefined> =
-          registration === undefined
-            ? Effect.succeed(`${staged.toolName} can no longer be applied from a plan.`)
-            : Effect.gen(function* () {
-                const call = ToolCall.make({
-                  id: callId,
-                  name: staged.toolName,
-                  params: staged.params
-                })
+        // Never attempted: no call id (it was neither admitted nor executed).
+        if (registration === undefined) {
+          outcomes.push(
+            callOutcome({
+              ...base,
+              status: 'failed',
+              error: `${staged.toolName} can no longer be applied from a plan.`
+            })
+          )
 
-                const beforeCall = input.beforeCall
+          if (input.onFailure === 'stop') stopped = true
 
-                if (beforeCall !== undefined) {
-                  const admitted = yield* Effect.suspend(() =>
-                    beforeCall({ call, staged, context: resolution.context })
-                  ).pipe(Effect.result)
+          continue
+        }
 
-                  if (Result.isFailure(admitted)) return admitted.failure
-                }
+        const attempt: Effect.Effect<string | undefined> = Effect.gen(function* () {
+          const call = ToolCall.make({
+            id: callId,
+            name: staged.toolName,
+            params: staged.params
+          })
 
-                const executed = yield* resolution
-                  .execute(registration, call, reviewCall.id)
-                  .pipe(Effect.result)
+          const beforeCall = input.beforeCall
 
-                if (Result.isFailure(executed)) return executed.failure.message
+          if (beforeCall !== undefined) {
+            const admitted = yield* Effect.suspend(() =>
+              beforeCall({ call, staged, context: resolution.context })
+            ).pipe(Effect.result)
 
-                return executed.success.isError === true ? resultText(executed.success) : undefined
-              })
+            if (Result.isFailure(admitted)) return admitted.failure
+          }
+
+          const executed = yield* resolution
+            .execute(registration, call, reviewCall.id)
+            .pipe(Effect.result)
+
+          if (Result.isFailure(executed)) return executed.failure.message
+
+          return executed.success.isError === true ? resultText(executed.success) : undefined
+        })
 
         const error = yield* attempt
 
@@ -838,4 +918,67 @@ export const previewToolPlanWith =
         },
         { concurrency: 4 }
       )
+    })
+
+/** One page of a stored plan's previews (`previewStoredToolPlan`): loaded from the resolution's
+ * plan store with the review's scope, integrity, and digest checks, reporting the claim state.
+ */
+export const previewStoredToolPlanWith =
+  <Context>(resolution: ToolPlanResolution<Context>) =>
+  (input: {
+    readonly planId: string
+    readonly planDigest: string
+    readonly offset?: number
+    readonly limit?: number
+  }): Effect.Effect<ToolPlanPreviewPage, ToolPlanPreviewError> =>
+    Effect.gen(function* () {
+      const stored = yield* resolution.store.get(input.planId).pipe(
+        Effect.mapError(
+          error =>
+            new ToolPlanPreviewError({
+              cause: 'storage',
+              message: `The plan store is unavailable: ${error.message}`
+            })
+        )
+      )
+
+      if (stored === undefined || stored.plan.id !== input.planId)
+        return yield* Effect.fail(
+          new ToolPlanPreviewError({
+            cause: 'not_found',
+            message: `Plan ${input.planId} was not found.`
+          })
+        )
+
+      const plan = stored.plan
+
+      if (plan.digest !== input.planDigest)
+        return yield* Effect.fail(
+          new ToolPlanPreviewError({
+            cause: 'invalid_plan',
+            message: `planDigest does not match plan ${input.planId}.`
+          })
+        )
+
+      const offset = Math.max(0, Math.floor(input.offset ?? 0))
+
+      const limit = Math.min(
+        maxToolPlanPreviewKeys,
+        positiveInteger(input.limit) ?? maxToolPlanPreviewKeys
+      )
+
+      const keys = plan.calls.slice(offset, offset + limit).map(call => call.key)
+      const previews = yield* previewToolPlanWith(resolution)({ plan, keys })
+      const nextOffset = offset + keys.length
+
+      const page: ToolPlanPreviewPage = {
+        planId: plan.id,
+        planDigest: plan.digest,
+        total: plan.calls.length,
+        offset,
+        claimed: stored.claimedBy !== undefined,
+        previews
+      }
+
+      return nextOffset < plan.calls.length ? { ...page, nextOffset } : page
     })

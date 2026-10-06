@@ -258,6 +258,7 @@ export type {
   InputToolHandler,
   InteractionHost,
   InteractionOutcome,
+  InteractionCallValidator,
   InteractionPreflight,
   InteractionRef,
   InteractionResponseStructuredContent,

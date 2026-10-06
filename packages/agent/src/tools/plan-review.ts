@@ -13,10 +13,12 @@ import {
   ToolPlanPreviewError,
   ToolPlanReviewParams,
   ToolPlanReviewResponse,
+  toolPlanReviewActionId,
   type ToolPlan,
   type ToolPlanBeforeCall,
   type ToolPlanFailurePolicy,
-  type ToolPlanPreview
+  type ToolPlanPreview,
+  type ToolPlanPreviewPage
 } from './plan.ts'
 import {
   toolJsonSchemaFromSchema,
@@ -26,14 +28,13 @@ import {
   type ToolRegistration
 } from './registry.ts'
 
+export { toolPlanReviewActionId } from './plan.ts'
+
 /** Default name of the plan review tool. */
 export const toolPlanReviewToolName = 'review_plan'
 
 /** Default `InteractionDescriptor.kind` (host renderer key) of the plan review tool. */
 export const toolPlanReviewRenderer = 'tool_plan_review'
-
-/** The plan review tool's only action; cancelling the interaction applies nothing. */
-export const toolPlanReviewActionId = 'apply'
 
 export type MakePlanReviewToolOptions<Context> = {
   /** Default `review_plan`. */
@@ -47,8 +48,10 @@ export type MakePlanReviewToolOptions<Context> = {
   readonly actionLabel?: string
   /** Default `write`. */
   readonly access?: ToolAccess
-  /** Admits or rejects each selected call right before it runs (run-authority checks); a failure
-   * records the call `failed` without running it.
+  /** Admits or rejects each selected call right before it runs; a failure records the call
+   * `failed` without running it. The only per-call host authority hook for applied calls: they
+   * bypass code mode's `beforeNestedCall` and `ToolExecutor` decorators, so wire your
+   * run-authority (nested-write) authorizer here. See `ToolPlanBeforeCall`.
    */
   readonly beforeCall?: ToolPlanBeforeCall<Context>
   /** After a failed call: `stop` (default; later selected calls are `not_run`) or `continue`. */
@@ -187,7 +190,8 @@ export const makePlanReviewTool = <Context>(
             )
         }
       },
-      unknownOutcome: ({ call }) => runtime.interrupted({ reviewCall: call })
+      unknownOutcome: ({ call, submissionId }) =>
+        runtime.interrupted({ reviewCall: call, submissionId })
     })
   }
 }
@@ -220,4 +224,48 @@ export const previewToolPlan = (input: {
     plan: input.plan,
     keys: input.keys ?? input.plan.calls.slice(0, maxToolPlanPreviewKeys).map(call => call.key)
   })
+}
+
+type StoredPreviewRequestFields = {
+  planId: string
+  planDigest: string
+  offset?: number
+  limit?: number
+}
+
+/**
+ * One page of previews of a stored plan, for host review screens that only have the review call's
+ * `{ planId, planDigest }`: loads the plan from the resolution's plan store (`not_found`,
+ * `storage`), refuses another digest, scope, or a plan failing its integrity checks
+ * (`invalid_plan`), and reports whether a review already claimed it. Pages hold at most
+ * `maxToolPlanPreviewKeys` calls from `offset` (default 0); follow `nextOffset`.
+ */
+export const previewStoredToolPlan = (input: {
+  readonly toolSet: ResolvedToolSet
+  readonly planId: string
+  readonly planDigest: string
+  readonly offset?: number
+  readonly limit?: number
+}): Effect.Effect<ToolPlanPreviewPage, ToolPlanPreviewError> => {
+  const plans = input.toolSet.plans
+
+  if (plans === undefined)
+    return Effect.fail(
+      new ToolPlanPreviewError({
+        cause: 'unavailable',
+        message:
+          'This tool set has no staged tool plans (resolve it with plans and an interaction host).'
+      })
+    )
+
+  const page: StoredPreviewRequestFields = {
+    planId: input.planId,
+    planDigest: input.planDigest
+  }
+
+  if (input.offset !== undefined) page.offset = input.offset
+
+  if (input.limit !== undefined) page.limit = input.limit
+
+  return plans.previewStored(page)
 }

@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import type { ToolError } from '@yolk-sdk/agent/loop'
 import type {
   InteractionBusinessOutcome,
+  InteractionHostError,
   InteractionValidationError,
   ToolCall
 } from '@yolk-sdk/agent/protocol'
@@ -26,9 +27,10 @@ export class StagedCall extends Schema.Class<StagedCall>('StagedCall')({
 }) {}
 
 /**
- * A staged tool plan: the ordered calls one script staged. `id` is the staging (code mode) call id,
- * `scope` the plan store scope it was saved in, and `digest` the `toolPlanDigest` of its calls.
- * Plain wire data: persist it with `Schema.toCodecJson(ToolPlan)`.
+ * A staged tool plan: the ordered calls one script staged. `id` is the host's plan id for the
+ * staging (code mode) call (`ToolPlanOptions.planId`, default the call id), `scope` the plan store
+ * scope it was saved in, and `digest` the `toolPlanDigest` of its calls. Plain wire data: persist
+ * it with `Schema.toCodecJson(ToolPlan)`.
  */
 export class ToolPlan extends Schema.Class<ToolPlan>('ToolPlan')({
   id: NonEmptyTrimmedString,
@@ -53,6 +55,9 @@ export const ToolPlanReviewResponse = Schema.Struct({
 })
 
 export type ToolPlanReviewResponse = typeof ToolPlanReviewResponse.Type
+
+/** The plan review tool's only action; cancelling the interaction applies nothing. */
+export const toolPlanReviewActionId = 'apply'
 
 /** Digest of one staged call's arguments: the `toolLedgerArgs` `argsDigest` format. */
 export const stagedCallDigest = (params: unknown): string =>
@@ -107,14 +112,27 @@ export type StoredToolPlan = {
  * stages and reviews them (a review usually runs in a later turn or run than the script, so the
  * scope must outlive one run). Every operation is keyed within `scope`.
  *
- * - `put` inserts a plan once, keyed by `plan.id`: an existing plan with the same `digest` is a
- *   no-op (a re-executed script stages the same plan); a different digest fails with `conflict`.
+ * - `put` inserts a plan once, keyed by `plan.id`, atomically: insert-or-compare in one statement
+ *   or transaction (for example `INSERT ... ON CONFLICT DO NOTHING`, then read the stored digest).
+ *   An existing plan with the same `digest` is a no-op (a re-executed script stages the same plan);
+ *   a different digest fails with `conflict`. Never overwrite a stored plan.
  * - `get` returns the plan and its claim, or `undefined`.
- * - `claim` atomically records the review submission that applies the plan: `claimed` when it was
- *   unclaimed, `same` when this submission already owns it, `taken` when another one does. A plan
- *   is applied at most once; claims are never released.
+ * - `claim` atomically records the review submission that applies the plan, as a single
+ *   conditional update (for example `UPDATE ... SET claimed_by = $submission WHERE claimed_by IS
+ *   NULL`, then read the owner when no row changed): `claimed` when it was unclaimed, `same` when
+ *   this submission already owns it, `taken` when another one does. A plan is applied at most
+ *   once; claims are never released. Submission ids must be unique within the store's scope (the
+ *   interaction host allocates them; never reuse one for another review), or `same` could hand an
+ *   unrelated review an earlier review's claim.
  *
- * Operations must be interruptible, like `ToolLedgerStore` ones.
+ * Storage: a JSON(B) column round trip is safe. Digests are computed over canonical JSON (sorted
+ * keys), so reordered object keys still match; decode stored plans with
+ * `Schema.toCodecJson(ToolPlan)`. Retention is host policy: an unreviewed plan is inert (nothing
+ * runs without a review), so expire unclaimed plans after the conversation's review window, and
+ * keep claimed ones as long as the tool ledger entries they explain.
+ *
+ * Operations must be interruptible, like `ToolLedgerStore` ones. Store failures never become a
+ * verdict on a review: they surface as storage errors (the loop fails the batch closed).
  */
 export type ToolPlanStore = {
   readonly scope: string
@@ -308,35 +326,60 @@ export type ToolPlanFailurePolicy = 'stop' | 'continue'
  * rejected by `beforeCall`), `skipped` (not selected), `not_run` (selected, after a failure under
  * `stop`), or `unknown` (an interrupted apply's call that started without a recorded result).
  */
-export type ToolPlanCallStatus = 'applied' | 'failed' | 'skipped' | 'not_run' | 'unknown'
+export const ToolPlanCallStatus = Schema.Literals([
+  'applied',
+  'failed',
+  'skipped',
+  'not_run',
+  'unknown'
+])
 
-export type ToolPlanCallOutcome = {
+export type ToolPlanCallStatus = typeof ToolPlanCallStatus.Type
+
+/** One staged call's outcome in a plan review result. */
+export const ToolPlanCallOutcome = Schema.Struct({
   /** The staged key (`<planId>/s<n>`). */
-  readonly key: string
-  readonly toolName: string
-  readonly status: ToolPlanCallStatus
-  /** Ledger key of the applied call (`<reviewCallId>/<n>`), when it was attempted. */
-  readonly callId?: string
+  key: Schema.String,
+  toolName: Schema.String,
+  status: ToolPlanCallStatus,
+  /** Ledger key of the applied call (`<reviewCallId>/<n>`), only when it was attempted
+   * (`beforeCall` or execution started).
+   */
+  callId: Schema.optionalKey(Schema.String),
   /** Truncated error text of a failed call. */
-  readonly error?: string
-}
+  error: Schema.optionalKey(Schema.String)
+})
 
-export type ToolPlanCallCounts = { readonly [Status in ToolPlanCallStatus]: number }
+export type ToolPlanCallOutcome = typeof ToolPlanCallOutcome.Type
+
+export const ToolPlanCallCounts = Schema.Struct({
+  applied: Schema.Number,
+  failed: Schema.Number,
+  skipped: Schema.Number,
+  not_run: Schema.Number,
+  unknown: Schema.Number
+})
+
+export type ToolPlanCallCounts = typeof ToolPlanCallCounts.Type
 
 /**
- * `result` of a plan review's `interaction_outcome`: `applied` (the selection ran; per-call
- * statuses), `refused` (nothing was applied: plan missing, changed, already applied, or no accepted
- * review), or `interrupted` (an earlier execution started applying and recorded no outcome; calls
- * are listed from the tool ledger, or `ledgerUnavailable`).
+ * `structuredContent.result` of a plan review's `interaction_outcome`: `applied` (the selection
+ * ran; per-call statuses), `refused` (nothing was applied: plan missing, changed, already applied,
+ * or no accepted review), or `interrupted` (an earlier execution started applying and recorded no
+ * outcome; calls are listed from the tool ledger and the receipt's selection, with
+ * `ledgerUnavailable` when there is no ledger). Plain JSON; decode it with this Schema across
+ * process or network boundaries.
  */
-export type ToolPlanOutcome = {
-  readonly type: 'tool_plan_outcome'
-  readonly planId: string
-  readonly state: 'applied' | 'refused' | 'interrupted'
-  readonly calls: ReadonlyArray<ToolPlanCallOutcome>
-  readonly counts: ToolPlanCallCounts
-  readonly ledgerUnavailable?: true
-}
+export const ToolPlanOutcome = Schema.Struct({
+  type: Schema.Literal('tool_plan_outcome'),
+  planId: Schema.String,
+  state: Schema.Literals(['applied', 'refused', 'interrupted']),
+  calls: Schema.Array(ToolPlanCallOutcome),
+  counts: ToolPlanCallCounts,
+  ledgerUnavailable: Schema.optionalKey(Schema.Literal(true))
+})
+
+export type ToolPlanOutcome = typeof ToolPlanOutcome.Type
 
 export type ToolPlanApplyResult = {
   readonly outcome: InteractionBusinessOutcome
@@ -344,8 +387,14 @@ export type ToolPlanApplyResult = {
   readonly structuredContent: ToolPlanOutcome
 }
 
-/** `beforeCall` of a plan review: admits or rejects each selected call before it runs (same shape
- * as code mode's `beforeNestedCall`). A failure records the call `failed` without executing it.
+/**
+ * `beforeCall` of a plan review: admits or rejects each selected call right before it runs (same
+ * shape as code mode's `beforeNestedCall`). A failure records the call `failed` without executing
+ * it. This is the only per-call host authority hook for applied plan calls: they run inside the
+ * review's interaction action through the resolved execute path, so code mode's
+ * `beforeNestedCall` and any decorator around the `ToolExecutor` never see them (registration
+ * wrappers and the tool ledger still apply). Wire your run-authority or nested-write authorizer
+ * here; without it, applied calls are checked only by the tools themselves.
  */
 export type ToolPlanBeforeCall<Context> = (input: {
   readonly call: ToolCall
@@ -364,9 +413,10 @@ export type ToolPlanRuntime<Context> = {
   readonly load: (input: {
     readonly planId: string
     readonly planDigest: string
-  }) => Effect.Effect<ToolPlan, InteractionValidationError>
+  }) => Effect.Effect<ToolPlan, InteractionValidationError | InteractionHostError>
   /** Selection checks: non-empty, no duplicates, keys of the plan, tools still stageable, and
-   * each tool's `staging.precheck` with the resolution's (fresh) context.
+   * each tool's `staging.precheck` with the resolution's (fresh) context (at most
+   * `toolPlanPrecheckConcurrency` at a time).
    */
   readonly validateSelection: (input: {
     readonly plan: ToolPlan
@@ -385,31 +435,60 @@ export type ToolPlanRuntime<Context> = {
   /** The listing for an apply that started and recorded no outcome (outcome `unknown`). */
   readonly interrupted: (input: {
     readonly reviewCall: ToolCall
+    readonly submissionId: string
   }) => Effect.Effect<ToolPlanApplyResult>
 }
 
-/** One entry of `previewToolPlan`. */
-export type ToolPlanPreview =
-  | {
-      readonly key: string
-      readonly status: 'ok'
-      readonly toolName: string
-      readonly params: Schema.Json
-      /** The tool's `staging.preview`, when it has one. */
-      readonly preview?: Schema.Json
-    }
-  | {
-      readonly key: string
-      readonly status: 'error'
-      readonly toolName?: string
-      readonly message: string
-    }
+/** One entry of `previewToolPlan`: the staged arguments and the tool's optional bounded
+ * `staging.preview`, or why the key cannot be previewed. Plain JSON; decode it with this Schema
+ * across process or network boundaries.
+ */
+export const ToolPlanPreview = Schema.Union([
+  Schema.Struct({
+    key: Schema.String,
+    status: Schema.Literal('ok'),
+    toolName: Schema.String,
+    params: Schema.Json,
+    /** The tool's `staging.preview`, when it has one. */
+    preview: Schema.optionalKey(Schema.Json)
+  }),
+  Schema.Struct({
+    key: Schema.String,
+    status: Schema.Literal('error'),
+    toolName: Schema.optionalKey(Schema.String),
+    message: Schema.String
+  })
+])
+
+export type ToolPlanPreview = typeof ToolPlanPreview.Type
+
+/** One page of `previewStoredToolPlan`: previews of `limit` staged calls from `offset`, the
+ * plan's call count, the next page's offset (absent on the last page), and whether a review
+ * already claimed (applied or is applying) the plan.
+ */
+export const ToolPlanPreviewPage = Schema.Struct({
+  planId: Schema.String,
+  planDigest: Schema.String,
+  total: Schema.Number,
+  offset: Schema.Number,
+  nextOffset: Schema.optionalKey(Schema.Number),
+  claimed: Schema.Boolean,
+  previews: Schema.Array(ToolPlanPreview)
+})
+
+export type ToolPlanPreviewPage = typeof ToolPlanPreviewPage.Type
 
 export class ToolPlanPreviewError extends Schema.TaggedError<ToolPlanPreviewError>()(
   'ToolPlanPreviewError',
   {
     message: Schema.String,
-    cause: Schema.Literals(['unavailable', 'invalid_plan', 'page_too_large'])
+    cause: Schema.Literals([
+      'unavailable',
+      'not_found',
+      'storage',
+      'invalid_plan',
+      'page_too_large'
+    ])
   }
 ) {}
 
@@ -419,6 +498,22 @@ export const maxToolPlanPreviewKeys = 50
 /** UTF-8 bytes of one preview's compact JSON; larger previews become error entries. */
 export const maxToolPlanPreviewBytes = 16 * 1024
 
+/** Staged keys of a plan in pages of at most `maxToolPlanPreviewKeys` (for `previewToolPlan`). */
+export const toolPlanKeyPages = (
+  plan: ToolPlan,
+  pageSize: number = maxToolPlanPreviewKeys
+): ReadonlyArray<ReadonlyArray<string>> => {
+  const size = Math.max(1, Math.min(maxToolPlanPreviewKeys, Math.floor(pageSize)))
+  const keys = plan.calls.map(call => call.key)
+
+  return Array.from({ length: Math.ceil(keys.length / size) }, (_, page) =>
+    keys.slice(page * size, page * size + size)
+  )
+}
+
+/** Most selected calls whose `staging.precheck` runs at once. */
+export const toolPlanPrecheckConcurrency = 8
+
 /** Plan capabilities of a resolution with staging (`ResolvedToolSet.plans`). */
 export type ResolvedToolPlans = {
   readonly store: ToolPlanStore
@@ -427,4 +522,10 @@ export type ResolvedToolPlans = {
     readonly plan: ToolPlan
     readonly keys: ReadonlyArray<string>
   }) => Effect.Effect<ReadonlyArray<ToolPlanPreview>, ToolPlanPreviewError>
+  readonly previewStored: (input: {
+    readonly planId: string
+    readonly planDigest: string
+    readonly offset?: number
+    readonly limit?: number
+  }) => Effect.Effect<ToolPlanPreviewPage, ToolPlanPreviewError>
 }

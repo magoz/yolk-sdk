@@ -77,7 +77,12 @@ selecting the staged keys. `resolveTools(..., { plans: { store }, interactionHos
 plan review registration enables it; without them there is no staging and the review tool is
 unavailable. The plan executor (`ToolPlanRuntime.apply`) re-reads the review receipt, claims the
 plan once, and runs selected calls in staged order through `executeRegistration` (ids
-`<reviewCallId>/<n>`, ledger parent the review call). `previewToolPlan` renders bounded previews.
+`<reviewCallId>/<n>`, ledger parent the review call). Applied calls bypass code mode's
+`beforeNestedCall` and `ToolExecutor` decorators: the review's `beforeCall` is the only per-call
+host authority hook. `previewStoredToolPlan` (paged, from the store) and `previewToolPlan` render
+bounded previews; `ToolPlanOutcome` and `ToolPlanPreview*` are Effect Schemas for decoding results
+across process boundaries. Plan store outages fail the batch closed at preflight (never an
+invalid-arguments verdict).
 
 ## Output schemas, exposure, and nested tool access
 

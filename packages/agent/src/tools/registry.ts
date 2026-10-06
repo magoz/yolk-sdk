@@ -1,5 +1,6 @@
 import {
   Array as Arr,
+  Duration,
   Effect,
   Exit,
   Layer,
@@ -26,6 +27,8 @@ import {
   validInteractionReceipt,
   type InputToolHandler,
   type InteractionBusinessOutcome,
+  type InteractionCallValidator,
+  type InteractionHostError,
   type InteractionRef,
   type InteractionHost,
   type InteractionOutcome,
@@ -70,6 +73,8 @@ import {
 import {
   makeToolPlanRuntime,
   makeToolPlanStaging,
+  positiveInteger,
+  previewStoredToolPlanWith,
   previewToolPlanWith,
   type ToolPlanResolution
 } from './plan-runtime.ts'
@@ -302,7 +307,7 @@ export type InteractionActionHandler<Context> = {
     readonly context: Context
     /** The interaction call (normalized arguments) the response answers. */
     readonly call: ToolCall
-  }) => Effect.Effect<void, Schema.SchemaError | InteractionValidationError>
+  }) => Effect.Effect<void, Schema.SchemaError | InteractionValidationError | InteractionHostError>
   readonly execute: (input: {
     readonly data: unknown
     readonly context: Context
@@ -318,8 +323,11 @@ export type InteractionActionResult = {
 }
 
 export type InteractionToolRegistration<Context> = {
-  /** Validate model-supplied context before opening a request or accepting a response. */
-  readonly validateCall: InteractionResponseValidator
+  /** Validate model-supplied context before opening a request or accepting a response. An
+   * `InteractionHostError` means storage the validator reads is unavailable (see
+   * `InteractionCallValidator`), never that the call is invalid.
+   */
+  readonly validateCall: InteractionCallValidator
   readonly validateResponse: InteractionResponseValidator
   /** Server-defined named actions keyed by action id. */
   readonly actions: Readonly<Record<string, InteractionActionHandler<Context>>>
@@ -875,9 +883,6 @@ const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistra
   return Arr.findFirst(names, (name, index) => names.indexOf(name) !== index)
 }
 
-const positiveLimit = (value: number | undefined, fallback: number) =>
-  value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
-
 // Protocol owns names without importing registrations back into this module.
 const loopOwnedToolNames: ReadonlySet<string> = new Set([questionToolName, subagentToolName])
 
@@ -886,6 +891,9 @@ const interactionToolError = (input: {
   readonly cause: ToolError['cause']
   readonly message: string
 }) => new ToolError({ tool: input.tool, cause: input.cause, message: input.message })
+
+/** Bound of an interaction's `unknownOutcome` description; past it the generic notice is used. */
+const interactionUnknownDescriptionTimeout = Duration.seconds(3)
 
 const hostErrorToToolError = (tool: string) => (error: unknown) =>
   interactionToolError({
@@ -963,17 +971,22 @@ const executeInteractionTool = <Context>(input: {
       return Effect.suspend(() =>
         describe({ call: stored.call, submissionId: stored.submissionId })
       ).pipe(
+        // Interruptible only inside its own bound (finalizers run with a pending interrupt).
+        Effect.interruptible,
+        Effect.timeoutOption(interactionUnknownDescriptionTimeout),
         Effect.map(described =>
-          makeInteractionToolResult({
-            toolCallId: stored.call.id,
-            requestId: stored.slot,
-            slot: stored.slot,
-            submissionId: stored.submissionId,
-            actionId: stored.actionId ?? '',
-            outcome: 'unknown',
-            content: described.content,
-            structuredContent: described.structuredContent
-          })
+          Option.isNone(described)
+            ? genericUnknownResult()
+            : makeInteractionToolResult({
+                toolCallId: stored.call.id,
+                requestId: stored.slot,
+                slot: stored.slot,
+                submissionId: stored.submissionId,
+                actionId: stored.actionId ?? '',
+                outcome: 'unknown',
+                content: described.value.content,
+                structuredContent: described.value.structuredContent
+              })
         ),
         Effect.catchDefect(defect =>
           Effect.logWarning(
@@ -1009,29 +1022,42 @@ const executeInteractionTool = <Context>(input: {
       )
     }
 
-    yield* handler
-      .validateCall(businessCall.params)
-      .pipe(
-        Effect.mapError(error =>
-          interactionToolError({ tool: name, cause: 'validation', message: error.message })
-        )
-      )
-    yield* handler
-      .validateResponse(data)
-      .pipe(
-        Effect.mapError(error =>
-          interactionToolError({ tool: name, cause: 'validation', message: error.message })
-        )
-      )
+    const validateAction = action.validate
 
-    if (action.validate !== undefined) {
-      yield* action
-        .validate({ data, context: input.context, call: businessCall })
-        .pipe(
-          Effect.mapError(error =>
-            interactionToolError({ tool: name, cause: 'validation', message: error.message })
-          )
+    const validated = yield* Effect.gen(function* () {
+      yield* handler.validateCall(businessCall.params)
+      yield* handler.validateResponse(data)
+
+      if (validateAction !== undefined)
+        yield* validateAction({ data, context: input.context, call: businessCall })
+    }).pipe(Effect.result)
+
+    if (Result.isFailure(validated)) {
+      const failure = validated.failure
+
+      // Storage a validator reads is unavailable: fail closed (nothing runs), like ledger claims.
+      if (Predicate.isTagged(failure, 'InteractionHostError'))
+        return yield* Effect.fail(
+          interactionToolError({
+            tool: name,
+            cause: 'unavailable',
+            message: `Interaction storage is unavailable; no dispatch occurred: ${failure.message}`
+          })
         )
+
+      // Another execution may have started or settled this receipt since it was read (for
+      // example a redelivered step): report that observation, not an invalid-arguments result.
+      const current = yield* host.read(ref.slot).pipe(Effect.mapError(hostErrorToToolError(name)))
+
+      if (current !== undefined && validInteractionReceipt(current, input.call, ref)) {
+        if (current.status === 'settled' && current.result !== undefined) return current.result
+
+        if (current.status === 'started') return yield* unknownResult()
+      }
+
+      return yield* Effect.fail(
+        interactionToolError({ tool: name, cause: 'validation', message: failure.message })
+      )
     }
 
     return yield* Effect.uninterruptibleMask(restore =>
@@ -1071,11 +1097,17 @@ const executeInteractionTool = <Context>(input: {
         // Bounded finalization attempts durable uncertainty on defects/interruption (described by
         // the registration when it can, for example a plan review's ledgered calls). It does
         // not replace the original Cause, nor mask the business Effect indefinitely.
-        const recoverSettlement = Effect.suspend(() =>
-          unknownResult().pipe(
-            Effect.flatMap(result => host.settle(claim.token, { status: 'unknown', result }))
-          )
-        ).pipe(Effect.interruptible, Effect.timeout('5 seconds'), Effect.exit)
+        // The description has its own bound (falling back to the generic notice), so settlement
+        // always keeps its full budget and the receipt is sealed.
+        const recoverSettlement = unknownResult().pipe(
+          Effect.flatMap(result =>
+            Effect.suspend(() => host.settle(claim.token, { status: 'unknown', result })).pipe(
+              Effect.interruptible,
+              Effect.timeout('5 seconds')
+            )
+          ),
+          Effect.exit
+        )
 
         const sealUnknown = recoverSettlement.pipe(Effect.asVoid)
 
@@ -1474,8 +1506,8 @@ export const resolveTools = <Context>(
         ? undefined
         : {
             store: plans.store,
-            maxCalls: positiveLimit(plans.maxCalls, defaultToolPlanMaxCalls),
-            maxArgsBytes: positiveLimit(plans.maxArgsBytes, defaultToolPlanMaxArgsBytes),
+            maxCalls: positiveInteger(plans.maxCalls) ?? defaultToolPlanMaxCalls,
+            maxArgsBytes: positiveInteger(plans.maxArgsBytes) ?? defaultToolPlanMaxArgsBytes,
             host: interactionHost,
             context,
             reviewToolName: reviewRegistration.tool.def.name,
@@ -1495,6 +1527,22 @@ export const resolveTools = <Context>(
                   onSome: match => executeRegistration(match, call, undefined, parentCallId)
                 }
               ),
+            ledgered:
+              ledger === undefined
+                ? undefined
+                : (registration, call, parentCallId) => {
+                    const match = stageableRegistrations.find(item => item.tool === registration)
+
+                    return (
+                      match !== undefined &&
+                      ledger.isLedgered({
+                        call,
+                        moduleId: match.moduleId,
+                        access: registration.access,
+                        parentCallId
+                      })
+                    )
+                  },
             listNested: ledger === undefined ? undefined : ledger.store.list
           }
 
@@ -1757,7 +1805,8 @@ export const resolveTools = <Context>(
           plans: {
             store: planResolution.store,
             reviewToolName: planResolution.reviewToolName,
-            preview: previewToolPlanWith(planResolution)
+            preview: previewToolPlanWith(planResolution),
+            previewStored: previewStoredToolPlanWith(planResolution)
           }
         }
   })
