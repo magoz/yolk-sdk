@@ -289,7 +289,12 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   /** Present only on generalized typed input tools. Never combined with approval/background. */
   input: Schema.optional(InputDescriptor),
   /** Present only on action-backed interaction tools. Never combined with approval/background/input. */
-  interaction: Schema.optional(InteractionDescriptor)
+  interaction: Schema.optional(InteractionDescriptor),
+  /** Host-marked stageable: code mode scripts may record calls of this approval-gated tool into a
+   * staged tool plan that a person reviews once (ADR 0005). Only valid with `approval` and without
+   * input, interaction, background, or `callableBy: 'model'`. Direct script calls stay fail-closed.
+   */
+  staging: Schema.optional(Schema.Literal(true))
 }) {}
 
 export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
@@ -1389,6 +1394,21 @@ export const isCodeModeFailClosed = (def: ToolDef): boolean =>
  */
 export const isCodeModeCallable = (def: ToolDef): boolean =>
   def.callableBy !== 'model' && !isCodeModeFailClosed(def)
+
+/** Scripts may stage (never directly call) the tool into a reviewed plan: host-marked
+ * `staging`, approval-gated, not `callableBy: 'model'`, and outside every other fail-closed kind
+ * (input, interaction, background, `question`, `subagent`).
+ */
+export const isToolStageable = (def: ToolDef): boolean =>
+  def.staging === true &&
+  def.approval !== undefined &&
+  def.callableBy !== 'model' &&
+  def.input === undefined &&
+  def.interaction === undefined &&
+  def.background !== true &&
+  def.execution === undefined &&
+  def.name !== questionToolName &&
+  def.name !== subagentToolName
 
 /** Provider-facing: everything except `codemode`-only definitions. */
 export const isProviderToolDef = (def: ToolDef): boolean => def.callableBy !== 'codemode'

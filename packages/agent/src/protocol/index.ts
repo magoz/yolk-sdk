@@ -210,6 +210,7 @@ export {
   isCodeModeCallable,
   isCodeModeFailClosed,
   isProviderToolDef,
+  isToolStageable,
   makeBackgroundToolAcceptedResult,
   providerToolDefs,
   ToolCallableBy,

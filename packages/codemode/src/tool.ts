@@ -9,6 +9,7 @@ import {
   FiberSet,
   Option,
   Predicate,
+  Result,
   Scope
 } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -32,9 +33,12 @@ import {
 import {
   makeTool,
   type NestedToolExecutor,
+  type StagedCallReceipt,
   type ToolExecutionInput,
   type ToolLedgerAbandonedInput,
   type ToolLedgerEntry,
+  type ToolPlanBuilder,
+  type ToolPlanStageError,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
@@ -64,6 +68,7 @@ import type {
   CodeModeInterruptedCall,
   CodeModeInterruptedCalls,
   CodeModeInterruptedCallStatus,
+  CodeModeStagedPlan,
   CodeModeStructuredContent
 } from './store.ts'
 
@@ -144,6 +149,18 @@ export type MakeCodeModeToolOptions<Context> = {
    * throw) is logged and never changes the call's result.
    */
   readonly afterNestedCall?: (input: CodeModeAfterNestedCallInput<Context>) => Effect.Effect<void>
+  /**
+   * Staged tool plans (ADR 0005). When the resolution offers staging (`resolveTools(..., { plans,
+   * interactionHost })` with a plan review tool), scripts get `stage(name, args)` for stageable
+   * approval-gated tools. `false` turns it off for this tool; `maxCalls` may only lower the
+   * resolution's cap.
+   */
+  readonly staging?: CodeModeStagingOptions | false
+}
+
+export type CodeModeStagingOptions = {
+  /** Staged calls per script; `stage` rejects past it. At most the resolution's `maxCalls`. */
+  readonly maxCalls?: number
 }
 
 /** Outcome of a nested call for `afterNestedCall`. */
@@ -310,6 +327,55 @@ const discoveryGlobals = (
   }
 ]
 
+type StageFork = (
+  effect: Effect.Effect<StagedCallReceipt, ToolPlanStageError>,
+  options: { readonly signal: AbortSignal }
+) => Fiber.Fiber<StagedCallReceipt, ToolPlanStageError>
+
+/** `stage(name, args)`: records one call into the script's plan (never runs it). */
+const stageGlobal = (plan: ToolPlanBuilder, fork: StageFork): CodeModeExecutorGlobal => ({
+  name: 'stage',
+  spread: true,
+  signature: '(name: string, args: object): Promise<{ staged: true; key: string; index: number }>',
+  description:
+    'Record a call of a stageable tool into this script’s plan for a person to review; it does not run.',
+  execute: (args, { signal }) => {
+    const [name, params] = Array.isArray(args) ? args : []
+
+    if (signal.aborted) return Promise.reject(new Error('stage was cancelled.'))
+
+    if (!Predicate.isString(name))
+      return Promise.reject(new Error('stage: the first argument must be a tool name.'))
+
+    return new Promise((resolve, reject) => {
+      fork(plan.stage({ name, params: params === undefined ? {} : params }), {
+        signal
+      }).addObserver(exit => {
+        if (Exit.isSuccess(exit)) {
+          resolve(exit.value)
+
+          return
+        }
+
+        const error = Cause.findErrorOption(exit.cause)
+
+        reject(
+          new Error(
+            Option.isSome(error)
+              ? `stage: ${error.value.message}`
+              : Cause.hasInterruptsOnly(exit.cause)
+                ? 'stage was cancelled.'
+                : 'stage failed unexpectedly.'
+          )
+        )
+      })
+    })
+  }
+})
+
+const planNotice = (plan: CodeModeStagedPlan) =>
+  `\n\nStaged ${plan.count} call${plan.count === 1 ? '' : 's'} as plan ${plan.id}; nothing was applied yet. To apply them, call ${plan.reviewToolName}(${JSON.stringify({ planId: plan.id, planDigest: plan.digest })}): a person reviews the plan and selects the calls to apply.`
+
 const hasStoreWrites = (result: CodeModeExecutionResult) =>
   result.storeWrites !== undefined &&
   (Object.keys(result.storeWrites.set).length > 0 || result.storeWrites.delete.length > 0)
@@ -359,6 +425,24 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
           const fibers = yield* FiberSet.make<ToolResult>().pipe(Scope.provide(scope))
           const runFork = yield* FiberSet.runtime(fibers)<never>()
           const records: Array<CallRecord> = []
+
+          // Staged tool plans: only when the resolution offers staging and the host keeps it on.
+          const stagingOptions = options.staging === false ? undefined : options.staging
+          const staging = options.staging === false ? undefined : nested.staging
+          const maxStagedCalls = stagingOptions?.maxCalls
+
+          const plan =
+            staging === undefined
+              ? undefined
+              : staging.begin(
+                  maxStagedCalls === undefined ? undefined : { maxCalls: maxStagedCalls }
+                )
+
+          const stageFibers = yield* FiberSet.make<StagedCallReceipt, ToolPlanStageError>().pipe(
+            Scope.provide(scope)
+          )
+
+          const stageFork = yield* FiberSet.runtime(stageFibers)<never>()
 
           const callTool =
             (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
@@ -434,9 +518,27 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                       )
                     })
 
+              // The plan's ordering guardrail: once a script stages, only read tools run.
+              const guarded =
+                plan === undefined
+                  ? run
+                  : plan.admit(nestedCall).pipe(
+                      Effect.matchEffect({
+                        onFailure: error =>
+                          Effect.succeed(
+                            ToolResult.make({
+                              toolCallId: nestedCall.id,
+                              content: error.message,
+                              isError: true
+                            })
+                          ),
+                        onSuccess: () => run
+                      })
+                    )
+
               const admitted =
                 options.beforeNestedCall === undefined
-                  ? run
+                  ? guarded
                   : options.beforeNestedCall({ call: nestedCall, context: input.context }).pipe(
                       Effect.matchEffect({
                         onFailure: message =>
@@ -447,7 +549,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                               isError: true
                             })
                           ),
-                        onSuccess: () => run
+                        onSuccess: () => guarded
                       })
                     )
 
@@ -502,7 +604,10 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             try: signal =>
               options.executor.execute(input.code, {
                 tools,
-                globals: discoveryGlobals(catalog),
+                globals:
+                  plan === undefined
+                    ? discoveryGlobals(catalog)
+                    : [...discoveryGlobals(catalog), stageGlobal(plan, stageFork)],
                 timeoutMs,
                 memoryLimitBytes: limits.memoryLimitBytes,
                 store,
@@ -536,8 +641,48 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
 
           // Calls still running when the script ended are cancelled and recorded as such.
           yield* boundedWait(FiberSet.clear(fibers))
+          yield* boundedWait(FiberSet.clear(stageFibers))
 
           const finishedAt = yield* Clock.currentTimeMillis
+
+          // A successful script's staged calls are saved once as a plan; a failed script's are
+          // discarded (a partial plan is never offered for review). Nothing staged ever ran.
+          const stagedCount = plan === undefined ? 0 : (yield* plan.staged).length
+
+          const saved =
+            plan === undefined || stagedCount === 0 || !result.ok
+              ? undefined
+              : yield* plan.finish.pipe(Effect.result)
+
+          const savedPlan: CodeModeStagedPlan | undefined =
+            staging === undefined ||
+            saved === undefined ||
+            Result.isFailure(saved) ||
+            saved.success === undefined
+              ? undefined
+              : {
+                  id: saved.success.id,
+                  digest: saved.success.digest,
+                  count: saved.success.calls.length,
+                  reviewToolName: staging.reviewToolName
+                }
+
+          const planFailure =
+            saved !== undefined && Result.isFailure(saved) ? saved.failure : undefined
+
+          const planFailed = planFailure !== undefined
+          const plural = stagedCount === 1 ? '' : 's'
+
+          const stagingNotice =
+            stagedCount === 0
+              ? undefined
+              : !result.ok
+                ? `\n\nThe script failed, so its ${stagedCount} staged call${plural} ${stagedCount === 1 ? 'was' : 'were'} discarded; nothing was applied.`
+                : planFailure !== undefined
+                  ? `\n\nThe script staged ${stagedCount} call${plural}, but the plan could not be saved (${planFailure.message}); nothing was applied. Run the script again.`
+                  : savedPlan === undefined
+                    ? undefined
+                    : planNotice(savedPlan)
 
           const recorded = records.map((record): NestedToolCallInput => ({
             id: record.id,
@@ -554,22 +699,31 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
 
           const { nestedCalls, usage } = nestedToolCallResultFields(recorder)
 
+          const segments = codeModeResultSegments({
+            result,
+            wallTimeMs: finishedAt - startedAt,
+            calls: recorded,
+            maxChars: limits.maxOutputChars,
+            maxImages: limits.maxImages,
+            maxImageBytes: limits.maxImageBytes
+          })
+
+          // The staging notice follows the bounded output so a cut never hides the plan.
           const content = codeModeSegmentsContent(
-            codeModeResultSegments({
-              result,
-              wallTimeMs: finishedAt - startedAt,
-              calls: recorded,
-              maxChars: limits.maxOutputChars,
-              maxImages: limits.maxImages,
-              maxImageBytes: limits.maxImageBytes
-            })
+            stagingNotice === undefined
+              ? segments
+              : [...segments, { type: 'text', text: stagingNotice }]
           )
 
+          const ok = result.ok && !planFailed
+
+          const codemode: CodeModeStructuredContent['codemode'] =
+            ok && result.storeWrites !== undefined && hasStoreWrites(result)
+              ? { ok: true, storeWrites: result.storeWrites }
+              : { ok }
+
           const structuredContent: CodeModeStructuredContent = {
-            codemode:
-              result.ok && result.storeWrites !== undefined && hasStoreWrites(result)
-                ? { ok: true, storeWrites: result.storeWrites }
-                : { ok: result.ok }
+            codemode: savedPlan === undefined ? codemode : { ...codemode, plan: savedPlan }
           }
 
           type ResultFields = {
@@ -588,7 +742,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             nestedCalls
           }
 
-          if (!result.ok) {
+          if (!ok) {
             fields.isError = true
           }
 
@@ -745,7 +899,12 @@ export const makeCodeModeTool = <Context>(
     parameters: CodeModeParams,
     access: 'write',
     nestedToolAccess: true,
-    describe: ({ tools }) => renderCodeModeDescription({ tools, inlineBudget, store }),
+    describe: ({ tools, staging }) =>
+      renderCodeModeDescription(
+        staging === undefined || options.staging === false
+          ? { tools, inlineBudget, store }
+          : { tools, inlineBudget, store, staging }
+      ),
     abandonedResult: abandonedScriptResult(limits),
     execute: ({
       call,

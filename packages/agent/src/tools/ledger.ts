@@ -386,6 +386,12 @@ export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
   }
 }
 
+/** The canonical JSON `toolLedgerArgs` digests (internal to `tools`: staged tool plans reuse the
+ * same format, so a staged call's digest equals the ledger digest of its applied call).
+ */
+export const canonicalToolArguments = (params: unknown): string =>
+  canonicalArguments(compactToolArguments(params))
+
 const jsonValue = (value: unknown): Result.Result<unknown, undefined> => {
   const encoded = compactJson(value)
 

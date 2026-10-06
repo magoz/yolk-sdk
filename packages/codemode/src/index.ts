@@ -27,6 +27,7 @@ export type {
   CodeModeCatalogTool,
   CodeModeDescriptionInput,
   CodeModeListing,
+  CodeModeStagingDescription,
   CodeModeToolExposure
 } from './catalog.ts'
 
@@ -55,6 +56,7 @@ export type {
   CodeModeInterruptedCall,
   CodeModeInterruptedCalls,
   CodeModeInterruptedCallStatus,
+  CodeModeStagedPlan,
   CodeModeStructuredContent,
   CodeModeToolResultEntry
 } from './store.ts'
@@ -71,6 +73,7 @@ export type {
   CodeModeAfterNestedCallInput,
   CodeModeLimits,
   CodeModeNestedCallOutcome,
+  CodeModeStagingOptions,
   MakeCodeModeToolOptions
 } from './tool.ts'
 
