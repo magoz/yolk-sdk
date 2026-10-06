@@ -122,6 +122,15 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   raw text. A tool with an output schema but no `structuredContent` resolves to its text (a tool
   bug, kept readable).
 - Code mode access is `write`; nested calls keep their own access metadata.
+- Staged tool plans (ADR 0005): when `nested.staging` exists and `staging !== false`, the script
+  gets a `stage(name, args)` global (spread args, fibers of a scoped `FiberSet`, not recorded as
+  nested calls) over one `ToolPlanBuilder` per script; every nested call goes through
+  `builder.admit` after `beforeNestedCall` (a rejection is recorded `error` and never runs). Only a
+  successful script saves its plan (`finish`); a failed one discards it. The plan notice is appended
+  after bounding (never cut) and `structuredContent.codemode.plan` carries
+  `{ id, digest, count, reviewToolName }`; a failed save makes the result `isError` with
+  `{ ok: false }`. The description lists `stage` and the stageable tool names only when staging is
+  offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
   host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
   script's queue never holds process permits). Per-script semaphores are keyed by the parent tool
@@ -149,5 +158,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   ledger already cut, `interruptedCalls` bounds, long-script conflicts, completed replay,
   concurrent duplicates wait), records past
   256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
+- `test/plan.test.ts`: staging through code mode (saved plan, nothing applied, description,
+  fail-closed direct calls, failed scripts discard, ordering guardrails, invalid/duplicate/limit
+  stages, ledgered replay, save conflicts, and the pi executor end to end).
 - `test/classifier-tool.test.ts`: classifier tool through scripts, per-script and process caps
   (shared across scripts and registrations, `false`), permits released on interruption, errors.

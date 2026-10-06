@@ -386,6 +386,12 @@ export const toolLedgerArgs = (params: unknown): ToolLedgerArgs => {
   }
 }
 
+/** The canonical JSON `toolLedgerArgs` digests (internal to `tools`: staged tool plans reuse the
+ * same format, so a staged call's digest equals the ledger digest of its applied call).
+ */
+export const canonicalToolArguments = (params: unknown): string =>
+  canonicalArguments(compactToolArguments(params))
+
 const jsonValue = (value: unknown): Result.Result<unknown, undefined> => {
   const encoded = compactJson(value)
 
@@ -758,6 +764,8 @@ export const executeLedgered = (input: {
   readonly parentKey: string | undefined
   readonly execute: Effect.Effect<ToolResult, ToolError>
   readonly abandonedResult?: ((input: ToolLedgerAbandonedInput) => ToolResult) | undefined
+  /** The result when the wait for an in-flight duplicate ends (default `inFlightTimeoutResult`). */
+  readonly inFlightTimeoutResult?: Effect.Effect<ToolResult> | undefined
 }): Effect.Effect<ToolResult, ToolError> =>
   Effect.gen(function* () {
     const { call, options } = input
@@ -814,7 +822,10 @@ export const executeLedgered = (input: {
         yield* reportDecision(options.onLedgerDecision, event)
       })
 
-    const waitTimedOut = decide('in_flight_timeout').pipe(Effect.as(inFlightTimeoutResult(call)))
+    const timedOutResult =
+      input.inFlightTimeoutResult ?? Effect.sync(() => inFlightTimeoutResult(call))
+
+    const waitTimedOut = decide('in_flight_timeout').pipe(Effect.andThen(timedOutResult))
 
     const stillInFlight = (claimed: ToolLedgerClaim) =>
       ToolLedgerClaim.$is('InFlight')(claimed) && matches(claimed.entry)
@@ -961,7 +972,7 @@ export const executeLedgered = (input: {
       Completed: ({ outcome }) =>
         decide(waited ? 'in_flight_wait' : 'completed').pipe(Effect.andThen(replay(call, outcome))),
       // Unreachable for a matching entry (the wait loop consumes it); kept total.
-      InFlight: () => decide('in_flight_timeout').pipe(Effect.as(inFlightTimeoutResult(call))),
+      InFlight: () => waitTimedOut,
       Abandoned: ({ entry }) => decide('abandoned').pipe(Effect.andThen(abandoned(entry)))
     })
   })

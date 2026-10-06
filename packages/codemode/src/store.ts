@@ -18,7 +18,19 @@ export type CodeModeStructuredContent = {
      * (the ledger's `list` failed), so any of them may have been applied.
      */
     readonly interruptedCallsUnavailable?: true
+    /** The staged tool plan a successful script saved (ADR 0005); nothing of it ran yet. */
+    readonly plan?: CodeModeStagedPlan
   }
+}
+
+/** A saved staged tool plan: review it with the `reviewToolName` tool and `{ planId: id,
+ * planDigest: digest }`.
+ */
+export type CodeModeStagedPlan = {
+  readonly id: string
+  readonly digest: string
+  readonly count: number
+  readonly reviewToolName: string
 }
 
 /** What an abandoned execution's ledgered nested call is known to have done: `applied` (recorded

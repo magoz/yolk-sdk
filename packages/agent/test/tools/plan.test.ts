@@ -1,0 +1,1810 @@
+import { Deferred, Effect, Fiber, Predicate, Result } from 'effect'
+import { TestClock } from 'effect/testing'
+import * as Schema from 'effect/Schema'
+import { describe, expect, it } from '@effect/vitest'
+import { prepareToolBatch } from '@yolk-sdk/agent/loop'
+import {
+  contentText,
+  InteractionRequest,
+  InteractionResponse,
+  InteractionValidationError,
+  ToolApprovalPolicy,
+  ToolCall,
+  ToolDef,
+  ToolResult,
+  interactionRequestId,
+  isCodeModeCallable,
+  isToolStageable,
+  type InteractionHost,
+  type InteractionRef
+} from '@yolk-sdk/agent/protocol'
+import {
+  EmptyToolParams,
+  makeInMemoryToolLedgerStore,
+  makeInMemoryToolPlanStore,
+  makePlanReviewTool,
+  makeTool,
+  previewStoredToolPlan,
+  previewToolPlan,
+  resolveTools,
+  toolPlanKeyPages,
+  StagedCall,
+  stagedCallDigest,
+  ToolPlan,
+  toolPlanDigest,
+  type MakePlanReviewToolOptions,
+  type NestedToolExecutor,
+  type NestedToolStagingDescription,
+  type ResolvedToolSet,
+  type ToolModule,
+  type ToolPlanBuilder,
+  type ToolLedgerOptions,
+  type ToolPlanClaimResult,
+  type ToolPlanOptions,
+  type ToolPlanRuntime,
+  ToolPlanOutcome,
+  ToolPlanPreview,
+  ToolPlanStoreError,
+  ToolLedgerError,
+  type ToolPlanStore,
+  type ToolRegistration
+} from '../../src/tools/index.ts'
+import { makeFakeInteractionHost } from './interaction-host.ts'
+
+type Ctx = { readonly tenant: string }
+
+const context: Ctx = { tenant: 'tenant_1' }
+
+const manual = ToolApprovalPolicy.make({ mode: 'manual' })
+
+const Link = Schema.Struct({ resource: Schema.String, curriculum: Schema.String })
+
+const Query = Schema.Struct({ query: Schema.String })
+
+type Applied = Array<{ readonly resource: string; readonly key: string | undefined }>
+
+const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
+  makeTool<Ctx, typeof Link>({
+    name: 'link_curriculum',
+    description: 'Link a curriculum to a published resource',
+    parameters: Link,
+    access: 'write',
+    approval: manual,
+    staging: {
+      preview: ({ params, context }) =>
+        Effect.succeed({ summary: `${context.tenant}:${params.resource}->${params.curriculum}` }),
+      precheck: ({ params }) =>
+        Effect.gen(function* () {
+          const tracker = options.prechecks
+
+          if (tracker !== undefined) {
+            tracker.active += 1
+            tracker.max = Math.max(tracker.max, tracker.active)
+            yield* Effect.yieldNow
+            tracker.active -= 1
+          }
+
+          if (params.resource === 'stale')
+            return yield* Effect.fail(new InteractionValidationError({ message: 'stale resource' }))
+        })
+    },
+    execute: ({ call, params, idempotencyKey }) =>
+      Effect.gen(function* () {
+        if (params.resource === options.dieOn)
+          return yield* Effect.die(new Error('process crashed'))
+
+        const gate = options.gate
+
+        if (gate !== undefined && gate.resource === params.resource) {
+          yield* Deferred.succeed(gate.reached, undefined)
+          yield* Deferred.await(gate.release)
+        }
+
+        applied.push({ resource: params.resource, key: idempotencyKey })
+
+        return yield* Effect.succeed(
+          params.resource === options.failOn
+            ? ToolResult.make({
+                toolCallId: call.id,
+                content: `cannot link ${params.resource}`,
+                isError: true
+              })
+            : ToolResult.make({ toolCallId: call.id, content: `linked ${params.resource}` })
+        )
+      })
+  })
+
+const lookupTool = makeTool<Ctx, typeof Query>({
+  name: 'lookup',
+  description: 'Read resources',
+  parameters: Query,
+  access: 'read',
+  execute: ({ call, params }) =>
+    Effect.succeed(ToolResult.make({ toolCallId: call.id, content: `found ${params.query}` }))
+})
+
+const noteTool = (notes: Array<string>) =>
+  makeTool<Ctx, typeof Query>({
+    name: 'note',
+    description: 'Write a note',
+    parameters: Query,
+    access: 'write',
+    execute: ({ call, params }) =>
+      Effect.sync(() => {
+        notes.push(params.query)
+
+        return ToolResult.make({ toolCallId: call.id, content: 'noted' })
+      })
+  })
+
+type Box = {
+  nested?: NestedToolExecutor
+  staging?: NestedToolStagingDescription
+  described: boolean
+}
+
+/** A nested-access registration that only captures its `nested` executor and description input. */
+const scriptTool = (box: Box): ToolRegistration<Ctx> =>
+  makeTool<Ctx, typeof EmptyToolParams>({
+    name: 'script',
+    description: 'script',
+    parameters: EmptyToolParams,
+    access: 'write',
+    nestedToolAccess: true,
+    describe: ({ staging }) => {
+      box.described = true
+
+      if (staging !== undefined) box.staging = staging
+
+      return 'script'
+    },
+    execute: ({ call, nested }) =>
+      Effect.sync(() => {
+        if (nested !== undefined) box.nested = nested
+
+        return ToolResult.make({ toolCallId: call.id, content: 'ok' })
+      })
+  })
+
+type PrecheckTracker = { active: number; max: number }
+
+/** Blocks the apply of `resource` until `release`, after signalling `reached`. */
+type Gate = {
+  readonly resource: string
+  readonly reached: Deferred.Deferred<void>
+  readonly release: Deferred.Deferred<void>
+}
+
+type LinkToolOptions = {
+  failOn?: string
+  dieOn?: string
+  prechecks?: PrecheckTracker
+  gate?: Gate
+}
+
+/** Toggles a plan store outage: every operation fails while `down`; with `getsLeft`, `get`
+ * starts failing once that many more reads succeeded.
+ */
+type Outage = { down: boolean; getsLeft?: number; claimDown?: boolean; fenceDown?: boolean }
+
+const withOutage = (store: ToolPlanStore, outage: Outage): ToolPlanStore => {
+  const down = () => new ToolPlanStoreError({ cause: 'storage', message: 'database is down' })
+
+  return {
+    scope: store.scope,
+    put: plan => (outage.down ? Effect.fail(down()) : store.put(plan)),
+    get: planId =>
+      Effect.suspend(() => {
+        if (outage.getsLeft !== undefined) {
+          if (outage.getsLeft <= 0) return Effect.fail(down())
+
+          outage.getsLeft -= 1
+        }
+
+        return outage.down ? Effect.fail(down()) : store.get(planId)
+      }),
+    claim: input =>
+      outage.down || outage.claimDown === true ? Effect.fail(down()) : store.claim(input)
+  }
+}
+
+type PlanOptionFields = {
+  store: ToolPlanStore
+  maxCalls?: number
+  maxArgsBytes?: number
+  planId?: ToolPlanOptions['planId']
+}
+
+type LedgerOptionFields = {
+  store: ToolLedgerOptions['store']
+  isLedgered?: ToolLedgerOptions['isLedgered']
+  maxWaitMs?: number
+  onLedgerDecision?: ToolLedgerOptions['onLedgerDecision']
+}
+
+type ResolveOptionFields = {
+  interactionHost?: InteractionHost
+  plans?: ToolPlanOptions
+  ledger?: ToolLedgerOptions
+}
+
+type SetupOptions = {
+  readonly host?: boolean
+  readonly plans?: boolean
+  readonly review?: MakePlanReviewToolOptions<Ctx> | false
+  readonly reviewRegistration?: ToolRegistration<Ctx>
+  readonly ledger?: boolean
+  readonly maxCalls?: number
+  readonly maxArgsBytes?: number
+  readonly planId?: ToolPlanOptions['planId']
+  readonly failOn?: string
+  readonly dieOn?: string
+  readonly settlement?: 'fail'
+  readonly outage?: Outage
+  readonly unledgered?: boolean
+  readonly prechecks?: PrecheckTracker
+  readonly gate?: Gate
+  readonly maxWaitMs?: number
+  readonly decisions?: Array<string>
+}
+
+const setup = (options: SetupOptions = {}) =>
+  Effect.gen(function* () {
+    const fake = makeFakeInteractionHost(
+      options.settlement === undefined ? {} : { settlement: options.settlement }
+    )
+
+    const store = makeInMemoryToolPlanStore({ scope: 'conversation_1' })
+    const ledgerStore = makeInMemoryToolLedgerStore({ scope: 'conversation_1' })
+    const applied: Applied = []
+    const notes: Array<string> = []
+    const box: Box = { described: false }
+
+    const review =
+      options.reviewRegistration ??
+      (options.review === false ? undefined : makePlanReviewTool<Ctx>(options.review ?? {}))
+
+    const linkOptions: LinkToolOptions = {}
+
+    if (options.failOn !== undefined) linkOptions.failOn = options.failOn
+
+    if (options.dieOn !== undefined) linkOptions.dieOn = options.dieOn
+
+    if (options.prechecks !== undefined) linkOptions.prechecks = options.prechecks
+
+    if (options.gate !== undefined) linkOptions.gate = options.gate
+
+    const modules: ReadonlyArray<ToolModule<Ctx>> = [
+      { id: 'host', tools: review === undefined ? [scriptTool(box)] : [scriptTool(box), review] },
+      { id: 'cms', tools: [linkTool(applied, linkOptions), lookupTool, noteTool(notes)] }
+    ]
+
+    const plans: PlanOptionFields = {
+      store: options.outage === undefined ? store : withOutage(store, options.outage)
+    }
+
+    if (options.maxCalls !== undefined) plans.maxCalls = options.maxCalls
+
+    if (options.maxArgsBytes !== undefined) plans.maxArgsBytes = options.maxArgsBytes
+
+    if (options.planId !== undefined) plans.planId = options.planId
+
+    const resolveOptions: ResolveOptionFields = {}
+
+    if (options.host !== false) resolveOptions.interactionHost = fake.host
+
+    if (options.plans !== false) resolveOptions.plans = plans
+
+    if (options.ledger === true) {
+      const outage = options.outage
+
+      // The apply fence is the only top-level ledger key without a `/` in these tests.
+      const ledgerStoreFor: ToolLedgerOptions['store'] =
+        outage === undefined
+          ? ledgerStore
+          : {
+              ...ledgerStore,
+              claim: request =>
+                outage.fenceDown === true && !request.key.includes('/')
+                  ? Effect.fail(new ToolLedgerError({ message: 'ledger is down' }))
+                  : ledgerStore.claim(request)
+            }
+
+      const ledger: LedgerOptionFields = { store: ledgerStoreFor }
+      const decisions = options.decisions
+
+      if (options.unledgered === true) ledger.isLedgered = () => false
+
+      if (options.maxWaitMs !== undefined) ledger.maxWaitMs = options.maxWaitMs
+
+      if (decisions !== undefined)
+        ledger.onLedgerDecision = event => {
+          decisions.push(`${event.key}:${event.decision}`)
+        }
+
+      resolveOptions.ledger = ledger
+    }
+
+    const toolSet = yield* resolveTools(modules, context, resolveOptions)
+
+    yield* toolSet.execute(ToolCall.make({ id: 'script_1', name: 'script', params: {} }))
+
+    // Another resolution of the same modules and plans with a different interaction host.
+    const resolveWithHost = (interactionHost: InteractionHost) =>
+      resolveTools(modules, context, { ...resolveOptions, interactionHost })
+
+    return { fake, store, ledgerStore, applied, notes, box, toolSet, resolveWithHost }
+  })
+
+type Env = Effect.Success<ReturnType<typeof setup>>
+
+const builderOf = (env: Env, options?: { readonly maxCalls?: number }): ToolPlanBuilder => {
+  const staging = env.box.nested?.staging
+
+  if (staging === undefined) throw new Error('Staging is unavailable')
+
+  return staging.begin(options)
+}
+
+const stageLinks = (builder: ToolPlanBuilder, resources: ReadonlyArray<string>) =>
+  Effect.forEach(resources, resource =>
+    builder.stage({ name: 'link_curriculum', params: { resource, curriculum: 'LGR22' } })
+  )
+
+const savedPlan = (builder: ToolPlanBuilder) =>
+  Effect.gen(function* () {
+    const plan = yield* builder.finish
+
+    if (plan === undefined) throw new Error('Nothing staged')
+
+    return plan
+  })
+
+const stagedPlan = (env: Env, resources: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const builder = builderOf(env)
+
+    yield* stageLinks(builder, resources)
+
+    return yield* savedPlan(builder)
+  })
+
+const reviewInteraction = (toolSet: ResolvedToolSet) => {
+  const interaction = toolSet.interactions.review_plan
+
+  if (interaction === undefined || interaction.def.interaction === undefined)
+    throw new Error('Missing plan review interaction')
+
+  return { interaction, descriptor: interaction.def.interaction }
+}
+
+const reviewCall = (plan: ToolPlan, id = 'review_1', digest = plan.digest) =>
+  ToolCall.make({ id, name: 'review_plan', params: { planId: plan.id, planDigest: digest } })
+
+const submission = (call: ToolCall, keys: ReadonlyArray<string>) =>
+  InteractionResponse.make({
+    requestId: interactionRequestId(call),
+    toolCallId: call.id,
+    outcome: 'submitted',
+    source: 'user',
+    actionId: 'apply',
+    data: { selectedKeys: [...keys] }
+  })
+
+/** Opens the review request, accepts a person's selection, and returns the receipt reference. */
+const accept = (env: Env, call: ToolCall, keys: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const { interaction, descriptor } = reviewInteraction(env.toolSet)
+
+    env.fake.addPending(
+      InteractionRequest.make({
+        requestId: interactionRequestId(call),
+        toolCallId: call.id,
+        call,
+        interaction: descriptor
+      })
+    )
+
+    return yield* env.fake.accept(submission(call, keys), interaction)
+  })
+
+const reviewAndApply = (env: Env, plan: ToolPlan, keys: ReadonlyArray<string>, id?: string) =>
+  Effect.gen(function* () {
+    const call = reviewCall(plan, id)
+    const ref = yield* accept(env, call, keys)
+    const result = yield* env.toolSet.execute(call, { interaction: ref })
+
+    return { call, ref, result }
+  })
+
+const PlanReviewOutcome = Schema.Struct({
+  outcome: Schema.String,
+  result: Schema.optional(ToolPlanOutcome)
+})
+
+const outcomeOf = (result: ToolResult) =>
+  Schema.decodeUnknownEffect(PlanReviewOutcome)(result.structuredContent).pipe(Effect.orDie)
+
+/** Runs `effect` while the test clock passes the default ledger lease (30 s). */
+const afterLeaseExpiry = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.gen(function* () {
+    const fiber = yield* effect.pipe(Effect.forkChild)
+
+    yield* TestClock.adjust('31 seconds')
+
+    return yield* Fiber.join(fiber)
+  })
+
+const textOf = (result: ToolResult) =>
+  Predicate.isString(result.content) ? result.content : contentText(result.content)
+
+describe('stageable tool definitions', () => {
+  it.effect('keeps stageable approval tools fail-closed for direct script calls', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const nested = env.box.nested
+      const link = env.toolSet.tools.find(tool => tool.name === 'link_curriculum')
+
+      expect(link?.staging).toBe(true)
+      expect(link !== undefined && isToolStageable(link)).toBe(true)
+      expect(link !== undefined && isCodeModeCallable(link)).toBe(false)
+      expect(nested?.tools.map(tool => tool.def.name)).toEqual(['lookup', 'note'])
+      expect(nested?.staging?.tools.map(tool => tool.def.name)).toEqual(['link_curriculum'])
+
+      if (nested === undefined) throw new Error('Missing nested executor')
+
+      const direct = yield* nested.execute(
+        ToolCall.make({
+          id: 'script_1/1',
+          name: 'link_curriculum',
+          params: { resource: 'r1', curriculum: 'LGR22' }
+        })
+      )
+
+      expect(direct.isError).toBe(true)
+      expect(textOf(direct)).toContain('not callable from code mode')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('rejects staging on tools that are not plain approval-gated tools', () =>
+    Effect.gen(function* () {
+      const resolve = (tool: ToolRegistration<Ctx>) =>
+        resolveTools([{ id: 'm', tools: [tool] }], context).pipe(Effect.flip)
+
+      const withoutApproval = yield* resolve(
+        makeTool<Ctx, typeof Link>({
+          name: 'unsafe',
+          description: 'x',
+          parameters: Link,
+          access: 'write',
+          staging: true,
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+        })
+      )
+
+      const modelOnly = yield* resolve(
+        makeTool<Ctx, typeof Link>({
+          name: 'model_only',
+          description: 'x',
+          parameters: Link,
+          access: 'write',
+          approval: manual,
+          callableBy: 'model',
+          staging: true,
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+        })
+      )
+
+      const rawWithoutValidator = yield* resolve({
+        def: ToolDef.make({
+          name: 'raw',
+          description: 'x',
+          parameters: { type: 'object' },
+          approval: manual,
+          staging: true
+        }),
+        access: 'write',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+      })
+
+      const twoReviews = yield* resolveTools(
+        [
+          {
+            id: 'm',
+            tools: [makePlanReviewTool<Ctx>(), makePlanReviewTool<Ctx>({ name: 'review_other' })]
+          }
+        ],
+        context
+      ).pipe(Effect.flip)
+
+      expect(withoutApproval.cause).toBe('staging_unsupported_policy')
+      expect(modelOnly.cause).toBe('staging_unsupported_policy')
+      expect(rawWithoutValidator.cause).toBe('staging_validation_required')
+      expect(twoReviews.cause).toBe('plan_review_duplicate')
+    })
+  )
+
+  it.effect('offers staging only with plans, an interaction host, and a review tool', () =>
+    Effect.gen(function* () {
+      const full = yield* setup()
+      const noPlans = yield* setup({ plans: false })
+      const noHost = yield* setup({ host: false })
+      const noReview = yield* setup({ review: false })
+
+      expect(full.box.nested?.staging?.reviewToolName).toBe('review_plan')
+      expect(full.box.staging?.tools.map(tool => tool.def.name)).toEqual(['link_curriculum'])
+      expect(full.toolSet.plans?.reviewToolName).toBe('review_plan')
+      expect(full.toolSet.interactions.review_plan).toBeDefined()
+
+      // Voice and subagent resolutions without an interaction host (or plans) get no `stage`, and
+      // the review tool stays unavailable.
+      for (const env of [noPlans, noHost, noReview]) {
+        expect(env.box.nested?.staging).toBeUndefined()
+        expect(env.box.staging).toBeUndefined()
+        expect(env.box.described).toBe(true)
+        expect(env.toolSet.plans).toBeUndefined()
+        expect(env.toolSet.interactions.review_plan).toBeUndefined()
+      }
+    })
+  )
+})
+
+describe('staging guardrails', () => {
+  it.effect('validates staged arguments without executing or ledgering anything', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true })
+      const builder = builderOf(env)
+
+      const receipt = yield* builder.stage({
+        name: 'link_curriculum',
+        params: { resource: 'r1', curriculum: 'LGR22' }
+      })
+
+      const invalid = yield* builder
+        .stage({ name: 'link_curriculum', params: { resource: 1 } })
+        .pipe(Effect.flip)
+
+      const unknown = yield* builder
+        .stage({ name: 'note', params: { query: 'x' } })
+        .pipe(Effect.flip)
+
+      const notJson = yield* builder
+        .stage({ name: 'link_curriculum', params: { resource: 'r', curriculum: Number.NaN } })
+        .pipe(Effect.flip)
+
+      expect(receipt).toEqual({ staged: true, key: 'script_1/s1', index: 1 })
+      expect(invalid.reason).toBe('invalid_arguments')
+      expect(invalid.message).toContain('link_curriculum')
+      expect(unknown.reason).toBe('not_stageable')
+      expect(unknown.message).toContain('link_curriculum')
+      expect(notJson.reason).toBe('invalid_arguments')
+      expect(env.applied).toEqual([])
+      // Only the script call itself is ledgered; staging records nothing.
+      expect((yield* env.ledgerStore.entries).map(entry => entry.key)).toEqual(['script_1'])
+      expect(yield* builder.staged).toEqual([
+        StagedCall.make({
+          key: 'script_1/s1',
+          toolName: 'link_curriculum',
+          params: { resource: 'r1', curriculum: 'LGR22' },
+          argsDigest: stagedCallDigest({ curriculum: 'LGR22', resource: 'r1' })
+        })
+      ])
+    })
+  )
+
+  it.effect('rejects staging after a write ran, and writes after staging; reads run anywhere', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const writeFirst = builderOf(env)
+      const read = ToolCall.make({ id: 'script_1/1', name: 'lookup', params: { query: 'q' } })
+      const write = ToolCall.make({ id: 'script_1/2', name: 'note', params: { query: 'n' } })
+
+      yield* writeFirst.admit(read)
+      yield* writeFirst.admit(write)
+
+      const stageAfterWrite = yield* stageLinks(writeFirst, ['r1']).pipe(Effect.flip)
+
+      const stageFirst = builderOf(env)
+
+      yield* stageLinks(stageFirst, ['r1'])
+      yield* stageFirst.admit(read)
+
+      const writeAfterStage = yield* stageFirst.admit(write).pipe(Effect.flip)
+
+      expect(stageAfterWrite.reason).toBe('order')
+      expect(stageAfterWrite.message).toContain('note')
+      expect(writeAfterStage.reason).toBe('order')
+      expect(yield* stageFirst.staged).toHaveLength(1)
+    })
+  )
+
+  it.effect('rejects duplicates and calls past the caps, never truncating', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ maxCalls: 2, maxArgsBytes: 120 })
+      const builder = builderOf(env)
+
+      yield* stageLinks(builder, ['r1'])
+
+      const duplicate = yield* builder
+        .stage({ name: 'link_curriculum', params: { curriculum: 'LGR22', resource: 'r1' } })
+        .pipe(Effect.flip)
+
+      const tooLarge = yield* builder
+        .stage({
+          name: 'link_curriculum',
+          params: { resource: 'x'.repeat(200), curriculum: 'LGR22' }
+        })
+        .pipe(Effect.flip)
+
+      yield* stageLinks(builder, ['r2'])
+
+      const pastMax = yield* stageLinks(builder, ['r3']).pipe(Effect.flip)
+
+      const lowered = builderOf(env, { maxCalls: 1 })
+
+      yield* stageLinks(lowered, ['r1'])
+
+      const pastLowered = yield* stageLinks(lowered, ['r2']).pipe(Effect.flip)
+
+      expect(duplicate.reason).toBe('duplicate')
+      expect(duplicate.message).toContain('script_1/s1')
+      expect(tooLarge.reason).toBe('limit')
+      expect(pastMax.reason).toBe('limit')
+      expect(pastLowered.reason).toBe('limit')
+      expect((yield* builder.staged).map(call => call.key)).toEqual(['script_1/s1', 'script_1/s2'])
+    })
+  )
+})
+
+describe('plan persistence', () => {
+  it.effect('saves the plan once, idempotently by id; a different digest conflicts', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+
+      expect(plan.id).toBe('script_1')
+      expect(plan.scope).toBe('conversation_1')
+      expect(plan.digest).toBe(toolPlanDigest(plan.calls))
+
+      // A re-executed script stages the same plan again: a no-op.
+      const again = yield* stagedPlan(env, ['r1', 'r2'])
+
+      expect(again.digest).toBe(plan.digest)
+
+      const changed = yield* stagedPlan(env, ['r1', 'r3']).pipe(Effect.flip)
+
+      expect(changed.cause).toBe('conflict')
+      expect((yield* env.store.plans).map(stored => stored.plan.digest)).toEqual([plan.digest])
+      expect(yield* builderOf(env).finish).toBeUndefined()
+
+      const conflicting = ToolPlan.make({
+        id: 'script_2',
+        scope: 'conversation_1',
+        digest: 'a',
+        calls: [plan.calls[0]]
+      })
+
+      yield* env.store.put(conflicting)
+
+      const put = yield* Effect.result(
+        env.store.put(ToolPlan.make({ ...conflicting, digest: 'b' }))
+      )
+
+      expect(Result.isFailure(put)).toBe(true)
+    })
+  )
+})
+
+describe('host plan ids', () => {
+  it.effect('prefixes plans and keys with the host id, and applies them by it', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ planId: ({ call }) => `run_7:turn_2:${call.id}` })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const { result } = yield* reviewAndApply(env, plan, ['run_7:turn_2:script_1/s2'])
+      const outcome = yield* outcomeOf(result)
+
+      expect(plan.id).toBe('run_7:turn_2:script_1')
+      expect(plan.calls.map(call => call.key)).toEqual([
+        'run_7:turn_2:script_1/s1',
+        'run_7:turn_2:script_1/s2'
+      ])
+      expect(outcome.result?.calls.map(call => [call.key, call.status])).toEqual([
+        ['run_7:turn_2:script_1/s1', 'skipped'],
+        ['run_7:turn_2:script_1/s2', 'applied']
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r2'])
+    })
+  )
+
+  it.effect('disables stage for empty, untrimmed, or throwing host ids', () =>
+    Effect.gen(function* () {
+      const ids: ReadonlyArray<ToolPlanOptions['planId']> = [
+        () => '',
+        () => ' padded',
+        () => {
+          throw new Error('host bug')
+        }
+      ]
+
+      for (const planId of ids) {
+        const env = yield* setup({ planId })
+        const failure = yield* stageLinks(builderOf(env), ['r1']).pipe(Effect.flip)
+
+        expect(failure.reason).toBe('not_stageable')
+        expect(failure.message).toContain('plan id')
+        expect(yield* env.store.plans).toEqual([])
+      }
+    })
+  )
+})
+
+describe('plan review', () => {
+  it.effect('applies exactly the selected calls in staged order, nested in the ledger', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const { result } = yield* reviewAndApply(env, plan, ['script_1/s3', 'script_1/s1'])
+      const outcome = yield* outcomeOf(result)
+
+      expect(result.isError).toBeUndefined()
+      expect(outcome.outcome).toBe('completed')
+      expect(outcome.result?.state).toBe('applied')
+      expect(outcome.result?.calls.map(call => [call.key, call.status, call.callId])).toEqual([
+        ['script_1/s1', 'applied', 'review_1/1'],
+        ['script_1/s2', 'skipped', undefined],
+        ['script_1/s3', 'applied', 'review_1/3']
+      ])
+      expect(env.applied).toEqual([
+        { resource: 'r1', key: 'conversation_1:review_1/1' },
+        { resource: 'r3', key: 'conversation_1:review_1/3' }
+      ])
+
+      const entries = yield* env.ledgerStore.list('review_1')
+
+      expect(entries.map(entry => [entry.key, entry.argsDigest])).toEqual([
+        ['review_1/1', plan.calls[0].argsDigest],
+        ['review_1/3', plan.calls[2]?.argsDigest]
+      ])
+      expect(textOf(result)).toContain('2 applied, 0 failed, 1 skipped, 0 not run')
+    })
+  )
+
+  it.effect('validates the plan id, digest, and claim at call validation', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1'])
+      const { interaction } = reviewInteraction(env.toolSet)
+
+      yield* interaction.validateCall(reviewCall(plan).params)
+
+      const wrongDigest = yield* interaction
+        .validateCall(reviewCall(plan, 'review_1', 'f'.repeat(64)).params)
+        .pipe(Effect.flip)
+
+      const missing = yield* interaction
+        .validateCall({ planId: 'nope', planDigest: plan.digest })
+        .pipe(Effect.flip)
+
+      const malformed = yield* interaction.validateCall({ planId: plan.id }).pipe(Effect.flip)
+
+      yield* reviewAndApply(env, plan, ['script_1/s1'])
+
+      const claimed = yield* interaction.validateCall(reviewCall(plan).params).pipe(Effect.flip)
+
+      expect(wrongDigest.message).toContain('planDigest does not match')
+      expect(missing.message).toContain('was not found')
+      expect(malformed.message).toContain('planDigest')
+      expect(claimed.message).toContain('already reviewed and applied')
+    })
+  )
+
+  it.effect('admits only non-empty, duplicate-free subsets that pass every precheck', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1', 'stale'])
+
+      const admission = (keys: ReadonlyArray<string>, id: string) =>
+        accept(env, reviewCall(plan, id), keys).pipe(Effect.flip)
+
+      const foreign = yield* admission(['script_1/s9'], 'review_a')
+      const duplicate = yield* admission(['script_1/s1', 'script_1/s1'], 'review_b')
+      const empty = yield* admission([], 'review_c')
+      const stale = yield* admission(['script_1/s2'], 'review_d')
+
+      yield* accept(env, reviewCall(plan, 'review_e'), ['script_1/s1'])
+
+      expect(foreign.message).toContain('is not a staged call')
+      expect(duplicate.message).toContain('repeats')
+      expect(empty._tag).toBe('InteractionAdmissionError')
+      expect(stale.message).toContain('stale resource')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('applies a plan once: a second review is refused and runs nothing', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan, 'review_2')
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      yield* reviewAndApply(env, plan, ['script_1/s1'])
+
+      // The second review was accepted before the first applied; its call validation now fails.
+      const second = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.flip)
+
+      expect(second.cause).toBe('validation')
+      expect(second.message).toContain('already reviewed and applied')
+      expect(env.applied).toHaveLength(1)
+    })
+  )
+
+  it.effect('refuses a plan another submission claimed in a race; never re-runs its own', () =>
+    Effect.gen(function* () {
+      const races: ReadonlyArray<ToolPlanClaimResult> = ['taken', 'same']
+
+      for (const race of races) {
+        const env = yield* setup()
+        const plan = yield* stagedPlan(env, ['r1'])
+        const call = reviewCall(plan)
+        const ref = yield* accept(env, call, ['script_1/s1'])
+        const claim = env.store.claim
+
+        // Both executions passed call validation; the store decides at claim time.
+        const racing = yield* resolveTools(
+          [
+            { id: 'host', tools: [makePlanReviewTool<Ctx>()] },
+            { id: 'cms', tools: [linkTool(env.applied)] }
+          ],
+          context,
+          {
+            interactionHost: env.fake.host,
+            plans: {
+              store: {
+                ...env.store,
+                claim: input => claim(input).pipe(Effect.as(race))
+              }
+            }
+          }
+        )
+
+        const outcome = yield* outcomeOf(yield* racing.execute(call, { interaction: ref }))
+
+        expect(outcome.outcome).toBe(race === 'taken' ? 'failed' : 'unknown')
+        expect(outcome.result?.state).toBe(race === 'taken' ? 'refused' : 'interrupted')
+        expect(env.applied).toEqual([])
+      }
+    })
+  )
+
+  it.effect('cancelling the review applies nothing', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+      const { interaction, descriptor } = reviewInteraction(env.toolSet)
+
+      env.fake.addPending(
+        InteractionRequest.make({
+          requestId: interactionRequestId(call),
+          toolCallId: call.id,
+          call,
+          interaction: descriptor
+        })
+      )
+
+      const ref = yield* env.fake.accept(
+        InteractionResponse.make({
+          requestId: interactionRequestId(call),
+          toolCallId: call.id,
+          outcome: 'cancelled',
+          source: 'user'
+        }),
+        interaction
+      )
+
+      const result = yield* env.toolSet.execute(call, { interaction: ref })
+
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toContain('cancelled')
+      expect(env.applied).toEqual([])
+      expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+    })
+  )
+
+  it.effect('stops after a failure by default and continues when configured', () =>
+    Effect.gen(function* () {
+      const stop = yield* setup({ failOn: 'r2' })
+      const stopPlan = yield* stagedPlan(stop, ['r1', 'r2', 'r3'])
+      const keys = stopPlan.calls.map(call => call.key)
+      const stopped = yield* outcomeOf((yield* reviewAndApply(stop, stopPlan, keys)).result)
+
+      const go = yield* setup({ failOn: 'r2', review: { onFailure: 'continue' } })
+      const goPlan = yield* stagedPlan(go, ['r1', 'r2', 'r3'])
+      const continued = yield* outcomeOf((yield* reviewAndApply(go, goPlan, keys)).result)
+
+      expect(stopped.outcome).toBe('completed')
+      expect(stopped.result?.calls.map(call => call.status)).toEqual([
+        'applied',
+        'failed',
+        'not_run'
+      ])
+      expect(stopped.result?.calls[1]?.error).toBe('cannot link r2')
+      expect(stop.applied.map(item => item.resource)).toEqual(['r1', 'r2'])
+      expect(continued.result?.calls.map(call => call.status)).toEqual([
+        'applied',
+        'failed',
+        'applied'
+      ])
+      expect(go.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect('runs beforeCall first; a rejection fails the call without running it', () =>
+    Effect.gen(function* () {
+      const seen: Array<string> = []
+
+      const env = yield* setup({
+        review: {
+          onFailure: 'continue',
+          beforeCall: ({ call, staged, context }) =>
+            Effect.suspend(() => {
+              seen.push(`${call.id}:${staged.key}:${context.tenant}`)
+
+              return staged.key === 'script_1/s1' ? Effect.fail('not allowed now') : Effect.void
+            })
+        }
+      })
+
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+
+      const outcome = yield* outcomeOf(
+        (yield* reviewAndApply(env, plan, ['script_1/s1', 'script_1/s2'])).result
+      )
+
+      expect(seen).toEqual(['review_1/1:script_1/s1:tenant_1', 'review_1/2:script_1/s2:tenant_1'])
+      expect(outcome.result?.calls.map(call => [call.status, call.error])).toEqual([
+        ['failed', 'not allowed now'],
+        ['applied', undefined]
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r2'])
+    })
+  )
+
+  it.effect('lists per-key ledger states, as unknown, after a crash mid-apply; never re-runs', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, dieOn: 'r2', settlement: 'fail' })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      // The process "crashes" on r2: the defect escapes and settlement cannot be recorded.
+      const crashed = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      expect(crashed._tag).toBe('Failure')
+      expect(env.fake.receiptFor(interactionRequestId(call))?.status).toBe('started')
+
+      // The redelivery waits behind the apply fence until the crashed apply's lease expires.
+      const replayed = yield* afterLeaseExpiry(env.toolSet.execute(call, { interaction: ref }))
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(replayed.isError).toBe(true)
+      expect(outcome.outcome).toBe('unknown')
+      expect(outcome.result?.state).toBe('interrupted')
+      // A lease expiry does not prove the apply stopped: s3 has no entry but stays unknown.
+      expect(outcome.result?.calls.map(item => [item.key, item.callId, item.status])).toEqual([
+        ['script_1/s1', 'review_1/1', 'applied'],
+        ['script_1/s2', 'review_1/2', 'unknown'],
+        ['script_1/s3', undefined, 'unknown']
+      ])
+      expect(textOf(replayed)).toContain('It was not run again')
+      expect(env.applied.map(item => item.resource)).toEqual(['r1'])
+    })
+  )
+
+  it.effect('settles an apply that fails unexpectedly as unknown with the ledger listing', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, dieOn: 'r2' })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const failed = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+      const receipt = env.fake.receiptFor(interactionRequestId(call))
+      const replayed = yield* env.toolSet.execute(call, { interaction: ref })
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(failed._tag).toBe('Failure')
+      expect(receipt?.status).toBe('settled')
+      expect(outcome.outcome).toBe('unknown')
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'applied'],
+        ['script_1/s2', 'unknown'],
+        ['script_1/s3', 'not_run']
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r1'])
+    })
+  )
+
+  it.effect('reports the listing as unavailable without a ledger', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ dieOn: 'r1', settlement: 'fail' })
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      const outcome = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+      // Without a ledger, a selected call of a claimed plan may have run: unknown, never empty.
+      expect(outcome.outcome).toBe('unknown')
+      expect(outcome.result?.ledgerUnavailable).toBe(true)
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'unknown']
+      ])
+    })
+  )
+})
+
+describe('privileged plan executor', () => {
+  type RuntimeBox = { runtime?: ToolPlanRuntime<Ctx> }
+
+  const capturingReview = (box: RuntimeBox): ToolRegistration<Ctx> => {
+    const review = makePlanReviewTool<Ctx>()
+    const bind = review.planReview
+
+    if (bind === undefined) throw new Error('Missing plan review binding')
+
+    return {
+      ...review,
+      planReview: runtime => {
+        box.runtime = runtime
+
+        return bind(runtime)
+      }
+    }
+  }
+
+  const runtimeOf = (box: RuntimeBox) => {
+    if (box.runtime === undefined) throw new Error('Missing runtime')
+
+    return box.runtime
+  }
+
+  it.effect('refuses without an accepted, started receipt for this exact selection', () =>
+    Effect.gen(function* () {
+      const box: RuntimeBox = {}
+      const env = yield* setup({ reviewRegistration: capturingReview(box) })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const runtime = runtimeOf(box)
+      const call = reviewCall(plan)
+
+      const applyWith = (submissionId: string, keys: ReadonlyArray<string>) =>
+        runtime.apply({
+          reviewCall: call,
+          submissionId,
+          planId: plan.id,
+          planDigest: plan.digest,
+          keys,
+          onFailure: 'stop'
+        })
+
+      const noReceipt = yield* applyWith('forged', ['script_1/s1'])
+
+      // Accepted but never claimed (so not started).
+      const ref = yield* accept(env, call, ['script_1/s1'])
+      const notStarted = yield* applyWith(ref.submissionId, ['script_1/s1'])
+
+      expect(noReceipt.outcome).toBe('failed')
+      expect(noReceipt.structuredContent.state).toBe('refused')
+      expect(notStarted.structuredContent.state).toBe('refused')
+      expect(env.applied).toEqual([])
+      expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+    })
+  )
+
+  it.effect('refuses a started receipt for another selection, digest, or tool', () =>
+    Effect.gen(function* () {
+      const box: RuntimeBox = {}
+      const env = yield* setup({ reviewRegistration: capturingReview(box) })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const runtime = runtimeOf(box)
+      const call = reviewCall(plan)
+
+      // The person accepted only s1, and the receipt is started (claimed by an execution).
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      yield* env.fake.host.claim(ref)
+
+      const applyWith = (input: {
+        readonly reviewCall: ToolCall
+        readonly submissionId: string
+        readonly planDigest: string
+        readonly keys: ReadonlyArray<string>
+      }) => runtime.apply({ ...input, planId: plan.id, onFailure: 'stop' })
+
+      const widened = yield* applyWith({
+        reviewCall: call,
+        submissionId: ref.submissionId,
+        planDigest: plan.digest,
+        keys: ['script_1/s1', 'script_1/s2']
+      })
+
+      const otherDigest = yield* applyWith({
+        reviewCall: call,
+        submissionId: ref.submissionId,
+        planDigest: 'f'.repeat(64),
+        keys: ['script_1/s1']
+      })
+
+      // A started receipt of another interaction tool with the same params never applies plans.
+      const impostor = ToolCall.make({
+        id: 'impostor_1',
+        name: 'impostor',
+        params: { planId: plan.id, planDigest: plan.digest }
+      })
+
+      const impostorRef = yield* accept(env, impostor, ['script_1/s1'])
+
+      yield* env.fake.host.claim(impostorRef)
+
+      const otherTool = yield* applyWith({
+        reviewCall: impostor,
+        submissionId: impostorRef.submissionId,
+        planDigest: plan.digest,
+        keys: ['script_1/s1']
+      })
+
+      for (const refused of [widened, otherDigest, otherTool]) {
+        expect(refused.outcome).toBe('failed')
+        expect(refused.structuredContent.state).toBe('refused')
+      }
+
+      expect(env.fake.receiptFor(ref.slot)?.status).toBe('started')
+      expect(env.applied).toEqual([])
+      expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+    })
+  )
+
+  it.effect('refuses a plan whose stored calls no longer match their digests', () =>
+    Effect.gen(function* () {
+      const box: RuntimeBox = {}
+      const env = yield* setup({ reviewRegistration: capturingReview(box) })
+      const runtime = runtimeOf(box)
+
+      const first = StagedCall.make({
+        key: 'script_9/s1',
+        toolName: 'link_curriculum',
+        params: { resource: 'tampered', curriculum: 'LGR22' },
+        argsDigest: stagedCallDigest({ resource: 'original', curriculum: 'LGR22' })
+      })
+
+      const tampered = ToolPlan.make({
+        id: 'script_9',
+        scope: 'conversation_1',
+        digest: toolPlanDigest([first]),
+        calls: [first]
+      })
+
+      yield* env.store.put(tampered)
+
+      const loaded = yield* runtime
+        .load({ planId: tampered.id, planDigest: tampered.digest })
+        .pipe(Effect.flip)
+
+      const preview = yield* previewToolPlan({ toolSet: env.toolSet, plan: tampered }).pipe(
+        Effect.flip
+      )
+
+      expect(loaded.message).toContain('does not match its digest')
+      expect(preview.cause).toBe('invalid_plan')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('refuses a plan whose keys were moved to other calls', () =>
+    Effect.gen(function* () {
+      const box: RuntimeBox = {}
+      const env = yield* setup({ reviewRegistration: capturingReview(box) })
+      const runtime = runtimeOf(box)
+
+      const call = (key: string, resource: string) =>
+        StagedCall.make({
+          key,
+          toolName: 'link_curriculum',
+          params: { resource, curriculum: 'LGR22' },
+          argsDigest: stagedCallDigest({ resource, curriculum: 'LGR22' })
+        })
+
+      // Every digest matches, but s1 now names the second call.
+      const first = call('script_8/s2', 'keep')
+      const second = call('script_8/s1', 'drop')
+
+      const swapped = ToolPlan.make({
+        id: 'script_8',
+        scope: 'conversation_1',
+        digest: toolPlanDigest([first, second]),
+        calls: [first, second]
+      })
+
+      yield* env.store.put(swapped)
+
+      const loaded = yield* runtime
+        .load({ planId: swapped.id, planDigest: swapped.digest })
+        .pipe(Effect.flip)
+
+      expect(loaded.message).toContain('out of place')
+    })
+  )
+
+  it.effect('rejects stages once the plan is saved', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const builder = builderOf(env)
+
+      yield* stageLinks(builder, ['r1'])
+      yield* builder.finish
+
+      const late = yield* stageLinks(builder, ['r2']).pipe(Effect.flip)
+
+      expect(late.reason).toBe('order')
+    })
+  )
+})
+
+describe('previewToolPlan', () => {
+  it.effect('renders bounded per-key previews with the resolution context, paged', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+
+      const previews = yield* previewToolPlan({
+        toolSet: env.toolSet,
+        plan,
+        keys: ['script_1/s2', 'script_1/s7']
+      })
+
+      const tooMany = yield* previewToolPlan({
+        toolSet: env.toolSet,
+        plan,
+        keys: Array.from({ length: 51 }, (_, index) => `k${index}`)
+      }).pipe(Effect.flip)
+
+      const other = yield* setup({ plans: false })
+
+      const unavailable = yield* previewToolPlan({ toolSet: other.toolSet, plan }).pipe(Effect.flip)
+
+      expect(previews).toEqual([
+        {
+          key: 'script_1/s2',
+          status: 'ok',
+          toolName: 'link_curriculum',
+          params: { resource: 'r2', curriculum: 'LGR22' },
+          preview: { summary: 'tenant_1:r2->LGR22' }
+        },
+        { key: 'script_1/s7', status: 'error', message: 'Not a staged call of the plan.' }
+      ])
+      expect(tooMany.cause).toBe('page_too_large')
+      expect(unavailable.cause).toBe('unavailable')
+    })
+  )
+})
+
+describe('review resilience', () => {
+  it.effect('fails a preflight batch closed during a plan store outage', () =>
+    Effect.gen(function* () {
+      const outage: Outage = { down: false }
+      const env = yield* setup({ outage })
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+
+      outage.down = true
+
+      const failure = yield* prepareToolBatch({
+        tools: env.toolSet.tools,
+        responses: [],
+        calls: [call],
+        interactions: env.toolSet.interactions
+      }).pipe(Effect.flip)
+
+      expect(failure.cause).toBe('unavailable')
+      expect(failure.message).toContain('plan store is unavailable')
+    })
+  )
+
+  it.effect('answers admission and execution outages as unavailable, never invalid', () =>
+    Effect.gen(function* () {
+      const outage: Outage = { down: false }
+      const env = yield* setup({ outage })
+      const plan = yield* stagedPlan(env, ['r1'])
+
+      outage.down = true
+
+      const admission = yield* accept(env, reviewCall(plan, 'review_a'), ['script_1/s1']).pipe(
+        Effect.flip
+      )
+
+      outage.down = false
+
+      const call = reviewCall(plan, 'review_b')
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      outage.down = true
+
+      const execution = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.flip)
+
+      expect(admission._tag).toBe('InteractionAdmissionError')
+      expect(admission.message).toContain('unavailable')
+      expect(execution.cause).toBe('unavailable')
+      expect(env.fake.receiptFor(ref.slot)?.status).toBe('accepted')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('reports the outcome of a concurrent delivery instead of invalid arguments', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1'])
+      const stale = yield* env.fake.host.read(ref.slot)
+
+      if (stale === undefined) throw new Error('Missing receipt')
+
+      // Delivery B read the receipt while it was still accepted.
+      const preflight = yield* prepareToolBatch({
+        tools: env.toolSet.tools,
+        responses: [],
+        calls: [call],
+        interactions: env.toolSet.interactions,
+        interactionReceipts: new Map([[call.id, stale]])
+      })
+
+      // Delivery A applies the plan.
+      const winner = yield* env.toolSet.execute(call, { interaction: ref })
+
+      // B's executor starts from the same stale snapshot; its validation now fails, so it
+      // re-reads the receipt and reports A's settled outcome.
+      let reads = 0
+
+      const staleHost: InteractionHost = {
+        ...env.fake.host,
+        read: slot => (reads++ === 0 ? Effect.succeed(stale) : env.fake.host.read(slot))
+      }
+
+      const loser = yield* (yield* env.resolveWithHost(staleHost)).execute(call, {
+        interaction: ref
+      })
+
+      const unclaimed = yield* prepareToolBatch({
+        tools: env.toolSet.tools,
+        responses: [],
+        calls: [reviewCall(plan, 'review_x')],
+        interactions: env.toolSet.interactions
+      })
+
+      expect(preflight.callsToExecute.map(item => item.call.id)).toEqual([call.id])
+      expect(loser).toEqual(winner)
+      expect(env.applied).toHaveLength(1)
+      // Without a receipt, a call for an applied plan is still rejected up front.
+      expect(unclaimed.callsToExecute).toEqual([])
+      expect(JSON.stringify(unclaimed.resultMessages)).toContain('already reviewed and applied')
+    })
+  )
+})
+
+describe('staging snapshots, listings, and prechecks', () => {
+  it.effect('stages one snapshot of the arguments', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const builder = builderOf(env)
+      const params = { resource: 'r1', curriculum: 'LGR22' }
+
+      yield* builder.stage({ name: 'link_curriculum', params })
+      params.resource = 'changed'
+
+      const [staged] = yield* builder.staged
+
+      expect(staged?.params).toEqual({ curriculum: 'LGR22', resource: 'r1' })
+      expect(staged?.argsDigest).toBe(stagedCallDigest({ resource: 'r1', curriculum: 'LGR22' }))
+    })
+  )
+
+  it.effect('lists selected calls of unledgered tools as unknown after a crash', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, unledgered: true, dieOn: 'r2', settlement: 'fail' })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s2', 'script_1/s3'])
+
+      yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      const outcome = yield* outcomeOf(
+        yield* afterLeaseExpiry(env.toolSet.execute(call, { interaction: ref }))
+      )
+
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'skipped'],
+        ['script_1/s2', 'unknown'],
+        ['script_1/s3', 'unknown']
+      ])
+    })
+  )
+
+  it.effect('runs prechecks with bounded concurrency', () =>
+    Effect.gen(function* () {
+      const prechecks: PrecheckTracker = { active: 0, max: 0 }
+      const env = yield* setup({ prechecks })
+      const resources = Array.from({ length: 20 }, (_, index) => `r${index}`)
+      const plan = yield* stagedPlan(env, resources)
+
+      yield* accept(
+        env,
+        reviewCall(plan),
+        plan.calls.map(staged => staged.key)
+      )
+
+      expect(prechecks.max).toBeGreaterThan(1)
+      expect(prechecks.max).toBeLessThanOrEqual(8)
+    })
+  )
+})
+
+describe('previewStoredToolPlan', () => {
+  it.effect('pages a stored plan with its claim state and Schema-decodable previews', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const resources = Array.from({ length: 60 }, (_, index) => `r${index}`)
+      const plan = yield* stagedPlan(env, resources)
+
+      const first = yield* previewStoredToolPlan({
+        toolSet: env.toolSet,
+        planId: plan.id,
+        planDigest: plan.digest
+      })
+
+      const last = yield* previewStoredToolPlan({
+        toolSet: env.toolSet,
+        planId: plan.id,
+        planDigest: plan.digest,
+        offset: first.nextOffset ?? 0
+      })
+
+      yield* reviewAndApply(env, plan, ['script_1/s1'])
+
+      const claimed = yield* previewStoredToolPlan({
+        toolSet: env.toolSet,
+        planId: plan.id,
+        planDigest: plan.digest,
+        limit: 1
+      })
+
+      const missing = yield* previewStoredToolPlan({
+        toolSet: env.toolSet,
+        planId: 'nope',
+        planDigest: plan.digest
+      }).pipe(Effect.flip)
+
+      const wrongDigest = yield* previewStoredToolPlan({
+        toolSet: env.toolSet,
+        planId: plan.id,
+        planDigest: 'f'.repeat(64)
+      }).pipe(Effect.flip)
+
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(ToolPlanPreview))(
+        JSON.parse(JSON.stringify(first.previews))
+      )
+
+      expect([first.total, first.offset, first.nextOffset, first.previews.length]).toEqual([
+        60, 0, 50, 50
+      ])
+      expect([last.offset, last.nextOffset, last.previews.length]).toEqual([50, undefined, 10])
+      expect(first.claimed).toBe(false)
+      expect(claimed.claimed).toBe(true)
+      expect(claimed.previews.map(preview => preview.key)).toEqual(['script_1/s1'])
+      expect(missing.cause).toBe('not_found')
+      expect(wrongDigest.cause).toBe('invalid_plan')
+      expect(decoded).toHaveLength(50)
+      expect(toolPlanKeyPages(plan).map(page => page.length)).toEqual([50, 10])
+    })
+  )
+})
+
+describe('concurrent apply deliveries', () => {
+  const makeGate = (resource: string) =>
+    Effect.gen(function* () {
+      const gate: Gate = {
+        resource,
+        reached: yield* Deferred.make<void>(),
+        release: yield* Deferred.make<void>()
+      }
+
+      return gate
+    })
+
+  // Lets forked fibers run until they block (for example on a ledger poll sleep).
+  const settle = Effect.forEach(Array.from({ length: 50 }), () => Effect.yieldNow, {
+    discard: true
+  })
+
+  /** Delivery A applies until it blocks inside r2 (r1 applied); returns its fiber. */
+  const applyUntilGate = (env: Env, gate: Gate, call: ToolCall, ref: InteractionRef) =>
+    Effect.gen(function* () {
+      const first = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* Deferred.await(gate.reached)
+
+      return first
+    })
+
+  it.effect('a redelivery waits for the in-flight apply and returns its real outcome', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const decisions: Array<string> = []
+      const env = yield* setup({ ledger: true, gate, decisions })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+
+      // Delivery B finds the receipt started and waits behind the apply fence.
+      const second = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* settle
+      yield* Deferred.succeed(gate.release, undefined)
+
+      const winner = yield* Fiber.join(first)
+
+      yield* TestClock.adjust('2 seconds')
+
+      const redelivered = yield* Fiber.join(second)
+      const outcome = yield* outcomeOf(redelivered)
+
+      expect(redelivered).toEqual(winner)
+      expect(outcome.outcome).toBe('completed')
+      expect(outcome.result?.calls.map(item => item.status)).toEqual([
+        'applied',
+        'applied',
+        'applied'
+      ])
+      expect(decisions).toContain('review_1:in_flight_wait')
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect('past the wait, a redelivery lists calls the apply may still reach as unknown', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const env = yield* setup({ ledger: true, gate, maxWaitMs: 5_000 })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+
+      const second = yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.forkChild)
+
+      yield* settle
+      yield* TestClock.adjust('6 seconds')
+
+      const listed = yield* outcomeOf(yield* Fiber.join(second))
+
+      // The first delivery is still running and goes on to apply r2 and r3.
+      yield* Deferred.succeed(gate.release, undefined)
+      yield* Fiber.join(first)
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'applied'],
+        ['script_1/s2', 'unknown'],
+        ['script_1/s3', 'unknown']
+      ])
+      expect(listed.result?.calls.some(item => item.status === 'not_run')).toBe(false)
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect('without a ledger, a redelivery never claims a call was not run', () =>
+    Effect.gen(function* () {
+      const gate = yield* makeGate('r2')
+      const env = yield* setup({ gate })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      const first = yield* applyUntilGate(env, gate, call, ref)
+      const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+      yield* Deferred.succeed(gate.release, undefined)
+      yield* Fiber.join(first)
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.ledgerUnavailable).toBe(true)
+      expect(listed.result?.calls.map(item => item.status)).toEqual([
+        'unknown',
+        'unknown',
+        'unknown'
+      ])
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+    })
+  )
+
+  it.effect(
+    'a redelivery that holds the fence first proves nothing ran, and blocks the apply',
+    () =>
+      Effect.gen(function* () {
+        type RuntimeBox = { runtime?: ToolPlanRuntime<Ctx> }
+
+        const box: RuntimeBox = {}
+        const review = makePlanReviewTool<Ctx>()
+        const bind = review.planReview
+
+        if (bind === undefined) throw new Error('Missing plan review binding')
+
+        const env = yield* setup({
+          ledger: true,
+          reviewRegistration: {
+            ...review,
+            planReview: runtime => {
+              box.runtime = runtime
+
+              return bind(runtime)
+            }
+          }
+        })
+
+        const plan = yield* stagedPlan(env, ['r1', 'r2'])
+        const call = reviewCall(plan)
+        const ref = yield* accept(env, call, ['script_1/s1', 'script_1/s2'])
+
+        // Delivery A claimed the receipt and stopped before reaching the apply fence.
+        yield* env.fake.host.claim(ref)
+
+        const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+        // If A's apply resumes now, it finds the fence completed and runs nothing.
+        const runtime = box.runtime
+
+        if (runtime === undefined) throw new Error('Missing runtime')
+
+        const resumed = yield* runtime.apply({
+          reviewCall: call,
+          submissionId: ref.submissionId,
+          planId: plan.id,
+          planDigest: plan.digest,
+          keys: ['script_1/s1', 'script_1/s2'],
+          onFailure: 'stop'
+        })
+
+        expect(listed.outcome).toBe('failed')
+        expect(listed.result?.calls.map(item => item.status)).toEqual(['not_run', 'not_run'])
+        expect(resumed.structuredContent.calls.map(item => item.status)).toEqual([
+          'not_run',
+          'not_run'
+        ])
+        expect(env.applied).toEqual([])
+        expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+      })
+  )
+})
+
+describe('review hardening', () => {
+  it.effect('a fresh fence is not proof when the plan claim shows an apply ran', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1', 'script_1/s2'])
+
+      // An apply under another ledger scope (or with its fence entry deleted) claimed the plan.
+      yield* env.fake.host.claim(ref)
+      yield* env.store.claim({ planId: plan.id, submissionId: ref.submissionId })
+
+      const listed = yield* outcomeOf(yield* env.toolSet.execute(call, { interaction: ref }))
+
+      expect(listed.outcome).toBe('unknown')
+      expect(listed.result?.calls.map(item => item.status)).toEqual(['unknown', 'unknown'])
+    })
+  )
+
+  it.effect(
+    'an outage after the receipt claim applies nothing and leaves the plan reviewable',
+    () =>
+      Effect.gen(function* () {
+        const outage: Outage = { down: false }
+        const env = yield* setup({ outage })
+        const plan = yield* stagedPlan(env, ['r1'])
+        const call = reviewCall(plan)
+        const ref = yield* accept(env, call, ['script_1/s1'])
+
+        // Call and selection validation still read the plan; the apply's own read fails.
+        outage.getsLeft = 2
+
+        const failedResult = yield* env.toolSet.execute(call, { interaction: ref })
+        const failed = yield* outcomeOf(failedResult)
+
+        outage.getsLeft = undefined
+
+        const { result } = yield* reviewAndApply(env, plan, ['script_1/s1'], 'review_2')
+
+        expect(failed.outcome).toBe('failed')
+        expect(failed.result?.state).toBe('refused')
+        expect(textOf(failedResult)).toContain('The plan is unchanged and can still be applied')
+        expect(env.fake.receiptFor(ref.slot)?.status).toBe('settled')
+        expect((yield* outcomeOf(result)).outcome).toBe('completed')
+        expect(env.applied.map(item => item.resource)).toEqual(['r1'])
+      })
+  )
+})
+
+describe('outages after the receipt claim', () => {
+  const failedApply = (outageOf: (outage: Outage) => void, ledger: boolean) =>
+    Effect.gen(function* () {
+      const outage: Outage = { down: false }
+      const env = yield* setup({ outage, ledger })
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      outageOf(outage)
+
+      const result = yield* env.toolSet.execute(call, { interaction: ref })
+
+      return { env, plan, outcome: yield* outcomeOf(result), text: textOf(result) }
+    })
+
+  it.effect('a plan-claim outage applies nothing and says the plan may be locked', () =>
+    Effect.gen(function* () {
+      const { env, outcome, text } = yield* failedApply(outage => {
+        outage.claimDown = true
+      }, false)
+
+      expect(outcome.outcome).toBe('failed')
+      expect(text).toContain('may now be locked')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('a fence outage applies nothing and leaves the plan reviewable', () =>
+    Effect.gen(function* () {
+      const { env, plan, outcome, text } = yield* failedApply(outage => {
+        outage.fenceDown = true
+      }, true)
+
+      expect(outcome.outcome).toBe('failed')
+      expect(text).toContain('The plan is unchanged and can still be applied')
+      expect(env.applied).toEqual([])
+      expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+    })
+  )
+})

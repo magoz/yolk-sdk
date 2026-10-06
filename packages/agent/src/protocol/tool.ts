@@ -289,7 +289,12 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   /** Present only on generalized typed input tools. Never combined with approval/background. */
   input: Schema.optional(InputDescriptor),
   /** Present only on action-backed interaction tools. Never combined with approval/background/input. */
-  interaction: Schema.optional(InteractionDescriptor)
+  interaction: Schema.optional(InteractionDescriptor),
+  /** Host-marked stageable: code mode scripts may record calls of this approval-gated tool into a
+   * staged tool plan that a person reviews once (ADR 0005). Only valid with `approval` and without
+   * input, interaction, background, or `callableBy: 'model'`. Direct script calls stay fail-closed.
+   */
+  staging: Schema.optional(Schema.Literal(true))
 }) {}
 
 export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
@@ -896,6 +901,16 @@ export class InteractionValidationError extends Schema.TaggedError<InteractionVa
   { message: Schema.String }
 ) {}
 
+/** Server-side validator for one interaction call's model-supplied params. Besides schema and
+ * business rejections it may fail with an `InteractionHostError` when host storage it reads is
+ * unavailable: that is never a verdict on the call. Loop preflight fails the batch closed (like
+ * `loadInteractionReceipts`), admission answers `unavailable`, and execution fails closed as an
+ * `unavailable` `ToolError`.
+ */
+export type InteractionCallValidator = (
+  params: unknown
+) => Effect.Effect<unknown, Schema.SchemaError | InteractionValidationError | InteractionHostError>
+
 /** Narrow loop preflight seam for action-backed interactions. Validators and the
  * server-defined action list are provided separately from the serializable ToolDef
  * (see ResolvedToolSet.interactions); hosts pass them explicitly to
@@ -904,16 +919,18 @@ export class InteractionValidationError extends Schema.TaggedError<InteractionVa
  */
 export type InteractionPreflight = {
   /** Validate model-supplied context before opening a request or accepting a response. */
-  readonly validateCall: InteractionResponseValidator
+  readonly validateCall: InteractionCallValidator
   readonly validateResponse: InteractionResponseValidator
   /** Server-defined action ids. Membership is checked; labels stay display-only. */
   readonly actionIds: ReadonlyArray<string>
-  /** Bound fresh host policy. Admission invokes this before accepting; not authentication. */
+  /** Bound fresh host policy. Admission invokes this before accepting; not authentication. An
+   * `InteractionHostError` means host storage is unavailable (admission answers `unavailable`).
+   */
   readonly validateAction: (input: {
     readonly actionId: string
     readonly data: Schema.Json
     readonly call: ToolCall
-  }) => Effect.Effect<void, InteractionValidationError | Schema.SchemaError>
+  }) => Effect.Effect<void, InteractionValidationError | Schema.SchemaError | InteractionHostError>
 }
 
 /** Host-allocated opaque identity. Neither field authenticates consent. The host adapter
@@ -1014,10 +1031,24 @@ export class InteractionAdmissionError extends Schema.TaggedError<InteractionAdm
       'cancelled_with_payload',
       'missing_data',
       'invalid_data',
-      'action_rejected'
+      'action_rejected',
+      // Host storage a validator reads is unavailable: retryable, never a verdict on the input.
+      'unavailable'
     ])
   }
 ) {}
+
+const admissionErrorFor =
+  (cause: 'invalid_call' | 'action_rejected', prefix: string) =>
+  (
+    error: Schema.SchemaError | InteractionValidationError | InteractionHostError
+  ): InteractionAdmissionError =>
+    error instanceof InteractionHostError
+      ? new InteractionAdmissionError({
+          cause: 'unavailable',
+          message: `Interaction storage is unavailable: ${error.message}`
+        })
+      : new InteractionAdmissionError({ cause, message: `${prefix}${error.message}` })
 
 const isInteractionJsonObject = (
   value: Schema.Json
@@ -1126,7 +1157,7 @@ export const validInteractionReceipt = (
 export const validateInteractionSubmission = (input: {
   readonly request: InteractionRequest
   readonly response: InteractionResponse
-  readonly validateCall: InteractionResponseValidator
+  readonly validateCall: InteractionCallValidator
   readonly validateResponse: InteractionResponseValidator
   readonly actionIds: ReadonlyArray<string> | ReadonlySet<string>
   readonly validateAction: InteractionPreflight['validateAction']
@@ -1169,16 +1200,12 @@ export const validateInteractionSubmission = (input: {
       return InteractionCandidate.Cancelled({ slot: input.request.requestId })
     }
 
-    yield* input.validateCall(input.request.call.params).pipe(
-      Effect.asVoid,
-      Effect.mapError(
-        error =>
-          new InteractionAdmissionError({
-            message: `Invalid interaction call: ${error.message}`,
-            cause: 'invalid_call'
-          })
+    yield* input
+      .validateCall(input.request.call.params)
+      .pipe(
+        Effect.asVoid,
+        Effect.mapError(admissionErrorFor('invalid_call', 'Invalid interaction call: '))
       )
-    )
 
     const actionId = input.response.actionId
 
@@ -1226,15 +1253,9 @@ export const validateInteractionSubmission = (input: {
       )
     )
 
-    yield* input.validateAction({ actionId, data, call: input.request.call }).pipe(
-      Effect.mapError(
-        error =>
-          new InteractionAdmissionError({
-            message: error.message,
-            cause: 'action_rejected'
-          })
-      )
-    )
+    yield* input
+      .validateAction({ actionId, data, call: input.request.call })
+      .pipe(Effect.mapError(admissionErrorFor('action_rejected', '')))
 
     return InteractionCandidate.Submitted({
       slot: input.request.requestId,
@@ -1389,6 +1410,21 @@ export const isCodeModeFailClosed = (def: ToolDef): boolean =>
  */
 export const isCodeModeCallable = (def: ToolDef): boolean =>
   def.callableBy !== 'model' && !isCodeModeFailClosed(def)
+
+/** Scripts may stage (never directly call) the tool into a reviewed plan: host-marked
+ * `staging`, approval-gated, not `callableBy: 'model'`, and outside every other fail-closed kind
+ * (input, interaction, background, `question`, `subagent`).
+ */
+export const isToolStageable = (def: ToolDef): boolean =>
+  def.staging === true &&
+  def.approval !== undefined &&
+  def.callableBy !== 'model' &&
+  def.input === undefined &&
+  def.interaction === undefined &&
+  def.background !== true &&
+  def.execution === undefined &&
+  def.name !== questionToolName &&
+  def.name !== subagentToolName
 
 /** Provider-facing: everything except `codemode`-only definitions. */
 export const isProviderToolDef = (def: ToolDef): boolean => def.callableBy !== 'codemode'

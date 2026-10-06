@@ -999,7 +999,7 @@ const prepareInteractionCall = (input: {
   readonly receipts: ReadonlyMap<string, InteractionReceipt>
   readonly call: ToolCall
   readonly index: number
-}): Effect.Effect<PreparedToolCall> =>
+}): Effect.Effect<PreparedToolCall, ToolError> =>
   Effect.gen(function* () {
     const def = toolDefFor(input.tools, input.call)
 
@@ -1065,7 +1065,24 @@ const prepareInteractionCall = (input: {
 
     const validCall = yield* preflight.validateCall(input.call.params).pipe(Effect.result)
 
-    if (Predicate.isTagged(validCall, 'Failure'))
+    // Host storage a validator reads is unavailable: fail the batch closed (like
+    // `loadInteractionReceipts`), never turn it into a verdict on the call.
+    if (
+      Predicate.isTagged(validCall, 'Failure') &&
+      Predicate.isTagged(validCall.failure, 'InteractionHostError')
+    )
+      return yield* Effect.fail(
+        new ToolError({
+          tool: input.call.name,
+          cause: 'unavailable',
+          message: validCall.failure.message
+        })
+      )
+
+    // An accepted receipt goes to the executor even when the call no longer validates: it
+    // re-validates before any claim and, if another execution started or settled the receipt
+    // meanwhile, reports that outcome instead of an invalid-arguments result.
+    if (Predicate.isTagged(validCall, 'Failure') && stored === undefined)
       return PreparedToolCall.Result({
         index: input.index,
         call: input.call,
@@ -1130,7 +1147,7 @@ const prepareToolCall = (input: {
   readonly receipts: ReadonlyMap<string, InteractionReceipt>
   readonly call: ToolCall
   readonly index: number
-}): Effect.Effect<PreparedToolCall> =>
+}): Effect.Effect<PreparedToolCall, ToolError> =>
   toolDefFor(input.tools, input.call)?.callableBy === 'codemode'
     ? Effect.succeed(unavailableCodeModeOnlyCall(input.call, input.index))
     : prepareModelToolCall(input)
@@ -1143,7 +1160,7 @@ const prepareModelToolCall = (input: {
   readonly receipts: ReadonlyMap<string, InteractionReceipt>
   readonly call: ToolCall
   readonly index: number
-}): Effect.Effect<PreparedToolCall> =>
+}): Effect.Effect<PreparedToolCall, ToolError> =>
   !input.receipts.has(input.call.id) && toolDefFor(input.tools, input.call)?.input !== undefined
     ? prepareInputCall({
         tools: input.tools,
@@ -1178,7 +1195,10 @@ const prepareModelToolCall = (input: {
             )
         : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
-/** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
+/** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution.
+ * Fails (`ToolError` `unavailable`) only when host storage an interaction call validator reads is
+ * unavailable: the batch fails closed, like `loadInteractionReceipts`, and nothing runs.
+ */
 export const prepareToolBatch = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
@@ -1186,7 +1206,7 @@ export const prepareToolBatch = (input: {
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly interactions?: Readonly<Record<string, InteractionPreflight>>
   readonly interactionReceipts?: ReadonlyMap<string, InteractionReceipt>
-}): Effect.Effect<PreparedToolBatch> =>
+}): Effect.Effect<PreparedToolBatch, ToolError> =>
   Effect.gen(function* () {
     const handlers = input.inputs ?? {}
     const preflights = input.interactions ?? {}

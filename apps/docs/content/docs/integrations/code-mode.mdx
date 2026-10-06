@@ -119,7 +119,8 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
 
 - Approval, input, interaction, and background tools, and the `question` and `subagent` tools,
   never run from code mode. Marking them `all` behaves as `model`; marking them `codemode` fails
-  resolution.
+  resolution. Approval-gated tools you mark `staging` can be staged for one review instead (see
+  [Stage approval-gated writes](#stage-approval-gated-writes)).
 - `codemode`-only tools are never sent to model providers.
 - Listed tools fill an inline budget (default 3,000 estimated tokens) fairly across tool modules:
   each round every module places its cheapest remaining tool. `all` tools are already declared to
@@ -260,6 +261,82 @@ itself ledgered, so a re-executed call never runs its script again:
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive `idempotencyKey`. Calls the
 ledger policy skips (by default read-only calls) are not listed. Scripts are never replayed.
 
+## Stage approval-gated writes
+
+Bulk work on an approval-gated tool would otherwise need one approval per call. Mark the tool
+stageable, and a script can record the calls into a plan that a person reviews once, unticking any
+they do not want. Nothing runs while the script runs.
+
+```ts
+import { Effect } from 'effect'
+import { ToolApprovalPolicy } from '@yolk-sdk/agent/protocol'
+import {
+  makeInMemoryToolPlanStore,
+  makePlanReviewTool,
+  makeTool,
+  resolveTools
+} from '@yolk-sdk/agent/tools'
+
+const setCurriculum = makeTool<HostContext, typeof SetCurriculumParams>({
+  name: 'set_curriculum',
+  description: 'Set the curriculum links of a published resource.',
+  parameters: SetCurriculumParams, // host-owned Effect Schema
+  access: 'write',
+  approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+  staging: {
+    // Optional, side-effect free. A precheck failure rejects the person's selection.
+    precheck: ({ params, context }) => assertStillExpected(context, params), // host-owned
+    // Optional bounded JSON for your review screen (`previewToolPlan`).
+    preview: ({ params, context }) => describeChange(context, params) // host-owned
+  },
+  execute: ({ params, context, idempotencyKey }) => applyCurriculum(context, params, idempotencyKey)
+})
+
+const toolSet = Effect.gen(function* () {
+  return yield* resolveTools(
+    [{ id: 'host', tools: [codemode, makePlanReviewTool<HostContext>()] }, cmsModule],
+    hostContext,
+    {
+      interactionHost: scopedReceipts, // host-owned InteractionHost
+      plans: { store: planStore }, // host-owned ToolPlanStore, scoped to the conversation
+      ledger: { store: ledgerStore }
+    }
+  )
+})
+```
+
+`makeInMemoryToolPlanStore` is the reference store for tests; production stores persist plans
+(`Schema.toCodecJson(ToolPlan)`) where later turns can read them. A script then stages calls:
+
+```js
+const resources = await tools.list_published({ subject: 'math' })
+for (const resource of resources) {
+  await stage('set_curriculum', { id: resource.id, curriculum: ['LGR22-MA-7'] })
+}
+return resources.length
+```
+
+- `stage(name, args)` validates the arguments with the tool's decoder and resolves to
+  `{ staged: true, key, index }`. It executes and ledgers nothing.
+- Once a script stages, it may only run `read` tools; a script that already ran a write tool
+  cannot stage. Duplicate calls (same tool and arguments) are rejected. A plan holds at most 500
+  calls and 1 MiB of arguments (`plans: { maxCalls, maxArgsBytes }`). The code mode option
+  `staging: { maxCalls }` can only lower it. Calls past a limit are rejected, never truncated.
+- A successful script saves the plan once and its result tells the model to call
+  `review_plan({ planId, planDigest })`; hosts read `structuredContent.codemode.plan`
+  (`{ id, digest, count, reviewToolName }`). A failed script discards its staged calls.
+- `stage` exists only when the resolution has `plans`, an `interactionHost`, and one plan review
+  tool. Voice and subagent resolutions without them never get it. `staging: false` turns it off for
+  one code mode tool.
+
+The review is an [action-backed interaction](../agent/tools-hitl#review-a-staged-plan): render the
+`tool_plan_review` kind, accept `{ selectedKeys }`, and resume as for any interaction. Yolk then
+applies exactly the selected calls in staged order, once.
+
+**Per-call authority:** applied plan calls do not pass through `beforeNestedCall` or decorators
+around your `ToolExecutor`: they run inside the review action. Pass the same per-call authorizer as
+`makePlanReviewTool({ beforeCall })`; it is the only per-call host hook for applied calls.
+
 ## Make tools ready for code mode
 
 Scripts can only use what a tool declares and returns. For each tool scripts may call:
@@ -374,7 +451,8 @@ and aborts the executor's signal.
   `write` access.
 - Decorators you wrap around the `ToolExecutor` (outside `ResolvedToolSet.execute`), such as a
   per-call run-admission or stop check, see only the `codemode` call, never the nested calls of its
-  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers:
+  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers, and the same
+  check in the plan review's `beforeCall` for staged calls:
 
   ```ts
   const codemode = makeCodeModeTool<HostContext>({
@@ -394,7 +472,8 @@ and aborts the executor's signal.
 - The worker inherits a copy of the host's `process.env`. Scripts cannot read it (the VM has no
   `process`), but keep that in mind for engine-level vulnerabilities.
 - The VM's clock and `Math.random` come from the engine's WASI shim.
-- Approvals inside scripts are not supported yet; approval-gated tools never run from code mode.
+- Approvals inside scripts are not supported; approval-gated tools never run from code mode. Staged
+  calls run only after a person accepts a plan review, through the same execute path and ledger.
 - Node prints one `ExperimentalWarning` per process for `stripTypeScriptTypes`.
 
 ## Other runtimes

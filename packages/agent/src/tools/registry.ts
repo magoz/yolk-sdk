@@ -1,5 +1,6 @@
 import {
   Array as Arr,
+  Duration,
   Effect,
   Exit,
   Layer,
@@ -13,6 +14,7 @@ import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/ag
 import {
   isCodeModeCallable,
   isCodeModeFailClosed,
+  isToolStageable,
   isToolJsonSchemaObject,
   makeErrorToolResult,
   makeInteractionToolResult,
@@ -25,6 +27,8 @@ import {
   validInteractionReceipt,
   type InputToolHandler,
   type InteractionBusinessOutcome,
+  type InteractionCallValidator,
+  type InteractionHostError,
   type InteractionRef,
   type InteractionHost,
   type InteractionOutcome,
@@ -56,6 +60,24 @@ import {
   type ToolLedgerAbandonedInput,
   type ToolLedgerOptions
 } from './ledger.ts'
+import {
+  defaultToolPlanMaxArgsBytes,
+  defaultToolPlanMaxCalls,
+  type ResolvedToolPlans,
+  type ToolPlanOptions,
+  type ToolPlanRuntime,
+  type ToolPlanStaging,
+  type ToolStaging,
+  type ToolStagingHandlers
+} from './plan.ts'
+import {
+  makeToolPlanRuntime,
+  makeToolPlanStaging,
+  positiveInteger,
+  previewStoredToolPlanWith,
+  previewToolPlanWith,
+  type ToolPlanResolution
+} from './plan-runtime.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -76,7 +98,10 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'interaction_unsupported_policy',
       'interaction_validation_required',
       'codemode_unsupported_tool',
-      'invalid_tool_exposure'
+      'invalid_tool_exposure',
+      'staging_unsupported_policy',
+      'staging_validation_required',
+      'plan_review_duplicate'
     ])
   }
 ) {}
@@ -180,13 +205,33 @@ export type NestedToolExecutor = {
    * `ResolvedToolSet.execute` (for example a wrapped ToolExecutor) do not see nested calls.
    */
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult>
+  /** Staged tool plans (ADR 0005), bound to this call: present only when the resolution has
+   * `plans`, an `interactionHost`, and one plan review registration.
+   */
+  readonly staging?: ToolPlanStaging
+}
+
+/** What a nested-access description sees of staging: the stageable tools and the review tool. */
+export type NestedToolStagingDescription = {
+  readonly tools: ReadonlyArray<NestedTool>
+  readonly reviewToolName: string
+}
+
+type NestedToolExecutorFields = {
+  tools: NestedToolExecutor['tools']
+  execute: NestedToolExecutor['execute']
+  staging?: ToolPlanStaging
 }
 
 /** Computes a nested-access registration's resolved description from the tools its scripts can
  * call (for example a code mode catalog). Honored by `resolveTools` only for registrations with
- * `nestedToolAccess: true`; the static `def.description` stays the fallback elsewhere.
+ * `nestedToolAccess: true`; the static `def.description` stays the fallback elsewhere. `staging`
+ * is present when the resolution offers staged tool plans.
  */
-export type NestedToolDescriber = (input: { readonly tools: ReadonlyArray<NestedTool> }) => string
+export type NestedToolDescriber = (input: {
+  readonly tools: ReadonlyArray<NestedTool>
+  readonly staging?: NestedToolStagingDescription
+}) => string
 
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
@@ -232,6 +277,16 @@ export type ToolRegistration<Context> = {
    * and the selected server action handlers. Never combined with approval/background.
    */
   readonly interaction?: InteractionToolRegistration<Context>
+  /** Present only on stageable registrations (`def.staging`): optional preview and precheck hooks
+   * over a staged call (ADR 0005).
+   */
+  readonly staging?: ToolStagingHandlers<Context>
+  /** Present only on plan review registrations (`makePlanReviewTool`): builds the interaction
+   * handlers from the plan capabilities `resolveTools` binds (plan store, interaction host, and
+   * the privileged plan executor). Without `plans` and an `interactionHost`, the tool is
+   * unavailable.
+   */
+  readonly planReview?: (runtime: ToolPlanRuntime<Context>) => InteractionToolRegistration<Context>
   /** Result of a ledgered call found abandoned (claimed earlier, lease expired, no result),
    * instead of the default "may already have been applied" error. Receives the call's nested
    * ledger entries. The call is never executed again either way.
@@ -250,7 +305,9 @@ export type InteractionActionHandler<Context> = {
   readonly validate?: (input: {
     readonly data: unknown
     readonly context: Context
-  }) => Effect.Effect<void, Schema.SchemaError | InteractionValidationError>
+    /** The interaction call (normalized arguments) the response answers. */
+    readonly call: ToolCall
+  }) => Effect.Effect<void, Schema.SchemaError | InteractionValidationError | InteractionHostError>
   readonly execute: (input: {
     readonly data: unknown
     readonly context: Context
@@ -266,11 +323,32 @@ export type InteractionActionResult = {
 }
 
 export type InteractionToolRegistration<Context> = {
-  /** Validate model-supplied context before opening a request or accepting a response. */
-  readonly validateCall: InteractionResponseValidator
+  /** Validate model-supplied context before opening a request or accepting a response. An
+   * `InteractionHostError` means storage the validator reads is unavailable (see
+   * `InteractionCallValidator`), never that the call is invalid.
+   */
+  readonly validateCall: InteractionCallValidator
   readonly validateResponse: InteractionResponseValidator
   /** Server-defined named actions keyed by action id. */
   readonly actions: Readonly<Record<string, InteractionActionHandler<Context>>>
+  /**
+   * Describes an accepted action that started and has no recorded receipt outcome, instead of the
+   * generic notice; nothing runs again. `phase` is `replay` when another execution (a redelivered
+   * step, a concurrent duplicate) finds the receipt started, possibly while the first one is still
+   * running, and `seal` when the executing action itself ended without an outcome (a defect or
+   * interruption) and the receipt is being sealed. Only in `replay` may the registration report a
+   * final `outcome` it can prove from its own durable record (for example a ledger entry the action
+   * completed); otherwise the result is `unknown`. Seal descriptions are bounded to 3 s.
+   */
+  readonly unknownOutcome?: (input: {
+    readonly call: ToolCall
+    readonly submissionId: string
+    readonly phase: 'replay' | 'seal'
+  }) => Effect.Effect<{
+    readonly outcome?: InteractionBusinessOutcome
+    readonly content: ToolResult['content']
+    readonly structuredContent?: unknown
+  }>
 }
 
 export type { ToolExecutionOptions } from '@yolk-sdk/agent/loop'
@@ -302,6 +380,10 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
+  /** Host-mark the tool stageable into reviewed plans (ADR 0005; sets `def.staging`). Requires
+   * `approval`. Pass hooks for review previews and selection prechecks, or `true` for none.
+   */
+  readonly staging?: true | ToolStaging<Context, ParamsSchema['Type']>
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
   readonly nestedToolAccess?: boolean
   /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
@@ -353,6 +435,8 @@ export type ResolvedToolSet = {
    */
   readonly interactions: Readonly<Record<string, ResolvedInteractionTool>>
   readonly interactionHost?: InteractionHost
+  /** Staged tool plans of this resolution (ADR 0005), when staging is available. */
+  readonly plans?: ResolvedToolPlans
 }
 
 const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
@@ -574,12 +658,13 @@ const invalidParamsMessage = (
   options.invalidParamsMessage?.(error) ??
   withToolArgumentsErrorHint(`Invalid ${options.name} arguments: ${String(error)}`, error)
 
-type MakeToolRegistrationFields = {
+type MakeToolRegistrationFields<Context> = {
   def: ToolDef
   background?: boolean
   nestedToolAccess?: boolean
   describe?: NestedToolDescriber
   abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
+  staging?: ToolStagingHandlers<Context>
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
@@ -591,12 +676,62 @@ type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
   discovery?: ToolDef['discovery']
   approval: MakeToolOptions<Context, ParamsSchema>['approval']
   background?: boolean
+  staging?: true
+}
+
+type ToolStagingHandlerFields<Context> = {
+  preview?: NonNullable<ToolStagingHandlers<Context>['preview']>
+  precheck?: NonNullable<ToolStagingHandlers<Context>['precheck']>
+}
+
+// Typed staging hooks see decoded arguments; a staged call that no longer decodes fails the hook.
+const stagingHandlers = <Context, Params>(
+  name: string,
+  staging: ToolStaging<Context, Params>,
+  decodeParams: (input: unknown) => Effect.Effect<Params, Schema.SchemaError>
+): ToolStagingHandlers<Context> => {
+  const handlers: ToolStagingHandlerFields<Context> = {}
+  const preview = staging.preview
+  const precheck = staging.precheck
+
+  if (preview !== undefined) {
+    handlers.preview = ({ call, context }) =>
+      decodeParams(call.params).pipe(
+        Effect.mapError(
+          error =>
+            new ToolError({
+              tool: name,
+              cause: 'validation',
+              message: `Invalid ${name} arguments: ${error.message}`
+            })
+        ),
+        Effect.flatMap(params => preview({ params, context }))
+      )
+  }
+
+  if (precheck !== undefined) {
+    handlers.precheck = ({ call, context }) =>
+      decodeParams(call.params).pipe(
+        Effect.mapError(
+          error =>
+            new InteractionValidationError({
+              message: `Invalid ${name} arguments: ${error.message}`
+            })
+        ),
+        Effect.flatMap(params => precheck({ params, context }))
+      )
+  }
+
+  return handlers
 }
 
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
 ): ToolRegistration<Context> => {
-  const registration: MakeToolRegistrationFields = {
+  // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
+  const decodeParams = decodeToolArguments(options.parameters)
+
+  const registration: MakeToolRegistrationFields<Context> = {
     def: ToolDef.make(
       (() => {
         const fields: MakeToolDefFields<Context, ParamsSchema> = {
@@ -622,9 +757,17 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           fields.background = options.background
         }
 
+        if (options.staging !== undefined) {
+          fields.staging = true
+        }
+
         return fields
       })()
     )
+  }
+
+  if (options.staging !== undefined && options.staging !== true) {
+    registration.staging = stagingHandlers(options.name, options.staging, decodeParams)
   }
 
   if (options.background !== undefined) {
@@ -642,9 +785,6 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   if (options.abandonedResult !== undefined) {
     registration.abandonedResult = options.abandonedResult
   }
-
-  // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
-  const decodeParams = decodeToolArguments(options.parameters)
 
   const tails: Pick<
     ToolRegistration<Context>,
@@ -713,6 +853,7 @@ type ToolDefFields = {
   execution?: ToolDef['execution']
   input?: ToolDef['input']
   interaction?: ToolDef['interaction']
+  staging?: ToolDef['staging']
 }
 
 // Explicit field selection: `ToolDef.make` would retain excess own keys of a spread instance.
@@ -739,6 +880,8 @@ const withToolDescription = (def: ToolDef, description: string): ToolDef => {
 
   if (def.interaction !== undefined) fields.interaction = def.interaction
 
+  if (def.staging !== undefined) fields.staging = def.staging
+
   return ToolDef.make(fields)
 }
 
@@ -757,6 +900,9 @@ const interactionToolError = (input: {
   readonly message: string
 }) => new ToolError({ tool: input.tool, cause: input.cause, message: input.message })
 
+/** Bound of an interaction's `unknownOutcome` description; past it the generic notice is used. */
+const interactionUnknownDescriptionTimeout = Duration.seconds(3)
+
 const hostErrorToToolError = (tool: string) => (error: unknown) =>
   interactionToolError({
     tool,
@@ -771,6 +917,8 @@ const hostErrorToToolError = (tool: string) => (error: unknown) =>
  * observations precede current validators/actions; no raw browser payload enters here. */
 const executeInteractionTool = <Context>(input: {
   readonly registration: ToolRegistration<Context> | undefined
+  /** The registration's effective handlers (plan review handlers are bound per resolution). */
+  readonly handler: InteractionToolRegistration<Context> | undefined
   readonly call: ToolCall
   readonly context: Context
   readonly ref: InteractionRef | undefined
@@ -808,7 +956,9 @@ const executeInteractionTool = <Context>(input: {
 
     if (stored.status === 'settled' && stored.result !== undefined) return stored.result
 
-    const unknownResult = () =>
+    const handler = input.handler
+
+    const genericUnknownResult = () =>
       makeInteractionToolResult({
         toolCallId: stored.call.id,
         requestId: stored.slot,
@@ -819,9 +969,67 @@ const executeInteractionTool = <Context>(input: {
         content: 'The accepted action has no acknowledged final outcome.'
       })
 
-    if (stored.status === 'started') return unknownResult()
+    // A started action without a recorded outcome: the registration may describe what it knows
+    // (for example a plan review's ledgered calls); any failure keeps the generic notice. Replays
+    // may report an outcome the registration proves; seals are always unknown and bounded, so
+    // settlement keeps its budget (finalizers run with a pending interrupt, so each bounded step
+    // is interruptible only inside its own timeout).
+    const unknownResult = (phase: 'replay' | 'seal'): Effect.Effect<ToolResult> => {
+      const describe = handler?.unknownOutcome
 
-    const handler = input.registration?.interaction
+      if (describe === undefined) return Effect.succeed(genericUnknownResult())
+
+      const described = Effect.suspend(() =>
+        describe({ call: stored.call, submissionId: stored.submissionId, phase })
+      )
+
+      const bounded =
+        phase === 'seal'
+          ? described.pipe(
+              Effect.interruptible,
+              Effect.timeoutOption(interactionUnknownDescriptionTimeout)
+            )
+          : described.pipe(Effect.map(Option.some))
+
+      return bounded.pipe(
+        Effect.map(result =>
+          Option.isNone(result)
+            ? genericUnknownResult()
+            : makeInteractionToolResult({
+                toolCallId: stored.call.id,
+                requestId: stored.slot,
+                slot: stored.slot,
+                submissionId: stored.submissionId,
+                actionId: stored.actionId ?? '',
+                outcome: phase === 'replay' ? (result.value.outcome ?? 'unknown') : 'unknown',
+                content: result.value.content,
+                structuredContent: result.value.structuredContent
+              })
+        ),
+        Effect.catchDefect(defect =>
+          Effect.logWarning(
+            `Interaction ${stored.slot}: unknownOutcome failed; using the generic notice: ${defect instanceof Error ? defect.message : String(defect)}`
+          ).pipe(Effect.as(genericUnknownResult()))
+        )
+      )
+    }
+
+    // A replay prefers the receipt's own settlement when the first execution recorded it while
+    // this one was describing (for example after waiting for it).
+    const replayResult = Effect.gen(function* () {
+      const described = yield* unknownResult('replay')
+
+      const latest = yield* host.read(stored.slot).pipe(Effect.orElseSucceed(() => undefined))
+
+      return latest !== undefined &&
+        latest.status === 'settled' &&
+        latest.result !== undefined &&
+        validInteractionReceipt(latest, input.call, ref)
+        ? latest.result
+        : described
+    })
+
+    if (stored.status === 'started') return yield* replayResult
 
     // Receipts bind the original call; validators and handlers see normalized arguments.
     const businessCall =
@@ -847,29 +1055,42 @@ const executeInteractionTool = <Context>(input: {
       )
     }
 
-    yield* handler
-      .validateCall(businessCall.params)
-      .pipe(
-        Effect.mapError(error =>
-          interactionToolError({ tool: name, cause: 'validation', message: error.message })
-        )
-      )
-    yield* handler
-      .validateResponse(data)
-      .pipe(
-        Effect.mapError(error =>
-          interactionToolError({ tool: name, cause: 'validation', message: error.message })
-        )
-      )
+    const validateAction = action.validate
 
-    if (action.validate !== undefined) {
-      yield* action
-        .validate({ data, context: input.context })
-        .pipe(
-          Effect.mapError(error =>
-            interactionToolError({ tool: name, cause: 'validation', message: error.message })
-          )
+    const validated = yield* Effect.gen(function* () {
+      yield* handler.validateCall(businessCall.params)
+      yield* handler.validateResponse(data)
+
+      if (validateAction !== undefined)
+        yield* validateAction({ data, context: input.context, call: businessCall })
+    }).pipe(Effect.result)
+
+    if (Result.isFailure(validated)) {
+      const failure = validated.failure
+
+      // Storage a validator reads is unavailable: fail closed (nothing runs), like ledger claims.
+      if (Predicate.isTagged(failure, 'InteractionHostError'))
+        return yield* Effect.fail(
+          interactionToolError({
+            tool: name,
+            cause: 'unavailable',
+            message: `Interaction storage is unavailable; no dispatch occurred: ${failure.message}`
+          })
         )
+
+      // Another execution may have started or settled this receipt since it was read (for
+      // example a redelivered step): report that observation, not an invalid-arguments result.
+      const current = yield* host.read(ref.slot).pipe(Effect.mapError(hostErrorToToolError(name)))
+
+      if (current !== undefined && validInteractionReceipt(current, input.call, ref)) {
+        if (current.status === 'settled' && current.result !== undefined) return current.result
+
+        if (current.status === 'started') return yield* replayResult
+      }
+
+      return yield* Effect.fail(
+        interactionToolError({ tool: name, cause: 'validation', message: failure.message })
+      )
     }
 
     return yield* Effect.uninterruptibleMask(restore =>
@@ -891,7 +1112,7 @@ const executeInteractionTool = <Context>(input: {
         if (Predicate.isTagged(claim, 'Existing')) {
           return claim.receipt.status === 'settled' && claim.receipt.result !== undefined
             ? claim.receipt.result
-            : unknownResult()
+            : yield* restore(replayResult)
         }
 
         if (
@@ -904,13 +1125,20 @@ const executeInteractionTool = <Context>(input: {
           )
         }
 
-        const unknown: InteractionOutcome = { status: 'unknown', result: unknownResult() }
+        const unknown: InteractionOutcome = { status: 'unknown', result: genericUnknownResult() }
 
-        // Bounded finalization attempts durable uncertainty on defects/interruption. It does
+        // Bounded finalization attempts durable uncertainty on defects/interruption (described by
+        // the registration when it can, for example a plan review's ledgered calls). It does
         // not replace the original Cause, nor mask the business Effect indefinitely.
-        const recoverSettlement = Effect.suspend(() => host.settle(claim.token, unknown)).pipe(
-          Effect.interruptible,
-          Effect.timeout('5 seconds'),
+        // The description has its own bound (falling back to the generic notice), so settlement
+        // always keeps its full budget and the receipt is sealed.
+        const recoverSettlement = unknownResult('seal').pipe(
+          Effect.flatMap(result =>
+            Effect.suspend(() => host.settle(claim.token, { status: 'unknown', result })).pipe(
+              Effect.interruptible,
+              Effect.timeout('5 seconds')
+            )
+          ),
           Effect.exit
         )
 
@@ -997,6 +1225,11 @@ export const resolveTools = <Context>(
      * re-executions. Absent: unchanged behavior.
      */
     readonly ledger?: ToolLedgerOptions
+    /** Staged tool plans (ADR 0005): with an `interactionHost` and one plan review registration,
+     * nested-access registrations get `nested.staging` and the review tool becomes available.
+     * Absent: no staging, and plan review tools are unavailable.
+     */
+    readonly plans?: ToolPlanOptions
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -1044,6 +1277,7 @@ export const resolveTools = <Context>(
           tool.approval !== undefined ||
           tool.input !== undefined ||
           tool.interaction !== undefined ||
+          tool.planReview !== undefined ||
           tool.nestedToolAccess === true)
       ) {
         return yield* Effect.fail(
@@ -1086,11 +1320,13 @@ export const resolveTools = <Context>(
           )
         }
 
-        if (
-          tool.interaction === undefined ||
-          Object.keys(tool.interaction.actions).length === 0 ||
-          tool.def.interaction.actions.length === 0
-        ) {
+        // Plan review registrations get their handlers bound per resolution instead.
+        const handlersMissing =
+          tool.planReview === undefined
+            ? tool.interaction === undefined || Object.keys(tool.interaction.actions).length === 0
+            : tool.interaction !== undefined
+
+        if (handlersMissing || tool.def.interaction.actions.length === 0) {
           return yield* Effect.fail(
             new ToolRegistryError({
               cause: 'interaction_validation_required',
@@ -1128,6 +1364,45 @@ export const resolveTools = <Context>(
         }
       }
 
+      if (tool.planReview !== undefined && tool.def.interaction === undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'interaction_validation_required',
+            message: `Plan review tool requires an interaction definition: ${tool.def.name}`
+          })
+        )
+      }
+
+      // Staging is host-marked on approval-gated tools only; a staged call is validated by the
+      // side-effect-free decoder and applied only through a reviewed plan.
+      if (tool.def.staging !== undefined || tool.staging !== undefined) {
+        if (
+          !isToolStageable(tool.def) ||
+          activated(tool) ||
+          tool.background === true ||
+          tool.input !== undefined ||
+          tool.interaction !== undefined ||
+          tool.planReview !== undefined ||
+          tool.nestedToolAccess === true
+        ) {
+          return yield* Effect.fail(
+            new ToolRegistryError({
+              cause: 'staging_unsupported_policy',
+              message: `Tool ${tool.def.name} cannot be staged: staging needs def.staging and approval, and no input, interaction, background, nested tool access, or callableBy 'model'.`
+            })
+          )
+        }
+
+        if (tool.validate === undefined) {
+          return yield* Effect.fail(
+            new ToolRegistryError({
+              cause: 'staging_validation_required',
+              message: `Stageable tool requires side-effect-free validation: ${tool.def.name}`
+            })
+          )
+        }
+      }
+
       const unsupportedSchema = activated(tool)
         ? unsupportedBackgroundSchema(tool.def.parameters)
         : undefined
@@ -1151,6 +1426,17 @@ export const resolveTools = <Context>(
       }
     }
 
+    const reviewRegistrations = resolved.filter(item => item.tool.planReview !== undefined)
+
+    if (reviewRegistrations.length > 1) {
+      return yield* Effect.fail(
+        new ToolRegistryError({
+          cause: 'plan_review_duplicate',
+          message: `At most one plan review tool may resolve: ${reviewRegistrations.map(item => item.tool.def.name).join(', ')}`
+        })
+      )
+    }
+
     // Script-callable registrations: never fail-closed tools, never nested-access registrations.
     const nestedRegistrations = resolved.filter(
       item =>
@@ -1158,19 +1444,45 @@ export const resolveTools = <Context>(
         item.tool.approval === undefined &&
         item.tool.input === undefined &&
         item.tool.interaction === undefined &&
+        item.tool.planReview === undefined &&
         !activated(item.tool) &&
         isCodeModeCallable(item.tool.def)
     )
 
-    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(item =>
+    const nestedToolOf = (item: ResolvedRegistration<Context>): NestedTool =>
       item.moduleDescription === undefined
         ? { def: item.tool.def, moduleId: item.moduleId }
         : { def: item.tool.def, moduleId: item.moduleId, moduleDescription: item.moduleDescription }
+
+    const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(nestedToolOf)
+
+    // Staged tool plans need durable plan storage, receipt-backed review, and one review tool.
+    const reviewRegistration = reviewRegistrations[0]
+
+    const stageableRegistrations = resolved.filter(
+      item => isToolStageable(item.tool.def) && item.tool.validate !== undefined
     )
+
+    const stagingDescription: NestedToolStagingDescription | undefined =
+      options.plans !== undefined &&
+      options.interactionHost !== undefined &&
+      reviewRegistration !== undefined
+        ? {
+            tools: stageableRegistrations.map(nestedToolOf),
+            reviewToolName: reviewRegistration.tool.def.name
+          }
+        : undefined
 
     const describedDef = (tool: ToolRegistration<Context>): ToolDef =>
       tool.nestedToolAccess === true && tool.describe !== undefined
-        ? withToolDescription(tool.def, tool.describe({ tools: nestedTools }))
+        ? withToolDescription(
+            tool.def,
+            tool.describe(
+              stagingDescription === undefined
+                ? { tools: nestedTools }
+                : { tools: nestedTools, staging: stagingDescription }
+            )
+          )
         : tool.def
 
     const tools = Arr.map(resolved, item => {
@@ -1213,33 +1525,126 @@ export const resolveTools = <Context>(
       )
     )
 
+    const ledger =
+      options.ledger === undefined ? undefined : resolveToolLedgerOptions(options.ledger)
+
+    const plans = options.plans
+    const interactionHost = options.interactionHost
+
+    // Staged tool plans (ADR 0005): staging and the privileged plan executor exist only with plan
+    // storage, receipt-backed review, and one review tool. Applied calls take the single dispatch
+    // seam (`executeRegistration`) like any other call, nested under the review call.
+    const planResolution: ToolPlanResolution<Context> | undefined =
+      plans === undefined || interactionHost === undefined || reviewRegistration === undefined
+        ? undefined
+        : {
+            store: plans.store,
+            maxCalls: positiveInteger(plans.maxCalls) ?? defaultToolPlanMaxCalls,
+            maxArgsBytes: positiveInteger(plans.maxArgsBytes) ?? defaultToolPlanMaxArgsBytes,
+            host: interactionHost,
+            context,
+            reviewToolName: reviewRegistration.tool.def.name,
+            planId: call => (plans.planId === undefined ? call.id : plans.planId({ call })),
+            stageableTools: stageableRegistrations.map(nestedToolOf),
+            stageable: name =>
+              stageableRegistrations.find(item => item.tool.def.name === name)?.tool,
+            nestedAccess: name =>
+              nestedRegistrations.find(item => item.tool.def.name === name)?.tool.access,
+            businessCall: (registration, call) =>
+              omitNullOptionalToolCallArguments(registration.def.parameters, call),
+            execute: (registration, call, parentCallId) =>
+              Option.match(
+                Arr.findFirst(stageableRegistrations, item => item.tool === registration),
+                {
+                  onNone: () => Effect.fail(missingToolError(call.name)),
+                  onSome: match => executeRegistration(match, call, undefined, parentCallId)
+                }
+              ),
+            ledgered:
+              ledger === undefined
+                ? undefined
+                : (registration, call, parentCallId) => {
+                    const match = stageableRegistrations.find(item => item.tool === registration)
+
+                    return (
+                      match !== undefined &&
+                      ledger.isLedgered({
+                        call,
+                        moduleId: match.moduleId,
+                        access: registration.access,
+                        parentCallId
+                      })
+                    )
+                  },
+            listNested: ledger === undefined ? undefined : ledger.store.list,
+            // The apply fence: one ledger entry per review call (whatever the ledger policy), so
+            // a redelivered execution waits for an in-flight apply instead of guessing.
+            fence:
+              ledger === undefined
+                ? undefined
+                : fence =>
+                    executeLedgered({
+                      options: ledger,
+                      call: fence.call,
+                      parentKey: undefined,
+                      execute: fence.execute,
+                      abandonedResult: fence.abandonedResult,
+                      inFlightTimeoutResult: fence.inFlightTimeoutResult
+                    })
+          }
+
+    const boundPlanReview =
+      planResolution === undefined || reviewRegistration?.tool.planReview === undefined
+        ? undefined
+        : reviewRegistration.tool.planReview(makeToolPlanRuntime(planResolution))
+
+    // Effective interaction handlers: plan review handlers exist only when plans are bound.
+    const interactionOf = (
+      tool: ToolRegistration<Context> | undefined
+    ): InteractionToolRegistration<Context> | undefined =>
+      tool === undefined
+        ? undefined
+        : tool.planReview === undefined
+          ? tool.interaction
+          : tool === reviewRegistration?.tool
+            ? boundPlanReview
+            : undefined
+
     const interactions: Record<string, ResolvedInteractionTool> = Object.fromEntries(
-      resolved.flatMap(({ tool }) =>
-        tool.def.interaction !== undefined &&
-        tool.interaction !== undefined &&
-        options.interactionHost !== undefined
+      resolved.flatMap(({ tool }) => {
+        const handler = interactionOf(tool)
+
+        return tool.def.interaction !== undefined &&
+          handler !== undefined &&
+          interactionHost !== undefined
           ? [
               [
                 tool.def.name,
                 {
                   def: tool.def,
-                  validateCall: withArguments(tool.def)(tool.interaction.validateCall),
-                  validateResponse: tool.interaction.validateResponse,
-                  actionIds: Object.keys(tool.interaction.actions),
-                  validateAction: ({ actionId, data }) => {
-                    const action = tool.interaction?.actions[actionId]
+                  validateCall: withArguments(tool.def)(handler.validateCall),
+                  validateResponse: handler.validateResponse,
+                  actionIds: Object.keys(handler.actions),
+                  validateAction: ({ actionId, data, call }) => {
+                    const action = Object.hasOwn(handler.actions, actionId)
+                      ? handler.actions[actionId]
+                      : undefined
 
                     return action === undefined
                       ? Effect.fail(
                           new InteractionValidationError({ message: 'Unknown interaction action' })
                         )
-                      : (action.validate?.({ data, context }) ?? Effect.void)
+                      : (action.validate?.({
+                          data,
+                          context,
+                          call: omitNullOptionalToolCallArguments(tool.def.parameters, call)
+                        }) ?? Effect.void)
                   }
                 }
               ]
             ]
           : []
-      )
+      })
     )
 
     const codeModeOnlyNames = resolved.flatMap(item =>
@@ -1254,9 +1659,6 @@ export const resolveTools = <Context>(
         `Code-mode-only tools are unreachable without a nested tool access registration: ${codeModeOnlyNames.join(', ')}`
       )
     }
-
-    const ledger =
-      options.ledger === undefined ? undefined : resolveToolLedgerOptions(options.ledger)
 
     const executionInput = (
       tool: ToolRegistration<Context>,
@@ -1295,6 +1697,7 @@ export const resolveTools = <Context>(
       if (match.tool.def.interaction !== undefined) {
         return executeInteractionTool({
           registration: match.tool,
+          handler: interactionOf(match.tool),
           call,
           context,
           ref: executionOptions?.interaction,
@@ -1371,6 +1774,7 @@ export const resolveTools = <Context>(
       executionOptions?.interaction !== undefined
         ? executeInteractionTool({
             registration: resolved.find(item => item.tool.def.name === call.name)?.tool,
+            handler: interactionOf(resolved.find(item => item.tool.def.name === call.name)?.tool),
             call,
             context,
             ref: executionOptions.interaction,
@@ -1387,9 +1791,21 @@ export const resolveTools = <Context>(
             }
           )
 
-    const nestedFor = (parent: ToolCall): NestedToolExecutor => ({
-      tools: nestedTools,
-      execute: call =>
+    const nestedFor = (parent: ToolCall): NestedToolExecutor => {
+      const executor: NestedToolExecutorFields = {
+        tools: nestedTools,
+        execute: nestedExecute(parent)
+      }
+
+      if (planResolution !== undefined)
+        executor.staging = makeToolPlanStaging(planResolution, parent)
+
+      return executor
+    }
+
+    const nestedExecute =
+      (parent: ToolCall): NestedToolExecutor['execute'] =>
+      call =>
         Option.match(
           Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
           {
@@ -1419,9 +1835,8 @@ export const resolveTools = <Context>(
               )
           }
         )
-    })
 
-    return {
+    const toolSet: ResolvedToolSet = {
       tools,
       metadata,
       execute,
@@ -1429,6 +1844,18 @@ export const resolveTools = <Context>(
       interactions,
       interactionHost: options.interactionHost
     }
+
+    return planResolution === undefined
+      ? toolSet
+      : {
+          ...toolSet,
+          plans: {
+            store: planResolution.store,
+            reviewToolName: planResolution.reviewToolName,
+            preview: previewToolPlanWith(planResolution),
+            previewStored: previewStoredToolPlanWith(planResolution)
+          }
+        }
   })
 
 export const makeToolExecutorLayer = (toolSet: ResolvedToolSet) =>

@@ -955,6 +955,20 @@ keep their operations interruptible (the ledger's timeouts cannot cut uninterrup
 logs and metrics. Without the option behavior is unchanged. See
 [the tools README](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/tools/README.md#durable-tool-ledger).
 
+## Staged tool plans
+
+A code mode script can stage calls of approval-gated tools marked `staging`
+(`makeTool({ approval, staging })`) instead of running them; a person reviews the saved plan once
+through `makePlanReviewTool` (`review_plan({ planId, planDigest })`, response `{ selectedKeys }`),
+and Yolk applies exactly the selected recorded calls, in staged order and at most once, through the
+normal execute path and ledger. Enable it with
+`resolveTools(modules, context, { interactionHost, plans: { store, planId? } })` and one review tool.
+Applied calls bypass `beforeNestedCall` and `ToolExecutor` decorators: wire your per-call authorizer
+as `makePlanReviewTool({ beforeCall })`. With a ledger, a redelivered review waits for an in-flight
+apply and returns its real outcome. `previewStoredToolPlan` pages previews for review screens;
+`ToolPlanOutcome` and `ToolPlanPreviewPage` are Effect Schemas. See
+[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md).
+
 ## Tool failures
 
 Use `modelVisibleToolError(...)` for expected tool-domain failures the model can recover

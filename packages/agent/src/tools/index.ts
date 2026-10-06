@@ -56,6 +56,62 @@ export type {
   ToolLedgerStore
 } from './ledger.ts'
 
+export {
+  defaultToolPlanMaxArgsBytes,
+  defaultToolPlanMaxCalls,
+  makeInMemoryToolPlanStore,
+  maxToolPlanPreviewBytes,
+  maxToolPlanPreviewKeys,
+  StagedCall,
+  stagedCallDigest,
+  ToolPlan,
+  ToolPlanClaimResult,
+  toolPlanDigest,
+  toolPlanIntegrityProblem,
+  ToolPlanPreviewError,
+  ToolPlanReviewParams,
+  ToolPlanReviewResponse,
+  ToolPlanCallCounts,
+  ToolPlanCallOutcome,
+  ToolPlanCallStatus,
+  toolPlanKeyPages,
+  ToolPlanOutcome,
+  toolPlanPrecheckConcurrency,
+  ToolPlanPreview,
+  ToolPlanPreviewPage,
+  ToolPlanStageError,
+  ToolPlanStageErrorReason,
+  ToolPlanStoreError
+} from './plan.ts'
+
+export type {
+  InMemoryToolPlanStore,
+  ResolvedToolPlans,
+  StagedCallReceipt,
+  StoredToolPlan,
+  ToolPlanApplyResult,
+  ToolPlanBeforeCall,
+  ToolPlanBuilder,
+  ToolPlanFailurePolicy,
+  ToolPlanOptions,
+  ToolPlanRuntime,
+  ToolPlanStaging,
+  ToolPlanStore,
+  ToolStaging,
+  ToolStagingHandlers
+} from './plan.ts'
+
+export {
+  makePlanReviewTool,
+  previewStoredToolPlan,
+  previewToolPlan,
+  toolPlanReviewActionId,
+  toolPlanReviewRenderer,
+  toolPlanReviewToolName
+} from './plan-review.ts'
+
+export type { MakePlanReviewToolOptions } from './plan-review.ts'
+
 export { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 
 export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'
@@ -107,6 +163,7 @@ export type {
   NestedTool,
   NestedToolDescriber,
   NestedToolExecutor,
+  NestedToolStagingDescription,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,

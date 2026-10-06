@@ -108,5 +108,21 @@ external-provider idempotency, and warning/blocking separately consented duplica
 `InteractionSubmitted` means accepted, not completed: keep it active until a server tool result.
 Never optimistically emit it from local submit or reconstruct a result from transcript acceptance.
 Voice/realtime, background activation, and hosts without authenticated receipt storage remain
-unsupported. Generic fake-effect reference and adversarial tests: `packages/agent/test/tools/interaction-host.ts`,
+unsupported.
+
+Staged tool plans ([ADR 0005](../docs/adr/0005-staged-tool-plans.md)) reuse this flow: the
+`review_plan` interaction (`makePlanReviewTool`) accepts `{ selectedKeys }` for a code mode plan,
+and its action applies only those staged calls after re-reading the started receipt. Hosts add a
+conversation-scoped `ToolPlanStore` (`resolveTools(..., { plans })`) next to the receipt port and
+wire their per-call write authorizer as `beforeCall` (applied calls bypass `beforeNestedCall` and
+executor decorators). With a tool ledger, a redelivered review (receipt `started`) waits behind the
+apply's ledger entry for the real outcome; listings never call a call `not_run` while an earlier
+execution may still reach it.
+
+Call validators and `validateAction` may read host storage (`InteractionCallValidator`); an
+unavailable store fails with `InteractionHostError`, never a verdict: `prepareToolBatch` fails the
+batch with `ToolError` `unavailable` (retry the step), admission answers `InteractionAdmissionError`
+`unavailable` (nothing consumed), and execution fails closed. When an accepted receipt's call no
+longer validates, preflight still dispatches it and the executor re-reads the receipt, reporting a
+delivery that already started or settled it instead of an invalid-arguments error. Generic fake-effect reference and adversarial tests: `packages/agent/test/tools/interaction-host.ts`,
 `interaction.test.ts`, and `test/loop/interaction-tools.test.ts`. No live app opt-in is included.

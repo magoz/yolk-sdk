@@ -127,6 +127,18 @@ Hosts that re-execute steps (Vercel Workflow's queue is at-least-once) pass a du
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive a stable `idempotencyKey`.
 Calls the ledger policy skips (by default read-only calls) are not listed.
 
+## Staged writes
+
+When the resolution has plans (`resolveTools(..., { interactionHost, plans: { store } })`) and a
+plan review tool (`makePlanReviewTool` from `@yolk-sdk/agent/tools`), scripts get
+`await stage(name, args)` for approval-gated tools marked `staging`. `stage` validates the arguments
+and records the call without running or ledgering it. Once a script stages, it may only run read
+tools; duplicates and calls past `maxCalls`/`maxArgsBytes` are rejected. A successful script saves
+the plan once and its result tells the model to call `review_plan({ planId, planDigest })`
+(`structuredContent.codemode.plan`); a failed script discards its staged calls. Approval-gated tools
+stay fail-closed for `tools.<name>()`. Pass `staging: false` to turn it off or `staging: { maxCalls }`
+to lower the cap. See ADR 0005.
+
 ## Limits
 
 | Limit              | Default | Notes                                                                    |

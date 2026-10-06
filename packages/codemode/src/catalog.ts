@@ -221,6 +221,26 @@ const intro = [
   'Only the script output and its return value come back to you: filter and aggregate inside the script and return a small JSON value.'
 ].join('\n')
 
+const stageLine = (reviewToolName: string) =>
+  `- \`await stage(name, args)\`: record a call of a stageable tool for review instead of running it; resolves to \`{ staged: true, key, index }\`. Nothing runs until a person approves the plan through the \`${reviewToolName}\` tool, which the result tells you how to call. Once a script stages, it may only run read tools; a script that already ran a write tool cannot stage.`
+
+/** Stageable tool names listed in the description; the rest are summarized with a count. */
+const maxListedStageableTools = 20
+
+const stageableSection = (staging: CodeModeStagingDescription) => {
+  const names = staging.tools.map(tool => tool.def.name)
+  const hidden = names.length - maxListedStageableTools
+
+  return [
+    '## Stageable tools',
+    'Approval-gated tools a script cannot call through `tools`, only stage with `await stage("<name>", args)` (arguments as for the tool of the same name):',
+    ...names.slice(0, maxListedStageableTools).map(name => `- \`${name}\``),
+    ...(hidden > 0
+      ? [`- … and ${hidden} more (an unknown name rejects with the stageable tools).`]
+      : [])
+  ].join('\n')
+}
+
 const globalLines = (store: boolean) => [
   '- `text(value)` and `console.log(...values)`: append text to the output.',
   '- `image(dataUrl)`: append a base64 image (a `data:` URL or `{ type: "image", data, mimeType }`).',
@@ -256,11 +276,19 @@ const namespaceSection = (namespace: string, tools: ReadonlyArray<CodeModeCatalo
 const unlistedToolsLine =
   'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` or `await describeNamespace(name)` before calling it.'
 
+/** Staged tool plans as the description shows them (`NestedToolStagingDescription`). */
+export type CodeModeStagingDescription = {
+  readonly tools: ReadonlyArray<NestedTool>
+  readonly reviewToolName: string
+}
+
 export type CodeModeDescriptionInput = {
   readonly tools: ReadonlyArray<NestedTool>
   readonly inlineBudget?: number
   /** Mention `store()`/`load()` persistence. */
   readonly store?: boolean
+  /** Document `stage()` and list the stageable tools (only when some exist). */
+  readonly staging?: CodeModeStagingDescription
 }
 
 /**
@@ -268,7 +296,8 @@ export type CodeModeDescriptionInput = {
  * namespace, then one fixed line pointing to `searchTools`/`describeTool`/`describeNamespace`.
  * `all` tools get one line each outside the budget; `listed` tools are declared within the inline
  * budget; `search` tools never contribute, so adding or removing them (even whole namespaces of
- * them) leaves the text byte-identical.
+ * them) leaves the text byte-identical. With `staging` (and stageable tools), `stage()` is listed
+ * with the globals and the stageable tool names follow the nested tools.
  */
 export const renderCodeModeDescription = (input: CodeModeDescriptionInput): string => {
   const catalog = codeModeCatalog(input.tools)
@@ -283,12 +312,20 @@ export const renderCodeModeDescription = (input: CodeModeDescriptionInput): stri
       )
   )
 
+  const staging =
+    input.staging !== undefined && input.staging.tools.length > 0 ? input.staging : undefined
+
   return [
     intro,
-    ['Globals:', ...globalLines(input.store === true)].join('\n'),
+    [
+      'Globals:',
+      ...globalLines(input.store === true),
+      ...(staging === undefined ? [] : [stageLine(staging.reviewToolName)])
+    ].join('\n'),
     sections.length === 0
       ? 'Nested tools: none are listed here.'
       : ['## Nested tools by namespace', ...sections].join('\n\n'),
+    ...(staging === undefined ? [] : [stageableSection(staging)]),
     unlistedToolsLine
   ].join('\n\n')
 }
