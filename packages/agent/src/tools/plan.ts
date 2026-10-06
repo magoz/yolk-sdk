@@ -1,11 +1,11 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { ToolError } from '@yolk-sdk/agent/loop'
-import type {
-  InteractionBusinessOutcome,
-  InteractionHostError,
-  InteractionValidationError,
-  ToolCall
+import {
+  ToolChangePreview,
+  type InteractionBusinessOutcome,
+  type InteractionHostError,
+  type InteractionValidationError,
+  type ToolCall
 } from '@yolk-sdk/agent/protocol'
 import { canonicalToolArguments } from './ledger.ts'
 import type { NestedTool } from './registry.ts'
@@ -227,16 +227,12 @@ export type ToolPlanOptions = {
 
 /**
  * Optional per-tool staging hooks of a stageable registration, over the decoded staged arguments
- * and a fresh host context. `preview` renders a bounded JSON preview for host review screens
- * (`previewToolPlan`); `precheck` runs when a person's selection is validated (admission and
- * again before applying) and rejects a selection whose preconditions no longer hold. Neither may
- * have side effects.
+ * and a fresh host context. `precheck` runs when a person's selection is validated (admission and
+ * again before applying) and rejects a selection whose preconditions no longer hold; it is the
+ * authority a change preview's `blocked` only displays. No side effects. Review previews come
+ * from the tool's `changePreview` hook, shared with direct approvals (ADR 0006).
  */
 export type ToolStaging<Context, Params> = {
-  readonly preview?: (input: {
-    readonly params: Params
-    readonly context: Context
-  }) => Effect.Effect<Schema.Json, ToolError>
   readonly precheck?: (input: {
     readonly params: Params
     readonly context: Context
@@ -247,10 +243,6 @@ export type ToolStaging<Context, Params> = {
  * hooks). See `ToolStaging`.
  */
 export type ToolStagingHandlers<Context> = {
-  readonly preview?: (input: {
-    readonly call: ToolCall
-    readonly context: Context
-  }) => Effect.Effect<Schema.Json, ToolError>
   readonly precheck?: (input: {
     readonly call: ToolCall
     readonly context: Context
@@ -445,9 +437,11 @@ export type ToolPlanRuntime<Context> = {
   }) => Effect.Effect<ToolPlanApplyResult>
 }
 
-/** One entry of `previewToolPlan`: the staged arguments and the tool's optional bounded
- * `staging.preview`, or why the key cannot be previewed. Plain JSON; decode it with this Schema
- * across process or network boundaries.
+/** One entry of `previewToolPlan`: the staged arguments with the tool's bounded change preview
+ * (`changePreview`, the hook direct approvals use) or `previewError` when that hook failed (show
+ * the arguments instead), or `status: 'error'` when the key cannot be reviewed (not a staged call,
+ * or the tool can no longer be applied from a plan). Plain JSON; decode it with this Schema across
+ * process or network boundaries.
  */
 export const ToolPlanPreview = Schema.Union([
   Schema.Struct({
@@ -455,8 +449,10 @@ export const ToolPlanPreview = Schema.Union([
     status: Schema.Literal('ok'),
     toolName: Schema.String,
     params: Schema.Json,
-    /** The tool's `staging.preview`, when it has one. */
-    preview: Schema.optionalKey(Schema.Json)
+    /** The tool's change preview, when it has a `changePreview` hook that succeeded. */
+    preview: Schema.optionalKey(ToolChangePreview),
+    /** Why the tool's change preview is missing, when it has a hook. */
+    previewError: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({
     key: Schema.String,
@@ -500,9 +496,6 @@ export class ToolPlanPreviewError extends Schema.TaggedError<ToolPlanPreviewErro
 
 /** Most keys one `previewToolPlan` call renders; hosts page larger plans. */
 export const maxToolPlanPreviewKeys = 50
-
-/** UTF-8 bytes of one preview's compact JSON; larger previews become error entries. */
-export const maxToolPlanPreviewBytes = 16 * 1024
 
 /** Staged keys of a plan in pages of at most `maxToolPlanPreviewKeys` (for `previewToolPlan`). */
 export const toolPlanKeyPages = (

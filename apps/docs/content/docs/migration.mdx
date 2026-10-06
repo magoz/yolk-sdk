@@ -29,6 +29,27 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: tool change previews
+
+New, opt-in: approval-gated tools can describe what a call would change with
+`makeTool({ approval, changePreview })`. Pass `toolSet.approvalPreviews` as `approvalPreviews` to
+your loop or runtime config and pending `ToolApprovalRequest`s carry `preview` (a
+`ToolChangePreview`) or `previewError`; staged plan reviews use the same hook. See
+[Preview the change](./agent/tools-hitl#preview-the-change).
+
+Breaking changes for staged plan hosts:
+
+- `staging.preview` is removed. Move it to the tool's `changePreview` and return a
+  `ToolChangePreview` (`{ target, changes, ... }`) instead of arbitrary JSON.
+- `ToolPlanPreview` `ok` entries carry `preview: ToolChangePreview` or `previewError`. A failing
+  preview no longer turns the entry into `status: 'error'`; it keeps `params`. Oversized previews
+  are truncated with markers instead of becoming error entries.
+- `maxToolPlanPreviewBytes` is removed. Use `defaultToolChangePreviewMaxBytes` (16 KiB) and set
+  the bound with `resolveTools(..., { changePreview: { maxBytes } })`.
+- `ToolRegistryError` has a new cause, `change_preview_unsupported_policy` (a `changePreview` on a
+  tool without `approval`). `ResolvedToolSet` has a new required field, `approvalPreviews`: update
+  hand-built tool sets.
+
 ### Canary.103: staged tool plans
 
 New, opt-in: code mode scripts can stage approval-gated tool calls with `stage(name, args)`, and a

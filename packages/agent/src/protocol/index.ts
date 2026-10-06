@@ -226,6 +226,25 @@ export {
 export { truncateCodePoints } from './bounded-text.ts'
 
 export {
+  ToolChangeCut,
+  ToolChangeItem,
+  ToolChangePreview,
+  ToolChangePreviewError,
+  ToolChangeScalar,
+  ToolChangeSetCuts,
+  ToolChangeSideCuts,
+  ToolChangeTarget,
+  ToolFieldChange,
+  ToolListChange,
+  ToolSetChange,
+  ToolStructuredChange,
+  ToolTextChange,
+  ToolValueChange
+} from './change-preview.ts'
+
+export type { ToolApprovalPreviewer } from './change-preview.ts'
+
+export {
   boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
   makeNestedToolCallRecorder,

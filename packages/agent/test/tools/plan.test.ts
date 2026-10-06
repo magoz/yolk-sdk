@@ -2,7 +2,7 @@ import { Deferred, Effect, Fiber, Predicate, Result } from 'effect'
 import { TestClock } from 'effect/testing'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { prepareToolBatch } from '@yolk-sdk/agent/loop'
+import { prepareToolBatch, ToolError } from '@yolk-sdk/agent/loop'
 import {
   contentText,
   InteractionRequest,
@@ -20,6 +20,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
+  groupToolChangePreviews,
   makeInMemoryToolLedgerStore,
   makeInMemoryToolPlanStore,
   makePlanReviewTool,
@@ -47,6 +48,7 @@ import {
   ToolPlanStoreError,
   ToolLedgerError,
   type ToolPlanStore,
+  type ToolChangePreview,
   type ToolRegistration
 } from '../../src/tools/index.ts'
 import { makeFakeInteractionHost } from './interaction-host.ts'
@@ -61,6 +63,21 @@ const Link = Schema.Struct({ resource: Schema.String, curriculum: Schema.String 
 
 const Query = Schema.Struct({ query: Schema.String })
 
+const linkPreview = (ctx: Ctx, params: typeof Link.Type): ToolChangePreview => ({
+  target: { label: params.resource, kind: 'resource', id: params.resource },
+  summary: `${ctx.tenant}: link ${params.curriculum}`,
+  changes: [
+    {
+      _tag: 'Set',
+      field: 'curriculum',
+      label: 'Curriculum',
+      added: [{ id: params.curriculum, label: params.curriculum }],
+      removed: [],
+      unchanged: [{ id: `existing-${params.resource}`, label: 'Existing' }]
+    }
+  ]
+})
+
 type Applied = Array<{ readonly resource: string; readonly key: string | undefined }>
 
 const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
@@ -70,9 +87,13 @@ const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
     parameters: Link,
     access: 'write',
     approval: manual,
+    changePreview: ({ params, context }) =>
+      params.resource === 'unpreviewable'
+        ? Effect.fail(
+            new ToolError({ tool: 'link_curriculum', cause: 'unavailable', message: 'cms is down' })
+          )
+        : Effect.succeed(linkPreview(context, params)),
     staging: {
-      preview: ({ params, context }) =>
-        Effect.succeed({ summary: `${context.tenant}:${params.resource}->${params.curriculum}` }),
       precheck: ({ params }) =>
         Effect.gen(function* () {
           const tracker = options.prechecks
@@ -1294,12 +1315,31 @@ describe('previewToolPlan', () => {
           status: 'ok',
           toolName: 'link_curriculum',
           params: { resource: 'r2', curriculum: 'LGR22' },
-          preview: { summary: 'tenant_1:r2->LGR22' }
+          preview: linkPreview(context, { resource: 'r2', curriculum: 'LGR22' })
         },
         { key: 'script_1/s7', status: 'error', message: 'Not a staged call of the plan.' }
       ])
       expect(tooMany.cause).toBe('page_too_large')
       expect(unavailable.cause).toBe('unavailable')
+    })
+  )
+
+  it.effect('keeps the staged arguments with a preview error when the hook fails', () =>
+    Effect.gen(function* () {
+      const env = yield* setup()
+      const plan = yield* stagedPlan(env, ['unpreviewable'])
+
+      const previews = yield* previewToolPlan({ toolSet: env.toolSet, plan })
+
+      expect(previews).toEqual([
+        {
+          key: 'script_1/s1',
+          status: 'ok',
+          toolName: 'link_curriculum',
+          params: { resource: 'unpreviewable', curriculum: 'LGR22' },
+          previewError: 'cms is down'
+        }
+      ])
     })
   )
 })
@@ -1520,6 +1560,22 @@ describe('previewStoredToolPlan', () => {
       expect(wrongDigest.cause).toBe('invalid_plan')
       expect(decoded).toHaveLength(50)
       expect(toolPlanKeyPages(plan).map(page => page.length)).toEqual([50, 10])
+
+      // The staged calls make one change on 60 targets: a host renders it once.
+      const groups = groupToolChangePreviews(
+        [...decoded, ...last.previews].flatMap(entry =>
+          entry.status === 'ok' && entry.preview !== undefined
+            ? [{ key: entry.key, toolName: entry.toolName, preview: entry.preview }]
+            : []
+        )
+      )
+
+      expect(groups.map(group => [group.toolName, group.entries.length])).toEqual([
+        ['link_curriculum', 60]
+      ])
+      expect(groups[0]?.changes).toEqual(
+        linkPreview(context, { resource: 'r0', curriculum: 'LGR22' }).changes
+      )
     })
   )
 })

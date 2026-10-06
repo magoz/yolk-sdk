@@ -83,9 +83,21 @@ plan once, and runs selected calls in staged order through `executeRegistration`
 `<reviewCallId>/<n>`, ledger parent the review call). Applied calls bypass code mode's
 `beforeNestedCall` and `ToolExecutor` decorators: the review's `beforeCall` is the only per-call
 host authority hook. `previewStoredToolPlan` (paged, from the store) and `previewToolPlan` render
-bounded previews; `ToolPlanOutcome` and `ToolPlanPreview*` are Effect Schemas for decoding results
-across process boundaries. Plan store outages fail the batch closed at preflight (never an
-invalid-arguments verdict).
+each staged call's arguments with the tool's change preview; `ToolPlanOutcome` and
+`ToolPlanPreview*` are Effect Schemas for decoding results across process boundaries. Plan store
+outages fail the batch closed at preflight (never an invalid-arguments verdict).
+
+## Tool change previews
+
+See `docs/adr/0006-tool-change-previews.md`. An approval-gated tool's `changePreview` hook
+(`makeTool({ approval, changePreview })`) describes what one call would change as a
+tool-agnostic `ToolChangePreview` (`Value`, `Text`, `Set`, `List`, `Structured` field changes).
+`resolveTools` runs it through one bounded path (timeout, Schema decoding, deterministic
+truncation with markers; `changePreview: { maxBytes, timeoutMs }`) for both consumers:
+`ResolvedToolSet.approvalPreviews` (pass as `approvalPreviews` to loop configs; pending approval
+requests carry `preview` or `previewError`) and staged plan previews. `toolChangeSignature` and
+`groupToolChangePreviews` group identical changes per tool. Previews are display only: approvals
+bind to the call, and `staging.precheck` and the tool's write stay authoritative.
 
 ## Output schemas, exposure, and nested tool access
 

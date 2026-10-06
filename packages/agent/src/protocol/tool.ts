@@ -1,6 +1,7 @@
 import { Data, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
+import { ToolChangePreview } from './change-preview.ts'
 import { Content, TextPart } from './content.ts'
 import { NestedToolCalls } from './nested-tool-calls.ts'
 import { AgentUsage } from './usage.ts'
@@ -384,13 +385,21 @@ export const makeErrorToolResult = (input: ErrorToolResultInput) =>
     })()
   )
 
+/**
+ * A pending approval of one call. `preview` is the tool's bounded change preview, computed
+ * server-side when the request was raised (`approvalPreviews`); `previewError` says why it is
+ * missing for a tool that has a preview hook (hosts then show the raw `call.params`). Both are
+ * display only: the approval binds to the call (`requestId`), never to the preview.
+ */
 export class ToolApprovalRequest extends Schema.TaggedClass<ToolApprovalRequest>()(
   'ToolApprovalRequest',
   {
     requestId: NonEmptyTrimmedString,
     toolCallId: NonEmptyTrimmedString,
     call: ToolCall,
-    policy: Schema.optional(ToolApprovalPolicy)
+    policy: Schema.optional(ToolApprovalPolicy),
+    preview: Schema.optional(ToolChangePreview),
+    previewError: Schema.optional(Schema.String)
   }
 ) {}
 

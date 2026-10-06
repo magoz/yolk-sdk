@@ -19,6 +19,37 @@ export {
 export { omitNullOptionalToolArguments } from './arguments.ts'
 
 export {
+  boundToolChangePreview,
+  defaultToolChangePreviewMaxBytes,
+  defaultToolChangePreviewTimeoutMs,
+  groupToolChangePreviews,
+  isToolChangePreviewTruncated,
+  minToolChangePreviewMaxBytes,
+  toolChangeSignature
+} from './change-preview.ts'
+
+export type { ToolChangeGroup, ToolChangePreviewOptions } from './change-preview.ts'
+
+export {
+  ToolChangeCut,
+  ToolChangeItem,
+  ToolChangePreview,
+  ToolChangePreviewError,
+  ToolChangeScalar,
+  ToolChangeSetCuts,
+  ToolChangeSideCuts,
+  ToolChangeTarget,
+  ToolFieldChange,
+  ToolListChange,
+  ToolSetChange,
+  ToolStructuredChange,
+  ToolTextChange,
+  ToolValueChange
+} from '@yolk-sdk/agent/protocol'
+
+export type { ToolApprovalPreviewer } from '@yolk-sdk/agent/protocol'
+
+export {
   abandonedToolCallResult,
   classifyToolLedgerEntry,
   defaultToolLedgerLeaseMs,
@@ -60,7 +91,6 @@ export {
   defaultToolPlanMaxArgsBytes,
   defaultToolPlanMaxCalls,
   makeInMemoryToolPlanStore,
-  maxToolPlanPreviewBytes,
   maxToolPlanPreviewKeys,
   StagedCall,
   stagedCallDigest,
@@ -164,6 +194,7 @@ export type {
   NestedToolDescriber,
   NestedToolExecutor,
   NestedToolStagingDescription,
+  ToolChangePreviewHandler,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,
