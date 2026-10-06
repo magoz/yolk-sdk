@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.104
+
+### Patch Changes
+
+- 31b7e48: Advance unchanged public packages in lockstep with tool change previews in `@yolk-sdk/agent` (one before → after preview for approval-gated calls, shown on direct approvals and staged plan reviews). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [31b7e48]
+- Updated dependencies [d5d557e]
+  - @yolk-sdk/conformance@0.1.0-canary.104
+  - @yolk-sdk/agent@0.1.0-canary.104
+
 ## 0.1.0-canary.103
 
 ### Patch Changes

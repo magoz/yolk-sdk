@@ -1,5 +1,23 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.104
+
+### Minor Changes
+
+- d5d557e: Add tool change previews (ADR 0006): one tool-agnostic before → after diff for every approval-gated call, rendered the same way for direct approvals, sibling approvals, and staged plan reviews.
+
+  - New Effect Schemas in `@yolk-sdk/agent/protocol` (re-exported from `/tools`): `ToolChangePreview` (`target`, `summary?`, `changes`, `warnings?`, `blocked?`), `ToolFieldChange` (`Value`, `Text`, `Set`, `List`, `Structured`), `ToolChangeTarget`, `ToolChangeItem`, `ToolChangeScalar`, cut markers `ToolChangeCut`/`ToolChangeSideCuts`/`ToolChangeSetCuts`, `ToolChangePreviewError` with `ToolChangePreviewErrorCause`, its wire form `ToolChangePreviewFailure` (`{ cause, message }`, the `previewError` shape), and the `ToolApprovalPreviewer` loop seam.
+  - One hook: `makeTool({ approval, changePreview })` (decoded arguments) or `ToolRegistration.changePreview`, only on approval-gated tools (new `ToolRegistryError` cause `change_preview_unsupported_policy`). `resolveTools(..., { changePreview: { maxBytes, timeoutMs } })` bounds previews (default 16 KiB, at least 1 KiB, 5 s). Also exported: `ToolChangePreviewHandler`, `ToolChangePreviewOptions`, `ToolChangeGroup`, `defaultToolChangePreviewMaxBytes`, `defaultToolChangePreviewTimeoutMs`, `minToolChangePreviewMaxBytes`.
+  - Approvals: pass `ResolvedToolSet.approvalPreviews` as `approvalPreviews` to `run`, `runToolBatch`, `prepareToolBatch`, or `RuntimeConfig`; pending `ToolApprovalRequest`s (and their `ToolApprovalRequested` events) then carry `preview` or `previewError`. A failing preview never blocks the approval, and approval ids are unchanged. Voice ignores previews.
+  - Staged plans: `previewToolPlan`/`previewStoredToolPlan` run the same hook. `ToolPlanPreview` `ok` entries carry `params` plus `preview: ToolChangePreview`, `previewError`, or neither (the tool has no `changePreview`); never both (separate Schema members). Narrow with `entry.status === 'ok' && entry.preview !== undefined`. A failing or oversized preview no longer becomes an error entry.
+  - Large previews are truncated deterministically with `truncated` markers (original size, unit, window offset), never silently; `boundToolChangePreview` is exported. `toolChangeSignature`, `groupToolChangePreviews`, and `isToolChangePreviewTruncated` group identical changes per tool.
+  - Breaking (canary): `staging.preview` (`ToolStaging`/`ToolStagingHandlers`) and `maxToolPlanPreviewBytes` are removed (`staging` keeps only `precheck`); move previews to `changePreview` returning a `ToolChangePreview` and use `defaultToolChangePreviewMaxBytes`. `ResolvedToolSet` has a new required `approvalPreviews` field.
+
+### Patch Changes
+
+- Updated dependencies [31b7e48]
+  - @yolk-sdk/conformance@0.1.0-canary.104
+
 ## 0.1.0-canary.103
 
 ### Minor Changes

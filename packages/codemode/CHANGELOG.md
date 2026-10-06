@@ -1,5 +1,13 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.104
+
+### Patch Changes
+
+- 31b7e48: Advance in lockstep with tool change previews in `@yolk-sdk/agent`; no code mode implementation changes. Hosts that stage tool calls: plan review previews now come from each tool's `changePreview` hook in `@yolk-sdk/agent`, which replaces `staging.preview`.
+- Updated dependencies [d5d557e]
+  - @yolk-sdk/agent@0.1.0-canary.104
+
 ## 0.1.0-canary.103
 
 ### Minor Changes
