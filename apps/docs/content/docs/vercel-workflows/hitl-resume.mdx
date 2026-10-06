@@ -25,7 +25,11 @@ return {
 }
 ```
 
-Persist enough state for your UI and resume route to verify the request.
+Persist enough state for your UI and resume route to verify the request. To show approvers a
+before → after diff, pass `approvalPreviews: toolSet.approvalPreviews` to the `prepareToolBatch`
+or `runToolBatch` call in your tool step; each pending `ToolApprovalRequest` then carries its
+`preview`. Previews are recomputed whenever the batch reruns with siblings still pending, so render
+the latest request per call. See [Preview the change](../agent/tools-hitl#preview-the-change).
 
 ## Wait in the workflow
 

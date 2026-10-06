@@ -30,6 +30,14 @@ For schema-backed forms, follow [Collect typed input](../agent/tools-hitl#collec
 Pass `toolSet.inputs` alongside `toolSet.tools` into loop/runtime configuration; serializable tool
 definitions alone cannot validate responses. Keep input forms pending until server acceptance.
 
+## Show what an approval changes
+
+Give approval-gated tools a `changePreview` hook (`makeTool({ approval, changePreview })`) and pass
+`approvalPreviews: toolSet.approvalPreviews` to loop/runtime configuration. Pending approval
+requests then carry a tool-agnostic before → after `preview`; render it, or fall back to the raw
+arguments when `previewError` is set. The same hook previews staged plan reviews. Follow
+[Preview the change](../agent/tools-hitl#preview-the-change).
+
 ## Execute a reviewed action
 
 Use `makeInteractionTool`, not `makeInputTool`, when the user edits values and chooses a
@@ -61,6 +69,7 @@ mode script's staged approval-gated calls once and selects the calls to apply. F
 - `validateInteractionSubmission` from `@yolk-sdk/agent/protocol`
 - `makeInteractionTool` from `@yolk-sdk/agent/tools`
 - `makePlanReviewTool`, `previewStoredToolPlan` from `@yolk-sdk/agent/tools`
+- `ToolChangePreview`, `groupToolChangePreviews` from `@yolk-sdk/agent/tools`
 - `loadInteractionReceipts` from `@yolk-sdk/agent/loop`
 - `plainHitlResponse` from `@yolk-sdk/agent/protocol`
 - `questionResponseStructuredContent` from `@yolk-sdk/agent/protocol`
