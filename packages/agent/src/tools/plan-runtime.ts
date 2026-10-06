@@ -294,6 +294,20 @@ const countsOf = (calls: ReadonlyArray<ToolPlanCallOutcome>): ToolPlanCallCounts
 const outcomeLine = (call: ToolPlanCallOutcome) =>
   `- ${call.key} ${call.toolName}: ${call.status.replace('_', ' ')}${call.error === undefined ? '' : `: ${truncateCodePoints(call.error, 200)}`}`
 
+/** Model-visible lines stay bounded for large plans: applied and skipped calls are counted only,
+ * and at most `maxListedCalls` other calls are listed. `structuredContent.calls` keeps every call.
+ */
+const maxListedCalls = 50
+
+const notableLines = (calls: ReadonlyArray<ToolPlanCallOutcome>) => {
+  const notable = calls.filter(call => call.status !== 'applied' && call.status !== 'skipped')
+  const lines = notable.slice(0, maxListedCalls).map(outcomeLine)
+
+  return notable.length > maxListedCalls
+    ? [...lines, `- … and ${notable.length - maxListedCalls} more`]
+    : lines
+}
+
 const countsText = (counts: ToolPlanCallCounts) =>
   `${counts.applied} applied, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.not_run} not run`
 
@@ -349,7 +363,10 @@ const decodeReviewResponse = Schema.decodeUnknownOption(ToolPlanReviewResponse)
 const sameKeys = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
   left.length === right.length && left.every((key, index) => key === right[index])
 
-/** The receipt binds exactly this apply: started, submitted, same call, plan, and selection. */
+/** The receipt binds exactly this apply: started, submitted, same call, plan, and selection.
+ * `reviewCall` is the normalized business call; comparing its params with the receipt's original
+ * params is exact only because `ToolPlanReviewParams` has no optional fields (keep it so).
+ */
 const receiptMatches = (
   receipt: InteractionReceipt | undefined,
   input: {
@@ -531,14 +548,16 @@ export const makeToolPlanRuntime = <Context>(
           )
         }) ?? []
 
+      const recorded = countsOf(calls)
+
       const listing =
         entries === undefined
           ? 'Its applied calls cannot be listed (no tool ledger is available), so any selected call may already have been applied.'
           : calls.length === 0
             ? 'The tool ledger recorded no applied calls for it.'
             : [
-                'Calls the tool ledger recorded (they were not undone):',
-                ...calls.map(outcomeLine)
+                `Calls the tool ledger recorded (they were not undone): ${recorded.applied} applied, ${recorded.failed} failed, ${recorded.unknown} unknown.`,
+                ...notableLines(calls)
               ].join('\n')
 
       const structuredContent: ToolPlanOutcome =
@@ -691,13 +710,11 @@ export const makeToolPlanRuntime = <Context>(
         counts
       }
 
-      const attempted = outcomes.filter(call => call.status !== 'skipped')
-
       return {
         outcome: 'completed',
         content: [
-          `Applied plan ${planId}: ${countsText(counts)}.${counts.applied === 0 ? ' No call was applied.' : ''}`,
-          ...attempted.map(outcomeLine),
+          `Applied plan ${planId}: ${countsText(counts)}.${counts.applied === 0 ? ' No call reported success.' : ''}`,
+          ...notableLines(outcomes),
           ...(counts.not_run > 0
             ? ['Calls marked not run were skipped after a failure; nothing was undone.']
             : [])

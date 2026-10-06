@@ -461,6 +461,9 @@ const resolveHostTools = (context: HostContext) =>
   in `structuredContent.result` (`type: 'tool_plan_outcome'`).
 - If the apply crashes, the receipt stays started; re-execution never runs it again and returns an
   `unknown` outcome listing the ledger's per-call states.
+- Calls apply one after another in one tool step: keep plans small enough to fit your step
+  budget (lower `staging.maxCalls` on the code mode tool). `beforeCall` and any custom
+  `planReview` handler are trusted host code.
 
 `ToolPlanStore` is a port over host storage: `put` is idempotent by plan id and digest (another
 digest under the same id is a conflict), `get` returns the plan and its claim, and `claim(planId,

@@ -103,9 +103,23 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
 - **Integrity**: staged keys are positional (`<planId>/s<n>`), so a key moved to another call in
   storage fails the integrity check; the executor also requires the receipt to name the resolved
   review tool.
-- **Known limitation**: two concurrent executions of one accepted review (a redelivered step) both
-  re-validate before the receipt claim; the loser can see "already applied" as a validation error
-  instead of the winner's outcome. At most once still holds (the plan claim decides).
+- **Known limitations** (at most once always holds; the plan claim decides):
+  - Two concurrent executions of one accepted review (a redelivered step) both re-validate before
+    the receipt claim; the loser can see "already applied" as a validation error instead of the
+    winner's outcome. The same happens earlier at loop preflight (`prepareToolBatch` re-runs call
+    validation for an `accepted` receipt), where the loser gets a synthetic invalid-arguments result.
+  - A plan store outage during call validation is reported as a validation error, so a preflight
+    of an accepted review turns into an invalid-arguments result and the plan needs a fresh
+    review. Keep the plan store beside the receipt storage. A follow-up may surface store errors
+    as retryable step failures instead.
+  - Staged calls apply sequentially in one tool step: size plans (`staging.maxCalls`) so the
+    selected calls fit the host's step budget.
+  - A `ToolError` from an applied call is reported `failed`, as in code mode listings, even though
+    a timeout does not prove no effect; the review outcome stays `completed`, never `failed`.
+- **Trust**: `planReview` handlers and `beforeCall` are trusted host code. The executor re-checks
+  the receipt to stop the model and the browser, not host code (which can call any tool directly).
+- **Bounded text**: results count applied and skipped calls and list at most 50 other calls;
+  `structuredContent.result.calls` keeps every call.
 - **Cancel** applies nothing. Deny-all is cancel; an empty selection is invalid.
 
 `previewToolPlan({ toolSet, plan, keys })` returns bounded per-key previews for host review screens
