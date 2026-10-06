@@ -50,7 +50,8 @@ identities, not authentication or payload-derived provider idempotency guarantee
 Pass `interactionHost` to `resolveTools`, then pass both `toolSet.interactions` and
 `toolSet.interactionHost` into `run`/`runToolBatch`/runtime configs. For durable preflight, load
 `loadInteractionReceipts(calls, host)` first and pass its result as `interactionReceipts` to
-`prepareToolBatch`. Repeated preparation has no reads, claims, settlement or business effects;
+`prepareToolBatch`. Repeated preparation has no receipt reads, claims, settlement or business
+effects (interaction call validators may read host storage, failing the batch `unavailable`);
 all pending siblings fence execution. Historical receipts replay before current schemas/actions,
 even if the current tool was removed; missing handlers never authorize new execution.
 

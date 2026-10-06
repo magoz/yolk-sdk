@@ -270,12 +270,7 @@ they do not want. Nothing runs while the script runs.
 ```ts
 import { Effect } from 'effect'
 import { ToolApprovalPolicy } from '@yolk-sdk/agent/protocol'
-import {
-  makeInMemoryToolPlanStore,
-  makePlanReviewTool,
-  makeTool,
-  resolveTools
-} from '@yolk-sdk/agent/tools'
+import { makePlanReviewTool, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
 
 const setCurriculum = makeTool<HostContext, typeof SetCurriculumParams>({
   name: 'set_curriculum',
