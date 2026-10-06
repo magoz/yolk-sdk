@@ -223,6 +223,10 @@ Staged tool plans add three causes:
 - `staging_validation_required`: a raw stageable registration has no side-effect-free `validate`.
 - `plan_review_duplicate`: more than one `makePlanReviewTool` registration resolves.
 
+Tool change previews add one cause:
+
+- `change_preview_unsupported_policy`: a tool sets `changePreview` without `approval`.
+
 ### `stage` is not defined, or `review_plan` is unavailable
 
 Scripts get `stage(name, args)`, and the review tool becomes available, only when the resolution
@@ -239,6 +243,16 @@ The Node executor loads a worker file and `quickjs.wasm` from disk. When a bundl
 engine, those files are missing at runtime. In Next.js, add `@yolk-sdk/codemode`,
 `@earendil-works/pi-codemode`, and `quickjs-wasi` to `serverExternalPackages`, or pass `wasm` and
 `workerUrl` to `makePiCodeModeExecutor`. See [Add code mode](./integrations/code-mode).
+
+### Approval requests have no preview
+
+Pending `ToolApprovalRequest`s carry `preview` only when you pass
+`approvalPreviews: toolSet.approvalPreviews` to `run`, `runToolBatch`, `prepareToolBatch`, or the
+runtime config, and the tool has a `changePreview` hook. Voice approvals never compute previews.
+When `previewError` is set instead, its `cause` says why: `failed` (the hook failed or the
+arguments are invalid), `invalid` (not a `ToolChangePreview`), `too_large` (labels, target,
+summary, warnings, or `blocked` alone exceed `maxBytes`), or `timeout`. Show the raw arguments in
+that case. See [Preview the change](./agent/tools-hitl#preview-the-change).
 
 ### Approval pauses forever
 

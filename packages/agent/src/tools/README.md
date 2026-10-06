@@ -19,6 +19,9 @@ Generic host tool registration and resolution.
   twice under the same ledger key.
 - Staged tool plans: stageable approval-gated tools, the `ToolPlanStore` contract, and the
   `makePlanReviewTool` interaction that applies a person's selection once.
+- Tool change previews: the `changePreview` hook on approval-gated tools, deterministic bounding,
+  grouping; `ResolvedToolSet.approvalPreviews` for approval requests, and the same hook for plan
+  reviews.
 
 ## Use it when
 

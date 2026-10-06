@@ -141,8 +141,10 @@ stay fail-closed for `tools.<name>()`. Pass `staging: false` to turn it off or `
 to lower the cap.
 
 Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
-decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. See
-[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md).
+decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
+show each staged call with the tool's `changePreview` from `@yolk-sdk/agent/tools`. See
+[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md) and
+[ADR 0006](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0006-tool-change-previews.md).
 
 ## Limits
 
