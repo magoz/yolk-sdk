@@ -480,14 +480,16 @@ const resolveHostTools = (context: HostContext) =>
   at-least-once). With a tool ledger, each apply runs behind a ledger entry for the review call: a
   redelivery waits for the running apply (up to the ledger's `maxWaitMs` or `deadline`) and returns
   its real outcome. If the wait ends first, or the apply crashed, it returns an `unknown` outcome
-  listing each staged call; a call is `not_run` only when Yolk can prove it never ran and never
+  listing each staged call (or `failed` when Yolk proves nothing ran); a call is `not_run` only when Yolk can prove it never ran and never
   will, otherwise `unknown`. The apply is never run twice. Give the ledger wait room for your
   largest plan.
 - A plan store outage is never a verdict: loop preflight fails the batch with an `unavailable`
   `ToolError` (retry the step; the review stays accepted), admission answers
   `InteractionAdmissionError` `unavailable`, and an outage that starts mid-step fails the call
   closed. Once the receipt is claimed, an outage ends that review attempt with `failed` and nothing
-  applied; the model is told the plan is unchanged and can open a new review. A delivery that finds
+  applied: when reading the receipt or plan or claiming the apply's ledger entry failed, the model
+  is told the plan is unchanged and can open a new review; when claiming the plan itself failed,
+  the plan may now be locked against further reviews. A delivery that finds
   the receipt already started or settled by another delivery reports that outcome instead of an
   invalid-arguments error.
 - The apply's ledger entry must be visible to every redelivery of the review step: resolve the

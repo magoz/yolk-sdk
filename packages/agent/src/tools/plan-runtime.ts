@@ -811,14 +811,15 @@ export const makeToolPlanRuntime = <Context>(
 
       const listingOf = (
         basis: ListingBasis,
-        entries: ReadonlyArray<ToolLedgerEntry> | undefined
+        entries: ReadonlyArray<ToolLedgerEntry> | undefined,
+        claimedBy: string | undefined = stored?.claimedBy
       ) =>
         listing({
           reviewCall,
           submissionId,
           planId,
           plan: stored?.plan,
-          claimedBy: stored?.claimedBy,
+          claimedBy,
           selection,
           entries,
           basis
@@ -828,11 +829,12 @@ export const makeToolPlanRuntime = <Context>(
       if (phase === 'seal') return listingOf('ended', yield* listNested(reviewCall))
 
       // A replay: wait for an in-flight apply behind the fence and return its real outcome, or
-      // hold the fence itself. A fresh fence alone is not proof that no apply ran (another ledger
-      // scope, or an entry the host already deleted), so the durable plan claim, which every
-      // apply takes inside the fence before its first call, must agree: nothing ran only when the
-      // plan and selection are known, the plan is not claimed by this review, and the ledger
-      // lists no call of it.
+      // hold the fence itself. The fence is proof only within one ledger scope that keeps its
+      // entries (a host requirement). The durable plan claim, which every apply takes inside the
+      // fence before its first call, must also agree, which catches an apply that already
+      // claimed the plan elsewhere (not one that has yet to): nothing ran only when the plan and
+      // selection are known, the plan is not claimed by this review, and the ledger lists no
+      // call of it.
       const holdingFence = Effect.gen(function* () {
         const entries = yield* listNested(reviewCall)
 
@@ -855,16 +857,7 @@ export const makeToolPlanRuntime = <Context>(
           entries !== undefined &&
           entries.length === 0
 
-        return listing({
-          reviewCall,
-          submissionId,
-          planId,
-          plan: stored?.plan,
-          claimedBy,
-          selection,
-          entries,
-          basis: proven ? 'fenced' : 'uncertain'
-        })
+        return listingOf(proven ? 'fenced' : 'uncertain', entries, claimedBy)
       })
 
       return yield* fenced({

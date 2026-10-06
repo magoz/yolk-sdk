@@ -115,15 +115,16 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
     settlement, when recorded meanwhile);
   - holds the fence itself when no apply passed it, and the durable plan claim agrees (the plan is
     not claimed by this review, the ledger lists no call of it, the plan and selection are known):
-    nothing ran and nothing will (an apply that
-    arrives later replays that result instead of running), so it reports every selected call
+    nothing ran and nothing will (an apply that arrives later replays that result instead of
+    running), so it reports every selected call
     `not_run` with outcome `failed` (known no effect; the plan stays unclaimed and reviewable);
   - otherwise (the wait ends while the apply still runs, or its lease expired) falls back to the
     listing below.
-- **Fence scope**: the fence assumes every execution of a review call resolves with the same
-  ledger scope (for example run + turn of the review step) and that the host keeps the fence entry
-  at least as long as the receipt. A fresh fence in another scope, or after the entry was deleted,
-  is not taken as proof on its own: the plan claim must agree, else the listing stays uncertain.
+- **Fence scope (host requirement)**: every execution of a review call must resolve with the same
+  ledger scope (for example run + turn of the review step), and the host must keep the fence entry
+  at least as long as the receipt. The plan-claim check only catches an apply that already claimed
+  the plan elsewhere; an apply in another scope that has not claimed yet could still run after a
+  replay reported `not_run`. The same-scope requirement is what makes the fence a proof.
 - **Listing without an outcome**: it combines the receipt's selection, the plan claim, and the
   ledger. Ledger entries give `applied`, `failed`, or `unknown`; unselected calls are `skipped`. A
   selected call without an entry is `not_run` only when that is provable: another review owns the

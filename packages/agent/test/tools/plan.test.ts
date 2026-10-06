@@ -45,6 +45,7 @@ import {
   ToolPlanOutcome,
   ToolPlanPreview,
   ToolPlanStoreError,
+  ToolLedgerError,
   type ToolPlanStore,
   type ToolRegistration
 } from '../../src/tools/index.ts'
@@ -184,7 +185,7 @@ type LinkToolOptions = {
 /** Toggles a plan store outage: every operation fails while `down`; with `getsLeft`, `get`
  * starts failing once that many more reads succeeded.
  */
-type Outage = { down: boolean; getsLeft?: number }
+type Outage = { down: boolean; getsLeft?: number; claimDown?: boolean; fenceDown?: boolean }
 
 const withOutage = (store: ToolPlanStore, outage: Outage): ToolPlanStore => {
   const down = () => new ToolPlanStoreError({ cause: 'storage', message: 'database is down' })
@@ -202,7 +203,8 @@ const withOutage = (store: ToolPlanStore, outage: Outage): ToolPlanStore => {
 
         return outage.down ? Effect.fail(down()) : store.get(planId)
       }),
-    claim: input => (outage.down ? Effect.fail(down()) : store.claim(input))
+    claim: input =>
+      outage.down || outage.claimDown === true ? Effect.fail(down()) : store.claim(input)
   }
 }
 
@@ -294,7 +296,21 @@ const setup = (options: SetupOptions = {}) =>
     if (options.plans !== false) resolveOptions.plans = plans
 
     if (options.ledger === true) {
-      const ledger: LedgerOptionFields = { store: ledgerStore }
+      const outage = options.outage
+
+      // The apply fence is the only top-level ledger key without a `/` in these tests.
+      const ledgerStoreFor: ToolLedgerOptions['store'] =
+        outage === undefined
+          ? ledgerStore
+          : {
+              ...ledgerStore,
+              claim: request =>
+                outage.fenceDown === true && !request.key.includes('/')
+                  ? Effect.fail(new ToolLedgerError({ message: 'ledger is down' }))
+                  : ledgerStore.claim(request)
+            }
+
+      const ledger: LedgerOptionFields = { store: ledgerStoreFor }
       const decisions = options.decisions
 
       if (options.unledgered === true) ledger.isLedgered = () => false
@@ -1748,5 +1764,47 @@ describe('review hardening', () => {
         expect((yield* outcomeOf(result)).outcome).toBe('completed')
         expect(env.applied.map(item => item.resource)).toEqual(['r1'])
       })
+  )
+})
+
+describe('outages after the receipt claim', () => {
+  const failedApply = (outageOf: (outage: Outage) => void, ledger: boolean) =>
+    Effect.gen(function* () {
+      const outage: Outage = { down: false }
+      const env = yield* setup({ outage, ledger })
+      const plan = yield* stagedPlan(env, ['r1'])
+      const call = reviewCall(plan)
+      const ref = yield* accept(env, call, ['script_1/s1'])
+
+      outageOf(outage)
+
+      const result = yield* env.toolSet.execute(call, { interaction: ref })
+
+      return { env, plan, outcome: yield* outcomeOf(result), text: textOf(result) }
+    })
+
+  it.effect('a plan-claim outage applies nothing and says the plan may be locked', () =>
+    Effect.gen(function* () {
+      const { env, outcome, text } = yield* failedApply(outage => {
+        outage.claimDown = true
+      }, false)
+
+      expect(outcome.outcome).toBe('failed')
+      expect(text).toContain('may now be locked')
+      expect(env.applied).toEqual([])
+    })
+  )
+
+  it.effect('a fence outage applies nothing and leaves the plan reviewable', () =>
+    Effect.gen(function* () {
+      const { env, plan, outcome, text } = yield* failedApply(outage => {
+        outage.fenceDown = true
+      }, true)
+
+      expect(outcome.outcome).toBe('failed')
+      expect(text).toContain('The plan is unchanged and can still be applied')
+      expect(env.applied).toEqual([])
+      expect((yield* env.store.get(plan.id))?.claimedBy).toBeUndefined()
+    })
   )
 })
