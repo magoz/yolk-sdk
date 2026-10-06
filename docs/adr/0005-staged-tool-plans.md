@@ -86,11 +86,12 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
   execution.
 - **Admission** (`validateAction`, the resolution's fresh context) checks the selection: a
   non-empty, duplicate-free subset of the plan's keys whose tools are still stageable, then each
-  tool's optional `staging.precheck`. Hosts use prechecks for preconditions that may have changed
-  since staging (for example an expected current value).
+  tool's optional `staging.precheck` (at most 8 at a time). Hosts use prechecks for preconditions
+  that may have changed since staging; a tool's own compare-and-set in `execute` stays the
+  authority (a precheck cannot close the gap between check and write).
 - **Apply** runs the privileged plan executor (`ToolPlanRuntime.apply`):
-  1. Re-reads the review receipt and refuses unless it is accepted, started, submitted for this
-     exact call, plan id, digest, and selection.
+  1. Re-reads the review receipt and refuses unless it is started, submitted with action `apply`,
+     for the resolved review tool, and for this exact call, plan id, digest, and selection.
   2. Re-checks plan integrity, then `claim(planId, submissionId)`: `claimed` proceeds, `taken`
      refuses (`failed`, nothing applied), `same` reports the earlier apply as `unknown`.
   3. Runs the selected calls in staged order through `executeRegistration` (decoding, registration
@@ -99,36 +100,62 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
   4. `onFailure: 'stop'` (default) marks later selected calls `not_run`; `'continue'` runs them.
      Unselected calls are `skipped`. A partial apply is a `completed` outcome listing every call as
      `applied`, `failed`, `skipped`, or `not_run`.
-- **Crash**: the receipt stays `started`; re-execution never runs again and returns `unknown`
-  with the ledger's per-key states (`applied`, `failed`, `unknown`), or `ledgerUnavailable` when
-  there is no ledger (never an empty listing). A defect or interruption seals the receipt with the
-  same listing (bounded to 5 s, else the generic notice). Interactions gain an optional
-  `unknownOutcome` hook for this.
+- **Per-call authority**: applied calls run inside the review action, so code mode's
+  `beforeNestedCall` and decorators around the `ToolExecutor` never see them. `beforeCall` is the
+  only per-call host authority hook: hosts must wire their run-authority (nested-write) authorizer
+  there. Registration wrappers and the ledger still apply.
+- **Crash**: the receipt stays `started`; re-execution never runs again and returns `unknown`. The
+  listing combines the receipt's selection, the plan claim, and the ledger: ledger entries give
+  `applied`, `failed`, or `unknown`; unselected calls are `skipped`; a selected call without an
+  entry is `not_run` when its tool is ledgered (the claim precedes execution) or the plan is not
+  claimed by this review, and `unknown` otherwise (no ledger, or a tool the policy skips). Without a
+  ledger the result also carries `ledgerUnavailable` (never an empty listing). A defect or
+  interruption seals the receipt with the same listing: the description has its own 3 s bound
+  (falling back to the generic notice) and settlement keeps its full 5 s. Interactions gain an
+  optional `unknownOutcome` hook for this.
+- **Storage outages are never verdicts**: plan store errors in call validation and admission are
+  `InteractionHostError`s (protocol `InteractionCallValidator`). Loop preflight fails the batch
+  closed (`prepareToolBatch` fails with `ToolError` `unavailable`, like `loadInteractionReceipts`),
+  so the step can be retried with the review intact; admission answers `InteractionAdmissionError`
+  `unavailable` (nothing is consumed). During execution an outage fails closed as a model-visible
+  `unavailable` `ToolError`, as ledger claim failures do; nothing runs.
+- **Concurrent deliveries**: when an accepted review's call or selection no longer validates,
+  preflight still dispatches it, and the executor re-reads the receipt before reporting a
+  validation error: a receipt another delivery started or settled meanwhile yields that outcome
+  (`unknown` or the settled result), never "invalid arguments".
 - **Integrity**: staged keys are positional (`<planId>/s<n>`), so a key moved to another call in
-  storage fails the integrity check; the executor also requires the receipt to name the resolved
-  review tool.
+  storage fails the integrity check. Stage snapshots the arguments once (canonical JSON, parsed) and
+  validates, digests, and stores that snapshot.
 - **Known limitations** (at most once always holds; the plan claim decides):
-  - Two concurrent executions of one accepted review (a redelivered step) both re-validate before
-    the receipt claim; the loser can see "already applied" as a validation error instead of the
-    winner's outcome. The same happens earlier at loop preflight (`prepareToolBatch` re-runs call
-    validation for an `accepted` receipt), where the loser gets a synthetic invalid-arguments result.
-  - A plan store outage during call validation is reported as a validation error, so a preflight
-    of an accepted review turns into an invalid-arguments result and the plan needs a fresh
-    review. Keep the plan store beside the receipt storage. A follow-up may surface store errors
-    as retryable step failures instead.
+  - An outage that starts between preflight and execution of the same step reaches the executor,
+    which fails closed with a model-visible `unavailable` result while the receipt stays accepted;
+    the model must open a fresh review. Making it a step failure would need a retryable error
+    channel on `ToolExecutor.execute` (all `ToolError`s are tool results today); deferred.
   - Staged calls apply sequentially in one tool step: size plans (`staging.maxCalls`) so the
     selected calls fit the host's step budget.
   - A `ToolError` from an applied call is reported `failed`, as in code mode listings, even though
     a timeout does not prove no effect; the review outcome stays `completed`, never `failed`.
+  - The review tool stays advertised when the resolution has no plans (it answers unavailable),
+    consistent with interaction tools resolved without a host.
 - **Trust**: `planReview` handlers and `beforeCall` are trusted host code. The executor re-checks
   the receipt to stop the model and the browser, not host code (which can call any tool directly).
+  Submission ids must be unique within the plan store's scope: a reused id would make `claim`
+  answer `same` for an unrelated review.
 - **Bounded text**: results count applied and skipped calls and list at most 50 other calls;
   `structuredContent.result.calls` keeps every call.
 - **Cancel** applies nothing. Deny-all is cancel; an empty selection is invalid.
 
-`previewToolPlan({ toolSet, plan, keys })` returns bounded per-key previews for host review screens
-(each tool's optional `staging.preview`, at most 50 keys per page, 16 KiB per preview), refusing
-plans of another scope or with mismatched digests.
+Host review screens use `previewStoredToolPlan({ toolSet, planId, planDigest, offset?, limit? })`
+(loads through the plan store with the same scope, integrity, and digest checks; pages of at most
+50 calls with `nextOffset` and the claim state) or `previewToolPlan({ toolSet, plan, keys })` for a
+plan already in hand (`toolPlanKeyPages` pages its keys). Previews carry each tool's optional
+`staging.preview`, bounded to 16 KiB. `ToolPlanOutcome`, `ToolPlanPreview`, and
+`ToolPlanPreviewPage` are Effect Schemas so hosts can decode them across process boundaries.
+
+The plan store contract: `put` is atomic insert-or-compare (one statement or transaction), `claim`
+a single conditional update, JSON(B) storage is safe (digests use canonical JSON with sorted
+keys), and retention is host policy (unreviewed plans are inert; expire them after the review
+window, keep claimed ones as long as the ledger entries they explain).
 
 Approval binds to the transcript call (`approval:<callId>`); the plan review binds the person's
 consent to the receipt of one review call, one plan digest, and one selection. The plan executor
@@ -172,6 +199,10 @@ plans cover the common case where the script computes the writes and a person ap
 direct calls, staging availability (no `stage` without plans, host, or review tool), stage
 validation and guardrails (write-then-stage, stage-then-write, duplicates, caps), plan put
 idempotency and conflicts, review validation (digest, scope, subset, duplicates, prechecks),
-single-use claims (`taken`, `same`), the plan executor refusing without a started receipt or with
-mismatched digests, `onFailure`, `beforeCall`, crash mid-apply (`unknown` with per-key ledger
-states), nested ledger keys, cancel, previews, and the pi executor end to end.
+single-use claims (`taken`, `same`), the plan executor refusing without a started receipt, for a
+started receipt of another selection, digest, or tool, or with mismatched or moved keys,
+`onFailure`, `beforeCall`, crash mid-apply (`unknown` with per-key listings, ledgered and
+unledgered tools), plan store outages at preflight, admission, and execution, concurrent
+deliveries reporting the winner's outcome, argument snapshots, bounded precheck concurrency, host
+plan ids, nested ledger keys, cancel, paged stored previews with Schema decoding, and the pi
+executor end to end.

@@ -333,6 +333,10 @@ The review is an [action-backed interaction](../agent/tools-hitl#review-a-staged
 `tool_plan_review` kind, accept `{ selectedKeys }`, and resume as for any interaction. Yolk then
 applies exactly the selected calls in staged order, once.
 
+**Per-call authority:** applied plan calls do not pass through `beforeNestedCall` or decorators
+around your `ToolExecutor`: they run inside the review action. Pass the same per-call authorizer as
+`makePlanReviewTool({ beforeCall })`; it is the only per-call host hook for applied calls.
+
 ## Make tools ready for code mode
 
 Scripts can only use what a tool declares and returns. For each tool scripts may call:
@@ -447,7 +451,8 @@ and aborts the executor's signal.
   `write` access.
 - Decorators you wrap around the `ToolExecutor` (outside `ResolvedToolSet.execute`), such as a
   per-call run-admission or stop check, see only the `codemode` call, never the nested calls of its
-  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers:
+  script. Put per-call checks in `beforeNestedCall` or in registration-level wrappers, and the same
+  check in the plan review's `beforeCall` for staged calls:
 
   ```ts
   const codemode = makeCodeModeTool<HostContext>({

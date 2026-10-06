@@ -398,8 +398,13 @@ const prepared =
 // ToolExecutor.execute. Dropping the ref fails closed.
 ```
 
-Preparation only validates and plans: no reads, claims, settlements or actions. Load fresh
-snapshots before every preparation boundary. Historical receipts replay before current
+Preparation only validates and plans: no receipt reads, claims, settlements or actions. Load
+fresh snapshots before every preparation boundary. A call validator may read host storage (the
+plan review reads the plan store); when that storage is unavailable it fails with
+`InteractionHostError` and `prepareToolBatch` fails with a `ToolError` `unavailable`, like
+`loadInteractionReceipts`: retry the step. An accepted receipt whose call no longer validates is
+still dispatched, so the executor can re-read the receipt and report a delivery that already
+started or settled it. Historical receipts replay before current
 schemas/actions, even if a tool is removed or disabled; a missing handler can never start new
 work. The executor re-reads and validates the full receipt binding, then runs only its chosen
 action/data, before the next model turn. No extra approval or ambient permission is introduced.
@@ -435,43 +440,66 @@ authorization flow above: host acceptance, receipts, claim and settle.
 import { makePlanReviewTool, resolveTools } from '@yolk-sdk/agent/tools'
 
 const reviewPlan = makePlanReviewTool<HostContext>({
-  // Optional per-call run-authority check right before each selected call runs.
-  beforeCall: ({ call, context }) => assertRunActive(context, call), // host-owned
+  // The only per-call authority hook for applied calls (see below).
+  beforeCall: ({ call, context }) => authorizeWrite(context, call), // host-owned
   onFailure: 'stop' // default; 'continue' runs the remaining selected calls
 })
 
 const resolveHostTools = (context: HostContext) =>
   resolveTools([{ id: 'host', tools: [codemode, reviewPlan] }, ...hostModules], context, {
     interactionHost: scopedReceipts, // host-owned
-    plans: { store: planStore } // host-owned ToolPlanStore
+    plans: {
+      store: planStore, // host-owned ToolPlanStore, scoped to the conversation
+      // Provider call ids can repeat across turns: make plan ids unique and stable.
+      planId: ({ call }) => `${context.runId}:${context.turn}:${call.id}` // host-owned values
+    }
   })
 ```
 
 - The model calls `review_plan({ planId, planDigest })` with the values the script reported. Call
   validation loads the plan from the store: present, in scope, digests matching, not yet applied.
-- Render the `tool_plan_review` kind from `call.params.planId`: load the plan from your store and
-  page `previewToolPlan({ toolSet, plan, keys })` (at most 50 keys per call; each tool's optional
-  `staging.preview`). The person submits action `apply` with `{ selectedKeys }`, a non-empty subset
-  of the staged keys; they can untick calls but never change arguments. Cancel applies nothing.
+- Render the `tool_plan_review` kind with
+  `previewStoredToolPlan({ toolSet, planId, planDigest, offset })`: one page of at most 50 calls
+  with each tool's optional `staging.preview`, `nextOffset`, and whether a review already claimed
+  the plan. The results are plain JSON; decode them with the exported `ToolPlanPreviewPage` Schema
+  on the client. The person submits action `apply` with `{ selectedKeys }`, a non-empty subset of
+  the staged keys; they can untick calls but never change arguments. Cancel applies nothing.
 - Admission (`validateInteractionSubmission`) checks the selection with your fresh context: no
-  duplicates, keys of the plan, tools still stageable, and each tool's `staging.precheck`.
+  duplicates, keys of the plan, tools still stageable, and each tool's `staging.precheck` (at most
+  8 at a time). Keep prechecks cheap; make the tool's own write a compare-and-set for
+  correctness.
 - On execution Yolk re-reads the receipt, claims the plan once (`ToolPlanStore.claim`), and runs
   the selected calls in staged order through the resolved execute path and ledger, with ids
   `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, or `not_run`
-  in `structuredContent.result` (`type: 'tool_plan_outcome'`).
+  in `structuredContent.result`; decode it with the `ToolPlanOutcome` Schema.
+- **Per-call authority:** applied calls run inside the review action, so code mode's
+  `beforeNestedCall` and decorators around your `ToolExecutor` never see them. `beforeCall` is the
+  only per-call hook: wire the same run-authority or write authorizer you use for nested calls.
+  `beforeCall` and any custom `planReview` handler are trusted host code.
 - If the apply crashes, the receipt stays started; re-execution never runs it again and returns an
-  `unknown` outcome listing the ledger's per-call states.
-- Calls apply one after another in one tool step: keep plans small enough to fit your step
-  budget (lower `staging.maxCalls` on the code mode tool). `beforeCall` and any custom
-  `planReview` handler are trusted host code.
+  `unknown` outcome listing each staged call (from the ledger, the selection, and the plan claim).
+- A plan store outage is never a verdict: loop preflight fails the batch with an `unavailable`
+  `ToolError` (retry the step; the review stays accepted), admission answers
+  `InteractionAdmissionError` `unavailable`, and an outage that starts mid-step fails the call
+  closed. A delivery that finds the receipt already started or settled by another delivery reports
+  that outcome instead of an invalid-arguments error.
+- Calls apply one after another in one tool step: keep plans small enough to fit your step budget
+  (lower `staging.maxCalls` on the code mode tool).
 
-`ToolPlanStore` is a port over host storage: `put` is idempotent by plan id and digest (another
-digest under the same id is a conflict), `get` returns the plan and its claim, and `claim(planId,
-submissionId)` returns `claimed`, `same`, or `taken`; a plan is applied at most once. Scope it to
-the conversation, since reviews usually run in a later turn than the script. Plan ids default to the
-code mode call id; provider call ids can repeat across turns, so pass
-`plans: { store, planId: ({ call }) => \`${runId}:${turn}:${call.id}\` }`(host-owned values) when
-the store outlives a turn. The id must stay the same when the same call runs again.`makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
+`ToolPlanStore` is a port over host storage:
+
+- `put` is atomic insert-or-compare by plan id (for example `INSERT ... ON CONFLICT DO NOTHING`,
+  then compare digests): the same digest is a no-op, another digest a `conflict`.
+- `get` returns the plan and its claim.
+- `claim({ planId, submissionId })` is one conditional update (`... WHERE claimed_by IS NULL`)
+  returning `claimed`, `same`, or `taken`; a plan is applied at most once. Submission ids must be
+  unique within the store scope.
+- JSON(B) columns are safe: digests use canonical JSON (sorted keys). Decode stored plans with
+  `Schema.toCodecJson(ToolPlan)`.
+- Retention is yours: unreviewed plans are inert, so expire them after the review window; keep
+  claimed plans as long as the ledger entries they explain.
+
+`makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
 reports exactly which calls ran.
 
 ## Let the model choose background execution
