@@ -57,7 +57,9 @@ import {
   type InteractionHost,
   type QuestionPrompt,
   type QuestionResponse,
+  type ToolApprovalPreviewer,
   type ToolApprovalResponse,
+  type ToolChangePreview,
   ToolResult,
   TurnEnd,
   TurnStart,
@@ -70,6 +72,11 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
+import { truncateCodePoints } from '../protocol/bounded-text.ts'
+import {
+  toolChangePreviewMaxErrorChars,
+  type ToolChangePreviewFailure
+} from '../protocol/change-preview.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
@@ -99,6 +106,10 @@ export type RunConfig = {
    */
   readonly interactions?: Readonly<Record<string, InteractionPreflight>>
   readonly interactionHost?: InteractionHost
+  /** Change previewers of approval-gated tools by tool name (from
+   * ResolvedToolSet.approvalPreviews): pending approval requests carry their preview.
+   */
+  readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -117,6 +128,10 @@ export type ToolBatchConfig = {
   /** Server-side interaction preflight by tool name (from ResolvedToolSet.interactions). */
   readonly interactions?: Readonly<Record<string, InteractionPreflight>>
   readonly interactionHost?: InteractionHost
+  /** Change previewers of approval-gated tools by tool name (from
+   * ResolvedToolSet.approvalPreviews).
+   */
+  readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
   readonly model?: string
   readonly createdMessages?: ReadonlyArray<AgentMessage>
   readonly turn?: number
@@ -823,6 +838,68 @@ const prepareApprovalCall = (
   })
 }
 
+/** Most approval change previews one batch computes at once. */
+const approvalPreviewConcurrency = 8
+
+type ApprovalPreviewDisplay =
+  | { readonly preview: ToolChangePreview }
+  | { readonly previewError: ToolChangePreviewFailure }
+
+// A pending approval request with its tool's change preview, or why there is none. A preview
+// never blocks the approval: failures and defects become `previewError`; interruption propagates.
+const withApprovalPreview = (
+  previewers: Readonly<Record<string, ToolApprovalPreviewer>>,
+  item: PreparedToolCall
+): Effect.Effect<PreparedToolCall> => {
+  if (
+    !Predicate.isTagged(item, 'Pending') ||
+    !Predicate.isTagged(item.request, 'ToolApprovalRequest')
+  )
+    return Effect.succeed(item)
+
+  const request = item.request
+
+  const previewer = Object.hasOwn(previewers, request.call.name)
+    ? previewers[request.call.name]
+    : undefined
+
+  if (previewer === undefined) return Effect.succeed(item)
+
+  return Effect.suspend(() => previewer(request.call)).pipe(
+    Effect.map((preview): ApprovalPreviewDisplay => ({ preview })),
+    Effect.catch(error =>
+      Effect.succeed<ApprovalPreviewDisplay>({
+        previewError: {
+          cause: error.cause,
+          message: truncateCodePoints(error.message, toolChangePreviewMaxErrorChars)
+        }
+      })
+    ),
+    Effect.tapDefect(defect =>
+      Effect.logWarning(`The change preview of ${request.call.name} failed`, defect)
+    ),
+    Effect.catchDefect(() =>
+      Effect.succeed<ApprovalPreviewDisplay>({
+        previewError: { cause: 'failed', message: 'The change preview failed.' }
+      })
+    ),
+    Effect.map(display => {
+      const previewed = ToolApprovalRequest.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        call: request.call,
+        policy: request.policy,
+        ...display
+      })
+
+      return PreparedToolCall.Pending({
+        request: previewed,
+        events: [ToolApprovalRequested.make({ call: previewed.call, request: previewed })]
+      })
+    })
+  )
+}
+
 // The first valid response settles the request. Invalid attempts remain in durable logs
 // but cannot mask a correction; later duplicates cannot overwrite a submission/cancellation.
 const inputResponseFor = (
@@ -1206,12 +1283,18 @@ export const prepareToolBatch = (input: {
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
   readonly interactions?: Readonly<Record<string, InteractionPreflight>>
   readonly interactionReceipts?: ReadonlyMap<string, InteractionReceipt>
+  /** Change previewers by tool name (from ResolvedToolSet.approvalPreviews). Pending approval
+   * requests of these tools carry `preview` (or `previewError`); computed only while the request
+   * is pending, at most 8 at a time.
+   */
+  readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
 }): Effect.Effect<PreparedToolBatch, ToolError> =>
   Effect.gen(function* () {
     const handlers = input.inputs ?? {}
     const preflights = input.interactions ?? {}
+    const previewers = input.approvalPreviews ?? {}
 
-    const prepared = yield* Effect.forEach(input.calls, (call, index) =>
+    const planned = yield* Effect.forEach(input.calls, (call, index) =>
       prepareToolCall({
         tools: input.tools,
         responses: input.responses,
@@ -1222,6 +1305,13 @@ export const prepareToolBatch = (input: {
         index
       })
     )
+
+    const prepared =
+      Object.keys(previewers).length === 0
+        ? planned
+        : yield* Effect.forEach(planned, item => withApprovalPreview(previewers, item), {
+            concurrency: approvalPreviewConcurrency
+          })
 
     return {
       callsToExecute: prepared.flatMap(item =>
@@ -1426,6 +1516,7 @@ const makeAfterLlmStream = (
         calls: completion.toolCalls,
         inputs: input.config.inputs,
         interactions: input.config.interactions,
+        approvalPreviews: input.config.approvalPreviews,
         interactionReceipts: yield* loadInteractionReceipts(
           completion.toolCalls,
           input.config.interactionHost
@@ -1665,6 +1756,7 @@ const makePendingToolResumeStream = (
         calls: pendingCalls,
         inputs: input.config.inputs,
         interactions: input.config.interactions,
+        approvalPreviews: input.config.approvalPreviews,
         interactionReceipts: yield* loadInteractionReceipts(
           pendingCalls,
           input.config.interactionHost
@@ -1805,6 +1897,7 @@ export const runToolBatch = (
         calls: config.calls,
         inputs: config.inputs,
         interactions: config.interactions,
+        approvalPreviews: config.approvalPreviews,
         interactionReceipts: yield* loadInteractionReceipts(config.calls, config.interactionHost)
       })
 

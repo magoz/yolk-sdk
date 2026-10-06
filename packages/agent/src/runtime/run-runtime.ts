@@ -9,6 +9,7 @@ import type {
   InputToolHandler,
   InteractionPreflight,
   InteractionHost,
+  ToolApprovalPreviewer,
   ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -47,6 +48,8 @@ export type RuntimeConfig = {
   /** Server-side interaction preflight by tool name (from ResolvedToolSet.interactions). */
   readonly interactions?: Readonly<Record<string, InteractionPreflight>>
   readonly interactionHost?: InteractionHost
+  /** Change previewers by tool name (from ResolvedToolSet.approvalPreviews). */
+  readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -101,6 +104,7 @@ const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMe
   inputs: config.inputs,
   interactions: config.interactions,
   interactionHost: config.interactionHost,
+  approvalPreviews: config.approvalPreviews,
   reasoningEffort: config.reasoningEffort,
   capabilities: config.capabilities,
   model: config.model

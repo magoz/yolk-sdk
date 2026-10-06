@@ -4,9 +4,9 @@ Status: accepted.
 
 Code mode ([ADR 0002](0002-code-mode.md)) keeps approval-gated tools fail-closed: scripts never
 call them, and each direct call needs its own approval. Bulk gated work therefore costs one
-approval per item. Speldosa must set curriculum links on 124 published resources through an
-approval-gated `cms_manage_published` tool: 124 model turns and 124 clicks for one decision a
-person wants to make once, with the option to leave a few items out.
+approval per item. A host that must update 124 records through an approval-gated tool needs 124
+model turns and 124 clicks for one decision a person wants to make once, with the option to leave
+a few items out.
 
 Let a script **stage** approval-gated calls into a plan instead of running them. A person reviews
 the plan once through an action-backed interaction and selects the calls to apply; Yolk then runs
@@ -182,9 +182,12 @@ text tells the model `review_plan({ planId, planDigest })`; hosts get
 Host review screens use `previewStoredToolPlan({ toolSet, planId, planDigest, offset?, limit? })`
 (loads through the plan store with the same scope, integrity, and digest checks; pages of at most
 50 calls with `nextOffset` and the claim state) or `previewToolPlan({ toolSet, plan, keys })` for a
-plan already in hand (`toolPlanKeyPages` pages its keys). Previews carry each tool's optional
-`staging.preview`, bounded to 16 KiB. `ToolPlanOutcome`, `ToolPlanPreview`, and
-`ToolPlanPreviewPage` are Effect Schemas so hosts can decode them across process boundaries.
+plan already in hand (`toolPlanKeyPages` pages its keys). Each entry carries the staged arguments
+and the tool's change preview (`changePreview`, the hook direct approvals use; bounded and
+truncated per [ADR 0006](0006-tool-change-previews.md)), or `previewError` when it failed. A
+preview's `blocked` displays the condition `staging.precheck` enforces; the precheck stays
+authoritative. `ToolPlanOutcome`, `ToolPlanPreview`, and `ToolPlanPreviewPage` are Effect Schemas
+so hosts can decode them across process boundaries.
 
 The plan store contract: `put` is atomic insert-or-compare (one statement or transaction), `claim`
 a single conditional update, JSON(B) storage is safe (digests use canonical JSON with sorted
@@ -215,8 +218,8 @@ it unless a host deliberately resolves them with both.
   unknown outcomes; a new kind would duplicate them across protocol, loop, client, and React.
 - **Approval with selection**: approvals bind one call and carry a decision, not data; extending
   them to N calls changes every approval host and the voice path.
-- **Scoped grants** ("allow `cms_manage_published` for 10 minutes"): authorizes future calls a
-  person never saw, against the per-call approval rule.
+- **Scoped grants** ("allow `update_record` for 10 minutes"): authorizes future calls a person
+  never saw, against the per-call approval rule.
 - **App-specific change sets**: each app would rebuild staging, review, and the at-most-once apply.
 - **Atomic `executeBatch`**: tools have no transaction contract today. Future work: an optional
   per-tool batch executor for tools that can apply a selection atomically.

@@ -208,6 +208,115 @@ The SDK owns generic event and response shape. Hosts own UI, auth, request match
 
 Use the built-in question tool when the model needs a user choice. Use approval policy when a normal tool call needs permission before execution.
 
+## Preview the change
+
+An approval-gated tool can describe what one call would change, so a person reviews a
+before → after diff instead of raw arguments. The same hook previews direct approvals, sibling
+approvals in one turn, and [staged plan reviews](#review-a-staged-plan), and every host renders it
+with one tool-agnostic component.
+
+Fragment: `UpdateRecordParams`, `HostContext`, `context.records`, and `applyUpdate` are host-owned.
+
+```ts
+import { Effect } from 'effect'
+import { ToolApprovalPolicy } from '@yolk-sdk/agent/protocol'
+import {
+  makeTool,
+  resolveTools,
+  ToolChangePreview,
+  ToolTextChange,
+  ToolValueChange
+} from '@yolk-sdk/agent/tools'
+
+const updateRecord = makeTool<HostContext, typeof UpdateRecordParams>({
+  name: 'update_record',
+  description: 'Update a record.',
+  parameters: UpdateRecordParams,
+  access: 'write',
+  approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+  // Side-effect free: read the current state and describe the change.
+  changePreview: ({ params, context }) =>
+    context.records.get(params.id).pipe(
+      Effect.map(record =>
+        ToolChangePreview.make({
+          target: { label: record.title, kind: 'record', id: record.id, href: record.url },
+          changes: [
+            ToolValueChange.make({
+              field: 'status',
+              label: 'Status',
+              before: record.status,
+              after: params.status
+            }),
+            ToolTextChange.make({
+              field: 'body',
+              label: 'Body',
+              before: record.body,
+              after: params.body
+            })
+          ],
+          // Shown with a selectable call. Use `blocked` for what `staging.precheck` rejects.
+          warnings: record.archived ? ['The record is archived.'] : []
+        })
+      )
+    ),
+  execute: input => applyUpdate(input)
+})
+
+const toolSet =
+  yield *
+  resolveTools(modules, context, {
+    changePreview: { maxBytes: 32 * 1024 } // optional; default 16 KiB per preview, 5 s timeout
+  })
+```
+
+Pass `approvalPreviews: toolSet.approvalPreviews` to `run`, `runToolBatch`, `prepareToolBatch`, or
+the runtime config, next to `inputs` and `interactions`. A pending `ToolApprovalRequest` then
+carries `preview` (a `ToolChangePreview`) or `previewError` (`{ cause, message }`; `cause` is
+`failed`, `invalid`, `too_large`, or `timeout`). Render `request.preview` when present, else the
+raw `request.call.params`. Once the call settles, render its result instead of the pending diff:
+an approved call that ran shows the `after` state, and a denied call shows "not applied".
+
+A `ToolChangePreview` is `{ target, summary?, changes, warnings?, blocked? }`. Each change has a
+`field`, a display `label`, and one of five shapes:
+
+| `_tag`       | Shape                                      | Render as                                |
+| ------------ | ------------------------------------------ | ---------------------------------------- |
+| `Value`      | `before?`, `after`: short scalar or `null` | old → new                                |
+| `Text`       | `before?`, `after`: string                 | a text diff                              |
+| `Set`        | `added`, `removed`, `unchanged?` items     | + / − chips                              |
+| `List`       | `before?`, `after`: ordered items          | an ordered list diff                     |
+| `Structured` | `before?`, `after`: JSON, `summary?`       | your structural renderer, or the summary |
+
+Items are `{ id, label }`. An absent `before` means unknown or new; `null` means known empty. An
+empty `changes` means the call changes nothing.
+
+- **Display only.** The approval binds to the call (`approval:<callId>`), never to the preview. The
+  arguments stay the source of truth for what runs, and the tool's own write stays authoritative.
+  `warnings` are shown with a selectable call; `blocked` marks a call that cannot apply as
+  requested (recommend denying it). For staged plans, `staging.precheck` is the authority:
+  express the same condition in `blocked`.
+- **Failures never block approval.** A failing, slow (`timeoutMs`), invalid, or oversized preview
+  becomes `previewError`; invalid arguments report an error without calling the hook.
+- **Bounded.** Previews larger than `maxBytes` (compact JSON) are truncated deterministically and
+  never silently: `Set.unchanged` goes first, then values are capped at an equal share. Cut
+  strings and item arrays keep one window, which for a `before`/`after` pair starts shortly before
+  their first difference; a cut `Structured` value becomes `null`. Each cut value has a
+  `truncated` marker with `unit` (`chars`, `items`, `bytes`), `originalSize`, and an optional
+  `offset` (absent: 0). Check `truncated` before rendering a `Structured` `null`. Labels, the
+  target, `summary`, `warnings`, and `blocked` are never cut: a preview they alone push past the
+  bound reports `previewError` (`too_large`).
+- **When it is computed.** Previews run server-side when the approval request is raised, at most
+  8 at a time per batch, against the state before any call of the batch runs. Two siblings that
+  touch the same record are both previewed against its current state. Durable hosts that resume
+  one response per round re-raise the remaining siblings, recomputing their previews: render the
+  latest `ToolApprovalRequested` for a call. Each preview is up to `maxBytes` and appears in
+  `ToolApprovalRequested` and `AgentAwaitingInput.requests`; size durable event storage for it.
+- **Group repeated changes.** `toolChangeSignature(preview)` is a stable digest of `changes`
+  (ignoring the target, `Set.unchanged`, and `Set` order). `groupToolChangePreviews` groups
+  `{ toolName, preview }` entries so you can show "add X on 120 records" once. Truncated
+  previews are never grouped.
+- Voice approvals do not compute previews.
+
 ## Collect typed input
 
 Use `makeInputTool` when the model needs structured user data (such as a draft or form). Questions remain the built-in option/free-text UI; custom inputs use app-owned renderers. Input tools share the HITL lifecycle: the loop pauses with `AgentAwaitingInput`, your UI renders by kind, and you resume with a typed `InputResponse`.
@@ -459,11 +568,13 @@ const resolveHostTools = (context: HostContext) =>
 - The model calls `review_plan({ planId, planDigest })` with the values the script reported. Call
   validation loads the plan from the store: present, in scope, digests matching, not yet applied.
 - Render the `tool_plan_review` kind with
-  `previewStoredToolPlan({ toolSet, planId, planDigest, offset })`: one page of at most 50 calls
-  with each tool's optional `staging.preview`, `nextOffset`, and whether a review already claimed
-  the plan. The results are plain JSON; decode them with the exported `ToolPlanPreviewPage` Schema
-  on the client. The person submits action `apply` with `{ selectedKeys }`, a non-empty subset of
-  the staged keys; they can untick calls but never change arguments. Cancel applies nothing.
+  `previewStoredToolPlan({ toolSet, planId, planDigest, offset })`: one page of at most 50 calls,
+  each with its staged `params` and the tool's [change preview](#preview-the-change) (`preview`,
+  or `previewError` when it failed), plus `nextOffset` and whether a review already claimed the
+  plan. The results are plain JSON; decode them with the exported `ToolPlanPreviewPage` Schema on
+  the client. Group identical changes across all pages with `groupToolChangePreviews`.
+- The person submits action `apply` with `{ selectedKeys }`, a non-empty subset of the staged
+  keys; they can untick calls but never change arguments. Cancel applies nothing.
 - Admission (`validateInteractionSubmission`) checks the selection with your fresh context: no
   duplicates, keys of the plan, tools still stageable, and each tool's `staging.precheck` (at most
   8 at a time). Keep prechecks cheap; make the tool's own write a compare-and-set for
@@ -498,6 +609,9 @@ const resolveHostTools = (context: HostContext) =>
   review receipts.
 - Calls apply one after another in one tool step: keep plans small enough to fit your step budget
   (lower `staging.maxCalls` on the code mode tool).
+- After the review settles, show each call from `ToolPlanOutcome.calls`, not the pending diff:
+  `applied` shows the `after` state, `skipped`, `not_run`, and `failed` show "not applied" with no
+  pending diff, and `unknown` says the call may have been applied.
 
 `ToolPlanStore` is a port over host storage:
 

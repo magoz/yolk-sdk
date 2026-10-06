@@ -272,24 +272,24 @@ import { Effect } from 'effect'
 import { ToolApprovalPolicy } from '@yolk-sdk/agent/protocol'
 import { makePlanReviewTool, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
 
-const setCurriculum = makeTool<HostContext, typeof SetCurriculumParams>({
-  name: 'set_curriculum',
-  description: 'Set the curriculum links of a published resource.',
-  parameters: SetCurriculumParams, // host-owned Effect Schema
+const updateRecord = makeTool<HostContext, typeof UpdateRecordParams>({
+  name: 'update_record',
+  description: 'Update the fields of a record.',
+  parameters: UpdateRecordParams, // host-owned Effect Schema, for example { id, status }
   access: 'write',
   approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+  // Optional, side-effect free: the before → after diff shown on approvals and plan reviews.
+  changePreview: ({ params, context }) => describeRecordChange(context, params), // host-owned
   staging: {
     // Optional, side-effect free. A precheck failure rejects the person's selection.
-    precheck: ({ params, context }) => assertStillExpected(context, params), // host-owned
-    // Optional bounded JSON for your review screen (`previewToolPlan`).
-    preview: ({ params, context }) => describeChange(context, params) // host-owned
+    precheck: ({ params, context }) => assertStillExpected(context, params) // host-owned
   },
-  execute: ({ params, context, idempotencyKey }) => applyCurriculum(context, params, idempotencyKey)
+  execute: ({ params, context, idempotencyKey }) => applyUpdate(context, params, idempotencyKey)
 })
 
 const toolSet = Effect.gen(function* () {
   return yield* resolveTools(
-    [{ id: 'host', tools: [codemode, makePlanReviewTool<HostContext>()] }, cmsModule],
+    [{ id: 'host', tools: [codemode, makePlanReviewTool<HostContext>()] }, recordsModule],
     hostContext,
     {
       interactionHost: scopedReceipts, // host-owned InteractionHost
@@ -304,11 +304,11 @@ const toolSet = Effect.gen(function* () {
 (`Schema.toCodecJson(ToolPlan)`) where later turns can read them. A script then stages calls:
 
 ```js
-const resources = await tools.list_published({ subject: 'math' })
-for (const resource of resources) {
-  await stage('set_curriculum', { id: resource.id, curriculum: ['LGR22-MA-7'] })
+const records = await tools.list_records({ status: 'draft' })
+for (const record of records) {
+  await stage('update_record', { id: record.id, status: 'published' })
 }
-return resources.length
+return records.length
 ```
 
 - `stage(name, args)` validates the arguments with the tool's decoder and resolves to
@@ -326,7 +326,9 @@ return resources.length
 
 The review is an [action-backed interaction](../agent/tools-hitl#review-a-staged-plan): render the
 `tool_plan_review` kind, accept `{ selectedKeys }`, and resume as for any interaction. Yolk then
-applies exactly the selected calls in staged order, once.
+applies exactly the selected calls in staged order, once. Each staged call is previewed with the
+tool's `changePreview`, the same [change preview](../agent/tools-hitl#preview-the-change) direct
+approvals show.
 
 **Per-call authority:** applied plan calls do not pass through `beforeNestedCall` or decorators
 around your `ToolExecutor`: they run inside the review action. Pass the same per-call authorizer as

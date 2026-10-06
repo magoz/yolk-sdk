@@ -14,10 +14,13 @@ import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/ag
 import {
   isCodeModeCallable,
   isCodeModeFailClosed,
+  decodeBackgroundToolInput,
   isToolStageable,
   isToolJsonSchemaObject,
   makeErrorToolResult,
   makeInteractionToolResult,
+  ToolCall as ToolCallSchema,
+  ToolChangePreviewError,
   ToolDef,
   ToolJsonSchema,
   ToolJsonSchemaObject,
@@ -35,7 +38,9 @@ import {
   type InteractionPreflight,
   type InteractionResponseValidator,
   type ToolApprovalPolicy,
+  type ToolApprovalPreviewer,
   type ToolCall,
+  type ToolChangePreview,
   type ToolExposure,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
@@ -53,6 +58,11 @@ import {
   unsupportedBackgroundSchema,
   type BackgroundToolHost
 } from './background.ts'
+import {
+  resolveToolChangePreviewOptions,
+  runToolChangePreview,
+  type ToolChangePreviewOptions
+} from './change-preview.ts'
 import {
   executeLedgered,
   resolveToolLedgerOptions,
@@ -101,7 +111,8 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'invalid_tool_exposure',
       'staging_unsupported_policy',
       'staging_validation_required',
-      'plan_review_duplicate'
+      'plan_review_duplicate',
+      'change_preview_unsupported_policy'
     ])
   }
 ) {}
@@ -256,6 +267,18 @@ export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Conte
   readonly params: Params
 }
 
+/**
+ * A tool's change preview (ADR 0006): what one call would change, as a `ToolChangePreview`, over
+ * the call (arguments normalized like every handler's) and a fresh host context. Side-effect
+ * free. Only on approval-gated tools: it previews direct approval requests
+ * (`ResolvedToolSet.approvalPreviews`) and, for stageable tools, staged plan reviews
+ * (`previewToolPlan`). A failure never blocks the approval or review; hosts show the arguments.
+ */
+export type ToolChangePreviewHandler<Context> = (input: {
+  readonly call: ToolCall
+  readonly context: Context
+}) => Effect.Effect<ToolChangePreview, ToolError>
+
 export type ToolRegistration<Context> = {
   /** Required for raw background registrations; must validate without business effects. */
   readonly validate?: (call: ToolCall) => Effect.Effect<void, ToolError>
@@ -277,10 +300,14 @@ export type ToolRegistration<Context> = {
    * and the selected server action handlers. Never combined with approval/background.
    */
   readonly interaction?: InteractionToolRegistration<Context>
-  /** Present only on stageable registrations (`def.staging`): optional preview and precheck hooks
-   * over a staged call (ADR 0005).
+  /** Present only on stageable registrations (`def.staging`): an optional precheck hook over a
+   * staged call (ADR 0005). Previews come from `changePreview`.
    */
   readonly staging?: ToolStagingHandlers<Context>
+  /** Change preview of one call, for approval requests and plan reviews; requires `def.approval`
+   * (`change_preview_unsupported_policy` otherwise). See `ToolChangePreviewHandler`.
+   */
+  readonly changePreview?: ToolChangePreviewHandler<Context>
   /** Present only on plan review registrations (`makePlanReviewTool`): builds the interaction
    * handlers from the plan capabilities `resolveTools` binds (plan store, interaction host, and
    * the privileged plan executor). Without `plans` and an `interactionHost`, the tool is
@@ -381,9 +408,18 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
   /** Host-mark the tool stageable into reviewed plans (ADR 0005; sets `def.staging`). Requires
-   * `approval`. Pass hooks for review previews and selection prechecks, or `true` for none.
+   * `approval`. Pass a selection `precheck`, or `true` for none.
    */
   readonly staging?: true | ToolStaging<Context, ParamsSchema['Type']>
+  /** What one call would change, over the decoded arguments (ADR 0006): shown on approval
+   * requests and staged plan reviews. Requires `approval`; side-effect free. Arguments that no
+   * longer decode report a preview error without calling it.
+   */
+  readonly changePreview?: (input: {
+    readonly params: ParamsSchema['Type']
+    readonly call: ToolCall
+    readonly context: Context
+  }) => Effect.Effect<ToolChangePreview, ToolError>
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
   readonly nestedToolAccess?: boolean
   /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
@@ -437,6 +473,10 @@ export type ResolvedToolSet = {
   readonly interactionHost?: InteractionHost
   /** Staged tool plans of this resolution (ADR 0005), when staging is available. */
   readonly plans?: ResolvedToolPlans
+  /** Change previewers of approval-gated tools with a `changePreview` hook, by tool name
+   * (ADR 0006). Hosts pass these to loop/runtime configs so approval requests carry a preview.
+   */
+  readonly approvalPreviews: Readonly<Record<string, ToolApprovalPreviewer>>
 }
 
 const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
@@ -665,6 +705,7 @@ type MakeToolRegistrationFields<Context> = {
   describe?: NestedToolDescriber
   abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   staging?: ToolStagingHandlers<Context>
+  changePreview?: ToolChangePreviewHandler<Context>
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
@@ -680,7 +721,6 @@ type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
 }
 
 type ToolStagingHandlerFields<Context> = {
-  preview?: NonNullable<ToolStagingHandlers<Context>['preview']>
   precheck?: NonNullable<ToolStagingHandlers<Context>['precheck']>
 }
 
@@ -691,23 +731,7 @@ const stagingHandlers = <Context, Params>(
   decodeParams: (input: unknown) => Effect.Effect<Params, Schema.SchemaError>
 ): ToolStagingHandlers<Context> => {
   const handlers: ToolStagingHandlerFields<Context> = {}
-  const preview = staging.preview
   const precheck = staging.precheck
-
-  if (preview !== undefined) {
-    handlers.preview = ({ call, context }) =>
-      decodeParams(call.params).pipe(
-        Effect.mapError(
-          error =>
-            new ToolError({
-              tool: name,
-              cause: 'validation',
-              message: `Invalid ${name} arguments: ${error.message}`
-            })
-        ),
-        Effect.flatMap(params => preview({ params, context }))
-      )
-  }
 
   if (precheck !== undefined) {
     handlers.precheck = ({ call, context }) =>
@@ -768,6 +792,23 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
 
   if (options.staging !== undefined && options.staging !== true) {
     registration.staging = stagingHandlers(options.name, options.staging, decodeParams)
+  }
+
+  const changePreview = options.changePreview
+
+  if (changePreview !== undefined) {
+    registration.changePreview = ({ call, context }) =>
+      decodeParams(call.params).pipe(
+        Effect.mapError(
+          error =>
+            new ToolError({
+              tool: options.name,
+              cause: 'validation',
+              message: `Invalid ${options.name} arguments: ${error.message}`
+            })
+        ),
+        Effect.flatMap(params => changePreview({ params, call, context }))
+      )
   }
 
   if (options.background !== undefined) {
@@ -1230,6 +1271,10 @@ export const resolveTools = <Context>(
      * Absent: no staging, and plan review tools are unavailable.
      */
     readonly plans?: ToolPlanOptions
+    /** Bounds of tool change previews (approval requests and plan reviews): bytes per preview
+     * (default 16 KiB, larger previews are truncated) and the hook timeout (default 5 s).
+     */
+    readonly changePreview?: ToolChangePreviewOptions
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -1403,6 +1448,16 @@ export const resolveTools = <Context>(
         }
       }
 
+      // A change preview describes a call a person approves: approval-gated tools only.
+      if (tool.changePreview !== undefined && tool.def.approval === undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'change_preview_unsupported_policy',
+            message: `Tool ${tool.def.name} has a change preview but no approval policy: previews describe approval-gated calls only.`
+          })
+        )
+      }
+
       const unsupportedSchema = activated(tool)
         ? unsupportedBackgroundSchema(tool.def.parameters)
         : undefined
@@ -1528,6 +1583,66 @@ export const resolveTools = <Context>(
     const ledger =
       options.ledger === undefined ? undefined : resolveToolLedgerOptions(options.ledger)
 
+    const changePreviewBounds = resolveToolChangePreviewOptions(options.changePreview)
+
+    // The one change preview path of approvals and plan reviews: normalized arguments, a fresh
+    // context, the timeout, Schema decoding, and the byte bound.
+    const runChangePreview = (
+      tool: ToolRegistration<Context>,
+      hook: ToolChangePreviewHandler<Context>,
+      call: ToolCall
+    ) =>
+      runToolChangePreview({
+        tool: tool.def.name,
+        preview: Effect.suspend(() =>
+          hook({ call: omitNullOptionalToolCallArguments(tool.def.parameters, call), context })
+        ),
+        maxBytes: changePreviewBounds.maxBytes,
+        timeoutMs: changePreviewBounds.timeoutMs
+      })
+
+    const changePreviewOf = (tool: ToolRegistration<Context>, call: ToolCall) => {
+      const hook = tool.changePreview
+
+      return hook === undefined ? undefined : runChangePreview(tool, hook, call)
+    }
+
+    // Approval requests carry the call as the model sent it: activated calls preview the business
+    // arguments of their execution envelope.
+    const approvalPreviewOf =
+      (
+        tool: ToolRegistration<Context>,
+        hook: ToolChangePreviewHandler<Context>
+      ): ToolApprovalPreviewer =>
+      call =>
+        activated(tool)
+          ? Option.match(decodeBackgroundToolInput(call.params), {
+              onNone: () =>
+                Effect.fail(
+                  new ToolChangePreviewError({
+                    cause: 'failed',
+                    message: 'Expected exactly execution (foreground or background) and arguments.'
+                  })
+                ),
+              onSome: envelope =>
+                runChangePreview(
+                  tool,
+                  hook,
+                  ToolCallSchema.make({ id: call.id, name: call.name, params: envelope.arguments })
+                )
+            })
+          : runChangePreview(tool, hook, call)
+
+    const approvalPreviews: Record<string, ToolApprovalPreviewer> = Object.fromEntries(
+      resolved.flatMap(({ tool }) => {
+        const hook = tool.changePreview
+
+        return hook !== undefined && tool.def.approval?.mode === 'manual'
+          ? [[tool.def.name, approvalPreviewOf(tool, hook)]]
+          : []
+      })
+    )
+
     const plans = options.plans
     const interactionHost = options.interactionHost
 
@@ -1552,6 +1667,7 @@ export const resolveTools = <Context>(
               nestedRegistrations.find(item => item.tool.def.name === name)?.tool.access,
             businessCall: (registration, call) =>
               omitNullOptionalToolCallArguments(registration.def.parameters, call),
+            changePreview: changePreviewOf,
             execute: (registration, call, parentCallId) =>
               Option.match(
                 Arr.findFirst(stageableRegistrations, item => item.tool === registration),
@@ -1842,7 +1958,8 @@ export const resolveTools = <Context>(
       execute,
       inputs,
       interactions,
-      interactionHost: options.interactionHost
+      interactionHost: options.interactionHost,
+      approvalPreviews
     }
 
     return planResolution === undefined

@@ -680,6 +680,7 @@ HITL is protocol-level, not UI-level:
   `submitToolApprovalResponse` / `submitQuestionResponse`, or using client stream helpers like
   `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
+- Give approval-gated tools a `changePreview` hook (`makeTool({ approval, changePreview })`) and pass `resolveTools(...).approvalPreviews` as `approvalPreviews` to loop/runtime configs: pending `ToolApprovalRequest`s then carry a tool-agnostic before → after `preview` (`ToolChangePreview`) or `previewError`. Previews are display only and never block the approval. See [ADR 0006](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0006-tool-change-previews.md).
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
 - Use `makeInputTool({ name, description, response, renderer })` for custom typed input. Apps own the response Effect schema and renderer; the SDK carries JSON data only. Pass `resolveTools(...).inputs` alongside `tools` to loop/runtime configs. The original `callParameters` and `response` schemas validate server-side, including refinements; display JSON Schema is not the validator. Invalid calls fail before prompting; invalid submissions remain pending for correction. The first valid submission or cancellation settles the request and cannot be overwritten by stale responses.
 - Resume custom inputs with `submitInputResponse`, `streamInputResponseEventStream`, or WebSocket `InputResponseInput`. Echo request/call IDs; do not reconstruct them. Input collection is not authorization: a draft composer never grants permission to send. Input tools cannot carry approval/background policy or execute directly.
@@ -969,7 +970,8 @@ normal execute path and ledger. Enable it with
 `resolveTools(modules, context, { interactionHost, plans: { store, planId? } })` and one review tool.
 Applied calls bypass `beforeNestedCall` and `ToolExecutor` decorators: wire your per-call authorizer
 as `makePlanReviewTool({ beforeCall })`. With a ledger, a redelivered review waits for an in-flight
-apply and returns its real outcome. `previewStoredToolPlan` pages previews for review screens;
+apply and returns its real outcome. `previewStoredToolPlan` pages each staged call's arguments
+with the tool's change preview (the same `changePreview` hook approvals use) for review screens;
 `ToolPlanOutcome` and `ToolPlanPreviewPage` are Effect Schemas. See
 [ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md).
 

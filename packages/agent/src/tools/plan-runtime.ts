@@ -11,13 +11,11 @@ import {
   ToolCall,
   ToolResult,
   type InteractionHost,
-  type InteractionReceipt
+  type InteractionReceipt,
+  type ToolChangePreview,
+  type ToolChangePreviewError
 } from '@yolk-sdk/agent/protocol'
-import {
-  compactToolArguments,
-  truncateCodePoints,
-  utf8ByteLength
-} from '../protocol/bounded-text.ts'
+import { truncateCodePoints, utf8ByteLength } from '../protocol/bounded-text.ts'
 import { nestedToolCallMaxErrorChars } from '../protocol/nested-tool-calls.ts'
 import {
   canonicalToolArguments,
@@ -27,7 +25,6 @@ import {
   type ToolLedgerError
 } from './ledger.ts'
 import {
-  maxToolPlanPreviewBytes,
   maxToolPlanPreviewKeys,
   StagedCall,
   ToolPlan,
@@ -72,6 +69,11 @@ export type ToolPlanResolution<Context> = {
   readonly nestedAccess: (name: string) => ToolAccess | undefined
   /** The call with the registry's argument normalization (what validators and handlers see). */
   readonly businessCall: (registration: ToolRegistration<Context>, call: ToolCall) => ToolCall
+  /** The registration's bounded change preview (the approval path), `undefined` without a hook. */
+  readonly changePreview: (
+    registration: ToolRegistration<Context>,
+    call: ToolCall
+  ) => Effect.Effect<ToolChangePreview, ToolChangePreviewError> | undefined
   /** The registry's single dispatch seam (`executeRegistration`), with `parentCallId` for keys. */
   readonly execute: (
     registration: ToolRegistration<Context>,
@@ -1100,47 +1102,33 @@ export const previewToolPlanWith =
               message: `${staged.toolName} can no longer be applied from a plan.`
             })
 
-          const preview = registration.staging?.preview
+          const params = staged.params
+          const toolName = staged.toolName
 
-          if (preview === undefined)
-            return Effect.succeed({
-              key,
-              status: 'ok',
-              toolName: staged.toolName,
-              params: staged.params
-            })
+          const preview = resolution.changePreview(
+            registration,
+            ToolCall.make({ id: staged.key, name: toolName, params })
+          )
 
-          return Effect.suspend(() =>
-            preview({
-              call: resolution.businessCall(
-                registration,
-                ToolCall.make({ id: staged.key, name: staged.toolName, params: staged.params })
-              ),
-              context: resolution.context
-            })
-          ).pipe(
+          if (preview === undefined) return Effect.succeed({ key, status: 'ok', toolName, params })
+
+          // A failed preview never hides the call: the entry keeps the staged arguments.
+          return preview.pipe(
             Effect.match({
               onFailure: (error): ToolPlanPreview => ({
                 key,
-                status: 'error',
-                toolName: staged.toolName,
-                message: truncateCodePoints(error.message, nestedToolCallMaxErrorChars)
+                status: 'ok',
+                toolName,
+                params,
+                previewError: { cause: error.cause, message: error.message }
               }),
-              onSuccess: (rendered): ToolPlanPreview =>
-                utf8ByteLength(compactToolArguments(rendered)) > maxToolPlanPreviewBytes
-                  ? {
-                      key,
-                      status: 'error',
-                      toolName: staged.toolName,
-                      message: `The preview exceeds ${maxToolPlanPreviewBytes} bytes.`
-                    }
-                  : {
-                      key,
-                      status: 'ok',
-                      toolName: staged.toolName,
-                      params: staged.params,
-                      preview: rendered
-                    }
+              onSuccess: (rendered): ToolPlanPreview => ({
+                key,
+                status: 'ok',
+                toolName,
+                params,
+                preview: rendered
+              })
             })
           )
         },
