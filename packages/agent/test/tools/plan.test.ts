@@ -22,6 +22,7 @@ import {
   EmptyToolParams,
   groupToolChangePreviews,
   makeInMemoryToolLedgerStore,
+  ToolSetChange,
   makeInMemoryToolPlanStore,
   makePlanReviewTool,
   makeTool,
@@ -67,14 +68,13 @@ const linkPreview = (ctx: Ctx, params: typeof Link.Type): ToolChangePreview => (
   target: { label: params.resource, kind: 'resource', id: params.resource },
   summary: `${ctx.tenant}: link ${params.curriculum}`,
   changes: [
-    {
-      _tag: 'Set',
+    ToolSetChange.make({
       field: 'curriculum',
       label: 'Curriculum',
       added: [{ id: params.curriculum, label: params.curriculum }],
       removed: [],
       unchanged: [{ id: `existing-${params.resource}`, label: 'Existing' }]
-    }
+    })
   ]
 })
 
@@ -1337,7 +1337,7 @@ describe('previewToolPlan', () => {
           status: 'ok',
           toolName: 'link_curriculum',
           params: { resource: 'unpreviewable', curriculum: 'LGR22' },
-          previewError: 'cms is down'
+          previewError: { cause: 'failed', message: 'cms is down' }
         }
       ])
     })

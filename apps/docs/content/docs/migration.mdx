@@ -41,7 +41,8 @@ Breaking changes for staged plan hosts:
 
 - `staging.preview` is removed. Move it to the tool's `changePreview` and return a
   `ToolChangePreview` (`{ target, changes, ... }`) instead of arbitrary JSON.
-- `ToolPlanPreview` `ok` entries carry `preview: ToolChangePreview` or `previewError`. A failing
+- `ToolPlanPreview` `ok` entries carry `preview: ToolChangePreview` or `previewError`
+  (`{ cause, message }`). A failing
   preview no longer turns the entry into `status: 'error'`; it keeps `params`. Oversized previews
   are truncated with markers instead of becoming error entries.
 - `maxToolPlanPreviewBytes` is removed. Use `defaultToolChangePreviewMaxBytes` (16 KiB) and set

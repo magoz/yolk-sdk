@@ -48,7 +48,9 @@ ToolFieldChange =
 An absent `before` means unknown or new; `null` means known empty. Scalars are strings, finite
 numbers, booleans, or `null`. The Schemas are plain JSON and decode across process boundaries;
 `ToolChangePreviewError` (`failed`, `invalid`, `too_large`, `timeout`) says why a preview is
-missing.
+missing, and its wire form `ToolChangePreviewFailure` (`{ cause, message }`) is the `previewError`
+of approval requests and plan previews (never set together with `preview`). Failures and defects
+of host hooks are logged as warnings.
 
 ## One hook
 
@@ -88,7 +90,9 @@ the plan and tools no longer stageable. `blocked` should express the condition `
 enforces, so a person sees why a selection would be rejected; the precheck stays authoritative at
 admission and the tool's write at apply.
 
-Settled reviews render from `ToolPlanOutcome.calls`, not from previews: `applied` shows the after
+A settled direct approval renders its result, not the pending diff: an approved call that ran
+shows the after state, a denied call "not applied". Settled reviews render from
+`ToolPlanOutcome.calls`, not from previews: `applied` shows the after
 state; `skipped`, `not_run`, and `failed` show "not applied" without a pending diff; `unknown` says
 the call may have been applied.
 
@@ -104,8 +108,9 @@ Previews are bounded to `maxBytes` UTF-8 bytes of compact JSON (`resolveTools(..
    an equal share. Strings and arrays keep one window; for a `before`/`after` pair both windows
    start a little before their first difference, so a change at the end of a long text stays
    visible. A `Structured` value over the cap becomes `null`.
-4. Each cut value has a `truncated` marker `{ unit: 'chars' | 'items' | 'bytes', originalSize,
-offset? }`. Hosts check it before rendering a `Structured` `null`.
+4. Each cut value has a `truncated` marker with `unit` (`chars`, `items`, or `bytes`),
+   `originalSize`, and an optional `offset`. Hosts check it before rendering a `Structured`
+   `null`. A value the hook already cut keeps its marker's original size, and the offsets add up.
 5. Labels, the target, `summary`, `warnings`, and `blocked` are never cut. When they alone exceed
    the bound, the preview fails `too_large` and hosts show the arguments.
 
@@ -143,6 +148,7 @@ grouped. Hosts group across all pages of a paged plan.
 determinism, signature and grouping stability, the resolved previewer: approval required, decoded
 arguments, failures, defects, invalid previews, the byte bound, timeouts, activated envelopes),
 `packages/agent/test/loop/approval-preview.test.ts` (sibling requests each with their own preview,
-preview errors, no preview once answered, wire round trip, legacy requests), and
+preview errors, no preview once answered, interruption, wire round trip, legacy requests),
+`packages/agent/test/property/change-preview.property.test.ts` (bound, determinism, markers), and
 `packages/agent/test/tools/plan.test.ts` (staged plan previews from the same hook, preview errors
 keeping the arguments, grouping a stored plan's pages).

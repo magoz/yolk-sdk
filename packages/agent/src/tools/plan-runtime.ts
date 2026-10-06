@@ -1120,7 +1120,7 @@ export const previewToolPlanWith =
                 status: 'ok',
                 toolName,
                 params,
-                previewError: error.message
+                previewError: { cause: error.cause, message: error.message }
               }),
               onSuccess: (rendered): ToolPlanPreview => ({
                 key,

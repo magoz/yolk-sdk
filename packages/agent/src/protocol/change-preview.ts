@@ -175,16 +175,36 @@ export type ToolChangePreview = typeof ToolChangePreview.Type
 /**
  * Why a change preview is unavailable: the tool's hook failed (`failed`), returned something that
  * is not a `ToolChangePreview` (`invalid`), stayed too large after truncation (`too_large`), or
- * did not finish in time (`timeout`). Never blocks an approval or a review: hosts show the raw
- * arguments instead.
+ * did not finish in time (`timeout`).
  */
+export const ToolChangePreviewErrorCause = Schema.Literals([
+  'failed',
+  'invalid',
+  'too_large',
+  'timeout'
+])
+
+export type ToolChangePreviewErrorCause = typeof ToolChangePreviewErrorCause.Type
+
+/** A change preview that could not be computed. Never blocks an approval or a review. */
 export class ToolChangePreviewError extends Schema.TaggedError<ToolChangePreviewError>()(
   'ToolChangePreviewError',
-  {
-    message: Schema.String,
-    cause: Schema.Literals(['failed', 'invalid', 'too_large', 'timeout'])
-  }
+  { message: Schema.String, cause: ToolChangePreviewErrorCause }
 ) {}
+
+/**
+ * Wire form of a missing preview (`ToolApprovalRequest.previewError`, `ToolPlanPreview`
+ * `previewError`): hosts show the raw arguments instead, and may say why (`cause`).
+ */
+export const ToolChangePreviewFailure = Schema.Struct({
+  cause: ToolChangePreviewErrorCause,
+  message: Schema.String
+})
+
+export type ToolChangePreviewFailure = typeof ToolChangePreviewFailure.Type
+
+/** Most characters of a preview failure message. */
+export const toolChangePreviewMaxErrorChars = 500
 
 /**
  * Loop seam computing the preview of one approval-gated call before its approval request is

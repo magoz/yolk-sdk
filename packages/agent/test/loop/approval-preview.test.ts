@@ -1,4 +1,4 @@
-import { Effect, Layer, Match, Predicate, Stream } from 'effect'
+import { Effect, Exit, Layer, Match, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -15,6 +15,7 @@ import {
   makeTool,
   makeToolExecutorLayer,
   resolveTools,
+  ToolValueChange,
   type ToolChangePreview
 } from '../../src/tools/index.ts'
 
@@ -23,7 +24,12 @@ const Params = Schema.Struct({ id: Schema.String, status: Schema.String })
 const statusPreview = (params: typeof Params.Type): ToolChangePreview => ({
   target: { label: `Record ${params.id}`, id: params.id },
   changes: [
-    { _tag: 'Value', field: 'status', label: 'Status', before: 'draft', after: params.status }
+    ToolValueChange.make({
+      field: 'status',
+      label: 'Status',
+      before: 'draft',
+      after: params.status
+    })
   ]
 })
 
@@ -107,8 +113,12 @@ describe('approval change previews', () => {
       ).toEqual([
         ['approval:call_r1', statusPreview({ id: 'r1', status: 'published' }), undefined],
         ['approval:call_r2', statusPreview({ id: 'r2', status: 'published' }), undefined],
-        ['approval:call_broken', undefined, 'records are down'],
-        ['approval:call_crash', undefined, 'The change preview of update_record failed.'],
+        ['approval:call_broken', undefined, { cause: 'failed', message: 'records are down' }],
+        [
+          'approval:call_crash',
+          undefined,
+          { cause: 'failed', message: 'The change preview of update_record failed.' }
+        ],
         // No hook: a plain approval request, as before.
         ['approval:call_r3', undefined, undefined]
       ])
@@ -203,7 +213,25 @@ describe('approval change previews', () => {
       const [request] = approvalRequests(prepared.pendingRequests)
 
       expect(request?.requestId).toBe('approval:call_r1')
-      expect(request?.previewError).toBe('The change preview failed.')
+      expect(request?.previewError).toEqual({
+        cause: 'failed',
+        message: 'The change preview failed.'
+      })
+    })
+  )
+
+  it.effect('propagates interruption instead of reporting a preview error', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* setup([])
+
+      const exit = yield* prepareToolBatch({
+        tools: toolSet.tools,
+        responses: [],
+        calls: [update('r1')],
+        approvalPreviews: { update_record: () => Effect.interrupt }
+      }).pipe(Effect.exit)
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
     })
   )
 

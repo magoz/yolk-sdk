@@ -35,6 +35,8 @@ export {
   ToolChangeItem,
   ToolChangePreview,
   ToolChangePreviewError,
+  ToolChangePreviewErrorCause,
+  ToolChangePreviewFailure,
   ToolChangeScalar,
   ToolChangeSetCuts,
   ToolChangeSideCuts,

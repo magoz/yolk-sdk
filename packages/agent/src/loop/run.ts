@@ -73,7 +73,10 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName, validInteractionReceipt } from '../protocol/tool.ts'
 import { truncateCodePoints } from '../protocol/bounded-text.ts'
-import { nestedToolCallMaxErrorChars } from '../protocol/nested-tool-calls.ts'
+import {
+  toolChangePreviewMaxErrorChars,
+  type ToolChangePreviewFailure
+} from '../protocol/change-preview.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
@@ -840,7 +843,7 @@ const approvalPreviewConcurrency = 8
 
 type ApprovalPreviewDisplay =
   | { readonly preview: ToolChangePreview }
-  | { readonly previewError: string }
+  | { readonly previewError: ToolChangePreviewFailure }
 
 // A pending approval request with its tool's change preview, or why there is none. A preview
 // never blocks the approval: failures and defects become `previewError`; interruption propagates.
@@ -866,11 +869,19 @@ const withApprovalPreview = (
     Effect.map((preview): ApprovalPreviewDisplay => ({ preview })),
     Effect.catch(error =>
       Effect.succeed<ApprovalPreviewDisplay>({
-        previewError: truncateCodePoints(error.message, nestedToolCallMaxErrorChars)
+        previewError: {
+          cause: error.cause,
+          message: truncateCodePoints(error.message, toolChangePreviewMaxErrorChars)
+        }
       })
     ),
+    Effect.tapDefect(defect =>
+      Effect.logWarning(`The change preview of ${request.call.name} failed`, defect)
+    ),
     Effect.catchDefect(() =>
-      Effect.succeed<ApprovalPreviewDisplay>({ previewError: 'The change preview failed.' })
+      Effect.succeed<ApprovalPreviewDisplay>({
+        previewError: { cause: 'failed', message: 'The change preview failed.' }
+      })
     ),
     Effect.map(display => {
       const previewed = ToolApprovalRequest.make({

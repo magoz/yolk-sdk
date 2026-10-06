@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ToolChangePreview,
+  ToolChangePreviewFailure,
   type InteractionBusinessOutcome,
   type InteractionHostError,
   type InteractionValidationError,
@@ -451,8 +452,8 @@ export const ToolPlanPreview = Schema.Union([
     params: Schema.Json,
     /** The tool's change preview, when it has a `changePreview` hook that succeeded. */
     preview: Schema.optionalKey(ToolChangePreview),
-    /** Why the tool's change preview is missing, when it has a hook. */
-    previewError: Schema.optionalKey(Schema.String)
+    /** Why the tool's change preview is missing, when it has a hook (never with `preview`). */
+    previewError: Schema.optionalKey(ToolChangePreviewFailure)
   }),
   Schema.Struct({
     key: Schema.String,

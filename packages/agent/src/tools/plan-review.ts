@@ -198,9 +198,10 @@ export const makePlanReviewTool = <Context>(
 }
 
 /**
- * Per-key previews of a staged plan for host review screens: each staged call's arguments and its
- * tool's optional `staging.preview` (bounded to `maxToolPlanPreviewBytes`; a failing or oversized
- * preview is an error entry). At most `maxToolPlanPreviewKeys` keys per call: page larger plans.
+ * Per-key previews of a staged plan for host review screens: each staged call's arguments with its
+ * tool's change preview (`changePreview`, the hook approvals use, bounded by the resolution's
+ * `changePreview` options), or `previewError` when that preview is unavailable; the entry keeps
+ * the arguments either way. At most `maxToolPlanPreviewKeys` keys per call: page larger plans.
  * Resolve the tool set with a fresh host context; previews use it. Fails `unavailable` when the
  * resolution has no staging, and `invalid_plan` for a plan of another scope or with mismatched
  * digests. `keys` defaults to the first page of the plan.

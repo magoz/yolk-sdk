@@ -18,7 +18,7 @@ import {
   truncateCodePoints,
   utf8ByteLength
 } from '../protocol/bounded-text.ts'
-import { nestedToolCallMaxErrorChars } from '../protocol/nested-tool-calls.ts'
+import { toolChangePreviewMaxErrorChars } from '../protocol/change-preview.ts'
 import { canonicalToolArguments } from './ledger.ts'
 import { sha256HexSync } from './sha256.ts'
 
@@ -46,6 +46,7 @@ const jsonBytes = (value: unknown) => utf8ByteLength(compactToolArguments(value)
 // Encoded size of one character inside a JSON string (escapes included, quotes excluded).
 const encodedCharBytes = (character: string) => jsonBytes(character) - 2
 
+// Truncation works on private mutable drafts of a preview; callers only ever see new values.
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 
 type SideCuts = { before?: ToolChangeCut; after?: ToolChangeCut }
@@ -81,6 +82,8 @@ const windowSlot = <Unit, Value>(input: {
 }): Slot => {
   const { units, start } = input
   let kept: number | undefined
+  // Encoded size of every unit, measured once on the first cut.
+  let sizes: ReadonlyArray<number> | undefined
 
   const current = () => (kept === undefined ? units : units.slice(start, start + kept))
 
@@ -88,18 +91,25 @@ const windowSlot = <Unit, Value>(input: {
     bytes: () => jsonBytes(input.render(current())),
     shrinkable: () => (kept === undefined ? units.length > 0 : kept > 0),
     cut: bytes => {
-      const window = units.slice(start)
-      const before = current()
+      sizes ??= units.map(input.unitBytes)
+
+      const unitSizes = sizes
+      const windowLength = units.length - start
+      const from = kept === undefined ? 0 : start
+      const to = kept === undefined ? units.length : start + kept
       // The most units the cut may keep: strictly fewer than now.
-      const most = kept === undefined ? (start > 0 ? window.length : window.length - 1) : kept - 1
-      const budget = before.reduce((total, unit) => total + input.unitBytes(unit), 0) - bytes
+      const most = kept === undefined ? (start > 0 ? windowLength : windowLength - 1) : kept - 1
+      let budget = -bytes
+
+      for (let index = from; index < to; index += 1) budget += unitSizes[index] ?? 0
+
       let fitting = 0
       let used = 0
 
-      for (const unit of window) {
-        used += input.unitBytes(unit)
+      while (fitting < most) {
+        used += unitSizes[start + fitting] ?? 0
 
-        if (fitting >= most || used > budget) break
+        if (used > budget) break
 
         fitting += 1
       }
@@ -165,6 +175,17 @@ const structuredSlot = (
       cut = true
     }
   }
+}
+
+// A value the hook already cut keeps its own original size, and the offsets add up.
+const composeCut = (existing: ToolChangeCut | undefined, cut: ToolChangeCut): ToolChangeCut => {
+  if (existing === undefined) return cut
+
+  const offset = (existing.offset ?? 0) + (cut.offset ?? 0)
+
+  return offset > 0
+    ? { unit: existing.unit, originalSize: existing.originalSize, offset }
+    : { unit: existing.unit, originalSize: existing.originalSize }
 }
 
 const commonPrefix = <Unit>(
@@ -243,7 +264,7 @@ const valueDraft = (change: ToolValueChange): ChangeDraft => {
                 draft.before = value
               },
               cut => {
-                cuts.before = cut
+                cuts.before = composeCut(cuts.before, cut)
               }
             )
           ]),
@@ -256,7 +277,7 @@ const valueDraft = (change: ToolValueChange): ChangeDraft => {
                 draft.after = value
               },
               cut => {
-                cuts.after = cut
+                cuts.after = composeCut(cuts.after, cut)
               }
             )
           ]
@@ -284,7 +305,7 @@ const textDraft = (change: ToolTextChange): ChangeDraft => {
                 draft.before = value
               },
               cut => {
-                cuts.before = cut
+                cuts.before = composeCut(cuts.before, cut)
               }
             )
           ]),
@@ -295,7 +316,7 @@ const textDraft = (change: ToolTextChange): ChangeDraft => {
           draft.after = value
         },
         cut => {
-          cuts.after = cut
+          cuts.after = composeCut(cuts.after, cut)
         }
       )
     ]
@@ -313,7 +334,10 @@ const setDraft = (change: ToolSetChange): ChangeDraft => {
 
       if (unchanged === undefined || unchanged.length === 0) return
 
-      cuts.unchanged = { unit: 'items', originalSize: unchanged.length }
+      cuts.unchanged = composeCut(cuts.unchanged, {
+        unit: 'items',
+        originalSize: unchanged.length
+      })
       draft.unchanged = []
     },
     slots: [
@@ -324,7 +348,7 @@ const setDraft = (change: ToolSetChange): ChangeDraft => {
           draft.added = value
         },
         cut => {
-          cuts.added = cut
+          cuts.added = composeCut(cuts.added, cut)
         }
       ),
       itemsSlot(
@@ -334,7 +358,7 @@ const setDraft = (change: ToolSetChange): ChangeDraft => {
           draft.removed = value
         },
         cut => {
-          cuts.removed = cut
+          cuts.removed = composeCut(cuts.removed, cut)
         }
       )
     ]
@@ -360,7 +384,7 @@ const listDraft = (change: ToolListChange): ChangeDraft => {
                 draft.before = value
               },
               cut => {
-                cuts.before = cut
+                cuts.before = composeCut(cuts.before, cut)
               }
             )
           ]),
@@ -371,7 +395,7 @@ const listDraft = (change: ToolListChange): ChangeDraft => {
           draft.after = value
         },
         cut => {
-          cuts.after = cut
+          cuts.after = composeCut(cuts.after, cut)
         }
       )
     ]
@@ -395,7 +419,7 @@ const structuredDraft = (change: ToolStructuredChange): ChangeDraft => {
                 draft.before = value
               },
               cut => {
-                cuts.before = cut
+                cuts.before = composeCut(cuts.before, cut)
               }
             )
           ]),
@@ -405,7 +429,7 @@ const structuredDraft = (change: ToolStructuredChange): ChangeDraft => {
           draft.after = value
         },
         cut => {
-          cuts.after = cut
+          cuts.after = composeCut(cuts.after, cut)
         }
       )
     ]
@@ -602,7 +626,7 @@ const decodePreview = Schema.decodeUnknownEffect(ToolChangePreview)
 const previewError = (cause: ToolChangePreviewError['cause'], message: string) =>
   new ToolChangePreviewError({
     cause,
-    message: truncateCodePoints(message, nestedToolCallMaxErrorChars)
+    message: truncateCodePoints(message, toolChangePreviewMaxErrorChars)
   })
 
 /**
@@ -619,6 +643,9 @@ export const runToolChangePreview = (input: {
 }): Effect.Effect<ToolChangePreview, ToolChangePreviewError> =>
   Effect.suspend(() => input.preview).pipe(
     Effect.mapError(error => previewError('failed', error.message)),
+    Effect.tapDefect(defect =>
+      Effect.logWarning(`The change preview of ${input.tool} failed`, defect)
+    ),
     Effect.catchDefect(() =>
       Effect.fail(previewError('failed', `The change preview of ${input.tool} failed.`))
     ),

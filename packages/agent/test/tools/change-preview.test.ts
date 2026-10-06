@@ -13,6 +13,11 @@ import {
   resolveTools,
   ToolChangePreview,
   toolChangeSignature,
+  ToolListChange,
+  ToolSetChange,
+  ToolStructuredChange,
+  ToolTextChange,
+  ToolValueChange,
   type ToolChangePreviewOptions,
   type BackgroundToolHost,
   type ToolFieldChange
@@ -37,19 +42,17 @@ const bounded = (value: ToolChangePreview, maxBytes: number) => {
 }
 
 const allChanges: ReadonlyArray<ToolFieldChange> = [
-  { _tag: 'Value', field: 'status', label: 'Status', before: 'draft', after: 'published' },
-  { _tag: 'Value', field: 'owner', label: 'Owner', after: null },
-  { _tag: 'Text', field: 'body', label: 'Body', before: 'Hello', after: 'Hello, world' },
-  {
-    _tag: 'Set',
+  ToolValueChange.make({ field: 'status', label: 'Status', before: 'draft', after: 'published' }),
+  ToolValueChange.make({ field: 'owner', label: 'Owner', after: null }),
+  ToolTextChange.make({ field: 'body', label: 'Body', before: 'Hello', after: 'Hello, world' }),
+  ToolSetChange.make({
     field: 'tags',
     label: 'Tags',
     added: [{ id: 't2', label: 'Two' }],
     removed: [{ id: 't1', label: 'One' }],
     unchanged: [{ id: 't3', label: 'Three' }]
-  },
-  {
-    _tag: 'List',
+  }),
+  ToolListChange.make({
     field: 'steps',
     label: 'Steps',
     before: [{ id: 's1', label: 'One' }],
@@ -57,15 +60,14 @@ const allChanges: ReadonlyArray<ToolFieldChange> = [
       { id: 's1', label: 'One' },
       { id: 's2', label: 'Two' }
     ]
-  },
-  {
-    _tag: 'Structured',
+  }),
+  ToolStructuredChange.make({
     field: 'content',
     label: 'Content',
     before: { blocks: [] },
     after: { blocks: [{ type: 'paragraph', text: 'Hi' }] },
     summary: 'Adds a paragraph'
-  }
+  })
 ]
 
 describe('ToolChangePreview', () => {
@@ -112,28 +114,26 @@ describe('boundToolChangePreview', () => {
     }))
 
     const value = preview([
-      {
-        _tag: 'Set',
+      ToolSetChange.make({
         field: 'tags',
         label: 'Tags',
         added: [{ id: 'a', label: 'A' }],
         removed: [],
         unchanged
-      }
+      })
     ])
 
     const result = bounded(value, 1024)
 
     expect(result.changes).toEqual([
-      {
-        _tag: 'Set',
+      ToolSetChange.make({
         field: 'tags',
         label: 'Tags',
         added: [{ id: 'a', label: 'A' }],
         removed: [],
         unchanged: [],
         truncated: { unchanged: { unit: 'items', originalSize: 200 } }
-      }
+      })
     ])
     expect(isToolChangePreviewTruncated(result)).toBe(false)
   })
@@ -142,13 +142,12 @@ describe('boundToolChangePreview', () => {
     const shared = 'a'.repeat(5000)
 
     const value = preview([
-      {
-        _tag: 'Text',
+      ToolTextChange.make({
         field: 'body',
         label: 'Body',
         before: `${shared} old ending`,
         after: `${shared} new ending`
-      }
+      })
     ])
 
     const result = bounded(value, 1024)
@@ -175,28 +174,36 @@ describe('boundToolChangePreview', () => {
     }))
 
     const value = preview([
-      { _tag: 'Value', field: 'status', label: 'Status', before: 'draft', after: 'published' },
-      {
-        _tag: 'Structured',
+      ToolValueChange.make({
+        field: 'status',
+        label: 'Status',
+        before: 'draft',
+        after: 'published'
+      }),
+      ToolStructuredChange.make({
         field: 'content',
         label: 'Content',
         before: { blocks: [] },
         after: { blocks }
-      }
+      })
     ])
 
     const result = bounded(value, 1024)
 
     expect(result.changes).toEqual([
-      { _tag: 'Value', field: 'status', label: 'Status', before: 'draft', after: 'published' },
-      {
-        _tag: 'Structured',
+      ToolValueChange.make({
+        field: 'status',
+        label: 'Status',
+        before: 'draft',
+        after: 'published'
+      }),
+      ToolStructuredChange.make({
         field: 'content',
         label: 'Content',
         before: { blocks: [] },
         after: null,
         truncated: { after: { unit: 'bytes', originalSize: bytes({ blocks }) } }
-      }
+      })
     ])
   })
 
@@ -207,8 +214,13 @@ describe('boundToolChangePreview', () => {
     }))
 
     const value = preview([
-      { _tag: 'Set', field: 'tags', label: 'Tags', added: items, removed: items.slice(0, 10) },
-      { _tag: 'List', field: 'order', label: 'Order', after: items }
+      ToolSetChange.make({
+        field: 'tags',
+        label: 'Tags',
+        added: items,
+        removed: items.slice(0, 10)
+      }),
+      ToolListChange.make({ field: 'order', label: 'Order', after: items })
     ])
 
     const first = bounded(value, 4096)
@@ -232,6 +244,29 @@ describe('boundToolChangePreview', () => {
     })
   })
 
+  it('keeps the original size and offset of a value that was already cut', () => {
+    const shared = 'a'.repeat(5000)
+
+    const value = preview([
+      ToolTextChange.make({
+        field: 'body',
+        label: 'Body',
+        before: `${shared} old ending`,
+        after: `${shared} new ending`
+      })
+    ])
+
+    const once = bounded(value, 4096)
+    const twice = bounded(once, 1024)
+    const change = twice.changes[0]
+
+    expect(change?.truncated).toEqual({
+      before: { unit: 'chars', originalSize: 5011, offset: 4937 },
+      after: { unit: 'chars', originalSize: 5011, offset: 4937 }
+    })
+    expect(change?._tag === 'Text' && change.after.endsWith('new ending')).toBe(true)
+  })
+
   it('fails too_large when the parts it never cuts do not fit', () => {
     const value: ToolChangePreview = {
       ...preview([]),
@@ -248,14 +283,14 @@ describe('toolChangeSignature and groupToolChangePreviews', () => {
   const setChange = (
     added: ReadonlyArray<string>,
     unchanged: ReadonlyArray<string>
-  ): ToolFieldChange => ({
-    _tag: 'Set',
-    field: 'tags',
-    label: 'Tags',
-    added: added.map(id => ({ id, label: id.toUpperCase() })),
-    removed: [],
-    unchanged: unchanged.map(id => ({ id, label: id }))
-  })
+  ): ToolFieldChange =>
+    ToolSetChange.make({
+      field: 'tags',
+      label: 'Tags',
+      added: added.map(id => ({ id, label: id.toUpperCase() })),
+      removed: [],
+      unchanged: unchanged.map(id => ({ id, label: id }))
+    })
 
   it('ignores the target, summary, warnings, blocked, Set order, and Set.unchanged', () => {
     const a = preview([setChange(['x', 'y'], ['k'])], 'Record 1')
@@ -284,7 +319,7 @@ describe('toolChangeSignature and groupToolChangePreviews', () => {
 
       expect(toolChangeSignature(reordered)).toBe(
         toolChangeSignature(
-          preview([{ _tag: 'Value', field: 'f', label: 'L', before: 'a', after: 'b' }])
+          preview([ToolValueChange.make({ field: 'f', label: 'L', before: 'a', after: 'b' })])
         )
       )
     })
@@ -296,7 +331,7 @@ describe('toolChangeSignature and groupToolChangePreviews', () => {
     const long = 'z'.repeat(3000)
 
     const truncated = bounded(
-      preview([{ _tag: 'Text', field: 'body', label: 'Body', after: long }]),
+      preview([ToolTextChange.make({ field: 'body', label: 'Body', after: long })]),
       1024
     )
 
@@ -393,7 +428,7 @@ describe('resolved approval previews', () => {
           Effect.sync(() => {
             seen.push(params.id)
 
-            return preview([{ _tag: 'Value', field: 'id', label: 'Id', after: params.id }])
+            return preview([ToolValueChange.make({ field: 'id', label: 'Id', after: params.id })])
           })
         )
       )
@@ -405,7 +440,7 @@ describe('resolved approval previews', () => {
       const ok = yield* previewer(call({ id: 'r1' }))
       const invalid = yield* previewer(call({ id: 1 })).pipe(Effect.flip)
 
-      expect(ok.changes).toEqual([{ _tag: 'Value', field: 'id', label: 'Id', after: 'r1' }])
+      expect(ok.changes).toEqual([ToolValueChange.make({ field: 'id', label: 'Id', after: 'r1' })])
       expect(invalid.cause).toBe('failed')
       expect(invalid.message).toContain('Invalid update_record arguments')
       expect(seen).toEqual(['r1'])
@@ -458,7 +493,7 @@ describe('resolved approval previews', () => {
         gated(
           params =>
             Effect.succeed(
-              preview([{ _tag: 'Value', field: 'id', label: 'Id', after: params.id }])
+              preview([ToolValueChange.make({ field: 'id', label: 'Id', after: params.id })])
             ),
           {
             background: true
@@ -474,7 +509,7 @@ describe('resolved approval previews', () => {
       const ok = yield* previewer(call({ execution: 'background', arguments: { id: 'r9' } }))
       const malformed = yield* previewer(call({ id: 'r9' })).pipe(Effect.flip)
 
-      expect(ok.changes).toEqual([{ _tag: 'Value', field: 'id', label: 'Id', after: 'r9' }])
+      expect(ok.changes).toEqual([ToolValueChange.make({ field: 'id', label: 'Id', after: 'r9' })])
       expect(malformed.cause).toBe('failed')
     })
   )

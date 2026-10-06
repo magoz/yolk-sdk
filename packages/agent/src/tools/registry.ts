@@ -300,8 +300,8 @@ export type ToolRegistration<Context> = {
    * and the selected server action handlers. Never combined with approval/background.
    */
   readonly interaction?: InteractionToolRegistration<Context>
-  /** Present only on stageable registrations (`def.staging`): optional preview and precheck hooks
-   * over a staged call (ADR 0005).
+  /** Present only on stageable registrations (`def.staging`): an optional precheck hook over a
+   * staged call (ADR 0005). Previews come from `changePreview`.
    */
   readonly staging?: ToolStagingHandlers<Context>
   /** Change preview of one call, for approval requests and plan reviews; requires `def.approval`
