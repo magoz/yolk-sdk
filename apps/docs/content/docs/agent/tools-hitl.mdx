@@ -424,6 +424,51 @@ Hosts own reconciliation, external-provider idempotency and warnings against sep
 duplicates. Voice/realtime, background activation and hosts without authenticated receipt storage
 remain unsupported. This API does not promise exactly-once external effects.
 
+## Review a staged plan
+
+A [code mode](../integrations/code-mode#stage-approval-gated-writes) script can stage calls of
+approval-gated tools marked `staging` instead of running them. `makePlanReviewTool` is the
+interaction a person uses to review that plan once and select the calls to apply. It reuses the
+authorization flow above: host acceptance, receipts, claim and settle.
+
+```ts
+import { makePlanReviewTool, resolveTools } from '@yolk-sdk/agent/tools'
+
+const reviewPlan = makePlanReviewTool<HostContext>({
+  // Optional per-call run-authority check right before each selected call runs.
+  beforeCall: ({ call, context }) => assertRunActive(context, call), // host-owned
+  onFailure: 'stop' // default; 'continue' runs the remaining selected calls
+})
+
+const resolveHostTools = (context: HostContext) =>
+  resolveTools([{ id: 'host', tools: [codemode, reviewPlan] }, ...hostModules], context, {
+    interactionHost: scopedReceipts, // host-owned
+    plans: { store: planStore } // host-owned ToolPlanStore
+  })
+```
+
+- The model calls `review_plan({ planId, planDigest })` with the values the script reported. Call
+  validation loads the plan from the store: present, in scope, digests matching, not yet applied.
+- Render the `tool_plan_review` kind from `call.params.planId`: load the plan from your store and
+  page `previewToolPlan({ toolSet, plan, keys })` (at most 50 keys per call; each tool's optional
+  `staging.preview`). The person submits action `apply` with `{ selectedKeys }`, a non-empty subset
+  of the staged keys; they can untick calls but never change arguments. Cancel applies nothing.
+- Admission (`validateInteractionSubmission`) checks the selection with your fresh context: no
+  duplicates, keys of the plan, tools still stageable, and each tool's `staging.precheck`.
+- On execution Yolk re-reads the receipt, claims the plan once (`ToolPlanStore.claim`), and runs
+  the selected calls in staged order through the resolved execute path and ledger, with ids
+  `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, or `not_run`
+  in `structuredContent.result` (`type: 'tool_plan_outcome'`).
+- If the apply crashes, the receipt stays started; re-execution never runs it again and returns an
+  `unknown` outcome listing the ledger's per-call states.
+
+`ToolPlanStore` is a port over host storage: `put` is idempotent by plan id and digest (another
+digest under the same id is a conflict), `get` returns the plan and its claim, and `claim(planId,
+submissionId)` returns `claimed`, `same`, or `taken`; a plan is applied at most once. Scope it to
+the conversation, since reviews usually run in a later turn than the script.
+`makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
+reports exactly which calls ran.
+
 ## Let the model choose background execution
 
 Any `makeTool` registration may opt into background execution with `background: true`. The flag is

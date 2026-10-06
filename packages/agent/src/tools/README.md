@@ -68,6 +68,17 @@ Voice, background activation, and host-less execution fail closed. See
 `patterns/AGENT_HITL.md` for host wiring and `test/tools/interaction-host.ts` for the fake-effect
 reference (acceptance is separate from claim; no product or provider integration).
 
+## Staged tool plans
+
+`docs/adr/0005-staged-tool-plans.md`. Approval-gated tools marked `staging` (`makeTool({ approval,
+staging })`) can be staged by nested-access registrations (code mode's `stage(name, args)`) through
+`nested.staging`, and applied only after a person accepts a `makePlanReviewTool` interaction
+selecting the staged keys. `resolveTools(..., { plans: { store }, interactionHost })` with exactly one
+plan review registration enables it; without them there is no staging and the review tool is
+unavailable. The plan executor (`ToolPlanRuntime.apply`) re-reads the review receipt, claims the
+plan once, and runs selected calls in staged order through `executeRegistration` (ids
+`<reviewCallId>/<n>`, ledger parent the review call). `previewToolPlan` renders bounded previews.
+
 ## Output schemas, exposure, and nested tool access
 
 These are the code mode contract (`docs/adr/0002-code-mode.md`); this package does not run scripts.

@@ -39,7 +39,7 @@ world only through the host's resolved tools.
 | Nested calls     | Execute through the resolved tool set's normal execute path with the same host context.                          |
 | Exposure         | New `callableBy` (`all` / `model` / `codemode`) and, for `codemode`, `discovery` (`listed` / `search`) on tools. |
 | Fail-closed rule | Approval, input, interaction, and background tools never run from code mode, whatever their `callableBy` says.   |
-| Approvals        | Not supported inside scripts in phase 1. Phase 2 uses abort-and-replay over a recorded nested-call log.          |
+| Approvals        | Never inside scripts. Gated writes are staged and reviewed once ([ADR 0005](0005-staged-tool-plans.md)).         |
 | Re-execution     | A host-supplied durable tool ledger runs each ledgered call (top-level and nested) at most once per key.         |
 
 ## Engine
@@ -328,6 +328,10 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
 
 ## Phase 2: approvals inside scripts
 
+Superseded for gated writes by [Staged tool plans](0005-staged-tool-plans.md): scripts stage
+approval-gated calls with `stage(name, args)` and a person reviews the plan once. The
+abort-and-replay design below stays deferred until a script needs a gated call's result mid-run.
+
 Not part of phase 1. When a script reaches a call that needs approval:
 
 1. Abort the pass. Record the nested calls already applied, with their results, in sequence.
@@ -390,7 +394,8 @@ independent calls.
 4. **Measurement in 10x** before stable release: inbox triage, Fortnox follow-up, and Dropbox or
    OneDrive pagination compared with direct calls on DeepSeek V4.1 Flash: steps, tokens, latency,
    first-try script success, and Workflow events.
-5. **Phase 2 approvals**: abort-and-replay as described, after phase 1 ships.
+5. **Phase 2 approvals**: gated writes shipped as staged tool plans (ADR 0005); abort-and-replay
+   remains deferred.
 
 Tests must demonstrate:
 
