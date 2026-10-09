@@ -429,6 +429,17 @@ one line (never wrap by hand). Recipients then see the HTML part unwrapped; the 
 alternative Gmail web regenerates on send is still wrapped at about 76 columns, as for any message
 composed there. See [Gmail draft bodies](./integrations/connectors#gmail-draft-bodies).
 
+### Gmail draft with attachments fails
+
+A `validation_failed` error from `gmail.draft_compose`, `gmail.draft_update`, or
+`gmail.draft_reply` with `underlying.reason: 'too_large'` means the decoded MIME exceeds 35 MiB and
+nothing was written. More than 10 attachments or over 25 MiB decoded in total also fails
+`validation_failed`, from input validation. A draft with attachments is one
+`multipart/related` upload: a host HTTP adapter that re-encodes the string body or caps outgoing
+bodies below about 35 MiB breaks it, so forward the body exactly as UTF-8. Against the Google
+emulator, the draft media upload is not emulated and answers its unrecognised 400. See
+[Gmail draft attachments](./integrations/connectors#gmail-draft-attachments).
+
 ### Gmail submission is unconfirmed or its send scope is rejected
 
 `gmail.send_message` forwards host-generated base64url MIME unchanged. Its input validation checks
