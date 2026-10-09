@@ -39,6 +39,13 @@ are as currently understood; none is observed live yet.
 | `google.drive.get-file-fields`             | `read`               | `driveFileId`, `driveFolderId`                   | `get_file` accepts the connector's full `fields` selection and answers the same id, name, mime type, and parents as the listing                                                                                                                                                                  |
 | `google.drive.folder-trash-delete`         | `write-reversible`   | `driveFolderId`, `runId`                         | A run folder is created, trashed (`trashed: true`, left out of listings), deleted permanently by id (204, empty body), and reads `google_not_found`                                                                                                                                              |
 
+No case covers draft attachments: `gmail.draft_compose`, `gmail.draft_update`, and
+`gmail.draft_reply` with `attachments` write through the draft media upload
+(`upload/gmail/v1/users/me/drafts[/{id}]?uploadType=multipart`), which no fixture records and the
+Google emulator does not emulate (it answers the constant unrecognised 400). Unit tests pin the
+request shape; a draft-attachment case needs an owner-approved live recording. The draft case above
+sends no attachments, so its JSON requests are unchanged.
+
 Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
 
 - An unused 16-hex-digit message id answers 404 rather than 400 `Invalid id value`.

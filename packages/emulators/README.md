@@ -1606,7 +1606,11 @@ origin its fixtures record: Gmail (the API and the multipart send upload) on
 `https://gmail.googleapis.com` (`googleEmulatorGmailOrigin`), Calendar and Drive on
 `https://www.googleapis.com` (`googleEmulatorApisOrigin`). `fetch` takes the origin from the request
 URL (in-process routing keeps it); behind a loopback rewrite, which loses it, serve
-`fetchOn(origin)` for each origin on its own server:
+`fetchOn(origin)` for each origin on its own server. Draft attachments are not emulated:
+`gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` with `attachments` write
+through the draft media upload (`POST /upload/gmail/v1/users/me/drafts?uploadType=multipart`, or
+`PUT .../drafts/{id}?uploadType=multipart`), which no fixture records, so it answers the constant
+unrecognised 400 until a draft-attachment case is recorded live. To serve both origins:
 
 ```ts
 import {

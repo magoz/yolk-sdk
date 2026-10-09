@@ -1003,6 +1003,13 @@ created, trashed, and deleted, then the recorded 404). Every route needs
 `fetch` reads the origin from the request URL; behind a loopback rewrite, serve `fetchOn(origin)`
 for each origin on its own server.
 
+**Draft attachments are not emulated.** `gmail.draft_compose`, `gmail.draft_update`, and
+`gmail.draft_reply` with `attachments` write through the draft media upload
+(`POST /upload/gmail/v1/users/me/drafts?uploadType=multipart`, or
+`PUT .../drafts/{id}?uploadType=multipart`), which no fixture records, so it answers the constant
+unrecognised 400 until a draft-attachment conformance case is recorded live. Drafts without
+attachments are unaffected.
+
 **The practice send is recorded, never delivered.** It is irreversible on Gmail; the emulator
 accepts only the recorded 7-bit message whose sole recipient header is `To: <the seeded
 practiceAddress>`, records it in its state (it reads back with the recorded headers, its `Date`

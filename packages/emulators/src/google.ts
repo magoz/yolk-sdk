@@ -9,7 +9,10 @@
  * are emulated: Gmail on `https://gmail.googleapis.com` (`/gmail/v1/users/me/...` and the multipart
  * send upload), Calendar and Drive on `https://www.googleapis.com` (`/calendar/v3` and
  * `/drive/v3`). Each route answers only on its recorded origin (`fetchOn(origin)` serves one origin
- * behind a loopback rewrite). Response behaviour comes only from the fixtures: anything they do not
+ * behind a loopback rewrite). Draft attachments are not emulated: drafts with `attachments` write
+ * through the draft media upload (`POST`/`PUT` `/upload/gmail/v1/users/me/drafts[/{id}]`), which no
+ * fixture records, so it answers the constant unrecognised 400 until a draft-attachment case is
+ * recorded live. Response behaviour comes only from the fixtures: anything they do not
  * show answers one ledgered 400 not-emulated, writes nothing, and uses up no fault. That includes
  * an empty listing and every read of the leftover lookup (`findGoogleConformanceLeftovers`, whose
  * label listing, draft search, and free-text event query no fixture records): the lookup fails, and
