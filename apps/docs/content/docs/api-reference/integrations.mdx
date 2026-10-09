@@ -372,11 +372,18 @@ Gmail label contracts are `GmailLabel` (with `GmailLabelMessageListVisibility`,
 `gmail.modify` slot; reads use the readonly slot.
 
 Gmail draft contracts are `GmailDraftComposeInput` (`to`, `subject`, `body`, optional
-`contentType`, `cc`, `bcc`, `from`), `GmailDraftUpdateInput` (the same fields plus `draftId`),
-`GmailDraftReplyInput` (`messageId`, `body`, optional `contentType`, `from`), `GmailDraftIdInput`
-(`draftId`), and `GmailDraftContentType` (`'text' | 'html'`; `text` when omitted). A `text` body is
-sent as `multipart/alternative` with a derived HTML part; see
+`contentType`, `cc`, `bcc`, `from`, `attachments`), `GmailDraftUpdateInput` (the same fields plus
+`draftId`), `GmailDraftReplyInput` (`messageId`, `body`, optional `contentType`, `from`,
+`attachments`), `GmailDraftIdInput` (`draftId`), and `GmailDraftContentType` (`'text' | 'html'`;
+`text` when omitted). A `text` body is sent as `multipart/alternative` with a derived HTML part; see
 [Gmail draft bodies](../integrations/connectors#gmail-draft-bodies).
+
+Gmail draft attachment contracts are `GmailDraftAttachment` (`{ filename, mimeType, contentBase64 }`),
+`GmailDraftAttachments`, the field schemas `GmailDraftAttachmentFilename`,
+`GmailDraftAttachmentMimeType`, and `GmailDraftAttachmentBase64`, and the limits
+`gmailDraftAttachmentsMaxItems` (10), `gmailDraftAttachmentsMaxBytes` (25 MiB decoded in total), and
+`gmailDraftMessageMaxBytes` (35 MiB of decoded MIME). A draft with attachments is written through
+the draft media upload; see [Gmail draft attachments](../integrations/connectors#gmail-draft-attachments).
 
 See [Connectors catalog](../integrations/connectors) for action ids.
 

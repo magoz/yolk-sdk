@@ -29,6 +29,29 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.105: Gmail draft attachments
+
+New, opt-in: `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` take an optional
+`attachments` array of `{ filename, mimeType, contentBase64 }`. It is available from
+`0.1.0-canary.105`. New exports from `@yolk-sdk/connectors/google`: `GmailDraftAttachment`,
+`GmailDraftAttachments`, `GmailDraftAttachmentFilename`, `GmailDraftAttachmentMimeType`,
+`GmailDraftAttachmentBase64`, and the limits `gmailDraftAttachmentsMaxItems` (10 files),
+`gmailDraftAttachmentsMaxBytes` (25 MiB decoded in total), and `gmailDraftMessageMaxBytes` (35 MiB
+of decoded MIME). See [Gmail draft attachments](./integrations/connectors#gmail-draft-attachments).
+
+- A draft with attachments is written with one never-retried `multipart/related` upload to
+  `https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts?uploadType=multipart` (an update:
+  `PUT .../drafts/{id}?uploadType=multipart`). Host HTTP adapters must forward that body exactly as
+  UTF-8 and accept outgoing bodies up to about 35 MiB.
+- A draft whose decoded MIME exceeds 35 MiB fails with `validation_failed` and
+  `underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }` before anything is
+  written.
+- `gmail.draft_update` replaces the whole message: attachments not sent again are removed.
+- Drafts without attachments (absent or empty) are written exactly as before, through the JSON
+  endpoint.
+- The Google emulator does not emulate the draft media upload: a draft with attachments answers its
+  unrecognised 400. See [Google emulator](./api-reference/emulators#google-emulator).
+
 ### Canary.104: tool change previews
 
 New, opt-in: approval-gated tools can describe what a call would change with
