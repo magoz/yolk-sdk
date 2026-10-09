@@ -7,6 +7,9 @@
  * goes out unwrapped. Gmail also rewraps long unencoded (7bit/8bit) text/plain lines. So a text
  * body becomes `multipart/alternative`: the exact text, then HTML derived from it, both
  * quoted-printable with lines of at most 76 characters. An HTML body is one text/html part.
+ *
+ * A draft with attachments wraps that body entity as the first part of a 7-bit `multipart/mixed`,
+ * followed by one base64 part per attachment.
  */
 import type { GmailDraftContentType } from './gmail.ts'
 
@@ -167,27 +170,179 @@ const quotedPrintablePart = (contentType: string, content: string) =>
     encodeGmailQuotedPrintable(content)
   ].join('\r\n')
 
-/**
- * The `MIME-Version`, content headers, and body of a draft (everything after its address,
- * subject, and threading headers), CRLF-separated and 7-bit: a `text` body becomes
- * `multipart/alternative` (text/plain with the exact body, then the derived text/html), an `html`
- * body a single text/html part.
- */
-export const gmailDraftBodyMime = (body: string, contentType: GmailDraftContentType): string => {
-  if (contentType === 'html') {
-    return ['MIME-Version: 1.0', quotedPrintablePart('text/html', body)].join('\r\n')
-  }
+/** The body entity (content headers and content, no `MIME-Version`) of a draft body. */
+const gmailDraftBodyEntity = (body: string, contentType: GmailDraftContentType): string => {
+  if (contentType === 'html') return quotedPrintablePart('text/html', body)
 
   const delimiter = `--${gmailDraftAlternativeBoundary}`
 
   return [
-    'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${gmailDraftAlternativeBoundary}"`,
     '',
     delimiter,
     quotedPrintablePart('text/plain', body),
     delimiter,
     quotedPrintablePart('text/html', gmailDraftHtmlFromText(body)),
+    `${delimiter}--`
+  ].join('\r\n')
+}
+
+/**
+ * The `MIME-Version`, content headers, and body of a draft (everything after its address,
+ * subject, and threading headers), CRLF-separated and 7-bit: a `text` body becomes
+ * `multipart/alternative` (text/plain with the exact body, then the derived text/html), an `html`
+ * body a single text/html part.
+ */
+export const gmailDraftBodyMime = (body: string, contentType: GmailDraftContentType): string =>
+  ['MIME-Version: 1.0', gmailDraftBodyEntity(body, contentType)].join('\r\n')
+
+/**
+ * The `multipart/mixed` boundary of a draft with attachments. Like the alternative boundary, `=_`
+ * never occurs in quoted-printable or base64 content, header continuation lines start with
+ * whitespace, and `--=_yolk-draft-alternative` does not start with this delimiter, so it cannot
+ * collide with any part; it is constant so the same draft always yields the same MIME.
+ */
+export const gmailDraftMixedBoundary = '=_yolk-draft-mixed'
+
+/** One already validated draft attachment: canonical standard base64 content. */
+export type GmailDraftMimeAttachment = {
+  readonly filename: string
+  readonly mimeType: string
+  readonly contentBase64: string
+}
+
+const base64MaxLineLength = 76
+
+/** Canonical base64 split into lines of at most 76 characters (RFC 2045), CRLF-joined. */
+const base64Lines = (encoded: string): string => {
+  const lines: Array<string> = []
+
+  for (let index = 0; index < encoded.length; index += base64MaxLineLength) {
+    lines.push(encoded.slice(index, index + base64MaxLineLength))
+  }
+
+  return lines.join('\r\n')
+}
+
+/** Longest unfolded parameter line before a name is encoded instead (RFC 5322 recommends 78). */
+const headerLineMaxLength = 78
+
+const printableAscii = /^[\x20-\x7e]*$/u
+
+/** A quoted-string with `"` and `\` as quoted-pairs. */
+const quotedParameter = (value: string) => `"${value.replaceAll(/["\\]/gu, char => `\\${char}`)}"`
+
+/** Longest UTF-8 run per RFC 2047 B-word: 42 bytes encode to 56 characters, a 68-character word. */
+const encodedWordMaxBytes = 42
+
+const base64OfBytes = (bytes: Uint8Array) => {
+  let binary = ''
+
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+
+  return btoa(binary)
+}
+
+/** RFC 2047 UTF-8 B-encoded words of at most 75 characters, never splitting a code point. */
+const encodedWords = (value: string): ReadonlyArray<string> => {
+  const words: Array<string> = []
+  let pending = ''
+
+  for (const char of value) {
+    if (pending !== '' && utf8.encode(pending + char).length > encodedWordMaxBytes) {
+      words.push(pending)
+      pending = char
+    } else {
+      pending += char
+    }
+  }
+
+  if (pending !== '') words.push(pending)
+
+  return words.map(word => `=?UTF-8?B?${base64OfBytes(utf8.encode(word))}?=`)
+}
+
+/** RFC 2231 `attr-char`: every other octet is percent-encoded. */
+const attrChar = /^[A-Za-z0-9!#$&+\-.^_`|~]$/u
+
+/** Longest encoded value per RFC 2231 continuation, keeping folded lines short. */
+const extendedParameterChunkLength = 50
+
+/** RFC 2231 `name*=UTF-8''...`, split into `name*0*`, `name*1*`, ... continuations when long. */
+const extendedParameter = (name: string, value: string): ReadonlyArray<string> => {
+  const chunks: Array<string> = []
+  let current = ''
+
+  for (const byte of utf8.encode(value)) {
+    const char = String.fromCharCode(byte)
+
+    const token =
+      byte < 0x80 && attrChar.test(char)
+        ? char
+        : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`
+
+    if (current.length + token.length > extendedParameterChunkLength) {
+      chunks.push(current)
+      current = token
+    } else {
+      current += token
+    }
+  }
+
+  chunks.push(current)
+
+  return chunks.length === 1
+    ? [`${name}*=UTF-8''${chunks[0] ?? ''}`]
+    : chunks.map((chunk, index) =>
+        index === 0 ? `${name}*0*=UTF-8''${chunk}` : `${name}*${index}*=${chunk}`
+      )
+}
+
+/**
+ * An attachment part: `Content-Type` with `name`, base64 transfer encoding, and an `attachment`
+ * disposition with `filename`. A short printable-ASCII name stays a quoted-string on one line;
+ * any other name is folded as RFC 2047 words in `name` and RFC 2231 `filename*` continuations.
+ */
+const attachmentPart = (attachment: GmailDraftMimeAttachment): string => {
+  const plain = printableAscii.test(attachment.filename)
+  const typeLine = `Content-Type: ${attachment.mimeType}; name=${quotedParameter(attachment.filename)}`
+
+  const dispositionLine = `Content-Disposition: attachment; filename=${quotedParameter(attachment.filename)}`
+
+  return [
+    plain && typeLine.length <= headerLineMaxLength
+      ? typeLine
+      : `Content-Type: ${attachment.mimeType};\r\n name="${encodedWords(attachment.filename).join('\r\n ')}"`,
+    'Content-Transfer-Encoding: base64',
+    plain && dispositionLine.length <= headerLineMaxLength
+      ? dispositionLine
+      : `Content-Disposition: attachment;\r\n ${extendedParameter('filename', attachment.filename).join(';\r\n ')}`,
+    '',
+    base64Lines(attachment.contentBase64)
+  ].join('\r\n')
+}
+
+/**
+ * Like `gmailDraftBodyMime`, but with attachments: a 7-bit `multipart/mixed` whose first part is
+ * the draft body entity (the same `multipart/alternative` or text/html part), followed by one
+ * base64 part per attachment, in order. Without attachments it is exactly `gmailDraftBodyMime`.
+ */
+export const gmailDraftMime = (
+  body: string,
+  contentType: GmailDraftContentType,
+  attachments: ReadonlyArray<GmailDraftMimeAttachment>
+): string => {
+  if (attachments.length === 0) return gmailDraftBodyMime(body, contentType)
+
+  const delimiter = `--${gmailDraftMixedBoundary}`
+
+  return [
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${gmailDraftMixedBoundary}"`,
+    '',
+    delimiter,
+    gmailDraftBodyEntity(body, contentType),
+    ...attachments.flatMap(attachment => [delimiter, attachmentPart(attachment)]),
     `${delimiter}--`
   ].join('\r\n')
 }
