@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/conformance",
-  "version": "0.1.0-canary.104",
+  "version": "0.1.0-canary.105",
   "description": "Experimental Effect toolkit to record, replay, and fault-inject HTTP wire fixtures, and to define and run conformance cases.",
   "license": "MIT",
   "type": "module",
