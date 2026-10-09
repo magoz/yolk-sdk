@@ -23,7 +23,11 @@ import {
   gmailDraftUpdateAction,
   googleOAuthSlotId
 } from '@yolk-sdk/connectors/google'
-import { gmailDraftBodyMime, gmailDraftMixedBoundary } from '../src/google/gmail-draft-mime.ts'
+import {
+  gmailDraftBodyMime,
+  gmailDraftMime,
+  gmailDraftMixedBoundary
+} from '../src/google/gmail-draft-mime.ts'
 import {
   boundaryOf,
   contentTypeName,
@@ -329,7 +333,7 @@ describe('Gmail draft attachments', () => {
       })
   )
 
-  it.effect('keeps 8-bit header MIME on the JSON endpoint, where the string port is exact', () =>
+  it.effect('uploads raw non-ASCII header text too, as the UTF-8 text raw would carry', () =>
     Effect.gen(function* () {
       const host = makeHost([draftAnswer])
 
@@ -341,13 +345,9 @@ describe('Gmail draft attachments', () => {
         .pipe(Effect.provide(host.layer))
 
       expect(host.requests).toHaveLength(1)
-      expect(host.requests[0]?.url).toBe('https://gmail.googleapis.com/gmail/v1/users/me/drafts')
+      expect(host.requests[0]?.url).toBe(`${uploadUrl}?uploadType=multipart`)
 
-      const body = yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(Schema.Struct({ message: Schema.Struct({ raw: Schema.String }) }))
-      )(host.requests[0]?.body)
-
-      const mime = Buffer.from(body.message.raw, 'base64url').toString('utf8')
+      const { mime } = parseUpload(host.requests[0])
 
       expect(mime.startsWith('To: åsa@exämple.se\r\nCc: copy@example.com\r\n')).toBe(true)
       expectAttachments(multipartParts(splitEntity(mime).body, gmailDraftMixedBoundary).slice(1))
@@ -395,6 +395,7 @@ describe('Gmail draft attachments', () => {
         [{ ...valid, filename: 'a\r\nBcc: x@example.com' }],
         [{ ...valid, filename: 'a\u0000.txt' }],
         [{ ...valid, filename: 'fdp.\u202eexe' }],
+        [{ ...valid, filename: 'a\ud800.txt' }],
         [{ ...valid, filename: 'x'.repeat(256) }],
         [{ ...valid, mimeType: 'text/plain; charset=UTF-8' }],
         [{ ...valid, mimeType: 'text' }],
@@ -542,6 +543,61 @@ describe('Gmail draft attachments', () => {
       expect(parseUpload(host.requests[0]).mime.length).toBeLessThanOrEqual(
         gmailDraftMessageMaxBytes
       )
+    })
+  )
+
+  it.effect('rejects a reply its derived headers push over 35 MiB before writing', () =>
+    Effect.gen(function* () {
+      const big = GmailDraftAttachment.make({
+        filename: 'big.bin',
+        mimeType: 'application/octet-stream',
+        contentBase64: Buffer.alloc(gmailDraftAttachmentsMaxBytes).toString('base64')
+      })
+
+      const bodyMimeLength = (length: number) =>
+        gmailDraftMime('a'.repeat(length), 'text', [big]).length
+
+      // A body whose MIME with the attachment fits, less than 200 bytes below the cap.
+      let length = 0
+
+      for (let gap = gmailDraftMessageMaxBytes - bodyMimeLength(length); gap >= 200;) {
+        length += Math.max(1, Math.floor((gap - 100) / 3))
+        gap = gmailDraftMessageMaxBytes - bodyMimeLength(length)
+      }
+
+      expect(bodyMimeLength(length)).toBeLessThanOrEqual(gmailDraftMessageMaxBytes)
+
+      const host = makeHost([
+        json({
+          id: 'msg_1',
+          threadId: 'thread_1',
+          payload: {
+            headers: [
+              { name: 'From', value: 'lead@example.com' },
+              { name: 'Message-ID', value: '<msg_1@example.com>' },
+              { name: 'References', value: '<ancestor@example.com> '.repeat(20).trim() },
+              { name: 'Subject', value: 'Hej' }
+            ]
+          }
+        }),
+        json({ emailAddress: 'elina@speldosa.app' }),
+        json({ sendAs: [{ sendAsEmail: 'elina@speldosa.app' }] }),
+        draftAnswer
+      ])
+
+      const result = yield* gmailDraftReplyAction
+        .execute({
+          integration,
+          input: { messageId: 'msg_1', body: 'a'.repeat(length), attachments: [big] }
+        })
+        .pipe(Effect.provide(host.layer), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { cause: 'validation_failed', underlying: { reason: 'too_large' } }
+      })
+      // The reads ran (the headers come from them); the draft was never written.
+      expect(host.requests.map(request => request.method)).toEqual(['GET', 'GET', 'GET'])
     })
   )
 

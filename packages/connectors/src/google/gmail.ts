@@ -270,11 +270,23 @@ const gmailMultipartBoundary = (prefix: string, parts: ReadonlyArray<string>) =>
   return boundary
 }
 
+/** The JSON resource metadata of an upload: a message send, or a draft create or update. */
+type GmailUploadMetadata =
+  | { readonly threadId?: string }
+  | {
+      readonly id?: string
+      readonly message: { readonly threadId?: string }
+    }
+
 /**
  * One simple multipart media upload (`uploadType=multipart`): `multipart/related` with the JSON
- * resource metadata, then the 7-bit MIME as `message/rfc822`. The boundary occurs in neither.
+ * resource metadata, then the MIME as `message/rfc822`. The boundary occurs in neither.
  */
-const gmailMultipartUploadBody = (boundaryPrefix: string, metadata: object, mime: string) => {
+const gmailMultipartUploadBody = (
+  boundaryPrefix: string,
+  metadata: GmailUploadMetadata,
+  mime: string
+) => {
   const json = JSON.stringify(metadata)
   const boundary = gmailMultipartBoundary(boundaryPrefix, [json, mime])
 
@@ -326,10 +338,11 @@ export const gmailDraftMessageMaxBytes = gmailSendMessageMaxBytes
 
 /**
  * 1 to 255 characters; no control characters (C0, DEL, C1), no `/` or `\`, no bidirectional
- * overrides, isolates, or marks, and no line or paragraph separators.
+ * overrides, isolates, or marks, no line or paragraph separators, and no lone surrogates (UTF-8
+ * encoding would silently replace them).
  */
 const gmailDraftAttachmentFilenamePattern =
-  /^[^\u0000-\u001f\u007f-\u009f/\\\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]{1,255}$/u
+  /^[^\u0000-\u001f\u007f-\u009f/\\\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ud800-\udfff]{1,255}$/u
 
 /** An attachment's file name, as recipients see it. Never a path. */
 export const GmailDraftAttachmentFilename = Schema.String.check(
@@ -1242,10 +1255,10 @@ const gmailDraftTargetRequest = GmailDraftTarget.$match({
 /**
  * The one request writing a draft. Without attachments it is the JSON metadata request
  * (`{ message: { threadId?, raw } }` or `{ id, message: { raw } }`) exactly as before. With
- * attachments, 7-bit MIME (always, unless a header carries raw non-ASCII such as an unencoded
- * address) goes through the multipart media upload with the same metadata, since the JSON
- * endpoint refuses large messages; 8-bit MIME cannot cross the string port exactly and keeps the
- * JSON request, like `gmail.send_message`.
+ * attachments it is the multipart media upload with the same metadata, since the JSON endpoint
+ * refuses large messages. Unlike `gmail.send_message`, whose decoded bytes may be any 8-bit MIME,
+ * a draft's MIME is text the connector wrote, so the string port's UTF-8 encoding carries it
+ * exactly, raw non-ASCII header text (an unencoded address) included, as `raw` would.
  */
 const gmailDraftWriteRequest = (
   token: string,
@@ -1255,7 +1268,7 @@ const gmailDraftWriteRequest = (
 ) => {
   const { method, draftPath, metadata } = gmailDraftTargetRequest(target)
 
-  if (!content.hasAttachments || !hasOnlyAscii(mime)) {
+  if (!content.hasAttachments) {
     return gmailRequest({
       token,
       method,
@@ -2131,7 +2144,7 @@ const gmailDraftBodyGuidance =
   'The body is plain text unless contentType is "html": write each paragraph as one line (never wrap lines by hand) and separate paragraphs with a blank line. Plain text is sent with an HTML rendering of it, so Gmail keeps the lines unwrapped when the draft is sent.'
 
 const gmailDraftAttachmentGuidance =
-  'Optional attachments (at most 10, at most 25 MiB in total) each take filename, mimeType, and contentBase64 (padded standard base64, as gmail.get_attachment returns it).'
+  'Optional attachments (at most 10, at most 25 MiB in total) each take filename (a file name, not a path), mimeType (type/subtype without parameters; not multipart/* or message/*), and contentBase64 (padded standard base64, as gmail.get_attachment returns it).'
 
 export const gmailDraftComposeAction = defineAction({
   id: 'gmail.draft_compose',

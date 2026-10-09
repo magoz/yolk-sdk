@@ -398,25 +398,27 @@ returns, so a fetched attachment can be attached again unchanged.
 - Limits: at most 10 attachments (`gmailDraftAttachmentsMaxItems`), at most 25 MiB decoded in total
   (`gmailDraftAttachmentsMaxBytes`), and at most 35 MiB of decoded MIME
   (`gmailDraftMessageMaxBytes`, Gmail's media upload cap).
-- `filename`: 1 to 255 characters, no control characters, `/`, `\`, bidirectional controls, or line
-  separators, not only dots. `mimeType`: `type/subtype` without parameters; `multipart/*` and
-  `message/*` are refused (send an `.eml` as `application/octet-stream`). `contentBase64`:
-  canonical padded standard base64, no line breaks. An empty array means no attachments.
-- The draft becomes 7-bit `multipart/mixed` (boundary `=_yolk-draft-mixed`): the body exactly as
-  [above](#gmail-draft-bodies) first, then one base64 part per attachment, in order, with lines of
-  at most 76 characters; non-ASCII or long names use RFC 2047 `name` and RFC 2231 `filename*`.
+- `filename`: 1 to 255 characters, no control characters, `/`, `\`, bidirectional controls, line
+  separators, or lone surrogates, not only dots. `mimeType`: `type/subtype` without parameters;
+  `multipart/*` and `message/*` are refused (send an `.eml` as `application/octet-stream`).
+  `contentBase64`: canonical padded standard base64, no line breaks. An empty array means no
+  attachments.
+- The draft body becomes 7-bit `multipart/mixed` (boundary `=_yolk-draft-mixed`): the body exactly
+  as [above](#gmail-draft-bodies) first, then one base64 part per attachment, in order, with lines
+  of at most 76 characters; non-ASCII or long names use RFC 2047 `name` and RFC 2231 `filename*`.
   Headers, send-as checks, and the reply's recipients, `Re:` subject, `In-Reply-To`, `References`,
   and thread stay as without attachments.
 - It is written with one simple multipart media upload, never retried:
   `POST https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts?uploadType=multipart` (an
   update: `PUT .../drafts/{id}?uploadType=multipart`), `multipart/related` with the JSON draft
   metadata (`{ message: { threadId? } }` or `{ id, message: {} }`) and then the `message/rfc822`
-  MIME. Host HTTP adapters must forward that body exactly and accept outgoing bodies up to about
-  35 MiB. MIME with a raw non-ASCII header byte (an unencoded address) keeps the JSON `raw`
-  request, as on `gmail.send_message`.
-- An oversized draft fails before credentials or any request with a `validation_failed`
-  `ConnectorError` whose `underlying` is `{ outcome: 'rejected', retryable: false, reason: 'too_large' }`
-  (a reply checks its body MIME first, and the whole message once its headers are read). Provider
+  MIME. Host HTTP adapters must forward that body exactly as UTF-8 and accept outgoing bodies up to
+  about 35 MiB. Header text left unencoded (such as a non-ASCII address) is uploaded as UTF-8, the
+  same bytes the JSON `raw` request would carry.
+- An oversized draft fails with a `validation_failed` `ConnectorError` whose `underlying` is
+  `{ outcome: 'rejected', retryable: false, reason: 'too_large' }`, before credentials or any
+  request for compose and update. A reply checks its body MIME before any request and the whole
+  message after reading the original (its headers come from it), before writing anything. Provider
   answers map to the usual `gmail_draft_*_failed` failures.
 - Without attachments, drafts are written exactly as before through the JSON endpoint.
   `gmail.draft_update` replaces the whole message: attachments not sent again are removed.
