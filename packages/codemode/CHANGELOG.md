@@ -1,5 +1,13 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.105
+
+### Patch Changes
+
+- c1b73d3: Advance unchanged public packages in lockstep with Gmail draft attachments in `@yolk-sdk/connectors` (optional `attachments` on `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply`) and the matching `@yolk-sdk/emulators` README note: the Google emulator does not emulate the Gmail draft media upload, so a draft with attachments answers its unrecognised 400. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [c1b73d3]
+  - @yolk-sdk/agent@0.1.0-canary.105
+
 ## 0.1.0-canary.104
 
 ### Patch Changes
