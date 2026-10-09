@@ -655,7 +655,12 @@ There is no root export or barrel.
   refused `message.raw` is ever ledgered), and the wrapper's constant-reason `exactQuery` and
   `exactBodyKeys`. It emulates only the Gmail, Calendar, and Drive routes the fifteen Google cases
   (with their cleanup) send, each on its recorded origin (`https://gmail.googleapis.com` for Gmail
-  and the multipart send upload, `https://www.googleapis.com` for Calendar and Drive). The practice
+  and the multipart send upload, `https://www.googleapis.com` for Calendar and Drive). Draft
+  attachments are not emulated: `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply`
+  with `attachments` write through the draft media upload (`POST`
+  `/upload/gmail/v1/users/me/drafts?uploadType=multipart`, `PUT`
+  `/upload/gmail/v1/users/me/drafts/{id}?uploadType=multipart`), which no fixture records, so it
+  answers the constant unrecognised 400 until a draft-attachment case is recorded live. The practice
   send is irreversible on Gmail: the emulator only records the sent message in the state (never
   delivered) and accepts only the recorded 7-bit message whose sole recipient header is
   `To: <the seeded practiceAddress>`, and only while that address is the recorded

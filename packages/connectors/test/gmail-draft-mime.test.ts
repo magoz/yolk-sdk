@@ -3,8 +3,19 @@ import {
   encodeGmailQuotedPrintable,
   gmailDraftAlternativeBoundary,
   gmailDraftBodyMime,
-  gmailDraftHtmlFromText
+  gmailDraftHtmlFromText,
+  gmailDraftMime,
+  gmailDraftMixedBoundary
 } from '../src/google/gmail-draft-mime.ts'
+import {
+  boundaryOf,
+  contentTypeName,
+  decodeBase64Lines,
+  dispositionFilename,
+  headerOf,
+  multipartParts,
+  splitEntity
+} from './gmail-mime-parse.ts'
 
 /** RFC 2045 quoted-printable decoding, written independently of the encoder under test. */
 const decodeQuotedPrintable = (encoded: string): string => {
@@ -216,5 +227,187 @@ describe('Gmail draft body MIME', () => {
   it('serializes an empty body', () => {
     expectRoundTrip('')
     expect(gmailDraftHtmlFromText('')).toBe('<div dir="ltr"></div>')
+  })
+})
+
+const bytesOf = (length: number, seed: number) =>
+  Uint8Array.from({ length }, (_, index) => (index * 31 + seed) % 256)
+
+const attachmentOf = (filename: string, mimeType: string, bytes: Uint8Array) => ({
+  filename,
+  mimeType,
+  contentBase64: Buffer.from(bytes).toString('base64')
+})
+
+/** The body entity and attachment parts of a mixed draft MIME, asserting its top-level framing. */
+const mixedParts = (mime: string) => {
+  const head = `MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${gmailDraftMixedBoundary}"\r\n\r\n`
+
+  expect(mime.startsWith(head)).toBe(true)
+
+  return multipartParts(mime.slice(head.length), gmailDraftMixedBoundary)
+}
+
+describe('Gmail draft MIME with attachments', () => {
+  it('is exactly the body MIME without attachments', () => {
+    const contentTypes: ReadonlyArray<'text' | 'html'> = ['text', 'html']
+
+    for (const contentType of contentTypes) {
+      expect(gmailDraftMime('Hej Åsa', contentType, [])).toBe(
+        gmailDraftBodyMime('Hej Åsa', contentType)
+      )
+    }
+  })
+
+  it('serializes a text body and one attachment as multipart/mixed, byte for byte', () => {
+    expect(
+      gmailDraftMime('Hej', 'text', [
+        attachmentOf('a.txt', 'text/plain', new TextEncoder().encode('hi'))
+      ])
+    ).toBe(
+      [
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="=_yolk-draft-mixed"',
+        '',
+        '--=_yolk-draft-mixed',
+        'Content-Type: multipart/alternative; boundary="=_yolk-draft-alternative"',
+        '',
+        '--=_yolk-draft-alternative',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: quoted-printable',
+        '',
+        'Hej',
+        '--=_yolk-draft-alternative',
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: quoted-printable',
+        '',
+        '<div dir=3D"ltr">Hej</div>',
+        '--=_yolk-draft-alternative--',
+        '--=_yolk-draft-mixed',
+        'Content-Type: text/plain; name="a.txt"',
+        'Content-Transfer-Encoding: base64',
+        'Content-Disposition: attachment; filename="a.txt"',
+        '',
+        'aGk=',
+        '--=_yolk-draft-mixed--'
+      ].join('\r\n')
+    )
+  })
+
+  it('keeps the body first, then every attachment in order with its exact bytes', () => {
+    const body = 'Hej Åsa,\n\nHär är filerna.'
+    const pdf = bytesOf(10_000, 7)
+    const empty = new Uint8Array()
+    const odd = bytesOf(77, 3)
+
+    const attachments = [
+      attachmentOf('offert 2026.pdf', 'application/pdf', pdf),
+      attachmentOf('tom.bin', 'application/octet-stream', empty),
+      attachmentOf('b.csv', 'text/csv', odd)
+    ]
+
+    const mime = gmailDraftMime(body, 'text', attachments)
+    const [first, ...rest] = mixedParts(mime)
+
+    // The first part is the draft body entity, unchanged.
+    expect(`MIME-Version: 1.0\r\n${first?.headers.join('\r\n')}\r\n\r\n${first?.body}`).toBe(
+      gmailDraftBodyMime(body, 'text')
+    )
+    expect(rest).toHaveLength(3)
+
+    for (const [index, part] of rest.entries()) {
+      const expected = attachments[index]
+      const contentType = headerOf(part, 'Content-Type')
+
+      expect(contentType?.split(';')[0]).toBe(expected?.mimeType)
+      expect(contentTypeName(contentType)).toBe(expected?.filename)
+      expect(headerOf(part, 'Content-Transfer-Encoding')).toBe('base64')
+      expect(headerOf(part, 'Content-Disposition')?.startsWith('attachment;')).toBe(true)
+      expect(dispositionFilename(headerOf(part, 'Content-Disposition'))).toBe(expected?.filename)
+      expect(Buffer.from(decodeBase64Lines(part.body)).toString('base64')).toBe(
+        expected?.contentBase64
+      )
+    }
+
+    expect(decodeBase64Lines(rest[0]?.body ?? '')).toEqual(pdf)
+    expect(decodeBase64Lines(rest[1]?.body ?? '')).toEqual(empty)
+    expect(decodeBase64Lines(rest[2]?.body ?? '')).toEqual(odd)
+
+    for (const line of mime.split('\r\n')) {
+      expect(line).toMatch(/^[\x20-\x7e]*$/u)
+      expect(line.length).toBeLessThanOrEqual(78)
+    }
+  })
+
+  it('keeps an html body as the first part', () => {
+    const mime = gmailDraftMime('<p>Hej</p>', 'html', [
+      attachmentOf('a.bin', 'application/octet-stream', bytesOf(3, 1))
+    ])
+
+    const [first] = mixedParts(mime)
+
+    expect(first?.headers).toEqual([
+      'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: quoted-printable'
+    ])
+    expect(first?.body).toBe('<p>Hej</p>')
+  })
+
+  it('encodes non-ASCII and long names as RFC 2047 name and RFC 2231 filename*', () => {
+    const names = [
+      'Årsredovisning för Ängelholms Fönsterputs AB 2026 – slutlig version.pdf',
+      '😀 emoji "quoted" \'apostrophe\' 100%.txt',
+      `${'x'.repeat(120)}.txt`,
+      'кириллица.docx'
+    ]
+
+    for (const filename of names) {
+      const mime = gmailDraftMime('', 'text', [
+        attachmentOf(filename, 'application/octet-stream', bytesOf(5, 2))
+      ])
+
+      const raw = mime.split(`--${gmailDraftMixedBoundary}\r\n`)[2] ?? ''
+      const part = splitEntity(raw)
+
+      expect(raw).toContain('Content-Type: application/octet-stream;\r\n name="=?UTF-8?B?')
+      expect(raw).toContain('Content-Disposition: attachment;\r\n filename*')
+      expect(contentTypeName(headerOf(part, 'Content-Type'))).toBe(filename)
+      expect(dispositionFilename(headerOf(part, 'Content-Disposition'))).toBe(filename)
+
+      for (const line of mime.split('\r\n')) {
+        expect(line).toMatch(/^[\x20-\x7e]*$/u)
+        expect(line.length).toBeLessThanOrEqual(78)
+      }
+    }
+  })
+
+  it('quotes printable ASCII names with quotes and backslashes', () => {
+    const filename = 'say "hi" \\ bye.txt'
+    const mime = gmailDraftMime('', 'text', [attachmentOf(filename, 'text/plain', bytesOf(1, 0))])
+
+    expect(mime).toContain('Content-Type: text/plain; name="say \\"hi\\" \\\\ bye.txt"')
+    expect(mime).toContain('Content-Disposition: attachment; filename="say \\"hi\\" \\\\ bye.txt"')
+
+    const part = splitEntity(mime.split(`--${gmailDraftMixedBoundary}\r\n`)[2] ?? '')
+
+    expect(contentTypeName(headerOf(part, 'Content-Type'))).toBe(filename)
+    expect(dispositionFilename(headerOf(part, 'Content-Disposition'))).toBe(filename)
+  })
+
+  it('never lets the body or a name produce a mixed boundary delimiter', () => {
+    const hostile = `--${gmailDraftMixedBoundary}\n--${gmailDraftMixedBoundary}--`
+
+    const mime = gmailDraftMime(hostile, 'text', [
+      attachmentOf(hostile.replaceAll('\n', ' '), 'text/plain', new TextEncoder().encode(hostile))
+    ])
+
+    expect(
+      mime.split('\r\n').filter(line => line.startsWith(`--${gmailDraftMixedBoundary}`))
+    ).toEqual([
+      `--${gmailDraftMixedBoundary}`,
+      `--${gmailDraftMixedBoundary}`,
+      `--${gmailDraftMixedBoundary}--`
+    ])
+    expect(boundaryOf(headerOf(splitEntity(mime), 'Content-Type'))).toBe(gmailDraftMixedBoundary)
   })
 })

@@ -1327,7 +1327,10 @@ describe('unrecognised requests are ledgered with constant text only', () => {
     // An event id takes no `%`: a percent-encoded bearer beside `100%` is no route shape.
     ['GET', `${cal}/${encodeURIComponent(`${token.replace('S', '%53')}100%`)}`],
     ['HEAD', `${gm}/messages/${workMessage}?format=minimal`],
-    ['PROPFIND', `${gm}/messages/${workMessage}`]
+    ['PROPFIND', `${gm}/messages/${workMessage}`],
+    // Draft attachments upload the draft MIME; no fixture records it, so it is not emulated.
+    ['POST', `${gmailOrigin}/upload/gmail/v1/users/me/drafts?uploadType=multipart`],
+    ['PUT', `${gmailOrigin}/upload/gmail/v1/users/me/drafts/r-1?uploadType=multipart`]
   ] as const)('%s %s', async (method, url) => {
     const target = await emulator()
     const before = target.snapshot()

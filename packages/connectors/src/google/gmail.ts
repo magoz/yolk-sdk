@@ -9,6 +9,7 @@ import {
 import { defineAction } from '../action.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
+import type { ConnectorIntegration } from '../integration.ts'
 import {
   ConnectorHttpClient,
   ConnectorHttpRequest,
@@ -16,7 +17,7 @@ import {
   type ConnectorHttpClientApi
 } from '../http.ts'
 import { ActionResult } from '../result.ts'
-import { gmailDraftBodyMime } from './gmail-draft-mime.ts'
+import { gmailDraftMime } from './gmail-draft-mime.ts'
 import {
   GoogleGmailComposeOAuthCredentialSlot,
   GoogleGmailDraftReplyOAuthCredentialSlot,
@@ -259,19 +260,35 @@ const gmailSendRejectionMessages: Record<GmailSendRejection, string> = {
 }
 
 // Random candidates make collisions negligible; the inclusion check makes them impossible.
-const gmailMultipartBoundary = (mime: string) => {
-  let boundary = `yolk_gmail_send_${crypto.randomUUID().replaceAll('-', '')}`
+const gmailMultipartBoundary = (prefix: string, parts: ReadonlyArray<string>) => {
+  let boundary = `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
 
-  while (mime.includes(boundary)) {
-    boundary = `yolk_gmail_send_${crypto.randomUUID().replaceAll('-', '')}`
+  while (parts.some(part => part.includes(boundary))) {
+    boundary = `${prefix}${crypto.randomUUID().replaceAll('-', '')}`
   }
 
   return boundary
 }
 
-const gmailMultipartSendBody = (mime: string, threadId: string | undefined) => {
-  const boundary = gmailMultipartBoundary(mime)
-  const metadata = threadId === undefined ? {} : { threadId }
+/** The JSON resource metadata of an upload: a message send, or a draft create or update. */
+type GmailUploadMetadata =
+  | { readonly threadId?: string }
+  | {
+      readonly id?: string
+      readonly message: { readonly threadId?: string }
+    }
+
+/**
+ * One simple multipart media upload (`uploadType=multipart`): `multipart/related` with the JSON
+ * resource metadata, then the MIME as `message/rfc822`. The boundary occurs in neither.
+ */
+const gmailMultipartUploadBody = (
+  boundaryPrefix: string,
+  metadata: GmailUploadMetadata,
+  mime: string
+) => {
+  const json = JSON.stringify(metadata)
+  const boundary = gmailMultipartBoundary(boundaryPrefix, [json, mime])
 
   return {
     contentType: `multipart/related; boundary=${boundary}`,
@@ -279,7 +296,7 @@ const gmailMultipartSendBody = (mime: string, threadId: string | undefined) => {
       `--${boundary}`,
       'Content-Type: application/json; charset=UTF-8',
       '',
-      JSON.stringify(metadata),
+      json,
       `--${boundary}`,
       'Content-Type: message/rfc822',
       '',
@@ -288,6 +305,15 @@ const gmailMultipartSendBody = (mime: string, threadId: string | undefined) => {
     ].join('\r\n')
   }
 }
+
+const gmailMultipartSendBody = (mime: string, threadId: string | undefined) =>
+  gmailMultipartUploadBody('yolk_gmail_send_', threadId === undefined ? {} : { threadId }, mime)
+
+const gmailDraftUploadBaseUrl = 'https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts'
+
+/** Bytes `mime` occupies as UTF-8 (its length when 7-bit). */
+const mimeByteLength = (mime: string) =>
+  hasOnlyAscii(mime) ? mime.length : new TextEncoder().encode(mime).byteLength
 
 /**
  * How a draft `body` is read: `text` (the default when omitted) is plain text, sent as
@@ -298,6 +324,139 @@ export const GmailDraftContentType = Schema.Literals(['text', 'html'])
 
 export type GmailDraftContentType = typeof GmailDraftContentType.Type
 
+/** Most attachments one draft may carry. */
+export const gmailDraftAttachmentsMaxItems = 10
+
+/** Most decoded attachment bytes one draft may carry, summed over its attachments (25 MiB). */
+export const gmailDraftAttachmentsMaxBytes = 25 * 1024 * 1024
+
+/**
+ * Gmail's documented `drafts.create`/`drafts.update` media upload cap (35 MB), applied to the
+ * decoded MIME of a draft with attachments.
+ */
+export const gmailDraftMessageMaxBytes = gmailSendMessageMaxBytes
+
+/**
+ * 1 to 255 characters; no control characters (C0, DEL, C1), no `/` or `\`, no bidirectional
+ * overrides, isolates, or marks, no line or paragraph separators, and no lone surrogates (UTF-8
+ * encoding would silently replace them).
+ */
+const gmailDraftAttachmentFilenamePattern =
+  /^[^\u0000-\u001f\u007f-\u009f/\\\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ud800-\udfff]{1,255}$/u
+
+/** An attachment's file name, as recipients see it. Never a path. */
+export const GmailDraftAttachmentFilename = Schema.String.check(
+  Schema.isPattern(gmailDraftAttachmentFilenamePattern),
+  Schema.makeFilter((name: string) => !/^\.+$/u.test(name), {
+    expected: 'a file name other than only dots'
+  })
+).annotate({
+  description:
+    'File name shown to recipients, such as report.pdf: no path separators or control characters.'
+})
+
+export type GmailDraftAttachmentFilename = typeof GmailDraftAttachmentFilename.Type
+
+/** RFC 6838 `type/subtype` restricted names, each at most 127 characters; no parameters. */
+const gmailDraftAttachmentMimeTypePattern =
+  /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/u
+
+/**
+ * An attachment's media type, such as `application/pdf`. Composite `multipart/*` and `message/*`
+ * types are refused: MIME forbids base64 for them (send an `.eml` as `application/octet-stream`).
+ */
+export const GmailDraftAttachmentMimeType = Schema.String.check(
+  Schema.isPattern(gmailDraftAttachmentMimeTypePattern),
+  Schema.makeFilter((mimeType: string) => !/^(?:multipart|message)\//iu.test(mimeType), {
+    expected: 'a media type other than multipart/* or message/*'
+  })
+).annotate({ description: 'Media type without parameters, such as application/pdf.' })
+
+export type GmailDraftAttachmentMimeType = typeof GmailDraftAttachmentMimeType.Type
+
+const gmailBase64Pattern =
+  '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$'
+
+// Linear equivalent of gmailBase64Pattern (padded, canonical pad bits), for the same V8 stack
+// reason as isCanonicalBase64Url.
+const isCanonicalBase64 = (value: string) => {
+  const { unpadded, padding } = splitBase64Padding(value)
+
+  if (!/^[A-Za-z0-9+/]*$/.test(unpadded)) return false
+
+  switch (unpadded.length % 4) {
+    case 0:
+      return padding === 0
+    case 2:
+      return /[AQgw]$/.test(unpadded) && padding === 2
+    case 3:
+      return /[AEIMQUYcgkosw048]$/.test(unpadded) && padding === 1
+    default:
+      return false
+  }
+}
+
+/** Decoded byte length of canonical (padded) base64. */
+const base64DecodedLength = (value: string) =>
+  (value.length / 4) * 3 - splitBase64Padding(value).padding
+
+/** The file's bytes as canonical, padded standard base64 (RFC 4648 section 4), without line breaks. */
+export const GmailDraftAttachmentBase64 = Schema.String.check(
+  Schema.makeFilter(isCanonicalBase64, {
+    expected: `a string matching the RegExp ${gmailBase64Pattern}`,
+    toJsonSchema: () => ({ pattern: gmailBase64Pattern }),
+    arbitraryConstraint: { patterns: [{ source: gmailBase64Pattern, flags: '' }] }
+  })
+).annotate({ description: 'File content as padded standard base64, without line breaks.' })
+
+export type GmailDraftAttachmentBase64 = typeof GmailDraftAttachmentBase64.Type
+
+/**
+ * One draft attachment: the `filename`/`mimeType` pair `gmail.list_attachments` reports and the
+ * standard-base64 `contentBase64` `gmail.get_attachment` returns, so a fetched attachment can be
+ * attached again unchanged.
+ */
+export class GmailDraftAttachment extends Schema.Class<GmailDraftAttachment>(
+  'GmailDraftAttachment'
+)({
+  filename: GmailDraftAttachmentFilename,
+  mimeType: GmailDraftAttachmentMimeType,
+  contentBase64: GmailDraftAttachmentBase64
+}) {}
+
+const gmailDraftAttachmentsMaxItemsCheck = Schema.isMaxLength(gmailDraftAttachmentsMaxItems)
+
+const gmailDraftAttachmentsMaxBytesCheck = Schema.makeFilter(
+  (attachments: ReadonlyArray<{ readonly contentBase64: string }>) =>
+    attachments.reduce(
+      (total, attachment) => total + base64DecodedLength(attachment.contentBase64),
+      0
+    ) <= gmailDraftAttachmentsMaxBytes,
+  { expected: 'attachments of at most 25 MiB in total (decoded)' }
+)
+
+/**
+ * At most 10 attachments whose decoded bytes sum to at most 25 MiB, in display order. Empty means
+ * none: the draft is written exactly as without the field.
+ */
+export const GmailDraftAttachments = Schema.Array(GmailDraftAttachment)
+  .check(gmailDraftAttachmentsMaxItemsCheck, gmailDraftAttachmentsMaxBytesCheck)
+  .annotate({
+    description: 'Optional files to attach: at most 10, at most 25 MiB in total (decoded).'
+  })
+
+export type GmailDraftAttachments = typeof GmailDraftAttachments.Type
+
+/**
+ * Every attachment field checked again from plain fields: a typed caller's decoded Class
+ * instances are accepted as they are (and stay mutable at runtime), and attachment fields reach
+ * MIME headers.
+ */
+const GmailDraftAttachmentsRecheck = Schema.Array(Schema.Struct(GmailDraftAttachment.fields)).check(
+  gmailDraftAttachmentsMaxItemsCheck,
+  gmailDraftAttachmentsMaxBytesCheck
+)
+
 export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>(
   'GmailDraftComposeInput'
 )({
@@ -307,7 +466,8 @@ export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>
   contentType: Schema.optional(GmailDraftContentType),
   cc: Schema.optional(Schema.Array(Schema.String)),
   bcc: Schema.optional(Schema.Array(Schema.String)),
-  from: Schema.optional(Schema.String)
+  from: Schema.optional(Schema.String),
+  attachments: Schema.optional(GmailDraftAttachments)
 }) {}
 
 export class GmailDraftReplyInput extends Schema.Class<GmailDraftReplyInput>(
@@ -316,7 +476,8 @@ export class GmailDraftReplyInput extends Schema.Class<GmailDraftReplyInput>(
   messageId: Schema.String,
   body: Schema.String,
   contentType: Schema.optional(GmailDraftContentType),
-  from: Schema.optional(Schema.String)
+  from: Schema.optional(Schema.String),
+  attachments: Schema.optional(GmailDraftAttachments)
 }) {}
 
 export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
@@ -329,7 +490,8 @@ export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
   contentType: Schema.optional(GmailDraftContentType),
   cc: Schema.optional(Schema.Array(Schema.String)),
   bcc: Schema.optional(Schema.Array(Schema.String)),
-  from: Schema.optional(Schema.String)
+  from: Schema.optional(Schema.String),
+  attachments: Schema.optional(GmailDraftAttachments)
 }) {}
 
 export class GmailListAttachmentsInput extends Schema.Class<GmailListAttachmentsInput>(
@@ -979,31 +1141,184 @@ const composeGmailQuery = (input: {
   return `(${input.query}) ${suffix}`
 }
 
-/** A draft's MIME, base64url-encoded: address, subject, and threading headers, then the body. */
-const rawEmail = (input: {
+/** A draft's address, subject, and threading header lines. */
+const draftHeaderLines = (input: {
   readonly to: ReadonlyArray<string>
   readonly subject: string
-  readonly body: string
-  readonly contentType?: GmailDraftContentType | undefined
-  readonly cc?: ReadonlyArray<string>
-  readonly bcc?: ReadonlyArray<string>
-  readonly from?: string
-  readonly inReplyTo?: string
-  readonly references?: string
-}) => {
-  const headers = [
-    ...(input.from === undefined ? [] : [`From: ${encodeEmailAddress(input.from)}`]),
-    ...(input.to.length === 0 ? [] : [`To: ${encodeAddressList(input.to)}`]),
-    ...(input.cc === undefined ? [] : [`Cc: ${encodeAddressList(input.cc)}`]),
-    ...(input.bcc === undefined ? [] : [`Bcc: ${encodeAddressList(input.bcc)}`]),
-    `Subject: ${encodeRfc2047(input.subject)}`,
-    ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${sanitizeHeader(input.inReplyTo)}`]),
-    ...(input.references === undefined ? [] : [`References: ${sanitizeHeader(input.references)}`]),
-    gmailDraftBodyMime(input.body, input.contentType ?? 'text')
-  ]
+  readonly cc?: ReadonlyArray<string> | undefined
+  readonly bcc?: ReadonlyArray<string> | undefined
+  readonly from?: string | undefined
+  readonly inReplyTo?: string | undefined
+  readonly references?: string | undefined
+}): ReadonlyArray<string> => [
+  ...(input.from === undefined ? [] : [`From: ${encodeEmailAddress(input.from)}`]),
+  ...(input.to.length === 0 ? [] : [`To: ${encodeAddressList(input.to)}`]),
+  ...(input.cc === undefined ? [] : [`Cc: ${encodeAddressList(input.cc)}`]),
+  ...(input.bcc === undefined ? [] : [`Bcc: ${encodeAddressList(input.bcc)}`]),
+  `Subject: ${encodeRfc2047(input.subject)}`,
+  ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${sanitizeHeader(input.inReplyTo)}`]),
+  ...(input.references === undefined ? [] : [`References: ${sanitizeHeader(input.references)}`])
+]
 
-  return base64UrlEncode(headers.join('\r\n'))
+/**
+ * A draft's content: its body MIME (from `MIME-Version` on; with attachments a 7-bit
+ * `multipart/mixed`) and whether it carries attachments (an empty list carries none).
+ */
+type GmailDraftContent = { readonly bodyMime: string; readonly hasAttachments: boolean }
+
+/** A draft input's content, its attachments checked again first (`validation_failed`). */
+const gmailDraftContent = (
+  integration: ConnectorIntegration,
+  actionId: string,
+  input: {
+    readonly body: string
+    readonly contentType?: GmailDraftContentType | undefined
+    readonly attachments?: ReadonlyArray<GmailDraftAttachment> | undefined
+  }
+) =>
+  Schema.decodeUnknownEffect(GmailDraftAttachmentsRecheck)(input.attachments ?? []).pipe(
+    Effect.mapError(
+      error =>
+        new ConnectorError({
+          cause: 'validation_failed',
+          connectorId: integration.connectorId,
+          actionId,
+          message: `Invalid input for action: ${actionId}`,
+          underlying: error
+        })
+    ),
+    Effect.map((attachments): GmailDraftContent => ({
+      bodyMime: gmailDraftMime(input.body, input.contentType ?? 'text', attachments),
+      hasAttachments: attachments.length > 0
+    }))
+  )
+
+/** A draft's complete MIME: its header lines, then its body MIME. */
+const gmailDraftMessageMime = (headers: ReadonlyArray<string>, content: GmailDraftContent) =>
+  [...headers, content.bodyMime].join('\r\n')
+
+/**
+ * Refuse, before anything is written, a draft with attachments whose decoded MIME (`mime`, or
+ * only its body MIME before the reply headers are known) exceeds Gmail's 35 MB upload cap.
+ * Drafts without attachments are never checked, so they behave exactly as before.
+ */
+const rejectOversizedGmailDraft = (
+  integration: ConnectorIntegration,
+  actionId: string,
+  content: GmailDraftContent,
+  mime: string
+) =>
+  content.hasAttachments && mimeByteLength(mime) > gmailDraftMessageMaxBytes
+    ? Effect.fail(
+        new ConnectorError({
+          cause: 'validation_failed',
+          connectorId: integration.connectorId,
+          actionId,
+          message:
+            'Gmail draft rejected before writing: the message with its attachments exceeds 35 MiB. Attach fewer or smaller files.',
+          underlying: { outcome: 'rejected', retryable: false, reason: 'too_large' }
+        })
+      )
+    : Effect.void
+
+/** Where a draft is written: a new draft (optionally in a thread), or an existing one replaced. */
+type GmailDraftTarget = Data.TaggedEnum<{
+  Create: { readonly threadId?: string | undefined }
+  Update: { readonly draftId: string }
+}>
+
+const GmailDraftTarget = Data.taggedEnum<GmailDraftTarget>()
+
+/** A target's method, draft path suffix, and the JSON draft metadata the request carries. */
+type GmailDraftTargetRequest = {
+  readonly method: 'POST' | 'PUT'
+  readonly draftPath: string
+  readonly metadata: {
+    readonly id?: string
+    readonly message: { readonly threadId?: string }
+  }
 }
+
+const gmailDraftTargetRequest = GmailDraftTarget.$match({
+  Create: ({ threadId }): GmailDraftTargetRequest => ({
+    method: 'POST',
+    draftPath: '',
+    metadata: { message: threadId === undefined ? {} : { threadId } }
+  }),
+  Update: ({ draftId }): GmailDraftTargetRequest => ({
+    method: 'PUT',
+    draftPath: `/${encodeURIComponent(draftId)}`,
+    metadata: { id: draftId, message: {} }
+  })
+})
+
+/**
+ * The one request writing a draft. Without attachments it is the JSON metadata request
+ * (`{ message: { threadId?, raw } }` or `{ id, message: { raw } }`) exactly as before. With
+ * attachments it is the multipart media upload with the same metadata, since the JSON endpoint
+ * refuses large messages. Unlike `gmail.send_message`, whose decoded bytes may be any 8-bit MIME,
+ * a draft's MIME is text the connector wrote, so the string port's UTF-8 encoding carries it
+ * exactly, raw non-ASCII header text (an unencoded address) included, as `raw` would.
+ */
+const gmailDraftWriteRequest = (
+  token: string,
+  target: GmailDraftTarget,
+  content: GmailDraftContent,
+  mime: string
+) => {
+  const { method, draftPath, metadata } = gmailDraftTargetRequest(target)
+
+  if (!content.hasAttachments) {
+    return gmailRequest({
+      token,
+      method,
+      path: `/users/me/drafts${draftPath}`,
+      body: { ...metadata, message: { ...metadata.message, raw: base64UrlEncode(mime) } }
+    })
+  }
+
+  const upload = gmailMultipartUploadBody('yolk_gmail_draft_', metadata, mime)
+
+  return ConnectorHttpRequest.make({
+    method,
+    url: `${gmailDraftUploadBaseUrl}${draftPath}?uploadType=multipart`,
+    headers: { ...googleAuthorizationHeaders(token), 'content-type': upload.contentType },
+    body: upload.body
+  })
+}
+
+/**
+ * Write a draft with exactly one request (never retried) and return Gmail's draft answer
+ * undecoded; a non-2xx answer is the action's usual provider failure.
+ */
+const writeGmailDraft = (input: {
+  readonly token: string
+  readonly target: GmailDraftTarget
+  readonly content: GmailDraftContent
+  readonly mime: string
+  readonly errorCode: string
+  readonly errorMessage: string
+}) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorHttpClient
+
+    const response = yield* http.request(
+      gmailDraftWriteRequest(input.token, input.target, input.content, input.mime)
+    )
+
+    if (!isSuccessStatus(response.status)) {
+      return yield* gmailProviderFailure(
+        input.errorCode,
+        input.errorMessage,
+        response.status,
+        response.body
+      )
+    }
+
+    const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+
+    return ActionResult.success(output)
+  })
 
 const sanitizeHeader = (value: string) => value.replaceAll('\r', ' ').replaceAll('\n', ' ').trim()
 
@@ -1828,13 +2143,21 @@ export const gmailSendMessageAction = defineAction({
 const gmailDraftBodyGuidance =
   'The body is plain text unless contentType is "html": write each paragraph as one line (never wrap lines by hand) and separate paragraphs with a blank line. Plain text is sent with an HTML rendering of it, so Gmail keeps the lines unwrapped when the draft is sent.'
 
+const gmailDraftAttachmentGuidance =
+  'Optional attachments (at most 10, at most 25 MiB in total) each take filename (a file name, not a path), mimeType (type/subtype without parameters; not multipart/* or message/*), and contentBase64 (padded standard base64, as gmail.get_attachment returns it).'
+
 export const gmailDraftComposeAction = defineAction({
   id: 'gmail.draft_compose',
-  description: `Create a Gmail draft message. ${gmailDraftBodyGuidance}`,
+  description: `Create a Gmail draft message. ${gmailDraftBodyGuidance} ${gmailDraftAttachmentGuidance}`,
   inputSchema: GmailDraftComposeInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
+      const content = yield* gmailDraftContent(integration, 'gmail.draft_compose', input)
+      const mime = gmailDraftMessageMime(draftHeaderLines(input), content)
+
+      yield* rejectOversizedGmailDraft(integration, 'gmail.draft_compose', content, mime)
+
       const token = yield* resolveGoogleAccessToken(
         integration,
         GoogleGmailComposeOAuthCredentialSlot
@@ -1844,39 +2167,29 @@ export const gmailDraftComposeAction = defineAction({
 
       if (Predicate.isTagged(fromValidation, 'Failure')) return fromValidation
 
-      const http = yield* ConnectorHttpClient
-
-      const response = yield* http.request(
-        gmailRequest({
-          token,
-          method: 'POST',
-          path: '/users/me/drafts',
-          body: { message: { raw: rawEmail(input) } }
-        })
-      )
-
-      if (!isSuccessStatus(response.status)) {
-        return yield* gmailProviderFailure(
-          'gmail_draft_compose_failed',
-          'Gmail draft compose failed',
-          response.status,
-          response.body
-        )
-      }
-
-      const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
-
-      return ActionResult.success(output)
+      return yield* writeGmailDraft({
+        token,
+        target: GmailDraftTarget.Create({}),
+        content,
+        mime,
+        errorCode: 'gmail_draft_compose_failed',
+        errorMessage: 'Gmail draft compose failed'
+      })
     })
 })
 
 export const gmailDraftUpdateAction = defineAction({
   id: 'gmail.draft_update',
-  description: `Update a Gmail draft message. ${gmailDraftBodyGuidance}`,
+  description: `Update a Gmail draft message. The update replaces the whole message, so attachments not sent again are removed. ${gmailDraftBodyGuidance} ${gmailDraftAttachmentGuidance}`,
   inputSchema: GmailDraftUpdateInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
+      const content = yield* gmailDraftContent(integration, 'gmail.draft_update', input)
+      const mime = gmailDraftMessageMime(draftHeaderLines(input), content)
+
+      yield* rejectOversizedGmailDraft(integration, 'gmail.draft_update', content, mime)
+
       const token = yield* resolveGoogleAccessToken(
         integration,
         GoogleGmailComposeOAuthCredentialSlot
@@ -1886,29 +2199,14 @@ export const gmailDraftUpdateAction = defineAction({
 
       if (Predicate.isTagged(fromValidation, 'Failure')) return fromValidation
 
-      const http = yield* ConnectorHttpClient
-
-      const response = yield* http.request(
-        gmailRequest({
-          token,
-          method: 'PUT',
-          path: `/users/me/drafts/${encodeURIComponent(input.draftId)}`,
-          body: { id: input.draftId, message: { raw: rawEmail(input) } }
-        })
-      )
-
-      if (!isSuccessStatus(response.status)) {
-        return yield* gmailProviderFailure(
-          'gmail_draft_update_failed',
-          'Gmail draft update failed',
-          response.status,
-          response.body
-        )
-      }
-
-      const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
-
-      return ActionResult.success(output)
+      return yield* writeGmailDraft({
+        token,
+        target: GmailDraftTarget.Update({ draftId: input.draftId }),
+        content,
+        mime,
+        errorCode: 'gmail_draft_update_failed',
+        errorMessage: 'Gmail draft update failed'
+      })
     })
 })
 
@@ -1950,11 +2248,17 @@ export const gmailDraftDeleteAction = defineAction({
 
 export const gmailDraftReplyAction = defineAction({
   id: 'gmail.draft_reply',
-  description: `Create a simple Gmail reply draft. ${gmailDraftBodyGuidance}`,
+  description: `Create a simple Gmail reply draft. ${gmailDraftBodyGuidance} ${gmailDraftAttachmentGuidance}`,
   inputSchema: GmailDraftReplyInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
+      const content = yield* gmailDraftContent(integration, 'gmail.draft_reply', input)
+
+      // The reply headers come from the original message: check the body MIME before any request,
+      // and the whole message again once its headers are known.
+      yield* rejectOversizedGmailDraft(integration, 'gmail.draft_reply', content, content.bodyMime)
+
       const token = yield* resolveGoogleAccessToken(
         integration,
         GoogleGmailDraftReplyOAuthCredentialSlot
@@ -2041,40 +2345,27 @@ export const gmailDraftReplyAction = defineAction({
         .filter((value): value is string => value !== undefined && value.trim() !== '')
         .join(' ')
 
-      const draftResponse = yield* http.request(
-        gmailRequest({
-          token,
-          method: 'POST',
-          path: '/users/me/drafts',
-          body: {
-            message: {
-              threadId: original.threadId,
-              raw: rawEmail({
-                to: recipients,
-                subject: replySubject(headerValue(original, 'Subject')),
-                body: input.body,
-                contentType: input.contentType,
-                from: fromAddress,
-                inReplyTo: messageId,
-                references: references === '' ? undefined : references
-              })
-            }
-          }
-        })
+      const mime = gmailDraftMessageMime(
+        draftHeaderLines({
+          to: recipients,
+          subject: replySubject(headerValue(original, 'Subject')),
+          from: fromAddress,
+          inReplyTo: messageId,
+          references: references === '' ? undefined : references
+        }),
+        content
       )
 
-      if (!isSuccessStatus(draftResponse.status)) {
-        return yield* gmailProviderFailure(
-          'gmail_draft_reply_failed',
-          'Gmail draft reply failed',
-          draftResponse.status,
-          draftResponse.body
-        )
-      }
+      yield* rejectOversizedGmailDraft(integration, 'gmail.draft_reply', content, mime)
 
-      const output = yield* decodeJsonResponse(GmailUnknownOutput, draftResponse)
-
-      return ActionResult.success(output)
+      return yield* writeGmailDraft({
+        token,
+        target: GmailDraftTarget.Create({ threadId: original.threadId }),
+        content,
+        mime,
+        errorCode: 'gmail_draft_reply_failed',
+        errorMessage: 'Gmail draft reply failed'
+      })
     })
 })
 
