@@ -4,9 +4,9 @@ Private dogfood app for the Yolk SDK. Commands below run from the checkout root.
 
 ## Worktree provisioning
 
-Use the operator-installed `provision-env` / `sandbox-db` tools used by Herdr; these
+Use the operator-installed `provision env` / `provision db` tools used by Herdr; these
 are not SDK dependencies or a copy of 10x's Factory. The installed tool guide is
-`~/.local/share/sandbox-db/README.md`.
+[the `provision` README](https://github.com/magoz/provision).
 
 Prerequisites:
 
@@ -19,13 +19,13 @@ Prerequisites:
   `SANDBOX_DB_NEON_PROJECT_ID`, and `SANDBOX_DB_PARENT_BRANCH_ID`. Do not silently
   substitute an unrelated global profile.
 
-Root `package.json#provisionEnv.appDir` selects `examples/next`. Herdr uses this
+Root `package.json#provision.appDir` selects `examples/next`. Herdr uses this
 setting when provisioning a requested new worktree. For an existing checkout,
 stop its app servers before an authorized provisioning run:
 
 ```bash
-provision-env --repo "$PWD" --check-vercel-link --non-interactive
-provision-env --repo "$PWD" --database --ttl 7d
+provision env --repo "$PWD" --check-vercel-link --non-interactive
+provision env --repo "$PWD" --database --ttl 7d
 ```
 
 This installs locked dependencies, pulls Development into
@@ -97,8 +97,8 @@ installation or these tests.
 ## Lease verification and lifecycle
 
 ```bash
-sandbox-db status --worktree "$PWD" --lease default
-sandbox-db status --worktree "$PWD" --lease test
+provision db status --worktree "$PWD" --lease default
+provision db status --worktree "$PWD" --lease test
 ```
 
 Before running DB commands, confirm both leases are live, use distinct branches,
@@ -107,20 +107,20 @@ Leases expire automatically; the default and maximum requested lifetime is seven
 days. Renew each slot if needed:
 
 ```bash
-sandbox-db renew --worktree "$PWD" --lease default --ttl 7d
-sandbox-db renew --worktree "$PWD" --lease test --ttl 7d
+provision db renew --worktree "$PWD" --lease default --ttl 7d
+provision db renew --worktree "$PWD" --lease test --ttl 7d
 ```
 
 When finished, stop the app and release only this checkout's disposable slots:
 
 ```bash
-sandbox-db release --worktree "$PWD" --lease default
-sandbox-db release --worktree "$PWD" --lease test
+provision db release --worktree "$PWD" --lease default
+provision db release --worktree "$PWD" --lease test
 ```
 
 Release removes the leased DB URL keys. Keep the Development sandbox profile
 available for lifecycle commands. If env files are lost or leases expire, rerun
-`provision-env --repo "$PWD" --database` to restore or replace the pair.
+`provision env --repo "$PWD" --database` to restore or replace the pair.
 
 ## Schema and tests are separate
 
