@@ -55,10 +55,10 @@ Release note: GitHub Actions publishes through npm trusted publishing with prove
 
 ## Setup
 
-Preferred worktree setup uses the operator-installed provisioner. Root `package.json` sets `provisionEnv.appDir` to `examples/next`, so env files and the Vercel link land in the Next example:
+Preferred worktree setup uses the operator-installed provisioner. Root `package.json` sets `provision.appDir` to `examples/next`, so env files and the Vercel link land in the Next example:
 
 ```bash
-provision-env --repo "$PWD" --database
+provision env --repo "$PWD" --database
 ```
 
 See the [Next example provisioning runbook](examples/next/README.md) for Vercel prerequisites,

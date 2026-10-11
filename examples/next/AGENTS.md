@@ -28,8 +28,8 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 ## Env
 
 - App env files live under `examples/next`: `.env.local`, `.env.test`, `.env.example`.
-- Keep `.vercel` linking files here. Root `package.json` sets `provisionEnv.appDir` to `examples/next`.
-- Preferred worktree setup: `provision-env --repo <worktree> --database` from any directory. It pulls Vercel Development into `.env.local` and the custom `test` environment into `.env.test`, then overlays isolated Neon branches. Do not assign `PORT`; Portless owns it.
+- Keep `.vercel` linking files here. Root `package.json` sets `provision.appDir` to `examples/next`.
+- Preferred worktree setup: `provision env --repo <worktree> --database` from any directory. It pulls Vercel Development into `.env.local` and the custom `test` environment into `.env.test`, then overlays isolated Neon branches. Do not assign `PORT`; Portless owns it.
 - Follow [the provisioning runbook](README.md) for prerequisites, the owner-approved testing-only Neon parent named `production`, lease verification/renewal/release, and shared-service boundaries. Reconfirm clone approval if the app gains real production data or the configured parent changes.
 - Provisioning does not prepare schemas. Verify the disposable lease and obtain DB-operation approval first; `pnpm test:db:push`, `pnpm test:run`, and `pnpm test:e2e*` can drop the test public schema. Do not use them as read-only provisioning checks.
 - Manual fallback: `cp examples/next/.env.example examples/next/.env.local`.
