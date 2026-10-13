@@ -320,6 +320,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
   readonly hitlResponses?: ReadonlyArray<unknown>
+  readonly awaitingRequests?: ReadonlyArray<unknown>
   readonly usage?: unknown
   readonly turn?: number
   readonly eventSequence?: number
@@ -349,6 +350,13 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const createdMessages = yield* decodeMessages(input.createdMessages)
       const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
+
+      // The pause being resumed: an unanswered approval stays pending even after a policy change.
+      const awaitingRequests =
+        input.awaitingRequests === undefined
+          ? undefined
+          : yield* Schema.decodeUnknownEffect(Schema.Array(HitlRequest))(input.awaitingRequests)
+
       const usageInput = input.usage
 
       const usage = yield* usageInput === undefined
@@ -375,7 +383,8 @@ export async function runAgentWorkflowToolBatchStep(input: {
         calls,
         tools: runtime.config.tools,
         inputs: runtime.config.inputs,
-        responses: hitlResponses
+        responses: hitlResponses,
+        awaitingRequests
       })
 
       if (input.preflightOnly === true && prepared.pendingRequests.length === 0) {
@@ -403,6 +412,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
         tools: runtime.config.tools,
         inputs: runtime.config.inputs,
         hitlResponses,
+        awaitingRequests,
         model: runtime.config.model,
         createdMessages,
         turn: input.turn,

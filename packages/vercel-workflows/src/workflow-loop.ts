@@ -35,10 +35,24 @@ export type VercelAgentWorkflowToolBatchStepInput = {
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
   readonly hitlResponses?: ReadonlyArray<unknown>
+  /**
+   * On a resume, the requests of the pause being resumed (`awaitingInput.requests` of the
+   * previous attempt). Forward them to the agent loop (`prepareToolBatch` / `runToolBatch`
+   * `awaitingRequests`) so an unanswered approval stays pending even when its tool's policy
+   * changed. Absent on the first attempt of a batch.
+   */
+  readonly awaitingRequests?: ReadonlyArray<unknown>
   readonly usage?: unknown
   readonly turn?: number
   readonly eventSequence?: number
 }
+
+/** A resume carries the pause it resumes; the first attempt of a batch has none. */
+const withAwaitingRequests = (
+  base: VercelAgentWorkflowToolBatchStepInput,
+  awaitingRequests: ReadonlyArray<unknown> | undefined
+): VercelAgentWorkflowToolBatchStepInput =>
+  awaitingRequests === undefined ? base : { ...base, awaitingRequests }
 
 export type VercelAgentWorkflowAwaitingInput = {
   readonly hookToken: string
@@ -281,6 +295,7 @@ export async function runVercelAgentWorkflow(
 
     let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
     const toolHitlResponses: Array<unknown> = []
+    let toolAwaitingRequests: ReadonlyArray<unknown> | undefined
     let cumulativeUsage = modelResult.value.usage
     let toolEventSequence = modelResult.value.eventSequence ?? state.eventSequence
 
@@ -299,21 +314,22 @@ export async function runVercelAgentWorkflow(
     })
 
     for (;;) {
+      const stepInput = withAwaitingRequests(
+        {
+          context: input.context,
+          request: input.request,
+          calls: modelResult.value.toolCalls,
+          createdMessages: modelResult.value.createdMessages,
+          hitlResponses: toolHitlResponses.slice(),
+          usage: cumulativeUsage,
+          turn: modelResult.value.turn,
+          eventSequence: toolEventSequence
+        },
+        toolAwaitingRequests
+      )
+
       const toolsResult = await settleWorkflowStep(
-        retryWorkflowStep(
-          () =>
-            runToolBatchStep({
-              context: input.context,
-              request: input.request,
-              calls: modelResult.value.toolCalls,
-              createdMessages: modelResult.value.createdMessages,
-              hitlResponses: toolHitlResponses.slice(),
-              usage: cumulativeUsage,
-              turn: modelResult.value.turn,
-              eventSequence: toolEventSequence
-            }),
-          toolBatchStepRetry
-        )
+        retryWorkflowStep(() => runToolBatchStep(stepInput), toolBatchStepRetry)
       )
 
       if (Predicate.isTagged(toolsResult, 'Failure')) {
@@ -345,6 +361,7 @@ export async function runVercelAgentWorkflow(
       }
 
       const awaitingInput = toolsResult.value.awaitingInput
+      toolAwaitingRequests = awaitingInput.requests
       cumulativeUsage = toolsResult.value.usage ?? awaitingInput.usage ?? cumulativeUsage
       toolEventSequence = awaitingInput.eventSequence ?? toolEventSequence
 

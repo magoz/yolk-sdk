@@ -7,7 +7,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 | Layer                      | Owns                                                                                                 |
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent/protocol` | `HitlRequest`, `HitlResponse`, approval/question/input events, `AgentAwaitingInput`                  |
-| `@yolk-sdk/agent/loop`     | Pauses before gated tool execution; resumes from `hitlResponses`                                     |
+| `@yolk-sdk/agent/loop`     | Pauses before gated tool execution; resumes from `hitlResponses` and the pause's `awaitingRequests`  |
 | `@yolk-sdk/agent/runtime`  | Transcript replay and append-log pending/resume events                                               |
 | `@yolk-sdk/agent/client`   | HTTP/WS response submission helpers                                                                  |
 | `@yolk-sdk/agent/tools`    | Domain-free `question` and generalized typed input (`makeInputTool`) contracts                       |
@@ -21,7 +21,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Tool approval policy lives on `ToolDef.approval` and can be sourced from `ToolRegistration.approval`.
 - Manual approval emits `ToolApprovalRequested`, ends the run with `AgentAwaitingInput`, and never dispatches the tool until approved.
 - Denied approval becomes a model-visible `ToolResultMessage` with `isError = true`.
-- Approval binds the call, not the tool's current policy (hosts may re-read policy at execution). A recorded answer wins: the first exact-match `ToolApprovalResponse` settles the call (denied: the denied result, never executed; approved: executed). Otherwise an unanswered `ToolApprovalRequest` from the resumed pause stays pending (same request) even when the tool no longer requires approval. The loop sees only what the host passes: give it the pause being resumed as `awaitingRequests` (`AgentAwaitingInput.requests`) on `run`, `runToolBatch`, or `prepareToolBatch`; `runRuntime` passes its logged pause automatically. Without it, an unanswered request of a tool that no longer requires approval runs.
+- Approval binds the call on resume, not the tool's current policy (hosts re-read policy at execution). A resume batch (the transcript resume of `run`, or a `runToolBatch`/`prepareToolBatch` batch given `awaitingRequests` or any `hitlResponses`; `prepareToolBatch` also takes an explicit `resume`) settles a call with an exact-match recorded response (denied: the denied result, never executed; approved: executed). A denial under another approval id of the same call (`approval:<id>` or `approval:<id>:…`, after an execution-mode change) also denies. Otherwise an unanswered `ToolApprovalRequest` from the resumed pause stays pending: the same request (its original policy, its preview recomputed and dropped when the tool has no previewer) while it still names the call (name, canonical params, request id), else a fresh request. Requests naming calls outside the batch are ignored. A fresh batch (a new model turn) follows the current policy first, because providers may reuse call ids. The loop sees only what the host passes: give it the pause being resumed as `awaitingRequests` (`AgentAwaitingInput.requests`), and pass only that pause's responses to `runToolBatch`; `runRuntime` and the Vercel Workflow loop pass it automatically. Without it, an unanswered request of a tool that no longer requires approval runs.
 - Change previews ([ADR 0006](../docs/adr/0006-tool-change-previews.md)): pending `ToolApprovalRequest`s carry the tool's `preview` (`ToolChangePreview`) or `previewError` when hosts pass `ResolvedToolSet.approvalPreviews` as `approvalPreviews`. Display only: approval binds to the call, never the preview; a preview failure never blocks the approval (show `call.params`). Render the latest request event per call: resumed sibling rounds recompute previews.
 - `question` is a package-owned tool name. The loop intercepts it, emits `QuestionRequested`, and resumes with structured answers in `ToolResult.structuredContent`.
 - Generalized typed input tools (`makeInputTool`) share the same HITL lifecycle under their own interception branch. `ToolDef.input` carries display metadata only (`kind` stable renderer key, `title?`, `description?`, display-only JSON Schema hint); the registration's original Effect Schema owns server validation. Payloads and results are JSON-only (`Schema.Json`).
@@ -44,12 +44,12 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 
 ## Runtime adapters
 
-| Runtime         | Resume contract                                                                                                                                                                                           |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stateless Next  | Client sends full transcript plus `hitlResponses` to `/api/agent`; route passes `toolSet.inputs` through so input tools can resume                                                                        |
-| Cloudflare DO   | WebSocket accepts typed HITL response input; append log persists `RunAwaitingInput` and `HitlResponseAppended`                                                                                            |
-| Vercel Workflow | Tool step writes `AgentAwaitingInput`, waits on `createHook`, route resumes with `resumeHook`                                                                                                             |
-| Voice session   | Server tool endpoint returns `ApprovalRequired`; controller emits voice `AwaitingInput` and resumes by re-posting the call with the approval response; session death keeps the approval pending host-side |
+| Runtime         | Resume contract                                                                                                                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stateless Next  | Client sends full transcript plus `hitlResponses` to `/api/agent`; route passes `toolSet.inputs` through so input tools can resume                                                                               |
+| Cloudflare DO   | WebSocket accepts typed HITL response input; append log persists `RunAwaitingInput` and `HitlResponseAppended`                                                                                                   |
+| Vercel Workflow | Tool step writes `AgentAwaitingInput`, waits on `createHook`, route resumes with `resumeHook`; each resumed tool step gets the pause's `awaitingRequests` and forwards them to `prepareToolBatch`/`runToolBatch` |
+| Voice session   | Server tool endpoint returns `ApprovalRequired`; controller emits voice `AwaitingInput` and resumes by re-posting the call with the approval response; session death keeps the approval pending host-side        |
 
 ## UI rules
 
@@ -64,7 +64,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 
 - Protocol wire round-trips: approval/question/input request + response.
 - Plain serialization helpers: no Schema/Class instances in durable HITL payloads.
-- Loop: pause, approve, deny, question answer/cancel, input call validation/submit/cancel/invalid-repend/first-valid-wins, parallel pending, no duplicate execution.
+- Loop: pause, approve, deny, question answer/cancel, input call validation/submit/cancel/invalid-repend/first-valid-wins, parallel pending, no duplicate execution, approval binding across a policy change (resume vs fresh turn, outstanding reuse, execution-mode flip).
 - Runtime: append pending state, replay responses, durable resume.
 - React: waiting status, submit helpers, projection/replay.
 - App adapters: route/WS/Workflow resume and toolset inclusion.

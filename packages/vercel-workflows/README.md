@@ -210,7 +210,11 @@ loop will:
 
 1. pass that payload to `awaitInput`
 2. wait for the hook/webhook response
-3. rerun the same tool batch with the accumulated responses in a fresh `hitlResponses` array
+3. rerun the same tool batch with the accumulated responses in a fresh `hitlResponses` array and
+   the requests of the pause being resumed as `awaitingRequests` (absent on the first attempt)
+
+Forward `awaitingRequests` to the agent loop's `prepareToolBatch`/`runToolBatch`: an unanswered
+approval then stays pending even when its tool's policy changed since the pause.
 
 The loop owns its accumulator: host mutation of a supplied array cannot affect a later batch.
 Response order and element identity are preserved; response objects are not deep-cloned.
