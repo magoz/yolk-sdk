@@ -165,8 +165,22 @@ describe('AnthropicClaudeProviderLayer', () => {
           },
           { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
         ],
-        messages: [{ role: 'user', content: 'Be brief.\n\nhello' }],
-        tools: [{ name: 'mcp_Weather', description: 'Get weather.', input_schema: {} }]
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Be brief.\n\nhello', cache_control: { type: 'ephemeral' } }
+            ]
+          }
+        ],
+        tools: [
+          {
+            name: 'mcp_Weather',
+            description: 'Get weather.',
+            input_schema: {},
+            cache_control: { type: 'ephemeral' }
+          }
+        ]
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
         'TextDelta',

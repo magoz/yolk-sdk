@@ -4,6 +4,7 @@ import { HttpClient, HttpClientRequest } from 'effect/http'
 import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
 import { ProviderErrorInfo, replaceLoneSurrogatesDeep } from '@yolk-sdk/agent/protocol'
 import { streamAnthropicResponse, toAnthropicRequestBody } from './anthropic-provider-internal.ts'
+import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import {
   classifyProviderFailure,
   providerFailureCause,
@@ -21,6 +22,8 @@ type AnthropicMessagesProviderConfig = {
    * win on a name clash. Internal: the Anthropic conformance cases use it; OpenCode Go does not.
    */
   readonly extraBody?: Readonly<Record<string, Schema.Json>> | undefined
+  /** Session-affinity headers for `LLMRequest.cacheKey`; required headers win on a clash. */
+  readonly cacheKeyHeaders?: CacheKeyHeaders
 }
 
 type AnthropicMessagesErrorFields = {
@@ -88,7 +91,10 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
               const response = yield* client
                 .execute(
                   HttpClientRequest.post(config.messagesUrl).pipe(
-                    HttpClientRequest.setHeaders(config.headers),
+                    HttpClientRequest.setHeaders({
+                      ...requestCacheKeyHeaders(request.cacheKey, config.cacheKeyHeaders),
+                      ...config.headers
+                    }),
                     HttpClientRequest.bodyText(serialized, 'application/json')
                   )
                 )

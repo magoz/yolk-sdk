@@ -208,14 +208,24 @@ describe('Anthropic Messages conformance cases', () => {
           return entries[0]?.bodyJson
         })
 
-      const system = [{ type: 'text', text: 'Reply in one short sentence.' }]
+      const cacheControl = { type: 'ephemeral' }
+
+      const system = [
+        { type: 'text', text: 'Reply in one short sentence.', cache_control: cacheControl }
+      ]
 
       const plainBody = yield* bodyOf(anthropicMessagesPlainTextCase)
 
+      // Prompt caching is always on: system prompt and conversation-end breakpoints.
       expect(plainBody).toEqual({
         model: settings.models.plainText,
         system,
-        messages: [{ role: 'user', content: 'Say hello.' }],
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'Say hello.', cache_control: cacheControl }]
+          }
+        ],
         max_tokens: settings.maxTokens,
         stream: true
       })

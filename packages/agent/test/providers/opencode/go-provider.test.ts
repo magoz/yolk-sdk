@@ -337,7 +337,12 @@ describe('OpenCode Go', () => {
 
         if (protocol === 'messages') {
           expect(body.tools).toEqual([
-            { name: tool.name, description: tool.description, input_schema: tool.parameters }
+            {
+              name: tool.name,
+              description: tool.description,
+              input_schema: tool.parameters,
+              cache_control: { type: 'ephemeral' }
+            }
           ])
           expect(body.messages[1]).toMatchObject({
             role: 'assistant',

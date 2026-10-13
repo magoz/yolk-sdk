@@ -41,7 +41,8 @@ import {
   runToolBatch,
   ToolError,
   ToolExecutor,
-  type LLMRequest
+  type LLMRequest,
+  type RunConfig
 } from '../../src/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing'
 
@@ -120,6 +121,44 @@ describe('run', () => {
       ])
 
       expect(assistantContent(assistantMessageFromEvents(events))).toBe('ok')
+    })
+  )
+
+  it.effect('forwards the run cache key on every model request and omits it when unset', () =>
+    Effect.gen(function* () {
+      const keyed: Array<LLMRequest> = []
+      const unkeyed: Array<LLMRequest> = []
+
+      const config = {
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }
+
+      const runWith = (requests: Array<LLMRequest>, runConfig: RunConfig) =>
+        run(runConfig).pipe(
+          Stream.runCollect,
+          Effect.provide(
+            Layer.mergeAll(
+              FauxProvider.layerWithRequests({
+                responses: [
+                  Reply.toolCall({ id: 'call_1', name: 'weather', params: {} }),
+                  Reply.text('done')
+                ],
+                requests
+              }),
+              TestToolExecutor.layer({ weather: 'sunny' })
+            ).pipe(Layer.provideMerge(BaseLayer))
+          )
+        )
+
+      yield* runWith(keyed, { ...config, cacheKey: 'session-1' })
+      yield* runWith(unkeyed, config)
+
+      expect(keyed.map(request => request.cacheKey)).toEqual(['session-1', 'session-1'])
+      expect(unkeyed).toHaveLength(2)
+      expect(unkeyed.every(request => !('cacheKey' in request))).toBe(true)
     })
   )
 

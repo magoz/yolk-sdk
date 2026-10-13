@@ -64,6 +64,9 @@ const makeOpenCodeGoProtocolLayer = (
 
       const identity = { providerId: openCodeGoProviderId, providerName: 'OpenCode Go' }
 
+      // Go asks clients to send a stable per-conversation id here for routing and prompt caching.
+      const cacheKeyHeaders = (cacheKey: string) => ({ 'x-opencode-session': cacheKey })
+
       switch (config.protocol) {
         case 'chat-completions':
           return makeOpenAiProviderLayer({
@@ -75,13 +78,15 @@ const makeOpenCodeGoProtocolLayer = (
             reasoningContent: true,
             streaming: true,
             providerIdentity: { id: identity.providerId, name: identity.providerName },
-            extraHeaders
+            extraHeaders,
+            cacheKeyHeaders
           })
         case 'messages':
           return makeAnthropicMessagesProviderLayer({
             ...identity,
             messagesUrl: `${baseUrl}/messages`,
             maxTokens: config.maxOutputTokens,
+            cacheKeyHeaders,
             headers: {
               ...extraHeaders,
               'x-api-key': Redacted.value(config.apiKey),
@@ -107,6 +112,7 @@ const makeOpenCodeGoProtocolLayer = (
             requireJsonCompletion: true,
             commentaryPhaseBeforeToolCalls: true,
             extraHeaders,
+            cacheKeyHeaders,
             ...reasoningOptions
           })
         }

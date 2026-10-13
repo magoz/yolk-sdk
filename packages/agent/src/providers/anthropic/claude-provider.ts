@@ -8,16 +8,30 @@ import {
   toAnthropicRequestBody as toClaudeRequestBody
 } from '../anthropic-provider-internal.ts'
 
+/**
+ * Lifetime of the prompt-cache entries a request writes. `5m` is Anthropic's default; `1h` costs
+ * more to write but survives idle gaps such as pending approvals.
+ */
+export type AnthropicPromptCacheTtl = '5m' | '1h'
+
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
   readonly messagesUrl?: string
   readonly maxTokens: number
   readonly extraHeaders?: Readonly<Record<string, string>>
+  /** Default `5m`. */
+  readonly promptCacheTtl?: AnthropicPromptCacheTtl
+}
+
+type AnthropicCacheControl = {
+  readonly type: 'ephemeral'
+  readonly ttl?: '1h'
 }
 
 type AnthropicTextBlock = {
   readonly type: 'text'
   readonly text: string
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicImageBlock = {
@@ -25,6 +39,7 @@ type AnthropicImageBlock = {
   readonly source:
     | { readonly type: 'base64'; readonly media_type: string; readonly data: string }
     | { readonly type: 'url'; readonly url: string }
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicDocumentBlock = {
@@ -33,6 +48,7 @@ type AnthropicDocumentBlock = {
     | { readonly type: 'base64'; readonly media_type: 'application/pdf'; readonly data: string }
     | { readonly type: 'url'; readonly url: string }
   readonly title?: string
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicToolUseBlock = {
@@ -52,6 +68,7 @@ type AnthropicToolResultBlock = {
   readonly tool_use_id: string
   readonly content: string | ReadonlyArray<AnthropicToolResultContentBlock>
   readonly is_error?: boolean
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicMessage =
@@ -70,6 +87,7 @@ type AnthropicTool = {
   readonly name: string
   readonly description: string
   readonly input_schema: Schema.Json
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicRequestBody = {
@@ -80,11 +98,16 @@ type AnthropicRequestBody = {
   readonly output_config?: { readonly effort: 'low' | 'medium' | 'high' | 'xhigh' }
   readonly stream?: true
   readonly tools?: ReadonlyArray<AnthropicTool>
+  readonly tool_choice?: { readonly type: 'none' }
 }
 
 export const toAnthropicClaudeRequestBody = (
   request: LLMRequest,
-  config: { readonly maxTokens: number; readonly stream?: boolean }
+  config: {
+    readonly maxTokens: number
+    readonly stream?: boolean
+    readonly promptCacheTtl?: AnthropicPromptCacheTtl
+  }
 ): Effect.Effect<AnthropicRequestBody, LLMError> => toClaudeRequestBody(request, config)
 
 export const streamAnthropicClaudeResponse = (

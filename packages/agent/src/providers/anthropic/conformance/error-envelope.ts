@@ -31,13 +31,24 @@ export const anthropicMessagesErrorEnvelopeFixture: WireFixture = {
           system: [
             {
               type: 'text',
-              text: 'Reply in one short sentence.'
+              text: 'Reply in one short sentence.',
+              cache_control: {
+                type: 'ephemeral'
+              }
             }
           ],
           messages: [
             {
               role: 'user',
-              content: 'Say hello.'
+              content: [
+                {
+                  type: 'text',
+                  text: 'Say hello.',
+                  cache_control: {
+                    type: 'ephemeral'
+                  }
+                }
+              ]
             }
           ],
           max_tokens: 64,

@@ -38,13 +38,24 @@ export const anthropicMessagesToolUseInputDeltasFixture: WireFixture = {
           system: [
             {
               type: 'text',
-              text: 'Reply in one short sentence.'
+              text: 'Reply in one short sentence.',
+              cache_control: {
+                type: 'ephemeral'
+              }
             }
           ],
           messages: [
             {
               role: 'user',
-              content: 'What is the weather in Springfield? Use the tool.'
+              content: [
+                {
+                  type: 'text',
+                  text: 'What is the weather in Springfield? Use the tool.',
+                  cache_control: {
+                    type: 'ephemeral'
+                  }
+                }
+              ]
             }
           ],
           max_tokens: 64,
@@ -62,6 +73,9 @@ export const anthropicMessagesToolUseInputDeltasFixture: WireFixture = {
                 },
                 required: ['city'],
                 additionalProperties: false
+              },
+              cache_control: {
+                type: 'ephemeral'
               }
             }
           ]

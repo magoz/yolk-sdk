@@ -134,6 +134,8 @@ export type RunConfig = {
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
+  /** Forwarded as `LLMRequest.cacheKey` on every model request of this run. */
+  readonly cacheKey?: string
 }
 
 export type ModelTurnConfig = RunConfig & {
@@ -1778,19 +1780,30 @@ const makeModelOnlyAfterLlmStream = (
     })
   )
 
+type ProviderRequestFields = { -readonly [Key in keyof LLMRequest]: LLMRequest[Key] }
+
+const providerRequest = (config: RunConfig, messages: ReadonlyArray<AgentMessage>): LLMRequest => {
+  const request: ProviderRequestFields = {
+    messages,
+    tools: providerToolDefs(config.tools),
+    model: config.model,
+    reasoningEffort: config.reasoningEffort,
+    systemPrompt: config.systemPrompt
+  }
+
+  if (config.cacheKey !== undefined) {
+    request.cacheKey = config.cacheKey
+  }
+
+  return request
+}
+
 const makeLlmStream = (
   input: TurnStreamInput,
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () =>
-    input.provider.stream({
-      messages: result.messages,
-      tools: providerToolDefs(input.config.tools),
-      model: input.config.model,
-      reasoningEffort: input.config.reasoningEffort,
-      systemPrompt: input.config.systemPrompt
-    })
+  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
@@ -1826,14 +1839,7 @@ const makeModelOnlyLlmStream = (
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () =>
-    input.provider.stream({
-      messages: result.messages,
-      tools: providerToolDefs(input.config.tools),
-      model: input.config.model,
-      reasoningEffort: input.config.reasoningEffort,
-      systemPrompt: input.config.systemPrompt
-    })
+  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))

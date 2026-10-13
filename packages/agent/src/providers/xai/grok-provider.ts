@@ -92,6 +92,8 @@ type XAiGrokRequestBody = {
   }
   readonly tools?: ReadonlyArray<XAiGrokTool>
   readonly parallel_tool_calls?: true
+  readonly tool_choice?: 'none'
+  readonly prompt_cache_key?: string
 }
 
 const xAiGrokProviderDescriptor = {
@@ -99,6 +101,12 @@ const xAiGrokProviderDescriptor = {
   providerName: 'xAI Grok subscription',
   allowEofCompletion: false
 } as const
+
+// xAI caches per server: the conversation id routes a conversation's requests to one server.
+const xAiGrokPromptCache = {
+  promptCacheKey: true,
+  cacheKeyHeaders: (cacheKey: string) => ({ 'x-grok-conv-id': cacheKey })
+}
 
 export const toXAiGrokRequestBody = (
   request: LLMRequest,
@@ -110,6 +118,7 @@ export const toXAiGrokRequestBody = (
 ): Effect.Effect<XAiGrokRequestBody, LLMError> =>
   toOpenAiResponsesRequestBody(request, {
     ...config,
+    promptCacheKey: xAiGrokPromptCache.promptCacheKey,
     providerName: xAiGrokProviderDescriptor.providerName,
     alwaysIncludeReasoning: false
   }).pipe(
@@ -125,6 +134,7 @@ export const streamXAiGrokResponse = (response: HttpClientResponse.HttpClientRes
 export const makeXAiGrokProviderLayer = (config: XAiGrokProviderConfig) =>
   makeOpenAiResponsesProviderLayer({
     ...config,
+    ...xAiGrokPromptCache,
     providerId: xAiGrokProviderDescriptor.providerId,
     providerName: xAiGrokProviderDescriptor.providerName,
     responsesUrl: config.responsesUrl ?? xAiGrokResponsesUrl,
