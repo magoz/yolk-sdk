@@ -29,6 +29,29 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.107: provider prompt caching and Fortnox scopes
+
+Prompt caching is always on and changes outbound provider requests; no code change is required.
+Anthropic requests carry `cache_control` markers, Codex and Grok send `prompt_cache_key` plus their
+session headers, Vercel AI Gateway sends `providerOptions.gateway.caching: 'auto'` and
+`x-session-affinity`, and OpenCode Go sends `x-opencode-session`. To benefit:
+
+- Set `cacheKey` (for example the session id) on `run` or `runRuntime`. It travels in HTTP headers, so
+  keep it printable ASCII.
+- Keep the system prompt and tool list stable within a conversation and move per-request facts
+  (fresh signed URLs, the current time) out of earlier messages into `LLMRequest.turnContext`.
+- Optionally set `promptCacheTtl: '1h'` on `makeAnthropicClaudeProviderLayer` for sessions that
+  idle between turns.
+- Proxies or tests that assert exact request bodies or headers need updating.
+
+See [Prompt caching](./integrations/model-providers#prompt-caching) and ADR 0008.
+
+New, opt-in: `@yolk-sdk/connectors/fortnox` grows from 14 to 91 actions behind nine new opt-in
+OAuth slots that stay outside `FortnoxCombinedOAuthCredentialSlot`, so existing consent is
+unchanged. New host-only helpers: `downloadFortnoxOfferPreview`, `downloadFortnoxInboxFile`, and
+`uploadFortnoxInboxFile`. The Fortnox emulator serves their reads with unverified synthetic shapes.
+See [Read and write Fortnox records](./connectors/fortnox).
+
 ### Canary.105: Gmail draft attachments
 
 New, opt-in: `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply` take an optional
