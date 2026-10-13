@@ -80,6 +80,68 @@ const result = await Effect.runPromise(
 
 The result is a Yolk `ToolResult`, ready to feed back into the agent loop.
 
+## Confirm tool calls with form elicitation
+
+Some servers confirm destructive tools with MCP form elicitation over multi round-trip requests
+(MRTR, protocol `2026-07-28`): the first `tools/call` answers an `InputRequiredResult` (a form plus
+an opaque `requestState`), and the client retries the same call with the user's decision. Yolk
+models this for durable hosts: nothing blocks waiting for a person.
+
+Opt in with `elicitation: { form: true }`. The listing and the resumable call functions then declare
+`elicitation.form` in the per-request `_meta` client capabilities of a modern connection (never in a
+legacy `initialize`). `callRemoteMcpServerToolResumable` answers a typed outcome:
+
+```ts
+import {
+  callRemoteMcpServerToolResumable,
+  resumeRemoteMcpServerToolCall,
+  type McpClientOptions,
+  type McpElicitationResponse
+} from '@yolk-sdk/mcp/client'
+
+const options: McpClientOptions = { elicitation: { form: true } }
+const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_123', params, options }
+
+const outcome = await Effect.runPromise(
+  callRemoteMcpServerToolResumable(call).pipe(Effect.provide(FetchHttpClient.layer))
+)
+
+if (outcome._tag === 'InputRequired') {
+  // Persist `outcome.inputRequired`, show each form (message + requestedSchema), resume later,
+  // possibly in another process.
+  const pending = outcome.inputRequired
+  // The person's decision, collected by the host's own UI.
+  const decision: McpElicitationResponse = { action: 'accept', content: { confirm: true } }
+
+  const resumed = await Effect.runPromise(
+    resumeRemoteMcpServerToolCall({
+      ...call,
+      inputRequired: pending,
+      responses: Object.fromEntries(pending.elicitations.map(form => [form.key, decision]))
+    }).pipe(Effect.provide(FetchHttpClient.layer))
+  )
+}
+```
+
+`McpInputRequired` is a Schema class: encode it with `Schema.encodeUnknownEffect` to persist it and
+decode it in another process. Each `McpFormElicitation` carries the server's `key`, `message`, and
+`requestedSchema` (flat primitive properties, kept as received). Answer every elicitation with
+`accept` (with `content`), `decline`, or `cancel`. The resume sends the same tool call on a new
+JSON-RPC id with the exact `requestState` and the decisions as `inputResponses`; the server may pause
+again.
+
+Failures are typed. `McpInputRequiredError` covers a `malformed` or `too_large` pause (default bound:
+64 KiB of JSON and 16 requests; set `elicitation.maxInputRequiredBytes`), an `unsupported_request`
+(URL mode, sampling, roots, or any input without the opt-in), `invalid_responses` (checked before
+sending), and `unsupported_era` (resuming on a legacy connection). MCP `-32021` becomes
+`McpClientCapabilityRequiredError` with `requiredCapabilities`. A server that reports a missing
+capability as a tool error (for example Afloat's `CLIENT_CAPABILITY_REQUIRED`) answers a `Complete`
+outcome with `isError: true`.
+
+Legacy (pre-`2026-07-28`) elicitation is a server-initiated request that must be answered while the
+call is open, so it is not supported: an opted-in host never declares elicitation on a legacy
+connection. `callRemoteMcpServerTool` keeps its behavior and never declares it.
+
 ## Use local stdio MCP
 
 Use `@yolk-sdk/mcp/client/node` only in Node hosts:
@@ -114,7 +176,8 @@ Use `makeMcpToolServer` from `@yolk-sdk/mcp/server` to expose a tool-only Yolk a
 ## Conformance cases
 
 `@yolk-sdk/mcp/conformance` (experimental) holds nine read-only conformance cases that check the
-wire claims the remote client relies on, against any MCP server you point them at. See
+wire claims the remote client relies on, against any MCP server you point them at, plus the opt-in
+`mcpElicitationDeclarationCase` for hosts that declare form elicitation. See
 [MCP conformance](../api-reference/conformance#mcp-conformance).
 
 ## Security defaults

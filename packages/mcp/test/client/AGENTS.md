@@ -21,6 +21,9 @@ Transport/protocol tests for remote HTTP and local stdio MCP clients.
 - Invalid params and tool failures.
 - SSE parsing and retry/error boundaries.
 - MCP `structuredContent`, `isError`, and supported content block fidelity.
+- MRTR form elicitation (`elicitation.test.ts`): the official server in-process behind a fake
+  `HttpClient` that records the wire; hand-written `tools/call` answers only for payloads the
+  official server refuses to send.
 
 ## Anti-Patterns
 

@@ -102,6 +102,54 @@ const tools = await Effect.runPromise(
 
 Use `McpClientOptions.sdk` for official client options such as capabilities, MRTR, and shared response caching. Set `McpClientOptions.configureClient` to register elicitation or sampling handlers before connection. Use a persistent official `Client` directly for long-lived subscriptions and progress streams.
 
+## Form elicitation for durable hosts (MRTR)
+
+A server can pause a `tools/call` with an MCP `2026-07-28` `InputRequiredResult` (for example to
+confirm a destructive tool with a form). A durable host cannot block on a person inside a tool
+step, so Yolk returns the pause as data and resumes later, possibly in another process:
+
+```ts
+import {
+  callRemoteMcpServerToolResumable,
+  resumeRemoteMcpServerToolCall,
+  type McpClientOptions
+} from '@yolk-sdk/mcp/client'
+
+const options: McpClientOptions = { elicitation: { form: true } }
+const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_1', params, options }
+
+const outcome = yield * callRemoteMcpServerToolResumable(call)
+
+if (outcome._tag === 'InputRequired') {
+  // Persist outcome.inputRequired (a Schema class), render its forms, then later:
+  const next =
+    yield *
+    resumeRemoteMcpServerToolCall({
+      ...call,
+      inputRequired: outcome.inputRequired,
+      responses: { confirmation: { action: 'accept', content: { confirm: true } } }
+    })
+}
+```
+
+- `elicitation: { form: true }` is the opt-in. Only then do the listing and the resumable call
+  functions declare `elicitation.form`, in the per-request `_meta` client capabilities of a modern
+  connection. Nothing declares it in a legacy `initialize`, and `callRemoteMcpServerTool` (which
+  cannot represent a pause) never declares it.
+- The outcome is `Complete` (a `ToolResult`) or `InputRequired` (`McpInputRequired`: Schema-decoded
+  form elicitations with `key`, `message` and `requestedSchema`, plus the opaque `requestState`).
+  The pause is bounded: 64 KiB of JSON by default (`elicitation.maxInputRequiredBytes`) and 16
+  requests.
+- The resume re-sends the same tool call on a fresh connection and a new JSON-RPC id, with the exact
+  `requestState` and the decisions (`accept` with `content`, `decline`, `cancel`) as
+  `inputResponses`. Decisions are checked against the forms before anything is sent. The server may
+  pause again.
+- Typed failures: `McpInputRequiredError` (`malformed`, `too_large`, `unsupported_request` for URL
+  mode, sampling, roots or input without the opt-in, `invalid_responses`, `unsupported_era`) and
+  `McpClientCapabilityRequiredError` for MCP `-32021`.
+- Legacy-era elicitation (a server-initiated request answered while the call's stream is open) is
+  not supported; resuming against a legacy connection fails with `unsupported_era`.
+
 ## Connect to a local stdio server
 
 Node hosts can use the convenience wrappers from `client/node`:
@@ -163,7 +211,10 @@ invalid-request error (`-32600`) rather than an Effect defect. Malformed JSON re
 
 ## Conformance cases (experimental)
 
-`@yolk-sdk/mcp/conformance` holds nine `read` conformance cases for `@yolk-sdk/conformance/runner`.
+`@yolk-sdk/mcp/conformance` holds nine `read` conformance cases for `@yolk-sdk/conformance/runner`,
+plus one opt-in `read` case, `mcpElicitationDeclarationCase` (fixtures:
+`mcpConformanceElicitationFixtures`), for hosts that set `McpClientOptions.elicitation`; it only
+lists, so it never triggers a confirmation.
 They check the wire claims the remote client relies on: era negotiation, the modern stateless
 headers, the legacy session, response encoding, the tool listing, a read call, a tool error, an
 unknown tool, and a rejected credential. Every case runs the real `listRemoteMcpServerTools` and

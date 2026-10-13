@@ -98,6 +98,10 @@ import { latestMcpProtocolVersion } from '../client/protocol.ts'
 import { mcpAuthRejectedLegacyFixture, mcpAuthRejectedModernFixture } from './auth-rejected.ts'
 import { mcpCallReadLegacyFixture, mcpCallReadModernFixture } from './call-read.ts'
 import { mcpCallToolErrorLegacyFixture, mcpCallToolErrorModernFixture } from './call-tool-error.ts'
+import {
+  mcpElicitationDeclarationLegacyFixture,
+  mcpElicitationDeclarationModernFixture
+} from './elicitation-declaration.ts'
 import { mcpLegacySessionFixture } from './legacy-session.ts'
 import { mcpModernStatelessFixture } from './modern-stateless.ts'
 import {
@@ -143,6 +147,8 @@ export type McpConformanceCase = ConformanceCase<McpConformanceError, McpConform
 const toolCallId = 'yolk-conformance-call'
 
 const protocolVersionKey = 'io.modelcontextprotocol/protocolVersion'
+
+const clientCapabilitiesKey = 'io.modelcontextprotocol/clientCapabilities'
 
 const envelopeKeys = [
   protocolVersionKey,
@@ -1338,6 +1344,70 @@ export const mcpAuthRejectedCase: McpConformanceCase = defineConformanceCase({
       'transport',
       'expected the listing to fail as McpError with cause "transport"'
     )
+  })
+})
+
+/**
+ * Opt-in (not in `mcpConformanceCases`): run it for a host that sets
+ * `McpClientOptions.elicitation`. It sends no tools/call, so it never triggers a confirmation.
+ */
+export const mcpElicitationDeclarationCase: McpConformanceCase = defineConformanceCase({
+  id: 'mcp.elicitation.declaration',
+  title: 'an opted-in host declares form elicitation per modern request, never in legacy',
+  safety: 'read',
+  docs: 'With `McpClientOptions.elicitation: { form: true }`, the remote listing and the resumable call functions put the client capabilities (`sdk.capabilities` plus `elicitation: { form: {} }`) in the `_meta` of every modern tools/list and tools/call; the SDK still sends its own capabilities on the era probe. In the legacy era nothing declares elicitation: legacy elicitation is a server-initiated request answered synchronously, which a durable host cannot do.',
+  wire: "The listing, made with the host opted in, succeeds. Modern: every tools/list carries an object `elicitation.form` in its `_meta` `io.modelcontextprotocol/clientCapabilities`, and every page is answered with an object result (the server accepts the declaration). Legacy: the `initialize` capabilities hold no `elicitation`, and no request after the era probe (which carries the SDK's own envelope) carries `_meta` client capabilities.",
+  fixtures: [mcpElicitationDeclarationModernFixture.id, mcpElicitationDeclarationLegacyFixture.id],
+  run: Effect.gen(function* () {
+    const target = yield* McpConformanceTarget
+
+    const { exit, exchanges } = yield* observe(
+      listRemoteMcpServerTools(remoteConfig(target), {
+        ...clientOptions(target),
+        elicitation: { form: true }
+      })
+    )
+
+    if (Exit.isFailure(exit)) {
+      return yield* exit
+    }
+
+    const pages = byMethod(exchanges, 'tools/list')
+
+    yield* expectConformance(pages.length > 0, 'expected the client to send tools/list')
+
+    if (target.era === 'modern') {
+      for (const page of pages) {
+        const capabilities = field(field(rpcParams(page), '_meta'), clientCapabilitiesKey)
+
+        yield* expectConformance(
+          isRecord(field(field(capabilities, 'elicitation'), 'form')),
+          `expected elicitation.form in the _meta client capabilities of ${labelOf(page)}`
+        )
+        yield* expectConformance(
+          resultMemberOf(page).kind === 'object',
+          `expected an object result for ${labelOf(page)} (the server accepts the declaration)`
+        )
+      }
+
+      return
+    }
+
+    const initialize = byMethod(exchanges, 'initialize').at(-1)
+
+    yield* expectConformance(
+      initialize !== undefined &&
+        field(field(rpcParams(initialize), 'capabilities'), 'elicitation') === undefined,
+      'expected initialize to declare no elicitation capability'
+    )
+
+    // The era probe goes out before the era is known, with the SDK's own envelope.
+    for (const exchange of exchanges.filter(sent => rpcMethod(sent) !== 'server/discover')) {
+      yield* expectConformance(
+        field(field(rpcParams(exchange), '_meta'), clientCapabilitiesKey) === undefined,
+        `expected no _meta client capabilities on legacy ${labelOf(exchange)}`
+      )
+    }
   })
 })
 

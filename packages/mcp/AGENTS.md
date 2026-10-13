@@ -36,12 +36,27 @@
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
 - `mcpToolToToolDef` passes a present plain-JSON-object `outputSchema` through as declaration-only `ToolDef.outputSchema` (never sent to providers) and omits any other value instead of failing the listing. Exposure is host policy: it sets `callableBy`/`discovery` only from its `exposure` option (`McpToolExposureResolver`: a `ToolExposure` value or `(tool, serverName) => ToolExposure`), which the listing functions take as `McpClientOptions.exposure`; without it neither is set. `resolveTools` keeps the fail-closed rules. Tests: `test/client/tool-exposure.test.ts`.
 - Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
+- Form elicitation (MRTR, `src/client/elicitation.ts`) is host-owned and durable: never a blocking
+  callback. `McpClientOptions.elicitation` is the only opt-in; it is declared as per-request `_meta`
+  client capabilities on modern connections only (merged over `sdk.capabilities`; capabilities a
+  `configureClient` registers are not merged), never in a legacy `initialize`, and never by
+  `callRemoteMcpServerTool`. `callRemoteMcpServerToolResumable` answers `McpToolCallOutcome`
+  (`Complete` | `InputRequired`); `resumeRemoteMcpServerToolCall` calls first on its connection (no
+  listing) so its JSON-RPC id differs from the original call's, which follows the listing. The SDK's
+  `callTool` rejects an `input_required` answer for a tool with an `outputSchema` (it validates the
+  pause as output), so the resumable call passes the listed tool without `outputSchema` and
+  validates complete results itself (`assertStructuredOutput`). Form mode only; legacy
+  server-initiated elicitation is unsupported (`McpInputRequiredError` `unsupported_era`). Tests:
+  `test/client/elicitation.test.ts`.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
 - Export normal tool results/content; agent loop/providers stay MCP-agnostic.
 
 ## Conformance cases
 
-- `src/conformance/` owns the generic MCP cases (`mcpConformanceCases`, nine `read` cases),
+- `src/conformance/` owns the generic MCP cases (`mcpConformanceCases`, nine `read` cases; plus
+  the opt-in `mcpElicitationDeclarationCase` and its `mcpConformanceElicitationFixtures`, kept out
+  of the default suite, the emulator copies and the provider fixtures because the declaration is a
+  host opt-in),
   `McpConformanceTarget`, `McpConformanceConfig`, the observing `HttpClient`, the era filter
   (`selectMcpConformanceCases`), and the synthetic fixtures. Only this directory may import
   `@yolk-sdk/conformance/*` (`scripts/check-package-boundaries.ts`); client and server code never
@@ -156,3 +171,5 @@
   `observer.test.ts` covers the header allowlist, session evidence and bodies kept as received.
   `in-process.test.ts` runs the cases against `makeMcpToolServer` and states which cases do not
   apply.
+  `elicitation-declaration.test.ts` replays the opt-in elicitation case on both eras (exact
+  requests), drills a rejected listing, and runs it in-process.
