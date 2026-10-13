@@ -728,13 +728,20 @@ const carriedDefinition = (
 
 const InputRequiredResultType = Schema.Struct({ resultType: Schema.Literal('input_required') })
 
-/** The first response the transport delivered for the call's id (mutable: set once). */
-type FirstCallResponse = { response: Option.Option<JSONRPCResponse> }
+/** This invocation's call id and the first response the SDK would match to it (set once). */
+type CallCaptureState = {
+  callId: Option.Option<string | number>
+  response: Option.Option<JSONRPCResponse>
+}
+
+/** What the capture saw for the call's `input_required` answer. */
+type CapturedInputRequired =
+  | { readonly kind: 'captured'; readonly raw: unknown }
+  | { readonly kind: 'refused'; readonly message: string }
 
 /** The raw response to the step's `tools/call`, observed on the transport. */
 type CallResponseCapture = {
-  /** The raw `input_required` result of the first response with the call's id, if it is one. */
-  readonly inputRequired: () => Option.Option<unknown>
+  readonly inputRequired: () => CapturedInputRequired
   /** Puts the transport's `send` and `onmessage` back. */
   readonly restore: () => void
 }
@@ -742,50 +749,72 @@ type CallResponseCapture = {
 /**
  * Captures the raw response to the `tools/call` before the SDK's codec normalises it (the pinned
  * SDK drops a non-string `requestState` and turns non-object `inputRequests` into `{}`, which
- * could make a corrupted pause look valid). Wraps the transport's `send` to learn the call's
- * JSON-RPC id and its `onmessage` (which the client set on connect) to keep the first response
- * with that id: the one the client resolves the call with. Other ids (a listing, unrelated or
- * late responses), notifications and later duplicates are ignored, and every message is still
- * forwarded unchanged.
+ * could make a corrupted pause look valid). Wraps the transport's `send` to learn this
+ * invocation's call id (the first `tools/call` sent while installed) and its `onmessage` (which
+ * the client set on connect) to keep the response the client resolves the call with: the first
+ * one whose id matches under the client's own coercion (`Number(id)`, as `_onresponse` does).
+ * Other ids, notifications and later duplicates are ignored; every message is still forwarded
+ * unchanged. A matched response whose id is not identical to the sent one (`"1"` for `1`) is
+ * refused: the client accepted it, but it is not this call's answer.
  */
 const captureCallResponse = (client: SdkClient): CallResponseCapture => {
   const transport = client.transport
 
   if (transport === undefined) {
-    return { inputRequired: () => Option.none(), restore: () => undefined }
+    return {
+      inputRequired: () => ({ kind: 'refused', message: 'The client has no transport' }),
+      restore: () => undefined
+    }
   }
 
-  const callIds = new Set<string | number>()
-  const first: FirstCallResponse = { response: Option.none() }
+  const state: CallCaptureState = { callId: Option.none(), response: Option.none() }
   const forward = transport.onmessage
   const send = transport.send
 
   transport.send = (message, options) => {
-    if (isJSONRPCRequest(message) && message.method === 'tools/call') callIds.add(message.id)
+    if (
+      Option.isNone(state.callId) &&
+      isJSONRPCRequest(message) &&
+      message.method === 'tools/call'
+    ) {
+      state.callId = Option.some(message.id)
+    }
 
     return send.call(transport, message, options)
   }
 
   transport.onmessage = (message, extra) => {
     if (
-      Option.isNone(first.response) &&
+      Option.isSome(state.callId) &&
+      Option.isNone(state.response) &&
       isJSONRPCResponse(message) &&
-      message.id !== undefined &&
-      callIds.has(message.id)
+      Number(message.id) === Number(state.callId.value)
     ) {
-      first.response = Option.some(message)
+      state.response = Option.some(message)
     }
 
     forward?.(message, extra)
   }
 
   return {
-    inputRequired: () =>
-      first.response.pipe(
-        Option.filter(isJSONRPCResultResponse),
-        Option.map(response => response.result),
-        Option.filter(Schema.is(InputRequiredResultType))
-      ),
+    inputRequired: () => {
+      const response = Option.getOrUndefined(state.response)
+
+      if (response === undefined || !isJSONRPCResultResponse(response)) {
+        return { kind: 'refused', message: 'No input_required response to the call was observed' }
+      }
+
+      if (!Option.contains(state.callId, response.id)) {
+        return {
+          kind: 'refused',
+          message: 'The response the client matched to the call does not carry its exact id'
+        }
+      }
+
+      return Schema.is(InputRequiredResultType)(response.result)
+        ? { kind: 'captured', raw: response.result }
+        : { kind: 'refused', message: 'The response matched to the call is not input_required' }
+    },
     restore: () => {
       transport.send = send
       transport.onmessage = forward
@@ -936,14 +965,11 @@ const resumableStep = (
       }
 
       // Decode the pause as the server sent it, never the SDK's normalised copy.
-      return Option.match(capture.inputRequired(), {
-        onNone: (): ResumableStep => ({
-          kind: 'refused',
-          reason: 'malformed',
-          message: 'The raw input_required response to the call was not observed'
-        }),
-        onSome: (raw): ResumableStep => ({ kind: 'answered', era, raw, tool: paused })
-      })
+      const captured = capture.inputRequired()
+
+      return captured.kind === 'captured'
+        ? { kind: 'answered', era, raw: captured.raw, tool: paused }
+        : { kind: 'refused', reason: 'malformed', message: captured.message }
     } catch (error) {
       if (error instanceof MissingRequiredClientCapabilityError) {
         return {

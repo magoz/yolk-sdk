@@ -158,10 +158,12 @@ also covers an `unsupported_request` (URL mode,
 sampling, roots, or any input without the opt-in), `invalid_responses` and `mismatched_resume`
 (another tool or other arguments; both checked before sending), and `unsupported_era` (resuming on a
 legacy connection). The pause is decoded from the raw `input_required` response as the server sent it:
-the response with the call's JSON-RPC id, captured at the transport before the official client
+the response the official client resolves the call with (matched by its own `Number(id)` coercion;
+an id not identical to the call's fails `malformed`), captured at the transport before the client
 normalises it. A non-string `requestState` or non-object `inputRequests` fails `malformed` instead of
 passing as a valid or load-shedding pause; responses with other ids are ignored. Formats are checked
-by syntax: RFC 3339 dates, an absolute RFC 3986 URI (not WHATWG URL parsing), and a pragmatic
+by syntax: RFC 3339 dates (a leap second only at `23:59:60` UTC), an absolute RFC 3986 URI (IPv6
+literals per its grammar; not WHATWG URL parsing), and a pragmatic
 mailbox (a dot-atom local part, `@`, a hostname of at least two labels). MCP `-32021` becomes
 `McpClientCapabilityRequiredError` with `requiredCapabilities`. A server that reports a missing
 capability as a tool error (for example Afloat's `CLIENT_CAPABILITY_REQUIRED`) answers a `Complete`

@@ -1100,6 +1100,16 @@ describe('MCP form elicitation (MRTR)', () => {
         { site: 'urn:isbn:0451450523' },
         { site: 'mailto:a@example.com' },
         { site: 'https://[::1]:8080/p' },
+        { site: 'https://[::]/' },
+        { site: 'https://[1::]/' },
+        { site: 'https://[1:2:3:4:5:6:7:8]/' },
+        { site: 'https://[1:2:3:4:5:6:7::]/' },
+        { site: 'https://[1::8]/' },
+        { site: 'https://[fe80::1:2]/' },
+        { site: 'https://[::ffff:192.0.2.1]/' },
+        { site: 'https://[64:ff9b::192.0.2.33]/' },
+        { site: 'https://[1:2:3:4:5:6:192.0.2.1]/' },
+        { site: 'https://[v1.fe:80]/' },
         { site: 'https://example.com/a%20b' },
         { site: 'foo:' },
         { day: '2024-02-29' },
@@ -1110,7 +1120,10 @@ describe('MCP form elicitation (MRTR)', () => {
         { at: '2026-10-13T08:00:00Z' },
         { at: '2026-10-13T08:00:00.123+02:00' },
         { at: '0099-01-01T00:00:00z' },
-        { at: '2026-12-31T23:59:60.5-11:30' },
+        // Leap seconds only at 23:59:60 UTC, after the offset (RFC 3339 section 5.7).
+        { at: '2016-12-31T23:59:60Z' },
+        { at: '2016-12-31T12:29:60.5-11:30' },
+        { at: '2017-01-01T00:59:60+01:00' },
         { score: 1 },
         { score: 10 },
         { score: 5.5 },
@@ -1145,6 +1158,23 @@ describe('MCP form elicitation (MRTR)', () => {
         { site: 'https://example.com/%zz' },
         { site: 'http://x/#a#b' },
         { site: '1http://x' },
+        // Not RFC 3986 IPv6address.
+        { site: 'https://[1]/' },
+        { site: 'https://[:::]/' },
+        { site: 'https://[]/' },
+        { site: 'https://[1:2:3:4:5:6:7:8:9]/' },
+        { site: 'https://[1:2:3:4:5:6:7::8]/' },
+        { site: 'https://[1::2::3]/' },
+        { site: 'https://[12345::]/' },
+        { site: 'https://[:1::]/' },
+        { site: 'https://[1::2:]/' },
+        { site: 'https://[g::]/' },
+        { site: 'https://[1.2.3.4::]/' },
+        { site: 'https://[::256.1.1.1]/' },
+        { site: 'https://[::01.2.3.4]/' },
+        { site: 'https://[::1.2.3]/' },
+        { site: 'https://[1:2:3:4:5:6:7:192.0.2.1]/' },
+        { site: 'https://[fe80::1%25eth0]/' },
         { day: '2026-02-30' },
         { day: '1900-02-29' },
         { day: '2026-13-01' },
@@ -1156,6 +1186,11 @@ describe('MCP form elicitation (MRTR)', () => {
         { at: '2026-10-13T08:00:00.Z' },
         { at: '2026-10-13T08:00:00+24:00' },
         { at: '2026-10-13T08:00:00+0200' },
+        { at: '2026-10-13T08:00:60Z' },
+        { at: '2026-12-31T23:58:60Z' },
+        { at: '2016-12-31T23:59:60+01:00' },
+        { at: '2016-12-31T23:59:60.5-11:30' },
+        { at: '2026-10-13T08:00:61Z' },
         { score: 0.999 },
         { score: 10.001 },
         { count: -1 },
@@ -1318,6 +1353,66 @@ describe('MCP form elicitation (MRTR)', () => {
           )
         )
       ).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+    })
+  )
+
+  it.effect('takes the response the SDK matches by coerced id, refusing a different id type', () =>
+    Effect.gen(function* () {
+      const form = formRequest({ message: 'Sure?', requestedSchema: confirmationSchema })
+
+      const pause = (requestState: unknown) => ({
+        resultType: 'input_required',
+        inputRequests: { confirmation: form },
+        requestState
+      })
+
+      const batchAnswer =
+        (first: (id: string | number | undefined) => unknown): CallAnswer =>
+        id =>
+          Response.json([
+            { jsonrpc: '2.0', id: first(id), result: pause(1) },
+            { jsonrpc: '2.0', id, result: pause('valid') }
+          ])
+
+      // The SDK dispatches by Number(id): it resolves the call with the first entry ("1" for 1),
+      // whose pause is malformed. Taking the second entry would decode a pause the SDK never used.
+      const stringId = makeHarness(
+        undefined,
+        batchAnswer(id => String(id))
+      )
+
+      expect(
+        failure(
+          yield* Effect.exit(
+            callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(stringId.layer))
+          )
+        )
+      ).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+
+      // A matched id of another type, even with a valid pause, is refused.
+      const onlyString = makeHarness(undefined, id =>
+        Response.json({ jsonrpc: '2.0', id: String(id), result: pause('valid') })
+      )
+
+      expect(
+        failure(
+          yield* Effect.exit(
+            callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(onlyString.layer))
+          )
+        )
+      ).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+
+      // An exact id after an unrelated one still works.
+      const exact = makeHarness(
+        undefined,
+        batchAnswer(() => 'unrelated')
+      )
+
+      expect(
+        expectInputRequired(
+          yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(exact.layer))
+        ).requestState
+      ).toBe('valid')
     })
   )
 

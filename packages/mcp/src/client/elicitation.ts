@@ -549,37 +549,61 @@ const isDate = (value: string) => {
   )
 }
 
-/** `time-secfrac` (optional) then `time-offset` (`Z` or `±hh:mm`). */
-const isSecfracAndOffset = (rest: string) => {
+/**
+ * `time-secfrac` (optional) then `time-offset`: the offset east of UTC in minutes (`Z` is 0), or
+ * `None` when either part is malformed.
+ */
+const secfracAndOffset = (rest: string): Option.Option<number> => {
   const offsetAt = rest.search(/[Zz+-]/)
 
-  if (offsetAt === -1) return false
+  if (offsetAt === -1) return Option.none()
 
   const secfrac = rest.slice(0, offsetAt)
   const offset = rest.slice(offsetAt)
 
   if (secfrac !== '' && !(secfrac.startsWith('.') && digitsOnly.test(secfrac.slice(1)))) {
-    return false
+    return Option.none()
   }
 
-  if (offset === 'Z' || offset === 'z') return true
+  if (offset === 'Z' || offset === 'z') return Option.some(0)
 
   const match = timeOffset.exec(offset)
 
-  return match !== null && numberAt(match, 1) <= 23 && numberAt(match, 2) <= 59
+  if (match === null || numberAt(match, 1) > 23 || numberAt(match, 2) > 59) return Option.none()
+
+  const minutes = numberAt(match, 1) * 60 + numberAt(match, 2)
+
+  return Option.some(offset.startsWith('-') ? -minutes : minutes)
 }
 
+const minutesPerDay = 24 * 60
+
+/**
+ * RFC 3339 `date-time`. Second `60` (a leap second) is accepted only at `23:59:60` UTC, after
+ * applying the offset (RFC 3339 section 5.7); leap-second tables are not consulted.
+ */
 const isDateTime = (value: string) => {
   const match = dateTimeHead.exec(value)
 
-  return (
-    match !== null &&
-    isCalendarDate(numberAt(match, 1), numberAt(match, 2), numberAt(match, 3)) &&
-    numberAt(match, 4) <= 23 &&
-    numberAt(match, 5) <= 59 &&
-    numberAt(match, 6) <= 60 &&
-    isSecfracAndOffset(value.slice(match[0].length))
-  )
+  if (match === null) return false
+
+  const [hour, minute, second] = [numberAt(match, 4), numberAt(match, 5), numberAt(match, 6)]
+  const offset = secfracAndOffset(value.slice(match[0].length))
+
+  if (
+    Option.isNone(offset) ||
+    !isCalendarDate(numberAt(match, 1), numberAt(match, 2), numberAt(match, 3)) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 60
+  ) {
+    return false
+  }
+
+  const utcMinutes =
+    (((hour * 60 + minute - offset.value) % minutesPerDay) + minutesPerDay) % minutesPerDay
+
+  return second < 60 || utcMinutes === minutesPerDay - 1
 }
 
 /** RFC 5322 `atext`: the characters of a dot-atom part. */
@@ -642,7 +666,54 @@ const pcharSet = `${unreserved}${subDelims}:@`
 
 const scheme = /^[A-Za-z][A-Za-z0-9+.-]*$/
 
-const ipLiteral = /^\[[0-9A-Fa-f:.]+\]$/
+const h16 = /^[0-9A-Fa-f]{1,4}$/
+
+/** RFC 3986 `dec-octet`: 0-255 without leading zeros. */
+const decOctet = /^(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])$/
+
+const isIPv4 = (value: string) => {
+  const octets = value.split('.')
+
+  return octets.length === 4 && octets.every(octet => decOctet.test(octet))
+}
+
+/** `h16` groups, the last of which may be an IPv4 tail (two groups); `None` if malformed. */
+const ipv6Groups = (part: string, allowIPv4Tail: boolean): Option.Option<number> => {
+  if (part === '') return Option.some(0)
+
+  const pieces = part.split(':')
+  const last = pieces.at(-1) ?? ''
+  const tail = allowIPv4Tail && last.includes('.')
+  const groups = tail ? pieces.slice(0, -1) : pieces
+
+  return groups.every(group => h16.test(group)) && (!tail || isIPv4(last))
+    ? Option.some(groups.length + (tail ? 2 : 0))
+    : Option.none()
+}
+
+/**
+ * RFC 3986 `IPv6address` (RFC 4291 text form): eight 16-bit groups, or fewer with exactly one
+ * `::` standing for at least one zero group; the last 32 bits may be an IPv4 address. No zone ids.
+ */
+const isIPv6 = (value: string) => {
+  const gap = value.indexOf('::')
+
+  if (gap === -1) {
+    return Option.match(ipv6Groups(value, true), {
+      onNone: () => false,
+      onSome: count => count === 8
+    })
+  }
+
+  if (value.indexOf('::', gap + 1) !== -1) return false
+
+  const head = ipv6Groups(value.slice(0, gap), false)
+  const tail = ipv6Groups(value.slice(gap + 2), true)
+
+  return Option.isSome(head) && Option.isSome(tail) && head.value + tail.value <= 7
+}
+
+const ipv6Literal = /^\[([^\]]*)\]$/
 
 const ipFuture = /^\[[Vv][0-9A-Fa-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+\]$/
 
@@ -659,7 +730,7 @@ const isAuthority = (authority: string) => {
   const portText = colon === -1 ? '' : hostPort.slice(colon + 1)
 
   const validHost = host.startsWith('[')
-    ? ipLiteral.test(host) || ipFuture.test(host)
+    ? ipFuture.test(host) || isIPv6(ipv6Literal.exec(host)?.[1] ?? '')
     : isEncoded(host, `${unreserved}${subDelims}`)
 
   return isEncoded(userinfo, `${unreserved}${subDelims}:`) && validHost && port.test(portText)
