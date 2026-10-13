@@ -132,14 +132,21 @@ decode it in another process. Each `McpFormElicitation` carries the server's `ke
 `requestedSchema` (flat primitive properties, kept as received). The pause is bound to its call
 (`mcpToolName`, `argumentsDigest`) and carries the listed tool definition. Answer every elicitation
 with `accept` (with `content`), `decline`, or `cancel`; decisions are checked against each form
-(type, `required`, `const`, `enum`) before sending, and the server validates them again. The resume
-is re-sent as a new request on a new connection with the same tool call, the exact `requestState`,
-and the decisions as `inputResponses`. It lists nothing: the pause's tool definition drives header
-mirroring and the structured-output check. The server may pause again.
+(type, `required`, `const`, `enum`, titled `oneOf`, `items.enum`, titled `items.anyOf`) before sending, and the server validates them again. The
+resume is re-sent as a new request on a new connection with the same tool call, the exact
+`requestState`, and the decisions as `inputResponses`. It lists nothing: the pause's tool definition
+(`name`, `inputSchema`, `outputSchema`) drives header mirroring and the structured-output check, and
+an invalid one fails `malformed` before sending. With that definition the official client does not
+re-list and retry after a `HEADER_MISMATCH` (`-32020`), so a server that changed the tool's
+`x-mcp-header` declarations since the pause answers `McpError` (`cause: 'protocol'`). The server
+may pause again.
 
-Failures are typed. `McpInputRequiredError` covers a `malformed` or `too_large` pause (default bound:
-256 KiB of JSON and 16 requests, applied to the decoded pause after the body is buffered; set
-`elicitation.maxInputRequiredBytes` to a positive integer), an `unsupported_request` (URL mode,
+Failures are typed. `McpInputRequiredError` covers a `malformed` or `too_large` pause. The default
+bound is 256 KiB of JSON and 16 requests; set `elicitation.maxInputRequiredBytes` to a positive
+integer (checked before connecting). It applies separately to the server-provided pause (checked
+after the body is buffered, without the tool definition) and to the listed tool definition (checked
+before the call, so an oversized definition fails with nothing sent and never strands a pause). It
+also covers an `unsupported_request` (URL mode,
 sampling, roots, or any input without the opt-in), `invalid_responses` and `mismatched_resume`
 (another tool or other arguments; both checked before sending), and `unsupported_era` (resuming on a
 legacy connection). The official client drops a non-string `requestState`, so such a resume reaches

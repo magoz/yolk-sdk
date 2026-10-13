@@ -44,6 +44,7 @@ export {
   McpFormElicitation,
   McpInputRequired,
   mcpArgumentsDigest,
+  mcpMaxInputRequiredBytes,
   mcpMaxInputRequests,
   McpPausedTool,
   McpToolCallComplete,

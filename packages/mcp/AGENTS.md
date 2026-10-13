@@ -50,8 +50,14 @@
   which a host `responseCacheStore` keeps across connections), so every resumable call passes
   `toolDefinition` without `outputSchema` (the listed or paused definition, else a minimal one, so
   the cache is never read), compiles the output schema before calling, and validates complete
-  results itself (`assertStructuredOutput`). The size bound applies to the decoded pause after the
-  body is buffered. The SDK drops a non-string `requestState` (the resume is then a fresh call).
+  results itself (`assertStructuredOutput`); a carried definition that is not a valid tool fails
+  `malformed` (never a silent minimal fallback), and with `toolDefinition` set the SDK makes no
+  `HEADER_MISMATCH` re-list-and-retry. The carried definition is `name`, `inputSchema` and
+  `outputSchema` only: the fields the pinned SDK reads from `toolDefinition` (it removes
+  `execution` from 2026 listings and has no task runtime). `maxInputRequiredBytes` is validated
+  before connecting and bounds two parts separately: the server-provided pause (after the body is
+  buffered, without the tool definition) and the listed definition (before the call, so an
+  oversized definition fails `too_large` with nothing sent). The SDK drops a non-string `requestState` (the resume is then a fresh call).
   Form mode only; legacy server-initiated elicitation is unsupported (`McpInputRequiredError`
   `unsupported_era`). Tests: `test/client/elicitation.test.ts`.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.

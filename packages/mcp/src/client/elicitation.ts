@@ -16,10 +16,11 @@ import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { McpInputRequiredError, type McpInputRequiredErrorReason } from './errors.ts'
 
 /**
- * Default bound on one pause, in UTF-8 bytes of JSON: the `InputRequiredResult` and the decoded
- * `McpInputRequired` the host persists (elicitations, `requestState`, binding, tool definition).
- * It is checked after the response body is buffered, so it bounds what is decoded and persisted,
- * not what is received.
+ * Default bound, in UTF-8 bytes of JSON, applied separately to (1) the server-provided pause: the
+ * `InputRequiredResult` and the decoded `McpInputRequired` without its tool definition, checked
+ * after the response body is buffered (it bounds what is decoded and persisted, not what is
+ * received); and (2) the carried tool definition, checked before the call. A persisted pause is
+ * therefore at most about twice the bound.
  */
 export const defaultMcpMaxInputRequiredBytes = 262_144
 
@@ -80,7 +81,9 @@ const ListedJsonSchema = Schema.Record(Schema.String, Schema.Json)
 /**
  * The paused tool's listed definition: name, input and output schemas. A resume calls with it
  * instead of listing again (input schema for `x-mcp-header` mirroring, output schema for the
- * structured-output check).
+ * structured-output check). These are the only definition fields the pinned official client reads
+ * from `toolDefinition` (`@modelcontextprotocol/client` 2.0.0); `annotations`, `_meta` and
+ * `execution` (task support, which its 2026-07-28 codec deletes from listings) are not carried.
  */
 export class McpPausedTool extends Schema.Class<McpPausedTool>('McpPausedTool')({
   name: Schema.String,
@@ -110,6 +113,34 @@ export type McpPauseBinding = {
   readonly mcpToolName: string
   readonly argumentsDigest: string
   readonly tool: McpPausedTool | undefined
+}
+
+/** The JSON size of a carried tool definition, or `None` when it does not encode. */
+export const mcpPausedToolBytes = (tool: McpPausedTool): Option.Option<number> =>
+  Schema.encodeUnknownOption(Schema.fromJsonString(McpPausedTool))(tool).pipe(
+    Option.map(json => new TextEncoder().encode(json).byteLength)
+  )
+
+/**
+ * The host's `maxInputRequiredBytes` (default `defaultMcpMaxInputRequiredBytes`), or
+ * `McpInputRequiredError` (`malformed`) when it is not a positive integer. The resumable call
+ * functions check it before connecting.
+ */
+export const mcpMaxInputRequiredBytes = (input: {
+  readonly server: string
+  readonly elicitation: McpElicitationSupport | undefined
+}): Effect.Effect<number, McpInputRequiredError> => {
+  const maxBytes = input.elicitation?.maxInputRequiredBytes ?? defaultMcpMaxInputRequiredBytes
+
+  return Number.isSafeInteger(maxBytes) && maxBytes > 0
+    ? Effect.succeed(maxBytes)
+    : Effect.fail(
+        new McpInputRequiredError({
+          server: input.server,
+          reason: 'malformed',
+          message: 'elicitation.maxInputRequiredBytes must be a positive integer'
+        })
+      )
 }
 
 const isJsonArray = Schema.is(Schema.Array(Schema.Json))
@@ -295,15 +326,7 @@ export const decodeMcpInputRequired = (input: {
   readonly binding: McpPauseBinding
 }): Effect.Effect<McpInputRequired, McpInputRequiredError> =>
   Effect.gen(function* () {
-    const maxBytes = input.elicitation?.maxInputRequiredBytes ?? defaultMcpMaxInputRequiredBytes
-
-    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
-      return yield* inputRequiredError(
-        input.server,
-        'malformed',
-        'elicitation.maxInputRequiredBytes must be a positive integer'
-      )
-    }
+    const maxBytes = yield* mcpMaxInputRequiredBytes(input)
 
     const json = yield* encodeJson(input.raw).pipe(
       Effect.catch(() =>
@@ -357,22 +380,19 @@ export const decodeMcpInputRequired = (input: {
       decodeElicitation(input.server, key, raw)
     )
 
-    const pause = McpInputRequired.make({
+    const serverPause = McpInputRequired.make({
       elicitations,
       mcpToolName: input.binding.mcpToolName,
       argumentsDigest: input.binding.argumentsDigest,
       ...Option.match(Option.fromNullishOr(payload.requestState), {
         onNone: () => ({}),
         onSome: requestState => ({ requestState })
-      }),
-      ...Option.match(Option.fromNullishOr(input.binding.tool), {
-        onNone: () => ({}),
-        onSome: tool => ({ tool })
       })
     })
 
+    // The carried tool definition is bounded on its own, before the call.
     const persisted = yield* Schema.encodeEffect(Schema.fromJsonString(McpInputRequired))(
-      pause
+      serverPause
     ).pipe(
       Effect.catch(() =>
         inputRequiredError(input.server, 'malformed', 'The pause does not encode as JSON')
@@ -385,11 +405,24 @@ export const decodeMcpInputRequired = (input: {
       return yield* inputRequiredError(
         input.server,
         'too_large',
-        `The pause is ${persistedBytes} bytes with its tool definition; the limit is ${maxBytes}`
+        `The pause is ${persistedBytes} bytes; the limit is ${maxBytes}`
       )
     }
 
-    return pause
+    return Option.match(Option.fromNullishOr(input.binding.tool), {
+      onNone: () => serverPause,
+      onSome: tool =>
+        McpInputRequired.make({
+          elicitations: serverPause.elicitations,
+          mcpToolName: serverPause.mcpToolName,
+          argumentsDigest: serverPause.argumentsDigest,
+          tool,
+          ...Option.match(Option.fromNullishOr(serverPause.requestState), {
+            onNone: () => ({}),
+            onSome: requestState => ({ requestState })
+          })
+        })
+    })
   })
 
 const isString = Schema.is(Schema.String)

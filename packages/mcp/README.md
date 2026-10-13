@@ -148,15 +148,26 @@ const step = Effect.gen(function* () {
 - The outcome is `Complete` (a `ToolResult`) or `InputRequired` (`McpInputRequired`: Schema-decoded
   form elicitations with `key`, `message` and `requestedSchema`, the opaque `requestState`, the
   binding `mcpToolName` and `argumentsDigest`, and the listed tool definition `tool`).
-- The pause is bounded: 256 KiB of JSON by default (`elicitation.maxInputRequiredBytes`, a positive
-  integer) and 16 requests. The bound applies to the decoded pause after the response body is
-  buffered, so it bounds what is decoded and persisted, not what is received.
+- The bound is 256 KiB of JSON by default (`elicitation.maxInputRequiredBytes`, a positive
+  integer, checked before connecting) plus 16 requests, applied to two parts separately. The
+  server-provided pause (the `InputRequiredResult` and the decoded pause without its tool
+  definition) is checked after the response body is buffered, so it bounds what is decoded and
+  persisted, not what is received. The listed tool definition is checked before the call: a tool
+  whose definition alone exceeds the bound fails `too_large` with nothing sent, so a pause the
+  server already made is never lost to the bound. A persisted pause is at most about twice the
+  bound.
 - The resume is re-sent as a new request on a new connection with the same tool call (checked
   against the pause's binding), the exact `requestState`, and the decisions (`accept` with
   `content`, `decline`, `cancel`) as `inputResponses`. It lists nothing: it calls with the pause's
   tool definition (for `x-mcp-header` mirroring) and checks the result against its `outputSchema`.
-  Decisions are checked before anything is sent (type, `required`, `const`, `enum`, titled options,
-  `items.enum`); the server validates them again. The server may pause again.
+  A carried definition that is not a valid MCP tool fails `malformed` before sending. Because the
+  definition is passed as `toolDefinition`, the official client does not re-list and retry after a
+  `HEADER_MISMATCH` (`-32020`): a server that changed the tool's `x-mcp-header` declarations since
+  the pause answers `McpError` (`cause: 'protocol'`). Decisions are checked before anything is sent
+  (type, `required`, `const`, `enum`, titled `oneOf`, `items.enum`, titled `items.anyOf`); the server validates them again. The server may pause again.
+- The carried definition is `name`, `inputSchema` and `outputSchema`: the only `toolDefinition`
+  fields the pinned official client reads. `annotations`, `_meta` and `execution` (task support,
+  which its `2026-07-28` codec removes from listings) are not carried.
 - The official client drops a non-string `requestState`; the pause then carries none, and the
   resume reaches the server as a fresh call (the server pauses again).
 - Typed failures: `McpInputRequiredError` (`malformed`, `too_large`, `unsupported_request` for URL

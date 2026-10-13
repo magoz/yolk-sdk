@@ -17,6 +17,7 @@ import {
   InMemoryResponseCacheStore,
   mcpArgumentsDigest,
   McpFormElicitation,
+  McpPausedTool,
   toMcpInputResponses,
   listRemoteMcpServerTools,
   McpInputRequired,
@@ -81,6 +82,16 @@ const deleteTool: Tool = {
   annotations: { destructiveHint: true }
 }
 
+/** Its definition alone is larger than a tight `maxInputRequiredBytes`. */
+const bigSchemaTool: Tool = {
+  name: 'big_schema',
+  description: 'Lists a large input schema.',
+  inputSchema: {
+    type: 'object',
+    properties: { note: { type: 'string', description: 'x'.repeat(4_000) } }
+  }
+}
+
 /** Its `outputSchema` does not compile (invalid regular expression). */
 const brokenOutputTool: Tool = {
   name: 'broken_output',
@@ -117,7 +128,7 @@ const makeConfirmingServer = (ledger: ServerLedger) => () => {
 
   server.server.registerCapabilities({ tools: { listChanged: false } })
   server.server.setRequestHandler('tools/list', () => ({
-    tools: [deleteTool, brokenOutputTool, capabilityTool]
+    tools: [deleteTool, brokenOutputTool, bigSchemaTool, capabilityTool]
   }))
   server.server.setRequestHandler('tools/call', async (request, context) => {
     if (request.params.name === capabilityTool.name) {
@@ -798,19 +809,120 @@ describe('MCP form elicitation (MRTR)', () => {
     })
   )
 
-  it.effect('needs a positive integer maxInputRequiredBytes', () =>
+  it.effect('needs a positive integer maxInputRequiredBytes before connecting', () =>
     Effect.gen(function* () {
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(
+          Effect.provide(makeHarness().layer)
+        )
+      )
+
       for (const maxInputRequiredBytes of [0, -1, 1.5, Number.NaN]) {
         const harness = makeHarness()
+        const options: McpClientOptions = { elicitation: { form: true, maxInputRequiredBytes } }
 
-        const exit = yield* Effect.exit(
-          callRemoteMcpServerToolResumable(
-            callInput({ elicitation: { form: true, maxInputRequiredBytes } })
-          ).pipe(Effect.provide(harness.layer))
+        const exits = [
+          yield* Effect.exit(
+            callRemoteMcpServerToolResumable(callInput(options)).pipe(Effect.provide(harness.layer))
+          ),
+          yield* Effect.exit(
+            resumeRemoteMcpServerToolCall({
+              ...callInput(options),
+              inputRequired: pending,
+              responses: confirmed
+            }).pipe(Effect.provide(harness.layer))
+          )
+        ]
+
+        for (const exit of exits) {
+          expect(failure(exit)).toMatchObject({
+            _tag: 'McpInputRequiredError',
+            reason: 'malformed'
+          })
+        }
+
+        // Refused before connecting: nothing reached the server.
+        expect(harness.wire).toEqual([])
+      }
+    })
+  )
+
+  it.effect('bounds the carried tool definition on its own, before the call', () =>
+    Effect.gen(function* () {
+      const tight = makeHarness()
+
+      const tooLarge = yield* Effect.exit(
+        callRemoteMcpServerToolResumable({
+          ...callInput({ elicitation: { form: true, maxInputRequiredBytes: 2_048 } }),
+          mcpToolName: bigSchemaTool.name,
+          params: {}
+        }).pipe(Effect.provide(tight.layer))
+      )
+
+      expect(failure(tooLarge)).toMatchObject({
+        _tag: 'McpInputRequiredError',
+        reason: 'too_large'
+      })
+      expect(failure(tooLarge)?.message).toContain('The listed definition of big_schema')
+      // The call was never sent, so no pause exists that could not be persisted.
+      expect(tight.calls()).toHaveLength(0)
+
+      // The definition and the server-provided pause each fit the bound; together they do not.
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(
+          Effect.provide(makeHarness().layer)
+        )
+      )
+
+      const json = (value: unknown) =>
+        Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
+          Effect.map(text => new TextEncoder().encode(text).byteLength)
         )
 
-        expect(failure(exit)).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
-      }
+      const toolBytes = yield* json(pending.tool)
+      const pauseBytes = yield* json({ ...pending, tool: undefined })
+      const totalBytes = yield* json(pending)
+      const bound = Math.max(toolBytes, pauseBytes) + 64
+
+      expect(totalBytes).toBeGreaterThan(bound)
+
+      const fits = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(
+          callInput({ elicitation: { form: true, maxInputRequiredBytes: bound } })
+        ).pipe(Effect.provide(makeHarness().layer))
+      )
+
+      expect(fits.tool).toEqual(pending.tool)
+    })
+  )
+
+  it.effect('refuses a resume whose carried tool definition is not a valid tool', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness()
+
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+      )
+
+      const corrupted = McpInputRequired.make({
+        elicitations: pending.elicitations,
+        mcpToolName: pending.mcpToolName,
+        argumentsDigest: pending.argumentsDigest,
+        requestState: pending.requestState ?? '',
+        tool: McpPausedTool.make({ name: 'delete_invoice', inputSchema: { type: 'string' } })
+      })
+
+      const exit = yield* Effect.exit(
+        resumeRemoteMcpServerToolCall({
+          ...callInput(),
+          inputRequired: corrupted,
+          responses: confirmed
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(failure(exit)).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+      expect(harness.calls()).toHaveLength(1)
+      expect(harness.ledger.executed).toBe(0)
     })
   )
 

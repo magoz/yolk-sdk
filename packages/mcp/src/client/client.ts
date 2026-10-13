@@ -35,7 +35,9 @@ import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config.ts'
 import {
   decodeMcpInputRequired,
   mcpArgumentsDigest,
+  mcpMaxInputRequiredBytes,
   McpPausedTool,
+  mcpPausedToolBytes,
   McpToolCallComplete,
   McpToolCallInputRequired,
   toMcpInputResponses,
@@ -615,6 +617,24 @@ type ResumableStep =
     }
   | { readonly kind: 'missing_input_required_payload'; readonly message: string }
   | { readonly kind: 'legacy_resume' }
+  | {
+      readonly kind: 'refused'
+      readonly reason: 'malformed' | 'too_large'
+      readonly message: string
+    }
+
+/** The definition a step calls with, and the one its pause carries; or why there is none. */
+type CarriedDefinition =
+  | {
+      readonly kind: 'ok'
+      readonly paused: McpPausedTool | undefined
+      readonly definition: Tool | undefined
+    }
+  | {
+      readonly kind: 'refused'
+      readonly reason: 'malformed' | 'too_large'
+      readonly message: string
+    }
 
 const InputRequiredMissingBoth = Schema.Struct({
   violation: Schema.Literal('input-required-missing-both')
@@ -643,6 +663,63 @@ const sdkToolOf = (tool: McpPausedTool): Tool | undefined => {
   }
 
   return isSpecType.Tool(candidate) ? candidate : undefined
+}
+
+/**
+ * Initial step: the listed tool must be carriable (it decodes, and its JSON fits the bound, which
+ * applies to the definition on its own) or the call fails before anything is sent, so a pause is
+ * never unrecoverable. Resume: a carried definition must still be a valid MCP tool; it never
+ * silently degrades to the minimal definition.
+ */
+const carriedDefinition = (
+  name: string,
+  mode: ResumableMode,
+  listed: Tool | undefined,
+  maxBytes: number
+): CarriedDefinition => {
+  if (mode.kind === 'resume') {
+    if (mode.tool === undefined) return { kind: 'ok', paused: undefined, definition: undefined }
+
+    const definition = sdkToolOf(mode.tool)
+
+    return definition === undefined
+      ? {
+          kind: 'refused',
+          reason: 'malformed',
+          message: `The pause's tool definition of ${name} is not a valid MCP tool`
+        }
+      : { kind: 'ok', paused: mode.tool, definition }
+  }
+
+  if (listed === undefined) return { kind: 'ok', paused: undefined, definition: undefined }
+
+  const paused = decodePausedTool(listed)
+
+  if (Option.isNone(paused)) {
+    return {
+      kind: 'refused',
+      reason: 'malformed',
+      message: `The listed definition of ${name} cannot be carried in a pause`
+    }
+  }
+
+  const bytes = mcpPausedToolBytes(paused.value)
+
+  if (Option.isNone(bytes)) {
+    return {
+      kind: 'refused',
+      reason: 'malformed',
+      message: `The listed definition of ${name} does not encode as JSON`
+    }
+  }
+
+  return bytes.value > maxBytes
+    ? {
+        kind: 'refused',
+        reason: 'too_large',
+        message: `The listed definition of ${name} is ${bytes.value} bytes; the limit is ${maxBytes}`
+      }
+    : { kind: 'ok', paused: paused.value, definition: listed }
 }
 
 /** A definition that keeps the SDK off its response cache when nothing better is known. */
@@ -717,7 +794,8 @@ const assertStructuredOutput = async (
 const resumableStep = (
   input: CallRemoteMcpServerToolInput,
   args: ToolArguments,
-  mode: ResumableMode
+  mode: ResumableMode,
+  maxBytes: number
 ) =>
   withRemoteSdkClient(input.config, input.options, async (client): Promise<ResumableStep> => {
     const era = client.getProtocolEra()
@@ -738,15 +816,11 @@ const resumableStep = (
           ).tools.find(tool => tool.name === input.mcpToolName)
         : undefined
 
-    const paused =
-      mode.kind === 'resume'
-        ? mode.tool
-        : Option.getOrUndefined(Option.flatMap(Option.fromNullishOr(listed), decodePausedTool))
+    const carried = carriedDefinition(input.mcpToolName, mode, listed, maxBytes)
 
-    const definition =
-      mode.kind === 'resume'
-        ? Option.getOrUndefined(Option.flatMapNullishOr(Option.fromNullishOr(paused), sdkToolOf))
-        : listed
+    if (carried.kind === 'refused') return carried
+
+    const { paused, definition } = carried
 
     const validator =
       definition === undefined ? undefined : compileOutputValidator(definition, input.options)
@@ -832,6 +906,10 @@ const resumableOutcome = (
       return Effect.fail(
         new McpInputRequiredError({ server, reason: 'malformed', message: step.message })
       )
+    case 'refused':
+      return Effect.fail(
+        new McpInputRequiredError({ server, reason: step.reason, message: step.message })
+      )
     case 'answered':
       if (isInputRequiredResult(step.raw)) {
         return step.era === 'modern'
@@ -885,9 +963,14 @@ export const callRemoteMcpServerToolResumable = (
   input: CallRemoteMcpServerToolInput
 ): Effect.Effect<McpToolCallOutcome, McpResumableToolCallError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
+    const maxBytes = yield* mcpMaxInputRequiredBytes({
+      server: input.config.name,
+      elicitation: input.options?.elicitation
+    })
+
     const args = yield* decodeCallArguments(input.config.name, input.params)
     const argumentsDigest = yield* digestCallArguments(input.config.name, args)
-    const step = yield* resumableStep(input, args, { kind: 'initial' })
+    const step = yield* resumableStep(input, args, { kind: 'initial' }, maxBytes)
 
     return yield* resumableOutcome(input, step, argumentsDigest)
   })
@@ -907,6 +990,12 @@ export const resumeRemoteMcpServerToolCall = (
   Effect.gen(function* () {
     const server = input.config.name
     const pause = input.inputRequired
+
+    const maxBytes = yield* mcpMaxInputRequiredBytes({
+      server,
+      elicitation: input.options?.elicitation
+    })
+
     const args = yield* decodeCallArguments(server, input.params)
     const argumentsDigest = yield* digestCallArguments(server, args)
 
@@ -935,7 +1024,12 @@ export const resumeRemoteMcpServerToolCall = (
 
     if (pause.requestState !== undefined) retry.requestState = pause.requestState
 
-    const step = yield* resumableStep(input, args, { kind: 'resume', retry, tool: pause.tool })
+    const step = yield* resumableStep(
+      input,
+      args,
+      { kind: 'resume', retry, tool: pause.tool },
+      maxBytes
+    )
 
     return yield* resumableOutcome(input, step, argumentsDigest)
   })
