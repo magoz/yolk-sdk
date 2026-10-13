@@ -2,7 +2,9 @@ import { Deferred, Effect, Layer, Option, Predicate, Result, Stream } from 'effe
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
+  AssistantAgentMessage,
   assistantContent,
+  HostToolCallPart,
   assistantReasoningText,
   CompactionEnd,
   CompactionStart,
@@ -63,6 +65,15 @@ const noToolReasoningCapabilities = AgentModelCapabilities.make({
   input: AgentContentCapabilities.make({ text: true, image: false, document: false, audio: false }),
   tools: false,
   reasoning: false
+})
+
+/** The paused manual-approval call, as the transcript holds it while the human answers. */
+const pausedWeatherCall = AssistantAgentMessage.make({
+  parts: [
+    HostToolCallPart.make({
+      call: ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+    })
+  ]
 })
 
 const assistantMessageFromEvents = (events: ReadonlyArray<AgentEvent>) => {
@@ -370,8 +381,10 @@ describe('run', () => {
         source: 'user'
       })
 
+      // The answer resumes the paused call in the transcript (an answer never settles a call
+      // a new model turn produces: a provider may reuse call ids).
       const eventsChunk = yield* run({
-        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        messages: [UserMessage.make({ content: 'what is the weather?' }), pausedWeatherCall],
         systemPrompt: 'Use tools when useful.',
         tools: [
           ToolDef.make({
@@ -387,10 +400,7 @@ describe('run', () => {
         Stream.runCollect,
         Effect.provide(
           Layer.mergeAll(
-            FauxProvider.layer(
-              Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
-              Reply.text('sunny')
-            ),
+            FauxProvider.layer(Reply.text('sunny')),
             TestToolExecutor.layer({ weather: '72F' })
           ).pipe(Layer.provideMerge(BaseLayer))
         )
@@ -404,9 +414,7 @@ describe('run', () => {
           Predicate.isTagged(event, 'ToolExecutionStarted') ? [event.call.id] : []
         )
       ).toEqual(['call_1'])
-      expect(events.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
-        turns: 2
-      })
+      expect(events.find(event => Predicate.isTagged(event, 'AgentEnd'))).toBeDefined()
     })
   )
 
@@ -423,7 +431,7 @@ describe('run', () => {
       })
 
       const eventsChunk = yield* run({
-        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        messages: [UserMessage.make({ content: 'what is the weather?' }), pausedWeatherCall],
         systemPrompt: 'Use tools when useful.',
         tools: [
           ToolDef.make({
@@ -440,10 +448,7 @@ describe('run', () => {
         Effect.provide(
           Layer.mergeAll(
             FauxProvider.layerWithRequests({
-              responses: [
-                Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
-                Reply.text('ok')
-              ],
+              responses: [Reply.text('ok')],
               requests
             }),
             TestToolExecutor.layer({ weather: 'should not run' })
@@ -456,7 +461,7 @@ describe('run', () => {
       expect(
         events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
       ).toBeUndefined()
-      expect(requests[1]?.messages.at(-1)).toMatchObject(
+      expect(requests[0]?.messages.at(-1)).toMatchObject(
         ToolResultMessage.make({
           toolCallId: 'call_1',
           isError: true,

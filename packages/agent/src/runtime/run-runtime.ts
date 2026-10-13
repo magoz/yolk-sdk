@@ -1,4 +1,4 @@
-import { Data, Effect, Match, Predicate, Ref, Stream } from 'effect'
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Ref, Stream } from 'effect'
 import type {
   AgentEvent,
   AgentMessage,
@@ -161,6 +161,39 @@ const latestAwaitingRequests = (log: RuntimeSessionEventLog): ReadonlyArray<Hitl
     )
   }, undefined) ?? []
 
+/**
+ * The responses of the paused batch: those logged after the event that recorded the batch's
+ * assistant message (the transcript's last assistant message: a pause ends the run right after
+ * its batch). They include answers to earlier siblings of the batch (each answer resumes the same
+ * batch until it settles), and never an answer to an earlier batch, even one settled inside the
+ * same run without a run terminator, where a provider-reused call id would match it.
+ */
+const pausedBatchResponses = (log: RuntimeSessionEventLog): ReadonlyArray<HitlResponse> => {
+  const transcript = replayRuntimeSessionEvents(log.events)
+
+  return Option.match(
+    Arr.findLastIndex(transcript, message => Predicate.isTagged(message, 'Assistant')),
+    {
+      onNone: () => [],
+      onSome: batchMessage => {
+        const counts = Arr.scan(
+          log.events,
+          0,
+          (count, stored) => count + replayRuntimeSessionEvents([stored]).length
+        ).slice(1)
+
+        return Option.match(
+          Arr.findFirstIndex(counts, count => count > batchMessage),
+          {
+            onNone: () => [],
+            onSome: recorded => replayRuntimeHitlResponses(log.events.slice(recorded + 1))
+          }
+        )
+      }
+    }
+  )
+}
+
 const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
   Match.value(response).pipe(
     Match.tag(
@@ -317,10 +350,16 @@ const makeAppendHitlResponseRuntimeStream = (
       })
 
       const messages = replayRuntimeSessionEvents(initialLog.events)
-      const priorResponses = replayRuntimeHitlResponses(initialLog.events)
+      const priorResponses = pausedBatchResponses(initialLog)
       const hitlResponses = [...priorResponses, request.response]
 
-      return run(runtimeRunConfig({ ...config, hitlResponses }, messages)).pipe(
+      // The pause being resumed binds its unanswered approval requests (see `prepareToolBatch`).
+      const resumeConfig = {
+        ...runtimeRunConfig({ ...config, hitlResponses }, messages),
+        awaitingRequests: latestAwaitingRequests(initialLog)
+      }
+
+      return run(resumeConfig).pipe(
         Stream.tap(event =>
           Match.value(event).pipe(
             Match.tag('AgentEnd', end =>

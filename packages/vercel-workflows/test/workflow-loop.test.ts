@@ -339,6 +339,49 @@ describe('runVercelAgentWorkflow', () => {
     expect(receivedHitlResponses[2]?.[1]).toBe(secondApproval)
   })
 
+  it('passes each resume the requests of the pause it resumes', async () => {
+    const received: Array<ReadonlyArray<unknown> | undefined> = []
+    let round = 0
+
+    const awaiting = (hookToken: string, requests: ReadonlyArray<string>) => ({
+      hookToken,
+      requests,
+      messages: ['assistant-1'],
+      usage: { turns: 1 },
+      turns: 1
+    })
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input =>
+        step(() => (input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input))),
+      runToolBatchStep: input =>
+        step(() => {
+          round += 1
+          received.push(input.awaitingRequests)
+
+          if (round === 1) {
+            return {
+              ...toolBatchResult(input),
+              awaitingInput: awaiting('hook-1', ['approval:a', 'approval:b'])
+            }
+          }
+
+          if (round === 2) {
+            return { ...toolBatchResult(input), awaitingInput: awaiting('hook-2', ['approval:b']) }
+          }
+
+          return toolBatchResult(input)
+        }),
+      awaitInput: input => step(() => `answer-${input.hookToken}`),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result._tag).toBe('Completed')
+    expect(received).toEqual([undefined, ['approval:a', 'approval:b'], ['approval:b']])
+  })
+
   it('fails when awaiting input without handler', async () => {
     const errors: Array<unknown> = []
 
