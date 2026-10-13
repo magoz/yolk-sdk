@@ -117,12 +117,15 @@ const outcome = await Effect.runPromise(
 if (outcome._tag === 'InputRequired') {
   // Persist `outcome.inputRequired` first: the decision may take hours and another process.
   const pending = outcome.inputRequired
-  const responses: Record<string, McpElicitationResponse> = {}
+  const entries: Array<[string, McpElicitationResponse]> = []
 
   for (const form of pending.elicitations) {
     // One decision per form, keyed by `form.key`, from a person.
-    responses[form.key] = await collectDecision(form)
+    entries.push([form.key, await collectDecision(form)])
   }
+
+  // `Object.fromEntries` keeps any server key as an own property (even `__proto__`).
+  const responses = Object.fromEntries(entries)
 
   const resumed = await Effect.runPromise(
     resumeRemoteMcpServerToolCall({ ...call, inputRequired: pending, responses }).pipe(
@@ -154,9 +157,12 @@ before the call, so an oversized definition fails with nothing sent and never st
 also covers an `unsupported_request` (URL mode,
 sampling, roots, or any input without the opt-in), `invalid_responses` and `mismatched_resume`
 (another tool or other arguments; both checked before sending), and `unsupported_era` (resuming on a
-legacy connection). The pause is decoded from the raw `input_required` result as the server sent it
-(captured before the official client normalises it), so a non-string `requestState` or non-object
-`inputRequests` fails `malformed` instead of passing as a valid or load-shedding pause. MCP `-32021` becomes
+legacy connection). The pause is decoded from the raw `input_required` response as the server sent it:
+the response with the call's JSON-RPC id, captured at the transport before the official client
+normalises it. A non-string `requestState` or non-object `inputRequests` fails `malformed` instead of
+passing as a valid or load-shedding pause; responses with other ids are ignored. Formats are checked
+by syntax: RFC 3339 dates, an absolute RFC 3986 URI (not WHATWG URL parsing), and a pragmatic
+mailbox (a dot-atom local part, `@`, a hostname of at least two labels). MCP `-32021` becomes
 `McpClientCapabilityRequiredError` with `requiredCapabilities`. A server that reports a missing
 capability as a tool error (for example Afloat's `CLIENT_CAPABILITY_REQUIRED`) answers a `Complete`
 outcome with `isError: true`.

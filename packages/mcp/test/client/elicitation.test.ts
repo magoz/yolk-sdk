@@ -233,7 +233,13 @@ type Harness = {
  * `overrideCall` answers a `tools/call` with a hand-written result instead of the server (for
  * malformed payloads the official server would refuse to send).
  */
-const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
+/** A raw answer to a tools/call, given the call's JSON-RPC id. */
+type CallAnswer = (id: string | number | undefined) => Response
+
+const makeHarness = (
+  overrideCall?: (attempt: number) => unknown,
+  answerCall?: CallAnswer
+): Harness => {
   const ledger: ServerLedger = { minted: 0, executed: 0 }
   const handler = createMcpHandler(makeConfirmingServer(ledger))
   const wire: Array<WireMessage> = []
@@ -257,6 +263,14 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
 
         if (Option.isSome(message) && message.value.method === 'tools/call') {
           invoiceHeaders.push(request.headers['mcp-param-invoice-id'])
+        }
+
+        if (
+          answerCall !== undefined &&
+          Option.isSome(message) &&
+          message.value.method === 'tools/call'
+        ) {
+          return HttpClientResponse.fromWeb(request, answerCall(message.value.id))
         }
 
         if (
@@ -1079,12 +1093,24 @@ describe('MCP form elicitation (MRTR)', () => {
         { name: 'abcd' },
         // Code points, not UTF-16 units.
         { name: '🔐🔐' },
-        { email: 'a@b' },
-        { site: 'https://x.test/a?b=1' },
+        { email: 'a@b.co' },
+        { email: 'first.last@example.com' },
+        { email: "o'neil+tag@sub.example-mail.co" },
+        { site: 'https://x.test/a?b=1#frag' },
         { site: 'urn:isbn:0451450523' },
+        { site: 'mailto:a@example.com' },
+        { site: 'https://[::1]:8080/p' },
+        { site: 'https://example.com/a%20b' },
+        { site: 'foo:' },
         { day: '2024-02-29' },
+        { day: '2000-02-29' },
+        // Years 0-99: no Date.UTC remapping.
+        { day: '0099-01-01' },
+        { day: '0000-02-29' },
         { at: '2026-10-13T08:00:00Z' },
         { at: '2026-10-13T08:00:00.123+02:00' },
+        { at: '0099-01-01T00:00:00z' },
+        { at: '2026-12-31T23:59:60.5-11:30' },
         { score: 1 },
         { score: 10 },
         { score: 5.5 },
@@ -1101,14 +1127,35 @@ describe('MCP form elicitation (MRTR)', () => {
         { name: 'a' },
         { name: 'abcde' },
         { email: 'nope' },
-        { email: 'a b@c' },
+        { email: 'a b@c.d' },
+        { email: 'a..b@example.com' },
+        { email: '.a@example.com' },
+        { email: 'a.@example.com' },
+        { email: 'a@b' },
+        { email: 'a@-b.com' },
+        { email: 'a@b-.com' },
+        { email: 'a@b..com' },
+        { email: '"quoted"@example.com' },
         { site: 'not a uri' },
         { site: '/relative' },
+        // WHATWG URL parsing would accept and normalise these.
+        { site: 'https://example.com/a b' },
+        { site: 'https://exa mple.com/' },
+        { site: 'https://example.com/ü' },
+        { site: 'https://example.com/%zz' },
+        { site: 'http://x/#a#b' },
+        { site: '1http://x' },
         { day: '2026-02-30' },
+        { day: '1900-02-29' },
+        { day: '2026-13-01' },
+        { day: '2026-00-10' },
         { day: '2026-2-1' },
         { at: '2026-10-13 08:00:00Z' },
         { at: '2026-10-13T24:00:00Z' },
         { at: '2026-10-13T08:00:00' },
+        { at: '2026-10-13T08:00:00.Z' },
+        { at: '2026-10-13T08:00:00+24:00' },
+        { at: '2026-10-13T08:00:00+0200' },
         { score: 0.999 },
         { score: 10.001 },
         { count: -1 },
@@ -1197,6 +1244,125 @@ describe('MCP form elicitation (MRTR)', () => {
           yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
         ).requestState
       ).toBe('opaque')
+    })
+  )
+
+  it.effect('keeps only the response with the call id (SSE and JSON batches)', () =>
+    Effect.gen(function* () {
+      const form = formRequest({ message: 'Sure?', requestedSchema: confirmationSchema })
+
+      const pause = (requestState: unknown) => ({
+        resultType: 'input_required',
+        inputRequests: { confirmation: form },
+        requestState
+      })
+
+      const response = (id: string | number | undefined, result: unknown) => ({
+        jsonrpc: '2.0',
+        id,
+        result
+      })
+
+      const notification = {
+        jsonrpc: '2.0',
+        method: 'notifications/message',
+        params: { level: 'info', data: 'working' }
+      }
+
+      const sse = (messages: ReadonlyArray<unknown>) =>
+        new Response(
+          messages.map(message => `event: message\ndata: ${JSON.stringify(message)}\n\n`).join(''),
+          { headers: { 'content-type': 'text/event-stream' } }
+        )
+
+      // Around the matching response: a notification, an unrelated id, the listing's id (0),
+      // a duplicate of the call id, and a late unrelated response. Each holds a malformed
+      // pause that would fail the call if it were taken.
+      const answers: ReadonlyArray<CallAnswer> = [
+        id =>
+          sse([
+            notification,
+            response('unrelated', pause(1)),
+            response(0, pause(2)),
+            response(id, pause('right')),
+            response(id, pause(3)),
+            response('late', pause(4))
+          ]),
+        id =>
+          Response.json([
+            response('unrelated', pause(1)),
+            response(id, pause('right')),
+            response('late', pause(4))
+          ])
+      ]
+
+      for (const answer of answers) {
+        const harness = makeHarness(undefined, answer)
+
+        const pending = expectInputRequired(
+          yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+        )
+
+        expect(pending.requestState).toBe('right')
+      }
+
+      // Nothing with the call id: fails closed.
+      const unanswered = makeHarness(undefined, id =>
+        sse([response('unrelated', pause('wrong')), response(id, pause(5))])
+      )
+
+      expect(
+        failure(
+          yield* Effect.exit(
+            callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(unanswered.layer))
+          )
+        )
+      ).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+    })
+  )
+
+  it.effect('a server form key __proto__ survives to the resume wire', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(attempt =>
+        attempt === 1
+          ? {
+              resultType: 'input_required',
+              inputRequests: JSON.parse(
+                JSON.stringify({ '!': 0 }).replace(
+                  '"!":0',
+                  `"__proto__":${JSON.stringify(
+                    formRequest({ message: 'Sure?', requestedSchema: confirmationSchema })
+                  )}`
+                )
+              ),
+              requestState: 'opaque'
+            }
+          : { resultType: 'complete', content: [], structuredContent: { deleted: true } }
+      )
+
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(pending.elicitations.map(form => form.key)).toEqual(['__proto__'])
+
+      const responses = Object.fromEntries(
+        pending.elicitations.map(form => [
+          form.key,
+          { action: 'accept' as const, content: { confirm: true } }
+        ])
+      )
+
+      yield* resumeRemoteMcpServerToolCall({
+        ...callInput(),
+        inputRequired: pending,
+        responses
+      }).pipe(Effect.provide(harness.layer))
+
+      const retry = harness.calls()[1]
+      const sent = retry === undefined ? undefined : retryParams(retry).inputResponses
+
+      expect(Object.keys(Object(sent))).toEqual(['__proto__'])
     })
   )
 

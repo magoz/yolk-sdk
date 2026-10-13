@@ -520,19 +520,24 @@ const decodeBound = Schema.decodeUnknownOption(Schema.Finite)
 
 const FormatName = Schema.Literals(['email', 'uri', 'date', 'date-time'])
 
-/** A real calendar date (`2026-02-30` is not). */
-const isCalendarDate = (year: number, month: number, day: number) => {
-  const date = new Date(Date.UTC(year, month - 1, day))
+/** Days in a month of the proleptic Gregorian calendar (RFC 3339 dates; years 0000-9999). */
+const daysInMonth = (year: number, month: number) => {
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
 
-  return (
-    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-  )
+  return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0
 }
+
+const isCalendarDate = (year: number, month: number, day: number) =>
+  month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)
 
 const fullDate = /^(\d{4})-(\d{2})-(\d{2})$/
 
-const dateTime =
-  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-](\d{2}):(\d{2}))$/
+/** RFC 3339 `full-date "T" partial-time` up to the seconds; the rest is parsed by hand. */
+const dateTimeHead = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})/
+
+const timeOffset = /^[+-](\d{2}):(\d{2})$/
+
+const digitsOnly = /^\d+$/
 
 const numberAt = (match: RegExpExecArray, group: number) => Number(match[group] ?? Number.NaN)
 
@@ -544,31 +549,162 @@ const isDate = (value: string) => {
   )
 }
 
+/** `time-secfrac` (optional) then `time-offset` (`Z` or `±hh:mm`). */
+const isSecfracAndOffset = (rest: string) => {
+  const offsetAt = rest.search(/[Zz+-]/)
+
+  if (offsetAt === -1) return false
+
+  const secfrac = rest.slice(0, offsetAt)
+  const offset = rest.slice(offsetAt)
+
+  if (secfrac !== '' && !(secfrac.startsWith('.') && digitsOnly.test(secfrac.slice(1)))) {
+    return false
+  }
+
+  if (offset === 'Z' || offset === 'z') return true
+
+  const match = timeOffset.exec(offset)
+
+  return match !== null && numberAt(match, 1) <= 23 && numberAt(match, 2) <= 59
+}
+
 const isDateTime = (value: string) => {
-  const match = dateTime.exec(value)
-
-  if (match === null) return false
-
-  const offsetHours = match[9] === undefined ? 0 : numberAt(match, 9)
-  const offsetMinutes = match[10] === undefined ? 0 : numberAt(match, 10)
+  const match = dateTimeHead.exec(value)
 
   return (
+    match !== null &&
     isCalendarDate(numberAt(match, 1), numberAt(match, 2), numberAt(match, 3)) &&
     numberAt(match, 4) <= 23 &&
     numberAt(match, 5) <= 59 &&
     numberAt(match, 6) <= 60 &&
-    offsetHours <= 23 &&
-    offsetMinutes <= 59
+    isSecfracAndOffset(value.slice(match[0].length))
   )
 }
 
-/** Syntax checks for the subset's formats (RFC 3339 dates; an absolute URI; `local@domain`). */
+/** RFC 5322 `atext`: the characters of a dot-atom part. */
+const atext = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+$/
+
+/** An RFC 1035 / RFC 1123 LDH label: letters, digits, hyphens, not at either end. */
+const ldhLabel = /^[A-Za-z0-9-]{1,63}$/
+
+/**
+ * A pragmatic mailbox (the JSON Schema `email` format): a dot-atom local part (RFC 5322 `atext`
+ * runs joined by single dots, at most 64 characters; no quoted strings, comments or IP-literal
+ * domains), `@`, and a DNS hostname of at least two LDH labels (each 1-63 characters, not starting
+ * or ending with a hyphen; at most 253 characters). ASCII only.
+ */
+const isEmail = (value: string) => {
+  const at = value.lastIndexOf('@')
+  const local = value.slice(0, at)
+  const domain = value.slice(at + 1)
+  const labels = domain.split('.')
+
+  return (
+    at > 0 &&
+    local.length <= 64 &&
+    local.split('.').every(part => atext.test(part)) &&
+    domain.length <= 253 &&
+    labels.length >= 2 &&
+    labels.every(label => ldhLabel.test(label) && !label.startsWith('-') && !label.endsWith('-'))
+  )
+}
+
+const hexDigit = /^[0-9A-Fa-f]$/
+
+const unreserved = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
+
+const subDelims = "!$&'()*+,;="
+
+/**
+ * Whether every character is in `allowed` or starts a percent-encoding (`%` and two hex digits),
+ * in one linear pass.
+ */
+const isEncoded = (value: string, allowed: string) => {
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value.charAt(index)
+
+    if (char === '%') {
+      if (!hexDigit.test(value.charAt(index + 1)) || !hexDigit.test(value.charAt(index + 2))) {
+        return false
+      }
+
+      index += 2
+    } else if (!allowed.includes(char)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+const pcharSet = `${unreserved}${subDelims}:@`
+
+const scheme = /^[A-Za-z][A-Za-z0-9+.-]*$/
+
+const ipLiteral = /^\[[0-9A-Fa-f:.]+\]$/
+
+const ipFuture = /^\[[Vv][0-9A-Fa-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+\]$/
+
+const port = /^\d*$/
+
+/** RFC 3986 `authority`: `[ userinfo "@" ] host [ ":" port ]`. */
+const isAuthority = (authority: string) => {
+  const at = authority.lastIndexOf('@')
+  const userinfo = at === -1 ? '' : authority.slice(0, at)
+  const hostPort = authority.slice(at + 1)
+  const literalEnd = hostPort.startsWith('[') ? hostPort.indexOf(']') + 1 : 0
+  const colon = hostPort.indexOf(':', literalEnd)
+  const host = colon === -1 ? hostPort : hostPort.slice(0, colon)
+  const portText = colon === -1 ? '' : hostPort.slice(colon + 1)
+
+  const validHost = host.startsWith('[')
+    ? ipLiteral.test(host) || ipFuture.test(host)
+    : isEncoded(host, `${unreserved}${subDelims}`)
+
+  return isEncoded(userinfo, `${unreserved}${subDelims}:`) && validHost && port.test(portText)
+}
+
+/**
+ * An absolute RFC 3986 URI (the JSON Schema `uri` format): `scheme ":" hier-part [ "?" query ]
+ * [ "#" fragment ]`, checked by syntax, not by WHATWG URL parsing (which accepts and normalises
+ * spaces, backslashes and non-ASCII). ASCII only; every other character must be percent-encoded.
+ */
+const isUri = (value: string) => {
+  const colon = value.indexOf(':')
+
+  if (colon <= 0 || !scheme.test(value.slice(0, colon))) return false
+
+  const afterScheme = value.slice(colon + 1)
+  const hash = afterScheme.indexOf('#')
+  const beforeFragment = hash === -1 ? afterScheme : afterScheme.slice(0, hash)
+  const fragment = hash === -1 ? '' : afterScheme.slice(hash + 1)
+  const question = beforeFragment.indexOf('?')
+  const hierPart = question === -1 ? beforeFragment : beforeFragment.slice(0, question)
+  const query = question === -1 ? '' : beforeFragment.slice(question + 1)
+
+  if (!isEncoded(query, `${pcharSet}/?`) || !isEncoded(fragment, `${pcharSet}/?`)) return false
+
+  if (!hierPart.startsWith('//')) return isEncoded(hierPart, `${pcharSet}/`)
+
+  const authorityEnd = hierPart.indexOf('/', 2)
+  const authority = authorityEnd === -1 ? hierPart.slice(2) : hierPart.slice(2, authorityEnd)
+  const path = authorityEnd === -1 ? '' : hierPart.slice(authorityEnd)
+
+  return isAuthority(authority) && isEncoded(path, `${pcharSet}/`)
+}
+
+/**
+ * Syntax checks for the subset's formats, all linear (anchored patterns without nested
+ * quantifiers, or hand-written scans): RFC 3339 `full-date` and `date-time` on the proleptic
+ * Gregorian calendar, an absolute RFC 3986 URI, and a pragmatic dot-atom mailbox.
+ */
 const matchesFormat = (format: typeof FormatName.Type, value: string) => {
   switch (format) {
     case 'email':
-      return /^[^\s@]+@[^\s@]+$/.test(value)
+      return isEmail(value)
     case 'uri':
-      return URL.canParse(value)
+      return isUri(value)
     case 'date':
       return isDate(value)
     case 'date-time':

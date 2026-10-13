@@ -5,6 +5,8 @@ import {
   Client as SdkClient,
   fromJsonSchema,
   isInputRequiredResult,
+  isJSONRPCRequest,
+  isJSONRPCResponse,
   isJSONRPCResultResponse,
   isSpecType,
   mergeCapabilities,
@@ -17,6 +19,7 @@ import {
   type CallToolRequestOptions,
   type CallToolRequestParams,
   type CallToolResult,
+  type JSONRPCResponse,
   type ClientOptions as SdkClientOptions,
   type ProtocolEra,
   type Tool
@@ -725,29 +728,69 @@ const carriedDefinition = (
 
 const InputRequiredResultType = Schema.Struct({ resultType: Schema.Literal('input_required') })
 
+/** The first response the transport delivered for the call's id (mutable: set once). */
+type FirstCallResponse = { response: Option.Option<JSONRPCResponse> }
+
+/** The raw response to the step's `tools/call`, observed on the transport. */
+type CallResponseCapture = {
+  /** The raw `input_required` result of the first response with the call's id, if it is one. */
+  readonly inputRequired: () => Option.Option<unknown>
+  /** Puts the transport's `send` and `onmessage` back. */
+  readonly restore: () => void
+}
+
 /**
- * Captures each raw `input_required` result as it arrives, before the SDK's codec normalises it
- * (the pinned SDK drops a non-string `requestState` and turns non-object `inputRequests` into
- * `{}`, which could make a corrupted pause look valid). Wraps the transport's `onmessage`, which
- * the client set on connect; every message is still forwarded unchanged.
+ * Captures the raw response to the `tools/call` before the SDK's codec normalises it (the pinned
+ * SDK drops a non-string `requestState` and turns non-object `inputRequests` into `{}`, which
+ * could make a corrupted pause look valid). Wraps the transport's `send` to learn the call's
+ * JSON-RPC id and its `onmessage` (which the client set on connect) to keep the first response
+ * with that id: the one the client resolves the call with. Other ids (a listing, unrelated or
+ * late responses), notifications and later duplicates are ignored, and every message is still
+ * forwarded unchanged.
  */
-const captureRawInputRequired = (client: SdkClient): ReadonlyArray<unknown> => {
-  const captured: Array<unknown> = []
+const captureCallResponse = (client: SdkClient): CallResponseCapture => {
   const transport = client.transport
 
-  if (transport === undefined) return captured
+  if (transport === undefined) {
+    return { inputRequired: () => Option.none(), restore: () => undefined }
+  }
 
+  const callIds = new Set<string | number>()
+  const first: FirstCallResponse = { response: Option.none() }
   const forward = transport.onmessage
+  const send = transport.send
+
+  transport.send = (message, options) => {
+    if (isJSONRPCRequest(message) && message.method === 'tools/call') callIds.add(message.id)
+
+    return send.call(transport, message, options)
+  }
 
   transport.onmessage = (message, extra) => {
-    if (isJSONRPCResultResponse(message) && Schema.is(InputRequiredResultType)(message.result)) {
-      captured.push(message.result)
+    if (
+      Option.isNone(first.response) &&
+      isJSONRPCResponse(message) &&
+      message.id !== undefined &&
+      callIds.has(message.id)
+    ) {
+      first.response = Option.some(message)
     }
 
     forward?.(message, extra)
   }
 
-  return captured
+  return {
+    inputRequired: () =>
+      first.response.pipe(
+        Option.filter(isJSONRPCResultResponse),
+        Option.map(response => response.result),
+        Option.filter(Schema.is(InputRequiredResultType))
+      ),
+    restore: () => {
+      transport.send = send
+      transport.onmessage = forward
+    }
+  }
 }
 
 /** A definition that keeps the SDK off its response cache when nothing better is known. */
@@ -879,7 +922,7 @@ const resumableStep = (
           : Struct.omit(definition, ['outputSchema'])
     }
 
-    const rawInputRequired = captureRawInputRequired(client)
+    const capture = captureCallResponse(client)
 
     try {
       const result = await client.callTool(params, callOptions)
@@ -893,15 +936,14 @@ const resumableStep = (
       }
 
       // Decode the pause as the server sent it, never the SDK's normalised copy.
-      const [raw, ...more] = rawInputRequired
-
-      return raw === undefined || more.length > 0
-        ? {
-            kind: 'refused',
-            reason: 'malformed',
-            message: 'The raw input_required result of the call was not observed exactly once'
-          }
-        : { kind: 'answered', era, raw, tool: paused }
+      return Option.match(capture.inputRequired(), {
+        onNone: (): ResumableStep => ({
+          kind: 'refused',
+          reason: 'malformed',
+          message: 'The raw input_required response to the call was not observed'
+        }),
+        onSome: (raw): ResumableStep => ({ kind: 'answered', era, raw, tool: paused })
+      })
     } catch (error) {
       if (error instanceof MissingRequiredClientCapabilityError) {
         return {
@@ -916,6 +958,8 @@ const resumableStep = (
       }
 
       throw error
+    } finally {
+      capture.restore()
     }
   })
 

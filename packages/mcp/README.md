@@ -170,9 +170,16 @@ const step = Effect.gen(function* () {
 - The carried definition is `name`, `inputSchema` and `outputSchema`: the only `toolDefinition`
   fields the pinned official client reads. `annotations`, `_meta` and `execution` (task support,
   which its `2026-07-28` codec removes from listings) are not carried.
-- The pause is decoded from the raw `input_required` result as the server sent it, captured at the
-  transport before the official client normalises it (it would drop a non-string `requestState`
-  and turn non-object `inputRequests` into `{}`). Such a result fails `malformed`.
+- The pause is decoded from the raw `input_required` response as the server sent it: the first
+  response with the call's JSON-RPC id (the one the official client resolves with), captured at the
+  transport before the client normalises it (it would drop a non-string `requestState` and turn
+  non-object `inputRequests` into `{}`). Such a response fails `malformed`; other ids,
+  notifications and later duplicates are ignored.
+- Formats are syntax checks, all linear: `date`/`date-time` per RFC 3339 on the proleptic
+  Gregorian calendar (years 0000-9999); `uri` an absolute RFC 3986 URI (scheme, then unreserved,
+  sub-delims and the delimiters, other characters percent-encoded; no WHATWG normalisation);
+  `email` a pragmatic mailbox: a dot-atom local part (RFC 5322 `atext` runs joined by single dots,
+  at most 64 characters; no quoted strings), `@`, and a hostname of at least two LDH labels.
 - Typed failures: `McpInputRequiredError` (`malformed`, `too_large`, `unsupported_request` for URL
   mode, sampling, roots or input without the opt-in, `invalid_responses`, `mismatched_resume`,
   `unsupported_era`) and `McpClientCapabilityRequiredError` for MCP `-32021`.
