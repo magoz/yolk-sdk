@@ -1,5 +1,12 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.106
+
+### Patch Changes
+
+- 1cc86e7: Bind tool approval to the call instead of the tool's current policy when a pause resumes. Previously `prepareApprovalCall` checked whether the tool still required approval before reading the recorded answer, so a tool whose policy flipped to automatic between the request and the answer ran even when the human denied it. In a resume batch, an exact-match recorded `ToolApprovalResponse` now wins (denied: the denied result, never executed; approved: executed), and a denial under another approval id of the same call (after an execution-mode change) also denies. New optional `awaitingRequests` (the resumed pause's `AgentAwaitingInput.requests`) on `run`, `runToolBatch` and `prepareToolBatch` keeps an unanswered approval request pending even when the tool no longer requires approval: the same request while it still names the call, else a fresh one, its preview recomputed (or dropped without a previewer). A fresh batch (a new model turn) never settles an approval from recorded answers: the current policy decides and a gated call asks again, because a provider may reuse call ids. This closes a consent bypass that predates this change, where a new gated call reusing an earlier approved id executed. Answers consumed by a resumed batch no longer reach later model turns of the same run, and a call is settled only by a result in its own result window, so a provider-reused call id stays pending. `run`, `prepareToolBatch` and `runToolBatch` take an explicit `resume` (default: transcript pending calls with responses, `awaitingRequests` or an interaction host for `run`; `awaitingRequests` or responses given for the batch functions). Append-backed `runRuntime` forwards its logged pause automatically with only the paused batch's responses (sibling answers included, never an earlier batch's, even within one run). Transcript-mode and stateless hosts must pass `awaitingRequests` and only the responses of the batch being resumed (non-empty `hitlResponses` means resume), or set `resume` explicitly. `@yolk-sdk/vercel-workflows` passes each resumed tool step the pause's requests (`VercelAgentWorkflowToolBatchStepInput.awaitingRequests`) for hosts to forward.
+  - @yolk-sdk/conformance@0.1.0-canary.106
+
 ## 0.1.0-canary.105
 
 ### Patch Changes

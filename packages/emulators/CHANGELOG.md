@@ -1,5 +1,7 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.106
+
 ## 0.1.0-canary.105
 
 ### Patch Changes
