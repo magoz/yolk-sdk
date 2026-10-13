@@ -1,6 +1,11 @@
 import { Match } from 'effect'
 import * as Schema from 'effect/Schema'
-import { AgentError, ProviderErrorInfo, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
+import {
+  AgentAbortReason,
+  AgentError,
+  ProviderErrorInfo,
+  type AgentErrorCode
+} from '@yolk-sdk/agent/protocol'
 
 export const LLMResponseIssue = Schema.Literal('missing_done')
 
@@ -53,7 +58,7 @@ export class ContextTransformError extends Schema.TaggedError<ContextTransformEr
 ) {}
 
 export class AbortError extends Schema.TaggedError<AbortError>()('AbortError', {
-  reason: Schema.Literals(['user', 'system', 'max_turns'])
+  reason: AgentAbortReason
 }) {}
 
 export type LLMProviderError = LLMError | FauxExhaustedError | AbortError
@@ -121,7 +126,8 @@ export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError =>
       AgentError.make({
         code: 'aborted',
         message: `Agent run aborted: ${current.reason}`,
-        retryable: current.reason === 'system'
+        retryable: current.reason === 'system',
+        abortReason: current.reason
       })
     ),
     Match.tag('FauxExhaustedError', current =>

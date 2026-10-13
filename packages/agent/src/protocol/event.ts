@@ -53,6 +53,11 @@ export const AgentErrorCode = Schema.Literals([
 
 export type AgentErrorCode = typeof AgentErrorCode.Type
 
+/** Why an `aborted` run stopped: `user` cancelled it, the `system` stopped it, or it hit `max_turns`. */
+export const AgentAbortReason = Schema.Literals(['user', 'system', 'max_turns'])
+
+export type AgentAbortReason = typeof AgentAbortReason.Type
+
 export const ProviderFailureKind = Schema.Literals([
   'rate_limit',
   'overloaded',
@@ -110,7 +115,9 @@ export class AgentError extends Schema.TaggedClass<AgentError>()('AgentError', {
   code: AgentErrorCode,
   message: Schema.String,
   retryable: Schema.Boolean,
-  provider: Schema.optional(ProviderErrorInfo)
+  provider: Schema.optional(ProviderErrorInfo),
+  /** Set with code `aborted`; absent on events recorded before it existed. */
+  abortReason: Schema.optional(AgentAbortReason)
 }) {}
 
 export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {

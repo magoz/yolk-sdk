@@ -1,12 +1,15 @@
 import { Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentDone,
+  AgentFailed,
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
   DocumentPart,
   ImagePart,
   TextPart,
+  idleAgentStatus,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
 import { agentTextContextBudget, contextBudgetStatus } from '@/lib/agents/context-budget'
@@ -221,8 +224,10 @@ describe('agent playground', () => {
     expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: true })).toBe(
       true
     )
-    expect(isWorkflowResumeDisabled({ status: 'done', isTextBusy: false })).toBe(true)
-    expect(isWorkflowResumeDisabled({ status: 'error', isTextBusy: false })).toBe(false)
-    expect(isWorkflowResumeDisabled({ status: 'idle', isTextBusy: true })).toBe(true)
+    expect(isWorkflowResumeDisabled({ status: AgentDone.make({}), isTextBusy: false })).toBe(true)
+    expect(
+      isWorkflowResumeDisabled({ status: AgentFailed.make({ message: 'x' }), isTextBusy: false })
+    ).toBe(false)
+    expect(isWorkflowResumeDisabled({ status: idleAgentStatus, isTextBusy: true })).toBe(true)
   })
 })

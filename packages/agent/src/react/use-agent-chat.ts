@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Fiber, Option, Stream } from 'effect'
+import { Effect, Fiber, Option, Predicate, Stream } from 'effect'
 import {
   AgentTransportError,
   appendAgentMessage,
@@ -150,8 +150,8 @@ export function useAgentChat({
 
   const abortControllerRef = useRef<AbortController | null>(null)
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
-  const isRunning = state.status === 'running'
-  const isWaiting = state.status === 'waiting'
+  const isRunning = Predicate.isTagged(state.status, 'Working')
+  const isWaiting = Predicate.isTagged(state.status, 'Blocked')
 
   const applyEvent = useCallback(
     (event: AgentEvent) => {
@@ -449,7 +449,7 @@ export function useAgentChat({
     messages: toAgentMessages(state.chatMessages),
     hasReasoningSummary: hasAgentChatReasoningSummary(state),
     status: state.status,
-    error: state.error,
+    subagents: state.subagents,
     isRunning,
     isWaiting,
     canSubmitText,

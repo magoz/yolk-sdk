@@ -30,6 +30,34 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.115: agent status
+
+Breaking for `@yolk-sdk/agent/client` and `@yolk-sdk/agent/react`. The string `AgentRunStatus`
+is removed; `status` is now an [`AgentStatus`](./agent/status) from `@yolk-sdk/agent/protocol`,
+and `AgentClientState`/`AgentChatState` gain `subagents`.
+
+| Before                              | After                                                         |
+| ----------------------------------- | ------------------------------------------------------------- |
+| `status === 'idle'` or `'aborted'`  | `Predicate.isTagged(status, 'Idle')`                          |
+| `status === 'running'`              | `Predicate.isTagged(status, 'Working')` (or `chat.isRunning`) |
+| `status === 'waiting'`              | `Predicate.isTagged(status, 'Blocked')` (or `chat.isWaiting`) |
+| `status === 'done'`                 | `Predicate.isTagged(status, 'Done')`                          |
+| `status === 'error'`, `state.error` | `Failed` status: `status.message`                             |
+| `state.errorInfo`                   | `Failed` status: `status.error` (absent for transport errors) |
+| `state.retryInfo`                   | `agentStatusRetry(status)`                                    |
+| `useAgentChat().error`              | `Failed` status from `useAgentChat().status`                  |
+
+`markAgentError(state, message, error?)` takes an optional `AgentError` instead of
+`AgentError | null`. A stopped run is `Idle`, as in OSC 7501; there is no separate aborted
+status. `AgentError` gains an optional `abortReason` (`user`, `system`, `max_turns`) on `aborted`
+errors: `user` (or absent) maps to `Idle`, the others to `Failed`.
+
+New in `@yolk-sdk/agent/protocol`: `AgentStatus` and its variants, `AgentActivity`,
+`AgentBlockedKind`, `nextAgentStatus`, `agentStatusFromEvents`, `reconcileAgentStatus`,
+`AgentStatusTree` with `nextAgentStatusTree`, `withSubagentStatus`, `startAgentStatusTree`, and
+`settleAgentStatusTree`, plus `hitlRequestBlockedKind`, `agentBlockedKind`, `agentStatusRetry`,
+`isAgentStatusLive`, and `AgentAbortReason`.
+
 ### Canary.114: file claim check
 
 New, opt-in ([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md)):

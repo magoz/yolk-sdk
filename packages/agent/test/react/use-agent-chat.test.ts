@@ -2,6 +2,7 @@
 import { act, createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from '@effect/vitest'
+import { Predicate } from 'effect'
 import {
   AgentAwaitingInput,
   AgentEnd,
@@ -131,7 +132,7 @@ describe('useAgentChat', () => {
       )
       await tick()
     })
-    await waitFor(() => hook.value.status === 'done')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
 
     expect(requests).toHaveLength(1)
     expect(requests[0]?.sessionId).toBe('session-1')
@@ -160,7 +161,7 @@ describe('useAgentChat', () => {
     })
 
     expect(requests).toEqual([])
-    expect(hook.value.status).toBe('idle')
+    expect(hook.value.status._tag).toBe('Idle')
 
     hook.unmount()
   })
@@ -182,16 +183,14 @@ describe('useAgentChat', () => {
       hook.value.submitText('hello')
       await tick()
     })
-    expect(hook.value.status).toBe('running')
+    expect(hook.value.status._tag).toBe('Working')
     expect(hook.value.deleteTurn('message-0-user')).toEqual(AgentChatDeleteTurnResult.Ignored())
 
     await act(async () => {
       hook.value.stop()
       await tick()
     })
-    await waitFor(() => hook.value.status === 'aborted')
-
-    expect(hook.value.error).toBeNull()
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Idle'))
 
     hook.unmount()
   })
@@ -213,9 +212,9 @@ describe('useAgentChat', () => {
       hook.value.submitText('hello')
       await tick()
     })
-    await waitFor(() => hook.value.status === 'error')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Failed'))
 
-    expect(hook.value.error).toBe('upstream failed')
+    expect(hook.value.status).toMatchObject({ _tag: 'Failed', message: 'upstream failed' })
     expect(messages).toEqual(['upstream failed'])
 
     hook.unmount()
@@ -238,9 +237,9 @@ describe('useAgentChat', () => {
       hook.value.submitText('hello')
       await tick()
     })
-    await waitFor(() => hook.value.status === 'error')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Failed'))
 
-    expect(hook.value.error).toBe('Agent request failed')
+    expect(hook.value.status).toMatchObject({ _tag: 'Failed', message: 'Agent request failed' })
     expect(messages).toEqual(['Agent request failed'])
 
     hook.unmount()
@@ -289,7 +288,7 @@ describe('useAgentChat', () => {
       hook.value.submitText('weather')
       await tick()
     })
-    await waitFor(() => hook.value.status === 'waiting')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Blocked'))
 
     await act(async () => {
       const result = hook.value.submitToolApprovalResponse(approvalResponse)
@@ -301,7 +300,7 @@ describe('useAgentChat', () => {
       )
       await tick()
     })
-    await waitFor(() => hook.value.status === 'done')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
 
     expect(requests).toHaveLength(2)
     expect(requests[1]?.messages).toEqual([UserMessage.make({ content: 'weather' }), assistant])
@@ -321,15 +320,14 @@ describe('useAgentChat', () => {
       hook.value.submitText('hello')
       await tick()
     })
-    expect(hook.value.status).toBe('running')
+    expect(hook.value.status._tag).toBe('Working')
 
     await act(async () => {
       hook.value.stop()
       await tick()
     })
 
-    expect(hook.value.status).toBe('aborted')
-    expect(hook.value.error).toBeNull()
+    expect(hook.value.status._tag).toBe('Idle')
 
     hook.unmount()
   })
@@ -403,7 +401,7 @@ describe('useAgentChat', () => {
       )
       await tick()
     })
-    await waitFor(() => hook.value.status === 'done')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
 
     expect(requests).toHaveLength(1)
     expect(requests[0]?.messages).toEqual([UserMessage.make({ content: 'one' })])
@@ -449,7 +447,7 @@ describe('useAgentChat', () => {
       )
       await tick()
     })
-    await waitFor(() => hook.value.status === 'done')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
 
     expect(requests).toHaveLength(1)
     expect(requests[0]?.messages).toEqual([
@@ -514,7 +512,7 @@ describe('useAgentChat', () => {
     })
 
     expect(requests).toEqual([])
-    expect(hook.value.status).toBe('idle')
+    expect(hook.value.status._tag).toBe('Idle')
     expect(hook.value.messages).toEqual([
       UserMessage.make({ content: 'one' }),
       AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] })

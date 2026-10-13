@@ -490,12 +490,12 @@ describe('client HITL property tests', () => {
       const errored = markAgentError(state, 'failed')
       const aborted = markAgentAborted(state)
 
-      expect(submitted.status).toBe('running')
+      expect(submitted.status._tag).toBe('Working')
       expect(submitted.seenEventIds).toEqual([])
       expect(submitted.toolRuns).toEqual(completedBefore)
-      expect(errored.status).toBe('error')
+      expect(errored.status._tag).toBe('Failed')
       expect(errored.toolRuns).toEqual(completedBefore)
-      expect(aborted.status).toBe('aborted')
+      expect(aborted.status._tag).toBe('Idle')
       expect(aborted.toolRuns).toEqual(completedBefore)
     },
     propertyOptions

@@ -23,7 +23,7 @@ describe('@yolk-sdk/agent subpaths', () => {
 
     expect(root).toBeDefined()
     expect(protocol.UserMessage).toBeDefined()
-    expect(client.initialAgentClientState.status).toBe('idle')
+    expect(client.initialAgentClientState.status._tag).toBe('Idle')
     expect(compaction.makeContextBudget).toBeDefined()
     expect(loop.LoopConfig).toBeDefined()
     expect(testing.Reply).toBeDefined()
@@ -35,7 +35,7 @@ describe('@yolk-sdk/agent subpaths', () => {
     const message = UserMessage.make({ content: 'hello' })
 
     expect(message.content).toBe('hello')
-    expect(initialAgentClientState.status).toBe('idle')
+    expect(initialAgentClientState.status._tag).toBe('Idle')
     expect(makeContextBudget).toBeDefined()
     expect(Reply.text('ok').events.length).toBeGreaterThan(0)
     expect(ToolAccess).toBeDefined()

@@ -1,5 +1,11 @@
-import type { AgentRunStatus } from '@yolk-sdk/agent/client'
-import type { AgentReasoningEffort, AgentUsage } from '@yolk-sdk/agent/protocol'
+import { Match } from 'effect'
+import type {
+  AgentActivity,
+  AgentBlockedKind,
+  AgentReasoningEffort,
+  AgentStatus,
+  AgentUsage
+} from '@yolk-sdk/agent/protocol'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
@@ -34,25 +40,53 @@ export const voiceStatusVariant = (status: VoiceStatus) => {
   }
 }
 
-export const textStatusVariant = (status: AgentRunStatus) => {
-  switch (status) {
-    case 'done':
-      return 'secondary'
-    case 'error':
-      return 'destructive'
-    case 'aborted':
-    case 'idle':
-    case 'running':
-    case 'waiting':
-      return 'outline'
+export const textStatusVariant = (status: AgentStatus) =>
+  Match.value(status).pipe(
+    Match.withReturnType<'secondary' | 'destructive' | 'outline'>(),
+    Match.tag('Done', () => 'secondary'),
+    Match.tag('Failed', () => 'destructive'),
+    Match.tag('Idle', 'Working', 'Blocked', () => 'outline'),
+    Match.exhaustive
+  )
+
+const blockedLabel = (kind: AgentBlockedKind) => {
+  switch (kind) {
+    case 'permission':
+      return 'needs approval'
+    case 'question':
+      return 'needs answer'
+    case 'auth':
+      return 'needs sign-in'
   }
 }
+
+const activityLabel = (activity: AgentActivity) =>
+  Match.value(activity).pipe(
+    Match.tag('Busy', () => 'working'),
+    Match.tag('Generating', () => 'generating'),
+    Match.tag('Tools', current =>
+      current.calls.length === 1 ? `running ${current.calls[0].name}` : 'running tools'
+    ),
+    Match.tag('Compacting', () => 'compacting'),
+    Match.tag('Retrying', () => 'retrying'),
+    Match.exhaustive
+  )
+
+export const textStatusLabel = (status: AgentStatus) =>
+  Match.value(status).pipe(
+    Match.tag('Idle', () => 'idle'),
+    Match.tag('Working', current => activityLabel(current.activity)),
+    Match.tag('Blocked', current => blockedLabel(current.kind)),
+    Match.tag('Done', () => 'done'),
+    Match.tag('Failed', () => 'failed'),
+    Match.exhaustive
+  )
 
 type AgentStatusPanelProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
   readonly anthropicClaudeConnected: boolean
-  readonly textStatus: AgentRunStatus
+  readonly textStatus: AgentStatus
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
@@ -250,7 +284,7 @@ export function AgentStatusPanel({
           <Badge variant="outline">{defaultOpenAiRealtimeReasoningEffort}</Badge>
         </StatusRow>
         <StatusRow label="Status">
-          <Badge variant={textStatusVariant(textStatus)}>{textStatus}</Badge>
+          <Badge variant={textStatusVariant(textStatus)}>{textStatusLabel(textStatus)}</Badge>
         </StatusRow>
         <StatusRow label="Voice">
           <Badge variant={voiceStatusVariant(voiceStatus)}>{voiceStatus}</Badge>

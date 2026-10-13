@@ -1,0 +1,111 @@
+---
+title: Agent status
+description: One typed status for a run (idle, working, blocked on a person, done, failed), from live events or stored state.
+---
+
+`AgentStatus` in `@yolk-sdk/agent/protocol` says what a run is doing. It uses the vocabulary of
+the [OSC 7501 Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status):
+the SDK reports state, and your app decides how to show it (badges, inbox rows, notifications).
+
+| `_tag`    | Meaning                                                                                         |
+| --------- | ----------------------------------------------------------------------------------------------- |
+| `Idle`    | At rest, waiting for the next instruction. Also the status after a person stops a run.          |
+| `Working` | Running. `activity` says what: `Busy`, `Generating`, `Tools`, `Compacting`, `Retrying`.         |
+| `Blocked` | Paused until a person settles every request. `kind` says what is needed, `requests` holds them. |
+| `Done`    | Finished. The result is in the transcript.                                                      |
+| `Failed`  | Failed and stopped. `message`, plus the `AgentError` when the stream sent one.                  |
+
+Every variant is an Effect Schema class, so a status encodes to JSON with
+`Schema.toCodecJson(AgentStatus)` and can be stored next to the run.
+
+## Blocked kinds
+
+| Request                                     | `kind`       |
+| ------------------------------------------- | ------------ |
+| `ToolApprovalRequest`, `InteractionRequest` | `permission` |
+| `QuestionRequest`, `InputRequest`           | `question`   |
+| (reserved for logins and credentials)       | `auth`       |
+
+One pause can hold several requests (same-turn sibling calls). `agentBlockedKind` reports one kind
+for the batch, `auth` over `permission` over `question`; `hitlRequestBlockedKind` gives each
+request's own kind.
+
+## From live events
+
+```ts
+import { agentStatusFromEvents, nextAgentStatus } from '@yolk-sdk/agent/protocol'
+
+let status = agentStatusFromEvents(replayedEvents)
+status = nextAgentStatus(status, event)
+```
+
+| Event                                                               | Status                                    |
+| ------------------------------------------------------------------- | ----------------------------------------- |
+| `AgentStart`, `TurnStart`                                           | `Working(Busy)`                           |
+| `LLMStreamStart`                                                    | `Working(Generating)`                     |
+| `ToolExecutionStarted` / `Completed`, `Accepted`, `Error`           | adds / removes a running tool             |
+| `CompactionStart` / `CompactionEnd`                                 | `Working(Compacting)` / `Busy`            |
+| `AgentRetry`                                                        | `Working(Retrying)`, until output resumes |
+| `AgentAwaitingInput`                                                | `Blocked`                                 |
+| `AgentEnd`                                                          | `Done`                                    |
+| `AgentError` with code `aborted` and `abortReason` `user` (or none) | `Idle`                                    |
+| any other `AgentError`, including `system` and `max_turns` aborts   | `Failed`                                  |
+
+Other events leave the status unchanged. Work events mean the run is working whatever came
+before, so a resumed durable stream leaves `Blocked` even when it does not replay `AgentStart`.
+Dedupe replayed events by `eventId` before folding them. `agentStatusRetry(status)` returns the
+pending `AgentRetry` while retrying.
+
+## From stored state
+
+Store the encoded status in the same commit as the rest of the run, and reconcile it when you read
+it back:
+
+```ts
+import { reconcileAgentStatus } from '@yolk-sdk/agent/protocol'
+
+const status = reconcileAgentStatus(stored, { runActive: run.workflowRunId !== null })
+```
+
+`Working` and `Blocked` only hold while the run is alive, so they become `Idle` when you tell it
+the run is not active (lease cleared, platform run terminal). `Done` and `Failed` stay until you
+replace them. Base `runActive` on your authoritative run record, never on the last event seen.
+
+## Subagents
+
+`AgentStatusTree` is the run's `root` status plus one `SubagentStatusEntry` per subagent, in start
+order. `nextAgentStatusTree` and `agentStatusTreeFromEvents` fold events into it:
+
+- `SubagentStarted` adds a `Working` entry; `SubagentCompleted` sets `Done` or `Failed`.
+- A subagent call that the host accepts as background work is marked `background: true`. Its status
+  comes from you after that: write it with `withSubagentStatus`.
+- When the run stops (`AgentEnd`, `AgentError`), live inline subagents become `Idle`.
+- `AgentStart` drops entries settled in earlier runs.
+
+## In client and React state
+
+`AgentClientState` and `AgentChatState` carry `status: AgentStatus` and `subagents`. Failures and
+retries live in the status (`Failed`, `Working(Retrying)`), not in separate fields. `useAgentChat`
+returns `status` and `subagents`, and keeps `isRunning` (`Working`) and `isWaiting` (`Blocked`).
+
+```tsx
+import { Match } from 'effect'
+
+const label = Match.value(chat.status).pipe(
+  Match.tag('Idle', () => 'Idle'),
+  Match.tag('Working', () => 'Working'),
+  Match.tag('Blocked', current =>
+    current.kind === 'permission' ? 'Needs approval' : 'Needs answer'
+  ),
+  Match.tag('Done', () => 'Done'),
+  Match.tag('Failed', current => current.message),
+  Match.exhaustive
+)
+```
+
+## Host-owned
+
+- Whether a person has seen a `Done` or `Failed` run (unread state).
+- Labels, wording, and which statuses notify, plus rate limits for notifications.
+- Proof that a run is alive (`runActive`).
+- Emitting OSC 7501 sequences, if you ship a terminal app.

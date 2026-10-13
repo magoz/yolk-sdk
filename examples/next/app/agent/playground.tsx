@@ -935,7 +935,7 @@ export function AgentPlayground({
     if (
       !Predicate.isTagged(runtime, 'Workflow') ||
       workflowRunId === null ||
-      state.status === 'done' ||
+      Predicate.isTagged(state.status, 'Done') ||
       isRunning ||
       isWorkflowResuming
     ) {
@@ -1240,9 +1240,6 @@ export function AgentPlayground({
               voiceStatus={voiceStatus}
               activeToolCallCount={activeToolRunCount}
               toolResultCount={completedToolRunCount}
-              error={state.error}
-              errorInfo={state.errorInfo}
-              retryInfo={state.retryInfo}
               workflowRunId={workflowRunId}
               workflowResumeDisabled={isWorkflowResumeDisabled({
                 status: state.status,

@@ -1,4 +1,5 @@
-import type { AgentRunStatus } from '@yolk-sdk/agent/client'
+import { Predicate } from 'effect'
+import type { AgentStatus } from '@yolk-sdk/agent/protocol'
 
 export const isAgentTextBusy = (input: {
   readonly isRunning: boolean
@@ -7,6 +8,6 @@ export const isAgentTextBusy = (input: {
 }) => input.isRunning || input.isWaiting || input.isWorkflowResuming
 
 export const isWorkflowResumeDisabled = (input: {
-  readonly status: AgentRunStatus
+  readonly status: AgentStatus
   readonly isTextBusy: boolean
-}) => input.status === 'done' || input.isTextBusy
+}) => Predicate.isTagged(input.status, 'Done') || input.isTextBusy

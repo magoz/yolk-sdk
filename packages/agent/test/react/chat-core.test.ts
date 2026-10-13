@@ -1,7 +1,10 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentError,
+  AgentFailed,
+  agentStatusRetry,
   AgentRetry,
+  AgentStart,
   AssistantAgentMessage,
   AssistantMessageEvent,
   AssistantTextPart,
@@ -14,13 +17,16 @@ import {
   QuestionRequest,
   QuestionResponse,
   QuestionRequested,
+  SubagentStarted,
   ToolCall,
   ToolExecutionCompleted,
   ToolExecutionStarted,
   ToolInputEnd,
   ToolResult,
   UserMessage,
-  UserMessageEvent
+  UserMessageEvent,
+  idleAgentStatus,
+  makeSubagentRunId
 } from '@yolk-sdk/agent/protocol'
 import {
   applyAgentEventToChatProjection,
@@ -39,9 +45,8 @@ describe('agent chat core', () => {
     const message = UserMessage.make({ content: 'hello' })
     const state = reduceAgentChatState(initialAgentChatState, AgentChatAction.Submit({ message }))
 
-    expect(state.status).toBe('running')
+    expect(state.status._tag).toBe('Working')
     expect(state.chatMessages.map(chatMessage => chatMessage.role)).toEqual(['user'])
-    expect(state.error).toBeNull()
   })
 
   it('stores typed retry and error events on chat state', () => {
@@ -73,13 +78,8 @@ describe('agent chat core', () => {
 
     const failed = reduceAgentChatState(retrying, AgentChatAction.Event({ event: error }))
 
-    expect(retrying.retryInfo).toBe(retry)
-    expect(failed).toMatchObject({
-      status: 'error',
-      error: 'provider overloaded',
-      errorInfo: error,
-      retryInfo: null
-    })
+    expect(agentStatusRetry(retrying.status)).toBe(retry)
+    expect(failed.status).toEqual(AgentFailed.make({ message: 'provider overloaded', error }))
   })
 
   it('detects streaming reasoning summaries', () => {
@@ -367,7 +367,7 @@ describe('agent chat core', () => {
       AgentChatAction.SubmitHitlResponse({ response })
     )
 
-    expect(submitted.status).toBe('running')
+    expect(submitted.status._tag).toBe('Working')
     expect(submitted.chatMessages[0]?.parts[0]).toEqual(
       AgentChatPart.ToolCall({
         id: 'tool-call-call_question',
@@ -385,5 +385,45 @@ describe('agent chat core', () => {
         isVoiceActive: true
       })
     ).toBe(4)
+  })
+
+  it('tracks subagent statuses and settles them when the person stops the run', () => {
+    const started = [
+      AgentStart.make({ eventId: 'e0' }),
+      SubagentStarted.make({
+        eventId: 'e1',
+        parentToolCallId: 'call_s',
+        subagentRunId: makeSubagentRunId('call_s'),
+        subagentType: 'research',
+        description: 'Look it up',
+        model: 'model'
+      })
+    ].reduce(
+      (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+      initialAgentChatState
+    )
+
+    expect(started.subagents.map(entry => entry.status._tag)).toEqual(['Working'])
+
+    const stopped = reduceAgentChatState(started, AgentChatAction.Abort())
+
+    expect(stopped.status).toEqual(idleAgentStatus)
+    expect(stopped.subagents.map(entry => entry.status)).toEqual([idleAgentStatus])
+  })
+
+  it('clears a failure when the transcript changes without a new run', () => {
+    const failed = reduceAgentChatState(
+      initialAgentChatState,
+      AgentChatAction.Error({ message: 'network down' })
+    )
+
+    expect(failed.status).toEqual(AgentFailed.make({ message: 'network down' }))
+
+    const hydrated = reduceAgentChatState(
+      failed,
+      AgentChatAction.HydrateMessage({ message: UserMessage.make({ content: 'hi' }) })
+    )
+
+    expect(hydrated.status).toEqual(idleAgentStatus)
   })
 })

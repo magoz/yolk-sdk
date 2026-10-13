@@ -33,8 +33,21 @@ An observation that cannot establish whether an action took effect. It is neithe
 success nor proof that retrying is safe.
 _Avoid_: Failed action, safe to retry
 
+**Agent status**:
+What a run is doing: idle, working, blocked on a person, done, or failed. Working and blocked only
+hold while the run is alive; whether a person has seen a finished run is host state.
+_Avoid_: Running flag, waiting flag
+
+**Blocked kind**:
+What a blocked run needs from a person: `permission` (an approval or action-backed interaction),
+`question` (an answer or typed input), or `auth` (a credential).
+_Avoid_: Attention, notification
+
 ## Implementation boundary
 
 The accepted design is [Action-backed interactions](docs/adr/0001-action-backed-interactions.md).
 Hosts authenticate and atomically accept an immutable, scoped submission before SDK resume.
 Raw responses and transcript events never authorize execution.
+
+Agent status follows [Agent status](docs/adr/0010-agent-status.md): one protocol mapping from events,
+with liveness proven by the host.

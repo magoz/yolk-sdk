@@ -15,7 +15,6 @@ export {
 
 export type {
   AgentClientState,
-  AgentRunStatus,
   AgentToolRun,
   AgentTranscript,
   ApplyAgentEventOptions

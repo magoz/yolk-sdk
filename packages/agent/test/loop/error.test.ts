@@ -79,7 +79,14 @@ describe('agentLoopErrorToAgentError', () => {
     expect(agentLoopErrorToAgentError(new AbortError({ reason: 'system' }))).toMatchObject({
       code: 'aborted',
       message: 'Agent run aborted: system',
-      retryable: true
+      retryable: true,
+      abortReason: 'system'
+    })
+
+    expect(agentLoopErrorToAgentError(new AbortError({ reason: 'user' }))).toMatchObject({
+      code: 'aborted',
+      retryable: false,
+      abortReason: 'user'
     })
 
     expect(

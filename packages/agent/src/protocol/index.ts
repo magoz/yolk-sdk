@@ -61,6 +61,7 @@ export {
 } from './file.ts'
 
 export {
+  AgentAbortReason,
   AgentAwaitingInput,
   AgentEnd,
   AgentError,
@@ -155,6 +156,39 @@ export type {
 } from './message.ts'
 
 export { AgentReasoningEffort } from './reasoning.ts'
+
+export {
+  AgentActivity,
+  AgentBlocked,
+  AgentBlockedKind,
+  AgentBusy,
+  AgentCompacting,
+  AgentDone,
+  AgentFailed,
+  AgentGenerating,
+  AgentIdle,
+  AgentRetrying,
+  AgentRunningTools,
+  AgentStatus,
+  AgentStatusTree,
+  AgentToolActivityCall,
+  AgentWorking,
+  SubagentStatusEntry,
+  agentBlockedKind,
+  agentStatusFromEvents,
+  agentStatusRetry,
+  agentStatusTreeFromEvents,
+  hitlRequestBlockedKind,
+  idleAgentStatus,
+  initialAgentStatusTree,
+  isAgentStatusLive,
+  nextAgentStatus,
+  nextAgentStatusTree,
+  reconcileAgentStatus,
+  settleAgentStatusTree,
+  startAgentStatusTree,
+  withSubagentStatus
+} from './status.ts'
 
 export {
   AgentWebSocketClientMessage,
