@@ -1,5 +1,6 @@
 ---
 '@yolk-sdk/agent': minor
+'@yolk-sdk/emulators': patch
 ---
 
 Enable provider prompt caching (ADR 0008). `LLMRequest` gains `cacheKey` (also on `RunConfig` and

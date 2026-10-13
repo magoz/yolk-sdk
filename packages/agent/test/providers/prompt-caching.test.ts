@@ -237,7 +237,7 @@ describe('prompt caching', () => {
           { maxTokens: 100 }
         )
 
-        expect(JSON.stringify(body.messages[2])).not.toContain('cache_control')
+        expect(body.messages[2]).toEqual({ role: 'user', content: '' })
       })
     )
 
@@ -458,13 +458,25 @@ describe('prompt caching', () => {
               apiKey: Redacted.make('go-key'),
               protocol,
               maxOutputTokens: 100,
-              extraHeaders: { 'x-opencode-session': 'host-value' }
+              extraHeaders: {
+                'x-opencode-session': 'host-value',
+                'x-api-key': 'stolen',
+                authorization: 'Bearer stolen'
+              }
             }),
             requests,
             { ...baseRequest, cacheKey: 'session-1' }
           )
 
-          expect(requests[0]?.headers['x-opencode-session']).toBe('session-1')
+          const headers = requests[0]?.headers
+
+          expect(headers?.['x-opencode-session']).toBe('session-1')
+
+          if (protocol === 'messages') {
+            expect(headers?.['x-api-key']).toBe('go-key')
+          } else {
+            expect(headers?.['authorization']).toBe('Bearer go-key')
+          }
         }
       })
     )

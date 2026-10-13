@@ -71,7 +71,7 @@ const awaitingInput = (events: ReadonlyArray<AgentEvent>) =>
   events.find(event => Predicate.isTagged(event, 'AgentAwaitingInput'))
 
 describe('runtime prompt cache key', () => {
-  it.effect('forwards RuntimeConfig.cacheKey on every model request', () => {
+  it.effect('forwards RuntimeConfig.cacheKey, not the session id, to model requests', () => {
     const requests: Array<LLMRequest> = []
 
     return runRuntime(
@@ -80,12 +80,12 @@ describe('runtime prompt cache key', () => {
         input: UserMessage.make({ content: 'hello' }),
         runId: 'run_cache'
       }),
-      { systemPrompt: 'Be brief.', tools: [], model: 'faux', cacheKey: 'session_cache' }
+      { systemPrompt: 'Be brief.', tools: [], model: 'faux', cacheKey: 'conversation_key' }
     ).pipe(
       Stream.runCollect,
       Effect.provide(makeLayer(requests, [Reply.text('hi')])),
       Effect.map(() => {
-        expect(requests.map(request => request.cacheKey)).toEqual(['session_cache'])
+        expect(requests.map(request => request.cacheKey)).toEqual(['conversation_key'])
       })
     )
   })

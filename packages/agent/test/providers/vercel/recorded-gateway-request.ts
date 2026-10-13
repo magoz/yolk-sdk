@@ -12,7 +12,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * The request fields a replayed request must send exactly as the fixture recorded them.
  * `providerOptions` is deliberately absent: the 2026-09-30 recordings predate the always-on
  * `providerOptions.gateway.caching: 'auto'` (ADR 0008), so the provider now sends one field the
- * recordings lack. Re-record with `pnpm conformance:gateway --live` to cover it.
+ * recordings lack. With owner approval, re-record with
+ * `pnpm conformance:gateway --live --owner-approved --account <label>` to cover it.
  */
 export const recordedRequestFields = [
   'model',
