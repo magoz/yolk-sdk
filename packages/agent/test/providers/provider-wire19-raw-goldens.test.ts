@@ -17,9 +17,9 @@ import { openAiRealtimeToolParameters } from '../../src/providers/openai/realtim
 
 const goldens = {
   'anthropic-output-config-omitted':
-    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":"Be concise.\\n\\nHello"}],"max_tokens":123}',
+    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123}',
   'anthropic-output-config-present':
-    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":"Be concise.\\n\\nHello"}],"max_tokens":123,"output_config":{"effort":"medium"}}',
+    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123,"output_config":{"effort":"medium"}}',
   'anthropic-schema-union':
     '{"type":"object","properties":{"operation":{"type":"string","enum":["search","list"],"description":"op"},"query":{"type":"string"},"limit":{"type":"number"}},"required":["operation"],"$defs":{"SearchMeta":{"type":"string"},"ListMeta":{"type":"number"}},"additionalProperties":false}',
   'anthropic-schema-allof-empty': '{"type":"object","properties":{},"required":[],"$defs":{}}',
@@ -29,6 +29,10 @@ const goldens = {
     '{"model":"test-model","instructions":"Be concise.","input":[{"role":"user","content":"Hello"}],"store":false,"stream":true,"reasoning":{"effort":"low","summary":"auto"}}',
   'grok-omit-reasoning':
     '{"model":"test-model","instructions":"Be concise.","input":[{"role":"user","content":"Hello"}],"store":false,"stream":true,"max_output_tokens":30000}',
+  'codex-cache-key':
+    '{"model":"test-model","instructions":"Be concise.","input":[{"role":"user","content":"Hello"},{"role":"user","content":[{"type":"input_text","text":"Turn context."}]}],"store":false,"stream":true,"reasoning":{"effort":"low","summary":"auto"},"prompt_cache_key":"session-1"}',
+  'grok-cache-key-tool-choice':
+    '{"model":"test-model","instructions":"Be concise.","input":[{"role":"user","content":"Hello"}],"store":false,"stream":true,"max_output_tokens":30000,"tools":[{"type":"function","name":"lookup","description":"Look up.","parameters":{"type":"object"}}],"parallel_tool_calls":true,"tool_choice":"none","prompt_cache_key":"session-1"}',
   'grok-reasoning':
     '{"model":"test-model","instructions":"Be concise.","input":[{"role":"user","content":"Hello"}],"store":false,"stream":true,"max_output_tokens":30000,"reasoning":{"effort":"high","summary":"auto"}}',
   'openai-omitted':
@@ -37,10 +41,10 @@ const goldens = {
     '{"models":["fallback"],"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":123,"stream":false}',
   'openai-reasoned':
     '{"models":["fallback"],"reasoning":{"effort":"high"},"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":123,"stream":false}',
-  'gateway-omitted-http':
-    '{"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":2000,"stream":false}',
+  'gateway-default-http':
+    '{"providerOptions":{"gateway":{"caching":"auto"}},"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":2000,"stream":false}',
   'gateway-present-http':
-    '{"models":["openai/gpt-fallback"],"providerOptions":{"gateway":{"order":["vertex"],"sort":"ttft"}},"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":2000,"stream":false}',
+    '{"models":["openai/gpt-fallback"],"providerOptions":{"gateway":{"order":["vertex"],"sort":"ttft","caching":"auto"}},"model":"test-model","messages":[{"role":"system","content":"Be concise."},{"role":"user","content":"Hello"}],"max_tokens":2000,"stream":false}',
   'realtime-required-omitted':
     '{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"additionalProperties":false}',
   'realtime-required-present':
@@ -208,7 +212,31 @@ describe('provider-wire19 raw JSON goldens', () => {
           { maxOutputTokens: 30_000 }
         )
 
+        const codexCacheKey = yield* toOpenAiCodexRequestBody({
+          ...emptyRequest,
+          cacheKey: 'session-1',
+          turnContext: 'Turn context.'
+        })
+
+        const grokCacheKeyToolChoice = yield* toXAiGrokRequestBody(
+          {
+            ...emptyRequest,
+            cacheKey: 'session-1',
+            toolChoice: 'none',
+            tools: [
+              ToolDef.make({
+                name: 'lookup',
+                description: 'Look up.',
+                parameters: { type: 'object' }
+              })
+            ]
+          },
+          { maxOutputTokens: 30_000 }
+        )
+
         lock('codex-body', JSON.stringify(codex))
+        lock('codex-cache-key', JSON.stringify(codexCacheKey))
+        lock('grok-cache-key-tool-choice', JSON.stringify(grokCacheKeyToolChoice))
         lock('grok-omit-reasoning', JSON.stringify(grokOmitReasoning))
         lock('grok-reasoning', JSON.stringify(grokReasoning))
         expect(JSON.stringify(codex).includes('"max_output_tokens"')).toBe(false)
@@ -242,14 +270,14 @@ describe('provider-wire19 raw JSON goldens', () => {
     })
   )
 
-  it.effect('locks Gateway raw HTTP extraBody omission and models/providerOptions order', () =>
+  it.effect('locks Gateway raw HTTP default caching and models/providerOptions order', () =>
     Effect.gen(function* () {
       const jsonOk = () =>
         new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
           status: 200
         })
 
-      const omitted: Array<{ request: HttpClientRequest.HttpClientRequest }> = []
+      const defaults: Array<{ request: HttpClientRequest.HttpClientRequest }> = []
       const present: Array<{ request: HttpClientRequest.HttpClientRequest }> = []
 
       const run = (
@@ -268,7 +296,7 @@ describe('provider-wire19 raw JSON goldens', () => {
           )
         )
 
-      yield* run(omitted, {
+      yield* run(defaults, {
         apiKey: Redacted.make('gateway-key'),
         maxCompletionTokens: 2000
       })
@@ -279,7 +307,7 @@ describe('provider-wire19 raw JSON goldens', () => {
         routing: { order: ['vertex'], sort: 'ttft' }
       })
 
-      lock('gateway-omitted-http', rawBody(omitted[0]?.request))
+      lock('gateway-default-http', rawBody(defaults[0]?.request))
       lock('gateway-present-http', rawBody(present[0]?.request))
     })
   )

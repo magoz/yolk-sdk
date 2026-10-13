@@ -55,6 +55,7 @@ import {
   providerFailureCause,
   providerFailureRetryable
 } from './provider-error.ts'
+import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import { validateProviderTranscript } from './transcript.ts'
 
 type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
@@ -96,6 +97,10 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
    * Grok keep flattened parsing and untagged assistant messages.
    */
   readonly commentaryPhaseBeforeToolCalls?: boolean
+  /** Sends `LLMRequest.cacheKey` as the body `prompt_cache_key`. */
+  readonly promptCacheKey?: boolean
+  /** Session-affinity headers for `LLMRequest.cacheKey`; auth headers win on a clash. */
+  readonly cacheKeyHeaders?: CacheKeyHeaders
 }
 
 type OpenAiResponsesMessageInput = {
@@ -170,6 +175,8 @@ type OpenAiResponsesRequestBody = {
   }
   readonly tools?: ReadonlyArray<OpenAiResponsesTool>
   readonly parallel_tool_calls?: true
+  readonly tool_choice?: 'none'
+  readonly prompt_cache_key?: string
 }
 
 type OpenAiResponsesRequestBodyWithReasoning = OpenAiResponsesRequestBody & {
@@ -619,6 +626,7 @@ export const toOpenAiResponsesRequestBody = (
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiResponsesReasoningSummary
     readonly commentaryPhaseBeforeToolCalls?: boolean
+    readonly promptCacheKey?: boolean
   }
 ): Effect.Effect<OpenAiResponsesRequestBody, LLMError> =>
   Effect.gen(function* () {
@@ -637,7 +645,7 @@ export const toOpenAiResponsesRequestBody = (
 
     yield* validateProviderTranscript(request.messages)
 
-    const input = Arr.flatten(
+    const transcriptInput = Arr.flatten(
       yield* Effect.forEach(request.messages, message =>
         messageToResponsesInput(
           message,
@@ -646,6 +654,14 @@ export const toOpenAiResponsesRequestBody = (
         )
       )
     )
+
+    const input: ReadonlyArray<OpenAiResponsesInputItem> =
+      request.turnContext === undefined || request.turnContext.length === 0
+        ? transcriptInput
+        : [
+            ...transcriptInput,
+            { role: 'user', content: [{ type: 'input_text', text: request.turnContext }] }
+          ]
 
     const reasoningEffort = request.reasoningEffort ?? config.defaultReasoningEffort
 
@@ -683,14 +699,24 @@ export const toOpenAiResponsesRequestBody = (
       body.reasoning = reasoning
     }
 
+    const promptCacheKey =
+      config.promptCacheKey === true && request.cacheKey !== undefined
+        ? { prompt_cache_key: request.cacheKey }
+        : {}
+
     if (request.tools.length === 0) {
-      return body
+      return { ...body, ...promptCacheKey }
     }
+
+    const toolChoice: Pick<OpenAiResponsesRequestBody, 'tool_choice'> =
+      request.toolChoice === 'none' ? { tool_choice: 'none' } : {}
 
     return {
       ...body,
       tools: yield* Effect.forEach(request.tools, toOpenAiResponsesTool),
-      parallel_tool_calls: true
+      parallel_tool_calls: true,
+      ...toolChoice,
+      ...promptCacheKey
     }
   })
 
@@ -702,6 +728,7 @@ export const toOpenAiResponsesRequestBodyWithReasoning = (
     readonly maxOutputTokens?: number
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiResponsesReasoningSummary
+    readonly promptCacheKey?: boolean
   }
 ): Effect.Effect<OpenAiResponsesRequestBodyWithReasoning, LLMError> =>
   toOpenAiResponsesRequestBody(request, {
@@ -1614,6 +1641,7 @@ const sendOpenAiResponsesRequest = (
 
     const headers = {
       ...config.extraHeaders,
+      ...requestCacheKeyHeaders(request.cacheKey, config.cacheKeyHeaders),
       accept: 'text/event-stream',
       'content-type': 'application/json',
       ...(config.apiKey !== undefined

@@ -59,6 +59,7 @@ import {
   providerFailureRetryable
 } from '../provider-error.ts'
 import { validateProviderTranscript } from '../transcript.ts'
+import { requestCacheKeyHeaders } from '../cache-key-headers.ts'
 
 type OpenAiProviderIdentity = {
   readonly id: string
@@ -237,6 +238,11 @@ export type OpenAiProviderConfig = {
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
   readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
+  /**
+   * Session-affinity headers for `LLMRequest.cacheKey` (for example Gateway
+   * `x-session-affinity`). Required auth/content-negotiation headers win on a clash.
+   */
+  readonly cacheKeyHeaders?: (cacheKey: string) => Readonly<Record<string, string>>
 }
 
 type OpenAiTextContentPart = {
@@ -307,6 +313,7 @@ type OpenAiRequestBody = {
   readonly reasoning_effort?: AgentReasoningEffort
   readonly tools?: ReadonlyArray<OpenAiTool>
   readonly parallel_tool_calls?: true
+  readonly tool_choice?: 'none'
 }
 
 type ResolvePdfUrl = (url: string) => Effect.Effect<string, LLMError>
@@ -1008,7 +1015,13 @@ export const toOpenAiRequestBody = (
 
     const requestMessages = assembleOpenAiMessages(loweredMessages)
 
-    const messages = [systemMessage, ...requestMessages]
+    // Volatile per-request context goes last so the cached prefix stays byte-identical.
+    const turnContextMessages: ReadonlyArray<OpenAiMessage> =
+      request.turnContext === undefined || request.turnContext.length === 0
+        ? []
+        : [{ role: 'user', content: request.turnContext }]
+
+    const messages = [systemMessage, ...requestMessages, ...turnContextMessages]
 
     const completionTokenLimit =
       config.completionTokenField === 'max_tokens'
@@ -1051,13 +1064,17 @@ export const toOpenAiRequestBody = (
           stream: false
         }
 
+    const toolChoice: Pick<OpenAiRequestBody, 'tool_choice'> =
+      request.toolChoice === 'none' ? { tool_choice: 'none' } : {}
+
     const body: OpenAiRequestBody =
       request.tools.length === 0
         ? bodyWithoutTools
         : {
             ...bodyWithoutTools,
             tools: yield* Effect.forEach(request.tools, tool => toOpenAiTool(tool, providerName)),
-            parallel_tool_calls: true
+            parallel_tool_calls: true,
+            ...toolChoice
           }
 
     return body
@@ -1679,7 +1696,8 @@ const postOpenAiRequest = (
   config: OpenAiProviderConfig,
   providerIdentity: OpenAiProviderIdentity,
   serializedBody: string,
-  client: HttpClient.HttpClient
+  client: HttpClient.HttpClient,
+  cacheKey: string | undefined
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const httpRequest = HttpClientRequest.post(
@@ -1687,6 +1705,7 @@ const postOpenAiRequest = (
     ).pipe(
       HttpClientRequest.setHeaders({
         ...config.extraHeaders,
+        ...requestCacheKeyHeaders(cacheKey, config.cacheKeyHeaders),
         accept: config.streaming === true ? 'text/event-stream' : 'application/json',
         authorization: `Bearer ${Redacted.value(config.apiKey)}`,
         'content-type': 'application/json'
@@ -1803,7 +1822,15 @@ const sendOpenAiRequest = (
   Effect.gen(function* () {
     const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
     const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity, client)
-    const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
+
+    const response = yield* postOpenAiRequest(
+      config,
+      providerIdentity,
+      serializedBody,
+      client,
+      request.cacheKey
+    )
+
     const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
 
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
@@ -1844,7 +1871,15 @@ const streamOpenAiRequest = (
     Effect.gen(function* () {
       const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
       const serializedBody = yield* sendOpenAiRequestBody(config, request, providerIdentity, client)
-      const response = yield* postOpenAiRequest(config, providerIdentity, serializedBody, client)
+
+      const response = yield* postOpenAiRequest(
+        config,
+        providerIdentity,
+        serializedBody,
+        client,
+        request.cacheKey
+      )
+
       const responseFormat = yield* expectChatSseResponse(providerIdentity, response)
 
       return streamOpenAiChatResponse(

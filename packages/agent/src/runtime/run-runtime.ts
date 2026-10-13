@@ -18,6 +18,7 @@ import {
   type ContextTransformer,
   type LLMProvider,
   type LoopConfig,
+  type RunConfig,
   type ToolExecutor
 } from '@yolk-sdk/agent/loop'
 import { runtimeErrorToAgentError, SessionConflictError } from './error.ts'
@@ -53,6 +54,8 @@ export type RuntimeConfig = {
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
+  /** Forwarded as `LLMRequest.cacheKey`; typically the session id. */
+  readonly cacheKey?: string
 }
 
 export type RuntimeRequest = Data.TaggedEnum<{
@@ -96,19 +99,32 @@ type RuntimeErrorUnion = RuntimeError | AgentLoopError
 const extractNewMessages = (event: AgentEvent) =>
   Predicate.isTagged(event, 'AgentEnd') ? event.messages : []
 
-const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMessage>) => ({
-  messages,
-  systemPrompt: config.systemPrompt,
-  tools: config.tools,
-  hitlResponses: config.hitlResponses,
-  inputs: config.inputs,
-  interactions: config.interactions,
-  interactionHost: config.interactionHost,
-  approvalPreviews: config.approvalPreviews,
-  reasoningEffort: config.reasoningEffort,
-  capabilities: config.capabilities,
-  model: config.model
-})
+type RunConfigFields = { -readonly [Key in keyof RunConfig]: RunConfig[Key] }
+
+const runtimeRunConfig = (
+  config: RuntimeConfig,
+  messages: ReadonlyArray<AgentMessage>
+): RunConfig => {
+  const runConfig: RunConfigFields = {
+    messages,
+    systemPrompt: config.systemPrompt,
+    tools: config.tools,
+    hitlResponses: config.hitlResponses,
+    inputs: config.inputs,
+    interactions: config.interactions,
+    interactionHost: config.interactionHost,
+    approvalPreviews: config.approvalPreviews,
+    reasoningEffort: config.reasoningEffort,
+    capabilities: config.capabilities,
+    model: config.model
+  }
+
+  if (config.cacheKey !== undefined) {
+    runConfig.cacheKey = config.cacheKey
+  }
+
+  return runConfig
+}
 
 const runAndCollectMessages = (
   config: RuntimeConfig,

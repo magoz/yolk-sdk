@@ -70,23 +70,24 @@ const gatewayExtraBody = (config: VercelAiGatewayProviderConfig): OpenAiRequestE
     extras.models = [...config.fallbackModels]
   }
 
-  if (config.routing !== undefined) {
-    const gateway: { [key: string]: Schema.Json } = {}
+  const gateway: { [key: string]: Schema.Json } = {}
 
-    if (config.routing.order !== undefined) {
-      gateway.order = [...config.routing.order]
-    }
-
-    if (config.routing.only !== undefined) {
-      gateway.only = [...config.routing.only]
-    }
-
-    if (config.routing.sort !== undefined) {
-      gateway.sort = config.routing.sort
-    }
-
-    extras.providerOptions = { gateway }
+  if (config.routing?.order !== undefined) {
+    gateway.order = [...config.routing.order]
   }
+
+  if (config.routing?.only !== undefined) {
+    gateway.only = [...config.routing.only]
+  }
+
+  if (config.routing?.sort !== undefined) {
+    gateway.sort = config.routing.sort
+  }
+
+  // Gateway adds cache markers for explicit-caching upstreams (Anthropic, MiniMax, Alibaba) on the
+  // last message and the message before the last user message; implicit ones are untouched.
+  gateway.caching = 'auto'
+  extras.providerOptions = { gateway }
 
   return extras
 }
@@ -103,6 +104,7 @@ type VercelAiGatewayOpenAiLayerFields = {
   streaming?: VercelAiGatewayProviderConfig['streaming']
   reasoningContent?: VercelAiGatewayProviderConfig['reasoningContent']
   supportsPdfAttachments: boolean
+  cacheKeyHeaders: (cacheKey: string) => Readonly<Record<string, string>>
 }
 
 export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProviderConfig) =>
@@ -116,7 +118,9 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
         chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
         providerIdentity: vercelAiGatewayProviderIdentity,
         extraBody: gatewayExtraBody(config),
-        supportsPdfAttachments: config.supportsPdfAttachments ?? true
+        supportsPdfAttachments: config.supportsPdfAttachments ?? true,
+        // Forwarded to providers that support session affinity for prompt-cache locality.
+        cacheKeyHeaders: cacheKey => ({ 'x-session-affinity': cacheKey })
       }
 
       if (config.extraHeaders !== undefined) {

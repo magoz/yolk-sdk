@@ -7,8 +7,9 @@
  * `AnthropicConformanceConfig`, sends one request through `LLMProvider`, and asserts one wire
  * claim from the events it sees. The Claude subscription provider is not used: it only takes a
  * Claude OAuth token and adds the subscription compatibility layer (billing system block,
- * relocated system prompt, `mcp_` tool names), and neither public provider can send `tool_choice`
- * or `thinking`, which these cases set through the internal layer's extra request fields.
+ * relocated system prompt, `mcp_` tool names), and neither public provider can force a tool
+ * (`tool_choice: { type: 'tool' }`) or send `thinking`, which these cases set through the internal
+ * layer's extra request fields.
  *
  * Cases need only `HttpClient.HttpClient` and the config service, so the same case runs against
  * replayed fixtures (`ReplayHttpClient`), an emulator, or a host's live `HttpClient`. All five are

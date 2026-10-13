@@ -31,13 +31,24 @@ export const anthropicMessagesMaxTokensFixture: WireFixture = {
           system: [
             {
               type: 'text',
-              text: 'Reply in one short sentence.'
+              text: 'Reply in one short sentence.',
+              cache_control: {
+                type: 'ephemeral'
+              }
             }
           ],
           messages: [
             {
               role: 'user',
-              content: 'Count from 1 to 100, separated by commas.'
+              content: [
+                {
+                  type: 'text',
+                  text: 'Count from 1 to 100, separated by commas.',
+                  cache_control: {
+                    type: 'ephemeral'
+                  }
+                }
+              ]
             }
           ],
           max_tokens: 8,

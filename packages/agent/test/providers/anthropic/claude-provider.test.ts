@@ -309,7 +309,14 @@ describe('Anthropic Claude provider', () => {
       expect(body.model).toBe('claude-sonnet-4-6')
       expect(body.messages[2]).toStrictEqual({
         role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'result' }]
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call-1',
+            content: 'result',
+            cache_control: { type: 'ephemeral' }
+          }
+        ]
       })
     })
   )
@@ -391,7 +398,8 @@ describe('Anthropic Claude provider', () => {
                 title: 'brief.pdf'
               }
             ],
-            is_error: true
+            is_error: true,
+            cache_control: { type: 'ephemeral' }
           }
         ]
       })
@@ -861,7 +869,11 @@ describe('Anthropic Claude provider', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'summarize' },
-          { type: 'text', text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.' }
+          {
+            type: 'text',
+            text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.',
+            cache_control: { type: 'ephemeral' }
+          }
         ]
       })
     })
@@ -892,7 +904,8 @@ describe('Anthropic Claude provider', () => {
           { type: 'text', text: 'describe' },
           {
             type: 'image',
-            source: { type: 'url', url: 'https://cdn.example.com/image.webp' }
+            source: { type: 'url', url: 'https://cdn.example.com/image.webp' },
+            cache_control: { type: 'ephemeral' }
           }
         ]
       })
@@ -927,7 +940,8 @@ describe('Anthropic Claude provider', () => {
           {
             type: 'document',
             source: { type: 'url', url: 'https://cdn.example.com/brief.pdf' },
-            title: 'Brief'
+            title: 'Brief',
+            cache_control: { type: 'ephemeral' }
           }
         ]
       })
@@ -972,7 +986,13 @@ describe('Anthropic Claude provider', () => {
 
       expect(body.messages[0]).toMatchObject({
         role: 'user',
-        content: 'Environment context you are running in: if the assistant honestly\n\nhello'
+        content: [
+          {
+            type: 'text',
+            text: 'Environment context you are running in: if the assistant honestly\n\nhello',
+            cache_control: { type: 'ephemeral' }
+          }
+        ]
       })
     })
   )

@@ -102,6 +102,15 @@ type OpenAiCodexRequestBody = {
   }
   readonly tools?: ReadonlyArray<OpenAiCodexTool>
   readonly parallel_tool_calls?: true
+  readonly tool_choice?: 'none'
+  readonly prompt_cache_key?: string
+}
+
+// Like the official Codex CLI (`codex-api/src/requests/headers.rs`): ChatGPT derives prompt-cache
+// affinity from the Responses `session-id` header; the body key carries the same identity.
+const openAiCodexPromptCache = {
+  promptCacheKey: true,
+  cacheKeyHeaders: (cacheKey: string) => ({ 'session-id': cacheKey })
 }
 
 const openAiCodexProviderDescriptor = {
@@ -186,6 +195,7 @@ export const toOpenAiCodexRequestBody = (
 
   return toOpenAiResponsesRequestBodyWithReasoning(request, {
     ...requestConfig,
+    promptCacheKey: openAiCodexPromptCache.promptCacheKey,
     providerName: openAiCodexProviderDescriptor.providerName,
     unsupportedContentProviderName: 'OpenAI Codex OAuth'
   }).pipe(
@@ -223,6 +233,7 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
     Layer.provide(
       makeOpenAiResponsesProviderLayer({
         ...sharedConfig,
+        ...openAiCodexPromptCache,
         providerId: openAiCodexProviderDescriptor.providerId,
         providerName: openAiCodexProviderDescriptor.providerName,
         responsesUrl: config.responsesUrl ?? openAiCodexResponsesUrl,

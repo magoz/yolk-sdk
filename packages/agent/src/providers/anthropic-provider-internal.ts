@@ -50,16 +50,30 @@ import {
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
 
+/**
+ * Lifetime of the prompt-cache entries the request writes. `5m` is Anthropic's default; `1h` costs
+ * more to write (2x base input instead of 1.25x) but survives idle gaps such as pending approvals.
+ */
+export type AnthropicPromptCacheTtl = '5m' | '1h'
+
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
   readonly messagesUrl?: string
   readonly maxTokens: number
   readonly extraHeaders?: Readonly<Record<string, string>>
+  /** Default `5m`. */
+  readonly promptCacheTtl?: AnthropicPromptCacheTtl
+}
+
+type AnthropicCacheControl = {
+  readonly type: 'ephemeral'
+  readonly ttl?: '1h'
 }
 
 type AnthropicTextBlock = {
   readonly type: 'text'
   readonly text: string
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicSystemBlock = AnthropicTextBlock
@@ -76,6 +90,7 @@ type AnthropicImageBlock = {
         readonly type: 'url'
         readonly url: string
       }
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicDocumentBlock = {
@@ -91,6 +106,7 @@ type AnthropicDocumentBlock = {
         readonly url: string
       }
   readonly title?: string
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicToolUseBlock = {
@@ -98,6 +114,7 @@ type AnthropicToolUseBlock = {
   readonly id: string
   readonly name: string
   readonly input: Schema.Json
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicToolResultContentBlock =
@@ -110,6 +127,7 @@ type AnthropicToolResultBlock = {
   readonly tool_use_id: string
   readonly content: string | ReadonlyArray<AnthropicToolResultContentBlock>
   readonly is_error?: boolean
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicUserBlock =
@@ -135,6 +153,7 @@ type AnthropicTool = {
   readonly name: string
   readonly description: string
   readonly input_schema: Schema.Json
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicRequestBody = {
@@ -147,6 +166,7 @@ type AnthropicRequestBody = {
   }
   readonly stream?: true
   readonly tools?: ReadonlyArray<AnthropicTool>
+  readonly tool_choice?: { readonly type: 'none' }
 }
 
 type AnthropicToolBlockState = {
@@ -270,6 +290,17 @@ const sha256Hex = (value: string): Effect.Effect<string, LLMError> => {
       })
   })
 }
+
+// Claude Code sends a UUID session id; derive a stable one from the host cache key.
+const anthropicClaudeSessionIdFromCacheKey = (cacheKey: string) =>
+  sha256Hex(cacheKey).pipe(
+    Effect.map(
+      hash =>
+        `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-` +
+        `${'89ab'.charAt(Number.parseInt(hash.charAt(16), 16) % 4)}${hash.slice(17, 20)}-` +
+        hash.slice(20, 32)
+    )
+  )
 
 const computeAnthropicClaudeCch = (messageText: string) =>
   sha256Hex(messageText).pipe(Effect.map(hash => hash.slice(0, 5)))
@@ -1206,16 +1237,116 @@ const toAnthropicTool = (
     }))
   )
 
+const anthropicCacheControl = (ttl: AnthropicPromptCacheTtl | undefined): AnthropicCacheControl =>
+  ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' }
+
+const isMarkableBlock = (block: AnthropicUserBlock | AnthropicAssistantBlock) =>
+  block.type !== 'text' || block.text.length > 0
+
+/** Marks the last block of a message. Anthropic rejects markers on empty text. */
+const withMessageCacheControl = (
+  message: AnthropicMessage,
+  cacheControl: AnthropicCacheControl
+): AnthropicMessage => {
+  if (message.role === 'assistant') {
+    const last = message.content.at(-1)
+
+    return last === undefined || !isMarkableBlock(last)
+      ? message
+      : {
+          role: 'assistant',
+          content: [...message.content.slice(0, -1), { ...last, cache_control: cacheControl }]
+        }
+  }
+
+  if (Predicate.isString(message.content)) {
+    return message.content.length === 0
+      ? message
+      : {
+          role: 'user',
+          content: [{ type: 'text', text: message.content, cache_control: cacheControl }]
+        }
+  }
+
+  const last = message.content.at(-1)
+
+  if (last === undefined || !isMarkableBlock(last)) {
+    return message
+  }
+
+  return {
+    role: 'user',
+    content: [...message.content.slice(0, -1), { ...last, cache_control: cacheControl }]
+  }
+}
+
+/**
+ * Marks the end of the conversation and the end of the previous request's conversation (the
+ * message before the latest assistant turn). Each request then reads exactly what the previous
+ * one wrote, even when one turn adds more blocks than Anthropic's 20-block lookback.
+ */
+const withConversationCacheBreakpoints = (
+  messages: ReadonlyArray<AnthropicMessage>,
+  cacheControl: AnthropicCacheControl
+): ReadonlyArray<AnthropicMessage> => {
+  let lastAssistantIndex = -1
+
+  messages.forEach((message, index) => {
+    if (message.role === 'assistant') {
+      lastAssistantIndex = index
+    }
+  })
+
+  const marked = new Set([messages.length - 1, lastAssistantIndex - 1])
+
+  return messages.map((message, index) =>
+    marked.has(index) ? withMessageCacheControl(message, cacheControl) : message
+  )
+}
+
+/** Appends `LLMRequest.turnContext` after every breakpoint, merged into a trailing user turn. */
+const withTurnContext = (
+  messages: ReadonlyArray<AnthropicMessage>,
+  turnContext: string | undefined
+): ReadonlyArray<AnthropicMessage> => {
+  if (turnContext === undefined || turnContext.length === 0) {
+    return messages
+  }
+
+  const block: AnthropicTextBlock = { type: 'text', text: turnContext }
+  const last = messages.at(-1)
+
+  if (last === undefined || last.role !== 'user') {
+    return [...messages, { role: 'user', content: [block] }]
+  }
+
+  const content: ReadonlyArray<AnthropicUserBlock> = Predicate.isString(last.content)
+    ? last.content.length === 0
+      ? []
+      : [{ type: 'text', text: last.content }]
+    : last.content
+
+  return [...messages.slice(0, -1), { role: 'user', content: [...content, block] }]
+}
+
+/**
+ * Prompt caching is always on, with at most four breakpoints: the last tool (shared by every
+ * conversation with the same tools), the system prompt when it is sent in `system[]` (native
+ * Messages; the Claude subscription relocates it into the first user message, after a
+ * per-conversation billing block), and the two conversation breakpoints above.
+ */
 export const toAnthropicRequestBody = (
   request: LLMRequest,
   config: {
     readonly maxTokens: number
     readonly stream?: boolean
     readonly claudeCompatibility?: boolean
+    readonly promptCacheTtl?: AnthropicPromptCacheTtl
   }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     const claudeCompatibility = config.claudeCompatibility ?? true
+    const cacheControl = anthropicCacheControl(config.promptCacheTtl)
     yield* validateProviderTranscript(request.messages)
 
     const rawMessages = yield* Effect.forEach(request.messages, message =>
@@ -1227,11 +1358,21 @@ export const toAnthropicRequestBody = (
           yield* makeAnthropicClaudeBillingSystemBlock(rawMessages),
           anthropicClaudeIdentitySystemBlock
         ]
-      : [{ type: 'text', text: request.systemPrompt }]
+      : [
+          request.systemPrompt.length === 0
+            ? { type: 'text', text: request.systemPrompt }
+            : { type: 'text', text: request.systemPrompt, cache_control: cacheControl }
+        ]
 
-    const messages = claudeCompatibility
-      ? prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
-      : rawMessages
+    const messages = withTurnContext(
+      withConversationCacheBreakpoints(
+        claudeCompatibility
+          ? prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
+          : rawMessages,
+        cacheControl
+      ),
+      request.turnContext
+    )
 
     const outputConfig =
       request.reasoningEffort === undefined || request.reasoningEffort === 'minimal'
@@ -1264,12 +1405,17 @@ export const toAnthropicRequestBody = (
       return body
     }
 
-    return {
-      ...body,
-      tools: yield* Effect.forEach(request.tools, tool =>
-        toAnthropicTool(tool, claudeCompatibility)
-      )
-    }
+    const tools = yield* Effect.forEach(request.tools, tool =>
+      toAnthropicTool(tool, claudeCompatibility)
+    )
+
+    const markedTools = tools.map((tool, index) =>
+      index === tools.length - 1 ? { ...tool, cache_control: cacheControl } : tool
+    )
+
+    return request.toolChoice === 'none'
+      ? { ...body, tools: markedTools, tool_choice: { type: 'none' } }
+      : { ...body, tools: markedTools }
   })
 
 const anthropicClaudeProvider = 'anthropic_claude'
@@ -2005,6 +2151,11 @@ const sendAnthropicClaudeRequest = (
   Effect.gen(function* () {
     const body = yield* toAnthropicRequestBody(request, { ...config, stream: true })
 
+    const requestSessionId =
+      request.cacheKey === undefined
+        ? sessionId
+        : yield* anthropicClaudeSessionIdFromCacheKey(request.cacheKey)
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* Schema.decodeUnknownEffect(Schema.Json)(
@@ -2023,7 +2174,10 @@ const sendAnthropicClaudeRequest = (
         accept: 'text/event-stream',
         ...anthropicClaudeAuthorizationHeaders(config.token),
         'content-type': 'application/json',
-        ...makeAnthropicClaudeCompatibilityHeaders({ model: request.model, sessionId }),
+        ...makeAnthropicClaudeCompatibilityHeaders({
+          model: request.model,
+          sessionId: requestSessionId
+        }),
         ...config.extraHeaders
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')

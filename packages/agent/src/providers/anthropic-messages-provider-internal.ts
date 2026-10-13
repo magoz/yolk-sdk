@@ -4,6 +4,7 @@ import { HttpClient, HttpClientRequest } from 'effect/http'
 import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
 import { ProviderErrorInfo, replaceLoneSurrogatesDeep } from '@yolk-sdk/agent/protocol'
 import { streamAnthropicResponse, toAnthropicRequestBody } from './anthropic-provider-internal.ts'
+import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import {
   classifyProviderFailure,
   providerFailureCause,
@@ -15,12 +16,17 @@ type AnthropicMessagesProviderConfig = {
   readonly providerName: string
   readonly messagesUrl: string
   readonly maxTokens: number
+  /** Required protocol and auth headers; they win over every other header. */
   readonly headers: Readonly<Record<string, string>>
+  /** Host extras; cache-key headers and required headers win over them. */
+  readonly extraHeaders?: Readonly<Record<string, string>>
   /**
    * Extra JSON request fields (for example `tool_choice` or `thinking`). Lowered request fields
    * win on a name clash. Internal: the Anthropic conformance cases use it; OpenCode Go does not.
    */
   readonly extraBody?: Readonly<Record<string, Schema.Json>> | undefined
+  /** Session-affinity headers for `LLMRequest.cacheKey`; required headers win on a clash. */
+  readonly cacheKeyHeaders?: CacheKeyHeaders
 }
 
 type AnthropicMessagesErrorFields = {
@@ -88,7 +94,11 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
               const response = yield* client
                 .execute(
                   HttpClientRequest.post(config.messagesUrl).pipe(
-                    HttpClientRequest.setHeaders(config.headers),
+                    HttpClientRequest.setHeaders({
+                      ...config.extraHeaders,
+                      ...requestCacheKeyHeaders(request.cacheKey, config.cacheKeyHeaders),
+                      ...config.headers
+                    }),
                     HttpClientRequest.bodyText(serialized, 'application/json')
                   )
                 )

@@ -81,7 +81,8 @@ const providers = [
                   source: { type: 'url', url: signedUrl('pdf', attempt) },
                   title: 'brief.pdf'
                 }
-              ]
+              ],
+              cache_control: { type: 'ephemeral' }
             }
           ]
         }
