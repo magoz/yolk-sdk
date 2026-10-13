@@ -16,36 +16,36 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                            | Purpose                                                                                                             |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types              |
-| `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                   |
-| `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                         |
-| `@yolk-sdk/connectors/afloat/conformance`          | Experimental Afloat target, seeds, and derived fixtures for the `@yolk-sdk/mcp/conformance` cases                   |
-| `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter      |
-| `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update           |
-| `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                                  |
-| `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port          |
-| `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge       |
-| `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                                    |
-| `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, article, price, cost-center, payment, offer, inbox, settings, profile actions |
-| `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                                  |
-| `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                      |
-| `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                   |
-| `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                 |
-| `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures               |
-| `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                            |
-| `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures      |
-| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments            |
-| `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                          |
-| `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                               |
-| `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                   |
-| `@yolk-sdk/connectors/r2-storage`                  | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                                   |
-| `@yolk-sdk/connectors/r2-storage/conformance`      | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge               |
-| `@yolk-sdk/connectors/telegram`                    | Telegram bot send/validate actions                                                                                  |
-| `@yolk-sdk/connectors/telegram/conformance`        | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                                 |
-| `@yolk-sdk/connectors/todoist`                     | Todoist project/task/label/comment actions and API token slot constants                                             |
-| `@yolk-sdk/connectors/todoist/conformance`         | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                                  |
+| Subpath                                            | Purpose                                                                                                                                      |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types                                       |
+| `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                                            |
+| `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                                                  |
+| `@yolk-sdk/connectors/afloat/conformance`          | Experimental Afloat target, seeds, and derived fixtures for the `@yolk-sdk/mcp/conformance` cases                                            |
+| `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter                               |
+| `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update                                    |
+| `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                                                           |
+| `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port                                   |
+| `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge                                |
+| `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                                                             |
+| `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print, inbox, settings, profile actions |
+| `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                                                           |
+| `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                                               |
+| `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                                            |
+| `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                          |
+| `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                        |
+| `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
+| `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
+| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                                     |
+| `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                                                   |
+| `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                                                        |
+| `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                                            |
+| `@yolk-sdk/connectors/r2-storage`                  | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                                                            |
+| `@yolk-sdk/connectors/r2-storage/conformance`      | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge                                        |
+| `@yolk-sdk/connectors/telegram`                    | Telegram bot send/validate actions                                                                                                           |
+| `@yolk-sdk/connectors/telegram/conformance`        | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                                                          |
+| `@yolk-sdk/connectors/todoist`                     | Todoist project/task/label/comment actions and API token slot constants                                                                      |
+| `@yolk-sdk/connectors/todoist/conformance`         | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                                                           |
 
 ## Imports
 
@@ -1757,6 +1757,12 @@ state rather than dropping conditions or silently changing modes.
   `connectfile`; `FortnoxArchiveOAuthCredentialSlot` requests `archive`; preview uses `invoice`.
   These scopes grant provider **read and write** and are not added to the existing combined slot.
   Provider archive/list OpenAPI modeling is imperfect; validate sanitized responses before production.
+- Fortnox offer preview (`downloadFortnoxOfferPreview`) uses `/offers/{DocumentNumber}/preview` with
+  the `offer` slot. Inbox download (`downloadFortnoxInboxFile`, `/inbox/{Id}`) refuses `root` and
+  static folder ids, which answer folder JSON. Inbox upload (`uploadFortnoxInboxFile`) is one
+  never-retried multipart POST through `ConnectorBinaryWriteHttpClient`, capped at
+  `fortnoxInboxUploadMaxBytes` (50 MiB, not a documented Fortnox limit), and verifies the returned
+  `Size`. Both inbox helpers use the `inbox` slot.
 - Notion accepts hosted/external provider file objects from page/property/block reads. Fourth argument
   `NotionFileDownloadPolicy` requires `allowHostedUrl`; external files additionally require
   `allowExternalUrl`. Never forward Notion credentials. Refresh expired grants by rereading the owning

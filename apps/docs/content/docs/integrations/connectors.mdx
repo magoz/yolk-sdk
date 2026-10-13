@@ -7,21 +7,21 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 
 ## Summary
 
-| Connector       | Import                                 | Credential slots                             | Config keys                                        | Capabilities                                            |
-| --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------- |
-| Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                                       |
-| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management + host download              |
-| Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state              |
-| Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                                        |
-| Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice reads/writes, supplier reads |
-| GitHub          | `@yolk-sdk/connectors/github`          | `GithubTokenSlot`, `GithubUploadTokenSlot`   | `owner`, `repo`                                    | issue, PR, review, merge, repo context actions          |
-| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                        |
-| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                  |
-| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph                        |
-| Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions                        |
-| Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL                                    |
-| Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                                          |
-| Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions                              |
+| Connector       | Import                                 | Credential slots                             | Config keys                                        | Capabilities                                                                                                               |
+| --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                                                                                                          |
+| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management + host download                                                                                 |
+| Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state                                                                                 |
+| Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                                                                                                           |
+| Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customers, invoices, suppliers, articles, prices, cost centers, payments, offers, print, inbox, settings, profile |
+| GitHub          | `@yolk-sdk/connectors/github`          | `GithubTokenSlot`, `GithubUploadTokenSlot`   | `owner`, `repo`                                    | issue, PR, review, merge, repo context actions                                                                             |
+| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                                                                                           |
+| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                                                                                     |
+| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph                                                                                           |
+| Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions                                                                                           |
+| Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL                                                                                                       |
+| Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                                                                                                             |
+| Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions                                                                                                 |
 
 ## Afloat
 
@@ -47,9 +47,10 @@ Return optional `refreshToken`, `clientId`, and `clientSecret` from the host's r
 
 ## Fortnox
 
-`FortnoxConnector` exposes read actions plus customer/invoice create and update actions. Reads have
-`read` metadata; creates and updates have `write` metadata. Sending or booking an invoice is not
-exposed and must remain separately approval-gated by the host:
+`FortnoxConnector` exposes 91 actions (42 `read`, 31 `write`, 18 `destructive`). Deletes, payment
+bookkeeping, and offer lifecycle actions are `destructive` because the Fortnox API cannot undo them.
+Sending, booking, cancelling, or crediting a customer invoice is not exposed and must remain
+separately approval-gated by the host. The core record actions:
 
 | Action id                                                         | What it does                                          |
 | ----------------------------------------------------------------- | ----------------------------------------------------- |
@@ -65,8 +66,13 @@ exposed and must remain separately approval-gated by the host:
 All resource-scoped OAuth slots share `fortnox.oauth`. Required record scope hints are `companyinformation`,
 `customer`, `invoice`, `supplier`, and `supplierinvoice`. Opt-in file slots are
 `FortnoxConnectFileOAuthCredentialSlot` (`connectfile`) and `FortnoxArchiveOAuthCredentialSlot`
-(`archive`); they are **not** included in `FortnoxCombinedOAuthCredentialSlot`. **Fortnox scopes grant read and write**;
-action metadata distinguishes reads from customer/invoice writes. Hosts provide HTTP and current Fortnox OAuth credentials,
+(`archive`); they are **not** included in `FortnoxCombinedOAuthCredentialSlot`. Nine more opt-in
+resource slots, also outside the combined slot, cover articles (`article`), price lists and prices
+(`price`), cost centers (`costcenter`), payments (`payment`), offers (`offer`), print templates
+(`print`), the inbox (`inbox`), company settings and registers (`settings`), and the token's user
+profile (`profile`); see [Read and write Fortnox records](../connectors/fortnox) for their actions.
+**Fortnox scopes grant read and write**; action metadata distinguishes reads, writes, and
+destructive actions. Hosts provide HTTP and current Fortnox OAuth credentials,
 with no integration config keys.
 
 List actions support page/limit, one resource-specific search pair, and global selection fields.
@@ -971,8 +977,9 @@ GitHub's undocumented user-attachments endpoint with a user token (`github.uploa
 
 See [Transfer connector files](../connectors/files) for all download/export and create/update APIs,
 provider-specific concurrency and limits, consent and network enforcement. Raw bytes do not enter
-action arrays. New metadata actions are `fortnox.list_supplier_invoice_files` and
-`todoist.list_comments`; both declare read access.
+action arrays. The metadata actions `fortnox.list_supplier_invoice_files` and
+`todoist.list_comments` declare read access; Fortnox offer previews and inbox files move through
+host-only helpers.
 
 ## Custom connectors
 

@@ -301,7 +301,7 @@ responsible for choosing an effort accepted by the selected provider and model.
 
 Provider prompt caching is always on (ADR 0008). Set `cacheKey` (for example the session id) on
 `run` or `runRuntime` so providers route a conversation to its cached prefix: Anthropic gets
-`cache_control` breakpoints, Codex and Grok `prompt_cache_key` plus their session headers, Vercel AI
+`cache_control` breakpoints and a Claude session header derived from the key, Codex and Grok `prompt_cache_key` plus their session headers, Vercel AI
 Gateway `caching: 'auto'` and `x-session-affinity`, and OpenCode Go `x-opencode-session`. The
 generic OpenAI-compatible chat provider sends nothing unless its config sets `cacheKeyHeaders`.
 Claude entries last five minutes unless the provider sets `promptCacheTtl: '1h'`.
