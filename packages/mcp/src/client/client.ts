@@ -5,6 +5,7 @@ import {
   Client as SdkClient,
   fromJsonSchema,
   isInputRequiredResult,
+  isSpecType,
   mergeCapabilities,
   MissingRequiredClientCapabilityError,
   ProtocolError,
@@ -33,6 +34,8 @@ import type {
 import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config.ts'
 import {
   decodeMcpInputRequired,
+  mcpArgumentsDigest,
+  McpPausedTool,
   McpToolCallComplete,
   McpToolCallInputRequired,
   toMcpInputResponses,
@@ -589,8 +592,22 @@ type RetryParams = {
   requestState?: string
 }
 
+/** The first step lists, then calls; a resume calls with the paused tool's definition. */
+type ResumableMode =
+  | { readonly kind: 'initial' }
+  | {
+      readonly kind: 'resume'
+      readonly retry: RetryParams
+      readonly tool: McpPausedTool | undefined
+    }
+
 type ResumableStep =
-  | { readonly kind: 'answered'; readonly era: ProtocolEra | undefined; readonly raw: unknown }
+  | {
+      readonly kind: 'answered'
+      readonly era: ProtocolEra | undefined
+      readonly raw: unknown
+      readonly tool: McpPausedTool | undefined
+    }
   | {
       readonly kind: 'capability_required'
       readonly message: string
@@ -612,31 +629,75 @@ const decodeRequiredCapabilities = Schema.decodeUnknownOption(
   Schema.Record(Schema.String, Schema.Unknown)
 )
 
+const decodePausedTool = Schema.decodeUnknownOption(McpPausedTool)
+
+/** The SDK `Tool` of a persisted definition (`isSpecType` checks it; no cast). */
+const sdkToolOf = (tool: McpPausedTool): Tool | undefined => {
+  const candidate = {
+    name: tool.name,
+    inputSchema: tool.inputSchema,
+    ...Option.match(Option.fromNullishOr(tool.outputSchema), {
+      onNone: () => ({}),
+      onSome: outputSchema => ({ outputSchema })
+    })
+  }
+
+  return isSpecType.Tool(candidate) ? candidate : undefined
+}
+
+/** A definition that keeps the SDK off its response cache when nothing better is known. */
+const minimalToolDefinition = (name: string): Tool => ({ name, inputSchema: { type: 'object' } })
+
+type OutputValidator = ReturnType<typeof fromJsonSchema>['~standard']
+
 /**
- * The official client validates structured output against the cached listing even when the
- * answer is an `input_required` result (manual mode), and then rejects it. The resumable call
- * passes the listed tool without its `outputSchema` and checks complete results here instead,
- * with the same rules and the host's `sdk.jsonSchemaValidator`.
+ * Compiles the tool's `outputSchema` before the call, as the SDK does: a schema that does not
+ * compile fails the call before anything is sent.
+ */
+const compileOutputValidator = (
+  tool: Tool,
+  options: McpClientOptions | undefined
+): OutputValidator | undefined => {
+  if (tool.outputSchema === undefined) return undefined
+
+  try {
+    return fromJsonSchema(tool.outputSchema, options?.sdk?.jsonSchemaValidator)['~standard']
+  } catch (error) {
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
+      `Tool '${tool.name}' has an invalid outputSchema: ${unknownToMessage(error).slice(0, 200)}`
+    )
+  }
+}
+
+/**
+ * The official client validates structured output even when the answer is an `input_required`
+ * result (manual mode), and then rejects it. The resumable call therefore always passes the
+ * tool without its `outputSchema` as `toolDefinition` (the SDK never reads its response cache)
+ * and checks complete results here, with the SDK's rules and the host's `sdk.jsonSchemaValidator`.
  */
 const assertStructuredOutput = async (
-  tool: Tool,
-  result: CallToolResult,
-  options: McpClientOptions | undefined
+  toolName: string,
+  validator: OutputValidator,
+  result: CallToolResult
 ) => {
-  if (tool.outputSchema === undefined || result.isError === true) {
-    return
-  }
+  if (result.isError === true) return
 
   if (result.structuredContent === undefined) {
     throw new ProtocolError(
       ProtocolErrorCode.InvalidRequest,
-      `Tool ${tool.name} has an output schema but did not return structured content`
+      `Tool ${toolName} has an output schema but did not return structured content`
     )
   }
 
-  const outcome = await fromJsonSchema(tool.outputSchema, options?.sdk?.jsonSchemaValidator)[
-    '~standard'
-  ].validate(result.structuredContent)
+  const outcome = await Promise.resolve()
+    .then(() => validator.validate(result.structuredContent))
+    .catch((error: unknown) => {
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
+        `Failed to validate structured content: ${unknownToMessage(error)}`
+      )
+    })
 
   if (outcome.issues !== undefined) {
     throw new ProtocolError(
@@ -650,26 +711,25 @@ const assertStructuredOutput = async (
 
 /**
  * One wire step of a resumable call on a fresh connection. The first step lists, then calls (as
- * `callRemoteMcpServerTool` does). A resume (`retry` set) calls first and lists nothing: the call
- * is then the first numbered JSON-RPC request on its connection, so its id differs from the
- * original call's, which follows the listing.
+ * `callRemoteMcpServerTool` does). A resume lists nothing: it calls with the definition carried
+ * by the pause (or a minimal one) and is re-sent as a new request on a new connection.
  */
 const resumableStep = (
   input: CallRemoteMcpServerToolInput,
   args: ToolArguments,
-  retry: RetryParams | undefined
+  mode: ResumableMode
 ) =>
   withRemoteSdkClient(input.config, input.options, async (client): Promise<ResumableStep> => {
     const era = client.getProtocolEra()
 
-    if (retry !== undefined && era !== 'modern') {
+    if (mode.kind === 'resume' && era !== 'modern') {
       return { kind: 'legacy_resume' }
     }
 
     const meta = elicitationMeta(client, input.options)
 
     const listed =
-      retry === undefined
+      mode.kind === 'initial'
         ? (
             await client.listTools(
               meta === undefined ? undefined : { _meta: meta },
@@ -677,6 +737,19 @@ const resumableStep = (
             )
           ).tools.find(tool => tool.name === input.mcpToolName)
         : undefined
+
+    const paused =
+      mode.kind === 'resume'
+        ? mode.tool
+        : Option.getOrUndefined(Option.flatMap(Option.fromNullishOr(listed), decodePausedTool))
+
+    const definition =
+      mode.kind === 'resume'
+        ? Option.getOrUndefined(Option.flatMapNullishOr(Option.fromNullishOr(paused), sdkToolOf))
+        : listed
+
+    const validator =
+      definition === undefined ? undefined : compileOutputValidator(definition, input.options)
 
     // The SDK's neutral `CallToolRequestParams` omits the MRTR retry fields; its 2026-07-28 codec
     // sends them as received (its own auto-fulfilment driver retries the same way).
@@ -687,27 +760,31 @@ const resumableStep = (
 
     if (meta !== undefined) params._meta = meta
 
-    if (retry?.inputResponses !== undefined) params.inputResponses = retry.inputResponses
+    if (mode.kind === 'resume' && mode.retry.inputResponses !== undefined) {
+      params.inputResponses = mode.retry.inputResponses
+    }
 
-    if (retry?.requestState !== undefined) params.requestState = retry.requestState
+    if (mode.kind === 'resume' && mode.retry.requestState !== undefined) {
+      params.requestState = mode.retry.requestState
+    }
 
     const callOptions: CallToolRequestOptions = {
       ...sdkRequestOptions(input.options),
-      allowInputRequired: true
-    }
-
-    if (listed?.outputSchema !== undefined) {
-      callOptions.toolDefinition = Struct.omit(listed, ['outputSchema'])
+      allowInputRequired: true,
+      toolDefinition:
+        definition === undefined
+          ? minimalToolDefinition(input.mcpToolName)
+          : Struct.omit(definition, ['outputSchema'])
     }
 
     try {
       const result = await client.callTool(params, callOptions)
 
-      if (!isInputRequiredResult(result) && listed !== undefined) {
-        await assertStructuredOutput(listed, result, input.options)
+      if (!isInputRequiredResult(result) && validator !== undefined) {
+        await assertStructuredOutput(input.mcpToolName, validator, result)
       }
 
-      return { kind: 'answered', era, raw: result }
+      return { kind: 'answered', era, raw: result, tool: paused }
     } catch (error) {
       if (error instanceof MissingRequiredClientCapabilityError) {
         return {
@@ -727,7 +804,8 @@ const resumableStep = (
 
 const resumableOutcome = (
   input: CallRemoteMcpServerToolInput,
-  step: ResumableStep
+  step: ResumableStep,
+  argumentsDigest: string
 ): Effect.Effect<McpToolCallOutcome, McpResumableToolCallError> => {
   const server = input.config.name
 
@@ -760,7 +838,8 @@ const resumableOutcome = (
           ? decodeMcpInputRequired({
               server,
               raw: step.raw,
-              elicitation: input.options?.elicitation
+              elicitation: input.options?.elicitation,
+              binding: { mcpToolName: input.mcpToolName, argumentsDigest, tool: step.tool }
             }).pipe(Effect.map(inputRequired => McpToolCallInputRequired.make({ inputRequired })))
           : Effect.fail(
               new McpInputRequiredError({
@@ -781,55 +860,84 @@ const resumableOutcome = (
   }
 }
 
+const digestCallArguments = (server: string, args: ToolArguments) =>
+  mcpArgumentsDigest(args).pipe(
+    Effect.mapError(
+      error =>
+        new McpError({
+          server,
+          message: `Invalid tools/call arguments: not JSON: ${unknownToMessage(error)}`,
+          cause: 'validation'
+        })
+    )
+  )
+
 /**
  * Calls a remote MCP tool and answers a typed outcome instead of blocking on input:
  * `Complete` (the adapted result) or `InputRequired` (a serializable `McpInputRequired` the host
  * persists, decides on, and passes to `resumeRemoteMcpServerToolCall`). Like
- * `callRemoteMcpServerTool`, it lists tools on its own connection before calling. Set
- * `options.elicitation` to declare form elicitation; without it a server may refuse a tool that
- * needs confirmation (`McpClientCapabilityRequiredError` for MCP `-32021`, or a tool error result).
+ * `callRemoteMcpServerTool`, it lists tools on its own connection before calling; the pause
+ * carries the listed definition. Set `options.elicitation` to declare form elicitation; without
+ * it a server may refuse a tool that needs confirmation (`McpClientCapabilityRequiredError` for
+ * MCP `-32021`, or a tool error result).
  */
 export const callRemoteMcpServerToolResumable = (
   input: CallRemoteMcpServerToolInput
 ): Effect.Effect<McpToolCallOutcome, McpResumableToolCallError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const args = yield* decodeCallArguments(input.config.name, input.params)
-    const step = yield* resumableStep(input, args, undefined)
+    const argumentsDigest = yield* digestCallArguments(input.config.name, args)
+    const step = yield* resumableStep(input, args, { kind: 'initial' })
 
-    return yield* resumableOutcome(input, step)
+    return yield* resumableOutcome(input, step, argumentsDigest)
   })
 
 /**
- * Resumes a paused remote MCP tool call: re-sends the same tool call (pass the same
- * `mcpToolName` and `params`) on a fresh connection and a new JSON-RPC id, with the exact
- * `requestState` and the host's decisions as `inputResponses`. The server may pause again
- * (`InputRequired`). Fails with `McpInputRequiredError` before sending when `responses` do not
- * match the elicitations (`invalid_responses`), and when the server now negotiates a legacy era
- * (`unsupported_era`).
+ * Resumes a paused remote MCP tool call: the same tool call (same `mcpToolName` and `params`,
+ * checked against the pause's binding) is re-sent as a new request on a new connection, with the
+ * exact `requestState`, the host's decisions as `inputResponses`, and the pause's tool definition
+ * (no listing). The server may pause again (`InputRequired`). Fails with `McpInputRequiredError`
+ * before sending when the call does not match the pause (`mismatched_resume`) or `responses` do
+ * not match the elicitations (`invalid_responses`), and when the server now negotiates a legacy
+ * era (`unsupported_era`).
  */
 export const resumeRemoteMcpServerToolCall = (
   input: ResumeRemoteMcpServerToolCallInput
 ): Effect.Effect<McpToolCallOutcome, McpResumableToolCallError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const args = yield* decodeCallArguments(input.config.name, input.params)
+    const server = input.config.name
+    const pause = input.inputRequired
+    const args = yield* decodeCallArguments(server, input.params)
+    const argumentsDigest = yield* digestCallArguments(server, args)
+
+    if (input.mcpToolName !== pause.mcpToolName || argumentsDigest !== pause.argumentsDigest) {
+      return yield* Effect.fail(
+        new McpInputRequiredError({
+          server,
+          reason: 'mismatched_resume',
+          message:
+            input.mcpToolName === pause.mcpToolName
+              ? 'The resume sends other arguments than the paused call'
+              : `The resume calls ${input.mcpToolName}, but the pause is for ${pause.mcpToolName}`
+        })
+      )
+    }
 
     const inputResponses = yield* toMcpInputResponses({
-      server: input.config.name,
-      inputRequired: input.inputRequired,
+      server,
+      inputRequired: pause,
       responses: input.responses
     })
 
-    const requestState = input.inputRequired.requestState
-
     const retry: RetryParams = {}
 
-    if (input.inputRequired.elicitations.length > 0) retry.inputResponses = inputResponses
+    if (pause.elicitations.length > 0) retry.inputResponses = inputResponses
 
-    if (requestState !== undefined) retry.requestState = requestState
+    if (pause.requestState !== undefined) retry.requestState = pause.requestState
 
-    const step = yield* resumableStep(input, args, retry)
+    const step = yield* resumableStep(input, args, { kind: 'resume', retry, tool: pause.tool })
 
-    return yield* resumableOutcome(input, step)
+    return yield* resumableOutcome(input, step, argumentsDigest)
   })
 
 export const callLocalMcpServerTool = (

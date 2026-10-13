@@ -15,8 +15,13 @@ import * as Schema from 'effect/Schema'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { McpInputRequiredError, type McpInputRequiredErrorReason } from './errors.ts'
 
-/** Default bound on one `InputRequiredResult` (its JSON encoding, in UTF-8 bytes). */
-export const defaultMcpMaxInputRequiredBytes = 65_536
+/**
+ * Default bound on one pause, in UTF-8 bytes of JSON: the `InputRequiredResult` and the decoded
+ * `McpInputRequired` the host persists (elicitations, `requestState`, binding, tool definition).
+ * It is checked after the response body is buffered, so it bounds what is decoded and persisted,
+ * not what is received.
+ */
+export const defaultMcpMaxInputRequiredBytes = 262_144
 
 /** Most embedded input requests one `InputRequiredResult` may carry. */
 export const mcpMaxInputRequests = 16
@@ -27,7 +32,7 @@ export const mcpMaxInputRequests = 16
  */
 export type McpElicitationSupport = {
   readonly form: true
-  /** Bound on one `InputRequiredResult` (JSON, UTF-8 bytes). Default `65_536`. */
+  /** Bound on one pause (JSON, UTF-8 bytes; a positive integer). Default `262_144`. */
   readonly maxInputRequiredBytes?: number
 }
 
@@ -69,15 +74,84 @@ export class McpFormElicitation extends Schema.Class<McpFormElicitation>('McpFor
   requestedSchema: McpElicitationRequestedSchema
 }) {}
 
+/** A JSON Schema object as listed (kept as received). */
+const ListedJsonSchema = Schema.Record(Schema.String, Schema.Json)
+
+/**
+ * The paused tool's listed definition: name, input and output schemas. A resume calls with it
+ * instead of listing again (input schema for `x-mcp-header` mirroring, output schema for the
+ * structured-output check).
+ */
+export class McpPausedTool extends Schema.Class<McpPausedTool>('McpPausedTool')({
+  name: Schema.String,
+  inputSchema: ListedJsonSchema,
+  outputSchema: Schema.optional(ListedJsonSchema)
+}) {}
+
 /**
  * A tool call the server paused for input: serializable, safe to persist. `requestState` is
  * opaque server state, echoed back byte-exact on resume; never inspect or change it. No
  * `elicitations` with a `requestState` is a load-shedding pause: resume with no responses.
+ * The pause is bound to its call (`mcpToolName`, `argumentsDigest`): a resume with another tool
+ * or other arguments is refused before sending. `tool` is the listed definition, absent when the
+ * listing did not hold the tool.
  */
 export class McpInputRequired extends Schema.Class<McpInputRequired>('McpInputRequired')({
   elicitations: Schema.Array(McpFormElicitation),
-  requestState: Schema.optional(Schema.String)
+  requestState: Schema.optional(Schema.String),
+  mcpToolName: Schema.String,
+  /** `sha256:<hex>` of the canonical JSON (sorted keys) of the call's arguments. */
+  argumentsDigest: Schema.String,
+  tool: Schema.optional(McpPausedTool)
 }) {}
+
+/** What binds a pause to its call. */
+export type McpPauseBinding = {
+  readonly mcpToolName: string
+  readonly argumentsDigest: string
+  readonly tool: McpPausedTool | undefined
+}
+
+const isJsonArray = Schema.is(Schema.Array(Schema.Json))
+
+const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
+
+const byKey = ([left]: readonly [string, Schema.Json], [right]: readonly [string, Schema.Json]) =>
+  left < right ? -1 : 1
+
+/** JSON with object keys sorted (recursively): equal values give equal text. */
+export const canonicalMcpJson = (value: Schema.Json): string => {
+  if (isJsonArray(value)) return `[${value.map(canonicalMcpJson).join(',')}]`
+
+  if (isJsonObject(value)) {
+    const members = Object.entries(value)
+      .sort(byKey)
+      .map(([key, member]) => `${JSON.stringify(key)}:${canonicalMcpJson(member)}`)
+
+    return `{${members.join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+const decodeJsonValue = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
+
+const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+
+const hex = (bytes: ArrayBuffer) =>
+  Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+
+/** `sha256:<hex>` of the canonical JSON of tool-call arguments (as they go on the wire). */
+export const mcpArgumentsDigest = (args: unknown): Effect.Effect<string, Schema.SchemaError> =>
+  encodeUnknownJson(args).pipe(
+    Effect.flatMap(decodeJsonValue),
+    Effect.flatMap(json =>
+      Effect.promise(() =>
+        crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalMcpJson(json)))
+      )
+    ),
+    Effect.map(digest => `sha256:${hex(digest)}`)
+  )
 
 /** A value a form may return: the MCP `ElicitResult.content` value types. */
 export const McpElicitationContentValue = Schema.Union([
@@ -218,9 +292,18 @@ export const decodeMcpInputRequired = (input: {
   readonly server: string
   readonly raw: unknown
   readonly elicitation: McpElicitationSupport | undefined
+  readonly binding: McpPauseBinding
 }): Effect.Effect<McpInputRequired, McpInputRequiredError> =>
   Effect.gen(function* () {
     const maxBytes = input.elicitation?.maxInputRequiredBytes ?? defaultMcpMaxInputRequiredBytes
+
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      return yield* inputRequiredError(
+        input.server,
+        'malformed',
+        'elicitation.maxInputRequiredBytes must be a positive integer'
+      )
+    }
 
     const json = yield* encodeJson(input.raw).pipe(
       Effect.catch(() =>
@@ -274,9 +357,39 @@ export const decodeMcpInputRequired = (input: {
       decodeElicitation(input.server, key, raw)
     )
 
-    return payload.requestState === undefined
-      ? McpInputRequired.make({ elicitations })
-      : McpInputRequired.make({ elicitations, requestState: payload.requestState })
+    const pause = McpInputRequired.make({
+      elicitations,
+      mcpToolName: input.binding.mcpToolName,
+      argumentsDigest: input.binding.argumentsDigest,
+      ...Option.match(Option.fromNullishOr(payload.requestState), {
+        onNone: () => ({}),
+        onSome: requestState => ({ requestState })
+      }),
+      ...Option.match(Option.fromNullishOr(input.binding.tool), {
+        onNone: () => ({}),
+        onSome: tool => ({ tool })
+      })
+    })
+
+    const persisted = yield* Schema.encodeEffect(Schema.fromJsonString(McpInputRequired))(
+      pause
+    ).pipe(
+      Effect.catch(() =>
+        inputRequiredError(input.server, 'malformed', 'The pause does not encode as JSON')
+      )
+    )
+
+    const persistedBytes = utf8Bytes(persisted)
+
+    if (persistedBytes > maxBytes) {
+      return yield* inputRequiredError(
+        input.server,
+        'too_large',
+        `The pause is ${persistedBytes} bytes with its tool definition; the limit is ${maxBytes}`
+      )
+    }
+
+    return pause
   })
 
 const isString = Schema.is(Schema.String)
@@ -307,6 +420,69 @@ const matchesPropertyType = (
   }
 }
 
+const JsonList = Schema.Array(Schema.Json)
+
+const ConstOptions = Schema.Array(Schema.Struct({ const: Schema.Json }))
+
+const ItemChoices = Schema.Struct({
+  enum: Schema.optional(JsonList),
+  anyOf: Schema.optional(ConstOptions)
+})
+
+/** Allowed values from `enum`, else from titled `oneOf`/`anyOf` options (`{ const, title }`). */
+const allowedValues = (
+  enumValue: Schema.Json | undefined,
+  options: Schema.Json | undefined
+): Option.Option<ReadonlyArray<Schema.Json>> =>
+  Schema.decodeUnknownOption(JsonList)(enumValue).pipe(
+    Option.orElse(() =>
+      Schema.decodeUnknownOption(ConstOptions)(options).pipe(
+        Option.map(choices => choices.map(choice => choice.const))
+      )
+    )
+  )
+
+const sameJson = (left: Schema.Json, right: Schema.Json) =>
+  canonicalMcpJson(left) === canonicalMcpJson(right)
+
+const isAllowed = (allowed: Option.Option<ReadonlyArray<Schema.Json>>, value: Schema.Json) =>
+  Option.match(allowed, {
+    onNone: () => true,
+    onSome: values => values.some(candidate => sameJson(candidate, value))
+  })
+
+/**
+ * `const`, `enum` (or titled `oneOf`), and for string lists `items.enum` (or `items.anyOf`). The
+ * server validates again; this only catches a decision it would reject.
+ */
+const choiceProblems = (
+  name: string,
+  property: McpElicitationProperty,
+  value: McpElicitationContentValue
+) => {
+  const constValue = property['const']
+
+  const constProblem =
+    constValue === undefined || sameJson(constValue, value)
+      ? []
+      : [`${name} must be ${canonicalMcpJson(constValue)}`]
+
+  const enumProblem = isAllowed(allowedValues(property['enum'], property['oneOf']), value)
+    ? []
+    : [`${name} is not one of the allowed values`]
+
+  const items = Schema.decodeUnknownOption(ItemChoices)(property['items'])
+
+  const itemsAllowed = Option.flatMap(items, choices => allowedValues(choices.enum, choices.anyOf))
+
+  const itemProblem =
+    isStringArray(value) && value.some(item => !isAllowed(itemsAllowed, item))
+      ? [`${name} holds a value that is not allowed`]
+      : []
+
+  return [...constProblem, ...enumProblem, ...itemProblem]
+}
+
 const contentProblems = (
   elicitation: McpFormElicitation,
   content: Readonly<Record<string, McpElicitationContentValue>>
@@ -324,8 +500,10 @@ const contentProblems = (
   const mistyped = Object.entries(content).flatMap(([name, value]) => {
     const property = Object.hasOwn(properties, name) ? properties[name] : undefined
 
-    return property === undefined || matchesPropertyType(property.type, value)
-      ? []
+    if (property === undefined) return []
+
+    return matchesPropertyType(property.type, value)
+      ? choiceProblems(name, property, value)
       : [`${name} is not a ${property.type}`]
   })
 
@@ -367,8 +545,9 @@ const wireInputResponse = (
 /**
  * Checks the host's decisions against the paused call and builds the wire `inputResponses`:
  * exactly one decision per elicitation; accepted content only names declared properties, holds
- * every required one, and matches each property's `type`. Fails with `McpInputRequiredError`
- * (`invalid_responses`) before anything is sent.
+ * every required one, and matches each property's `type`, `const`, `enum` (or titled `oneOf`),
+ * and for string lists `items.enum` (or `items.anyOf`). Fails with `McpInputRequiredError`
+ * (`invalid_responses`) before anything is sent. The server still validates the decisions.
  */
 export const toMcpInputResponses = (input: {
   readonly server: string

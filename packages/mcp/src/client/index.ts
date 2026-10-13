@@ -32,6 +32,7 @@ export type {
 } from './client.ts'
 
 export {
+  canonicalMcpJson,
   decodeMcpInputRequired,
   defaultMcpMaxInputRequiredBytes,
   McpElicitationContentValue,
@@ -42,14 +43,16 @@ export {
   McpElicitationResponses,
   McpFormElicitation,
   McpInputRequired,
+  mcpArgumentsDigest,
   mcpMaxInputRequests,
+  McpPausedTool,
   McpToolCallComplete,
   McpToolCallInputRequired,
   McpToolCallOutcome,
   toMcpInputResponses
 } from './elicitation.ts'
 
-export type { McpElicitationSupport, McpWireElicitResult } from './elicitation.ts'
+export type { McpElicitationSupport, McpPauseBinding, McpWireElicitResult } from './elicitation.ts'
 
 export {
   McpClientCapabilityRequiredError,

@@ -109,27 +109,36 @@ confirm a destructive tool with a form). A durable host cannot block on a person
 step, so Yolk returns the pause as data and resumes later, possibly in another process:
 
 ```ts
+import { Effect } from 'effect'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
-  type McpClientOptions
+  type McpClientOptions,
+  type McpElicitationResponse,
+  type McpElicitationResponses
 } from '@yolk-sdk/mcp/client'
 
 const options: McpClientOptions = { elicitation: { form: true } }
 const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_1', params, options }
 
-const outcome = yield * callRemoteMcpServerToolResumable(call)
+const step = Effect.gen(function* () {
+  const outcome = yield* callRemoteMcpServerToolResumable(call)
 
-if (outcome._tag === 'InputRequired') {
-  // Persist outcome.inputRequired (a Schema class), render its forms, then later:
-  const next =
-    yield *
-    resumeRemoteMcpServerToolCall({
-      ...call,
-      inputRequired: outcome.inputRequired,
-      responses: { confirmation: { action: 'accept', content: { confirm: true } } }
-    })
-}
+  if (outcome._tag === 'Complete') return outcome.result
+
+  // Persist outcome.inputRequired (a Schema class) and render its forms. Later, possibly in
+  // another process, resume with one decision per form, keyed by its `key`:
+  const decline: McpElicitationResponse = { action: 'decline' }
+  const responses: McpElicitationResponses = Object.fromEntries(
+    outcome.inputRequired.elicitations.map(form => [form.key, decline])
+  )
+
+  return yield* resumeRemoteMcpServerToolCall({
+    ...call,
+    inputRequired: outcome.inputRequired,
+    responses
+  })
+})
 ```
 
 - `elicitation: { form: true }` is the opt-in. Only then do the listing and the resumable call
@@ -137,16 +146,22 @@ if (outcome._tag === 'InputRequired') {
   connection. Nothing declares it in a legacy `initialize`, and `callRemoteMcpServerTool` (which
   cannot represent a pause) never declares it.
 - The outcome is `Complete` (a `ToolResult`) or `InputRequired` (`McpInputRequired`: Schema-decoded
-  form elicitations with `key`, `message` and `requestedSchema`, plus the opaque `requestState`).
-  The pause is bounded: 64 KiB of JSON by default (`elicitation.maxInputRequiredBytes`) and 16
-  requests.
-- The resume re-sends the same tool call on a fresh connection and a new JSON-RPC id, with the exact
-  `requestState` and the decisions (`accept` with `content`, `decline`, `cancel`) as
-  `inputResponses`. Decisions are checked against the forms before anything is sent. The server may
-  pause again.
+  form elicitations with `key`, `message` and `requestedSchema`, the opaque `requestState`, the
+  binding `mcpToolName` and `argumentsDigest`, and the listed tool definition `tool`).
+- The pause is bounded: 256 KiB of JSON by default (`elicitation.maxInputRequiredBytes`, a positive
+  integer) and 16 requests. The bound applies to the decoded pause after the response body is
+  buffered, so it bounds what is decoded and persisted, not what is received.
+- The resume is re-sent as a new request on a new connection with the same tool call (checked
+  against the pause's binding), the exact `requestState`, and the decisions (`accept` with
+  `content`, `decline`, `cancel`) as `inputResponses`. It lists nothing: it calls with the pause's
+  tool definition (for `x-mcp-header` mirroring) and checks the result against its `outputSchema`.
+  Decisions are checked before anything is sent (type, `required`, `const`, `enum`, titled options,
+  `items.enum`); the server validates them again. The server may pause again.
+- The official client drops a non-string `requestState`; the pause then carries none, and the
+  resume reaches the server as a fresh call (the server pauses again).
 - Typed failures: `McpInputRequiredError` (`malformed`, `too_large`, `unsupported_request` for URL
-  mode, sampling, roots or input without the opt-in, `invalid_responses`, `unsupported_era`) and
-  `McpClientCapabilityRequiredError` for MCP `-32021`.
+  mode, sampling, roots or input without the opt-in, `invalid_responses`, `mismatched_resume`,
+  `unsupported_era`) and `McpClientCapabilityRequiredError` for MCP `-32021`.
 - Legacy-era elicitation (a server-initiated request answered while the call's stream is open) is
   not supported; resuming against a legacy connection fails with `unsupported_era`.
 

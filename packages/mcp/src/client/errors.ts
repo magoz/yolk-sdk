@@ -23,11 +23,13 @@ export class McpError extends Schema.TaggedError<McpError>()('McpError', {
 /**
  * Why an MCP input-required (MRTR) step failed:
  *
- * - `malformed`: the `InputRequiredResult` (or one of its form elicitations) does not decode.
+ * - `malformed`: the `InputRequiredResult` (or one of its form elicitations) does not decode, or
+ *   `maxInputRequiredBytes` is not a positive integer.
  * - `too_large`: it exceeds the byte bound or carries more than `mcpMaxInputRequests` requests.
  * - `unsupported_request`: it asks for anything but form elicitation (URL mode, sampling, roots),
  *   or for any input when the host did not declare form elicitation.
  * - `invalid_responses`: the host's decisions do not match the paused call's elicitations.
+ * - `mismatched_resume`: the resume names another tool or other arguments than the paused call.
  * - `unsupported_era`: the server negotiated a legacy (pre-`2026-07-28`) era, which has no
  *   input-required results; legacy server-initiated elicitation is not supported.
  */
@@ -36,6 +38,7 @@ export const McpInputRequiredErrorReason = Schema.Literals([
   'too_large',
   'unsupported_request',
   'invalid_responses',
+  'mismatched_resume',
   'unsupported_era'
 ])
 

@@ -14,6 +14,10 @@ import {
   callRemoteMcpServerTool,
   callRemoteMcpServerToolResumable,
   CLIENT_CAPABILITIES_META_KEY,
+  InMemoryResponseCacheStore,
+  mcpArgumentsDigest,
+  McpFormElicitation,
+  toMcpInputResponses,
   listRemoteMcpServerTools,
   McpInputRequired,
   McpToolCallOutcome,
@@ -66,7 +70,7 @@ const deleteTool: Tool = {
   description: 'Delete one invoice.',
   inputSchema: {
     type: 'object',
-    properties: { invoiceId: { type: 'string' } },
+    properties: { invoiceId: { type: 'string', 'x-mcp-header': 'Invoice-Id' } },
     required: ['invoiceId']
   },
   outputSchema: {
@@ -75,6 +79,14 @@ const deleteTool: Tool = {
     required: ['deleted']
   },
   annotations: { destructiveHint: true }
+}
+
+/** Its `outputSchema` does not compile (invalid regular expression). */
+const brokenOutputTool: Tool = {
+  name: 'broken_output',
+  description: 'Lists an output schema that does not compile.',
+  inputSchema: { type: 'object' },
+  outputSchema: { type: 'object', properties: { a: { type: 'string', pattern: '(' } } }
 }
 
 const capabilityTool: Tool = {
@@ -97,10 +109,16 @@ const supportsFormElicitation = (context: ServerContext) =>
 const toolError = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true })
 
 const makeConfirmingServer = (ledger: ServerLedger) => () => {
-  const server = new McpServer({ name: 'confirming', version: '1.0.0' })
+  // Cacheable listings, so a host `responseCacheStore` holds the listed output schemas.
+  const server = new McpServer(
+    { name: 'confirming', version: '1.0.0' },
+    { cacheHints: { 'tools/list': { ttlMs: 60_000, cacheScope: 'public' } } }
+  )
 
   server.server.registerCapabilities({ tools: { listChanged: false } })
-  server.server.setRequestHandler('tools/list', () => ({ tools: [deleteTool, capabilityTool] }))
+  server.server.setRequestHandler('tools/list', () => ({
+    tools: [deleteTool, brokenOutputTool, capabilityTool]
+  }))
   server.server.setRequestHandler('tools/call', async (request, context) => {
     if (request.params.name === capabilityTool.name) {
       throw new MissingRequiredClientCapabilityError(
@@ -192,6 +210,8 @@ const retryParams = (message: WireMessage) =>
 type Harness = {
   readonly ledger: ServerLedger
   readonly wire: Array<WireMessage>
+  /** The `mcp-param-invoice-id` header of every tools/call, in order. */
+  readonly invoiceHeaders: Array<string | undefined>
   readonly layer: Layer.Layer<HttpClient.HttpClient>
   readonly calls: () => ReadonlyArray<WireMessage>
 }
@@ -204,6 +224,7 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
   const ledger: ServerLedger = { minted: 0, executed: 0 }
   const handler = createMcpHandler(makeConfirmingServer(ledger))
   const wire: Array<WireMessage> = []
+  const invoiceHeaders: Array<string | undefined> = []
   let callAttempts = 0
 
   const layer = Layer.succeed(
@@ -218,6 +239,10 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
 
         if (Option.isSome(message)) {
           wire.push(message.value)
+        }
+
+        if (Option.isSome(message) && message.value.method === 'tools/call') {
+          invoiceHeaders.push(request.headers['mcp-param-invoice-id'])
         }
 
         if (
@@ -251,6 +276,7 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
   return {
     ledger,
     wire,
+    invoiceHeaders,
     layer,
     calls: () => wire.filter(message => message.method === 'tools/call')
   }
@@ -390,6 +416,13 @@ describe('MCP form elicitation (MRTR)', () => {
         }
       })
       expect(harness.ledger).toEqual({ minted: 1, executed: 0 })
+      expect(pending.mcpToolName).toBe('delete_invoice')
+      expect(pending.argumentsDigest).toMatch(/^sha256:[0-9a-f]{64}$/)
+      expect(pending.tool).toMatchObject({
+        name: 'delete_invoice',
+        inputSchema: deleteTool.inputSchema,
+        outputSchema: deleteTool.outputSchema
+      })
 
       const persisted = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(McpInputRequired))(
         pending
@@ -411,7 +444,7 @@ describe('MCP form elicitation (MRTR)', () => {
     })
   )
 
-  it.effect('resumes with the exact requestState and inputResponses under a new id', () =>
+  it.effect('resumes with the exact requestState and inputResponses as a new request', () =>
     Effect.gen(function* () {
       const harness = makeHarness()
 
@@ -441,7 +474,6 @@ describe('MCP form elicitation (MRTR)', () => {
 
       if (original === undefined || retry === undefined) return
 
-      expect(retry.id).not.toEqual(original.id)
       expect(retryParams(original)).toEqual({
         name: 'delete_invoice',
         arguments: { invoiceId: 'INV-1' }
@@ -453,6 +485,8 @@ describe('MCP form elicitation (MRTR)', () => {
         requestState: 'opaque-state-1'
       })
       expect(metaCapabilities(retry)).toEqual({ elicitation: { form: {} } })
+      // The resume mirrors x-mcp-header from the pause's definition, without listing.
+      expect(harness.invoiceHeaders).toEqual(['INV-1', 'INV-1'])
       expect(harness.wire.filter(message => message.method === 'tools/list')).toHaveLength(1)
     })
   )
@@ -521,7 +555,11 @@ describe('MCP form elicitation (MRTR)', () => {
       const harness = makeHarness(attempt =>
         attempt === 1
           ? { resultType: 'input_required', requestState: 'retry-later' }
-          : { resultType: 'complete', content: [{ type: 'text', text: 'done' }] }
+          : {
+              resultType: 'complete',
+              content: [{ type: 'text', text: 'done' }],
+              structuredContent: { deleted: true }
+            }
       )
 
       const pending = expectInputRequired(
@@ -647,6 +685,231 @@ describe('MCP form elicitation (MRTR)', () => {
     })
   )
 
+  it.effect('validates resumed results against the paused outputSchema', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(attempt =>
+        attempt === 1
+          ? inputRequiredResult({
+              confirmation: formRequest({ message: 'Sure?', requestedSchema: confirmationSchema })
+            })
+          : { resultType: 'complete', content: [], structuredContent: { deleted: 'no' } }
+      )
+
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+      )
+
+      const exit = yield* Effect.exit(
+        resumeRemoteMcpServerToolCall({
+          ...callInput(),
+          inputRequired: pending,
+          responses: confirmed
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(failure(exit)).toMatchObject({ _tag: 'McpError', cause: 'protocol' })
+      expect(failure(exit)?.message).toContain("does not match the tool's output schema")
+    })
+  )
+
+  it.effect('pauses again with a host responseCacheStore that holds the outputSchema', () =>
+    Effect.gen(function* () {
+      const options: McpClientOptions = {
+        elicitation: { form: true },
+        sdk: { responseCacheStore: new InMemoryResponseCacheStore() }
+      }
+
+      const harness = makeHarness(attempt =>
+        inputRequiredResult(
+          {
+            confirmation: formRequest({
+              message: `Round ${attempt}`,
+              requestedSchema: confirmationSchema
+            })
+          },
+          `state-${attempt}`
+        )
+      )
+
+      const first = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput(options)).pipe(
+          Effect.provide(harness.layer)
+        )
+      )
+
+      const second = expectInputRequired(
+        yield* resumeRemoteMcpServerToolCall({
+          ...callInput(options),
+          inputRequired: first,
+          responses: confirmed
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(second.requestState).toBe('state-2')
+      expect(second.tool).toEqual(first.tool)
+    })
+  )
+
+  it.effect('compiles the outputSchema before calling', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness()
+
+      const exit = yield* Effect.exit(
+        callRemoteMcpServerToolResumable({
+          ...callInput(),
+          mcpToolName: brokenOutputTool.name,
+          params: {}
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(failure(exit)).toMatchObject({ _tag: 'McpError', cause: 'protocol' })
+      expect(failure(exit)?.message).toContain("Tool 'broken_output' has an invalid outputSchema")
+      expect(harness.calls()).toHaveLength(0)
+    })
+  )
+
+  it.effect('reports a throwing output validator as a validation failure', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(() => ({
+        resultType: 'complete',
+        content: [],
+        structuredContent: { deleted: true }
+      }))
+
+      const exit = yield* Effect.exit(
+        callRemoteMcpServerToolResumable(
+          callInput({
+            elicitation: { form: true },
+            sdk: {
+              jsonSchemaValidator: {
+                getValidator: () => () => {
+                  throw new Error('validator exploded')
+                }
+              }
+            }
+          })
+        ).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(failure(exit)).toMatchObject({ _tag: 'McpError', cause: 'protocol' })
+      expect(failure(exit)?.message).toContain(
+        'Failed to validate structured content: validator exploded'
+      )
+    })
+  )
+
+  it.effect('needs a positive integer maxInputRequiredBytes', () =>
+    Effect.gen(function* () {
+      for (const maxInputRequiredBytes of [0, -1, 1.5, Number.NaN]) {
+        const harness = makeHarness()
+
+        const exit = yield* Effect.exit(
+          callRemoteMcpServerToolResumable(
+            callInput({ elicitation: { form: true, maxInputRequiredBytes } })
+          ).pipe(Effect.provide(harness.layer))
+        )
+
+        expect(failure(exit)).toMatchObject({ _tag: 'McpInputRequiredError', reason: 'malformed' })
+      }
+    })
+  )
+
+  it.effect('binds the pause to its tool and arguments', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness()
+
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable({
+          ...callInput(),
+          params: { invoiceId: 'INV-1', note: { b: 1, a: 2 } }
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      const mismatched = [
+        { mcpToolName: capabilityTool.name, params: { invoiceId: 'INV-1', note: { a: 2, b: 1 } } },
+        { mcpToolName: deleteTool.name, params: { invoiceId: 'INV-2', note: { a: 2, b: 1 } } }
+      ]
+
+      for (const call of mismatched) {
+        const exit = yield* Effect.exit(
+          resumeRemoteMcpServerToolCall({
+            ...callInput(),
+            ...call,
+            inputRequired: pending,
+            responses: confirmed
+          }).pipe(Effect.provide(harness.layer))
+        )
+
+        expect(failure(exit)).toMatchObject({
+          _tag: 'McpInputRequiredError',
+          reason: 'mismatched_resume'
+        })
+      }
+
+      expect(harness.calls()).toHaveLength(1)
+
+      // Key order does not matter: the digest is over canonical JSON.
+      const result = expectComplete(
+        yield* resumeRemoteMcpServerToolCall({
+          ...callInput(),
+          params: { note: { a: 2, b: 1 }, invoiceId: 'INV-1' },
+          inputRequired: pending,
+          responses: confirmed
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(result.structuredContent).toEqual({ deleted: true })
+    })
+  )
+
+  it.effect('checks enum, titled options and string-list items before sending', () =>
+    Effect.gen(function* () {
+      const pending = McpInputRequired.make({
+        mcpToolName: 'pick',
+        argumentsDigest: 'sha256:0',
+        elicitations: [
+          McpFormElicitation.make({
+            key: 'form',
+            message: 'Pick',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                size: { type: 'string', enum: ['s', 'm'] },
+                color: { type: 'string', oneOf: [{ const: '#f00', title: 'Red' }] },
+                tags: { type: 'array', items: { type: 'string', enum: ['a', 'b'] } },
+                labels: { type: 'array', items: { anyOf: [{ const: 'x', title: 'X' }] } }
+              }
+            }
+          })
+        ]
+      })
+
+      const check = (content: Record<string, string | ReadonlyArray<string>>) =>
+        toMcpInputResponses({
+          server: 'books',
+          inputRequired: pending,
+          responses: { form: { action: 'accept', content } }
+        }).pipe(Effect.exit)
+
+      expect(
+        Exit.isSuccess(yield* check({ size: 'm', color: '#f00', tags: ['a', 'b'], labels: ['x'] }))
+      ).toBe(true)
+
+      const rejected: ReadonlyArray<Record<string, string | ReadonlyArray<string>>> = [
+        { size: 'xl' },
+        { color: '#0f0' },
+        { tags: ['a', 'c'] },
+        { labels: ['y'] }
+      ]
+
+      for (const content of rejected) {
+        expect(failure(yield* check(content)), JSON.stringify(content)).toMatchObject({
+          reason: 'invalid_responses'
+        })
+      }
+    })
+  )
+
   it.effect('refuses elicitations the host did not declare', () =>
     Effect.gen(function* () {
       const harness = makeHarness(() =>
@@ -691,7 +954,7 @@ describe('MCP form elicitation (MRTR)', () => {
       const defaultBound = makeHarness(() =>
         inputRequiredResult({
           confirmation: formRequest({
-            message: 'x'.repeat(70_000),
+            message: 'x'.repeat(300_000),
             requestedSchema: confirmationSchema
           })
         })
@@ -760,7 +1023,9 @@ describe('MCP form elicitation (MRTR)', () => {
         { confirmation: { action: 'decline' }, other: { action: 'cancel' } },
         { confirmation: { action: 'accept', content: {} } },
         { confirmation: { action: 'accept', content: { confirm: 'yes' } } },
-        { confirmation: { action: 'accept', content: { confirm: true, extra: 1 } } }
+        { confirmation: { action: 'accept', content: { confirm: true, extra: 1 } } },
+        // `const: true` in the requested schema.
+        { confirmation: { action: 'accept', content: { confirm: false } } }
       ]
 
       for (const responses of invalid) {
@@ -785,7 +1050,12 @@ describe('MCP form elicitation (MRTR)', () => {
       const exit = yield* Effect.exit(
         resumeRemoteMcpServerToolCall({
           ...callInput(legacyOptions(optedIn)),
-          inputRequired: McpInputRequired.make({ elicitations: [], requestState: 'opaque' }),
+          inputRequired: McpInputRequired.make({
+            elicitations: [],
+            requestState: 'opaque',
+            mcpToolName: deleteTool.name,
+            argumentsDigest: yield* mcpArgumentsDigest(callInput().params)
+          }),
           responses: {}
         }).pipe(Effect.provide(harness.layer))
       )

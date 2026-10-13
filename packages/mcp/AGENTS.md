@@ -41,13 +41,19 @@
   client capabilities on modern connections only (merged over `sdk.capabilities`; capabilities a
   `configureClient` registers are not merged), never in a legacy `initialize`, and never by
   `callRemoteMcpServerTool`. `callRemoteMcpServerToolResumable` answers `McpToolCallOutcome`
-  (`Complete` | `InputRequired`); `resumeRemoteMcpServerToolCall` calls first on its connection (no
-  listing) so its JSON-RPC id differs from the original call's, which follows the listing. The SDK's
-  `callTool` rejects an `input_required` answer for a tool with an `outputSchema` (it validates the
-  pause as output), so the resumable call passes the listed tool without `outputSchema` and
-  validates complete results itself (`assertStructuredOutput`). Form mode only; legacy
-  server-initiated elicitation is unsupported (`McpInputRequiredError` `unsupported_era`). Tests:
-  `test/client/elicitation.test.ts`.
+  (`Complete` | `InputRequired`). The pause (`McpInputRequired`) carries its binding
+  (`mcpToolName`, `argumentsDigest` over canonical JSON) and the listed tool definition;
+  `resumeRemoteMcpServerToolCall` refuses another tool or other arguments (`mismatched_resume`),
+  lists nothing, and is re-sent as a new request on a new connection (distinct JSON-RPC ids are
+  not promised). The SDK's `callTool` rejects an `input_required` answer for a tool with an
+  `outputSchema` (it validates the pause as output, from `toolDefinition` or its response cache,
+  which a host `responseCacheStore` keeps across connections), so every resumable call passes
+  `toolDefinition` without `outputSchema` (the listed or paused definition, else a minimal one, so
+  the cache is never read), compiles the output schema before calling, and validates complete
+  results itself (`assertStructuredOutput`). The size bound applies to the decoded pause after the
+  body is buffered. The SDK drops a non-string `requestState` (the resume is then a fresh call).
+  Form mode only; legacy server-initiated elicitation is unsupported (`McpInputRequiredError`
+  `unsupported_era`). Tests: `test/client/elicitation.test.ts`.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
 - Export normal tool results/content; agent loop/providers stay MCP-agnostic.
 
