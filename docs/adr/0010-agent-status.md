@@ -50,8 +50,9 @@ terminal surface, and hosts that ship one can encode a status themselves.
 Every other event leaves the status as it was. Work events (start, turn, stream start, tool start,
 compaction start, retry) mean the run is working whatever the previous status was, so a resumed
 durable stream leaves `Blocked` even without `AgentStart`; neutral events never change a terminal
-status. Callers dedupe replayed events by `eventId` first, and the client and React reducers skip
-status for a replayed start of a call that is already settled in their transcript.
+status. Callers dedupe replayed events by `eventId` first. The reducers also skip status for a
+replayed start of a settled call: the client for a call with an acknowledged `ToolResult`
+(`acceptance`), React for a `Completed` or `Accepted` tool part.
 
 `AgentError` gains an optional `abortReason` (`AgentAbortReason`, also the loop's `AbortError`
 reason) because the reason only existed inside the message text, and status must never parse
@@ -72,9 +73,9 @@ host accepts as background work is marked `background`: either its `ToolExecutio
 is the subagent acknowledgement (`makeSubagentAcceptedToolResult`, matched by
 `isSubagentAcceptedToolResult`, the same predicate the loop uses to skip `SubagentCompleted`) or a
 generic `ToolExecutionAccepted`. It never receives `SubagentCompleted` from the parent stream, so
-its status comes from the host (`withSubagentStatus`). When the run stops (`AgentEnd`, `AgentError`, a local abort or transport
-failure), live inline subagents become `Idle`, since they cannot outlive it. `AgentStart` drops
-entries settled in earlier runs.
+its status comes from the host (`withSubagentStatus`). When the run stops (`AgentEnd`,
+`AgentError`, a local abort or transport failure), live inline subagents become `Idle`, since they
+cannot outlive it. `AgentStart` drops entries settled in earlier runs.
 
 ## Client and React
 
