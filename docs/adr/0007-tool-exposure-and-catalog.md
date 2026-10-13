@@ -156,6 +156,11 @@ the loop then finds the state current and appends nothing, so doing both never d
 **Registry.** A nested-access registration may declare `instruct` (like `describe`);
 `ResolvedToolSet.instructions` collects them for `RunConfig.instructions`.
 
+A host that cannot append messages to its persisted conversation may render the instruction's
+first render (`render({ previous: undefined, current: state })`) into its system prompt instead:
+the catalog then invalidates the cache from the system prompt on when it changes (rarely), never
+the tool definitions before it.
+
 Code mode ships the catalog as one such instruction with `makeCodeModeTool({ catalog:
 'instructions' })` (`codeModeCatalogInstruction`, key `yolk.codemode.catalog`); the default
 `catalog: 'description'` keeps the previous behavior for existing hosts. Hosts drop their own

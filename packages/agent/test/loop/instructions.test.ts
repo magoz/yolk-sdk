@@ -20,6 +20,7 @@ import {
   type RunInstruction
 } from '../../src/loop'
 import { FauxProvider, Reply } from '../../src/loop/testing'
+import { appendProtocolMessage, buildAgentChatMessages } from '../../src/react'
 
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 
@@ -178,4 +179,24 @@ describe('instructions in the loop', () => {
       expect(requestMessages(requests[1]).slice(0, 2)).toEqual(requestMessages(requests[0]))
     })
   )
+})
+
+describe('instruction messages in chat projections', () => {
+  it('are never shown as user messages', () => {
+    const [instruction] = instructionMessages([user], [catalog({ tools: 2 })])
+
+    if (instruction === undefined) throw new Error('Missing instruction message')
+
+    const items = buildAgentChatMessages({
+      messages: [user, instruction],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    expect(items.map(item => item.role)).toEqual(['user'])
+    expect(appendProtocolMessage(items, instruction)).toEqual(items)
+  })
 })

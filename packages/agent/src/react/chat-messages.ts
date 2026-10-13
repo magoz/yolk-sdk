@@ -1,6 +1,7 @@
 import { Array as Arr, Data, Match, Option, Predicate } from 'effect'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
 import {
+  isInstructionMessage,
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
@@ -1324,7 +1325,10 @@ export const appendProtocolMessage = (
   const sequence = nextMessageSequence(messages)
 
   return Match.value(message).pipe(
-    Match.tag('User', current => [...messages, userChatMessage(current, sequence)]),
+    // Host instruction messages (ADR 0007) are model context, never shown as user input.
+    Match.tag('User', current =>
+      isInstructionMessage(current) ? messages : [...messages, userChatMessage(current, sequence)]
+    ),
     Match.tag('Assistant', current => [
       ...messages,
       assistantChatMessage(current, sequence, lastTurnId(messages) ?? turnId(sequence))
@@ -1656,7 +1660,9 @@ const chatMessagesFromProtocolMessage = ({
 }): ReadonlyArray<AgentChatMessage> =>
   Match.value(message).pipe(
     Match.withReturnType<ReadonlyArray<AgentChatMessage>>(),
-    Match.tag('User', current => [userChatMessage(current, sequence)]),
+    Match.tag('User', current =>
+      isInstructionMessage(current) ? [] : [userChatMessage(current, sequence)]
+    ),
     Match.tag('Assistant', current => [
       {
         id: messageId(sequence, 'assistant'),
@@ -1795,9 +1801,10 @@ export const buildAgentChatMessages = ({
 
   const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>(
     (current, message, index) => {
-      const currentTurnId = Predicate.isTagged(message, 'User')
-        ? turnId(index)
-        : (lastTurnId(current) ?? turnId(index))
+      const currentTurnId =
+        Predicate.isTagged(message, 'User') && !isInstructionMessage(message)
+          ? turnId(index)
+          : (lastTurnId(current) ?? turnId(index))
 
       return [
         ...current,

@@ -612,5 +612,5 @@ export const renderCodeModeInstructedDescription = (input: {
       ...globalLines(input.store === true),
       ...(input.staging === undefined ? [] : [stageLine(input.staging.reviewToolName)])
     ].join('\n'),
-    'The tools scripts can call are in the latest "Code mode catalog" message of the conversation (namespaces, tool counts and listed tools). Find the others with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` before calling it.'
+    'The tools scripts can call are in the "Code mode catalog" (namespaces, tool counts and listed tools; the latest one applies). Find the others with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` before calling it.'
   ].join('\n\n')

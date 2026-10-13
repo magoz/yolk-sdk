@@ -384,7 +384,7 @@ describe('catalog instructions', () => {
       ])
 
       expect(descriptionOf(large)).toBe(descriptionOf(small))
-      expect(descriptionOf(large)).toContain('"Code mode catalog" message')
+      expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render({
