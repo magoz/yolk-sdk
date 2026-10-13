@@ -98,9 +98,12 @@ model searches again (fail-safe).
 **Code mode.** A deferred `all` tool's declaration is not in model context until activated, so
 code mode treats it like a `search` tool: never listed, found with `searchTools`.
 
-**Cache.** Activation adds definitions to the start of the next request: one prefix miss, then
-cached again. With Anthropic's native tool search the definition is inserted where it was found and
-nothing is invalidated (section 5). Script calls never touch definitions.
+**Cache.** Tool definitions start every request, so an activation invalidates the cached prefix
+once: with prompt caching ([ADR 0008](0008-prompt-caching.md)) the whole conversation is re-read at
+full price on that request, then cached again. Script calls never touch definitions, so bulk and
+exploratory work belongs in scripts; direct activation pays off for tools the model calls
+repeatedly. Anthropic's native tool search (section 5) inserts definitions in place and removes
+the miss.
 
 ## 3. Stage-only approval tools
 
