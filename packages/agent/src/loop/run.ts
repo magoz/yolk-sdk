@@ -51,6 +51,8 @@ import {
   formatQuestionResponseContent,
   hitlResponseEvent,
   questionResponseStructuredContent,
+  isSubagentAcceptedToolResult,
+  isSubagentObservationToolResult,
   makeSubagentRunId,
   declaredToolDefs,
   providerToolDefs,
@@ -253,18 +255,9 @@ const subagentCompletedEvent = (input: {
 }) => {
   const metadata = subagentCallMetadata(input.call)
 
-  const accepted =
-    objectField(input.result.structuredContent, 'type') === 'subagent_accepted' &&
-    objectField(input.result.structuredContent, 'status') === 'accepted' &&
-    objectField(input.result.structuredContent, 'subagent_run_id') ===
-      makeSubagentRunId(input.call.id)
-
-  const observation =
-    objectField(input.result.structuredContent, 'type') === 'subagent_observation' &&
-    objectField(input.result.structuredContent, 'subagent_run_id') ===
-      makeSubagentRunId(input.call.id)
-
-  return metadata === undefined || accepted || observation
+  return metadata === undefined ||
+    isSubagentAcceptedToolResult(input.call.id, input.result) ||
+    isSubagentObservationToolResult(input.call.id, input.result)
     ? undefined
     : SubagentCompleted.make({
         parentToolCallId: input.call.id,

@@ -1,6 +1,12 @@
 import * as Schema from 'effect/Schema'
 import { Match, Predicate } from 'effect'
-import { AgentError, AgentRetry, type AgentEvent, type SubagentStatus } from './event.ts'
+import {
+  AgentError,
+  AgentRetry,
+  isSubagentAcceptedToolResult,
+  type AgentEvent,
+  type SubagentStatus
+} from './event.ts'
 import { HitlRequest, type ToolCall } from './tool.ts'
 
 /**
@@ -323,10 +329,11 @@ export const withSubagentStatus = (
 export const startAgentStatusTree = (
   tree: AgentStatusTree,
   root: AgentStatus = busy
-): AgentStatusTree => ({
-  root,
-  subagents: tree.subagents.filter(entry => isAgentStatusLive(entry.status))
-})
+): AgentStatusTree => {
+  const live = tree.subagents.filter(entry => isAgentStatusLive(entry.status))
+
+  return { root, subagents: live.length === tree.subagents.length ? tree.subagents : live }
+}
 
 /**
  * The run stopped with `root` (idle, done, or failed). Inline subagents cannot outlive it, so the
@@ -343,6 +350,17 @@ export const settleAgentStatusTree = (
     entry => withEntryStatus(entry, idleAgentStatus)
   )
 })
+
+/** The host accepted the subagent call as background work and owns the child's status. */
+const markBackground = (
+  subagents: ReadonlyArray<SubagentStatusEntry>,
+  parentToolCallId: string
+): ReadonlyArray<SubagentStatusEntry> =>
+  updateSubagent(
+    subagents,
+    entry => entry.parentToolCallId === parentToolCallId && !entry.background,
+    entry => withEntryStatus(entry, entry.status, true)
+  )
 
 const nextSubagents = (
   subagents: ReadonlyArray<SubagentStatusEntry>,
@@ -367,12 +385,11 @@ const nextSubagents = (
         entry => withEntryStatus(entry, subagentCompletedStatus(current.status, current.summary))
       )
     ),
-    Match.tag('ToolExecutionAccepted', current =>
-      updateSubagent(
-        subagents,
-        entry => entry.parentToolCallId === current.call.id && !entry.background,
-        entry => withEntryStatus(entry, entry.status, true)
-      )
+    Match.tag('ToolExecutionAccepted', current => markBackground(subagents, current.call.id)),
+    Match.tag('ToolExecutionCompleted', current =>
+      isSubagentAcceptedToolResult(current.call.id, current.result)
+        ? markBackground(subagents, current.call.id)
+        : subagents
     ),
     Match.tag('ToolExecutionError', current =>
       updateSubagent(

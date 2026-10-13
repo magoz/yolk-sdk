@@ -77,9 +77,11 @@ replace them. Base `runActive` on your authoritative run record, never on the la
 order. `nextAgentStatusTree` and `agentStatusTreeFromEvents` fold events into it:
 
 - `SubagentStarted` adds a `Working` entry; `SubagentCompleted` sets `Done` or `Failed`.
-- A subagent call that the host accepts as background work is marked `background: true`. Its status
-  comes from you after that: write it with `withSubagentStatus`.
-- When the run stops (`AgentEnd`, `AgentError`), live inline subagents become `Idle`.
+- A subagent call that the host accepts as background work (its result is
+  `makeSubagentAcceptedToolResult`, or a `ToolExecutionAccepted` event) is marked
+  `background: true`. Its status comes from you after that: write it with `withSubagentStatus`.
+- When the run stops (`AgentEnd`, `AgentError`, a local stop, or a transport failure), live inline
+  subagents become `Idle`.
 - `AgentStart` drops entries settled in earlier runs.
 
 ## In client and React state
@@ -95,7 +97,12 @@ const label = Match.value(chat.status).pipe(
   Match.tag('Idle', () => 'Idle'),
   Match.tag('Working', () => 'Working'),
   Match.tag('Blocked', current =>
-    current.kind === 'permission' ? 'Needs approval' : 'Needs answer'
+    Match.value(current.kind).pipe(
+      Match.when('permission', () => 'Needs approval'),
+      Match.when('question', () => 'Needs answer'),
+      Match.when('auth', () => 'Needs sign-in'),
+      Match.exhaustive
+    )
   ),
   Match.tag('Done', () => 'Done'),
   Match.tag('Failed', current => current.message),

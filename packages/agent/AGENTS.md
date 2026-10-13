@@ -114,7 +114,8 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - `nextAgentStatus` is the only event → status mapping; client and React reducers fold `nextAgentStatusTree` and never set status by hand except through `startAgentStatusTree` (local submit/resume/regenerate/edit) and `settleAgentStatusTree` (transport failure, abort). Keep its `Match` exhaustive so new events must choose a mapping.
 - Work events move any status to `Working` (durable resumes may skip `AgentStart`); neutral events never change a settled status. A person's cancel is `Idle`; `aborted` errors carry `abortReason` and only `user` (or absent, older events) maps to `Idle`. Never derive status from message text.
 - Stored statuses go through `reconcileAgentStatus(status, { runActive })`: live statuses need host-proven liveness. Seen/unread, labels, notifications, and terminal output stay host-owned.
-- Background subagent entries (accepted calls) are host-owned via `withSubagentStatus`; run settlement idles only live inline entries.
+- Background subagent entries are host-owned via `withSubagentStatus`. Detection: a `ToolExecutionCompleted` whose result passes `isSubagentAcceptedToolResult` (the loop's own predicate for skipping `SubagentCompleted`; never duplicate it) or a `ToolExecutionAccepted`. Run settlement idles only live inline entries.
+- Reducers skip status for replayed starts of calls already settled in their transcript (client: acknowledged `ToolResult`; React: `Completed`/`Accepted` tool part).
 - Client/React state has no `error`/`errorInfo`/`retryInfo`: use `Failed` and `agentStatusRetry`.
 - Tests: `test/protocol/status.test.ts`, `test/property/status.property.test.ts`.
 

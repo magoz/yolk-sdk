@@ -349,7 +349,7 @@ describe('agent status tree', () => {
     expect(tree.subagents).toEqual([subagentEntry('s1', AgentFailed.make({ message: 'boom' }))])
   })
 
-  it('hands accepted background subagents to the host', () => {
+  it('hands background tool acceptances of subagent calls to the host', () => {
     const tree = agentStatusTreeFromEvents([
       AgentStart.make({}),
       subagentStarted('s1'),

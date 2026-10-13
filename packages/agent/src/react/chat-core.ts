@@ -80,6 +80,16 @@ const withStatusTree = (state: AgentChatState, tree: AgentStatusTree): AgentChat
     ? state
     : { ...state, status: tree.root, subagents: tree.subagents }
 
+const isSettledToolCall = (messages: ReadonlyArray<AgentChatMessage>, toolCallId: string) =>
+  messages.some(message =>
+    message.parts.some(
+      part =>
+        Predicate.isTagged(part, 'ToolCall') &&
+        part.call.id === toolCallId &&
+        (Predicate.isTagged(part.state, 'Completed') || Predicate.isTagged(part.state, 'Accepted'))
+    )
+  )
+
 const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
   withStatusTree(next, startAgentStatusTree(statusTree(state)))
 
@@ -240,14 +250,20 @@ export const reduceAgentChatState = (
         return state
       }
 
+      const projected = {
+        ...state,
+        chatMessages: applyAgentEventToChatMessages(state.chatMessages, current.event, current)
+      }
+
+      // A replayed start of an already settled call must not reopen the run.
+      const fenced =
+        Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
+        isSettledToolCall(state.chatMessages, current.event.call.id)
+
       return rememberEvent(
-        withStatusTree(
-          {
-            ...state,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, current.event, current)
-          },
-          nextAgentStatusTree(statusTree(state), current.event)
-        ),
+        fenced
+          ? projected
+          : withStatusTree(projected, nextAgentStatusTree(statusTree(state), current.event)),
         current.event
       )
     }),

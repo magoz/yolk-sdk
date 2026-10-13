@@ -11,7 +11,8 @@ import {
   type ActivityTone,
   type AgentActivityItem
 } from './agent-activity-model'
-import { textStatusLabel, textStatusVariant, voiceStatusVariant } from './agent-status'
+import { voiceStatusVariant } from './agent-status'
+import { textStatusLabel, textStatusVariant } from './agent-status-model'
 import type { VoiceStatus } from './use-realtime-voice'
 
 const activityToneClass = (tone: ActivityTone) => {

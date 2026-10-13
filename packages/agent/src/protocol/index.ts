@@ -96,6 +96,8 @@ export {
   SubagentStarted,
   SubagentStatus,
   hitlResponseEvent,
+  isSubagentAcceptedToolResult,
+  isSubagentObservationToolResult,
   makeSubagentRunId,
   ToolApprovalDenied,
   ToolApprovalGranted,

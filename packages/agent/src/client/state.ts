@@ -465,6 +465,21 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
+  const activeCallId = activeEventToolCallId(event)
+
+  if (activeCallId !== undefined && isAcknowledgedCall(state, activeCallId)) {
+    // Hydration need not restore transient runs; the transcript itself is a replay fence.
+    return rememberEvent(
+      {
+        ...state,
+        toolRuns: state.toolRuns.filter(
+          run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
+        )
+      },
+      event
+    )
+  }
+
   return rememberEvent(
     withStatusTree(
       applyAgentEventUnchecked(state, event, nowMs),
@@ -472,6 +487,15 @@ export const applyAgentEventWithOptions = (
     ),
     event
   )
+}
+
+const isAcknowledgedCall = (state: AgentClientState, toolCallId: string) => {
+  const acknowledges = (message: AgentMessage) =>
+    Predicate.isTagged(message, 'ToolResult') &&
+    message.toolCallId === toolCallId &&
+    message.acceptance !== undefined
+
+  return state.messages.some(acknowledges) || state.liveMessages.some(acknowledges)
 }
 
 const activeEventToolCallId = (event: AgentEvent): string | undefined =>
@@ -493,28 +517,8 @@ const applyAgentEventUnchecked = (
   state: AgentClientState,
   event: AgentEvent,
   nowMs: number
-): AgentClientState => {
-  const activeCallId = activeEventToolCallId(event)
-
-  const acknowledgesActiveCall = (message: AgentMessage) =>
-    Predicate.isTagged(message, 'ToolResult') &&
-    message.toolCallId === activeCallId &&
-    message.acceptance !== undefined
-
-  if (
-    activeCallId !== undefined &&
-    (state.messages.some(acknowledgesActiveCall) || state.liveMessages.some(acknowledgesActiveCall))
-  ) {
-    // Hydration need not restore transient runs; the transcript itself is a replay fence.
-    return {
-      ...state,
-      toolRuns: state.toolRuns.filter(
-        run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
-      )
-    }
-  }
-
-  return Match.value(event)
+): AgentClientState =>
+  Match.value(event)
     .pipe(
       Match.withReturnType<AgentClientState>(),
       Match.tag('AgentStart', () => ({
@@ -744,7 +748,6 @@ const applyAgentEventUnchecked = (
       ),
       Match.exhaustive
     )
-}
 
 export const submitAgentUserMessage = (
   state: AgentClientState,

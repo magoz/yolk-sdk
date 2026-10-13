@@ -1,6 +1,15 @@
 import { Effect, Layer, Predicate, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolApprovalPolicy, ToolCall, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  AgentEnd,
+  AgentStart,
+  ToolApprovalPolicy,
+  ToolCall,
+  ToolDef,
+  ToolResult,
+  agentStatusTreeFromEvents,
+  zeroAgentUsage
+} from '@yolk-sdk/agent/protocol'
 import { LoopConfig, prepareToolBatch, runToolBatch, ToolExecutor } from '../../src/loop/index.ts'
 import {
   makeSubagentAcceptedToolResult,
@@ -16,6 +25,37 @@ const child = ToolCall.make({
 })
 
 describe('background subagent contract', () => {
+  it.effect('hands an accepted child to the host in the status tree', () =>
+    Effect.gen(function* () {
+      const result = makeSubagentAcceptedToolResult({
+        callId: child.id,
+        workflowRunId: 'physical-child'
+      })
+
+      const events = yield* runToolBatch({ calls: [child] }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.merge(
+            LoopConfig.defaultLayer,
+            Layer.succeed(ToolExecutor, { execute: () => Effect.succeed(result) })
+          )
+        )
+      )
+
+      const tree = agentStatusTreeFromEvents([
+        AgentStart.make({}),
+        ...events,
+        AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })
+      ])
+
+      expect(tree.root._tag).toBe('Done')
+      expect(tree.subagents).toMatchObject([
+        { subagentRunId: 'subagent:child-call', background: true, status: { _tag: 'Working' } }
+      ])
+      expect(agentStatusTreeFromEvents([AgentStart.make({})], tree).subagents).toBe(tree.subagents)
+    })
+  )
+
   it.effect('completes the launch tool without completing the accepted child', () =>
     Effect.gen(function* () {
       const result = makeSubagentAcceptedToolResult({

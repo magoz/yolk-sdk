@@ -126,3 +126,18 @@ it('fences active events against acknowledged hydrated transcripts without retai
     expect(state.messages).toEqual(messages)
   }
 })
+
+it('keeps the run status when a replayed start reaches an acknowledged call', () => {
+  const transcript = [
+    AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+    ToolResultMessage.make({ ...result })
+  ]
+
+  const done = applyAgentEvent(
+    applyAgentEvent(applyAgentEvent(initialAgentClientState, started), accepted),
+    AgentEnd.make({ messages: transcript, turns: 1, usage: zeroAgentUsage })
+  )
+
+  expect(done.status._tag).toBe('Done')
+  expect(applyAgentEvent(done, started).status).toBe(done.status)
+})
