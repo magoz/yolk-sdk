@@ -1,13 +1,15 @@
 import * as Schema from 'effect/Schema'
-
-const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
-
-// Reject dot segments and malformed UTF-16 before encoding identifiers into URL paths.
-// The `u` flag keeps the pattern exportable to JSON Schema; the positive BMP class keeps the
-// pre-`u` acceptance exactly (no controls, DEL, surrogates or astral characters).
-const Identifier = NonEmptyString.check(
-  Schema.isPattern(/^(?!\.{1,2}$)[\u0020-\u007e\u0080-\ud7ff\ue000-\uffff]+$/u)
-)
+import {
+  Identifier,
+  NonEmptyString,
+  NullableBoolean,
+  NullableInt,
+  NullableNumber,
+  NullableString,
+  OptionalBoolean,
+  OptionalString,
+  PaginationFields
+} from './fields.ts'
 
 export const FortnoxCustomerNumber = Identifier.pipe(Schema.brand('FortnoxCustomerNumber'))
 
@@ -26,19 +28,6 @@ export const FortnoxGivenNumber = Schema.Trimmed.check(Schema.isPattern(/^[0-9]+
 )
 
 export type FortnoxGivenNumber = typeof FortnoxGivenNumber.Type
-
-const OptionalString = Schema.optional(Schema.String)
-
-const OptionalBoolean = Schema.optional(Schema.Boolean)
-
-// Fortnox uses JSON null for unset response fields. Preserve null; do not require omission.
-const NullableString = Schema.optional(Schema.NullOr(Schema.String))
-
-const NullableNumber = Schema.optional(Schema.NullOr(Schema.Number))
-
-const NullableBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
-
-const NullableInt = Schema.optional(Schema.NullOr(Schema.Int))
 
 // Resource fields deliberately retain Fortnox spelling and monetary wire types.
 // This is a bounded read model, not a lossless export of every provider field.
@@ -211,12 +200,6 @@ export class FortnoxSupplierInvoice extends Schema.Class<FortnoxSupplierInvoice>
   PaymentPending: NullableBoolean,
   SupplierInvoiceRows: Schema.optional(Schema.Chunk(FortnoxSupplierInvoiceRow))
 }) {}
-
-const PaginationFields = {
-  page: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
-  lastModified: Schema.optional(NonEmptyString)
-}
 
 // A single search pair reflects Fortnox's one resource-specific search-field limit.
 export class FortnoxCustomerSearch extends Schema.Class<FortnoxCustomerSearch>(

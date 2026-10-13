@@ -122,6 +122,7 @@ describe('route evidence manifest', () => {
   it('lists every route as an unverified connector route linked to Fortnox cases', () => {
     const caseIds = new Set(fortnoxConformanceCases.map(testCase => testCase.id))
 
+    expect(fortnoxEmulatorRoutes).toHaveLength(44)
     expect(fortnoxEmulatorRoutes.map(route => `${route.method} ${route.path}`)).toEqual([
       'GET /3/companyinformation',
       'GET /3/customers',
@@ -132,8 +133,49 @@ describe('route evidence manifest', () => {
       'GET /3/invoices/{DocumentNumber}',
       'PUT /3/invoices/{DocumentNumber}',
       'GET /3/invoices/{DocumentNumber}/preview',
-      'GET /3/invoices/{DocumentNumber}/email'
+      'GET /3/invoices/{DocumentNumber}/email',
+      // Read-only resources (no fixture: no case ids), in `src/fortnox/read-api.ts`.
+      'GET /3/articles',
+      'GET /3/articles/{ArticleNumber}',
+      'GET /3/pricelists',
+      'GET /3/pricelists/{Code}',
+      'GET /3/prices/sublist/{PriceList}/{ArticleNumber}',
+      'GET /3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}',
+      'GET /3/costcenters',
+      'GET /3/costcenters/{Code}',
+      'GET /3/invoicepayments',
+      'GET /3/invoicepayments/{Number}',
+      'GET /3/supplierinvoicepayments',
+      'GET /3/supplierinvoicepayments/{Number}',
+      'GET /3/offers',
+      'GET /3/offers/{DocumentNumber}',
+      'GET /3/offers/{DocumentNumber}/preview',
+      'GET /3/printtemplates',
+      'GET /3/inbox',
+      'GET /3/inbox/{Id}',
+      'GET /3/settings/company',
+      'GET /3/settings/lockedperiod',
+      'GET /3/predefinedaccounts',
+      'GET /3/predefinedaccounts/{Name}',
+      'GET /3/labels',
+      'GET /3/modesofpayments',
+      'GET /3/modesofpayments/{Code}',
+      'GET /3/termsofpayments',
+      'GET /3/termsofpayments/{Code}',
+      'GET /3/termsofdeliveries',
+      'GET /3/termsofdeliveries/{Code}',
+      'GET /3/wayofdeliveries',
+      'GET /3/wayofdeliveries/{Code}',
+      'GET /3/units',
+      'GET /3/units/{Code}',
+      'GET /3/me'
     ])
+
+    // The read-only routes have no fixture: GET only, no write, no case ids.
+    for (const route of fortnoxEmulatorRoutes.slice(10)) {
+      expect(route, route.path).toMatchObject({ method: 'GET', write: false, caseIds: [] })
+    }
+
     expect(fortnoxEmulatorRoutes.filter(route => route.write).map(route => route.path)).toEqual([
       '/3/customers/{CustomerNumber}',
       '/3/invoices',
@@ -171,19 +213,43 @@ describe('route evidence manifest', () => {
     Effect.promise(async () => {
       const target = await emulator()
 
-      for (const route of fortnoxEmulatorRoutes) {
-        const path = route.path
+      // A seeded key for each path parameter, by resource (offers are numbered apart from invoices).
+      const concrete = (template: string): string =>
+        template
           .replace('{CustomerNumber}', '1001')
+          .replace('/offers/{DocumentNumber}', '/offers/1')
           .replace('{DocumentNumber}', '103')
+          .replace('{ArticleNumber}', 'KIT-1')
+          .replace('{PriceList}', 'A')
+          .replace('{FromQuantity}', '0')
+          .replace('{Number}', '1')
+          .replace('{Id}', 'inbox_s')
+          .replace('{Name}', 'SALES')
+          .replace('/pricelists/{Code}', '/pricelists/A')
+          .replace('/costcenters/{Code}', '/costcenters/CC1')
+          .replace('/modesofpayments/{Code}', '/modesofpayments/BG')
+          .replace('/termsofpayments/{Code}', '/termsofpayments/30')
+          .replace('/termsofdeliveries/{Code}', '/termsofdeliveries/EXW')
+          .replace('/wayofdeliveries/{Code}', '/wayofdeliveries/P')
+          .replace('/units/{Code}', '/units/h')
+
+      for (const route of fortnoxEmulatorRoutes) {
+        const path = concrete(route.path)
 
         const body =
           route.method === 'GET'
             ? undefined
             : { [path.includes('customers') ? 'Customer' : 'Invoice']: { Comments: 'x' } }
 
-        await call(target, route.method, path, { body })
+        const response = await call(target, route.method, path, { body })
+
+        // Every read answers its seeded key (the write bodies here are deliberately incomplete).
+        if (route.method === 'GET') {
+          expect(response.status, `${route.method} ${path}`).toBeLessThan(300)
+        }
       }
 
+      // One request per route: the sublist path reached the sublist route, not the price route.
       expect(target.coverage().routes.every(route => route.requests === 1)).toBe(true)
       expect(target.coverage().unknownRouteRequests).toBe(0)
       expect(target.ledger.entries().every(entry => entry.evidence === 'unverified')).toBe(true)
@@ -197,7 +263,7 @@ describe('fail closed', () => {
       const target = await emulator()
 
       for (const [method, path] of [
-        ['GET', '/3/articles'],
+        ['GET', '/3/orders'],
         ['DELETE', '/3/customers/1001'],
         ['POST', '/3/invoices/103/email'],
         ['GET', '/v1/chat/completions'],
@@ -646,7 +712,9 @@ describe('invoices', () => {
       const target = await emulator({
         seed: {
           customers: [{ CustomerNumber: '1', Name: 'Euro AB', Currency: 'EUR' }],
-          invoices: []
+          invoices: [],
+          offers: [],
+          invoicePayments: []
         }
       })
 
@@ -676,7 +744,9 @@ describe('invoices', () => {
             { CustomerNumber: '4', Name: 'Unsafe AB', TermsOfPayment: '9007199254740992' },
             { CustomerNumber: '5', Name: 'Late AB', TermsOfPayment: '30' }
           ],
-          invoices: []
+          invoices: [],
+          offers: [],
+          invoicePayments: []
         }
       })
 
@@ -740,7 +810,9 @@ describe('invoices', () => {
       const noRecipient = await emulator({
         seed: {
           customers: [{ CustomerNumber: '1', Name: 'No Email AB' }],
-          invoices: [{ DocumentNumber: '1', CustomerNumber: '1' }]
+          invoices: [{ DocumentNumber: '1', CustomerNumber: '1' }],
+          offers: [],
+          invoicePayments: []
         }
       })
 

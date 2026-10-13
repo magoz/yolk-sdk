@@ -15,7 +15,8 @@ for the host R2 ports (`R2Presigner`, `R2ObjectClient`).
 Emulators never import other `@yolk-sdk/*` code: their wire shapes follow conformance fixtures
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
-`/3` API that reproduces the observed quirks the Fortnox conformance cases claim, the Microsoft
+`/3` API that reproduces the observed quirks the Fortnox conformance cases claim (and answers the
+connector's other reads with unverified synthetic shapes), the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
 conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
 MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
@@ -683,9 +684,35 @@ Routes (base path `/3`, JSON bodies, `Authorization: Bearer <non-empty>`; a miss
 | `GET /3/invoices/{DocumentNumber}/preview` | A small synthetic PDF (`application/pdf`); does not mark the invoice sent                                            |
 | `GET /3/invoices/{DocumentNumber}/email`   | Marks the invoice `Sent` and records an outbox entry in state; never sends anything                                  |
 
-`GET /3/companyinformation` and `GET /3/customers` have no recorded fixture: they cite no
-conformance case ids, use minimal shapes named after the connector's read fields, and are
-unverified, uncited read routes (the evidence check warns about them).
+Read-only resources (`GET` only; the connector's article, price, cost center, payment, offer,
+print, inbox, settings, and profile reads, and the host-only offer preview and inbox file
+downloads):
+
+| Route                                                                                                           | Behavior                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /3/articles`, `GET /3/articles/{ArticleNumber}`                                                            | `filter` (`active`/`inactive`), search (`articlenumber`, `description`, `ean`, `suppliernumber`, `manufacturer`, `manufacturerarticlenumber`); list rows send numeric strings; `SalesPrice` is the PreSelected price list's base price |
+| `GET /3/pricelists`, `GET /3/pricelists/{Code}`                                                                 | Search `code`, `comments`                                                                                                                                                                                                              |
+| `GET /3/prices/sublist/{PriceList}/{ArticleNumber}`, `GET /3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}` | One article's tiers in a price list (rows without `Percent`/`Date`); one price. A `sublist` path always reaches the sublist route                                                                                                      |
+| `GET /3/costcenters`, `GET /3/costcenters/{Code}`                                                               | Inactive ones included                                                                                                                                                                                                                 |
+| `GET /3/invoicepayments`, `GET /3/supplierinvoicepayments` (and `/{Number}`)                                    | Search `invoicenumber`; customer payments carry their held invoice's snapshot; voucher fields and `ModeOfPaymentAccount` as numeric strings                                                                                            |
+| `GET /3/offers`, `GET /3/offers/{DocumentNumber}`, `GET /3/offers/{DocumentNumber}/preview`                     | Filters, search, `fromdate`/`todate`; list rows have no rows; totals from the rows; the preview is the synthetic PDF and marks nothing sent                                                                                            |
+| `GET /3/printtemplates`                                                                                         | `type` `invoice` (default), `offer`, or `order`; no `MetaInformation`                                                                                                                                                                  |
+| `GET /3/inbox`, `GET /3/inbox/{Id}`                                                                             | A folder Id (`root`, the nine static folders, subfolders) answers `{ Folder }`; a file Id answers its bytes (`application/octet-stream`)                                                                                               |
+| `GET /3/settings/company`, `GET /3/settings/lockedperiod`                                                       | `{ CompanySettings }`, `{ LockedPeriod }`                                                                                                                                                                                              |
+| `GET /3/predefinedaccounts` (and `/{Name}`), `GET /3/labels`                                                    | Unpaginated, no `MetaInformation`; the single envelope is `PreDefinedAccount`                                                                                                                                                          |
+| `GET /3/modesofpayments`, `termsofpayments`, `termsofdeliveries`, `wayofdeliveries`, `units` (and `/{Code}`)    | `page`/`limit`, `MetaInformation`; a mode of payment's `AccountNumber` is a string in list rows                                                                                                                                        |
+| `GET /3/me`                                                                                                     | `{ Me }`                                                                                                                                                                                                                               |
+
+`GET /3/companyinformation`, `GET /3/customers`, and every read-only route above have no recorded
+fixture: they cite no conformance case ids, use minimal synthetic shapes named after the
+connector's read fields (in the wire types the connector's schemas accept), and are unverified,
+uncited read routes (the evidence check warns about them). Their writes (`POST`, `PUT`, `DELETE`,
+and side-effecting `GET`s such as `/offers/{DocumentNumber}/email` and `/print`) are not emulated
+and fail closed with the 404 below: emulating a connector write needs a conformance case and its
+live run first. Lists of `/3/offers` filter on the stored fields (unverified: `expired` is an
+`ExpireDate` before the injectable `now`, `completed` follows `NotCompleted`, `ordercreated`
+follows `OrderReference` other than `"0"`). A key the state does not hold answers 404
+`ErrorInformation` code `2999011`.
 
 Anything else fails closed with a 404 `ErrorInformation` (ledgered); unsupported query parameters
 (checked per route before it runs, so a rejected write writes nothing), unknown filters, unknown or
@@ -699,8 +726,10 @@ written when the customer it inherits from (a seed can hold anything) carries a 
 `TermsOfPayment` outside the subset, or when its
 computed due date is not a representable `YYYY-MM-DD` date. An empty string still keeps the
 stored value. The list filter
-`lastmodified` (the connector's `lastModified` input) is not emulated: the emulator tracks no
-modification times and answers it with a 400 saying so. Errors use the lowercase `{ ErrorInformation: { error, message, code } }` of the rejection
+`lastmodified` (the connector's `lastModified` input) is not emulated on any list: the emulator
+tracks no modification times and answers it with a 400 saying so. Customer and invoice writes do
+not emulate article, cost center, or project references (a 400), even though the read-only routes
+hold articles and cost centers. Errors use the lowercase `{ ErrorInformation: { error, message, code } }` of the rejection
 fixture; `fortnoxEmulatorErrorCodes` lists the codes (the `2999xxx` ones are synthetic).
 
 Observed quirks (`fortnoxEmulatorQuirks`, each tied to its conformance case):
@@ -719,11 +748,22 @@ Observed quirks (`fortnoxEmulatorQuirks`, each tied to its conformance case):
    invalid fields answer 400 `ErrorInformation`.
 5. **Read-only `Country`**: sending a customer `Country` answers 400 (no conformance case yet).
 
-State and seeds: company information, customers, and invoices with rows, plus the email outbox.
-The default seed is the synthetic fixture entities, with the same customer and document numbers as
-`fortnoxConformanceFixtureSeeds`, so the Fortnox conformance cases run unmodified. Pass
-`seed: { profile?, company?, customers?, invoices? }` (typed; entity lists replace the profile's)
-with profiles `'default'`, `'empty-company'`, or `'no-booked-invoices'`. `reset()` restores the
+State and seeds: company information, customers, and invoices with rows, plus the email outbox,
+and the read-only resources. The default seed is the synthetic fixture entities, with the same
+customer and document numbers as `fortnoxConformanceFixtureSeeds`, so the Fortnox conformance
+cases run unmodified, plus small synthetic read-only data (Example AB, `example.test`) that stays
+consistent with them. Pass `seed: { profile?, company?, customers?, invoices?, ... }` (typed; each
+given part replaces the profile's) with profiles `'default'`, `'empty-company'` (no business data;
+the settings, registers, print templates, user, and inbox folders stay), or
+`'no-booked-invoices'` (no invoice payments either). The read-only seed keys are `articles`,
+`priceLists`, `prices`, `costCenters`, `invoicePayments`, `supplierInvoicePayments`, `offers`,
+`printTemplates`, `inboxFolders`, `inboxFiles` (bytes as `ContentBase64`), `companySettings`,
+`lockedPeriod`, `predefinedAccounts`, `labels`, `modesOfPayment`, `termsOfPayment`,
+`termsOfDelivery`, `waysOfDelivery`, `units`, and `me`. A seed with a duplicate key or a dangling
+reference is rejected (offers name customers, invoice payments name invoices, prices name price
+lists and articles, ...); replacing `customers` or `invoices` without seeding `offers` or
+`invoicePayments` starts those empty. Supplier invoices are not emulated: a supplier invoice payment stores its own
+snapshot fields. `reset()` restores the
 current seed and clears the ledger and faults; `seed(next)` replaces the state and becomes what
 `reset()` restores; `snapshot()` returns a deep copy of the state.
 

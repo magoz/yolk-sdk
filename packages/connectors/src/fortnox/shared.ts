@@ -51,7 +51,9 @@ export const listPath = (
     readonly filter?: string
     readonly fromDate?: string
     readonly toDate?: string
-  }
+  },
+  // Resource-specific query parameters (already Fortnox-spelled keys); undefined values are omitted.
+  extra: Readonly<Record<string, string | undefined>> = {}
 ) => {
   const query = new URLSearchParams()
 
@@ -68,6 +70,11 @@ export const listPath = (
   if (input.fromDate !== undefined) query.set('fromdate', input.fromDate)
 
   if (input.toDate !== undefined) query.set('todate', input.toDate)
+
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) query.set(key, value)
+  }
+
   const suffix = query.toString()
 
   return suffix === '' ? resource : `${resource}?${suffix}`
@@ -181,8 +188,10 @@ export type FortnoxTransportOptions = {
   readonly credentials?: 'omit'
 }
 
+type FortnoxMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
+
 type FortnoxRequestFields = {
-  readonly method: 'GET' | 'POST' | 'PUT'
+  readonly method: FortnoxMethod
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
   readonly body: string | undefined
@@ -193,7 +202,7 @@ type FortnoxRequestFields = {
 const requestFortnox = (
   integration: ConnectorIntegration,
   slot: CredentialSlot,
-  method: 'GET' | 'POST' | 'PUT',
+  method: FortnoxMethod,
   path: string,
   body?: unknown,
   transport: FortnoxTransportOptions = {}
@@ -257,6 +266,7 @@ export const readFortnox = <A, B>(
     return ActionResult.success(map(decoded))
   })
 
+/** `body: undefined` sends no body (Fortnox PUT actions such as `bookkeep` or `cancel`). */
 export const writeFortnox = <A, B>(
   integration: ConnectorIntegration,
   slot: CredentialSlot,
@@ -273,4 +283,22 @@ export const writeFortnox = <A, B>(
     const decoded = yield* decodeJsonResponse(schema, response)
 
     return ActionResult.success(map(decoded))
+  })
+
+/**
+ * DELETE a Fortnox resource. Fortnox answers deletes with an empty body (204 or 200), so a 2xx is
+ * success without JSON decoding and the action returns the caller-built `output`.
+ */
+export const deleteFortnox = <B>(
+  integration: ConnectorIntegration,
+  slot: CredentialSlot,
+  path: string,
+  output: B
+) =>
+  Effect.gen(function* () {
+    const response = yield* requestFortnox(integration, slot, 'DELETE', path)
+
+    if (response.status < 200 || response.status >= 300) return yield* providerFailure(response)
+
+    return ActionResult.success(output)
   })

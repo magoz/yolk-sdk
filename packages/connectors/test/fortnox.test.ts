@@ -250,16 +250,41 @@ const listItems = (output: typeof FortnoxListOutput.Type) => {
   return Chunk.toReadonlyArray(output.supplierInvoices)
 }
 
+// Deletes, bookkeeping, offer lifecycle (convert, cancel, email, mark sent), and inbox deletion
+// cannot be undone through the Fortnox API.
+const destructiveActionIds = [
+  'fortnox.delete_article',
+  'fortnox.delete_price',
+  'fortnox.delete_cost_center',
+  'fortnox.delete_invoice_payment',
+  'fortnox.bookkeep_invoice_payment',
+  'fortnox.delete_supplier_invoice_payment',
+  'fortnox.bookkeep_supplier_invoice_payment',
+  'fortnox.create_order_from_offer',
+  'fortnox.create_invoice_from_offer',
+  'fortnox.cancel_offer',
+  'fortnox.email_offer',
+  'fortnox.mark_offer_sent',
+  'fortnox.delete_inbox_item',
+  'fortnox.delete_label',
+  'fortnox.delete_mode_of_payment',
+  'fortnox.delete_terms_of_payment',
+  'fortnox.delete_way_of_delivery',
+  'fortnox.delete_unit'
+]
+
 describe('Fortnox connector', () => {
   it('rejects non-finite JSON fixture bodies before stringify', () => {
     expect(() => response(Infinity)).toThrow('JSON fixture requires a finite JSON value')
     expect(() => response({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
   })
 
-  it('exports reads and customer/invoice writes with shared resource-scoped OAuth bindings', () => {
+  it('exports reads, writes, and destructive actions with shared resource-scoped OAuth bindings', () => {
     expect(FortnoxConnector.id).toBe('fortnox')
-    expect(FortnoxConnector.actions.map(action => action.id).sort()).toEqual(
-      [
+    expect(FortnoxConnector.actions).toHaveLength(91)
+    expect(new Set(FortnoxConnector.actions.map(action => action.id)).size).toBe(91)
+    expect(FortnoxConnector.actions.map(action => action.id)).toEqual(
+      expect.arrayContaining([
         ...reads.map(item => item.action),
         ...lists.map(item => item.action),
         'fortnox.list_supplier_invoice_files',
@@ -267,18 +292,25 @@ describe('Fortnox connector', () => {
         'fortnox.update_customer',
         'fortnox.create_invoice',
         'fortnox.update_invoice'
-      ].sort()
+      ])
     )
     expect(
       FortnoxConnector.actions
-        .filter(action => action.id.includes('create_') || action.id.includes('update_'))
-        .every(action => action.access === 'write')
+        .filter(action => action.access === 'destructive')
+        .map(action => action.id)
+        .sort()
+    ).toEqual([...destructiveActionIds].sort())
+    expect(
+      FortnoxConnector.actions
+        .filter(action => action.access === 'write')
+        .every(action => /^fortnox\.(create|update)_/.test(action.id))
     ).toBe(true)
     expect(
       FortnoxConnector.actions
-        .filter(action => !action.id.includes('create_') && !action.id.includes('update_'))
-        .every(action => action.access === 'read')
+        .filter(action => action.access === 'read')
+        .every(action => /^fortnox\.(get|list)_/.test(action.id))
     ).toBe(true)
+    expect(FortnoxConnector.actions.every(action => action.access !== undefined)).toBe(true)
     expect(FortnoxOAuthCredentialSlot).toMatchObject({ id: 'fortnox.oauth', kind: 'oauth' })
     expect(FortnoxCombinedOAuthCredentialSlot.requiredScopes).toEqual([
       'companyinformation',
@@ -300,19 +332,18 @@ describe('Fortnox connector', () => {
         {}
       )
 
-      expect(toolSet.tools).toHaveLength(14)
+      expect(toolSet.tools).toHaveLength(FortnoxConnector.actions.length)
 
       for (const tool of toolSet.tools) {
         expect(tool.parameters).toMatchObject({ type: 'object' })
         const access = toolSet.metadata.find(item => item.name === tool.name)?.access
-        expect(access).toBe(
-          tool.name.includes('create_customer') ||
-            tool.name.includes('update_customer') ||
-            tool.name.includes('create_invoice') ||
-            tool.name.includes('update_invoice')
-            ? 'write'
-            : 'read'
-        )
+
+        const declared = FortnoxConnector.actions.find(
+          action => action.id.replace('.', '_') === tool.name || action.id === tool.name
+        )?.access
+
+        expect(declared).toBeDefined()
+        expect(access).toBe(declared)
       }
 
       expect(harness.requests).toHaveLength(0)

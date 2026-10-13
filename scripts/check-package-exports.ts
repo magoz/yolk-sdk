@@ -35,7 +35,12 @@ import {
 import {
   downloadFortnoxInvoicePreview,
   downloadFortnoxArchiveFile,
-  fortnoxListSupplierInvoiceFilesAction
+  downloadFortnoxInboxFile,
+  downloadFortnoxOfferPreview,
+  fortnoxBookkeepInvoicePaymentAction,
+  fortnoxEmailOfferAction,
+  fortnoxListSupplierInvoiceFilesAction,
+  uploadFortnoxInboxFile
 } from '../packages/connectors/src/fortnox/index.ts'
 import { downloadNotionFile } from '../packages/connectors/src/notion/index.ts'
 import { downloadEmailAttachment } from '../packages/connectors/src/email/index.ts'
@@ -416,6 +421,9 @@ if (
     downloadGmailAttachment,
     downloadFortnoxInvoicePreview,
     downloadFortnoxArchiveFile,
+    downloadFortnoxOfferPreview,
+    downloadFortnoxInboxFile,
+    uploadFortnoxInboxFile,
     downloadNotionFile,
     downloadEmailAttachment,
     downloadTelegramFile,
@@ -429,6 +437,8 @@ if (
   ].some(value => !Predicate.isFunction(value)) ||
   GoogleDriveReadonlyOAuthCredentialSlot.id !== 'google.oauth' ||
   fortnoxListSupplierInvoiceFilesAction.access !== 'read' ||
+  fortnoxEmailOfferAction.access !== 'destructive' ||
+  fortnoxBookkeepInvoicePaymentAction.access !== 'destructive' ||
   todoistListCommentsAction.access !== 'read' ||
   githubMergePullRequestAction.access !== 'destructive' ||
   GithubConnector.actions.some(action => action.access === undefined)

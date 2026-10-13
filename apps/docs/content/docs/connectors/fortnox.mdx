@@ -1,16 +1,19 @@
 ---
 title: Read and write Fortnox records
-description: Read Fortnox records and create or update customers and invoices with host-owned OAuth.
+description: Read and write Fortnox records, prices, payments, offers, inbox, and settings with host-owned OAuth.
 ---
 
 Use `@yolk-sdk/connectors/fortnox` to read Fortnox records directly or expose them as agent tools.
-The connector exposes ten `read` actions plus four `write` actions for creating and updating customers
-and invoices. It sends GET, POST, and PUT requests to `https://api.fortnox.se/3`.
-There are no send, book, cancel, payment, or file-download actions. Sending or booking an invoice
-must remain a separately approval-gated host capability.
+The connector exposes 91 actions: 42 `read`, 31 `write`, and 18 `destructive`. It sends GET, POST,
+PUT, and DELETE requests to `https://api.fortnox.se/3`.
 
-Host-only invoice preview PDF and archive downloads plus supplier-file discovery are described in
-[Transfer connector files](./files#fortnox-and-notion). Preview does not mark an invoice Sent.
+`destructive` actions cannot be undone through the Fortnox API: deletes, payment bookkeeping, offer
+conversion, cancellation, emailing, and marking an offer sent. Gate them with host approval. Customer
+invoices still have no send, book, cancel, or credit action; those remain host capabilities.
+
+Host-only invoice and offer preview PDFs, archive and inbox downloads, inbox upload, and
+supplier-file discovery are described in [Transfer connector files](./files#fortnox-and-notion).
+Previews do not mark a document Sent.
 
 ## Connect a host credential
 
@@ -49,32 +52,50 @@ credential before returning it; the connector does not refresh tokens or enforce
 Integration config needs no keys and must not contain tokens or client secrets.
 
 The HTTP adapter must preserve `Authorization: Bearer …` and `Accept: application/json`.
-For POST and PUT actions it must also preserve `Content-Type: application/json` and the JSON body.
+When a request carries a JSON body it must also preserve `Content-Type: application/json` and the
+body. Lifecycle PUTs (`bookkeep`, `createorder`, `createinvoice`, `cancel`, `externalprint`) and all
+DELETEs are body-less. `fortnox.email_offer` is a side-effecting GET: never retry it or follow its
+redirects.
 Hosts own network policy, response-size limits, redirect safety, and avoiding credential/body logs.
 
 ## Choose consent scopes
 
 **Fortnox has no read-only OAuth scopes.** Each resource scope grants read and write access at the
 provider. Explain this distinction during consent and retain host authorization checks. Fortnox also
-requires a company license for each resource. Connector create/update actions declare `write` access;
-invoice sending or booking is not exposed and must remain separately approval-gated by the host.
+requires a company license for each resource. Action access metadata (`read`, `write`,
+`destructive`) is what hosts gate on; it does not narrow the token.
 
 All slots bind through `fortnox.oauth`:
 
-| Slot                                           | Required scope       |
-| ---------------------------------------------- | -------------------- |
-| `FortnoxCompanyInformationOAuthCredentialSlot` | `companyinformation` |
-| `FortnoxCustomerOAuthCredentialSlot`           | `customer`           |
-| `FortnoxInvoiceOAuthCredentialSlot`            | `invoice`            |
-| `FortnoxSupplierOAuthCredentialSlot`           | `supplier`           |
-| `FortnoxSupplierInvoiceOAuthCredentialSlot`    | `supplierinvoice`    |
-| `FortnoxConnectFileOAuthCredentialSlot`        | `connectfile`        |
-| `FortnoxArchiveOAuthCredentialSlot`            | `archive`            |
+| Slot                                           | Required scope       | Developer Portal name | Fortnox license               |
+| ---------------------------------------------- | -------------------- | --------------------- | ----------------------------- |
+| `FortnoxCompanyInformationOAuthCredentialSlot` | `companyinformation` | Företagsinformation   | Any                           |
+| `FortnoxCustomerOAuthCredentialSlot`           | `customer`           | Kund                  | Kundfaktura or Order          |
+| `FortnoxInvoiceOAuthCredentialSlot`            | `invoice`            | Faktura               | Order or Kundfaktura          |
+| `FortnoxSupplierOAuthCredentialSlot`           | `supplier`           | Leverantör            | Bokföring                     |
+| `FortnoxSupplierInvoiceOAuthCredentialSlot`    | `supplierinvoice`    | Leverantörsfaktura    | Bokföring                     |
+| `FortnoxConnectFileOAuthCredentialSlot`        | `connectfile`        | Koppla filer          | Bokföring, Anläggning, Arkiv  |
+| `FortnoxArchiveOAuthCredentialSlot`            | `archive`            | Arkivplats            | Any                           |
+| `FortnoxArticleOAuthCredentialSlot`            | `article`            | Artikel               | Order or Kundfaktura          |
+| `FortnoxPriceOAuthCredentialSlot`              | `price`              | Pris                  | Order or Kundfaktura          |
+| `FortnoxCostCenterOAuthCredentialSlot`         | `costcenter`         | Kostnadsställe        | Bokföring, Order, Kundfaktura |
+| `FortnoxPaymentOAuthCredentialSlot`            | `payment`            | Betalningar           | Bokföring, Order, Kundfaktura |
+| `FortnoxOfferOAuthCredentialSlot`              | `offer`              | Offert                | Order                         |
+| `FortnoxPrintOAuthCredentialSlot`              | `print`              | Utskrift              | Order or Kundfaktura          |
+| `FortnoxInboxOAuthCredentialSlot`              | `inbox`              | Inbox                 | Any                           |
+| `FortnoxSettingsOAuthCredentialSlot`           | `settings`           | Inställningar         | Any                           |
+| `FortnoxProfileOAuthCredentialSlot`            | `profile`            | Profil                | Any                           |
+
+`print` covers only print templates; printing, previewing, or emailing a document uses the
+document's own scope (`invoice`, `offer`). Fortnox also lists Company Logo (Företagslogga) and a
+sales API (Försäljnings-API) as Developer Portal scopes, but documents no endpoints for them, so the
+connector has no actions for either.
 
 `FortnoxOAuthCredentialSlot` is the generic binding without scope hints.
-`FortnoxCombinedOAuthCredentialSlot` declares the original five record scopes (not connectfile/archive); use it only when the host needs all
-resources. Action-scoped slots supply consent hints to the resolver, not a token store or permission
-checker.
+`FortnoxCombinedOAuthCredentialSlot` declares the original five record scopes only (not the file,
+article, price, cost-center, payment, offer, print, inbox, settings, or profile scopes); use it only
+when the host needs exactly those resources. Action-scoped slots supply consent hints to the
+resolver, not a token store or permission checker.
 
 Host OAuth implementation:
 
@@ -108,6 +129,74 @@ supplier InvoiceNumber. The new file scopes grant both reads and writes like oth
 | `fortnox.list_supplier_invoices`      | read   | `FortnoxListSupplierInvoicesInput`     | `{ supplierInvoices, pagination }` |
 | `fortnox.get_supplier_invoice`        | read   | `{ givenNumber }`                      | `FortnoxSupplierInvoice`           |
 | `fortnox.list_supplier_invoice_files` | read   | `FortnoxListSupplierInvoiceFilesInput` | `{ files, pagination }`            |
+
+### Master data, payments, offers, inbox, settings, and profile
+
+Get and delete inputs use camelCase identifiers (`{ articleNumber }`, `{ code }`,
+`{ paymentNumber }`, `{ documentNumber }`, `{ itemId }`, `{ labelId }`). Create and update inputs
+use Fortnox field spelling, carry the identifier, and bind it into the URL instead of the body.
+Deletes return `{ <identifier>, deleted: true }` without decoding Fortnox's empty answer.
+
+| Resource (scope)                      | Actions                                                                                                                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Articles (`article`)                  | read: `list_articles`, `get_article`; write: `create_article`, `update_article`; destructive: `delete_article`                                                                                 |
+| Price lists (`price`)                 | read: `list_price_lists`, `get_price_list`; write: `create_price_list`, `update_price_list`                                                                                                    |
+| Prices (`price`)                      | read: `list_prices`, `get_price`; write: `create_price`, `update_price`; destructive: `delete_price`                                                                                           |
+| Cost centers (`costcenter`)           | read: `list_cost_centers`, `get_cost_center`; write: `create_cost_center`, `update_cost_center`; destructive: `delete_cost_center`                                                             |
+| Invoice payments (`payment`)          | read: `list_invoice_payments`, `get_invoice_payment`; write: `create_invoice_payment`, `update_invoice_payment`; destructive: `delete_invoice_payment`, `bookkeep_invoice_payment`             |
+| Supplier invoice payments (`payment`) | read: `list_supplier_invoice_payments`, `get_supplier_invoice_payment`; write: `create_…`, `update_…`; destructive: `delete_supplier_invoice_payment`, `bookkeep_supplier_invoice_payment`     |
+| Offers (`offer`)                      | read: `list_offers`, `get_offer`; write: `create_offer`, `update_offer`; destructive: `create_order_from_offer`, `create_invoice_from_offer`, `cancel_offer`, `email_offer`, `mark_offer_sent` |
+| Print templates (`print`)             | read: `list_print_templates` (`type`: `invoice`, `offer`, or `order`; not paginated)                                                                                                           |
+| Inbox (`inbox`)                       | read: `get_inbox_folder` (`{ folderId? }`, root when omitted); destructive: `delete_inbox_item`                                                                                                |
+| Company settings (`settings`)         | read: `get_company_settings`, `get_locked_period`                                                                                                                                              |
+| Predefined accounts (`settings`)      | read: `list_predefined_accounts`, `get_predefined_account`; write: `update_predefined_account`                                                                                                 |
+| Labels (`settings`)                   | read: `list_labels`; write: `create_label`, `update_label`; destructive: `delete_label`                                                                                                        |
+| Modes of payment (`settings`)         | read: `list_modes_of_payment`, `get_mode_of_payment`; write: `create_…`, `update_…`; destructive: `delete_mode_of_payment`                                                                     |
+| Terms of payment (`settings`)         | read: `list_terms_of_payment`, `get_terms_of_payment`; write: `create_…`, `update_…`; destructive: `delete_terms_of_payment`                                                                   |
+| Terms of delivery (`settings`)        | read: `list_terms_of_delivery`, `get_terms_of_delivery`; write: `create_…`, `update_…` (Fortnox has no delete)                                                                                 |
+| Ways of delivery (`settings`)         | read: `list_ways_of_delivery`, `get_way_of_delivery`; write: `create_…`, `update_…`; destructive: `delete_way_of_delivery`                                                                     |
+| Units (`settings`)                    | read: `list_units`, `get_unit`; write: `create_unit`, `update_unit`; destructive: `delete_unit`                                                                                                |
+| Profile (`profile`)                   | read: `get_profile` (`GET /3/me`: the user behind the token)                                                                                                                                   |
+
+All action IDs carry the `fortnox.` prefix. Notes per resource:
+
+- **Articles.** `ArticleNumber` is assigned by Fortnox when omitted and cannot change later.
+  `SalesPrice` is read-only (it is the price in the default price list); set prices through the
+  price actions. Update changes only the sent fields. Delete is permanent.
+- **Prices.** A price is identified by price list, article number, and `FromQuantity` (0 for the
+  base price); all three form its URL path. The default price list is usually `A`. Fortnox
+  documents no price-list delete. `list_prices` lists one article's prices in one price list.
+- **Cost centers.** `Code` is writable only on create. Prefer `Active: false` over deleting.
+- **Payments.** Created payments are normally unbooked; check `Booked` in the response.
+  `AmountCurrency` is required when the invoice currency is not SEK. A supplier invoice payment's
+  `InvoiceNumber` is the supplier invoice **GivenNumber** (`FortnoxGivenNumber`), not the supplier's
+  own invoice number. Bookkeeping posts a voucher and has no API undo.
+- **Offers.** Row updates follow the invoice rules below (rows replace the list; `RowId` matches
+  rows and is regenerated). `create_order_from_offer` needs the Order license;
+  `create_invoice_from_offer` creates a customer invoice. Both return the offer number and the new
+  order or invoice number (null if Fortnox does not report it); do not retry an ambiguous
+  conversion, read the offer instead. `email_offer` sends to the offer's stored
+  `EmailInformation` recipient through a GET (the only method Fortnox offers); host HTTP adapters
+  must not retry it or follow redirects. `mark_offer_sent` sets `Sent` without producing a document. There
+  is no print action: `/print` returns bytes and marks the offer Sent; use the host preview plus
+  `mark_offer_sent`.
+- **Inbox.** Fortnox has nine static root folders (`inbox_s` supplier invoices, `inbox_v`
+  vouchers, `inbox_kf` customer invoices, and others). `get_inbox_folder` returns folder metadata;
+  a file id returns bytes, so use the host download helper. Deleting a subfolder deletes everything
+  in it; `delete_inbox_item` refuses `root` and the static folders.
+- **Settings.** Company settings and the locked period are read-only through the API.
+  `update_predefined_account` changes the account Fortnox books with by default. Deleting a label
+  removes it from every document that uses it. Labels and predefined accounts are not paginated.
+- **Not covered.** Article URL connections, price-list deletion, `?path=` inbox addressing,
+  Email Senders, Predefined Voucher Series, Company Logo, and the sales API (scope or endpoint not
+  confirmed).
+
+These additions follow Fortnox's current API reference and archived resource pages; none has been
+observed against a live company yet. The
+[Fortnox emulator](../api-reference/emulators#fortnox-emulator) serves their read endpoints
+(including the offer preview and inbox file bytes) with unverified, synthetic shapes named after the
+fields these actions read; their writes, and side-effecting reads such as `email_offer`, are not
+emulated and fail closed with a 404.
 
 Create customer inputs require `Name`; Fortnox assigns `CustomerNumber`. Create invoice inputs
 require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry the provider
@@ -181,18 +270,26 @@ production use; the connector does not infer completion when metadata is missing
 
 For resource-specific searches, supply one `search: { field, value }` pair:
 
-| Resource          | Supported `search.field` values                                          |
-| ----------------- | ------------------------------------------------------------------------ |
-| Customers         | `customernumber`, `name`, `organisationnumber`, `email`, `city`, `phone` |
-| Suppliers         | `suppliernumber`, `name`, `organisationnumber`, `email`, `city`, `phone` |
-| Invoices          | `customernumber`, `customername`, `documentnumber`, `ocr`                |
-| Supplier invoices | `suppliernumber`, `suppliername`, `invoicenumber`, `serialnumber`, `ocr` |
+| Resource                  | Supported `search.field` values                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Customers                 | `customernumber`, `name`, `organisationnumber`, `email`, `city`, `phone`                                                  |
+| Suppliers                 | `suppliernumber`, `name`, `organisationnumber`, `email`, `city`, `phone`                                                  |
+| Invoices                  | `customernumber`, `customername`, `documentnumber`, `ocr`                                                                 |
+| Supplier invoices         | `suppliernumber`, `suppliername`, `invoicenumber`, `serialnumber`, `ocr`                                                  |
+| Articles                  | `articlenumber`, `description`, `ean`, `suppliernumber`, `manufacturer`, `manufacturerarticlenumber`                      |
+| Price lists               | `code`, `comments`                                                                                                        |
+| Invoice payments          | `invoicenumber` (customer invoice DocumentNumber)                                                                         |
+| Supplier invoice payments | `invoicenumber` (supplier invoice GivenNumber)                                                                            |
+| Offers                    | `customername`, `customernumber`, `documentnumber`, `offerdate`, `ourreference`, `yourreference`, `costcenter`, `project` |
 
 Fortnox supports only one resource-specific search field at a time; matching follows provider
 semantics, not guaranteed exact equality. Combine it with global `lastModified`, and for invoice
 lists, `fromDate`/`toDate` date strings. Dates are forwarded unchanged without timezone conversion.
 
-Customers additionally accept `filter: 'active' | 'inactive'`. Both invoice lists accept `cancelled`,
+Customers and articles additionally accept `filter: 'active' | 'inactive'`. Offers accept
+`cancelled`, `expired`, `completed`, `notcompleted`, `ordercreated`, or `ordernotcreated`, plus
+`fromDate`/`toDate`. Settings registers (modes of payment, terms, ways of delivery, units) take
+`page` and `limit` only. Print templates, labels, and predefined accounts are not paginated. Both invoice lists accept `cancelled`,
 `fullypaid`, `unpaid`, `unpaidoverdue`, or `unbooked`; supplier invoices also accept `pendingpayment`
 and `authorizepending`. Supplier lists do not expose a status filter. Unsupported sort/offset or
 arbitrary query parameters are not part of this connector.
@@ -245,9 +342,11 @@ const tools = makeConnectorToolModule(FortnoxConnector, {
 })
 ```
 
-The adapter inherits each action's declared access metadata (`read` or `write`); explicit host
-access overrides still win. Since sending and booking are not connector actions, any host-owned
-outbound action must keep its own manual approval gate.
+The adapter inherits each action's declared access metadata (`read`, `write`, or `destructive`);
+explicit host access overrides still win. Require manual approval for `destructive` tools such as
+`fortnox.email_offer` and `fortnox.bookkeep_invoice_payment`, or exclude them from the module.
+Customer-invoice sending and booking are still not connector actions, so any host-owned outbound
+action must keep its own approval gate.
 See [Add connector tools](../integrations/connector-tool) for tool execution and authorization.
 
 ## Conformance cases

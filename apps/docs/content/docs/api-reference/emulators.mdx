@@ -414,9 +414,9 @@ clears the ledger, faults, and fixture use.
 | Export                                          | Purpose                                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `makeFortnoxEmulator(options?)`                 | `Promise` of `{ fetch, baseUrl, ledger, faults, reset, seed, snapshot, coverage, close }`        |
-| `fortnoxEmulatorRoutes`                         | Route evidence manifest (every route is `unverified`; four are connector write routes)           |
+| `fortnoxEmulatorRoutes`                         | Route evidence manifest (44 routes, every one `unverified`; four are connector write routes)     |
 | `fortnoxEmulatorQuirks`                         | The observed quirks it implements, each with its conformance case id and drill knob              |
-| `FortnoxEmulatorSeed`, `FortnoxEmulatorProfile` | Typed seed schema (`profile`, `company`, `customers`, `invoices`) and account-variance profiles  |
+| `FortnoxEmulatorSeed`, `FortnoxEmulatorProfile` | Typed seed schema (`profile`, entities, read-only resources) and account-variance profiles       |
 | `FortnoxFault`                                  | `{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`                |
 | `fortnoxEmulatorErrorCodes`                     | `ErrorInformation` codes (customer-not-found codes from the fixtures; `2999xxx` codes synthetic) |
 | `FortnoxEmulatorInputInvalid`                   | Invalid seed, fault, or option passed to the JS API                                              |
@@ -429,10 +429,29 @@ state; nothing is ever delivered). Requests need `Authorization: Bearer <non-emp
 never stored or ledgered. Anything else fails closed with a 404 `ErrorInformation`, and unsupported
 query parameters or fields get a 400 instead of being ignored.
 
+It also serves the reads of the connector's newer Fortnox actions, `GET` only: articles, price
+lists, prices (`/3/prices/sublist/{PriceList}/{ArticleNumber}` and
+`/3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}`), cost centers, customer and supplier invoice
+payments, offers and their preview PDF, print templates, the inbox (folder JSON; a file id answers
+the file bytes), company settings, the locked period, predefined accounts, labels, the modes and
+terms of payment, terms and ways of delivery, and units registers, and `/3/me`. No fixture records
+these 34 routes: they cite no conformance case, are `unverified`, and use minimal synthetic shapes
+named after the fields the connector reads. Their writes (and side-effecting reads such as
+`/3/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404; a key the state
+does not hold answers 404 code `2999011`; `lastmodified` gets a 400 on every list.
+
 The default seed holds the synthetic fixture entities with the same numbers as
-`fortnoxConformanceFixtureSeeds`, so the Fortnox conformance cases run unmodified against it.
-Profiles: `default`, `empty-company`, `no-booked-invoices`. `reset()` restores the seed; `seed()`
-replaces it.
+`fortnoxConformanceFixtureSeeds`, so the Fortnox conformance cases run unmodified against it, plus
+small synthetic read-only data (Example AB, `example.test`) consistent with them. Each read-only
+resource has its own seed key (`articles`, `priceLists`, `prices`, `costCenters`,
+`invoicePayments`, `supplierInvoicePayments`, `offers`, `printTemplates`, `inboxFolders`,
+`inboxFiles`, `companySettings`, `lockedPeriod`, `predefinedAccounts`, `labels`, `modesOfPayment`,
+`termsOfPayment`, `termsOfDelivery`, `waysOfDelivery`, `units`, `me`) that replaces the profile's
+part; a seed with a duplicate key or a dangling reference (an offer naming a missing customer, a
+payment naming a missing invoice, ...) is rejected. Replacing `customers` or `invoices` without
+seeding `offers` or `invoicePayments` starts those empty. Profiles: `default`, `empty-company` (no
+business data; settings, registers, and inbox folders stay), `no-booked-invoices` (no invoice
+payments either). `reset()` restores the seed; `seed()` replaces it.
 
 It implements the quirks the Fortnox cases claim: an omitted row `Discount` stays on positional row
 updates (`Discount: 0` clears; RowIds regenerate; totals are recomputed); an empty customer string
