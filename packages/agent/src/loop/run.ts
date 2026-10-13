@@ -139,9 +139,15 @@ export type ToolBatchConfig = {
   /** The requests of the pause being resumed (`AgentAwaitingInput.requests`). An unanswered
    * approval request listed here stays pending even when its tool no longer requires approval.
    * A batch with `awaitingRequests` or any `hitlResponses` is a resume (recorded answers win
-   * over the current policy); pass only the responses of the pause being resumed.
+   * over the current policy); pass only the responses of the batch being resumed, or set
+   * `resume`.
    */
   readonly awaitingRequests?: ReadonlyArray<HitlRequest>
+  /** Whether this batch resumes a pause (default: `awaitingRequests` given, or any
+   * `hitlResponses`). Set `false` for a new model turn's batch even when passing responses: a
+   * provider may reuse call ids, and only a resume lets recorded answers override the policy.
+   */
+  readonly resume?: boolean
   readonly model?: string
   readonly createdMessages?: ReadonlyArray<AgentMessage>
   readonly turn?: number
@@ -1398,7 +1404,7 @@ export const prepareToolBatch = (input: {
    * Only a resume lets recorded answers and the pause override the current policy; a fresh
    * batch (a new model turn, whose provider may reuse call ids) follows the policy first.
    */
-  readonly resume?: boolean
+  readonly resume?: boolean | undefined
 }): Effect.Effect<PreparedToolBatch, ToolError> =>
   Effect.gen(function* () {
     const handlers = input.inputs ?? {}
@@ -1473,15 +1479,23 @@ const toolResultIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<strin
     )
   )
 
-const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) => {
-  const completed = toolResultIds(messages)
+/**
+ * Host tool calls without a result. A result answers the calls of the assistant message it
+ * follows (up to the next assistant message), so a provider-reused call id is not settled by an
+ * earlier call's result.
+ */
+const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) =>
+  messages.flatMap((message, index) => {
+    if (!Predicate.isTagged(message, 'Assistant')) return []
 
-  return messages.flatMap(message =>
-    Predicate.isTagged(message, 'Assistant')
-      ? assistantHostToolCalls(message).filter(call => !completed.has(call.id))
-      : []
-  )
-}
+    const next = messages.findIndex(
+      (later, at) => at > index && Predicate.isTagged(later, 'Assistant')
+    )
+
+    const completed = toolResultIds(messages.slice(index + 1, next === -1 ? undefined : next))
+
+    return assistantHostToolCalls(message).filter(call => !completed.has(call.id))
+  })
 
 const nonEmptyHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
@@ -2018,6 +2032,7 @@ export const runToolBatch = (
         interactions: config.interactions,
         approvalPreviews: config.approvalPreviews,
         awaitingRequests: config.awaitingRequests,
+        resume: config.resume,
         interactionReceipts: yield* loadInteractionReceipts(config.calls, config.interactionHost)
       })
 

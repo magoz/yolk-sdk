@@ -345,6 +345,86 @@ describe('approval binds the call across a policy change', () => {
     })
   )
 
+  it.effect('runToolBatch honours an explicit resume flag over the default', () =>
+    Effect.gen(function* () {
+      // Responses given: the default treats the batch as a resume, so the denial binds.
+      const defaulted = yield* batch({ tools: [flipped], hitlResponses: [denied()] })
+
+      expect(started(defaulted)).toEqual([])
+      expect(tags(defaulted)).toContain('ToolApprovalDenied')
+
+      // A new model turn's batch: the policy decides; the old answer neither denies nor grants.
+      for (const stale of [denied(), approved()]) {
+        const fresh = yield* batch({ tools: [flipped], hitlResponses: [stale], resume: false })
+
+        expect(started(fresh)).toEqual(['call_1'])
+        expect(tags(fresh)).not.toContain('ToolApprovalDenied')
+        expect(tags(fresh)).not.toContain('ToolApprovalGranted')
+      }
+
+      // An explicit resume without responses still binds the outstanding request.
+      const awaitingRequests = yield* requestApproval
+      const resumed = yield* batch({ tools: [flipped], resume: true, awaitingRequests })
+
+      expect(started(resumed)).toEqual([])
+      expect(awaitingRequestsOf(resumed)).toEqual(awaitingRequests)
+    })
+  )
+
+  it.effect('compares outstanding params canonically: key order does not matter', () =>
+    Effect.gen(function* () {
+      const asked = ToolCall.make({
+        id: 'call_1',
+        name: 'delete_file',
+        params: { path: 'a.txt', options: { force: true, recursive: false } }
+      })
+
+      const reordered = ToolCall.make({
+        id: 'call_1',
+        name: 'delete_file',
+        params: { options: { recursive: false, force: true }, path: 'a.txt' }
+      })
+
+      const paused = yield* prepareToolBatch({ calls: [asked], tools: [gated], responses: [] })
+
+      const prepared = yield* prepareToolBatch({
+        calls: [reordered],
+        tools: [flipped],
+        responses: [],
+        awaitingRequests: paused.pendingRequests
+      })
+
+      // Reused (it keeps the policy it was asked under), not a fresh request.
+      expect(prepared.pendingRequests).toMatchObject([
+        { requestId: 'approval:call_1', policy: { mode: 'manual' } }
+      ])
+    })
+  )
+
+  it.effect('an approval under another approval id of the same call does not approve', () =>
+    Effect.gen(function* () {
+      const otherId = ToolApprovalResponse.make({
+        requestId: 'approval:call_1:background-v1:{}',
+        toolCallId: 'call_1',
+        decision: 'approved',
+        source: 'user'
+      })
+
+      const awaitingRequests = yield* requestApproval
+
+      for (const config of [
+        { tools: [gated], hitlResponses: [otherId] },
+        { tools: [flipped], hitlResponses: [otherId], awaitingRequests }
+      ]) {
+        const events = yield* batch(config)
+
+        expect(started(events)).toEqual([])
+        expect(tags(events)).not.toContain('ToolApprovalGranted')
+        expect(tags(events)).toContain('AgentAwaitingInput')
+      }
+    })
+  )
+
   it.effect('run resumes a paused transcript with the same binding', () =>
     Effect.gen(function* () {
       const user = UserMessage.make({ content: 'delete a.txt' })

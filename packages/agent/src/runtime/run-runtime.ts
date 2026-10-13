@@ -1,4 +1,4 @@
-import { Data, Effect, Match, Predicate, Ref, Stream } from 'effect'
+import { Array as Arr, Data, Effect, Match, Option, Predicate, Ref, Stream } from 'effect'
 import type {
   AgentEvent,
   AgentMessage,
@@ -161,6 +161,25 @@ const latestAwaitingRequests = (log: RuntimeSessionEventLog): ReadonlyArray<Hitl
     )
   }, undefined) ?? []
 
+const endsRun = (stored: RuntimeSessionEventLog['events'][number]) =>
+  Predicate.isTagged(stored.event, 'RunCompleted') ||
+  Predicate.isTagged(stored.event, 'RunFailed') ||
+  Predicate.isTagged(stored.event, 'RunInterrupted')
+
+/**
+ * The responses of the current pause chain: those logged since the last run that completed,
+ * failed or was interrupted. They include answers to earlier siblings of the batch being resumed
+ * (each answer resumes the same batch until it settles). Older answers belong to settled batches
+ * and must not reach the resume batch, where a provider-reused call id would match them.
+ */
+const pauseChainResponses = (log: RuntimeSessionEventLog): ReadonlyArray<HitlResponse> =>
+  replayRuntimeHitlResponses(
+    Option.match(Arr.findLastIndex(log.events, endsRun), {
+      onNone: () => log.events,
+      onSome: index => log.events.slice(index + 1)
+    })
+  )
+
 const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
   Match.value(response).pipe(
     Match.tag(
@@ -317,7 +336,7 @@ const makeAppendHitlResponseRuntimeStream = (
       })
 
       const messages = replayRuntimeSessionEvents(initialLog.events)
-      const priorResponses = replayRuntimeHitlResponses(initialLog.events)
+      const priorResponses = pauseChainResponses(initialLog)
       const hitlResponses = [...priorResponses, request.response]
 
       // The pause being resumed binds its unanswered approval requests (see `prepareToolBatch`).

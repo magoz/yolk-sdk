@@ -8,7 +8,13 @@ import {
   UserMessage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
-import { ContextTransformer, LLMDone, LLMToolCall, LoopConfig } from '@yolk-sdk/agent/loop'
+import {
+  ContextTransformer,
+  LLMDone,
+  LLMToolCall,
+  LoopConfig,
+  type LLMEvent
+} from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import {
   makeInMemorySessionEventStoreLayer,
@@ -47,6 +53,61 @@ const twoCalls = {
     LLMDone.make({ stopReason: 'tool_use' })
   ]
 }
+
+const approval = (toolCallId: string, decision: 'approved' | 'denied') =>
+  ToolApprovalResponse.make({
+    requestId: `approval:${toolCallId}`,
+    toolCallId,
+    decision,
+    source: 'user'
+  })
+
+const toolCalls = (...calls: ReadonlyArray<ToolCall>) => ({
+  events: [
+    ...calls.map(call => LLMToolCall.make({ call })),
+    LLMDone.make({ stopReason: 'tool_use' })
+  ]
+})
+
+const runtimeLayer = (...replies: ReadonlyArray<{ readonly events: ReadonlyArray<LLMEvent> }>) =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    LoopConfig.defaultLayer,
+    FauxProvider.layer(...replies),
+    TestToolExecutor.layer({ delete_file: 'deleted', read_file: 'read' }),
+    makeInMemorySessionEventStoreLayer()
+  )
+
+const appendResponse = (response: ToolApprovalResponse, runId: string, runtime: RuntimeConfig) =>
+  Effect.gen(function* () {
+    const store = yield* SessionEventStore
+    const log = yield* store.load('session_1')
+
+    return Array.from(
+      yield* runRuntime(
+        RuntimeRequest.AppendHitlResponse({
+          sessionId: 'session_1',
+          response,
+          runId,
+          expectedRevision: log.revision
+        }),
+        runtime
+      ).pipe(Stream.runCollect)
+    )
+  })
+
+const appendInput = (content: string, runId: string, runtime: RuntimeConfig) =>
+  runRuntime(
+    RuntimeRequest.AppendInput({
+      sessionId: 'session_1',
+      input: UserMessage.make({ content }),
+      runId
+    }),
+    runtime
+  ).pipe(
+    Stream.runCollect,
+    Effect.map(chunk => Array.from(chunk))
+  )
 
 const started = (events: ReadonlyArray<AgentEvent>) =>
   events.flatMap(event =>
@@ -102,6 +163,73 @@ describe('runtime approval binding', () => {
           FauxProvider.layer(twoCalls, Reply.text('done')),
           TestToolExecutor.layer({ delete_file: 'deleted' }),
           makeInMemorySessionEventStoreLayer()
+        )
+      )
+    )
+  )
+
+  it.effect('the resume keeps answers to earlier siblings of the same batch', () =>
+    Effect.gen(function* () {
+      const first = ToolCall.make({ id: 'call_1', name: 'delete_file', params: {} })
+      const second = ToolCall.make({ id: 'call_2', name: 'delete_file', params: {} })
+
+      expect(started(yield* appendInput('delete both', 'run_1', config(true)))).toEqual([])
+      expect(
+        started(yield* appendResponse(approval('call_1', 'approved'), 'run_2', config(true)))
+      ).toEqual([])
+
+      // The last answer resumes with both: call_1's approval came in an earlier resume.
+      const settled = yield* appendResponse(approval('call_2', 'approved'), 'run_3', config(true))
+
+      expect(started(settled)).toEqual([first.id, second.id])
+    }).pipe(
+      Effect.provide(
+        runtimeLayer(
+          toolCalls(
+            ToolCall.make({ id: 'call_1', name: 'delete_file', params: {} }),
+            ToolCall.make({ id: 'call_2', name: 'delete_file', params: {} })
+          ),
+          Reply.text('done')
+        )
+      )
+    )
+  )
+
+  it.effect('an old denial of a reused call id does not reach a later resume', () =>
+    Effect.gen(function* () {
+      const tools: RuntimeConfig = {
+        systemPrompt: 'Use tools.',
+        tools: [
+          toolDef(true),
+          ToolDef.make({ name: 'read_file', description: 'Read.', parameters: {} })
+        ],
+        model: 'faux'
+      }
+
+      // First batch: call_1 (gated) is denied; the run completes.
+      yield* appendInput('delete a', 'run_1', tools)
+      const deniedRun = yield* appendResponse(approval('call_1', 'denied'), 'run_2', tools)
+
+      expect(started(deniedRun)).toEqual([])
+      expect(deniedRun.map(event => event._tag)).toContain('AgentEnd')
+
+      // Second batch: the provider reuses call_1 for an automatic tool, beside a gated call_2.
+      expect(started(yield* appendInput('read a, delete b', 'run_3', tools))).toEqual([])
+
+      const resumed = yield* appendResponse(approval('call_2', 'approved'), 'run_4', tools)
+
+      expect(started(resumed)).toEqual(['call_1', 'call_2'])
+      expect(resumed.map(event => event._tag)).not.toContain('ToolApprovalDenied')
+    }).pipe(
+      Effect.provide(
+        runtimeLayer(
+          toolCalls(ToolCall.make({ id: 'call_1', name: 'delete_file', params: {} })),
+          Reply.text('kept'),
+          toolCalls(
+            ToolCall.make({ id: 'call_1', name: 'read_file', params: {} }),
+            ToolCall.make({ id: 'call_2', name: 'delete_file', params: {} })
+          ),
+          Reply.text('done')
         )
       )
     )

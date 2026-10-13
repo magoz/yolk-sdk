@@ -1,9 +1,11 @@
 /**
- * Approval binding through the Vercel Workflow loop: the package loop forwards each pause's
- * requests (`awaitingRequests`) to the tool step, which forwards them to the agent's
- * `runToolBatch`, as `agent-workflow-steps.ts` does. Two gated siblings pause, the host flips the
- * tool's policy to automatic, one sibling is answered: the other stays pending.
+ * Approval binding through the package Vercel Workflow loop and the agent's `runToolBatch`. The
+ * tool step here is a minimal stand-in, not `runAgentWorkflowToolBatchStep` (that needs the
+ * Workflow runtime and app layers): it forwards `awaitingRequests` the way the real step does,
+ * which the source guard below checks. Two gated siblings pause, the host flips the tool's policy
+ * to automatic, one sibling is answered: the other stays pending.
  */
+import { readFileSync } from 'node:fs'
 import { Effect, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
@@ -55,7 +57,21 @@ type Round = {
   readonly pending: ReadonlyArray<string>
 }
 
-describe('approval binding through the workflow loop', () => {
+describe('approval binding through the workflow loop (stand-in tool step)', () => {
+  it('the real tool step forwards awaitingRequests to prepareToolBatch and runToolBatch', () => {
+    const source = readFileSync(
+      'examples/next/lib/agents/workflow-runtime/agent-workflow-steps.ts',
+      'utf8'
+    )
+
+    const prepare = source.slice(source.indexOf('prepareToolBatch({'))
+    const run = source.slice(source.indexOf('runToolBatch({'))
+
+    expect(source).toContain('readonly awaitingRequests?: ReadonlyArray<unknown>')
+    expect(prepare.slice(0, prepare.indexOf('})'))).toContain('awaitingRequests')
+    expect(run.slice(0, run.indexOf('})'))).toContain('awaitingRequests')
+  })
+
   it.effect('keeps an unanswered sibling pending after the policy flips', () =>
     Effect.gen(function* () {
       const rounds: Array<Round> = []
