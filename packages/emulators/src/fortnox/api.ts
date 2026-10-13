@@ -11,7 +11,29 @@ import type { Hono } from '@emulators/core'
 import { Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { answeredOutsideCore, emulatorJobHeader, handlerFailedResponse } from '../emulator-http.ts'
-import type { EmulatorRouteEvidence } from '../route-evidence.ts'
+import { fortnoxReadRoutes } from './read-api.ts'
+import {
+  connectorRoute,
+  contains,
+  dateRange,
+  errorInformation,
+  fortnoxEmulatorErrorCodes,
+  invalidField,
+  isIsoDate,
+  isJsonObject,
+  matchesSearch,
+  paginate,
+  pdfResponse,
+  resourceUrl,
+  today,
+  unsupportedQuery,
+  jsonResponse,
+  type FortnoxApiEnv,
+  type FortnoxApiRoute,
+  type FortnoxEmulatorQuirks,
+  type RouteHandler,
+  type SearchTable
+} from './route-kit.ts'
 import {
   buildRow,
   compareNumbers,
@@ -30,58 +52,13 @@ import {
   type FortnoxEmulatorState
 } from './state.ts'
 
-/**
- * Drill knobs: each flips one observed quirk to the documented-but-wrong behavior, ONLY to prove
- * that the conformance cases catch a disagreement. Defaults follow the observed behavior.
- */
-export type FortnoxEmulatorQuirks = {
-  /** `false`: a positionally matched row that omits `Discount`/`DiscountType` resets them. */
-  readonly stickyRowDiscount?: boolean
-  /** `true`: a customer update with `""` clears the stored string instead of keeping it. */
-  readonly emptyStringClears?: boolean
-  /** `true`: `unpaid`/`unpaidoverdue`/`fullypaid` also match unbooked invoices. */
-  readonly paymentFiltersIncludeUnbooked?: boolean
-}
-
-export type FortnoxApiEnv = {
-  /** Clock in epoch milliseconds (the `unpaidoverdue` "today", new invoice dates, the outbox). */
-  readonly now: () => number
-  /** Origin used in `@url` links, for example `https://api.fortnox.se`. */
-  readonly linkOrigin: string
-  readonly quirks: Required<FortnoxEmulatorQuirks>
-}
-
-/**
- * `ErrorInformation` codes the emulator answers with. The two customer-not-found codes are copied
- * from the rejection fixture; the `2999xxx` codes are synthetic emulator codes.
- */
-export const fortnoxEmulatorErrorCodes = {
-  customerNotFound: 2000204,
-  invoiceCustomerNotFound: 2000433,
-  unauthorized: 2999001,
-  invalidBody: 2999002,
-  invalidField: 2999003,
-  readOnlyField: 2999004,
-  notEditable: 2999005,
-  invoiceNotFound: 2999006,
-  unknownRoute: 2999007,
-  unsupportedQuery: 2999008,
-  rateLimited: 2999009,
-  upstreamError: 2999010
-} as const
-
-/** Fortnox API base path. */
-export const fortnoxEmulatorBasePath = '/3'
-
-const jsonResponse = (status: number, body: unknown): Response =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' }
-  })
-
-/** A Fortnox `ErrorInformation` response with the lowercase fields of the rejection fixture. */
-export const errorInformation = (status: number, code: number, message: string): Response =>
-  jsonResponse(status, { ErrorInformation: { error: 1, message, code } })
+export {
+  errorInformation,
+  fortnoxEmulatorBasePath,
+  fortnoxEmulatorErrorCodes,
+  type FortnoxApiEnv,
+  type FortnoxEmulatorQuirks
+} from './route-kit.ts'
 
 const codes = fortnoxEmulatorErrorCodes
 
@@ -98,73 +75,22 @@ const invoiceNotFound = (): Response =>
 const invalidBody = (message: string): Response =>
   errorInformation(400, codes.invalidBody, `Synthetic: ${message}`)
 
-const invalidField = (message: string): Response =>
-  errorInformation(400, codes.invalidField, `Synthetic: ${message}`)
-
 const noReferencedEntity = (kind: string, value: string): Response =>
   invalidField(`${kind} ${value} does not exist in the emulated company.`)
+
+/**
+ * Customer and invoice writes do not emulate references to articles, cost centers, or projects
+ * (Fortnox would derive row and booking values from them); the read-only article and cost center
+ * routes do not change that.
+ */
+const unsupportedReference = (kind: string, value: string): Response =>
+  invalidField(`${kind} ${value}: references on customer and invoice writes are not emulated.`)
 
 const readOnlyField = (message: string): Response =>
   errorInformation(400, codes.readOnlyField, `Synthetic: ${message}`)
 
 const notEditable = (message: string): Response =>
   errorInformation(400, codes.notEditable, `Synthetic: ${message}`)
-
-const unsupportedQuery = (key: string): Response =>
-  errorInformation(
-    400,
-    codes.unsupportedQuery,
-    key === 'lastmodified'
-      ? 'Synthetic: query parameter lastmodified is not emulated (the emulator does not track modification times).'
-      : `Synthetic: query parameter ${key} is not emulated.`
-  )
-
-// The synthetic invoice preview PDF from the preview fixture (`bodyBase64`), copied as data.
-const previewPdfBase64 =
-  'JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFtdIC9Db3VudCAwID4+CmVuZG9iagp0cmFpbGVyCjw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg=='
-
-const previewPdfBytes = (): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(atob(previewPdfBase64), character => character.charCodeAt(0))
-
-type RouteRequest = {
-  readonly params: Readonly<Record<string, string>>
-  readonly query: URLSearchParams
-  /** Parsed JSON body; `undefined` when absent or not JSON. */
-  readonly body: Schema.Json | undefined
-}
-
-const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
-  value !== undefined && value !== null && Predicate.isObject(value) && !Array.isArray(value)
-
-type RouteHandler = (
-  state: FortnoxEmulatorState,
-  request: RouteRequest,
-  env: FortnoxApiEnv
-) => Response
-
-type FortnoxApiRoute = EmulatorRouteEvidence & {
-  /**
-   * Query parameters the route emulates; any other key answers 400 before the handler runs, so
-   * a rejected request never writes. Empty by default.
-   */
-  readonly queryKeys: ReadonlyArray<string>
-  readonly handler: RouteHandler
-}
-
-const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/
-
-/** A real `YYYY-MM-DD` calendar date (no JavaScript rollover such as `2026-02-30`). */
-const isIsoDate = (value: string): boolean => {
-  const parsed = Date.parse(`${value}T00:00:00.000Z`)
-
-  return (
-    isoDatePattern.test(value) &&
-    !Number.isNaN(parsed) &&
-    new Date(parsed).toISOString().slice(0, 10) === value
-  )
-}
-
-const today = (env: FortnoxApiEnv): string => new Date(env.now()).toISOString().slice(0, 10)
 
 /** `date` plus `days`, or `undefined` when the result is not a representable `YYYY-MM-DD` date. */
 const addDays = (date: string, days: number): string | undefined => {
@@ -212,10 +138,10 @@ const unsupportedVatType = (value: string): Response =>
   )
 
 const customerUrl = (env: FortnoxApiEnv, customerNumber: string): string =>
-  `${env.linkOrigin}${fortnoxEmulatorBasePath}/customers/${encodeURIComponent(customerNumber)}`
+  resourceUrl(env, 'customers', customerNumber)
 
 const invoiceUrl = (env: FortnoxApiEnv, documentNumber: string): string =>
-  `${env.linkOrigin}${fortnoxEmulatorBasePath}/invoices/${encodeURIComponent(documentNumber)}`
+  resourceUrl(env, 'invoices', documentNumber)
 
 const renderCustomer = (env: FortnoxApiEnv, customer: FortnoxEmulatorCustomer) => ({
   '@url': customerUrl(env, customer.CustomerNumber),
@@ -317,57 +243,6 @@ const unsupportedQueryKey = (
   return key === undefined ? undefined : unsupportedQuery(key)
 }
 
-const positiveInt = (
-  query: URLSearchParams,
-  key: string,
-  fallback: number,
-  maximum: number
-): number | Response => {
-  const raw = query.get(key)
-
-  if (raw === null) {
-    return fallback
-  }
-
-  const value = Number(raw)
-
-  return /^\d+$/.test(raw) && value >= 1 && value <= maximum
-    ? value
-    : invalidField(`query parameter ${key} must be an integer from 1 to ${maximum}.`)
-}
-
-/** Fortnox default and maximum page sizes. */
-const defaultLimit = 100
-
-const maxLimit = 500
-
-/** One page plus `MetaInformation` (`@TotalPages` is at least 1, as the empty-list fixture shows). */
-const paginate = <A>(
-  items: ReadonlyArray<A>,
-  query: URLSearchParams
-): { readonly items: ReadonlyArray<A>; readonly meta: Record<string, number> } | Response => {
-  const limit = positiveInt(query, 'limit', defaultLimit, maxLimit)
-  const page = positiveInt(query, 'page', 1, Number.MAX_SAFE_INTEGER)
-
-  if (limit instanceof Response) return limit
-
-  if (page instanceof Response) return page
-
-  return {
-    items: items.slice((page - 1) * limit, page * limit),
-    meta: {
-      '@CurrentPage': page,
-      '@TotalPages': Math.max(1, Math.ceil(items.length / limit)),
-      '@TotalResources': items.length
-    }
-  }
-}
-
-const contains = (value: string, search: string): boolean =>
-  value.toLowerCase().includes(search.toLowerCase())
-
-type CustomerSearch = (customer: FortnoxEmulatorCustomer, value: string) => boolean
-
 const customerSearch = {
   customernumber: (customer, value) => customer.CustomerNumber === value,
   name: (customer, value) => contains(customer.Name, value),
@@ -375,7 +250,7 @@ const customerSearch = {
   email: (customer, value) => contains(customer.Email, value),
   city: (customer, value) => contains(customer.City, value),
   phone: (customer, value) => contains(customer.Phone1, value) || contains(customer.Phone2, value)
-} satisfies Record<string, CustomerSearch>
+} satisfies SearchTable<FortnoxEmulatorCustomer>
 
 const customerListQueryKeys: ReadonlyArray<string> = [
   'page',
@@ -394,11 +269,7 @@ const listCustomers: RouteHandler = (state, { query }, env) => {
   const matching = state.customers.filter(
     customer =>
       (filter === null || customer.Active === (filter === 'active')) &&
-      Object.entries(customerSearch).every(([key, matches]) => {
-        const value = query.get(key)
-
-        return value === null || matches(customer, value)
-      })
+      matchesSearch(customer, query, customerSearch)
   )
 
   const page = paginate(matching, query)
@@ -473,8 +344,8 @@ type CustomerUpdates = {
 
 /**
  * Why a customer field value is not emulated (fail closed), or `undefined`. The emulated company
- * has only SEK, no cost centers, terms of payment in whole days (0–365), `VATType` `SEVAT`, and
- * `Type` `COMPANY` or `PRIVATE`.
+ * has only SEK, terms of payment in whole days (0–365), `VATType` `SEVAT`, and `Type` `COMPANY` or
+ * `PRIVATE`; cost center references are not emulated on writes.
  */
 const unsupportedCustomerValue = (
   key: CustomerStringField,
@@ -484,7 +355,7 @@ const unsupportedCustomerValue = (
     case 'Currency':
       return value === 'SEK' ? undefined : noReferencedEntity('Currency', value)
     case 'CostCenter':
-      return value === '' ? undefined : noReferencedEntity('CostCenter', value)
+      return value === '' ? undefined : unsupportedReference('CostCenter', value)
     case 'TermsOfPayment':
       return termsOfPaymentDays(value) === undefined ? unsupportedTermsOfPayment(value) : undefined
     case 'VATType':
@@ -633,14 +504,12 @@ const matchesInvoiceFilter = (
   }
 }
 
-type InvoiceSearch = (invoice: FortnoxEmulatorInvoice, value: string) => boolean
-
 const invoiceSearch = {
   customernumber: (invoice, value) => invoice.CustomerNumber === value,
   customername: (invoice, value) => contains(invoice.CustomerName, value),
   documentnumber: (invoice, value) => invoice.DocumentNumber === value,
   ocr: (invoice, value) => invoice.OCR === value
-} satisfies Record<string, InvoiceSearch>
+} satisfies SearchTable<FortnoxEmulatorInvoice>
 
 const invoiceListQueryKeys: ReadonlyArray<string> = [
   'page',
@@ -658,28 +527,16 @@ const listInvoices: RouteHandler = (state, { query }, env) => {
     return invalidField(`unknown invoice filter ${filter}.`)
   }
 
-  const fromDate = query.get('fromdate')
-  const toDate = query.get('todate')
+  const range = dateRange(query)
 
-  for (const [key, value] of [
-    ['fromdate', fromDate],
-    ['todate', toDate]
-  ] as const) {
-    if (value !== null && !isIsoDate(value)) {
-      return invalidField(`query parameter ${key} must be a YYYY-MM-DD date.`)
-    }
-  }
+  if (range instanceof Response) return range
 
   const matching = state.invoices.filter(
     invoice =>
       (filter === null || matchesInvoiceFilter(invoice, filter, env)) &&
-      (fromDate === null || invoice.InvoiceDate >= fromDate) &&
-      (toDate === null || invoice.InvoiceDate <= toDate) &&
-      Object.entries(invoiceSearch).every(([key, matches]) => {
-        const value = query.get(key)
-
-        return value === null || matches(invoice, value)
-      })
+      (range.from === null || invoice.InvoiceDate >= range.from) &&
+      (range.to === null || invoice.InvoiceDate <= range.to) &&
+      matchesSearch(invoice, query, invoiceSearch)
   )
 
   const page = paginate(matching, query)
@@ -707,8 +564,8 @@ type RowPatch = {
 const vatRates: ReadonlyArray<number> = [...fortnoxEmulatorVatCodes.keys()]
 
 /**
- * One row of an `InvoiceRows` write. `null` means omitted. Referenced articles, cost centers, and
- * projects must exist (the emulated company has none); accounts must be in 1000-8999.
+ * One row of an `InvoiceRows` write. `null` means omitted. References to articles, cost centers,
+ * and projects are not emulated on writes; accounts must be in 1000-8999.
  */
 const rowPatch = (value: Schema.Json, index: number): RowPatch | Response => {
   if (!isJsonObject(value)) {
@@ -746,7 +603,7 @@ const rowPatch = (value: Schema.Json, index: number): RowPatch | Response => {
       case 'Project':
         if (!Predicate.isString(field)) return invalidField(`${label(key)} must be a string.`)
 
-        if (field !== '') return noReferencedEntity(key, field)
+        if (field !== '') return unsupportedReference(key, field)
 
         patch[key] = field
         break
@@ -976,7 +833,7 @@ const invoiceUpdates = (
         break
       case 'CostCenter':
       case 'Project':
-        if (value !== '') return noReferencedEntity(key, value)
+        if (value !== '') return unsupportedReference(key, value)
 
         scalars[key] = value
         break
@@ -1102,12 +959,7 @@ const createInvoice: RouteHandler = (state, { body }, env) => {
 }
 
 const previewInvoice: RouteHandler = (state, { params }) =>
-  findInvoice(state, params.DocumentNumber ?? '') === undefined
-    ? invoiceNotFound()
-    : new Response(previewPdfBytes(), {
-        status: 200,
-        headers: { 'content-type': 'application/pdf' }
-      })
+  findInvoice(state, params.DocumentNumber ?? '') === undefined ? invoiceNotFound() : pdfResponse()
 
 /** Marks the invoice `Sent` and records an outbox entry. Nothing is ever delivered. */
 const emailInvoice: RouteHandler = (state, { params }, env) => {
@@ -1143,24 +995,6 @@ const emailInvoice: RouteHandler = (state, { params }, env) => {
 
 const companyInformation: RouteHandler = state =>
   jsonResponse(200, { CompanyInformation: state.company })
-
-const connectorRoute = (
-  method: string,
-  path: string,
-  write: boolean,
-  caseIds: ReadonlyArray<string>,
-  handler: RouteHandler,
-  queryKeys: ReadonlyArray<string> = []
-): FortnoxApiRoute => ({
-  method,
-  path: `${fortnoxEmulatorBasePath}${path}`,
-  kind: 'connector',
-  write,
-  caseIds,
-  evidence: 'unverified',
-  queryKeys,
-  handler
-})
 
 const listCase = 'fortnox.invoice.list-populated'
 
@@ -1200,7 +1034,8 @@ export const fortnoxApiRoutes: ReadonlyArray<FortnoxApiRoute> = [
   connectorRoute('GET', '/invoices/{DocumentNumber}', false, [discountCase, emailCase], getInvoice),
   connectorRoute('PUT', '/invoices/{DocumentNumber}', true, [discountCase], updateInvoice),
   connectorRoute('GET', '/invoices/{DocumentNumber}/preview', false, [previewCase], previewInvoice),
-  connectorRoute('GET', '/invoices/{DocumentNumber}/email', true, [emailCase], emailInvoice)
+  connectorRoute('GET', '/invoices/{DocumentNumber}/email', true, [emailCase], emailInvoice),
+  ...fortnoxReadRoutes
 ]
 
 /** One observed Fortnox quirk the emulator implements, and the case that claims it. */

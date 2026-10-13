@@ -5,12 +5,28 @@
  * Entity shapes and the default entities follow the synthetic Fortnox conformance fixtures, copied
  * as data (the same customer and document numbers as `fortnoxConformanceFixtureSeeds`), never
  * imported from SDK code. Where no fixture records a value, the default is synthesized and says
- * so below: customer 1002, most invoice rows, and the company information have no fixture.
+ * so below: customer 1002, most invoice rows, and the company information have no fixture. The
+ * read-only resources (articles, prices, offers, payments, the inbox, settings, registers, ...)
+ * have no fixture at all; they live in `src/fortnox/read-state.ts`.
  *
  * @experimental
  */
-import { Result, Struct } from 'effect'
+import { Predicate, Result, Struct } from 'effect'
 import * as Schema from 'effect/Schema'
+import {
+  buildReadState,
+  compareNumbers,
+  defaultReadEntities,
+  duplicate,
+  emptyCompanyReadEntities,
+  fortnoxReadSeedFields,
+  fortnoxReadStateFields,
+  round2,
+  type FortnoxReadEntities,
+  type FortnoxReadState
+} from './read-state.ts'
+
+export { compareNumbers, round2 } from './read-state.ts'
 
 const DiscountType = Schema.Literals(['PERCENT', 'AMOUNT'])
 
@@ -173,12 +189,13 @@ export const FortnoxEmulatorStateSchema = Schema.Struct({
   customers: Schema.Array(FortnoxEmulatorCustomer),
   invoices: Schema.Array(FortnoxEmulatorInvoice),
   outbox: Schema.Array(FortnoxEmulatorOutboxEntry),
-  counters: Counters
+  counters: Counters,
+  ...fortnoxReadStateFields
 })
 
 /**
  * The emulator state. The container is mutable (route handlers replace whole entity lists);
- * every entity is replaced, never edited in place.
+ * every entity is replaced, never edited in place. No route writes the read-only parts.
  */
 export type FortnoxEmulatorState = {
   company: FortnoxEmulatorCompany
@@ -186,7 +203,7 @@ export type FortnoxEmulatorState = {
   invoices: ReadonlyArray<FortnoxEmulatorInvoice>
   outbox: ReadonlyArray<FortnoxEmulatorOutboxEntry>
   counters: typeof Counters.Type
-}
+} & FortnoxReadState
 
 /** A seeded invoice row: the writable row fields; totals and `VATCode` are derived. */
 export const FortnoxEmulatorInvoiceRowSeed = Schema.Struct({
@@ -238,13 +255,20 @@ export type FortnoxEmulatorProfile = typeof FortnoxEmulatorProfile.Type
 
 /**
  * A typed seed. Start from `profile` (default `'default'`, the fixture entities); `company`,
- * `customers`, and `invoices`, when given, replace that part of the profile.
+ * `customers`, `invoices`, and each read-only part (`articles`, `priceLists`, `prices`,
+ * `costCenters`, `invoicePayments`, `supplierInvoicePayments`, `offers`, `printTemplates`,
+ * `inboxFolders`, `inboxFiles`, `companySettings`, `lockedPeriod`, `predefinedAccounts`, `labels`,
+ * `modesOfPayment`, `termsOfPayment`, `termsOfDelivery`, `waysOfDelivery`, `units`, `me`), when
+ * given, replace that part of the profile. Parts that reference others (offers name customers,
+ * invoice payments name invoices, ...) must stay consistent with them; replacing `customers` or
+ * `invoices` without seeding `offers` or `invoicePayments` starts those empty.
  */
 export const FortnoxEmulatorSeed = Schema.Struct({
   profile: Schema.optionalKey(FortnoxEmulatorProfile),
   company: Schema.optionalKey(FortnoxEmulatorCompany),
   customers: Schema.optionalKey(Schema.Array(FortnoxEmulatorCustomerSeed)),
-  invoices: Schema.optionalKey(Schema.Array(FortnoxEmulatorInvoiceSeed))
+  invoices: Schema.optionalKey(Schema.Array(FortnoxEmulatorInvoiceSeed)),
+  ...fortnoxReadSeedFields
 })
 
 export type FortnoxEmulatorSeed = typeof FortnoxEmulatorSeed.Type
@@ -276,8 +300,6 @@ export const fortnoxEmulatorVatCodes = new Map([
   [6, 'MP3'],
   [0, 'MF']
 ])
-
-export const round2 = (value: number): number => Math.round(value * 100) / 100
 
 /** Row total: `Price × DeliveredQuantity`, less a percent (or amount) discount. */
 export const rowTotal = (
@@ -539,6 +561,7 @@ type ProfileEntities = {
   readonly company: FortnoxEmulatorCompany
   readonly customers: ReadonlyArray<FortnoxEmulatorCustomerSeed>
   readonly invoices: ReadonlyArray<FortnoxEmulatorInvoiceSeed>
+  readonly reads: FortnoxReadEntities
 }
 
 const unbooked = (invoice: FortnoxEmulatorInvoiceSeed): FortnoxEmulatorInvoiceSeed => {
@@ -553,22 +576,26 @@ const profileEntities = (profile: FortnoxEmulatorProfile): ProfileEntities => {
       return {
         company: defaultCompany,
         customers: [exampleCustomer, exampleTrading],
-        invoices: defaultInvoices
+        invoices: defaultInvoices,
+        reads: defaultReadEntities
       }
     case 'empty-company':
-      return { company: defaultCompany, customers: [], invoices: [] }
+      return {
+        company: defaultCompany,
+        customers: [],
+        invoices: [],
+        reads: emptyCompanyReadEntities
+      }
     case 'no-booked-invoices':
+      // Payments follow booked invoices: with every invoice unbooked, there are none.
       return {
         company: defaultCompany,
         customers: [exampleCustomer, exampleTrading],
-        invoices: defaultInvoices.map(unbooked)
+        invoices: defaultInvoices.map(unbooked),
+        reads: { ...defaultReadEntities, invoicePayments: [] }
       }
   }
 }
-
-/** Numeric-aware order for Fortnox numbers (`"999" < "1001"`). */
-export const compareNumbers = (left: string, right: string): number =>
-  left.localeCompare(right, 'en', { numeric: true })
 
 const customerFromSeed = (seed: FortnoxEmulatorCustomerSeed): FortnoxEmulatorCustomer => {
   const countryCode = seed.CountryCode ?? 'SE'
@@ -677,9 +704,6 @@ export const invoiceFromSeed = (
   }
 }
 
-const duplicate = (values: ReadonlyArray<string | number>): string | number | undefined =>
-  values.find((value, index) => values.indexOf(value) !== index)
-
 const quantityProblem = (rows: ReadonlyArray<FortnoxEmulatorInvoiceRowSeed>) =>
   rows.find(
     row => row.DeliveredQuantity !== undefined && !Number.isFinite(Number(row.DeliveredQuantity))
@@ -730,12 +754,28 @@ const nextNumber = (numbers: ReadonlyArray<string>): number =>
 
 /** Build the emulator state for a decoded seed; a string is an integrity problem. */
 const stateFromSeed = (seed: FortnoxEmulatorSeed): FortnoxEmulatorState | string => {
-  const profile = profileEntities(seed.profile ?? 'default')
+  const {
+    profile: profileName,
+    company,
+    customers: customerSeeds,
+    invoices: invoiceSeeds,
+    ...readSeeds
+  } = seed
+
+  const profile = profileEntities(profileName ?? 'default')
 
   const entities: ProfileEntities = {
-    company: seed.company ?? profile.company,
-    customers: seed.customers ?? profile.customers,
-    invoices: seed.invoices ?? profile.invoices
+    company: company ?? profile.company,
+    customers: customerSeeds ?? profile.customers,
+    invoices: invoiceSeeds ?? profile.invoices,
+    // Profile offers and invoice payments reference profile customers and invoices; a seed that
+    // replaces those without seeding the dependents starts with none, so it stays valid.
+    reads: {
+      ...profile.reads,
+      offers: customerSeeds === undefined ? profile.reads.offers : [],
+      invoicePayments: invoiceSeeds === undefined ? profile.reads.invoicePayments : [],
+      ...readSeeds
+    }
   }
 
   const problem = seedProblem(entities)
@@ -765,7 +805,15 @@ const stateFromSeed = (seed: FortnoxEmulatorSeed): FortnoxEmulatorState | string
     )
     .sort((left, right) => compareNumbers(left.DocumentNumber, right.DocumentNumber))
 
+  const reads = buildReadState(entities.reads, {
+    customers,
+    invoiceNumbers: invoices.map(invoice => invoice.DocumentNumber)
+  })
+
+  if (Predicate.isString(reads)) return reads
+
   return {
+    ...reads,
     company: entities.company,
     customers,
     invoices,

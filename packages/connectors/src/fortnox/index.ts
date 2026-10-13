@@ -1,14 +1,42 @@
+import { fortnoxArticleActions } from './articles.ts'
+import { fortnoxCostCenterActions } from './cost-centers.ts'
 import { fortnoxListSupplierInvoiceFilesAction } from './files.ts'
+import { fortnoxInboxActions } from './inbox.ts'
+import { fortnoxOfferActions } from './offers.ts'
+import { fortnoxPaymentActions } from './payments.ts'
+import { fortnoxPriceActions } from './prices.ts'
+import { fortnoxPrintActions } from './print-templates.ts'
+import { fortnoxProfileActions } from './profile.ts'
+import { fortnoxSettingsRegisterActions } from './settings-registers.ts'
+import { fortnoxSettingsActions } from './settings.ts'
+
+export * from './articles.ts'
+
+export * from './cost-centers.ts'
 
 export * from './files.ts'
 
+export * from './inbox.ts'
+
+export * from './offers.ts'
+
+export * from './payments.ts'
+
+export * from './prices.ts'
+
+export * from './print-templates.ts'
+
+export * from './profile.ts'
+
+export * from './settings-registers.ts'
+
+export * from './settings.ts'
+
 import { Chunk } from 'effect'
 import * as Schema from 'effect/Schema'
-import * as SchemaAST from 'effect/SchemaAST'
-import * as SchemaParser from 'effect/SchemaParser'
-import * as SchemaTransformation from 'effect/SchemaTransformation'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
+import { closedInput } from './fields.ts'
 import {
   fortnoxConnectorId,
   FortnoxCompanyInformationOAuthCredentialSlot,
@@ -85,22 +113,8 @@ const SupplierInvoicesResponse = Schema.Struct({
   MetaInformation: FortnoxMetaInformation
 })
 
-// Parse options are call-scoped in Effect 4, not schema annotations. Customer writes reject
-// unknown keys (including Fortnox's read-only `Country` and list-only `Phone`) instead of
-// stripping them, so a request is never silently sent without a field the caller supplied.
-// Take fields, not a Class: `Schema.toType` (used by `executeTyped`) accepts an existing Class
-// instance without checking its keys, so the closed member must be a Struct.
-const closedInput = <Fields extends Schema.Struct.Fields>(fields: Fields) =>
-  Schema.declareConstructor<Schema.Struct<Fields>['Type'], Schema.Struct<Fields>['Encoded']>()(
-    [Schema.Struct(fields)],
-    ([member]) =>
-      (input, _ast, options) =>
-        SchemaParser.decodeUnknownEffect(member, { ...options, onExcessProperty: 'error' })(input),
-    {
-      toCodecJson: ([member]) => new SchemaAST.Link(member.ast, SchemaTransformation.passthrough())
-    }
-  )
-
+// Customer writes reject unknown keys (including Fortnox's read-only `Country` and list-only
+// `Phone`) through `closedInput` instead of stripping them.
 const fortnoxCustomerContactFieldsNote =
   'Country is read-only and derived from CountryCode; set CountryCode. Customers use Phone1/Phone2, not Phone. Unknown fields are rejected.'
 
@@ -358,7 +372,7 @@ export const fortnoxGetSupplierInvoiceAction = defineAction({
 export const FortnoxConnector = defineConnector({
   id: fortnoxConnectorId,
   description:
-    'Fortnox company, customer, invoice, supplier, and supplier-invoice actions without sending or booking.',
+    'Fortnox company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print-template, inbox, settings, and profile actions. Destructive actions (delete, bookkeep, cancel, convert, email, mark sent) are marked destructive.',
   actions: [
     fortnoxListSupplierInvoiceFilesAction,
     fortnoxGetCompanyInformationAction,
@@ -373,6 +387,16 @@ export const FortnoxConnector = defineConnector({
     fortnoxListSuppliersAction,
     fortnoxGetSupplierAction,
     fortnoxListSupplierInvoicesAction,
-    fortnoxGetSupplierInvoiceAction
+    fortnoxGetSupplierInvoiceAction,
+    ...fortnoxArticleActions,
+    ...fortnoxPriceActions,
+    ...fortnoxCostCenterActions,
+    ...fortnoxPaymentActions,
+    ...fortnoxOfferActions,
+    ...fortnoxPrintActions,
+    ...fortnoxInboxActions,
+    ...fortnoxSettingsActions,
+    ...fortnoxSettingsRegisterActions,
+    ...fortnoxProfileActions
   ]
 })

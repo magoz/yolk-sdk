@@ -1,28 +1,14 @@
-import { Chunk, Effect, Predicate } from 'effect'
+import { Chunk, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
-import { CredentialSlot, resolveCredential } from '../credential.ts'
+import { CredentialSlot } from '../credential.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import type { ConnectorFileTransferBudget } from '../file-transfer.ts'
-import {
-  OpaqueId,
-  SafeText,
-  credentialFailure,
-  decodeInput,
-  failTransfer,
-  fileBytes,
-  readBytes,
-  safeToken,
-  validateTransfer
-} from '../transfer-internal.ts'
+import { OpaqueId, SafeText, decodeInput, fileBytes } from '../transfer-internal.ts'
 import { FortnoxInvoiceOAuthCredentialSlot, fortnoxOAuthSlotId } from './oauth.ts'
 import { FortnoxDocumentNumber, FortnoxGivenNumber, FortnoxPagination } from './schemas.ts'
-import {
-  FortnoxMetaInformation,
-  fortnoxApiBaseUrl,
-  paginationFromApi,
-  readFortnox
-} from './shared.ts'
+import { FortnoxMetaInformation, paginationFromApi, readFortnox } from './shared.ts'
+import { downloadFortnoxBytes } from './transfer.ts'
 
 export const fortnoxArchiveScope = 'archive'
 
@@ -110,44 +96,13 @@ const download = <Id extends string>(
   preview: boolean
 ) =>
   Effect.gen(function* () {
-    const limits = yield* validateTransfer(integration, 'fortnox', budget)
-
-    const credential = yield* resolveCredential(
+    const response = yield* downloadFortnoxBytes(
       integration,
-      preview ? FortnoxInvoiceOAuthCredentialSlot : FortnoxArchiveOAuthCredentialSlot
-    ).pipe(Effect.mapError(credentialFailure))
-
-    if (!Predicate.isTagged(credential, 'OAuthCredential') || credential.provider !== 'fortnox')
-      return yield* failTransfer('credential_failed')
-    const token = yield* safeToken(credential.accessToken)
-
-    const path = preview
-      ? `invoices/${encodeURIComponent(id)}/preview`
-      : `archive/${encodeURIComponent(id)}`
-
-    const response = yield* readBytes(
-      `${fortnoxApiBaseUrl}/${path}`,
-      preview
-        ? { authorization: `Bearer ${token}` }
-        : { authorization: `Bearer ${token}`, accept: 'application/octet-stream' },
-      limits
+      preview ? FortnoxInvoiceOAuthCredentialSlot : FortnoxArchiveOAuthCredentialSlot,
+      preview ? `invoices/${encodeURIComponent(id)}/preview` : `archive/${encodeURIComponent(id)}`,
+      budget,
+      preview ? 'pdf' : 'binary'
     )
-
-    // Fortnox may serve previews as application/octet-stream or with a charset suffix,
-    // so accept any content type and verify the PDF magic bytes instead.
-    if (preview) {
-      const bytes = response.bytes
-
-      const isPdf =
-        bytes.length >= 5 &&
-        bytes[0] === 0x25 &&
-        bytes[1] === 0x50 &&
-        bytes[2] === 0x44 &&
-        bytes[3] === 0x46 &&
-        bytes[4] === 0x2d
-
-      if (!isPdf) return yield* failTransfer('invalid_metadata')
-    }
 
     return { ...fileBytes(response.bytes), source: { id, generatedPreview: preview } }
   })

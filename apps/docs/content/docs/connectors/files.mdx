@@ -41,22 +41,22 @@ budget without `maxMetadataBytes`; existing OneDrive download keeps its original
 
 All names below are exported through the indicated `@yolk-sdk/connectors/*` subpath.
 
-| Provider/subpath       | Host byte retrieval                                           | Host byte writes                           | Discovery and limits                                                                    |
-| ---------------------- | ------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| Dropbox (`dropbox`)    | `downloadDropboxFile`                                         | `createDropboxFile`, `updateDropboxFile`   | Existing metadata actions; 150,000,000-byte single upload cap                           |
-| OneDrive (`microsoft`) | `downloadOneDriveItem`                                        | `createOneDriveFile`, `updateOneDriveFile` | Existing drive actions; 250,000,000-byte single upload cap                              |
-| R2 (`r2-storage`)      | `getR2Object`                                                 | `createR2Object`, `updateR2Object`         | Host supplies bucket/key and `R2ObjectClient`; 100,000,000-byte PUT cap                 |
-| Drive (`google`)       | `downloadGoogleDriveFile`, `exportGoogleDriveFile`            | Not added                                  | Blob versus explicit native export; 10,000,000-byte export cap                          |
-| Fortnox (`fortnox`)    | `downloadFortnoxInvoicePreview`, `downloadFortnoxArchiveFile` | Not added                                  | `fortnox.list_supplier_invoice_files`; preview is generated PDF, not immutable original |
-| Notion (`notion`)      | `downloadNotionFile`                                          | Not added                                  | Page/property/block file objects; required host URL policy                              |
-| Gmail (`google`)       | `downloadGmailAttachment`                                     | Not added                                  | Existing attachment discovery; canonical base64url decoded inside host helper           |
-| Outlook (`microsoft`)  | `downloadOutlookAttachment`                                   | `addOutlookAttachment` (drafts)            | Existing discovery; file attachments only, raw `/$value`; uploads up to 150 MiB         |
-| IMAP/POP3 (`email`)    | `downloadEmailAttachment`                                     | Not added                                  | Optional `EmailClient.getAttachmentBytes`; no MIME library bundled                      |
-| Telegram (`telegram`)  | `downloadTelegramFile`                                        | Not added                                  | File IDs from messages available to the bot; 20,000,000-byte hosted download cap        |
-| Todoist (`todoist`)    | `downloadTodoistAttachment`                                   | Not added                                  | `todoist.list_comments` with task/project selection; download by comment ID             |
-| GitHub (`github`)      | Not added                                                     | `uploadGithubAttachment`                   | Undocumented user-attachments endpoint; user token only; 10 MB image / 100 MB video cap |
-| Afloat (`afloat`)      | Reuse remote MCP file grants                                  | Reuse remote MCP upload intents            | Dynamic discovery owns exact contracts; no duplicate SDK file wrappers                  |
-| Figma (`figma`)        | Reuse remote MCP asset exports                                | Reuse remote MCP asset/design tools        | No whole `.fig` download or arbitrary file-upload claim                                 |
+| Provider/subpath       | Host byte retrieval                                                                                                      | Host byte writes                           | Discovery and limits                                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Dropbox (`dropbox`)    | `downloadDropboxFile`                                                                                                    | `createDropboxFile`, `updateDropboxFile`   | Existing metadata actions; 150,000,000-byte single upload cap                                                           |
+| OneDrive (`microsoft`) | `downloadOneDriveItem`                                                                                                   | `createOneDriveFile`, `updateOneDriveFile` | Existing drive actions; 250,000,000-byte single upload cap                                                              |
+| R2 (`r2-storage`)      | `getR2Object`                                                                                                            | `createR2Object`, `updateR2Object`         | Host supplies bucket/key and `R2ObjectClient`; 100,000,000-byte PUT cap                                                 |
+| Drive (`google`)       | `downloadGoogleDriveFile`, `exportGoogleDriveFile`                                                                       | Not added                                  | Blob versus explicit native export; 10,000,000-byte export cap                                                          |
+| Fortnox (`fortnox`)    | `downloadFortnoxInvoicePreview`, `downloadFortnoxOfferPreview`, `downloadFortnoxArchiveFile`, `downloadFortnoxInboxFile` | `uploadFortnoxInboxFile`                   | `fortnox.list_supplier_invoice_files`, `fortnox.get_inbox_folder`; previews are generated PDFs; 50 MiB inbox upload cap |
+| Notion (`notion`)      | `downloadNotionFile`                                                                                                     | Not added                                  | Page/property/block file objects; required host URL policy                                                              |
+| Gmail (`google`)       | `downloadGmailAttachment`                                                                                                | Not added                                  | Existing attachment discovery; canonical base64url decoded inside host helper                                           |
+| Outlook (`microsoft`)  | `downloadOutlookAttachment`                                                                                              | `addOutlookAttachment` (drafts)            | Existing discovery; file attachments only, raw `/$value`; uploads up to 150 MiB                                         |
+| IMAP/POP3 (`email`)    | `downloadEmailAttachment`                                                                                                | Not added                                  | Optional `EmailClient.getAttachmentBytes`; no MIME library bundled                                                      |
+| Telegram (`telegram`)  | `downloadTelegramFile`                                                                                                   | Not added                                  | File IDs from messages available to the bot; 20,000,000-byte hosted download cap                                        |
+| Todoist (`todoist`)    | `downloadTodoistAttachment`                                                                                              | Not added                                  | `todoist.list_comments` with task/project selection; download by comment ID                                             |
+| GitHub (`github`)      | Not added                                                                                                                | `uploadGithubAttachment`                   | Undocumented user-attachments endpoint; user token only; 10 MB image / 100 MB video cap                                 |
+| Afloat (`afloat`)      | Reuse remote MCP file grants                                                                                             | Reuse remote MCP upload intents            | Dynamic discovery owns exact contracts; no duplicate SDK file wrappers                                                  |
+| Figma (`figma`)        | Reuse remote MCP asset exports                                                                                           | Reuse remote MCP asset/design tools        | No whole `.fig` download or arbitrary file-upload claim                                                                 |
 
 ## Create and update explicitly
 
@@ -207,6 +207,22 @@ separate from the customer/invoice action writes.
 These two new scopes are opt-in, not automatically added to the existing five-scope combined slot.
 Archive response modeling and generic list pagination in Fortnox OpenAPI are imperfect; validate
 sanitized provider responses before production, never infer a final page from missing metadata.
+
+`downloadFortnoxOfferPreview` takes `{ documentNumber }` and reads `/3/offers/{DocumentNumber}/preview`
+with the offer slot (`offer`); like the invoice preview it verifies PDF magic bytes and does not mark
+the offer Sent.
+
+Inbox helpers use `FortnoxInboxOAuthCredentialSlot` (`inbox`). `downloadFortnoxInboxFile` takes
+`{ fileId }` from `fortnox.get_inbox_folder` and reads `/3/inbox/{Id}`; it rejects `root` and the
+static folder IDs (`fortnoxInboxStaticFolderIds`), since a folder ID answers with folder JSON.
+`uploadFortnoxInboxFile` takes `{ folderId, fileName, contentType?, bytes }` and sends one
+`multipart/form-data` POST (field `file`) to `/3/inbox?folderid=…` through
+`ConnectorBinaryWriteHttpClient`. It validates the file name, picks a boundary absent from the bytes,
+never retries, and returns the uploaded file metadata, failing with `invalid_metadata` when the
+reported `Size` differs from the bytes sent. Fortnox documents no upload limit; the helper caps
+uploads at `fortnoxInboxUploadMaxBytes` (50 MiB) and fails larger files with
+`upload_session_required`. Upload query key and form field follow Fortnox's archived docs and
+official SDK; they are not yet observed live.
 
 Notion input is a provider `{ type: 'file', file: { url, expiry_time? } }` or
 `{ type: 'external', external: { url } }` object from existing page/property/block reads. Pass a fourth

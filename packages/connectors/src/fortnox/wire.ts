@@ -61,7 +61,7 @@ const NumberFromNumberOrNumericString = Schema.Union([
   Schema.Null
 ])
 
-const WireNullableNumber = Schema.optional(NumberFromNumberOrNumericString)
+export const WireNullableNumber = Schema.optional(NumberFromNumberOrNumericString)
 
 // Supplier invoice amounts stay strings publicly ("do not coerce financial values").
 // The wire boundary additionally accepts a finite JSON number and records its string form.
@@ -96,7 +96,47 @@ const StringFromStringOrFiniteNumber = Schema.Union([
   Schema.Null
 ])
 
-const WireNullableAmountString = Schema.optional(StringFromStringOrFiniteNumber)
+export const WireNullableAmountString = Schema.optional(StringFromStringOrFiniteNumber)
+
+// Fortnox docs examples send some identifiers as a JSON string in one response and a JSON integer
+// in another. Accept both at the wire; public schemas stay strings.
+const IntToString = Schema.Int.pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transform({
+      decode: (value: number) => String(value),
+      encode: (value: string) => Number(value)
+    })
+  )
+)
+
+export const StringOrInt = Schema.Union([Schema.String, IntToString])
+
+const EmptyStringToNull = Schema.Literal('').pipe(
+  Schema.decodeTo(
+    Schema.Null,
+    SchemaTransformation.transform({
+      decode: (): null => null,
+      encode: (): '' => ''
+    })
+  )
+)
+
+const IntegerStringToInt = Schema.String.check(Schema.isPattern(/^[+-]?[0-9]+$/u)).pipe(
+  Schema.decodeTo(
+    Schema.Int,
+    SchemaTransformation.transform({
+      decode: (value: string) => Number(value),
+      encode: (value: number) => String(value)
+    })
+  )
+)
+
+// Integer fields Fortnox sometimes sends as numeric strings ("" meaning unset); public type is
+// int | null | undefined.
+export const WireNullableInt = Schema.optional(
+  Schema.Union([Schema.Int, Schema.Null, EmptyStringToNull, IntegerStringToInt])
+)
 
 // Provider JSON arrays and public runtime Chunks are distinct decode boundaries.
 export const FortnoxInvoiceApi = Schema.Struct({

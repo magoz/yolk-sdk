@@ -101,7 +101,7 @@ implementations still validate external outputs themselves.
 | `@yolk-sdk/connectors/dropbox/conformance`         | Experimental: `dropboxConformanceCases`, `DropboxConformanceConfig`, `dropboxConformanceFixtures`, `dropboxConformanceFixtureSeeds` ([Conformance APIs](./conformance#connector-conformance))                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `@yolk-sdk/connectors/email`                       | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `@yolk-sdk/connectors/email/conformance`           | Experimental: `emailConformanceCases`, `EmailConformanceConfig`, `emailConformanceFixtures` (`PortFixture`s), `emailConformanceFixtureSeeds`, `emailClientLayerFromBackend`, `emailClientFromBackend`, `makeEmailReplayBackend`, `emailMessageNotFoundCode`; helpers `emailPortRequestJson`, `emailBackendMethods`, `emailPortName` ([Conformance APIs](./conformance#connector-conformance))                                                                                                                                                                                                             |
-| `@yolk-sdk/connectors/fortnox`                     | `FortnoxConnector`, shared/resource-scoped OAuth slots, read/write actions, resource/input/output schemas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `@yolk-sdk/connectors/fortnox`                     | `FortnoxConnector`, shared/resource-scoped OAuth slots, read/write/destructive actions, resource/input/output schemas, host-only preview/archive/inbox byte helpers                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `@yolk-sdk/connectors/fortnox/conformance`         | Experimental: `fortnoxConformanceCases`, `FortnoxConformanceConfig`, `fortnoxConformanceFixtures`, `fortnoxConformanceFixtureSeeds` ([Conformance APIs](./conformance#connector-conformance))                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `@yolk-sdk/connectors/github`                      | `GithubConnector`, `githubActions`, `GithubTokenSlot`, `GithubUploadTokenSlot`, issue/PR/repository actions and schemas, host-only `createGithubAppInstallationToken` and `uploadGithubAttachment`                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `@yolk-sdk/connectors/github/conformance`          | Experimental: `githubConformanceCases`, `GithubConformanceConfig`, `githubConformanceFixtures`, `githubConformanceFixtureSeeds`, `findGithubConformanceLeftovers` ([Conformance APIs](./conformance#connector-conformance))                                                                                                                                                                                                                                                                                                                                                                               |
@@ -136,9 +136,33 @@ are `FortnoxCustomerNumber`, `FortnoxDocumentNumber`, `FortnoxSupplierNumber`, a
 `FortnoxListSupplierInvoiceFilesInput`, `FortnoxListSupplierInvoiceFilesOutput`, and
 `FortnoxSupplierInvoiceFile`; both discovery input/output use `FortnoxGivenNumber`.
 `downloadFortnoxInvoicePreview` requires `FortnoxDocumentNumber`; archive file IDs stay strings.
-Customer/invoice create and update actions declare `write` access; sending or booking is not exposed
-and remains host approval policy. Opt-in file slots are `FortnoxConnectFileOAuthCredentialSlot` and
-`FortnoxArchiveOAuthCredentialSlot`; they are not on the combined slot. Read actions declare `read`; customer/invoice create and update actions declare `write`.
+Customer/invoice create and update actions declare `write` access; customer-invoice sending or
+booking is not exposed and remains host approval policy. Opt-in file slots are
+`FortnoxConnectFileOAuthCredentialSlot` and `FortnoxArchiveOAuthCredentialSlot`; they are not on the
+combined slot.
+
+Resource modules add, each with a `Fortnox*` read model and, where the resource supports them, a
+branded identifier, list/get/create/update/delete input and output classes, `fortnox*Action` exports, and an action array:
+articles (`FortnoxArticle`, `FortnoxArticleNumber`, `fortnoxArticleActions`), prices
+(`FortnoxPriceList`, `FortnoxPrice`, `FortnoxPriceListCode`, `FortnoxPriceFromQuantity`,
+`fortnoxPriceActions`), cost centers (`FortnoxCostCenter`, `FortnoxCostCenterCode`,
+`fortnoxCostCenterActions`), payments (`FortnoxInvoicePayment`, `FortnoxSupplierInvoicePayment`,
+`FortnoxInvoicePaymentNumber`, `FortnoxSupplierInvoicePaymentNumber`, `fortnoxPaymentActions`),
+offers (`FortnoxOffer`, `FortnoxOfferRow`, `fortnoxOfferActions`, host-only
+`downloadFortnoxOfferPreview`), print templates (`FortnoxPrintTemplate`, `fortnoxPrintActions`),
+inbox (`FortnoxInboxFolder`, `FortnoxInboxFile`, `FortnoxInboxId`, `fortnoxInboxActions`,
+host-only `downloadFortnoxInboxFile`, `uploadFortnoxInboxFile`, `fortnoxInboxUploadMaxBytes`),
+settings (`FortnoxCompanySettings`, `FortnoxLockedPeriod`, `FortnoxPredefinedAccount`,
+`FortnoxLabel`, `fortnoxSettingsActions`), settings registers (`FortnoxModeOfPayment`,
+`FortnoxTermsOfPayment`, `FortnoxTermsOfDelivery`, `FortnoxWayOfDelivery`, `FortnoxUnit`,
+`fortnoxSettingsRegisterActions`), and profile (`FortnoxProfile`, `fortnoxProfileActions`).
+Their opt-in slots (`FortnoxArticleOAuthCredentialSlot`, `FortnoxPriceOAuthCredentialSlot`,
+`FortnoxCostCenterOAuthCredentialSlot`, `FortnoxPaymentOAuthCredentialSlot`,
+`FortnoxOfferOAuthCredentialSlot`, `FortnoxPrintOAuthCredentialSlot`,
+`FortnoxInboxOAuthCredentialSlot`, `FortnoxSettingsOAuthCredentialSlot`,
+`FortnoxProfileOAuthCredentialSlot`) are not on the combined slot. Read actions declare `read`;
+create/update actions declare `write`; deletes, bookkeeping, and offer lifecycle actions declare
+`destructive`.
 See [Read and write Fortnox records](../connectors/fortnox) for OAuth constants, consent limitations,
 pagination, selected fields, and monetary wire types.
 

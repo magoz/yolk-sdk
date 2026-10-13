@@ -8,6 +8,13 @@
  * empty strings that keep values, payment filters that skip unbooked invoices, `ErrorInformation`
  * rejections, read-only `Country`) are implemented and listed in `fortnoxEmulatorQuirks`.
  *
+ * It also serves the connector's read-only resources (`GET` only, no fixture: unverified, minimal
+ * synthetic shapes named after the connector's read fields): articles, price lists and prices,
+ * cost centers, customer and supplier invoice payments, offers (with a preview PDF), print
+ * templates, the inbox (folder JSON, file bytes), company settings, the locked period, predefined
+ * accounts, labels, the modes/terms of payment, terms/ways of delivery, and units registers, and
+ * the user (`/3/me`). Their writes are not emulated and fail closed with a 404.
+ *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeFortnoxEmulator` (importing this module has no side effects).
  *
@@ -55,6 +62,35 @@ export {
   type FortnoxEmulatorQuirk,
   type FortnoxEmulatorQuirks
 } from './fortnox/api.ts'
+
+export {
+  FortnoxEmulatorArticle,
+  FortnoxEmulatorArticleSeed,
+  FortnoxEmulatorCompanySettings,
+  FortnoxEmulatorCostCenter,
+  FortnoxEmulatorDeliveryRegisterEntry,
+  FortnoxEmulatorInboxFile,
+  FortnoxEmulatorInboxFileSeed,
+  FortnoxEmulatorInboxFolder,
+  FortnoxEmulatorInvoicePayment,
+  FortnoxEmulatorInvoicePaymentSeed,
+  FortnoxEmulatorLabel,
+  FortnoxEmulatorLockedPeriod,
+  FortnoxEmulatorMe,
+  FortnoxEmulatorModeOfPayment,
+  FortnoxEmulatorOffer,
+  FortnoxEmulatorOfferRow,
+  FortnoxEmulatorOfferRowSeed,
+  FortnoxEmulatorOfferSeed,
+  FortnoxEmulatorPredefinedAccount,
+  FortnoxEmulatorPrice,
+  FortnoxEmulatorPriceList,
+  FortnoxEmulatorPrintTemplates,
+  FortnoxEmulatorSupplierInvoicePayment,
+  FortnoxEmulatorSupplierInvoicePaymentSeed,
+  FortnoxEmulatorTermsOfPayment,
+  FortnoxEmulatorUnit
+} from './fortnox/read-state.ts'
 
 export {
   FortnoxEmulatorCompany,

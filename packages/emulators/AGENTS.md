@@ -41,7 +41,10 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/r2-fixtures.ts`                     | Verbatim data copy of the R2 conformance `PortFixture`s (re-exported as `r2EmulatorFixtures`)                                                                                                                                                                                                                      |
 | (internal)                            | `src/r2-guard.ts`                        | R2 credential guard: copied credential key, parameter, and token lists (one test sample each), R2 decodings, repeat checks                                                                                                                                                                                         |
 | (internal)                            | `src/fortnox/state.ts`                   | Fortnox state/seed schemas, default seed (fixture entities), profiles, totals                                                                                                                                                                                                                                      |
-| (internal)                            | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, `ErrorInformation` codes                                                                                                                                                                                                                                        |
+| (internal)                            | `src/fortnox/read-state.ts`              | Fortnox read-only resources (no fixture): state/seed schemas, synthetic defaults, seed integrity                                                                                                                                                                                                                   |
+| (internal)                            | `src/fortnox/api.ts`                     | Fortnox route table (evidence + handlers), quirks, matching, registration                                                                                                                                                                                                                                          |
+| (internal)                            | `src/fortnox/read-api.ts`                | Fortnox read-only routes (`GET` only, no case ids): articles, prices, cost centers, payments, offers, print templates, inbox, settings, registers, `/me`                                                                                                                                                           |
+| (internal)                            | `src/fortnox/route-kit.ts`               | Fortnox route/handler types, `ErrorInformation` codes and envelope, paging, search, and shared helpers                                                                                                                                                                                                             |
 | (internal)                            | `src/microsoft/state.ts`                 | Microsoft state/seed schemas, default seed (fixture entities), profiles, instants                                                                                                                                                                                                                                  |
 | (internal)                            | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                                                                                                                                                                                               |
 | (internal)                            | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                                                                                                                                                                |
@@ -137,8 +140,17 @@ There is no root export or barrel.
   `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`, `src/google.ts` over
   `src/google/{gmail,calendar,drive}.ts`, `src/linkedin-search/api.ts`, and `src/mcp/api.ts`, whose
   routes list their JSON-RPC rows as variants). Fortnox routes without a fixture
-  (`GET /3/companyinformation`, `GET /3/customers`) cite no case ids and use minimal shapes named
-  after the connector's read fields; the check warns about them. The fixture-only `/todoist`,
+  (`GET /3/companyinformation`, `GET /3/customers`, and the 34 read-only `GET` routes of
+  `src/fortnox/read-api.ts`: articles, price lists and prices, cost centers, customer and
+  supplier invoice payments, offers and the offer preview, print templates, the inbox, company
+  settings, the locked period, predefined accounts, labels, the five settings registers, `/me`)
+  cite no case ids and use minimal shapes named after the connector's read fields, rendered in the
+  wire types the connector's schemas accept; the check warns about them. Their writes (and
+  side-effecting GETs such as `/offers/{DocumentNumber}/email`) are not emulated and fail closed
+  with the 404: a connector write route needs verified evidence or a pending entry naming a
+  conformance case's live run, and none of them has a case yet. These fixtureless Fortnox reads are
+  an owner-approved exception to the fixture-only rule below (PR #202), confined to the pre-rule
+  stateful `/fortnox` emulator; never a precedent for other emulators or for write routes. The fixture-only `/todoist`,
   `/telegram`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators never add a route
   without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
   the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
@@ -397,6 +409,21 @@ There is no root export or barrel.
   no silent fallback. Query keys are allowlisted per route in the route
   table (`queryKeys`, empty by default) and checked before the handler runs, so a rejected write
   never writes. `lastmodified` is not emulated (the state tracks no modification times).
+  Customer and invoice writes do not emulate article, cost center, or project references (400),
+  even though the read-only routes hold articles and cost centers.
+- Fortnox read-only state (`src/fortnox/read-state.ts`) has one seed key per resource, each
+  replacing the profile's part. The default profile holds small synthetic Example AB data that stays
+  mutually consistent, and seeds are checked like `seedProblem` does (duplicate keys; prices name
+  held price lists and articles; invoice payments held invoices; offers held customers, articles,
+  units, and cost centers; articles held units; payments held modes of payment; inbox files held
+  folders, canonical base64 bytes; every folder reachable from `root`; at most one PreSelected
+  price list), so a seed replacing `customers` or `invoices` replaces the parts naming them too.
+  Supplier invoices are not emulated: supplier invoice payments store their snapshot fields and
+  their `InvoiceNumber` is not checked. `empty-company` empties the business data (articles,
+  prices, cost centers, payments, offers, labels, inbox files) and keeps the settings, registers,
+  print templates, `me`, and inbox folders; `no-booked-invoices` has no invoice payments. Lookups
+  of keys the state does not hold answer 404 `ErrorInformation` code `2999011`
+  (`resourceNotFound`, synthetic).
 - Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape; see the
   README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
   conformance fixtures; anything they do not show fails closed (400 `Synthetic*`). Its README's
@@ -980,6 +1007,10 @@ writing; the credentials never reaching the ledger, state, coverage, or faults, 
 request passing both port scans; one drill fault per case failing exactly that case; the
 byte-for-byte fixture replay; fixture, manifest, and seed parity), `test/fortnox.test.ts` (routes,
 quirks, auth, faults through the real connector, profiles, control plane),
+`test/fortnox-reads.test.ts` (every read-only route's envelope, wire types, paging, filters and
+search, 404s, query allowlist, unemulated writes, the price sublist precedence, inbox folder JSON and
+file bytes, faults, seed integrity, profiles, and every read action of the new connector modules
+plus the offer preview and inbox file downloads run in-process through the real connector),
 `test/fortnox-conformance.test.ts` (all seven Fortnox cases in-process and over a loopback socket,
 the ledger showing the restores, the state-equals-seed proof for the reversible cases, and one drill
 per knob), `test/microsoft.test.ts` (manifest, fail closed including nested body keys, query
