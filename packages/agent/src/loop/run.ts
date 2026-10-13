@@ -128,7 +128,7 @@ export type RunConfig = {
   /** Whether the transcript's pending tool calls resume a pause. Default: they do when
    * `hitlResponses`, `awaitingRequests` or an `interactionHost` is given (otherwise a new model
    * turn runs). `true` resumes them even without responses; `false` prepares them as a fresh
-   * batch (current policy, no recorded answers consulted).
+   * batch (current policy, no recorded approval responses consulted).
    */
   readonly resume?: boolean
   readonly model: string
@@ -914,7 +914,6 @@ const prepareApprovalCall = (input: {
     return PreparedToolCall.Execute({ index, call, events: [] })
   }
 
-  // A fresh batch never settles an approval from recorded answers: a gated call asks again.
   const response = input.resume
     ? (approvalResponseFor(responses, call, tools) ?? callDenialFor(responses, call))
     : undefined
