@@ -2,7 +2,10 @@ export type { BackgroundToolHost } from './background.ts'
 
 export {
   EmptyToolParams,
+  defaultToolSearchLimit,
   makeTool,
+  makeToolSearchTool,
+  maxToolSearchLimit,
   makeToolExecutorLayer,
   modelVisibleToolError,
   modelVisibleToolErrorResult,
@@ -194,6 +197,7 @@ export type {
   ModelVisibleToolErrorStructuredContent,
   NestedTool,
   NestedToolDescriber,
+  NestedToolInstructor,
   NestedToolExecutor,
   NestedToolStagingDescription,
   ToolChangePreviewHandler,
@@ -204,6 +208,12 @@ export type {
 } from './registry.ts'
 
 export type { ToolExecutionOptions } from './registry.ts'
+
+export {
+  rankToolSearchDocuments,
+  toolSearchTokens,
+  type ToolSearchDocument
+} from './tool-search.ts'
 
 export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 

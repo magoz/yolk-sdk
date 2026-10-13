@@ -140,6 +140,21 @@ the plan once and its result tells the model to call `review_plan({ planId, plan
 stay fail-closed for `tools.<name>()`. Pass `staging: false` to turn it off or `staging: { maxCalls }`
 to lower the cap.
 
+A stageable tool may be **stage-only** (`callableBy: 'codemode'`, usually with `discovery: 'search'`):
+it is never declared to the model, scripts find it with `searchTools()` (hits marked
+`stageOnly: true`) and read it with `describeTool()`, and the only thing they can do with it is
+`stage()` it. See [ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
+
+### Catalog as instructions
+
+`makeCodeModeTool({ executor, catalog: 'instructions' })` keeps the `codemode` description
+invariant and delivers the catalog (every namespace with its tool count, listed tools within
+`inlineBudget`, `pinned` tools always) as a host instruction: pass `toolSet.instructions` to
+`RunConfig.instructions`, or, for durable hosts driving `runModelTurn`, append and persist
+`instructionMessages(transcript, toolSet.instructions)` from `@yolk-sdk/agent/loop` before each
+model step. A changed catalog is appended to the conversation as a delta instead of rewriting the
+cached request prefix.
+
 Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
 decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
 show each staged call with the tool's `changePreview` from `@yolk-sdk/agent/tools`. See

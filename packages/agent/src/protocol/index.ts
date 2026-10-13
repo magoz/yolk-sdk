@@ -105,9 +105,12 @@ export {
   AssistantReasoningPart,
   AssistantTextPart,
   HostToolCallPart,
+  isInstructionMessage,
+  latestInstructionState,
   MessageAnnotations,
   MessageAuthor,
   type MessageEnvelope,
+  MessageInstruction,
   ProviderToolCallPart,
   ProviderToolResultPart,
   ToolResultMessage,
@@ -209,6 +212,7 @@ export {
   isToolJsonSchemaObject,
   isCodeModeCallable,
   isCodeModeFailClosed,
+  isDeferredTool,
   isProviderToolDef,
   isToolStageable,
   makeBackgroundToolAcceptedResult,
@@ -216,6 +220,7 @@ export {
   ToolCallableBy,
   ToolDef,
   ToolDiscovery,
+  ToolLoading,
   toolDiscovery,
   ToolJsonSchema,
   ToolJsonSchemaObject,
@@ -302,3 +307,10 @@ export {
 } from './usage.ts'
 
 export type MessageId = string
+
+export {
+  activatedToolNames,
+  declaredToolDefs,
+  ToolSearchActivation,
+  toolSearchToolName
+} from './tool-search.ts'

@@ -15,12 +15,20 @@ export type {
 
 export {
   codeModeCatalog,
+  codeModeCatalogInstruction,
+  codeModeCatalogInstructionKey,
+  CodeModeCatalogSummary,
+  codeModeStageOnlyCatalog,
   defaultCodeModeInlineBudget,
   describeCodeModeTool,
   estimateCodeModeTokens,
   findCodeModeTool,
+  renderCodeModeCatalog,
+  renderCodeModeCatalogChange,
   renderCodeModeDescription,
-  selectCodeModeListing
+  renderCodeModeInstructedDescription,
+  selectCodeModeListing,
+  summarizeCodeModeCatalog
 } from './catalog.ts'
 
 export type {

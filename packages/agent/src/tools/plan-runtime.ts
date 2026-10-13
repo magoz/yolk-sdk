@@ -117,15 +117,38 @@ const stagedCall = (fields: {
   readonly argsDigest: string
 }) => StagedCall.make(fields)
 
-const toolList = (tools: ReadonlyArray<NestedTool>) => {
-  const names = tools.map(tool => tool.def.name)
-  const listed = names.slice(0, 20).join(', ')
+const maxSuggestedStageableTools = 5
 
-  return names.length === 0
-    ? 'none'
-    : names.length > 20
-      ? `${listed}, and ${names.length - 20} more`
-      : listed
+const nameTokens = (name: string) =>
+  new Set(
+    name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(token => token.length > 0)
+  )
+
+/**
+ * The stageable tools a rejected `stage(name)` suggests: the closest names by shared words (catalog
+ * order on ties), else the first ones. Bounded, since stage-only tools can be many (ADR 0007).
+ */
+const stageableSuggestions = (name: string, tools: ReadonlyArray<NestedTool>) => {
+  if (tools.length === 0) return 'none'
+
+  const wanted = nameTokens(name)
+
+  const ranked = tools
+    .map((tool, index) => ({
+      name: tool.def.name,
+      index,
+      score: [...nameTokens(tool.def.name)].filter(token => wanted.has(token)).length
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+
+  const close = ranked.filter(entry => entry.score > 0)
+  const shown = (close.length > 0 ? close : ranked).slice(0, maxSuggestedStageableTools)
+  const more = tools.length - shown.length
+
+  return `${shown.map(entry => entry.name).join(', ')}${more > 0 ? ` (${more} more; find them with searchTools)` : ''}`
 }
 
 // Plan ids become key prefixes (`<planId>/s<n>`) and `ToolPlan.id`: non-empty and trimmed. Any
@@ -198,7 +221,7 @@ const makeBuilder = <Context>(
           return yield* Effect.fail(
             stageError(
               'not_stageable',
-              `${name} cannot be staged. Stageable tools: ${toolList(resolution.stageableTools)}.`
+              `${name} cannot be staged. Stageable tools: ${stageableSuggestions(name, resolution.stageableTools)}.`
             )
           )
 

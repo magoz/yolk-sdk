@@ -10,10 +10,19 @@ import {
   type JsonSchema
 } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError, ToolExecutor, type ToolExecutionOptions } from '@yolk-sdk/agent/loop'
+import {
+  ToolError,
+  ToolExecutor,
+  type RunInstruction,
+  type ToolExecutionOptions
+} from '@yolk-sdk/agent/loop'
 import {
   isCodeModeCallable,
   isCodeModeFailClosed,
+  isDeferredTool,
+  toolSearchToolName,
+  ToolResult,
+  type ToolSearchActivation,
   decodeBackgroundToolInput,
   isToolStageable,
   isToolJsonSchemaObject,
@@ -41,8 +50,7 @@ import {
   type ToolApprovalPreviewer,
   type ToolCall,
   type ToolChangePreview,
-  type ToolExposure,
-  type ToolResult
+  type ToolExposure
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
@@ -88,6 +96,7 @@ import {
   previewToolPlanWith,
   type ToolPlanResolution
 } from './plan-runtime.ts'
+import { rankToolSearchDocuments } from './tool-search.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -112,7 +121,8 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'staging_unsupported_policy',
       'staging_validation_required',
       'plan_review_duplicate',
-      'change_preview_unsupported_policy'
+      'change_preview_unsupported_policy',
+      'deferred_unsupported_tool'
     ])
   }
 ) {}
@@ -244,6 +254,17 @@ export type NestedToolDescriber = (input: {
   readonly staging?: NestedToolStagingDescription
 }) => string
 
+/**
+ * Computes a nested-access registration's host instruction (ADR 0007) from the tools its scripts
+ * can call, for example the code mode catalog delivered as an instruction message instead of in
+ * the description. Honored only with `nestedToolAccess: true`; collected in
+ * `ResolvedToolSet.instructions`, which hosts pass to `RunConfig.instructions`.
+ */
+export type NestedToolInstructor = (input: {
+  readonly tools: ReadonlyArray<NestedTool>
+  readonly staging?: NestedToolStagingDescription
+}) => RunInstruction | undefined
+
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
@@ -292,6 +313,8 @@ export type ToolRegistration<Context> = {
    * nested tools of the resolution instead of `def.description`.
    */
   readonly describe?: NestedToolDescriber
+  /** With `nestedToolAccess: true`, a host instruction computed from the nested tools. */
+  readonly instruct?: NestedToolInstructor
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
   /** Present only on schema-backed input registrations; owns user-payload validation. */
@@ -424,10 +447,16 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly nestedToolAccess?: boolean
   /** With `nestedToolAccess: true`, compute the resolved description from the nested tools. */
   readonly describe?: NestedToolDescriber
+  /** With `nestedToolAccess: true`, a host instruction computed from the nested tools. */
+  readonly instruct?: NestedToolInstructor
   /** See `ToolRegistration.abandonedResult`. */
   readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
+  /** Model-callable tools only: `deferred` declares the tool once `tool_search` activated it
+   * (ADR 0007). Absent means `eager`.
+   */
+  readonly loading?: ToolDef['loading']
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
   ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
@@ -477,6 +506,10 @@ export type ResolvedToolSet = {
    * (ADR 0006). Hosts pass these to loop/runtime configs so approval requests carry a preview.
    */
   readonly approvalPreviews: Readonly<Record<string, ToolApprovalPreviewer>>
+  /** Host instructions of nested-access registrations (ADR 0007), in resolution order. Hosts pass
+   * these to `RunConfig.instructions` for model turns.
+   */
+  readonly instructions: ReadonlyArray<RunInstruction>
 }
 
 const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
@@ -703,6 +736,7 @@ type MakeToolRegistrationFields<Context> = {
   background?: boolean
   nestedToolAccess?: boolean
   describe?: NestedToolDescriber
+  instruct?: NestedToolInstructor
   abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   staging?: ToolStagingHandlers<Context>
   changePreview?: ToolChangePreviewHandler<Context>
@@ -715,6 +749,7 @@ type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
   outputSchema?: ReturnType<typeof jsonSchemaFromSchema>
   callableBy?: ToolDef['callableBy']
   discovery?: ToolDef['discovery']
+  loading?: ToolDef['loading']
   approval: MakeToolOptions<Context, ParamsSchema>['approval']
   background?: boolean
   staging?: true
@@ -777,6 +812,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           fields.discovery = options.discovery
         }
 
+        if (options.loading !== undefined) {
+          fields.loading = options.loading
+        }
+
         if (options.background !== undefined) {
           fields.background = options.background
         }
@@ -821,6 +860,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
 
   if (options.describe !== undefined) {
     registration.describe = options.describe
+  }
+
+  if (options.instruct !== undefined) {
+    registration.instruct = options.instruct
   }
 
   if (options.abandonedResult !== undefined) {
@@ -889,6 +932,7 @@ type ToolDefFields = {
   outputSchema?: ToolDef['outputSchema']
   callableBy?: ToolDef['callableBy']
   discovery?: ToolDef['discovery']
+  loading?: ToolDef['loading']
   approval?: ToolDef['approval']
   background?: ToolDef['background']
   execution?: ToolDef['execution']
@@ -910,6 +954,8 @@ const withToolDescription = (def: ToolDef, description: string): ToolDef => {
   if (def.callableBy !== undefined) fields.callableBy = def.callableBy
 
   if (def.discovery !== undefined) fields.discovery = def.discovery
+
+  if (def.loading !== undefined) fields.loading = def.loading
 
   if (def.approval !== undefined) fields.approval = def.approval
 
@@ -1252,6 +1298,107 @@ const executeInteractionTool = <Context>(input: {
     )
   })
 
+/** Default and maximum number of tools one `tool_search` call activates. */
+export const defaultToolSearchLimit = 5
+
+export const maxToolSearchLimit = 20
+
+const ToolSearchParams = Schema.Struct({
+  query: Schema.String.annotate({
+    description: 'What the tool should do, in a few words (for example "list open issues").'
+  }),
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: maxToolSearchLimit })).annotate({
+      description: `How many tools to load (default ${defaultToolSearchLimit}).`
+    })
+  )
+})
+
+const description = [
+  'Find and load tools that are not declared yet: they become callable directly from your next step on, for the rest of the conversation.',
+  'Search by what the tool should do. Loaded tools keep their own approval rules.'
+].join(' ')
+
+const resultText = (tools: ReadonlyArray<ToolDef>) =>
+  tools.length === 0
+    ? 'No tools matched. Try other words.'
+    : [
+        `Loaded ${tools.length} tool${tools.length === 1 ? '' : 's'}; call them directly from your next step:`,
+        ...tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0] ?? ''}`)
+      ].join('\n')
+
+/**
+ * The package `tool_search` tool over the deferred tools of one resolution (ADR 0007). Its result
+ * names the activated tools in `structuredContent.toolSearch.activated`; the loop declares them
+ * from the next request on (`declaredToolDefs`). Read access: it changes nothing outside the
+ * transcript.
+ */
+export const makeToolSearchTool = <Context>(
+  deferred: ReadonlyArray<{ readonly def: ToolDef; readonly searchText?: string }>
+): ToolRegistration<Context> =>
+  makeTool<Context, typeof ToolSearchParams>({
+    name: toolSearchToolName,
+    description,
+    parameters: ToolSearchParams,
+    access: 'read',
+    callableBy: 'model',
+    execute: ({ call, params }) =>
+      Effect.sync(() => {
+        const found = rankToolSearchDocuments(
+          deferred.map(tool => ({
+            value: tool.def,
+            text: [tool.def.name, tool.def.description, tool.searchText ?? ''].join(' ')
+          })),
+          params.query,
+          params.limit ?? defaultToolSearchLimit
+        )
+
+        const activation: ToolSearchActivation = {
+          toolSearch: { activated: found.map(tool => tool.name) }
+        }
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: resultText(found),
+          structuredContent: activation
+        })
+      })
+  })
+
+/**
+ * Adds the package `tool_search` registration when deferred model-callable tools resolve (ADR
+ * 0007), unless the host opts out or already registers a tool with that name. Each deferred tool
+ * is searched by its name, description, and module description.
+ */
+const withToolSearch = <Context>(
+  resolved: ReadonlyArray<ResolvedRegistration<Context>>,
+  toolSearch: false | undefined
+): ReadonlyArray<ResolvedRegistration<Context>> => {
+  const deferred = resolved.filter(item => isDeferredTool(item.tool.def))
+
+  if (
+    toolSearch === false ||
+    deferred.length === 0 ||
+    resolved.some(item => item.tool.def.name === toolSearchToolName)
+  )
+    return resolved
+
+  const searchable = deferred.map(item =>
+    item.moduleDescription === undefined
+      ? { def: item.tool.def }
+      : { def: item.tool.def, searchText: item.moduleDescription }
+  )
+
+  return [
+    ...resolved,
+    {
+      moduleId: toolSearchToolName,
+      moduleDescription: undefined,
+      tool: makeToolSearchTool<Context>(searchable)
+    }
+  ]
+}
+
 export const resolveTools = <Context>(
   modules: ReadonlyArray<ToolModule<Context>>,
   context: Context,
@@ -1275,6 +1422,11 @@ export const resolveTools = <Context>(
      * (default 16 KiB, larger previews are truncated) and the hook timeout (default 5 s).
      */
     readonly changePreview?: ToolChangePreviewOptions
+    /** `false` keeps the package `tool_search` tool out of the resolution even when deferred tools
+     * resolve (ADR 0007); the host then activates them its own way. Default: added when any
+     * model-callable tool is `loading: 'deferred'` and no tool is named `tool_search`.
+     */
+    readonly toolSearch?: false
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -1282,7 +1434,7 @@ export const resolveTools = <Context>(
       resolveModuleTools(toolModule, context)
     )
 
-    const resolved = Arr.flatten(resolvedByModule)
+    const resolved = withToolSearch(Arr.flatten(resolvedByModule), options.toolSearch)
     const duplicateName = findDuplicateToolName(resolved)
 
     if (Option.isSome(duplicateName)) {
@@ -1291,6 +1443,18 @@ export const resolveTools = <Context>(
 
     const activated = (tool: ToolRegistration<Context>) =>
       options.backgroundHost !== undefined && (tool.background ?? tool.def.background) === true
+
+    // A stage-only tool (ADR 0007): codemode-only and stageable, so scripts find it and can only
+    // `stage()` it. Its staging validator is still required by the staging rules below.
+    const isStageOnlyRegistration = (tool: ToolRegistration<Context>) =>
+      tool.def.callableBy === 'codemode' &&
+      isToolStageable(tool.def) &&
+      !activated(tool) &&
+      tool.background !== true &&
+      tool.input === undefined &&
+      tool.interaction === undefined &&
+      tool.planReview === undefined &&
+      tool.nestedToolAccess !== true
 
     for (const { tool } of resolved) {
       // Resolved definitions are advertisements, not reusable business registrations.
@@ -1314,9 +1478,12 @@ export const resolveTools = <Context>(
 
       // Fail-closed tools never run from code mode; marking them codemode-only is an error
       // rather than a silently unreachable tool. A nested-access registration is never
-      // script-callable itself, so codemode-only would make it unreachable too.
+      // script-callable itself, so codemode-only would make it unreachable too. The one exception
+      // is a stage-only tool (ADR 0007): a stageable approval-gated tool scripts find and only
+      // `stage()`; it stays fail-closed for direct calls and is never declared to providers.
       if (
         tool.def.callableBy === 'codemode' &&
+        !isStageOnlyRegistration(tool) &&
         (isCodeModeFailClosed(tool.def) ||
           activated(tool) ||
           tool.approval !== undefined ||
@@ -1328,7 +1495,36 @@ export const resolveTools = <Context>(
         return yield* Effect.fail(
           new ToolRegistryError({
             cause: 'codemode_unsupported_tool',
-            message: `Tool ${tool.def.name} cannot be callableBy 'codemode': approval, input, interaction, background, question, subagent, and nested-access tools never run from code mode.`
+            message: `Tool ${tool.def.name} cannot be callableBy 'codemode': approval, input, interaction, background, question, subagent, and nested-access tools never run from code mode (stageable approval tools may be stage-only).`
+          })
+        )
+      }
+
+      // Deferred loading (ADR 0007) applies to plain model-callable tools: never codemode-only,
+      // never tools whose lifecycle the loop or a host owns, never `tool_search` itself.
+      if (tool.def.loading !== undefined && tool.def.callableBy === 'codemode') {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'invalid_tool_exposure',
+            message: `Tool ${tool.def.name} sets loading with callableBy 'codemode': codemode-only tools are never declared.`
+          })
+        )
+      }
+
+      if (
+        tool.def.loading === 'deferred' &&
+        (tool.def.name === toolSearchToolName ||
+          loopOwnedToolNames.has(tool.def.name) ||
+          activated(tool) ||
+          tool.input !== undefined ||
+          tool.interaction !== undefined ||
+          tool.planReview !== undefined ||
+          tool.nestedToolAccess === true)
+      ) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'deferred_unsupported_tool',
+            message: `Tool ${tool.def.name} cannot be deferred: input, interaction, plan review, background, nested-access, question, subagent and tool_search tools are always declared.`
           })
         )
       }
@@ -1539,6 +1735,20 @@ export const resolveTools = <Context>(
             )
           )
         : tool.def
+
+    const instructions = resolved.flatMap(item => {
+      const instruct = item.tool.instruct
+
+      if (item.tool.nestedToolAccess !== true || instruct === undefined) return []
+
+      const instruction = instruct(
+        stagingDescription === undefined
+          ? { tools: nestedTools }
+          : { tools: nestedTools, staging: stagingDescription }
+      )
+
+      return instruction === undefined ? [] : [instruction]
+    })
 
     const tools = Arr.map(resolved, item => {
       const def = describedDef(item.tool)
@@ -1776,6 +1986,19 @@ export const resolveTools = <Context>(
       )
     }
 
+    // Stage-only tools are reachable only through `stage()`, which needs staging.
+    const unstageableStageOnlyNames = resolved.flatMap(item =>
+      isStageOnlyRegistration(item.tool) && stagingDescription === undefined
+        ? [item.tool.def.name]
+        : []
+    )
+
+    if (unstageableStageOnlyNames.length > 0) {
+      yield* Effect.logWarning(
+        `Stage-only tools are unreachable without staged tool plans: ${unstageableStageOnlyNames.join(', ')}`
+      )
+    }
+
     const executionInput = (
       tool: ToolRegistration<Context>,
       call: ToolCall,
@@ -1959,7 +2182,8 @@ export const resolveTools = <Context>(
       inputs,
       interactions,
       interactionHost: options.interactionHost,
-      approvalPreviews
+      approvalPreviews,
+      instructions
     }
 
     return planResolution === undefined

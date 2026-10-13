@@ -161,7 +161,9 @@ same tool set, they are unreachable, and resolution warns.
 Fail-closed rule: a tool with `ToolDef.approval`, `ToolDef.input`, `ToolDef.interaction`, or
 `ToolDef.execution === 'background-v1'`, and the package-owned `question` and `subagent` tools,
 are never callable from code mode. Marking them `all` behaves as `model`; marking them `codemode`
-is a resolution error.
+is a resolution error, except a stageable approval tool ([ADR 0005](0005-staged-tool-plans.md)),
+which may be stage-only: scripts find it and only `stage()` it
+([ADR 0007](0007-tool-exposure-and-catalog.md)).
 
 ### Nested tool access
 

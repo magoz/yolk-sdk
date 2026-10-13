@@ -25,16 +25,17 @@ exactly those recorded calls.
 
 ## Decision summary
 
-| Area         | Decision                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------ |
-| Script phase | Explicit `stage(name, args)` global; the script completes normally. Nothing executes or is ledgered.         |
-| Review phase | A separate model tool call (`review_plan({ planId, planDigest })`) built on `makeInteractionTool` mechanics. |
-| Selection    | `{ selectedKeys: NonEmptyArray<string> }`: untick only, never argument edits.                                |
-| Execution    | A privileged plan executor inside the accepted review action, through the normal registry execute path.      |
-| Storage      | Host `ToolPlanStore` (`put` idempotent by id and digest, `get`, single-use `claim`).                         |
-| Availability | Only with `plans`, an `interactionHost`, and exactly one plan review tool in the resolution.                 |
-| Fail-closed  | Unchanged for direct calls: `tools.<name>()` on approval tools still fails; `stage` is the only path.        |
-| Atomicity    | None in v1: calls apply in staged order; a crash leaves a partial apply reported as `unknown`.               |
+| Area         | Decision                                                                                                                                       |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Script phase | Explicit `stage(name, args)` global; the script completes normally. Nothing executes or is ledgered.                                           |
+| Review phase | A separate model tool call (`review_plan({ planId, planDigest })`) built on `makeInteractionTool` mechanics.                                   |
+| Selection    | `{ selectedKeys: NonEmptyArray<string> }`: untick only, never argument edits.                                                                  |
+| Execution    | A privileged plan executor inside the accepted review action, through the normal registry execute path.                                        |
+| Storage      | Host `ToolPlanStore` (`put` idempotent by id and digest, `get`, single-use `claim`).                                                           |
+| Availability | Only with `plans`, an `interactionHost`, and exactly one plan review tool in the resolution.                                                   |
+| Fail-closed  | Unchanged for direct calls: `tools.<name>()` on approval tools still fails; `stage` is the only path.                                          |
+| Discovery    | A stageable tool may be stage-only (`callableBy: 'codemode'`, [ADR 0007](0007-tool-exposure-and-catalog.md)): never declared, found by search. |
+| Atomicity    | None in v1: calls apply in staged order; a crash leaves a partial apply reported as `unknown`.                                                 |
 
 ## Why a separate review call
 

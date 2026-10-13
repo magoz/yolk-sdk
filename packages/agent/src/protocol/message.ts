@@ -31,10 +31,45 @@ const MessageEnvelopeSchema = {
   annotations: Schema.optional(MessageAnnotations)
 }
 
+/**
+ * Marks a user-role message the loop appended as a host instruction (ADR 0007): `key` names the
+ * instruction and `state` is the JSON state it rendered, so the next request can tell whether the
+ * instruction changed. Never model-visible (only `content` is); UIs should not show these messages
+ * as user input (`isInstructionMessage`).
+ */
+export const MessageInstruction = Schema.Struct({
+  key: Schema.NonEmptyString,
+  state: Schema.Json
+})
+
+export type MessageInstruction = typeof MessageInstruction.Type
+
 export class UserMessage extends Schema.TaggedClass<UserMessage>()('User', {
   ...MessageEnvelopeSchema,
-  content: Content
+  content: Content,
+  instruction: Schema.optional(MessageInstruction)
 }) {}
+
+/** A user-role message the loop appended as a host instruction (ADR 0007). */
+export const isInstructionMessage = (
+  message: AgentMessage
+): message is UserMessage & { readonly instruction: MessageInstruction } =>
+  Predicate.isTagged(message, 'User') && message.instruction !== undefined
+
+/** The state of the latest instruction message with `key`, or `undefined` when there is none. */
+export const latestInstructionState = (
+  messages: ReadonlyArray<AgentMessage>,
+  key: string
+): Schema.Json | undefined => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+
+    if (message !== undefined && isInstructionMessage(message) && message.instruction.key === key)
+      return message.instruction.state
+  }
+
+  return undefined
+}
 
 export class AssistantTextPart extends Schema.TaggedClass<AssistantTextPart>()('Text', {
   content: Content

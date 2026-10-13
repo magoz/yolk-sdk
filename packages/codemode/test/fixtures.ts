@@ -21,7 +21,7 @@ export const HitsOutput = Schema.Struct({
 
 type Exposure =
   | { readonly callableBy?: 'all' | 'model' }
-  | { readonly callableBy: 'codemode'; readonly discovery?: 'listed' | 'search' }
+  | { readonly callableBy: 'codemode'; readonly discovery?: 'listed' | 'search' | 'pinned' }
 
 export type ToolLog = Array<string>
 

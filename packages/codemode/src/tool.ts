@@ -30,9 +30,12 @@ import {
   type NestedToolCallInput,
   type NestedToolCallStatus
 } from '@yolk-sdk/agent/protocol'
+import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import {
   makeTool,
+  type NestedTool,
   type NestedToolExecutor,
+  type NestedToolInstructor,
   type StagedCallReceipt,
   type ToolExecutionInput,
   type ToolLedgerAbandonedInput,
@@ -43,11 +46,15 @@ import {
 } from '@yolk-sdk/agent/tools'
 import {
   codeModeCatalog,
+  codeModeCatalogInstruction,
+  codeModeStageOnlyCatalog,
   defaultCodeModeInlineBudget,
   describeCodeModeTool,
   findCodeModeTool,
   renderCodeModeDescription,
-  type CodeModeCatalogTool
+  renderCodeModeInstructedDescription,
+  type CodeModeCatalogTool,
+  type CodeModeStagingDescription
 } from './catalog.ts'
 import type {
   CodeModeExecutionResult,
@@ -156,6 +163,15 @@ export type MakeCodeModeToolOptions<Context> = {
    * resolution's cap.
    */
   readonly staging?: CodeModeStagingOptions | false
+  /**
+   * Where the nested tool catalog goes (ADR 0007). `description` (default): in this tool's
+   * description, which changes with the catalog. `instructions`: the description stays invariant
+   * and the catalog (every namespace with its tool count, listed tools within `inlineBudget`) is
+   * the resolution's `instructions` entry; hosts pass `ResolvedToolSet.instructions` to
+   * `RunConfig.instructions`, so a change is appended to the conversation instead of rewriting the
+   * cached request prefix.
+   */
+  readonly catalog?: 'description' | 'instructions'
 }
 
 export type CodeModeStagingOptions = {
@@ -267,7 +283,11 @@ const hookOutcome = (exit: Exit.Exit<ToolResult>): CodeModeNestedCallOutcome =>
 type CodeModeNamespaceDescription = {
   readonly name: string
   description?: string
-  readonly tools: ReadonlyArray<{ readonly name: string; readonly description: string }>
+  readonly tools: ReadonlyArray<{
+    readonly name: string
+    readonly description: string
+    readonly stageOnly?: true
+  }>
 }
 
 const SearchOptions = Schema.Struct({
@@ -277,7 +297,8 @@ const SearchOptions = Schema.Struct({
 
 const decodeSearchOptions = Schema.decodeUnknownOption(SearchOptions)
 
-/** `searchTools`, `describeTool`, and `describeNamespace` over every nested tool. */
+/** `searchTools`, `describeTool`, and `describeNamespace` over every nested tool and, while the
+ * script may stage, every stage-only tool. */
 const discoveryGlobals = (
   catalog: ReadonlyArray<CodeModeCatalogTool>
 ): ReadonlyArray<CodeModeExecutorGlobal> => [
@@ -317,7 +338,11 @@ const discoveryGlobals = (
 
       const namespace: CodeModeNamespaceDescription = {
         name,
-        tools: tools.map(tool => ({ name: tool.identifier, description: tool.description }))
+        tools: tools.map(tool =>
+          tool.exposure === 'stage'
+            ? { name: tool.name, description: tool.description, stageOnly: true }
+            : { name: tool.identifier, description: tool.description }
+        )
       }
 
       if (description !== undefined) namespace.description = description
@@ -332,8 +357,15 @@ type StageFork = (
   options: { readonly signal: AbortSignal }
 ) => Fiber.Fiber<StagedCallReceipt, ToolPlanStageError>
 
-/** `stage(name, args)`: records one call into the script's plan (never runs it). */
-const stageGlobal = (plan: ToolPlanBuilder, fork: StageFork): CodeModeExecutorGlobal => ({
+/**
+ * `stage(name, args)`: records one call into the script's plan (never runs it). `name` is the raw
+ * tool name or its catalog identifier (what `searchTools` returns for callable tools).
+ */
+const stageGlobal = (
+  plan: ToolPlanBuilder,
+  fork: StageFork,
+  stageable: ReadonlyArray<NestedTool>
+): CodeModeExecutorGlobal => ({
   name: 'stage',
   spread: true,
   signature: '(name: string, args: object): Promise<{ staged: true; key: string; index: number }>',
@@ -347,8 +379,13 @@ const stageGlobal = (plan: ToolPlanBuilder, fork: StageFork): CodeModeExecutorGl
     if (!Predicate.isString(name))
       return Promise.reject(new Error('stage: the first argument must be a tool name.'))
 
+    const toolName =
+      stageable.find(({ def }) => def.name === name)?.def.name ??
+      stageable.find(({ def }) => toCodemodeIdentifier(def.name) === name)?.def.name ??
+      name
+
     return new Promise((resolve, reject) => {
-      fork(plan.stage({ name, params: params === undefined ? {} : params }), {
+      fork(plan.stage({ name: toolName, params: params === undefined ? {} : params }), {
         signal
       }).addObserver(exit => {
         if (Exit.isSuccess(exit)) {
@@ -605,9 +642,15 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
               options.executor.execute(input.code, {
                 tools,
                 globals:
-                  plan === undefined
+                  plan === undefined || staging === undefined
                     ? discoveryGlobals(catalog)
-                    : [...discoveryGlobals(catalog), stageGlobal(plan, stageFork)],
+                    : [
+                        ...discoveryGlobals([
+                          ...catalog,
+                          ...codeModeStageOnlyCatalog(staging.tools)
+                        ]),
+                        stageGlobal(plan, stageFork, staging.tools)
+                      ],
                 timeoutMs,
                 memoryLimitBytes: limits.memoryLimitBytes,
                 store,
@@ -893,18 +936,36 @@ export const makeCodeModeTool = <Context>(
   const inlineBudget = options.inlineBudget ?? defaultCodeModeInlineBudget
   const store = options.loadStore !== undefined
 
-  return makeTool<Context, typeof CodeModeParams>({
+  const instructed = options.catalog === 'instructions'
+
+  const offered = (staging: CodeModeStagingDescription | undefined) =>
+    options.staging === false || staging === undefined || staging.tools.length === 0
+      ? undefined
+      : staging
+
+  const registration = makeTool<Context, typeof CodeModeParams>({
     name,
-    description: renderCodeModeDescription({ tools: [], inlineBudget, store }),
+    description: instructed
+      ? renderCodeModeInstructedDescription({ store })
+      : renderCodeModeDescription({ tools: [], inlineBudget, store }),
     parameters: CodeModeParams,
     access: 'write',
     nestedToolAccess: true,
-    describe: ({ tools, staging }) =>
-      renderCodeModeDescription(
-        staging === undefined || options.staging === false
+    describe: ({ tools, staging }) => {
+      const offeredStaging = offered(staging)
+
+      if (instructed)
+        return renderCodeModeInstructedDescription(
+          offeredStaging === undefined ? { store } : { store, staging: offeredStaging }
+        )
+
+      return renderCodeModeDescription(
+        offeredStaging === undefined
           ? { tools, inlineBudget, store }
-          : { tools, inlineBudget, store, staging }
-      ),
+          : { tools, inlineBudget, store, staging: offeredStaging }
+      )
+    },
+
     abandonedResult: abandonedScriptResult(limits),
     execute: ({
       call,
@@ -922,4 +983,18 @@ export const makeCodeModeTool = <Context>(
           )
         : runScript({ options, limits, call, context, code: params.code, nested })
   })
+
+  if (!instructed) return registration
+
+  const instruct: NestedToolInstructor = ({ tools, staging }) => {
+    const offeredStaging = offered(staging)
+
+    return codeModeCatalogInstruction(
+      offeredStaging === undefined
+        ? { tools, inlineBudget }
+        : { tools, inlineBudget, staging: offeredStaging }
+    )
+  }
+
+  return { ...registration, instruct }
 }
