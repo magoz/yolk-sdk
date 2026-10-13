@@ -297,6 +297,16 @@ configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` th
 `output_config.effort`. It omits `minimal`, which Anthropic does not support. Hosts remain
 responsible for choosing an effort accepted by the selected provider and model.
 
+### Prompt caching
+
+Provider prompt caching is always on (ADR 0008). Set `cacheKey` (for example the session id) on
+`run` or `runRuntime` so providers route a conversation to its cached prefix: Anthropic gets
+`cache_control` breakpoints, Codex and Grok `prompt_cache_key` plus their session headers, Vercel AI
+Gateway `caching: 'auto'` and `x-session-affinity`, and OpenCode Go `x-opencode-session`. Claude
+entries last five minutes unless the provider sets `promptCacheTtl: '1h'`. Keep the prefix
+byte-identical: per-request facts (fresh signed URLs, the current time) belong in
+`LLMRequest.turnContext`, which adapters append after every breakpoint.
+
 ### Anthropic tool schemas
 
 Claude subscription OAuth rejects some valid JSON Schema constructs that Effect Schema can emit
