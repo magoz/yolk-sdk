@@ -302,10 +302,15 @@ responsible for choosing an effort accepted by the selected provider and model.
 Provider prompt caching is always on (ADR 0008). Set `cacheKey` (for example the session id) on
 `run` or `runRuntime` so providers route a conversation to its cached prefix: Anthropic gets
 `cache_control` breakpoints, Codex and Grok `prompt_cache_key` plus their session headers, Vercel AI
-Gateway `caching: 'auto'` and `x-session-affinity`, and OpenCode Go `x-opencode-session`. Claude
-entries last five minutes unless the provider sets `promptCacheTtl: '1h'`. Keep the prefix
-byte-identical: per-request facts (fresh signed URLs, the current time) belong in
-`LLMRequest.turnContext`, which adapters append after every breakpoint.
+Gateway `caching: 'auto'` and `x-session-affinity`, and OpenCode Go `x-opencode-session`. The
+generic OpenAI-compatible chat provider sends nothing unless its config sets `cacheKeyHeaders`.
+Claude entries last five minutes unless the provider sets `promptCacheTtl: '1h'`.
+
+Keep the prefix byte-identical: per-request facts (fresh signed URLs, the current time) belong in
+`LLMRequest.turnContext`, which adapters append after the conversation (Anthropic after every
+breakpoint; Gateway's automatic markers still read the prefix before it). Loop hosts set it by
+decorating `LLMProvider`. `LLMRequest.toolChoice: 'none'` forbids tool calls but keeps the tool
+definitions; on Anthropic a changed `tool_choice` invalidates the cached messages.
 
 ### Anthropic tool schemas
 

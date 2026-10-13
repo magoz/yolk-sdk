@@ -15,14 +15,16 @@ export type LLMRequest = {
   readonly reasoningEffort?: AgentReasoningEffort
   /**
    * Stable conversation identity (for example the host session id) that providers use to route
-   * requests to their prompt cache. Requests that share a prefix (subagents, compaction) should
-   * reuse the parent's key. Opaque to the SDK; never put personal data in it.
+   * requests to their prompt cache. Requests that share a prefix (compaction) should reuse the
+   * conversation's key. Sent as an HTTP header value, so keep it printable ASCII; opaque to the
+   * SDK, never personal data.
    */
   readonly cacheKey?: string
   /**
-   * Per-request context appended after the conversation and after every prompt-cache breakpoint,
-   * so it can change on every request (fresh signed URLs, the current time) without invalidating
-   * the cached prefix. Never part of the transcript; the host owns its wording.
+   * Per-request context appended after the conversation, so it can change on every request (fresh
+   * signed URLs, the current time) without rewriting the cached prefix. Anthropic places it after
+   * every breakpoint; Gateway's automatic markers still read the prefix before it. Never part of
+   * the transcript; the host owns its wording. Loop hosts set it by decorating `LLMProvider`.
    */
   readonly turnContext?: string
   /**

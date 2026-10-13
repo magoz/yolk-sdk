@@ -87,8 +87,8 @@ const makeOpenCodeGoProtocolLayer = (
             messagesUrl: `${baseUrl}/messages`,
             maxTokens: config.maxOutputTokens,
             cacheKeyHeaders,
+            extraHeaders,
             headers: {
-              ...extraHeaders,
               'x-api-key': Redacted.value(config.apiKey),
               'anthropic-version': '2023-06-01',
               accept: 'text/event-stream',

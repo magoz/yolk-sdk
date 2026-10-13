@@ -56,6 +56,7 @@ type AnthropicToolUseBlock = {
   readonly id: string
   readonly name: string
   readonly input: Schema.Json
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicToolResultContentBlock =

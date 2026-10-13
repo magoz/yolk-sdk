@@ -86,7 +86,8 @@ export type VercelAiGatewayConformanceCase = ConformanceCase<
 const systemPrompt = 'Reply in one short sentence.'
 
 // The owner-approved live probe (`pnpm conformance:gateway --live --account synthetic`) that
-// recorded the committed verified fixtures observed every case pass on this date.
+// recorded the committed verified fixtures observed every case pass on this date. The recorded
+// requests predate `providerOptions.gateway.caching: 'auto'` (ADR 0008); re-record to observe it.
 const liveObservation = { account: 'synthetic', date: '2026-09-30' } as const
 
 const lookupWeatherTool = ToolDef.make({

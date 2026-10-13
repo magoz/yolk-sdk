@@ -16,7 +16,7 @@ rewriting the prefix.
 | ------------- | ------------------------------------------------------------------------------------------- |
 | Default       | Always on; no policy object. Markers and keys are cheap and providers ignore short prefixes |
 | Identity      | `LLMRequest.cacheKey` (host session id), set once on `RunConfig`/`RuntimeConfig`            |
-| Volatile data | `LLMRequest.turnContext`: appended after the last breakpoint, never in the transcript       |
+| Volatile data | `LLMRequest.turnContext`: appended after the conversation, never in the transcript          |
 | Tool choice   | `LLMRequest.toolChoice: 'none'` forbids calls but keeps tool definitions                    |
 | Anthropic TTL | Provider config `promptCacheTtl: '5m' \| '1h'`, default `5m`                                |
 
@@ -26,11 +26,15 @@ rewriting the prefix.
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude subscription            | Markers on the last tool, the conversation end and the previous request's end (3); `X-Claude-Code-Session-Id` is a UUID derived from `cacheKey` |
 | Native Messages (OpenCode Go)  | Same, plus the system prompt (4); `x-opencode-session`                                                                                          |
-| Codex                          | `prompt_cache_key` and `session-id` header (as the official CLI)                                                                                |
+| Codex                          | `prompt_cache_key` and the `session-id` header (official CLI: `codex-api/src/requests/headers.rs`)                                              |
 | Grok                           | `prompt_cache_key` and `x-grok-conv-id`                                                                                                         |
 | Vercel AI Gateway              | `providerOptions.gateway.caching: 'auto'` (Gateway marks explicit-caching upstreams), `x-session-affinity`                                      |
 | OpenCode Go chat / Responses   | `x-opencode-session`                                                                                                                            |
 | Generic OpenAI-compatible chat | Nothing (strict endpoints may reject unknown fields); hosts can add `cacheKeyHeaders`                                                           |
+
+`turnContext` follows every Anthropic breakpoint. Gateway's automatic markers land on the last
+message (the turn context) and on the message before the last user message, so the stable prefix
+before the turn context is still read.
 
 The two conversation breakpoints (last message, and the message before the latest assistant turn)
 make each request read exactly what the previous one wrote, even when a turn adds more blocks than

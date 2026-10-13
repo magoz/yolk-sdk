@@ -114,6 +114,7 @@ type AnthropicToolUseBlock = {
   readonly id: string
   readonly name: string
   readonly input: Schema.Json
+  readonly cache_control?: AnthropicCacheControl
 }
 
 type AnthropicToolResultContentBlock =
@@ -1239,13 +1240,23 @@ const toAnthropicTool = (
 const anthropicCacheControl = (ttl: AnthropicPromptCacheTtl | undefined): AnthropicCacheControl =>
   ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' }
 
-/** Marks the last block of a user message. Anthropic rejects markers on empty text. */
-const withUserMessageCacheControl = (
+const isMarkableBlock = (block: AnthropicUserBlock | AnthropicAssistantBlock) =>
+  block.type !== 'text' || block.text.length > 0
+
+/** Marks the last block of a message. Anthropic rejects markers on empty text. */
+const withMessageCacheControl = (
   message: AnthropicMessage,
   cacheControl: AnthropicCacheControl
 ): AnthropicMessage => {
-  if (message.role !== 'user') {
-    return message
+  if (message.role === 'assistant') {
+    const last = message.content.at(-1)
+
+    return last === undefined || !isMarkableBlock(last)
+      ? message
+      : {
+          role: 'assistant',
+          content: [...message.content.slice(0, -1), { ...last, cache_control: cacheControl }]
+        }
   }
 
   if (Predicate.isString(message.content)) {
@@ -1259,7 +1270,7 @@ const withUserMessageCacheControl = (
 
   const last = message.content.at(-1)
 
-  if (last === undefined || (last.type === 'text' && last.text.length === 0)) {
+  if (last === undefined || !isMarkableBlock(last)) {
     return message
   }
 
@@ -1289,7 +1300,7 @@ const withConversationCacheBreakpoints = (
   const marked = new Set([messages.length - 1, lastAssistantIndex - 1])
 
   return messages.map((message, index) =>
-    marked.has(index) ? withUserMessageCacheControl(message, cacheControl) : message
+    marked.has(index) ? withMessageCacheControl(message, cacheControl) : message
   )
 }
 

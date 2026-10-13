@@ -16,7 +16,10 @@ type AnthropicMessagesProviderConfig = {
   readonly providerName: string
   readonly messagesUrl: string
   readonly maxTokens: number
+  /** Required protocol and auth headers; they win over every other header. */
   readonly headers: Readonly<Record<string, string>>
+  /** Host extras; cache-key headers and required headers win over them. */
+  readonly extraHeaders?: Readonly<Record<string, string>>
   /**
    * Extra JSON request fields (for example `tool_choice` or `thinking`). Lowered request fields
    * win on a name clash. Internal: the Anthropic conformance cases use it; OpenCode Go does not.
@@ -92,6 +95,7 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
                 .execute(
                   HttpClientRequest.post(config.messagesUrl).pipe(
                     HttpClientRequest.setHeaders({
+                      ...config.extraHeaders,
                       ...requestCacheKeyHeaders(request.cacheKey, config.cacheKeyHeaders),
                       ...config.headers
                     }),

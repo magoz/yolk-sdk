@@ -3,6 +3,7 @@ import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/h
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  AssistantTextPart,
   HostToolCallPart,
   ToolCall,
   ToolDef,
@@ -16,7 +17,14 @@ import {
   makeAnthropicClaudeProviderLayer,
   toAnthropicClaudeRequestBody
 } from '../../src/providers/anthropic/claude-provider.ts'
-import { makeOpenAiCodexProviderLayer } from '../../src/providers/openai/codex-provider.ts'
+import {
+  makeOpenAiCodexProviderLayer,
+  toOpenAiCodexRequestBody
+} from '../../src/providers/openai/codex-provider.ts'
+import {
+  makeOpenAiProviderLayer,
+  toOpenAiRequestBody
+} from '../../src/providers/openai/provider.ts'
 import { makeXAiGrokProviderLayer } from '../../src/providers/xai/grok-provider.ts'
 import { xAiGrokProviderId } from '../../src/providers/xai/grok.ts'
 import { makeVercelAiGatewayProviderLayer } from '../../src/providers/vercel/ai-gateway-provider.ts'
@@ -187,6 +195,90 @@ describe('prompt caching', () => {
       })
     )
 
+    it.effect('marks an assistant-ending conversation before the turn context', () =>
+      Effect.gen(function* () {
+        const body = yield* toAnthropicClaudeRequestBody(
+          {
+            ...baseRequest,
+            tools: [],
+            messages: [
+              UserMessage.make({ content: 'first' }),
+              AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'reply' })] })
+            ],
+            turnContext: 'Now: 12:00'
+          },
+          { maxTokens: 100 }
+        )
+
+        expect(body.messages[1]).toEqual({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'reply', cache_control: { type: 'ephemeral' } }]
+        })
+        expect(body.messages[2]).toEqual({
+          role: 'user',
+          content: [{ type: 'text', text: 'Now: 12:00' }]
+        })
+      })
+    )
+
+    it.effect('never marks an empty text block', () =>
+      Effect.gen(function* () {
+        const body = yield* toAnthropicClaudeRequestBody(
+          {
+            ...baseRequest,
+            systemPrompt: '',
+            tools: [],
+            messages: [
+              UserMessage.make({ content: 'first' }),
+              AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'reply' })] }),
+              UserMessage.make({ content: '' })
+            ]
+          },
+          { maxTokens: 100 }
+        )
+
+        expect(JSON.stringify(body.messages[2])).not.toContain('cache_control')
+      })
+    )
+
+    it.effect('drops toolChoice none without tools on every transport', () =>
+      Effect.gen(function* () {
+        const request = { ...baseRequest, tools: [], toolChoice: 'none' as const }
+        const anthropic = yield* toAnthropicClaudeRequestBody(request, { maxTokens: 100 })
+        const codex = yield* toOpenAiCodexRequestBody(request)
+        const chat = yield* toOpenAiRequestBody(request, { maxCompletionTokens: 100 })
+
+        expect(anthropic).not.toHaveProperty('tool_choice')
+        expect(codex).not.toHaveProperty('tool_choice')
+        expect(chat).not.toHaveProperty('tool_choice')
+      })
+    )
+
+    it.effect('keeps a random per-layer session header without a cache key', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+        const first = makeAnthropicClaudeProviderLayer({ token: claudeToken, maxTokens: 100 })
+        const second = makeAnthropicClaudeProviderLayer({ token: claudeToken, maxTokens: 100 })
+
+        yield* Effect.gen(function* () {
+          const provider = yield* LLMProvider
+
+          yield* provider.stream(baseRequest).pipe(Stream.runCollect, Effect.ignore)
+          yield* provider.stream(baseRequest).pipe(Stream.runCollect, Effect.ignore)
+        }).pipe(
+          Effect.provide(first.pipe(Layer.provide(capturingHttpClient(requests, emptyResponse))))
+        )
+
+        yield* send(second, requests, baseRequest)
+
+        const sessionIds = requests.map(request => request.headers['x-claude-code-session-id'])
+
+        expect(sessionIds[0]).toBeDefined()
+        expect(sessionIds[1]).toBe(sessionIds[0])
+        expect(sessionIds[2]).not.toBe(sessionIds[0])
+      })
+    )
+
     it.effect('derives a stable UUID session header from the cache key', () =>
       Effect.gen(function* () {
         const requests: Array<HttpClientRequest.HttpClientRequest> = []
@@ -330,6 +422,50 @@ describe('prompt caching', () => {
 
         expect(requests[0]?.headers['x-opencode-session']).toBe('session-1')
         expect(bodyText(requests[0])).not.toContain('prompt_cache_key')
+      })
+    )
+
+    it.effect('lets required auth win over cache-key headers', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        yield* send(
+          makeOpenAiProviderLayer({
+            apiKey: Redacted.make('real-key'),
+            maxCompletionTokens: 100,
+            cacheKeyHeaders: cacheKey => ({
+              authorization: 'Bearer stolen',
+              'x-session': cacheKey
+            })
+          }),
+          requests,
+          { ...baseRequest, cacheKey: 'session-1' },
+          chatResponse
+        )
+
+        expect(requests[0]?.headers['authorization']).toBe('Bearer real-key')
+        expect(requests[0]?.headers['x-session']).toBe('session-1')
+      })
+    )
+
+    it.effect('orders Go headers the same on every protocol: extras, cache key, auth', () =>
+      Effect.gen(function* () {
+        for (const protocol of ['chat-completions', 'messages', 'responses'] as const) {
+          const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+          yield* send(
+            makeOpenCodeGoProviderLayer({
+              apiKey: Redacted.make('go-key'),
+              protocol,
+              maxOutputTokens: 100,
+              extraHeaders: { 'x-opencode-session': 'host-value' }
+            }),
+            requests,
+            { ...baseRequest, cacheKey: 'session-1' }
+          )
+
+          expect(requests[0]?.headers['x-opencode-session']).toBe('session-1')
+        }
       })
     )
 

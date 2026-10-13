@@ -70,6 +70,27 @@ const makeLayer = (
 const awaitingInput = (events: ReadonlyArray<AgentEvent>) =>
   events.find(event => Predicate.isTagged(event, 'AgentAwaitingInput'))
 
+describe('runtime prompt cache key', () => {
+  it.effect('forwards RuntimeConfig.cacheKey on every model request', () => {
+    const requests: Array<LLMRequest> = []
+
+    return runRuntime(
+      RuntimeRequest.AppendInput({
+        sessionId: 'session_cache',
+        input: UserMessage.make({ content: 'hello' }),
+        runId: 'run_cache'
+      }),
+      { systemPrompt: 'Be brief.', tools: [], model: 'faux', cacheKey: 'session_cache' }
+    ).pipe(
+      Stream.runCollect,
+      Effect.provide(makeLayer(requests, [Reply.text('hi')])),
+      Effect.map(() => {
+        expect(requests.map(request => request.cacheKey)).toEqual(['session_cache'])
+      })
+    )
+  })
+})
+
 describe('input runtime persistence', () => {
   it.effect('persists pending input and resumes through reconnect', () => {
     const firstRequests: Array<LLMRequest> = []

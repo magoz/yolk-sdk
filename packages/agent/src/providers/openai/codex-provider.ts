@@ -106,8 +106,8 @@ type OpenAiCodexRequestBody = {
   readonly prompt_cache_key?: string
 }
 
-// Like the official Codex CLI: the body key and the `session-id` header carry the conversation
-// identity that ChatGPT routes its prompt cache on.
+// Like the official Codex CLI (`codex-api/src/requests/headers.rs`): ChatGPT derives prompt-cache
+// affinity from the Responses `session-id` header; the body key carries the same identity.
 const openAiCodexPromptCache = {
   promptCacheKey: true,
   cacheKeyHeaders: (cacheKey: string) => ({ 'session-id': cacheKey })

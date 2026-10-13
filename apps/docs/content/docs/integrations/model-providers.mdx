@@ -211,13 +211,18 @@ prefix. It is always on:
 | OpenCode Go        | `x-opencode-session` (Messages also gets the Anthropic markers)                        |
 
 Pass a stable conversation identity such as the session id as `cacheKey` on `run`, `runRuntime`, or
-`LLMRequest`. Claude caches entries for five minutes; set `promptCacheTtl: '1h'` on
-`makeAnthropicClaudeProviderLayer` for sessions that idle between turns.
+`LLMRequest`; it travels in HTTP headers, so keep it printable ASCII. The generic OpenAI-compatible
+chat provider sends nothing unless its config sets `cacheKeyHeaders`. Claude caches entries for five
+minutes; set `promptCacheTtl: '1h'` on `makeAnthropicClaudeProviderLayer` for sessions that idle
+between turns.
 
 A cache hit needs a byte-identical prefix. Keep the system prompt and tool list stable within a
 conversation and never rewrite earlier messages per request: put per-request facts such as fresh
-signed URLs or the current time in `LLMRequest.turnContext`, which adapters append after every cache
-breakpoint. Read the outcome from `AgentInputUsage.cacheRead` and `cacheWrite`. See
+signed URLs or the current time in `LLMRequest.turnContext`. Adapters append it after the
+conversation (Anthropic after every breakpoint; Gateway's automatic markers still read the prefix
+before it). Loop hosts set it by decorating `LLMProvider`. `LLMRequest.toolChoice: 'none'` forbids
+tool calls but keeps the tool definitions; on Anthropic a changed `tool_choice` invalidates the
+cached messages. Read the outcome from `AgentInputUsage.cacheRead` and `cacheWrite`. See
 `docs/adr/0008-prompt-caching.md` in the repository for the design.
 
 ## Read subscription allowance
