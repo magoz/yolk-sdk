@@ -161,24 +161,38 @@ const latestAwaitingRequests = (log: RuntimeSessionEventLog): ReadonlyArray<Hitl
     )
   }, undefined) ?? []
 
-const endsRun = (stored: RuntimeSessionEventLog['events'][number]) =>
-  Predicate.isTagged(stored.event, 'RunCompleted') ||
-  Predicate.isTagged(stored.event, 'RunFailed') ||
-  Predicate.isTagged(stored.event, 'RunInterrupted')
-
 /**
- * The responses of the current pause chain: those logged since the last run that completed,
- * failed or was interrupted. They include answers to earlier siblings of the batch being resumed
- * (each answer resumes the same batch until it settles). Older answers belong to settled batches
- * and must not reach the resume batch, where a provider-reused call id would match them.
+ * The responses of the paused batch: those logged after the event that recorded the batch's
+ * assistant message (the transcript's last assistant message: a pause ends the run right after
+ * its batch). They include answers to earlier siblings of the batch (each answer resumes the same
+ * batch until it settles), and never an answer to an earlier batch, even one settled inside the
+ * same run without a run terminator, where a provider-reused call id would match it.
  */
-const pauseChainResponses = (log: RuntimeSessionEventLog): ReadonlyArray<HitlResponse> =>
-  replayRuntimeHitlResponses(
-    Option.match(Arr.findLastIndex(log.events, endsRun), {
-      onNone: () => log.events,
-      onSome: index => log.events.slice(index + 1)
-    })
+const pausedBatchResponses = (log: RuntimeSessionEventLog): ReadonlyArray<HitlResponse> => {
+  const transcript = replayRuntimeSessionEvents(log.events)
+
+  return Option.match(
+    Arr.findLastIndex(transcript, message => Predicate.isTagged(message, 'Assistant')),
+    {
+      onNone: () => [],
+      onSome: batchMessage => {
+        const counts = Arr.scan(
+          log.events,
+          0,
+          (count, stored) => count + replayRuntimeSessionEvents([stored]).length
+        ).slice(1)
+
+        return Option.match(
+          Arr.findFirstIndex(counts, count => count > batchMessage),
+          {
+            onNone: () => [],
+            onSome: recorded => replayRuntimeHitlResponses(log.events.slice(recorded + 1))
+          }
+        )
+      }
+    }
   )
+}
 
 const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
   Match.value(response).pipe(
@@ -336,7 +350,7 @@ const makeAppendHitlResponseRuntimeStream = (
       })
 
       const messages = replayRuntimeSessionEvents(initialLog.events)
-      const priorResponses = pauseChainResponses(initialLog)
+      const priorResponses = pausedBatchResponses(initialLog)
       const hitlResponses = [...priorResponses, request.response]
 
       // The pause being resumed binds its unanswered approval requests (see `prepareToolBatch`).

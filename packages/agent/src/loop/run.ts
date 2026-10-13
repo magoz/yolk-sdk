@@ -1,4 +1,15 @@
-import { Clock, Data, Effect, Match, Option, Predicate, Ref, Stream } from 'effect'
+import {
+  Array as Arr,
+  Clock,
+  Data,
+  Effect,
+  Match,
+  Option,
+  Predicate,
+  Ref,
+  Stream,
+  Struct
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentAwaitingInput,
@@ -114,6 +125,12 @@ export type RunConfig = {
    * approval request listed here stays pending even when its tool no longer requires approval.
    */
   readonly awaitingRequests?: ReadonlyArray<HitlRequest>
+  /** Whether the transcript's pending tool calls resume a pause. Default: they do when
+   * `hitlResponses`, `awaitingRequests` or an `interactionHost` is given (otherwise a new model
+   * turn runs). `true` resumes them even without responses; `false` prepares them as a fresh
+   * batch (current policy, no recorded answers consulted).
+   */
+  readonly resume?: boolean
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -854,10 +871,11 @@ const prepareQuestionCall = (
   })
 
 /**
- * Approval of one call. A fresh batch (a new model turn) follows the current policy first: a
- * provider may reuse call ids across turns, so earlier answers must not settle a new call unless
- * the tool asks. A resume batch binds the call to its pause instead, because hosts re-read tool
- * policy at execution and the policy can change between the request and the answer:
+ * Approval of one call. A fresh batch (a new model turn) follows the current policy and never
+ * consults recorded answers: a provider may reuse call ids, so an earlier answer must never
+ * settle a new call (a gated call asks again). A resume batch binds the call to its pause
+ * instead, because hosts re-read tool policy at execution and the policy can change between the
+ * request and the answer:
  *
  * 1. A recorded answer wins: the first exact-match response settles the call (`denied`: the
  *    denied result, never executed; `approved`: executed). A denial for the same call under
@@ -896,9 +914,10 @@ const prepareApprovalCall = (input: {
     return PreparedToolCall.Execute({ index, call, events: [] })
   }
 
-  const response =
-    approvalResponseFor(responses, call, tools) ??
-    (input.resume ? callDenialFor(responses, call) : undefined)
+  // A fresh batch never settles an approval from recorded answers: a gated call asks again.
+  const response = input.resume
+    ? (approvalResponseFor(responses, call, tools) ?? callDenialFor(responses, call))
+    : undefined
 
   if (response?.decision === 'denied') {
     return PreparedToolCall.Result({
@@ -1401,8 +1420,9 @@ export const prepareToolBatch = (input: {
    */
   readonly awaitingRequests?: ReadonlyArray<HitlRequest>
   /** Whether this batch resumes a pause (default: `awaitingRequests` given, or any `responses`).
-   * Only a resume lets recorded answers and the pause override the current policy; a fresh
-   * batch (a new model turn, whose provider may reuse call ids) follows the policy first.
+   * Only a resume consults recorded approvals and the pause; a fresh batch (a new model turn,
+   * whose provider may reuse call ids) never settles an approval from `responses`: the current
+   * policy decides, and a gated call asks again.
    */
   readonly resume?: boolean | undefined
 }): Effect.Effect<PreparedToolBatch, ToolError> =>
@@ -1411,6 +1431,9 @@ export const prepareToolBatch = (input: {
     const preflights = input.interactions ?? {}
     const previewers = input.approvalPreviews ?? {}
 
+    const resume =
+      input.resume ?? (input.awaitingRequests !== undefined || input.responses.length > 0)
+
     const planned = yield* Effect.forEach(input.calls, (call, index) =>
       prepareToolCall({
         tools: input.tools,
@@ -1418,9 +1441,8 @@ export const prepareToolBatch = (input: {
         handlers,
         preflights,
         receipts: input.interactionReceipts ?? new Map(),
-        awaiting: input.awaitingRequests ?? [],
-        resume:
-          input.resume ?? (input.awaitingRequests !== undefined || input.responses.length > 0),
+        awaiting: resume ? (input.awaitingRequests ?? []) : [],
+        resume,
         call,
         index
       })
@@ -1480,19 +1502,19 @@ const toolResultIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<strin
   )
 
 /**
- * Host tool calls without a result. A result answers the calls of the assistant message it
- * follows (up to the next assistant message), so a provider-reused call id is not settled by an
- * earlier call's result.
+ * Host tool calls without a result. A call is settled only by a result in its result window: the
+ * consecutive `ToolResult` messages right after its assistant message (the transcript rule of
+ * `danglingHostToolCalls`). A provider-reused call id is never settled by an earlier call's result.
  */
 const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) =>
   messages.flatMap((message, index) => {
     if (!Predicate.isTagged(message, 'Assistant')) return []
 
-    const next = messages.findIndex(
-      (later, at) => at > index && Predicate.isTagged(later, 'Assistant')
+    const window = Arr.takeWhile(messages.slice(index + 1), later =>
+      Predicate.isTagged(later, 'ToolResult')
     )
 
-    const completed = toolResultIds(messages.slice(index + 1, next === -1 ? undefined : next))
+    const completed = toolResultIds(window)
 
     return assistantHostToolCalls(message).filter(call => !completed.has(call.id))
   })
@@ -1640,7 +1662,8 @@ const makeAfterLlmStream = (
 
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
-        // A new model turn: the current policy first (providers may reuse call ids).
+        // A new model turn: approvals follow the current policy (a provider may reuse call ids).
+        // Answers reach only a run's first turn; later turns get a config without them.
         resume: false,
         responses: input.config.hitlResponses ?? [],
         calls: completion.toolCalls,
@@ -1711,6 +1734,7 @@ const makeAfterLlmStream = (
                   Stream.concat(
                     makeTurnStream({
                       ...input,
+                      config: withoutConsumedAnswers(input.config),
                       currentMessages: [
                         ...input.currentMessages,
                         assistantMessage,
@@ -1841,6 +1865,13 @@ const makeModelOnlyLlmStream = (
     )
 }
 
+/**
+ * The config of the model turns after a batch settled: answers and the pause are consumed by the
+ * batch they settled and never reach a later turn, where a provider may reuse a call id.
+ */
+const withoutConsumedAnswers = (config: RunConfig): RunConfig =>
+  Struct.omit(config, ['hitlResponses', 'awaitingRequests', 'resume'])
+
 const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.suspend(() => {
     if (input.turn > input.loopConfig.maxTurns) {
@@ -1870,20 +1901,22 @@ const makePendingToolResumeStream = (
     Effect.gen(function* () {
       const pendingCalls = pendingHostToolCalls(input.currentMessages)
 
-      if (
-        pendingCalls.length === 0 ||
-        ((input.config.hitlResponses ?? []).length === 0 &&
-          (input.config.awaitingRequests ?? []).length === 0 &&
-          input.config.interactionHost === undefined)
-      ) {
+      const detected =
+        (input.config.hitlResponses ?? []).length > 0 ||
+        (input.config.awaitingRequests ?? []).length > 0 ||
+        input.config.interactionHost !== undefined
+
+      if (pendingCalls.length === 0 || (input.config.resume === undefined && !detected)) {
         return makeTurnStream(input)
       }
+
+      const resume = input.config.resume ?? true
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
 
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
-        resume: true,
+        resume,
         responses: input.config.hitlResponses ?? [],
         calls: pendingCalls,
         inputs: input.config.inputs,
@@ -1950,6 +1983,7 @@ const makePendingToolResumeStream = (
               Effect.as(
                 makeTurnStream({
                   ...input,
+                  config: withoutConsumedAnswers(input.config),
                   currentMessages: [...input.currentMessages, ...orderedResults]
                 })
               )

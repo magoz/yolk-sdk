@@ -109,6 +109,13 @@ const appendInput = (content: string, runId: string, runtime: RuntimeConfig) =>
     Effect.map(chunk => Array.from(chunk))
   )
 
+const awaitingOf = (events: ReadonlyArray<AgentEvent>) =>
+  events.flatMap(event =>
+    Predicate.isTagged(event, 'AgentAwaitingInput')
+      ? event.requests.map(request => request.requestId)
+      : []
+  )
+
 const started = (events: ReadonlyArray<AgentEvent>) =>
   events.flatMap(event =>
     Predicate.isTagged(event, 'ToolExecutionStarted') ? [event.call.id] : []
@@ -225,6 +232,74 @@ describe('runtime approval binding', () => {
         runtimeLayer(
           toolCalls(ToolCall.make({ id: 'call_1', name: 'delete_file', params: {} })),
           Reply.text('kept'),
+          toolCalls(
+            ToolCall.make({ id: 'call_1', name: 'read_file', params: {} }),
+            ToolCall.make({ id: 'call_2', name: 'delete_file', params: {} })
+          ),
+          Reply.text('done')
+        )
+      )
+    )
+  )
+
+  it.effect('a gated reused id in a later batch of the same run asks again', () =>
+    Effect.gen(function* () {
+      expect(started(yield* appendInput('delete a', 'run_1', config(true)))).toEqual([])
+
+      // run_2 settles batch 1 (call_1 approved), then pauses on batch 2 without a terminator:
+      // the provider reuses call_1 for a new gated call beside call_2.
+      const second = yield* appendResponse(approval('call_1', 'approved'), 'run_2', config(true))
+
+      expect(started(second)).toEqual(['call_1'])
+      expect(second.map(event => event._tag)).not.toContain('AgentEnd')
+      expect(awaitingOf(second)).toEqual(['approval:call_1', 'approval:call_2'])
+
+      // Answering call_2 resumes batch 2 only: batch 1's approval of call_1 is not consent.
+      const third = yield* appendResponse(approval('call_2', 'approved'), 'run_3', config(true))
+
+      expect(started(third)).toEqual([])
+      expect(awaitingOf(third)).toEqual(['approval:call_1'])
+    }).pipe(
+      Effect.provide(
+        runtimeLayer(
+          toolCalls(ToolCall.make({ id: 'call_1', name: 'delete_file', params: { path: 'a' } })),
+          toolCalls(
+            ToolCall.make({ id: 'call_1', name: 'delete_file', params: { path: 'b' } }),
+            ToolCall.make({ id: 'call_2', name: 'delete_file', params: { path: 'c' } })
+          ),
+          Reply.text('done')
+        )
+      )
+    )
+  )
+
+  it.effect('an old denial in the same run does not deny an automatic reused-id sibling', () =>
+    Effect.gen(function* () {
+      const tools: RuntimeConfig = {
+        systemPrompt: 'Use tools.',
+        tools: [
+          toolDef(true),
+          ToolDef.make({ name: 'read_file', description: 'Read.', parameters: {} })
+        ],
+        model: 'faux'
+      }
+
+      yield* appendInput('delete a', 'run_1', tools)
+
+      // run_2 settles batch 1 (call_1 denied), then pauses on batch 2 in the same run.
+      const second = yield* appendResponse(approval('call_1', 'denied'), 'run_2', tools)
+
+      expect(second.map(event => event._tag)).not.toContain('AgentEnd')
+      expect(awaitingOf(second)).toEqual(['approval:call_2'])
+
+      const third = yield* appendResponse(approval('call_2', 'approved'), 'run_3', tools)
+
+      expect(started(third)).toEqual(['call_1', 'call_2'])
+      expect(third.map(event => event._tag)).not.toContain('ToolApprovalDenied')
+    }).pipe(
+      Effect.provide(
+        runtimeLayer(
+          toolCalls(ToolCall.make({ id: 'call_1', name: 'delete_file', params: {} })),
           toolCalls(
             ToolCall.make({ id: 'call_1', name: 'read_file', params: {} }),
             ToolCall.make({ id: 'call_2', name: 'delete_file', params: {} })
