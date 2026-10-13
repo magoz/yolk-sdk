@@ -1,5 +1,24 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.107
+
+### Minor Changes
+
+- d0ed3bc: The Fortnox emulator (`@yolk-sdk/emulators/fortnox`) now serves every read endpoint of the connector's newer Fortnox actions, `GET` only (34 routes, 44 in `fortnoxEmulatorRoutes`): articles, price lists and prices, cost centers, customer and supplier invoice payments, offers and the offer preview PDF, print templates, the inbox (folder JSON, file bytes), company settings, the locked period, predefined accounts, labels, the modes/terms of payment, terms/ways of delivery, and units registers, and `/3/me`. No fixture records them: they cite no conformance case, are `unverified`, and use minimal synthetic shapes named after the fields the connector reads. Their writes and side-effecting reads (such as `/3/offers/{DocumentNumber}/email`) are not emulated and still fail closed with a 404. The state and `FortnoxEmulatorSeed` gain one key per resource (each replacing the profile's part, checked for duplicates and dangling references; a seed replacing `customers` or `invoices` without seeding `offers` or `invoicePayments` starts those empty); the default profile holds small consistent synthetic data, `empty-company` empties the business data, and `no-booked-invoices` has no invoice payments. A missing key answers 404 `ErrorInformation` code `2999011` (`resourceNotFound`). Customer and invoice writes that reference an article, cost center, or project still answer 400, now saying such references are not emulated.
+
+### Patch Changes
+
+- 8972e3c: Enable provider prompt caching (ADR 0008). `LLMRequest` gains `cacheKey` (also on `RunConfig` and
+  `RuntimeConfig`), `turnContext` and `toolChoice`. Anthropic requests always carry `cache_control`
+  breakpoints (last tool, conversation end, previous request's end; native Messages also the system
+  prompt) with a configurable `promptCacheTtl` on the Claude provider, and the Claude session header
+  is derived from `cacheKey`. Codex and Grok send `prompt_cache_key` plus their session headers,
+  Vercel AI Gateway sends `caching: 'auto'` and `x-session-affinity`, and OpenCode Go sends
+  `x-opencode-session`. `turnContext` is appended after the conversation (after every Anthropic breakpoint); `toolChoice: 'none'` keeps
+  tool definitions while forbidding calls (on Anthropic it invalidates cached messages). The generic OpenAI-compatible chat provider sends nothing unless its new
+  optional `cacheKeyHeaders` config is set. The `@yolk-sdk/emulators` OpenCode Go Messages recording
+  now expects the cache markers.
+
 ## 0.1.0-canary.106
 
 ## 0.1.0-canary.105

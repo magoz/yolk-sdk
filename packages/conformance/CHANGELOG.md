@@ -1,5 +1,11 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.107
+
+### Patch Changes
+
+- d3c2f98: Advance unchanged public packages in lockstep with the Fortnox Developer Portal scopes in `@yolk-sdk/connectors` (91 actions across the article, price, costcenter, payment, offer, print, inbox, settings, and profile scopes), the matching `@yolk-sdk/emulators` Fortnox read routes, and provider prompt caching in `@yolk-sdk/agent` (ADR 0008). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.106
 
 ## 0.1.0-canary.105
