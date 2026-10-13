@@ -516,6 +516,121 @@ const choiceProblems = (
   return [...constProblem, ...enumProblem, ...itemProblem]
 }
 
+const decodeBound = Schema.decodeUnknownOption(Schema.Finite)
+
+const FormatName = Schema.Literals(['email', 'uri', 'date', 'date-time'])
+
+/** A real calendar date (`2026-02-30` is not). */
+const isCalendarDate = (year: number, month: number, day: number) => {
+  const date = new Date(Date.UTC(year, month - 1, day))
+
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  )
+}
+
+const fullDate = /^(\d{4})-(\d{2})-(\d{2})$/
+
+const dateTime =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-](\d{2}):(\d{2}))$/
+
+const numberAt = (match: RegExpExecArray, group: number) => Number(match[group] ?? Number.NaN)
+
+const isDate = (value: string) => {
+  const match = fullDate.exec(value)
+
+  return (
+    match !== null && isCalendarDate(numberAt(match, 1), numberAt(match, 2), numberAt(match, 3))
+  )
+}
+
+const isDateTime = (value: string) => {
+  const match = dateTime.exec(value)
+
+  if (match === null) return false
+
+  const offsetHours = match[9] === undefined ? 0 : numberAt(match, 9)
+  const offsetMinutes = match[10] === undefined ? 0 : numberAt(match, 10)
+
+  return (
+    isCalendarDate(numberAt(match, 1), numberAt(match, 2), numberAt(match, 3)) &&
+    numberAt(match, 4) <= 23 &&
+    numberAt(match, 5) <= 59 &&
+    numberAt(match, 6) <= 60 &&
+    offsetHours <= 23 &&
+    offsetMinutes <= 59
+  )
+}
+
+/** Syntax checks for the subset's formats (RFC 3339 dates; an absolute URI; `local@domain`). */
+const matchesFormat = (format: typeof FormatName.Type, value: string) => {
+  switch (format) {
+    case 'email':
+      return /^[^\s@]+@[^\s@]+$/.test(value)
+    case 'uri':
+      return URL.canParse(value)
+    case 'date':
+      return isDate(value)
+    case 'date-time':
+      return isDateTime(value)
+  }
+}
+
+const codePoints = (value: string) => Array.from(value).length
+
+const outside = (count: number, min: Option.Option<number>, max: Option.Option<number>) =>
+  (Option.isSome(min) && count < min.value) || (Option.isSome(max) && count > max.value)
+
+/**
+ * The bounds of the 2026-07-28 form-schema subset: string `minLength`/`maxLength` (in code
+ * points) and `format`, number and integer `minimum`/`maximum` (inclusive; the subset has no
+ * exclusive bounds), and string-list `minItems`/`maxItems`.
+ */
+const boundProblems = (
+  name: string,
+  property: McpElicitationProperty,
+  value: McpElicitationContentValue
+): ReadonlyArray<string> => {
+  if (isString(value)) {
+    const length = codePoints(value)
+
+    const lengthProblem = outside(
+      length,
+      decodeBound(property['minLength']),
+      decodeBound(property['maxLength'])
+    )
+      ? [`${name} has ${length} characters, outside minLength/maxLength`]
+      : []
+
+    const format = Schema.decodeUnknownOption(FormatName)(property['format'])
+
+    const formatProblem =
+      Option.isSome(format) && !matchesFormat(format.value, value)
+        ? [`${name} is not a valid ${format.value}`]
+        : []
+
+    return [...lengthProblem, ...formatProblem]
+  }
+
+  if (isFiniteNumber(value)) {
+    return outside(value, decodeBound(property['minimum']), decodeBound(property['maximum']))
+      ? [`${name} is outside minimum/maximum`]
+      : []
+  }
+
+  if (isStringArray(value)) {
+    return outside(
+      value.length,
+      decodeBound(property['minItems']),
+      decodeBound(property['maxItems'])
+    )
+      ? [`${name} has ${value.length} items, outside minItems/maxItems`]
+      : []
+  }
+
+  return []
+}
+
 const contentProblems = (
   elicitation: McpFormElicitation,
   content: Readonly<Record<string, McpElicitationContentValue>>
@@ -536,7 +651,7 @@ const contentProblems = (
     if (property === undefined) return []
 
     return matchesPropertyType(property.type, value)
-      ? choiceProblems(name, property, value)
+      ? [...choiceProblems(name, property, value), ...boundProblems(name, property, value)]
       : [`${name} is not a ${property.type}`]
   })
 
@@ -578,8 +693,9 @@ const wireInputResponse = (
 /**
  * Checks the host's decisions against the paused call and builds the wire `inputResponses`:
  * exactly one decision per elicitation; accepted content only names declared properties, holds
- * every required one, and matches each property's `type`, `const`, `enum` (or titled `oneOf`),
- * and for string lists `items.enum` (or `items.anyOf`). Fails with `McpInputRequiredError`
+ * every required one, and matches each property's `type` (integer vs number), `const`, `enum` (or
+ * titled `oneOf`), `minLength`/`maxLength`, `format`, `minimum`/`maximum`, and for string lists
+ * `items.enum` (or `items.anyOf`) and `minItems`/`maxItems`. Fails with `McpInputRequiredError`
  * (`invalid_responses`) before anything is sent. The server still validates the decisions.
  */
 export const toMcpInputResponses = (input: {

@@ -126,8 +126,10 @@ const step = Effect.gen(function* () {
 
   if (outcome._tag === 'Complete') return outcome.result
 
-  // Persist outcome.inputRequired (a Schema class) and render its forms. Later, possibly in
-  // another process, resume with one decision per form, keyed by its `key`:
+  // Integration fragment: persist outcome.inputRequired (a Schema class) and show its forms to a
+  // person; resume later, possibly in another process, with their decisions, one per form keyed
+  // by its `key`. This sketch declines every form (the safe default when nobody decides); never
+  // auto-accept a confirmation.
   const decline: McpElicitationResponse = { action: 'decline' }
   const responses: McpElicitationResponses = Object.fromEntries(
     outcome.inputRequired.elicitations.map(form => [form.key, decline])
@@ -164,12 +166,13 @@ const step = Effect.gen(function* () {
   definition is passed as `toolDefinition`, the official client does not re-list and retry after a
   `HEADER_MISMATCH` (`-32020`): a server that changed the tool's `x-mcp-header` declarations since
   the pause answers `McpError` (`cause: 'protocol'`). Decisions are checked before anything is sent
-  (type, `required`, `const`, `enum`, titled `oneOf`, `items.enum`, titled `items.anyOf`); the server validates them again. The server may pause again.
+  (type (integer vs number), `required`, `const`, `enum`, titled `oneOf`, `minLength`/`maxLength`, `format` (email, uri, date, date-time), `minimum`/`maximum`, `items.enum`, titled `items.anyOf`, `minItems`/`maxItems`); the server validates them again. The server may pause again.
 - The carried definition is `name`, `inputSchema` and `outputSchema`: the only `toolDefinition`
   fields the pinned official client reads. `annotations`, `_meta` and `execution` (task support,
   which its `2026-07-28` codec removes from listings) are not carried.
-- The official client drops a non-string `requestState`; the pause then carries none, and the
-  resume reaches the server as a fresh call (the server pauses again).
+- The pause is decoded from the raw `input_required` result as the server sent it, captured at the
+  transport before the official client normalises it (it would drop a non-string `requestState`
+  and turn non-object `inputRequests` into `{}`). Such a result fails `malformed`.
 - Typed failures: `McpInputRequiredError` (`malformed`, `too_large`, `unsupported_request` for URL
   mode, sampling, roots or input without the opt-in, `invalid_responses`, `mismatched_resume`,
   `unsupported_era`) and `McpClientCapabilityRequiredError` for MCP `-32021`.

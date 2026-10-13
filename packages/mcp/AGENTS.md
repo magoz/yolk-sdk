@@ -57,7 +57,7 @@
   `execution` from 2026 listings and has no task runtime). `maxInputRequiredBytes` is validated
   before connecting and bounds two parts separately: the server-provided pause (after the body is
   buffered, without the tool definition) and the listed definition (before the call, so an
-  oversized definition fails `too_large` with nothing sent). The SDK drops a non-string `requestState` (the resume is then a fresh call).
+  oversized definition fails `too_large` with nothing sent). The pause is decoded from the raw `input_required` result, captured by wrapping the transport's `onmessage` after connect (`captureRawInputRequired`), because the SDK's codec drops a non-string `requestState` and turns non-object `inputRequests` into `{}`; a malformed raw envelope, or none observed exactly once, fails `malformed`. Accepted content is checked against the whole 2026-07-28 form-schema subset (see `toMcpInputResponses`).
   Form mode only; legacy server-initiated elicitation is unsupported (`McpInputRequiredError`
   `unsupported_era`). Tests: `test/client/elicitation.test.ts`.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.

@@ -223,6 +223,8 @@ type Harness = {
   readonly wire: Array<WireMessage>
   /** The `mcp-param-invoice-id` header of every tools/call, in order. */
   readonly invoiceHeaders: Array<string | undefined>
+  /** The body of every server answer to a tools/call, in order. */
+  readonly callAnswers: Array<string>
   readonly layer: Layer.Layer<HttpClient.HttpClient>
   readonly calls: () => ReadonlyArray<WireMessage>
 }
@@ -236,6 +238,7 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
   const handler = createMcpHandler(makeConfirmingServer(ledger))
   const wire: Array<WireMessage> = []
   const invoiceHeaders: Array<string | undefined> = []
+  const callAnswers: Array<string> = []
   let callAttempts = 0
 
   const layer = Layer.succeed(
@@ -279,6 +282,10 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
           )
         )
 
+        if (Option.isSome(message) && message.value.method === 'tools/call') {
+          callAnswers.push(yield* Effect.promise(() => response.clone().text()))
+        }
+
         return HttpClientResponse.fromWeb(request, response)
       })
     )
@@ -288,6 +295,7 @@ const makeHarness = (overrideCall?: (attempt: number) => unknown): Harness => {
     ledger,
     wire,
     invoiceHeaders,
+    callAnswers,
     layer,
     calls: () => wire.filter(message => message.method === 'tools/call')
   }
@@ -868,11 +876,15 @@ describe('MCP form elicitation (MRTR)', () => {
       expect(tight.calls()).toHaveLength(0)
 
       // The definition and the server-provided pause each fit the bound; together they do not.
+      const measured = makeHarness()
+
       const pending = expectInputRequired(
-        yield* callRemoteMcpServerToolResumable(callInput()).pipe(
-          Effect.provide(makeHarness().layer)
-        )
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(measured.layer))
       )
+
+      const answer = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Struct({ result: Schema.Unknown }))
+      )(measured.callAnswers[0] ?? '')
 
       const json = (value: unknown) =>
         Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
@@ -882,7 +894,9 @@ describe('MCP form elicitation (MRTR)', () => {
       const toolBytes = yield* json(pending.tool)
       const pauseBytes = yield* json({ ...pending, tool: undefined })
       const totalBytes = yield* json(pending)
-      const bound = Math.max(toolBytes, pauseBytes) + 64
+      // The raw InputRequiredResult (as the server sent it) is bounded too.
+      const rawBytes = yield* json(answer.result)
+      const bound = Math.max(toolBytes, pauseBytes, rawBytes) + 64
 
       expect(totalBytes).toBeGreaterThan(bound)
 
@@ -1019,6 +1033,170 @@ describe('MCP form elicitation (MRTR)', () => {
           reason: 'invalid_responses'
         })
       }
+    })
+  )
+
+  it.effect('enforces the form-schema subset bounds at their boundaries', () =>
+    Effect.gen(function* () {
+      const pending = McpInputRequired.make({
+        mcpToolName: 'fill',
+        argumentsDigest: 'sha256:0',
+        elicitations: [
+          McpFormElicitation.make({
+            key: 'form',
+            message: 'Fill',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', minLength: 2, maxLength: 4 },
+                email: { type: 'string', format: 'email' },
+                site: { type: 'string', format: 'uri' },
+                day: { type: 'string', format: 'date' },
+                at: { type: 'string', format: 'date-time' },
+                score: { type: 'number', minimum: 1, maximum: 10 },
+                count: { type: 'integer', minimum: 0 },
+                tags: {
+                  type: 'array',
+                  minItems: 1,
+                  maxItems: 2,
+                  items: { type: 'string', enum: ['a', 'b', 'c'] }
+                }
+              }
+            }
+          })
+        ]
+      })
+
+      const check = (content: Record<string, string | number | ReadonlyArray<string>>) =>
+        toMcpInputResponses({
+          server: 'books',
+          inputRequired: pending,
+          responses: { form: { action: 'accept', content } }
+        }).pipe(Effect.exit)
+
+      const accepted: ReadonlyArray<Record<string, string | number | ReadonlyArray<string>>> = [
+        { name: 'ab' },
+        { name: 'abcd' },
+        // Code points, not UTF-16 units.
+        { name: '🔐🔐' },
+        { email: 'a@b' },
+        { site: 'https://x.test/a?b=1' },
+        { site: 'urn:isbn:0451450523' },
+        { day: '2024-02-29' },
+        { at: '2026-10-13T08:00:00Z' },
+        { at: '2026-10-13T08:00:00.123+02:00' },
+        { score: 1 },
+        { score: 10 },
+        { score: 5.5 },
+        { count: 0 },
+        { tags: ['a'] },
+        { tags: ['a', 'b'] }
+      ]
+
+      for (const content of accepted) {
+        expect(Exit.isSuccess(yield* check(content)), JSON.stringify(content)).toBe(true)
+      }
+
+      const rejected: ReadonlyArray<Record<string, string | number | ReadonlyArray<string>>> = [
+        { name: 'a' },
+        { name: 'abcde' },
+        { email: 'nope' },
+        { email: 'a b@c' },
+        { site: 'not a uri' },
+        { site: '/relative' },
+        { day: '2026-02-30' },
+        { day: '2026-2-1' },
+        { at: '2026-10-13 08:00:00Z' },
+        { at: '2026-10-13T24:00:00Z' },
+        { at: '2026-10-13T08:00:00' },
+        { score: 0.999 },
+        { score: 10.001 },
+        { count: -1 },
+        { count: 1.5 },
+        { tags: [] },
+        { tags: ['a', 'b', 'c'] }
+      ]
+
+      for (const content of rejected) {
+        expect(failure(yield* check(content)), JSON.stringify(content)).toMatchObject({
+          reason: 'invalid_responses'
+        })
+      }
+    })
+  )
+
+  it.effect('refuses an out-of-bounds decision with no resume call', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness(attempt =>
+        attempt === 1
+          ? inputRequiredResult({
+              form: formRequest({
+                message: 'How many?',
+                requestedSchema: {
+                  type: 'object',
+                  properties: { copies: { type: 'integer', minimum: 1, maximum: 3 } },
+                  required: ['copies']
+                }
+              })
+            })
+          : { resultType: 'complete', content: [], structuredContent: { deleted: true } }
+      )
+
+      const pending = expectInputRequired(
+        yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+      )
+
+      const exit = yield* Effect.exit(
+        resumeRemoteMcpServerToolCall({
+          ...callInput(),
+          inputRequired: pending,
+          responses: { form: { action: 'accept', content: { copies: 4 } } }
+        }).pipe(Effect.provide(harness.layer))
+      )
+
+      expect(failure(exit)).toMatchObject({ reason: 'invalid_responses' })
+      expect(harness.calls()).toHaveLength(1)
+    })
+  )
+
+  it.effect('validates the raw input_required envelope, not the SDK normalised one', () =>
+    Effect.gen(function* () {
+      const form = formRequest({ message: 'Sure?', requestedSchema: confirmationSchema })
+
+      const corrupted: ReadonlyArray<unknown> = [
+        // The SDK would drop the state: the resume would lose it.
+        { resultType: 'input_required', inputRequests: { confirmation: form }, requestState: 123 },
+        // The SDK would turn the requests into {}: a load-shedding pause.
+        { resultType: 'input_required', inputRequests: 'garbage', requestState: 'opaque' },
+        { resultType: 'input_required', inputRequests: [form], requestState: 'opaque' },
+        { resultType: 'input_required', inputRequests: null, requestState: 'opaque' }
+      ]
+
+      for (const raw of corrupted) {
+        const harness = makeHarness(() => raw)
+
+        const exit = yield* Effect.exit(
+          callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+        )
+
+        expect(failure(exit), JSON.stringify(raw)).toMatchObject({
+          _tag: 'McpInputRequiredError',
+          reason: 'malformed'
+        })
+      }
+
+      // A well-formed raw pause still decodes, with its state.
+      const harness = makeHarness(() => ({
+        resultType: 'input_required',
+        inputRequests: { confirmation: form },
+        requestState: 'opaque'
+      }))
+
+      expect(
+        expectInputRequired(
+          yield* callRemoteMcpServerToolResumable(callInput()).pipe(Effect.provide(harness.layer))
+        ).requestState
+      ).toBe('opaque')
     })
   )
 

@@ -145,7 +145,7 @@ export const mcpConformanceElicitationFixtures: ReadonlyArray<WireFixture> = [
   mcpElicitationDeclarationLegacyFixture
 ]
 
-/** Every MCP wire fixture, in case order (modern before legacy). */
+/** Default-suite MCP wire fixtures, in case order (modern before legacy). */
 export const mcpConformanceFixtures: ReadonlyArray<WireFixture> = [
   mcpNegotiationEraModernFixture,
   mcpNegotiationEraLegacyFixture,

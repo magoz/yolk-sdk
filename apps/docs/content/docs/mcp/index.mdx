@@ -91,6 +91,10 @@ Opt in with `elicitation: { form: true }`. The listing and the resumable call fu
 `elicitation.form` in the per-request `_meta` client capabilities of a modern connection (never in a
 legacy `initialize`). `callRemoteMcpServerToolResumable` answers a typed outcome:
 
+An integration fragment: `collectDecision` stands for the host's own flow (persist the pause, show
+the form to a person, await their answer, possibly in another process). Never auto-accept a
+confirmation; when no person decides, answer `decline` or `cancel`.
+
 ```ts
 import {
   callRemoteMcpServerToolResumable,
@@ -100,6 +104,9 @@ import {
   type McpFormElicitation
 } from '@yolk-sdk/mcp/client'
 
+// Host-owned: renders the form, waits for a person, and returns their decision.
+declare const collectDecision: (form: McpFormElicitation) => Promise<McpElicitationResponse>
+
 const options: McpClientOptions = { elicitation: { form: true } }
 const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_123', params, options }
 
@@ -108,21 +115,19 @@ const outcome = await Effect.runPromise(
 )
 
 if (outcome._tag === 'InputRequired') {
-  // Persist `outcome.inputRequired`, show each form (message + requestedSchema), resume later,
-  // possibly in another process.
+  // Persist `outcome.inputRequired` first: the decision may take hours and another process.
   const pending = outcome.inputRequired
-  // One decision per form, keyed by `form.key`, collected by the host's own UI.
-  const decide = (form: McpFormElicitation): McpElicitationResponse =>
-    form.key === 'confirmation'
-      ? { action: 'accept', content: { confirm: true } }
-      : { action: 'decline' }
+  const responses: Record<string, McpElicitationResponse> = {}
+
+  for (const form of pending.elicitations) {
+    // One decision per form, keyed by `form.key`, from a person.
+    responses[form.key] = await collectDecision(form)
+  }
 
   const resumed = await Effect.runPromise(
-    resumeRemoteMcpServerToolCall({
-      ...call,
-      inputRequired: pending,
-      responses: Object.fromEntries(pending.elicitations.map(form => [form.key, decide(form)]))
-    }).pipe(Effect.provide(FetchHttpClient.layer))
+    resumeRemoteMcpServerToolCall({ ...call, inputRequired: pending, responses }).pipe(
+      Effect.provide(FetchHttpClient.layer)
+    )
   )
 }
 ```
@@ -132,7 +137,7 @@ decode it in another process. Each `McpFormElicitation` carries the server's `ke
 `requestedSchema` (flat primitive properties, kept as received). The pause is bound to its call
 (`mcpToolName`, `argumentsDigest`) and carries the listed tool definition. Answer every elicitation
 with `accept` (with `content`), `decline`, or `cancel`; decisions are checked against each form
-(type, `required`, `const`, `enum`, titled `oneOf`, `items.enum`, titled `items.anyOf`) before sending, and the server validates them again. The
+(type (integer vs number), `required`, `const`, `enum`, titled `oneOf`, `minLength`/`maxLength`, `format` (email, uri, date, date-time), `minimum`/`maximum`, `items.enum`, titled `items.anyOf`, `minItems`/`maxItems`) before sending, and the server validates them again. The
 resume is re-sent as a new request on a new connection with the same tool call, the exact
 `requestState`, and the decisions as `inputResponses`. It lists nothing: the pause's tool definition
 (`name`, `inputSchema`, `outputSchema`) drives header mirroring and the structured-output check, and
@@ -149,8 +154,9 @@ before the call, so an oversized definition fails with nothing sent and never st
 also covers an `unsupported_request` (URL mode,
 sampling, roots, or any input without the opt-in), `invalid_responses` and `mismatched_resume`
 (another tool or other arguments; both checked before sending), and `unsupported_era` (resuming on a
-legacy connection). The official client drops a non-string `requestState`, so such a resume reaches
-the server as a fresh call. MCP `-32021` becomes
+legacy connection). The pause is decoded from the raw `input_required` result as the server sent it
+(captured before the official client normalises it), so a non-string `requestState` or non-object
+`inputRequests` fails `malformed` instead of passing as a valid or load-shedding pause. MCP `-32021` becomes
 `McpClientCapabilityRequiredError` with `requiredCapabilities`. A server that reports a missing
 capability as a tool error (for example Afloat's `CLIENT_CAPABILITY_REQUIRED`) answers a `Complete`
 outcome with `isError: true`.

@@ -5,6 +5,7 @@ import {
   Client as SdkClient,
   fromJsonSchema,
   isInputRequiredResult,
+  isJSONRPCResultResponse,
   isSpecType,
   mergeCapabilities,
   MissingRequiredClientCapabilityError,
@@ -722,6 +723,33 @@ const carriedDefinition = (
     : { kind: 'ok', paused: paused.value, definition: listed }
 }
 
+const InputRequiredResultType = Schema.Struct({ resultType: Schema.Literal('input_required') })
+
+/**
+ * Captures each raw `input_required` result as it arrives, before the SDK's codec normalises it
+ * (the pinned SDK drops a non-string `requestState` and turns non-object `inputRequests` into
+ * `{}`, which could make a corrupted pause look valid). Wraps the transport's `onmessage`, which
+ * the client set on connect; every message is still forwarded unchanged.
+ */
+const captureRawInputRequired = (client: SdkClient): ReadonlyArray<unknown> => {
+  const captured: Array<unknown> = []
+  const transport = client.transport
+
+  if (transport === undefined) return captured
+
+  const forward = transport.onmessage
+
+  transport.onmessage = (message, extra) => {
+    if (isJSONRPCResultResponse(message) && Schema.is(InputRequiredResultType)(message.result)) {
+      captured.push(message.result)
+    }
+
+    forward?.(message, extra)
+  }
+
+  return captured
+}
+
 /** A definition that keeps the SDK off its response cache when nothing better is known. */
 const minimalToolDefinition = (name: string): Tool => ({ name, inputSchema: { type: 'object' } })
 
@@ -851,14 +879,29 @@ const resumableStep = (
           : Struct.omit(definition, ['outputSchema'])
     }
 
+    const rawInputRequired = captureRawInputRequired(client)
+
     try {
       const result = await client.callTool(params, callOptions)
 
-      if (!isInputRequiredResult(result) && validator !== undefined) {
-        await assertStructuredOutput(input.mcpToolName, validator, result)
+      if (!isInputRequiredResult(result)) {
+        if (validator !== undefined) {
+          await assertStructuredOutput(input.mcpToolName, validator, result)
+        }
+
+        return { kind: 'answered', era, raw: result, tool: paused }
       }
 
-      return { kind: 'answered', era, raw: result, tool: paused }
+      // Decode the pause as the server sent it, never the SDK's normalised copy.
+      const [raw, ...more] = rawInputRequired
+
+      return raw === undefined || more.length > 0
+        ? {
+            kind: 'refused',
+            reason: 'malformed',
+            message: 'The raw input_required result of the call was not observed exactly once'
+          }
+        : { kind: 'answered', era, raw, tool: paused }
     } catch (error) {
       if (error instanceof MissingRequiredClientCapabilityError) {
         return {
