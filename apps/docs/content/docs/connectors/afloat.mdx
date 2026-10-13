@@ -86,6 +86,18 @@ alone, in any encoding) for wholesale synthetic replacement: every `tools/call` 
 replaced by a minimal synthetic one before promotion, never scrubbed field by field.
 `--target figma` is refused until an owner-approved practice seat exists.
 
+### Confirmation-gated tools
+
+Afloat confirms destructive tools (hard deletes, tax-return generation) with MCP form elicitation
+over multi round-trip requests: a client that declares `elicitation.form` gets an
+`InputRequiredResult` and resumes with `callRemoteMcpServerToolResumable` and
+`resumeRemoteMcpServerToolCall`; a client that does not, including every legacy-era client, gets a
+`CLIENT_CAPABILITY_REQUIRED` tool error. The conformance cases never call these tools (the call gate
+forwards only read-only calls), and no Afloat fixture covers them. The opt-in
+`mcpElicitationDeclarationCase` only lists; against Afloat it is a dry-run note for now: it has no
+Afloat fixture and the runner does not schedule it, so a live check would need its own owner-approved
+run.
+
 ## Emulator profile
 
 `@yolk-sdk/emulators/mcp` serves profile `afloat` on `https://useafloat.com/mcp` from a data copy of

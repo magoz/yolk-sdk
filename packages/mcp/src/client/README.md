@@ -10,6 +10,9 @@ Full-core MCP v2 client exports plus Effect/Yolk tool adapters.
 - Effect `HttpClient`-backed remote Yolk tool listing and calling.
 - Node stdio transports and convenience wrappers through `@yolk-sdk/mcp/client/node`.
 - MCP tool-to-Yolk `ToolDef` / `ToolResult` adapters.
+- Durable form elicitation (MRTR): `callRemoteMcpServerToolResumable` answers `Complete` or a
+  serializable `InputRequired` pause; `resumeRemoteMcpServerToolCall` retries with the exact
+  `requestState` and the host's decisions. Opt in with `McpClientOptions.elicitation`.
 
 The official `Client` keeps its upstream legacy default. Select `versionNegotiation: { mode: 'auto' }` or pin `2026-07-28` for modern MCP.
 

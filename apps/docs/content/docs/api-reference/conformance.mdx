@@ -381,6 +381,13 @@ answers SSE in session `yolk-synthetic-session-0001`. The exchanges are in the o
 sends them, the request bodies carry its exact ids and `_meta` envelope, and `authorization` is never
 recorded. `mcpConformanceSyntheticTarget(era)` and `mcpConformanceFixtureSeeds` replay them.
 
+`mcpElicitationDeclarationCase` (`mcp.elicitation.declaration`, read, both eras) is opt-in: it is
+not in `mcpConformanceCases`, and its two fixtures are `mcpConformanceElicitationFixtures`, not part
+of `mcpConformanceFixtures`. Run it for a host that sets `McpClientOptions.elicitation`. It only
+lists: modern tools/list requests carry `elicitation.form` in their `_meta` client capabilities and
+get an object result; legacy `initialize` declares no elicitation and no request after the era probe
+carries `_meta` client capabilities. It never calls a tool, so it never triggers a confirmation.
+
 The cases also run in-process against `makeMcpToolServer().handleHttpRequest`. Five cases apply
 there: era, stateless, response encoding, listing and unknown tool. The legacy session never happens
 because the client negotiates the modern era. The two call cases stop at their precondition, because

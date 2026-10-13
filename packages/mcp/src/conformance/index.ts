@@ -16,6 +16,10 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import { mcpAuthRejectedLegacyFixture, mcpAuthRejectedModernFixture } from './auth-rejected.ts'
 import { mcpCallReadLegacyFixture, mcpCallReadModernFixture } from './call-read.ts'
 import { mcpCallToolErrorLegacyFixture, mcpCallToolErrorModernFixture } from './call-tool-error.ts'
+import {
+  mcpElicitationDeclarationLegacyFixture,
+  mcpElicitationDeclarationModernFixture
+} from './elicitation-declaration.ts'
 import { mcpLegacySessionFixture } from './legacy-session.ts'
 import { mcpModernStatelessFixture } from './modern-stateless.ts'
 import {
@@ -34,6 +38,7 @@ export {
   mcpCallReadCase,
   mcpCallToolErrorCase,
   mcpConformanceCases,
+  mcpElicitationDeclarationCase,
   mcpLegacySessionCase,
   mcpModernStatelessCase,
   mcpNegotiationEraCase,
@@ -85,6 +90,7 @@ export {
   mcpConformanceLegacyInitializeResult,
   mcpConformanceModernDiscoverResult,
   mcpConformanceSyntheticCursor,
+  mcpConformanceSyntheticElicitationEnvelope,
   mcpConformanceSyntheticEnvelope,
   mcpConformanceSyntheticInvalidCall,
   mcpConformanceSyntheticLegacyProtocolVersion,
@@ -116,6 +122,8 @@ export {
   mcpCallReadModernFixture,
   mcpCallToolErrorLegacyFixture,
   mcpCallToolErrorModernFixture,
+  mcpElicitationDeclarationLegacyFixture,
+  mcpElicitationDeclarationModernFixture,
   mcpLegacySessionFixture,
   mcpModernStatelessFixture,
   mcpNegotiationEraLegacyFixture,
@@ -128,7 +136,16 @@ export {
   mcpUnknownToolModernFixture
 }
 
-/** Every MCP wire fixture, in case order (modern before legacy). */
+/**
+ * The fixtures of the opt-in `mcpElicitationDeclarationCase` (not in `mcpConformanceFixtures`,
+ * like the case is not in `mcpConformanceCases`).
+ */
+export const mcpConformanceElicitationFixtures: ReadonlyArray<WireFixture> = [
+  mcpElicitationDeclarationModernFixture,
+  mcpElicitationDeclarationLegacyFixture
+]
+
+/** Default-suite MCP wire fixtures, in case order (modern before legacy). */
 export const mcpConformanceFixtures: ReadonlyArray<WireFixture> = [
   mcpNegotiationEraModernFixture,
   mcpNegotiationEraLegacyFixture,

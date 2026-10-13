@@ -14,15 +14,54 @@ export {
   callLocalMcpServerTool,
   callMcpServerTool,
   callRemoteMcpServerTool,
+  callRemoteMcpServerToolResumable,
   listLocalMcpServerTools,
   listMcpServerTools,
   listMcpTools,
-  listRemoteMcpServerTools
+  listRemoteMcpServerTools,
+  resumeRemoteMcpServerToolCall
 } from './client.ts'
 
-export type { CallMcpServerToolInput, McpClientOptions, McpResolvedTool } from './client.ts'
+export type {
+  CallMcpServerToolInput,
+  CallRemoteMcpServerToolInput,
+  McpClientOptions,
+  McpResolvedTool,
+  McpResumableToolCallError,
+  ResumeRemoteMcpServerToolCallInput
+} from './client.ts'
 
-export { McpError, McpErrorCause } from './errors.ts'
+export {
+  canonicalMcpJson,
+  decodeMcpInputRequired,
+  defaultMcpMaxInputRequiredBytes,
+  McpElicitationContentValue,
+  McpElicitationProperty,
+  McpElicitationPropertyType,
+  McpElicitationRequestedSchema,
+  McpElicitationResponse,
+  McpElicitationResponses,
+  McpFormElicitation,
+  McpInputRequired,
+  mcpArgumentsDigest,
+  mcpMaxInputRequiredBytes,
+  mcpMaxInputRequests,
+  McpPausedTool,
+  McpToolCallComplete,
+  McpToolCallInputRequired,
+  McpToolCallOutcome,
+  toMcpInputResponses
+} from './elicitation.ts'
+
+export type { McpElicitationSupport, McpPauseBinding, McpWireElicitResult } from './elicitation.ts'
+
+export {
+  McpClientCapabilityRequiredError,
+  McpError,
+  McpErrorCause,
+  McpInputRequiredError,
+  McpInputRequiredErrorReason
+} from './errors.ts'
 
 export {
   decodeJsonRpcMessageFromJson,

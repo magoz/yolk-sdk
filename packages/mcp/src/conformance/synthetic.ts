@@ -58,6 +58,16 @@ export const mcpConformanceSyntheticEnvelope: Schema.JsonObject = {
   [metaKeys.clientCapabilities]: {}
 }
 
+/**
+ * The envelope of a modern listing or call when the host opts into form elicitation
+ * (`McpClientOptions.elicitation`): the client capabilities declare `elicitation.form`. The era
+ * probe keeps `mcpConformanceSyntheticEnvelope` (the SDK's own capabilities).
+ */
+export const mcpConformanceSyntheticElicitationEnvelope: Schema.JsonObject = {
+  ...mcpConformanceSyntheticEnvelope,
+  [metaKeys.clientCapabilities]: { elicitation: { form: {} } }
+}
+
 /** A read-only synthetic tool with an output schema. */
 export const mcpConformanceSyntheticReadTool: Schema.JsonObject = {
   name: 'get_synthetic_note',
@@ -165,7 +175,11 @@ type ModernRequest = {
   readonly params?: Schema.JsonObject
 }
 
-const modernRequest = (url: string, request: ModernRequest): WireExchange['request'] => {
+const modernRequest = (
+  url: string,
+  request: ModernRequest,
+  envelope: Schema.JsonObject = mcpConformanceSyntheticEnvelope
+): WireExchange['request'] => {
   const name = request.method === 'tools/call' ? request.params?.['name'] : undefined
 
   const routing = {
@@ -185,7 +199,7 @@ const modernRequest = (url: string, request: ModernRequest): WireExchange['reque
       jsonrpc: '2.0',
       id: request.id,
       method: request.method,
-      params: { ...request.params, _meta: mcpConformanceSyntheticEnvelope }
+      params: { ...request.params, _meta: envelope }
     }
   }
 }
@@ -227,10 +241,12 @@ const singlePage: ReadonlyArray<McpSyntheticToolsPage> = [{ tools: mcpConformanc
 
 /**
  * `listRemoteMcpServerTools` against the modern server: `server/discover`, then one tools/list per
- * page (ids from 0; each page after the first sends the previous page's `nextCursor`).
+ * page (ids from 0; each page after the first sends the previous page's `nextCursor`). The pages
+ * carry `listEnvelope` (default: the plain envelope); the probe always carries the plain one.
  */
 export const modernListingExchanges = (
-  pages: ReadonlyArray<McpSyntheticToolsPage> = singlePage
+  pages: ReadonlyArray<McpSyntheticToolsPage> = singlePage,
+  listEnvelope: Schema.JsonObject = mcpConformanceSyntheticEnvelope
 ): ReadonlyArray<WireExchange> => {
   const url = mcpConformanceSyntheticModernUrl
 
@@ -244,7 +260,8 @@ export const modernListingExchanges = (
           url,
           cursor === undefined
             ? { id: index, method: 'tools/list' }
-            : { id: index, method: 'tools/list', params: { cursor } }
+            : { id: index, method: 'tools/list', params: { cursor } },
+          listEnvelope
         ),
         response: jsonAnswer(200, success(index, toolsPage(page.tools, page.nextCursor)))
       }
