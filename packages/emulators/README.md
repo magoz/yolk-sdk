@@ -763,7 +763,7 @@ the settings, registers, print templates, user, and inbox folders stay), or
 reference is rejected (offers name customers, invoice payments name invoices, prices name price
 lists and articles, ...); replacing `customers` or `invoices` without seeding `offers` or
 `invoicePayments` starts those empty. Supplier invoices are not emulated: a supplier invoice payment stores its own
-snapshot fields. `reset()` restores the
+snapshot fields. Offers are VAT-exclusive only (`VATIncluded: false`). `reset()` restores the
 current seed and clears the ledger and faults; `seed(next)` replaces the state and becomes what
 `reset()` restores; `snapshot()` returns a deep copy of the state.
 

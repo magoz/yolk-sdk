@@ -485,12 +485,14 @@ describe('Fortnox offers', () => {
       action: fortnoxCreateOrderFromOfferAction,
       path: 'createorder',
       key: 'OrderReference',
+      envelope: 'Order',
       output: 'orderNumber'
     },
     {
       action: fortnoxCreateInvoiceFromOfferAction,
       path: 'createinvoice',
       key: 'InvoiceReference',
+      envelope: 'Invoice',
       output: 'invoiceNumber'
     }
   ] as const
@@ -534,6 +536,21 @@ describe('Fortnox offers', () => {
         }
 
         expect(harness.scopes).toEqual(Array.from({ length: 5 }, () => ['offer']))
+      })
+    )
+
+    it.effect(`${item.action.id} also accepts the new document's own envelope`, () =>
+      Effect.gen(function* () {
+        const harness = makeHarness([
+          response({ [item.envelope]: { DocumentNumber: '21', CustomerNumber: '1' } }),
+          response({ [item.envelope]: { DocumentNumber: 22 } })
+        ])
+
+        const first = yield* run(item.action, { documentNumber: '7' }, harness.layer)
+        const second = yield* run(item.action, { documentNumber: '7' }, harness.layer)
+
+        expect(first).toMatchObject({ value: { offerNumber: '7', [item.output]: '21' } })
+        expect(second).toMatchObject({ value: { offerNumber: '7', [item.output]: '22' } })
       })
     )
   }

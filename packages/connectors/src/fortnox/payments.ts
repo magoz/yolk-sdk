@@ -43,8 +43,6 @@ export const FortnoxSupplierInvoicePaymentNumber = PaymentNumber.pipe(
 
 export type FortnoxSupplierInvoicePaymentNumber = typeof FortnoxSupplierInvoicePaymentNumber.Type
 
-// Wire boundary. Fortnox docs examples send `Number` and `InvoiceNumber` as strings or integers,
-// and `VoucherNumber`, `VoucherYear`, and `ModeOfPaymentAccount` as numeric strings.
 // Bounded read model of a payment write-off (Fortnox docs: WriteOffs[WriteOff]).
 export class FortnoxPaymentWriteOff extends Schema.Class<FortnoxPaymentWriteOff>(
   'FortnoxPaymentWriteOff'
@@ -86,8 +84,9 @@ const PaymentResponseFields = {
   WriteOffs: Schema.optional(Schema.Chunk(FortnoxPaymentWriteOff))
 }
 
-// Amounts follow the customer-invoice convention (number | null): both payment resources type
-// amounts as JSON numbers in Fortnox docs; only InvoiceTotal may arrive as a numeric string.
+// Wire boundary. Public amounts follow the customer-invoice convention (number | null); Fortnox
+// docs type them as JSON numbers but examples send some (InvoiceTotal, voucher fields) as numeric
+// strings, so every amount and integer field accepts both.
 const PaymentApiFields = {
   Amount: WireNullableNumber,
   AmountCurrency: WireNullableNumber,
@@ -114,6 +113,8 @@ export class FortnoxInvoicePayment extends Schema.Class<FortnoxInvoicePayment>(
   ...PaymentResponseFields
 }) {}
 
+// Fortnox docs examples send `Number` and `InvoiceNumber` as strings or integers, and
+// `ModeOfPaymentAccount` as a numeric string.
 const FortnoxInvoicePaymentApi = Schema.Struct({
   ...FortnoxInvoicePayment.fields,
   ...PaymentApiFields,

@@ -288,15 +288,26 @@ const referenceFromApi = (value: FortnoxDocumentNumber | '' | null | undefined) 
   value === undefined || value === null || value === '' || value === '0' ? null : value
 
 // Fortnox OpenAPI (and the official Fortnox .NET SDK) answer createorder/createinvoice with the
-// source offer (`{ Offer }`), not the new document; the new number is the offer's
-// OrderReference/InvoiceReference. Decode only those keys.
-const OfferOrderReferenceResponse = Schema.Struct({
-  Offer: Schema.Struct({ DocumentNumber: FortnoxDocumentNumber, OrderReference: WireReference })
+// source offer (`{ Offer }`), whose OrderReference/InvoiceReference names the new document. Not
+// observed live, so the new document's own envelope (`{ Order }` / `{ Invoice }`) is accepted too:
+// an irreversible conversion must not report failure only because of the answer's shape.
+const NewDocument = Schema.Struct({
+  DocumentNumber: Schema.Union([FortnoxDocumentNumber, NumericReference])
 })
 
-const OfferInvoiceReferenceResponse = Schema.Struct({
-  Offer: Schema.Struct({ DocumentNumber: FortnoxDocumentNumber, InvoiceReference: WireReference })
-})
+const OfferOrderReferenceResponse = Schema.Union([
+  Schema.Struct({
+    Offer: Schema.Struct({ DocumentNumber: FortnoxDocumentNumber, OrderReference: WireReference })
+  }),
+  Schema.Struct({ Order: NewDocument })
+])
+
+const OfferInvoiceReferenceResponse = Schema.Union([
+  Schema.Struct({
+    Offer: Schema.Struct({ DocumentNumber: FortnoxDocumentNumber, InvoiceReference: WireReference })
+  }),
+  Schema.Struct({ Invoice: NewDocument })
+])
 
 const offerPath = (documentNumber: string, action?: string) =>
   action === undefined
@@ -404,10 +415,15 @@ export const fortnoxCreateOrderFromOfferAction = defineAction({
       undefined,
       OfferOrderReferenceResponse,
       value =>
-        FortnoxCreateOrderFromOfferOutput.make({
-          offerNumber: value.Offer.DocumentNumber,
-          orderNumber: referenceFromApi(value.Offer.OrderReference)
-        })
+        'Order' in value
+          ? FortnoxCreateOrderFromOfferOutput.make({
+              offerNumber: input.documentNumber,
+              orderNumber: value.Order.DocumentNumber
+            })
+          : FortnoxCreateOrderFromOfferOutput.make({
+              offerNumber: value.Offer.DocumentNumber,
+              orderNumber: referenceFromApi(value.Offer.OrderReference)
+            })
     )
 })
 
@@ -426,10 +442,15 @@ export const fortnoxCreateInvoiceFromOfferAction = defineAction({
       undefined,
       OfferInvoiceReferenceResponse,
       value =>
-        FortnoxCreateInvoiceFromOfferOutput.make({
-          offerNumber: value.Offer.DocumentNumber,
-          invoiceNumber: referenceFromApi(value.Offer.InvoiceReference)
-        })
+        'Invoice' in value
+          ? FortnoxCreateInvoiceFromOfferOutput.make({
+              offerNumber: input.documentNumber,
+              invoiceNumber: value.Invoice.DocumentNumber
+            })
+          : FortnoxCreateInvoiceFromOfferOutput.make({
+              offerNumber: value.Offer.DocumentNumber,
+              invoiceNumber: referenceFromApi(value.Offer.InvoiceReference)
+            })
     )
 })
 

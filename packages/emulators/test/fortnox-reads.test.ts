@@ -751,7 +751,7 @@ describe('read-only seeds and profiles', () => {
       }
 
       // Schema-level checks: a FromQuantity the connector cannot put in a path, a lowercase
-      // predefined account name, an unknown key.
+      // predefined account name, an unknown key, a VAT-inclusive offer (totals would be wrong).
       for (const seed of [
         {
           prices: [
@@ -766,7 +766,8 @@ describe('read-only seeds and profiles', () => {
           ]
         },
         { predefinedAccounts: [{ Name: 'sales', Account: 3001 }] },
-        { articles: [{ ArticleNumber: 'A', Description: 'a', SalesPrice: 1 }] }
+        { articles: [{ ArticleNumber: 'A', Description: 'a', SalesPrice: 1 }] },
+        { offers: [{ DocumentNumber: '9', CustomerNumber: '1001', VATIncluded: true }] }
       ]) {
         await expect(
           makeFortnoxEmulator({ seed: JSON.parse(JSON.stringify(seed)) }),

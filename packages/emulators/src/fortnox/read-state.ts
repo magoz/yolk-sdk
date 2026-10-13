@@ -221,7 +221,8 @@ const offerScalarFields = {
   DeliveryDate: NullableDate,
   Currency: Schema.String,
   CurrencyRate: Schema.Finite,
-  VATIncluded: Schema.Boolean,
+  // Totals add VAT on top of row prices; VAT-inclusive offers are not emulated.
+  VATIncluded: Schema.Literal(false),
   Cancelled: Schema.Boolean,
   Sent: Schema.Boolean,
   NotCompleted: Schema.Boolean,

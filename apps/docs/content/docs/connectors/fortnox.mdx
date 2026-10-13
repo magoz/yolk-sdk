@@ -174,7 +174,8 @@ All action IDs carry the `fortnox.` prefix. Notes per resource:
 - **Offers.** Row updates follow the invoice rules below (rows replace the list; `RowId` matches
   rows and is regenerated). `create_order_from_offer` needs the Order license;
   `create_invoice_from_offer` creates a customer invoice. Both return the offer number and the new
-  order or invoice number (null if Fortnox does not report it); do not retry an ambiguous
+  order or invoice number (null if Fortnox does not report it), accepting either the documented
+  `{ Offer }` answer or the new document's own `{ Order }`/`{ Invoice }` envelope; do not retry an ambiguous
   conversion, read the offer instead. `email_offer` sends to the offer's stored
   `EmailInformation` recipient through a GET (the only method Fortnox offers); host HTTP adapters
   must not retry it or follow redirects. `mark_offer_sent` sets `Sent` without producing a document. There
@@ -189,7 +190,9 @@ All action IDs carry the `fortnox.` prefix. Notes per resource:
   removes it from every document that uses it. Labels and predefined accounts are not paginated.
 - **Not covered.** Article URL connections, price-list deletion, `?path=` inbox addressing,
   Email Senders, Predefined Voucher Series, Company Logo, and the sales API (scope or endpoint not
-  confirmed).
+  confirmed). Within the original scopes, customer-invoice send, book, cancel, and credit, customer
+  deletion, supplier and supplier-invoice writes, and file-connection writes are also not
+  connector actions yet.
 
 These additions follow Fortnox's current API reference and archived resource pages; none has been
 observed against a live company yet. The

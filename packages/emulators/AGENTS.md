@@ -148,7 +148,9 @@ There is no root export or barrel.
   wire types the connector's schemas accept; the check warns about them. Their writes (and
   side-effecting GETs such as `/offers/{DocumentNumber}/email`) are not emulated and fail closed
   with the 404: a connector write route needs verified evidence or a pending entry naming a
-  conformance case's live run, and none of them has a case yet. The fixture-only `/todoist`,
+  conformance case's live run, and none of them has a case yet. These fixtureless Fortnox reads are
+  an owner-approved exception to the fixture-only rule below (PR #202), confined to the pre-rule
+  stateful `/fortnox` emulator; never a precedent for other emulators or for write routes. The fixture-only `/todoist`,
   `/telegram`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators never add a route
   without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
   the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
