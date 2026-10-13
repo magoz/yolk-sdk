@@ -320,7 +320,13 @@ const makeAppendHitlResponseRuntimeStream = (
       const priorResponses = replayRuntimeHitlResponses(initialLog.events)
       const hitlResponses = [...priorResponses, request.response]
 
-      return run(runtimeRunConfig({ ...config, hitlResponses }, messages)).pipe(
+      // The pause being resumed binds its unanswered approval requests (see `prepareToolBatch`).
+      const resumeConfig = {
+        ...runtimeRunConfig({ ...config, hitlResponses }, messages),
+        awaitingRequests: latestAwaitingRequests(initialLog)
+      }
+
+      return run(resumeConfig).pipe(
         Stream.tap(event =>
           Match.value(event).pipe(
             Match.tag('AgentEnd', end =>

@@ -110,6 +110,10 @@ export type RunConfig = {
    * ResolvedToolSet.approvalPreviews): pending approval requests carry their preview.
    */
   readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
+  /** The requests of the pause being resumed (`AgentAwaitingInput.requests`). An unanswered
+   * approval request listed here stays pending even when its tool no longer requires approval.
+   */
+  readonly awaitingRequests?: ReadonlyArray<HitlRequest>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -132,6 +136,10 @@ export type ToolBatchConfig = {
    * ResolvedToolSet.approvalPreviews).
    */
   readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
+  /** The requests of the pause being resumed (`AgentAwaitingInput.requests`). An unanswered
+   * approval request listed here stays pending even when its tool no longer requires approval.
+   */
+  readonly awaitingRequests?: ReadonlyArray<HitlRequest>
   readonly model?: string
   readonly createdMessages?: ReadonlyArray<AgentMessage>
   readonly turn?: number
@@ -684,6 +692,13 @@ const approvalResponseFor = (
       : []
   )[0]
 
+const outstandingApprovalFor = (awaiting: ReadonlyArray<HitlRequest>, call: ToolCall) =>
+  awaiting.flatMap(request =>
+    Predicate.isTagged(request, 'ToolApprovalRequest') && request.toolCallId === call.id
+      ? [request]
+      : []
+  )[0]
+
 const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
   responses.flatMap(response =>
     Predicate.isTagged(response, 'QuestionResponse') && matchesQuestion(response, call)
@@ -786,11 +801,20 @@ const prepareQuestionCall = (
     })
   })
 
+/**
+ * Approval binds the call, not the tool's current policy (re-read at execution):
+ *
+ * 1. A recorded answer wins: the first exact-match response settles the call (`denied`: the
+ *    denied result, never executed; `approved`: executed). Ids must match exactly, as before.
+ * 2. Else an outstanding request from the resumed pause (`awaitingRequests`) stays pending.
+ * 3. Else the current policy decides: `manual` asks, anything else executes.
+ */
 const prepareApprovalCall = (
   tools: ReadonlyArray<ToolDef>,
   call: ToolCall,
   index: number,
-  responses: ReadonlyArray<HitlResponse>
+  responses: ReadonlyArray<HitlResponse>,
+  awaiting: ReadonlyArray<HitlRequest>
 ): PreparedToolCall => {
   const envelope = backgroundEnvelope(tools, call)
 
@@ -808,21 +832,9 @@ const prepareApprovalCall = (
     })
   }
 
-  if (!approvalRequired(tools, call)) {
-    return PreparedToolCall.Execute({ index, call, events: [] })
-  }
-
-  const request = toolApprovalRequest(tools, call)
   const response = approvalResponseFor(responses, call, tools)
 
-  if (response === undefined) {
-    return PreparedToolCall.Pending({
-      request,
-      events: [ToolApprovalRequested.make({ call, request })]
-    })
-  }
-
-  if (response.decision === 'denied') {
+  if (response?.decision === 'denied') {
     return PreparedToolCall.Result({
       index,
       call,
@@ -831,10 +843,30 @@ const prepareApprovalCall = (
     })
   }
 
-  return PreparedToolCall.Execute({
-    index,
-    call,
-    events: [hitlResponseEvent(response)]
+  if (response !== undefined) {
+    return PreparedToolCall.Execute({
+      index,
+      call,
+      events: [hitlResponseEvent(response)]
+    })
+  }
+
+  const outstanding = outstandingApprovalFor(awaiting, call)
+
+  if (outstanding === undefined && !approvalRequired(tools, call)) {
+    return PreparedToolCall.Execute({ index, call, events: [] })
+  }
+
+  // An outstanding request keeps its identity (and the policy it was asked under) when the
+  // call still binds to it; a changed execution mode needs a fresh request.
+  const request =
+    outstanding !== undefined && outstanding.requestId === approvalRequestId(call, tools)
+      ? outstanding
+      : toolApprovalRequest(tools, call)
+
+  return PreparedToolCall.Pending({
+    request,
+    events: [ToolApprovalRequested.make({ call, request })]
   })
 }
 
@@ -1222,6 +1254,7 @@ const prepareToolCall = (input: {
   readonly handlers: Readonly<Record<string, InputToolHandler>>
   readonly preflights: Readonly<Record<string, InteractionPreflight>>
   readonly receipts: ReadonlyMap<string, InteractionReceipt>
+  readonly awaiting: ReadonlyArray<HitlRequest>
   readonly call: ToolCall
   readonly index: number
 }): Effect.Effect<PreparedToolCall, ToolError> =>
@@ -1235,6 +1268,7 @@ const prepareModelToolCall = (input: {
   readonly handlers: Readonly<Record<string, InputToolHandler>>
   readonly preflights: Readonly<Record<string, InteractionPreflight>>
   readonly receipts: ReadonlyMap<string, InteractionReceipt>
+  readonly awaiting: ReadonlyArray<HitlRequest>
   readonly call: ToolCall
   readonly index: number
 }): Effect.Effect<PreparedToolCall, ToolError> =>
@@ -1270,7 +1304,15 @@ const prepareModelToolCall = (input: {
                 })
               })
             )
-        : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
+        : Effect.succeed(
+            prepareApprovalCall(
+              input.tools,
+              input.call,
+              input.index,
+              input.responses,
+              input.awaiting
+            )
+          )
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution.
  * Fails (`ToolError` `unavailable`) only when host storage an interaction call validator reads is
@@ -1288,6 +1330,11 @@ export const prepareToolBatch = (input: {
    * is pending, at most 8 at a time.
    */
   readonly approvalPreviews?: Readonly<Record<string, ToolApprovalPreviewer>>
+  /** The requests of the pause being resumed (`AgentAwaitingInput.requests`). An unanswered
+   * approval request listed here stays pending even when its tool no longer requires approval;
+   * a recorded answer always wins over the current policy.
+   */
+  readonly awaitingRequests?: ReadonlyArray<HitlRequest>
 }): Effect.Effect<PreparedToolBatch, ToolError> =>
   Effect.gen(function* () {
     const handlers = input.inputs ?? {}
@@ -1301,6 +1348,7 @@ export const prepareToolBatch = (input: {
         handlers,
         preflights,
         receipts: input.interactionReceipts ?? new Map(),
+        awaiting: input.awaitingRequests ?? [],
         call,
         index
       })
@@ -1743,6 +1791,7 @@ const makePendingToolResumeStream = (
       if (
         pendingCalls.length === 0 ||
         ((input.config.hitlResponses ?? []).length === 0 &&
+          (input.config.awaitingRequests ?? []).length === 0 &&
           input.config.interactionHost === undefined)
       ) {
         return makeTurnStream(input)
@@ -1757,6 +1806,7 @@ const makePendingToolResumeStream = (
         inputs: input.config.inputs,
         interactions: input.config.interactions,
         approvalPreviews: input.config.approvalPreviews,
+        awaitingRequests: input.config.awaitingRequests,
         interactionReceipts: yield* loadInteractionReceipts(
           pendingCalls,
           input.config.interactionHost
@@ -1898,6 +1948,7 @@ export const runToolBatch = (
         inputs: config.inputs,
         interactions: config.interactions,
         approvalPreviews: config.approvalPreviews,
+        awaitingRequests: config.awaitingRequests,
         interactionReceipts: yield* loadInteractionReceipts(config.calls, config.interactionHost)
       })
 
