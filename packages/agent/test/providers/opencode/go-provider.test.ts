@@ -392,14 +392,23 @@ describe('OpenCode Go', () => {
 
     it.effect(`${protocol}: rejects malformed response JSON`, () =>
       Effect.gen(function* () {
-        const malformed =
+        const malformed = () =>
           protocol === 'chat-completions'
             ? new Response('data: {broken\n\n')
             : new Response('{broken')
 
-        const error = yield* run(protocol, malformed, []).pipe(Effect.flip)
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        const error = yield* runQueued(
+          protocol,
+          [malformed(), malformed()],
+          requests,
+          streamOnce(input)
+        ).pipe(Effect.flip)
 
         expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+        // Only chat codes this rejection (`unexpected_content_type`), so only chat re-routes.
+        expect(requests).toHaveLength(protocol === 'chat-completions' ? 2 : 1)
       })
     )
   }
@@ -718,14 +727,22 @@ describe('OpenCode Go', () => {
     Effect.gen(function* () {
       const secret = 'sentinel-secret-token'
 
-      const error = yield* run(
-        'chat-completions',
+      const echoing = () =>
         Response.json(
           { choices: [{ message: { content: `echoes ${secret}` } }] },
           { status: 200, headers: { 'content-type': 'application/json' } }
-        ),
-        []
+        )
+
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+      const error = yield* runQueued(
+        'chat-completions',
+        [echoing(), echoing()],
+        requests,
+        streamOnce(input)
       ).pipe(Effect.flip)
+
+      expect(requests).toHaveLength(2)
 
       expect(error).toMatchObject({
         _tag: 'LLMError',
@@ -915,18 +932,55 @@ describe('OpenCode Go', () => {
       })
     )
 
-    it.effect('chat: never retries model decisions', () =>
+    for (const finishReason of ['length', 'content_filter']) {
+      it.effect(`chat: never retries the model decision ${finishReason}`, () =>
+        Effect.gen(function* () {
+          const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+          const error = yield* runQueued(
+            'chat-completions',
+            [sse([{ choices: [{ delta: {}, finish_reason: finishReason }] }], true)],
+            requests,
+            streamOnce({ ...input, cacheKey: 'session-1' })
+          ).pipe(Effect.flip)
+
+          expect(error).toMatchObject({ provider: { providerCode: finishReason } })
+          expect(requests).toHaveLength(1)
+        })
+      )
+    }
+
+    it.effect('chat: reroutes the session the transport sent when case variants repeat', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        yield* runQueued(
+          'chat-completions',
+          [malformed(), success('chat-completions')],
+          requests,
+          streamOnce(input),
+          { extraHeaders: { 'X-OpenCode-Session': 'first', 'x-opencode-session': 'last' } }
+        )
+
+        expect(requests.map(request => request.headers['x-opencode-session'])).toEqual([
+          'last',
+          'last.reroute'
+        ])
+      })
+    )
+
+    it.effect('messages: never retries uncoded stream rejections', () =>
       Effect.gen(function* () {
         const requests: Array<HttpClientRequest.HttpClientRequest> = []
 
         const error = yield* runQueued(
-          'chat-completions',
-          [sse([{ choices: [{ delta: {}, finish_reason: 'length' }] }], true)],
+          'messages',
+          [malformed()],
           requests,
           streamOnce({ ...input, cacheKey: 'session-1' })
         ).pipe(Effect.flip)
 
-        expect(error).toMatchObject({ provider: { providerCode: 'length' } })
+        expect(error).toMatchObject({ cause: 'invalid_response' })
         expect(requests).toHaveLength(1)
       })
     )

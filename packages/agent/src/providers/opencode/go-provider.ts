@@ -147,18 +147,24 @@ const reroutableResponseCodes: ReadonlySet<string> = new Set<string>([
   'unexpected_content_type'
 ])
 
-const isReroutable = (error: LLMProviderError): error is LLMError =>
-  Predicate.isTagged(error, 'LLMError') &&
-  error.cause === 'invalid_response' &&
-  error.provider?.providerCode !== undefined &&
-  reroutableResponseCodes.has(error.provider.providerCode)
+/** The malformed-response code of a reroutable failure, else `undefined`. */
+const reroutableCodeOf = (error: LLMProviderError): string | undefined => {
+  if (!Predicate.isTagged(error, 'LLMError') || error.cause !== 'invalid_response') return undefined
 
+  const code = error.provider?.providerCode
+
+  return code !== undefined && reroutableResponseCodes.has(code) ? code : undefined
+}
+
+// Last case variant wins, matching the lowercased extras the protocol layer sends.
 const sessionHeaderOf = (headers: Readonly<Record<string, string>> | undefined) => {
+  let session: string | undefined
+
   for (const [key, value] of Object.entries(headers ?? {})) {
-    if (key.toLowerCase() === 'x-opencode-session') return value
+    if (key.toLowerCase() === 'x-opencode-session') session = value
   }
 
-  return undefined
+  return session
 }
 
 /**
@@ -183,7 +189,9 @@ const streamWithReroute = (
             Stream.unwrap(
               Ref.get(emitted).pipe(
                 Effect.map(started => {
-                  if (started || !isReroutable(error)) return Stream.fail(error)
+                  const code = reroutableCodeOf(error)
+
+                  if (started || code === undefined) return Stream.fail(error)
 
                   const rerouted =
                     sessionId === undefined
@@ -192,7 +200,7 @@ const streamWithReroute = (
 
                   return Stream.fromEffect(
                     Effect.logWarning(
-                      `OpenCode Go sent a malformed response (${error.provider?.providerCode}); retrying once on a fresh route`
+                      `OpenCode Go sent a malformed response (${code}); retrying once on a fresh route`
                     )
                   ).pipe(Stream.drain, Stream.concat(provider.stream(rerouted)))
                 })

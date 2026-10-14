@@ -240,9 +240,12 @@ Messages retains native tool names and system instructions, without Claude OAuth
 Responses sends `max_output_tokens`, unlike Codex. Go requires a nonempty key and positive safe-integer
 limit at layer construction. `extraHeaders` cannot override required protocol headers, regardless of
 case. Only override `baseUrl` with a trusted proxy because it receives the credential.
-A malformed response before any event (for example a stream payload that is not JSON) is retried
-once under `<session>.reroute` so Go routes it to another upstream; the error otherwise carries the
-failed check as `provider.providerCode`.
+A Chat Completions parser rejection (for example a stream payload that is not JSON), a response that
+is not a stream, or a stream ending before its terminal event is retried once, before any event,
+under `<session>.reroute` so Go routes it to another upstream. The session is the request
+`cacheKey`, else the `x-opencode-session` extra header; without either the request is resent
+unchanged. Failures read `OpenCode Go <cause>` and carry the failed check as
+`provider.providerCode`.
 
 Request `reasoningEffort` becomes chat `reasoning_effort`, Messages `output_config.effort` (omitting
 `minimal`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the
