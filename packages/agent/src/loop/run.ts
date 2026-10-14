@@ -1818,7 +1818,8 @@ const makeLlmStream = (
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
+  const makeStream = () =>
+    input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
@@ -1854,7 +1855,8 @@ const makeModelOnlyLlmStream = (
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
+  const makeStream = () =>
+    input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
@@ -1898,7 +1900,7 @@ const withoutConsumedAnswers = (config: RunConfig): RunConfig =>
  */
 const withTurnInstructions = (input: TurnStreamInput) =>
   Effect.gen(function* () {
-    const { messages, appended } = yield* withInstructionMessages(
+    const { messages, appended } = withInstructionMessages(
       input.currentMessages,
       input.config.instructions
     )

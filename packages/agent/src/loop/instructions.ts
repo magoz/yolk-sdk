@@ -1,6 +1,10 @@
-import { Effect, Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
-import { latestInstructionState, UserMessage, type AgentMessage } from '@yolk-sdk/agent/protocol'
+import {
+  interactionJsonEquals,
+  latestInstructionState,
+  UserMessage,
+  type AgentMessage
+} from '@yolk-sdk/agent/protocol'
 
 /**
  * A host instruction kept current in the conversation (ADR 0007), for example the code mode tool
@@ -24,39 +28,17 @@ export type RunInstruction = {
   }) => string
 }
 
-/** Removed instructions keep this state, so a removal is recorded once. */
-const removedState: Schema.Json = null
-
-const isJsonObject = (value: Schema.Json): value is { readonly [key: string]: Schema.Json } =>
-  Predicate.isObject(value) && !Array.isArray(value)
-
-/** JSON with object keys sorted, so equal states compare equal whatever their key order (for
- * example after a round trip through a database JSON column).
+/**
+ * The instruction messages a model request needs before it runs, in `instructions` order. States
+ * compare as JSON values, independent of object key order. A removal is recorded once as an
+ * instruction message without a state.
  */
-const canonicalJson = (value: Schema.Json): string => {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-
-  if (isJsonObject(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key] ?? null)}`)
-      .join(',')}}`
-  }
-
-  return JSON.stringify(value)
-}
-
-const sameState = (left: Schema.Json, right: Schema.Json) =>
-  canonicalJson(left) === canonicalJson(right)
-
-/** The instruction messages a model request needs before it runs, in `instructions` order. */
 export const instructionMessages = (
   messages: ReadonlyArray<AgentMessage>,
   instructions: ReadonlyArray<RunInstruction>
 ): ReadonlyArray<UserMessage> =>
   instructions.flatMap(instruction => {
-    const recorded = latestInstructionState(messages, instruction.key)
-    const previous = recorded === undefined || recorded === removedState ? undefined : recorded
+    const previous = latestInstructionState(messages, instruction.key)
     const current = instruction.state
 
     if (current === undefined) {
@@ -65,12 +47,12 @@ export const instructionMessages = (
       return [
         UserMessage.make({
           content: instruction.render({ previous, current: undefined }),
-          instruction: { key: instruction.key, state: removedState }
+          instruction: { key: instruction.key }
         })
       ]
     }
 
-    if (previous !== undefined && sameState(previous, current)) return []
+    if (previous !== undefined && interactionJsonEquals(previous, current)) return []
 
     const content = instruction.render({ previous, current })
 
@@ -86,12 +68,11 @@ export const instructionMessages = (
 export const withInstructionMessages = (
   messages: ReadonlyArray<AgentMessage>,
   instructions: ReadonlyArray<RunInstruction> | undefined
-) =>
-  Effect.sync(() => {
-    const appended =
-      instructions === undefined || instructions.length === 0
-        ? []
-        : instructionMessages(messages, instructions)
+) => {
+  const appended =
+    instructions === undefined || instructions.length === 0
+      ? []
+      : instructionMessages(messages, instructions)
 
-    return { messages: appended.length === 0 ? messages : [...messages, ...appended], appended }
-  })
+  return { messages: appended.length === 0 ? messages : [...messages, ...appended], appended }
+}

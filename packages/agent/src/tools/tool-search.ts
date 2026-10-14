@@ -1,3 +1,14 @@
+import { Effect, Option } from 'effect'
+import * as Schema from 'effect/Schema'
+import {
+  ToolDef,
+  ToolResult,
+  toolSearchToolName,
+  type ToolSearchActivation
+} from '@yolk-sdk/agent/protocol'
+import type { ToolRegistration } from './registry.ts'
+
+// Standard BM25 parameters: `k1` saturates repeated terms, `b` normalizes by document length.
 const k1 = 1.2
 
 const b = 0.75
@@ -70,3 +81,98 @@ export const rankToolSearchDocuments = <A>(
     .slice(0, bounded)
     .map(entry => entry.document.value)
 }
+
+/** Default and maximum number of tools one `tool_search` call activates. */
+export const defaultToolSearchLimit = 5
+
+export const maxToolSearchLimit = 20
+
+const ToolSearchParams = Schema.Struct({
+  query: Schema.String,
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: maxToolSearchLimit }))
+  )
+})
+
+const decodeToolSearchParams = Schema.decodeUnknownOption(ToolSearchParams)
+
+const toolSearchDescription = [
+  'Find and load tools that are not declared yet: they become callable directly from your next step on, for the rest of the conversation.',
+  'Search by what the tool should do. Loaded tools keep their own approval rules.'
+].join(' ')
+
+// The provider-facing schema of `ToolSearchParams`, with model guidance.
+const toolSearchParameters = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'string',
+      description: 'What the tool should do, in a few words (for example "list open issues").'
+    },
+    limit: {
+      type: 'integer',
+      minimum: 1,
+      maximum: maxToolSearchLimit,
+      description: `How many tools to load (default ${defaultToolSearchLimit}).`
+    }
+  },
+  required: ['query'],
+  additionalProperties: false
+} satisfies ToolDef['parameters']
+
+const toolSearchResultText = (tools: ReadonlyArray<ToolDef>) =>
+  tools.length === 0
+    ? 'No tools matched. Try other words.'
+    : [
+        `Loaded ${tools.length} tool${tools.length === 1 ? '' : 's'}; call them directly from your next step:`,
+        ...tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0] ?? ''}`)
+      ].join('\n')
+
+/**
+ * The package `tool_search` tool over the deferred tools of one resolution (ADR 0007). Its result
+ * names the activated tools in `structuredContent.toolSearch.activated`; the loop declares them
+ * from the next request on (`declaredToolDefs`). Read access: it changes nothing outside the
+ * transcript.
+ */
+export const makeToolSearchTool = <Context>(
+  deferred: ReadonlyArray<{ readonly def: ToolDef; readonly searchText?: string }>
+): ToolRegistration<Context> => ({
+  def: ToolDef.make({
+    name: toolSearchToolName,
+    description: toolSearchDescription,
+    parameters: toolSearchParameters,
+    callableBy: 'model'
+  }),
+  access: 'read',
+  execute: ({ call }) =>
+    Effect.sync(() =>
+      Option.match(decodeToolSearchParams(call.params), {
+        onNone: () =>
+          ToolResult.make({
+            toolCallId: call.id,
+            content: `Invalid ${toolSearchToolName} arguments: pass { query: string, limit?: 1 to ${maxToolSearchLimit} }.`,
+            isError: true
+          }),
+        onSome: params => {
+          const found = rankToolSearchDocuments(
+            deferred.map(tool => ({
+              value: tool.def,
+              text: [tool.def.name, tool.def.description, tool.searchText ?? ''].join(' ')
+            })),
+            params.query,
+            params.limit ?? defaultToolSearchLimit
+          )
+
+          const activation: ToolSearchActivation = {
+            toolSearch: { activated: found.map(tool => tool.name) }
+          }
+
+          return ToolResult.make({
+            toolCallId: call.id,
+            content: toolSearchResultText(found),
+            structuredContent: activation
+          })
+        }
+      })
+    )
+})

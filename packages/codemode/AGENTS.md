@@ -133,7 +133,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
 - Stage-only tools (ADR 0007: stageable with `callableBy: 'codemode'`): while the script may stage,
   `codeModeStageOnlyCatalog` adds them to the discovery catalog only (`exposure: 'stage'`, no
-  `tools` binding, not in `ALL_TOOLS`). `searchTools`/`describeNamespace` return their raw name with
+  `tools` binding, not in `ALL_TOOLS`; the executor gets them as `unbound` keys so a direct call
+  rejects with a hint to `stage()` them). `searchTools`/`describeNamespace` return their raw name with
   `stageOnly: true`; `describeTool` renders the `stage()` call and its argument type; `stage()`
   accepts the raw name or the catalog identifier. The description never names stage-only `search`
   tools, so they leave it byte-identical once any stageable tool exists.
@@ -150,8 +151,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 
 - Catalog placement (ADR 0007): `makeCodeModeTool({ catalog })`. `description` (default) keeps the
   catalog in the tool description. `instructions` makes the description invariant
-  (`renderCodeModeInstructedDescription`: intro, globals, `stage()` when offered, a pointer to the
-  catalog message) and contributes `instruct`: `codeModeCatalogInstruction`, key
+  (`renderCodeModeInstructedDescription`: intro, globals, `stage()` whenever staging is offered,
+  even with no stageable tool yet, a pointer to the catalog) and contributes `instruct`: `codeModeCatalogInstruction`, key
   `yolk.codemode.catalog`, state `CodeModeCatalogSummary` (every namespace with count, description,
   listed count and listing; listed stageable names), rendered in full, as a delta when only
   namespaces/counts/descriptions changed, or as a replacement. `pinned` tools are always listed,

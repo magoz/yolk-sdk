@@ -142,6 +142,12 @@ export type AgentChatMessage = {
   readonly author?: MessageAuthor
   readonly annotations?: MessageAnnotations
   readonly parts: ReadonlyArray<AgentChatPart>
+  /**
+   * Host instruction messages (ADR 0007) that followed this message in the transcript. Never
+   * rendered; `toAgentMessages` emits them right after this message, so a transcript rebuilt from
+   * chat messages keeps them and the loop does not re-append them.
+   */
+  readonly instructionsAfter?: ReadonlyArray<UserMessage>
 }
 
 export type DeleteChatTurnResult =
@@ -1327,7 +1333,9 @@ export const appendProtocolMessage = (
   return Match.value(message).pipe(
     // Host instruction messages (ADR 0007) are model context, never shown as user input.
     Match.tag('User', current =>
-      isInstructionMessage(current) ? messages : [...messages, userChatMessage(current, sequence)]
+      isInstructionMessage(current)
+        ? withInstructionAfterLast(messages, current)
+        : [...messages, userChatMessage(current, sequence)]
     ),
     Match.tag('Assistant', current => [
       ...messages,
@@ -1801,6 +1809,8 @@ export const buildAgentChatMessages = ({
 
   const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>(
     (current, message, index) => {
+      if (isInstructionMessage(message)) return withInstructionAfterLast(current, message)
+
       const currentTurnId =
         Predicate.isTagged(message, 'User') && !isInstructionMessage(message)
           ? turnId(index)
@@ -1973,7 +1983,30 @@ const assistantMessageFromParts = (message: AgentChatMessage) => {
 
 const protocolMessagesFromChatMessage = (
   message: AgentChatMessage
-): ReadonlyArray<AgentMessage> => {
+): ReadonlyArray<AgentMessage> => [
+  ...ownProtocolMessages(message),
+  ...(message.instructionsAfter ?? [])
+]
+
+/**
+ * Attaches a host instruction message to the last chat message (`instructionsAfter`). A
+ * transcript that starts with one has no message to carry it: the loop then appends it again.
+ */
+const withInstructionAfterLast = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  instruction: UserMessage
+): ReadonlyArray<AgentChatMessage> => {
+  const last = messages.at(-1)
+
+  if (last === undefined) return messages
+
+  return [
+    ...messages.slice(0, -1),
+    { ...last, instructionsAfter: [...(last.instructionsAfter ?? []), instruction] }
+  ]
+}
+
+const ownProtocolMessages = (message: AgentChatMessage): ReadonlyArray<AgentMessage> => {
   switch (message.role) {
     case 'user': {
       const content = collectContent(message.parts)

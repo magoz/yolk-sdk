@@ -106,6 +106,7 @@ export {
   AssistantTextPart,
   HostToolCallPart,
   isInstructionMessage,
+  latestInstructionMessages,
   latestInstructionState,
   MessageAnnotations,
   MessageAuthor,

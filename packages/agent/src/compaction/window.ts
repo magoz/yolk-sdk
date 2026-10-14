@@ -1,6 +1,8 @@
 import {
   CompactionEnd,
   CompactionStart,
+  isInstructionMessage,
+  latestInstructionMessages,
   type AgentEvent,
   type AgentMessage
 } from '@yolk-sdk/agent/protocol'
@@ -164,7 +166,20 @@ export const applyCompactionPlan = (
   }
 
   const estimateTokens = estimator(options.estimateTokens)
-  const messages = [options.summaryMessage, ...plan.recentMessages]
+
+  // Host instructions (ADR 0007) the summary would fold away stay verbatim after it: the loop
+  // compares instruction state with the uncompacted transcript and would never re-append them.
+  const recentKeys = new Set(
+    plan.recentMessages.flatMap(message =>
+      isInstructionMessage(message) ? [message.instruction.key] : []
+    )
+  )
+
+  const keptInstructions = latestInstructionMessages(plan.compactedMessages).filter(
+    message => !recentKeys.has(message.instruction.key)
+  )
+
+  const messages = [options.summaryMessage, ...keptInstructions, ...plan.recentMessages]
   const afterTokens = estimateTokens(messages)
 
   if (afterTokens >= plan.beforeTokens) {

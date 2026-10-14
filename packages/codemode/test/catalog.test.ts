@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef } from '@yolk-sdk/agent/protocol'
+import { ToolApprovalPolicy, ToolDef } from '@yolk-sdk/agent/protocol'
 import { resolveTools, type NestedTool } from '@yolk-sdk/agent/tools'
 import {
   codeModeCatalog,
@@ -470,5 +470,56 @@ describe('deferred tools', () => {
     expect(searchCodeModeTools(codeModeCatalog(tools), 'issues').map(hit => hit.name)).toEqual([
       'list_issues'
     ])
+  })
+})
+
+describe('stageable tools in the description', () => {
+  const approval = ToolApprovalPolicy.make({ mode: 'manual' })
+
+  const stageable = (name: string, discovery?: 'listed' | 'search' | 'pinned'): NestedTool => ({
+    moduleId: 'cms',
+    def:
+      discovery === undefined
+        ? ToolDef.make({
+            name,
+            description: `${name} tool`,
+            parameters: { type: 'object' },
+            approval,
+            staging: true
+          })
+        : ToolDef.make({
+            name,
+            description: `${name} tool`,
+            parameters: { type: 'object' },
+            approval,
+            staging: true,
+            callableBy: 'codemode',
+            discovery
+          })
+  })
+
+  it('always names pinned stage-only tools, past the cap', () => {
+    const tools = [
+      ...Array.from({ length: 25 }, (_, index) => stageable(`bulk_${index}`)),
+      stageable('archive', 'pinned')
+    ]
+
+    const description = renderCodeModeDescription({
+      tools: [],
+      staging: { tools, reviewToolName: 'review_plan' }
+    })
+
+    expect(description).toContain('- `archive`')
+    expect(description).toContain('… and 6 more')
+  })
+
+  it('keeps the instructed description invariant when the first stageable tool connects', () => {
+    const registration = makeCodeModeTool({ executor: unusedExecutor, catalog: 'instructions' })
+
+    const describe = (tools: ReadonlyArray<NestedTool>) =>
+      registration.describe?.({ tools: [], staging: { tools, reviewToolName: 'review_plan' } })
+
+    expect(describe([stageable('archive', 'search')])).toBe(describe([]))
+    expect(describe([])).toContain('`await stage(name, args)`')
   })
 })

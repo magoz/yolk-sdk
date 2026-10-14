@@ -15,7 +15,14 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { ContextTransformer, LoopConfig, run, ToolExecutor, type LLMRequest } from '../../src/loop'
 import { FauxProvider, Reply } from '../../src/loop/testing'
-import { makeTool, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
+import {
+  makeInputTool,
+  makeQuestionToolRegistration,
+  makeTool,
+  resolveTools,
+  type ToolModule,
+  type ToolRegistration
+} from '../../src/tools'
 
 type Ctx = { readonly tenant: string }
 
@@ -217,6 +224,134 @@ describe('declared tool definitions', () => {
 
       expect(names(requests[0]?.tools ?? [])).toEqual(['lookup', 'tool_search'])
       expect(names(requests[1]?.tools ?? [])).toContain('list_issues')
+    })
+  )
+})
+
+describe('exposure validation (ADR 0007)', () => {
+  const defer = (registration: ToolRegistration<Ctx>): ToolRegistration<Ctx> => ({
+    ...registration,
+    def: ToolDef.make({ ...registration.def, loading: 'deferred' })
+  })
+
+  const rejected = (registrations: ReadonlyArray<ToolRegistration<Ctx>>) =>
+    resolveTools([{ id: 'm', tools: registrations }], context).pipe(
+      Effect.flip,
+      Effect.map(error => error.cause)
+    )
+
+  it.effect('keeps loop-owned, input, background and tool_search tools declared', () =>
+    Effect.gen(function* () {
+      const question = defer(
+        makeQuestionToolRegistration<Ctx>({
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+        })
+      )
+
+      const input = defer(
+        makeInputTool<Ctx, typeof Schema.String>({
+          name: 'ask_word',
+          description: 'Ask for a word',
+          renderer: 'text',
+          response: Schema.String
+        })
+      )
+
+      const background = defer({ ...tool('lookup', 'x'), background: true })
+      const search = defer(tool('tool_search', 'host search'))
+
+      expect(yield* rejected([question])).toBe('deferred_unsupported_tool')
+      expect(yield* rejected([input])).toBe('deferred_unsupported_tool')
+      expect(yield* rejected([background])).toBe('deferred_unsupported_tool')
+      expect(yield* rejected([search])).toBe('deferred_unsupported_tool')
+    })
+  )
+
+  it.effect('rejects duplicate instruction keys and instructions without nested access', () =>
+    Effect.gen(function* () {
+      const instruction = { key: 'catalog', state: 1, render: () => 'catalog' }
+
+      const nested = (name: string): ToolRegistration<Ctx> => ({
+        ...tool(name, 'x'),
+        nestedToolAccess: true,
+        instruct: () => instruction
+      })
+
+      expect(yield* rejected([nested('a'), nested('b')])).toBe('duplicate_instruction')
+      expect(yield* rejected([{ ...tool('c', 'x'), instruct: () => instruction }])).toBe(
+        'invalid_tool_exposure'
+      )
+    })
+  )
+})
+
+describe('activation edge cases', () => {
+  const assistant = (call: ToolCall) =>
+    AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
+
+  const activation = (id: string, names: ReadonlyArray<string>) =>
+    toolResultMessageFromResult(
+      ToolResult.make({
+        toolCallId: id,
+        content: 'x',
+        structuredContent: { toolSearch: { activated: [...names] } }
+      })
+    )
+
+  it('matches a result to the search call of the assistant message it follows', () => {
+    // A provider reused the call id in a later turn for another tool.
+    const search = ToolCall.make({ id: 'call_1', name: 'tool_search', params: { query: 'x' } })
+    const lookup = ToolCall.make({ id: 'call_1', name: 'lookup', params: { query: 'x' } })
+
+    const names = activatedToolNames([
+      assistant(search),
+      activation('call_1', ['list_issues']),
+      assistant(lookup),
+      activation('call_1', ['create_issue'])
+    ])
+
+    expect([...names]).toEqual(['list_issues'])
+  })
+
+  it.effect('reads activation from the transcript, not the compacted request', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(modules, context)
+      const requests: Array<LLMRequest> = []
+      const searched = yield* toolSet.execute(searchCall)
+
+      const transcript = [
+        UserMessage.make({ content: 'list the issues' }),
+        assistant(searchCall),
+        toolResultMessageFromResult(searched),
+        UserMessage.make({ content: 'go on' })
+      ]
+
+      // A transform that drops everything but the last message (like a summary would).
+      const compacting = Layer.succeed(
+        ContextTransformer,
+        ContextTransformer.of({
+          transform: messages => Effect.succeed({ messages: messages.slice(-1), events: [] })
+        })
+      )
+
+      yield* run({
+        messages: transcript,
+        systemPrompt: 'Be brief.',
+        tools: toolSet.tools,
+        model: 'faux'
+      }).pipe(
+        Stream.runDrain,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({ responses: [Reply.text('ok')], requests }),
+            Layer.succeed(ToolExecutor, ToolExecutor.of({ execute: call => toolSet.execute(call) }))
+          ).pipe(Layer.provideMerge(Layer.mergeAll(compacting, LoopConfig.defaultLayer)))
+        )
+      )
+
+      expect(requests[0]?.messages).toHaveLength(1)
+      expect(names(requests[0]?.tools ?? [])).toContain('list_issues')
     })
   )
 })

@@ -59,8 +59,9 @@ catalog instructions with delta updates.
 | `codemode`   | never declared (`loading` is invalid) | invalid                                                 |
 
 Resolution errors: `loading` on `codemode` tools (`invalid_tool_exposure`); `deferred` on loop-owned
-tools (`question`, `subagent`), interaction, input and background tools, and on `tool_search`
-itself (`deferred_unsupported_tool`). Approval-gated tools may be `deferred`.
+tools (`question`, `subagent`), interaction, input, plan review, nested-access and background tools
+(`background: true` whether or not a background host is configured), and on `tool_search` itself
+(`deferred_unsupported_tool`). Approval-gated tools may be `deferred`.
 
 Hosts map their own settings onto the axes, for example Pi-style `direct` = `all`+`eager`,
 `deferred` = `all`+`deferred`, `codemode` = `codemode`, `hidden` = not resolved.
@@ -90,10 +91,12 @@ hosts need nothing extra: a redelivered step reads the same transcript and decla
 allowed tool, so a call to it by name runs like any call (the durable tool-batch step has no
 transcript to check activation against). Approval-gated deferred tools prompt as always.
 
-**Activation source.** Only results of assistant `tool_search` calls count, read from the host's
-full transcript (`input.currentMessages`, before any `ContextTransformer`), so compacting a
-request never unloads a tool. A host that rewrites its persisted history loses activations; the
-model searches again (fail-safe).
+**Activation source.** A tool result counts only when it answers a `tool_search` call of the
+assistant message it follows (providers may reuse call ids across turns, so ids are matched
+against the latest assistant message only). Activation is read from the host's full transcript
+(`input.currentMessages`, before any `ContextTransformer`), so compacting a request never unloads
+a tool. A host that rewrites its persisted history loses activations; the model searches again
+(fail-safe).
 
 **Code mode.** A deferred `all` tool's declaration is not in model context until activated, so
 code mode treats it like a `search` tool: never listed, found with `searchTools`.
@@ -112,13 +115,16 @@ the miss.
   background). Every other `codemode` + approval combination stays `codemode_unsupported_tool`.
   `isCodeModeFailClosed` is unchanged, so they are never in `nestedRegistrations` and
   `tools.<name>()` stays fail-closed.
-- Code mode adds them to its catalog marked `stage`: `searchTools` hits carry `stageOnly: true`,
-  `describeTool` renders `stage("<name>", args: …)`, no `tools.<id>` proxy exists, and a direct call
-  rejects with "approval-gated: use stage()".
+- Code mode adds them to its catalog marked `stage`: `searchTools` hits carry `stageOnly: true` and
+  `describeTool` renders `stage("<name>", args: …)`. They have no callable `tools` binding: the
+  executor gets them as `unbound` keys (identifier and raw name), so `tools.<id>(args)` rejects with
+  "`<name>` is approval-gated: record it with `stage("<name>", args)` instead of calling it".
 - `stage()` accepts the catalog identifier or the raw name. `not_stageable` names close matches and
   points to `searchTools`, not every stageable tool.
 - `ALL_TOOLS` lists callable tools only, so it excludes stage-only tools; `searchTools` and
   `describeNamespace` include them, marked stage-only.
+- The Stageable section names stageable tools except stage-only `search` ones: `pinned` ones
+  always, the others up to a cap of 20 with a count of the rest.
 - Plan apply is unchanged: the plan executor uses `executeRegistration` over the stageable
   registrations, not the model-facing `execute` that drops codemode-only tools. Ledger keys, fences
   and previews are as in ADR 0005.
@@ -128,36 +134,51 @@ the miss.
 ## 4. Catalog instructions
 
 **The `codemode` description becomes invariant**: intro, globals, the `stage()` line whenever
-staging is offered, and a pointer to the catalog instructions. Nothing in it depends on tools.
+staging is offered (plans, an interaction host and a review tool, even before any stageable tool
+resolves), and a pointer to the catalog. Nothing in it depends on tools.
 
 **Catalog summary** (`summarizeCodeModeCatalog`, pure):
 
-- every namespace with nested tools: `- <namespace> (<n> tools[, <k> shown]) // <description>`;
+- every namespace with nested tools: ``- `<namespace>` (<n> tools[, <k> listed | none listed]): <description>``;
 - full signatures of `listed` and `pinned` tools, filled round-robin across namespaces, cheapest
   first, within the inline budget (`defaultCodeModeInlineBudget`, host-configurable); `pinned`
   tools are always shown, outside the budget; `search` tools never are;
-- stage-only tools counted in their namespace, listed only when `listed` or `pinned`.
+- stage-only tools counted in their namespace and named in the Stageable section when `listed` or
+  `pinned` (as above).
 
 `ToolDiscovery` gains `pinned` (`listed` = shown when the budget allows, `search` = never shown,
 `pinned` = always shown), valid only with `callableBy: 'codemode'` like the others.
 
-**Instruction messages.** A user-role `UserMessage` with an `instruction: { key, state }` envelope
-field (`MessageInstruction`): `state` is the JSON state it rendered and is never model-visible
-(only `content` is). No new message kind, so providers, persistence and host decoders need no
-change; `isInstructionMessage` lets UIs hide them, and `latestInstructionState` reads the last
-state of a key.
+**Instruction messages.** A user-role `UserMessage` with an `instruction: { key, state? }`
+envelope field (`MessageInstruction`): `state` is the JSON state it rendered (any JSON, `null`
+included) and is never model-visible (only `content` is); a message without `state` records a
+removal. No new message kind, so providers, persistence and host decoders need no change.
+`isInstructionMessage` identifies them, `latestInstructionState` reads the last state of a key, and
+`latestInstructionMessages` the last message of each key still holding a state.
+
+**UIs.** The React chat projection never shows instruction messages as user messages; it keeps
+them on the previous chat message (`instructionsAfter`), and `toAgentMessages` emits them back in
+place, so a transcript rebuilt from chat messages keeps them.
+
+**Compaction.** The loop compares with the uncompacted transcript, so a summary that folded an
+instruction away would leave the model without it and never re-append it. Window compaction
+(`applyCompactionPlan`) keeps the latest instruction message of each key verbatim after its
+summary. Hosts with their own compaction must do the same (`latestInstructionMessages`).
 
 **Delivery.** `RunInstruction` is `{ key, state, render({ previous, current }) }`. Before each
 model request the loop compares `state` with the latest recorded state of the key (canonical JSON):
 equal appends nothing; different appends one instruction message (first render, delta or full
-replacement, or a removal notice once). `run()` does it for `RunConfig.instructions` and returns
+replacement, or a removal notice once). States compare as JSON values independent of object key
+order (`interactionJsonEquals`). `run()` does it for `RunConfig.instructions` and returns
 the messages with its created messages; it never emits a `UserMessage` event (not user input).
 Durable hosts driving `runModelTurn` own their transcript: they append
 `instructionMessages(transcript, instructions)` themselves and persist them before the model step;
 the loop then finds the state current and appends nothing, so doing both never duplicates.
 
 **Registry.** A nested-access registration may declare `instruct` (like `describe`);
-`ResolvedToolSet.instructions` collects them for `RunConfig.instructions`.
+`ResolvedToolSet.instructions` collects them for `RunConfig.instructions`. `instruct` without
+`nestedToolAccess` is `invalid_tool_exposure`; two instructions with one key are
+`duplicate_instruction` (each would find the other's message and append every turn).
 
 A host that cannot append messages to its persisted conversation may render the instruction's
 first render (`render({ previous: undefined, current: state })`) into its system prompt instead:
@@ -182,9 +203,11 @@ Code mode ships the catalog as one such instruction with `makeCodeModeTool({ cat
 
 No tool gains authority. `tool_search` activates only tools the resolution already allows the
 model to call; hidden (unresolved) tools are never searchable. Activated gated tools keep their
-approval; stage-only tools only reach `review_plan`. Activation from transcript content is safe
-because only `tool_search` results produced by the package tool count: the loop checks the result
-belongs to a `tool_search` call and intersects names with the current deferred set.
+approval; stage-only tools only reach `review_plan`. Activation from transcript content is safe:
+only results answering a `tool_search` call of the assistant message they follow count (the
+package tool, or a host tool of that name, which takes over its contract), and activated names
+only declare tools that are resolved and still deferred. Deferral is not an authority boundary
+anyway: an allowed deferred tool called by name runs.
 
 ## Rejected alternatives
 
@@ -200,15 +223,20 @@ belongs to a `tool_search` call and intersects names with the current deferred s
 
 ## Tests
 
-- Agent: resolution errors per axis combination; `tool_search` added, opted out, or host-owned;
-  `declaredToolDefs` from transcripts (activation, look-alike results of other tools ignored);
-  activated gated tool keeps its approval; a run declares a tool after its search.
-- Agent: stage-only resolution, no provider declaration, nested direct call rejected with the stage
-  hint, stage → review → apply unchanged.
-- Codemode: invariant description across catalog changes; summary namespace lines, counts, budget,
-  pinned; stage-only search marker and declaration; `stage` by identifier.
-- Instructions: initial, delta, full replacement, removal; idempotent per transcript (key order
-  independent); `run()` keeps them for later turns, never as user message events.
+- Agent: resolution errors per axis combination (codemode loading, question, input, background,
+  nested access, `tool_search`; duplicate instruction keys; `instruct` without nested access);
+  `tool_search` added, opted out, or host-owned; `declaredToolDefs` from transcripts (activation,
+  look-alike results of other tools, reused call ids); activation read through a compacting
+  transform; activated gated tool keeps its approval; a run declares a tool after its search.
+- Agent: stage-only resolution, no provider declaration, nested direct call rejected, stage →
+  review → apply unchanged.
+- Codemode: invariant description across catalog changes and when the first stageable tool
+  connects; summary namespace lines, counts, budget, pinned (pinned stage-only names past the
+  cap); stage-only search marker and declaration; `stage` by identifier; the pi executor rejects a
+  direct call with the stage hint and keeps it out of `ALL_TOOLS`.
+- Instructions: initial, delta, full replacement, removal, `null` state; idempotent per transcript
+  (key order independent); `run()` keeps them for later turns, never as user message events; kept
+  through window compaction; hidden in and round-tripped through the chat projection.
 
 ## Implementation plan
 

@@ -19,8 +19,9 @@ import {
   type LLMRequest,
   type RunInstruction
 } from '../../src/loop'
+import { compactWindowMessages } from '../../src/compaction'
 import { FauxProvider, Reply } from '../../src/loop/testing'
-import { appendProtocolMessage, buildAgentChatMessages } from '../../src/react'
+import { appendProtocolMessage, buildAgentChatMessages, toAgentMessages } from '../../src/react'
 
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 
@@ -55,7 +56,7 @@ describe('instruction messages', () => {
     expect(contentOf(first)).toEqual(['catalog: {"tools":2}'])
     expect(first.every(isInstructionMessage)).toBe(true)
 
-    // The same state, with keys in another order, appends nothing.
+    // The same state appends nothing.
     expect(instructionMessages([user, ...first], [catalog({ tools: 2 })])).toEqual([])
 
     const changed = instructionMessages([user, ...first], [catalog({ tools: 3 })])
@@ -74,6 +75,13 @@ describe('instruction messages', () => {
     expect(
       contentOf(instructionMessages([user, ...first, ...removed], [catalog({ tools: 1 })]))
     ).toEqual(['catalog: {"tools":1}'])
+  })
+
+  it('treats a null state as a state, never as a removal', () => {
+    const first = instructionMessages([user], [catalog(null)])
+
+    expect(contentOf(first)).toEqual(['catalog: null'])
+    expect(instructionMessages([user, ...first], [catalog(null)])).toEqual([])
   })
 
   it('compares states independently of object key order', () => {
@@ -197,6 +205,53 @@ describe('instruction messages in chat projections', () => {
     })
 
     expect(items.map(item => item.role)).toEqual(['user'])
-    expect(appendProtocolMessage(items, instruction)).toEqual(items)
+    // Hidden, never dropped: a transcript rebuilt from chat messages keeps them in place.
+    expect(toAgentMessages(items)).toEqual([user, instruction])
+
+    const appended = appendProtocolMessage(
+      buildAgentChatMessages({
+        messages: [user],
+        userDraft: '',
+        assistantDraft: '',
+        reasoningDraft: '',
+        toolRuns: [],
+        error: null
+      }),
+      instruction
+    )
+
+    expect(appended.map(item => item.role)).toEqual(['user'])
+    expect(toAgentMessages(appended)).toEqual([user, instruction])
+  })
+})
+
+describe('instruction messages through compaction', () => {
+  it('keep the latest instruction of each key verbatim after the summary', () => {
+    const old = instructionMessages([user], [catalog({ tools: 1 })])
+    const current = instructionMessages([user, ...old], [catalog({ tools: 2 })])
+
+    const transcript: ReadonlyArray<AgentMessage> = [
+      user,
+      ...old,
+      UserMessage.make({ content: 'filler '.repeat(400) }),
+      ...current,
+      UserMessage.make({ content: 'filler '.repeat(400) }),
+      UserMessage.make({ content: 'latest' })
+    ]
+
+    const result = compactWindowMessages(transcript, {
+      strategy: 'test',
+      thresholdTokens: 10,
+      tailMessageCount: 1,
+      makeSummaryMessage: () => UserMessage.make({ content: 'summary' })
+    })
+
+    expect(contentOf(result.messages)).toEqual([
+      'summary',
+      'catalog changed: {"tools":2}',
+      'latest'
+    ])
+    // The loop compares with the uncompacted transcript: nothing to re-append.
+    expect(instructionMessages(transcript, [catalog({ tools: 2 })])).toEqual([])
   })
 })

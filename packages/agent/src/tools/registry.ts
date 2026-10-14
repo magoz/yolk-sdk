@@ -21,8 +21,6 @@ import {
   isCodeModeFailClosed,
   isDeferredTool,
   toolSearchToolName,
-  ToolResult,
-  type ToolSearchActivation,
   decodeBackgroundToolInput,
   isToolStageable,
   isToolJsonSchemaObject,
@@ -50,7 +48,8 @@ import {
   type ToolApprovalPreviewer,
   type ToolCall,
   type ToolChangePreview,
-  type ToolExposure
+  type ToolExposure,
+  type ToolResult
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
@@ -96,7 +95,7 @@ import {
   previewToolPlanWith,
   type ToolPlanResolution
 } from './plan-runtime.ts'
-import { rankToolSearchDocuments } from './tool-search.ts'
+import { makeToolSearchTool } from './tool-search.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -122,7 +121,8 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'staging_validation_required',
       'plan_review_duplicate',
       'change_preview_unsupported_policy',
-      'deferred_unsupported_tool'
+      'deferred_unsupported_tool',
+      'duplicate_instruction'
     ])
   }
 ) {}
@@ -1298,73 +1298,6 @@ const executeInteractionTool = <Context>(input: {
     )
   })
 
-/** Default and maximum number of tools one `tool_search` call activates. */
-export const defaultToolSearchLimit = 5
-
-export const maxToolSearchLimit = 20
-
-const ToolSearchParams = Schema.Struct({
-  query: Schema.String.annotate({
-    description: 'What the tool should do, in a few words (for example "list open issues").'
-  }),
-  limit: Schema.optional(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: maxToolSearchLimit })).annotate({
-      description: `How many tools to load (default ${defaultToolSearchLimit}).`
-    })
-  )
-})
-
-const description = [
-  'Find and load tools that are not declared yet: they become callable directly from your next step on, for the rest of the conversation.',
-  'Search by what the tool should do. Loaded tools keep their own approval rules.'
-].join(' ')
-
-const resultText = (tools: ReadonlyArray<ToolDef>) =>
-  tools.length === 0
-    ? 'No tools matched. Try other words.'
-    : [
-        `Loaded ${tools.length} tool${tools.length === 1 ? '' : 's'}; call them directly from your next step:`,
-        ...tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0] ?? ''}`)
-      ].join('\n')
-
-/**
- * The package `tool_search` tool over the deferred tools of one resolution (ADR 0007). Its result
- * names the activated tools in `structuredContent.toolSearch.activated`; the loop declares them
- * from the next request on (`declaredToolDefs`). Read access: it changes nothing outside the
- * transcript.
- */
-export const makeToolSearchTool = <Context>(
-  deferred: ReadonlyArray<{ readonly def: ToolDef; readonly searchText?: string }>
-): ToolRegistration<Context> =>
-  makeTool<Context, typeof ToolSearchParams>({
-    name: toolSearchToolName,
-    description,
-    parameters: ToolSearchParams,
-    access: 'read',
-    callableBy: 'model',
-    execute: ({ call, params }) =>
-      Effect.sync(() => {
-        const found = rankToolSearchDocuments(
-          deferred.map(tool => ({
-            value: tool.def,
-            text: [tool.def.name, tool.def.description, tool.searchText ?? ''].join(' ')
-          })),
-          params.query,
-          params.limit ?? defaultToolSearchLimit
-        )
-
-        const activation: ToolSearchActivation = {
-          toolSearch: { activated: found.map(tool => tool.name) }
-        }
-
-        return ToolResult.make({
-          toolCallId: call.id,
-          content: resultText(found),
-          structuredContent: activation
-        })
-      })
-  })
-
 /**
  * Adds the package `tool_search` registration when deferred model-callable tools resolve (ADR
  * 0007), unless the host opts out or already registers a tool with that name. Each deferred tool
@@ -1515,7 +1448,8 @@ export const resolveTools = <Context>(
         tool.def.loading === 'deferred' &&
         (tool.def.name === toolSearchToolName ||
           loopOwnedToolNames.has(tool.def.name) ||
-          activated(tool) ||
+          (tool.background ?? tool.def.background) === true ||
+          tool.def.execution !== undefined ||
           tool.input !== undefined ||
           tool.interaction !== undefined ||
           tool.planReview !== undefined ||
@@ -1525,6 +1459,16 @@ export const resolveTools = <Context>(
           new ToolRegistryError({
             cause: 'deferred_unsupported_tool',
             message: `Tool ${tool.def.name} cannot be deferred: input, interaction, plan review, background, nested-access, question, subagent and tool_search tools are always declared.`
+          })
+        )
+      }
+
+      // Instructions are computed from nested tools: only nested-access registrations have them.
+      if (tool.instruct !== undefined && tool.nestedToolAccess !== true) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'invalid_tool_exposure',
+            message: `Tool ${tool.def.name} sets instruct without nestedToolAccess: instructions are computed from the nested tools.`
           })
         )
       }
@@ -1724,31 +1668,37 @@ export const resolveTools = <Context>(
           }
         : undefined
 
+    // What `describe` and `instruct` of nested-access registrations see.
+    const nestedDescription =
+      stagingDescription === undefined
+        ? { tools: nestedTools }
+        : { tools: nestedTools, staging: stagingDescription }
+
     const describedDef = (tool: ToolRegistration<Context>): ToolDef =>
       tool.nestedToolAccess === true && tool.describe !== undefined
-        ? withToolDescription(
-            tool.def,
-            tool.describe(
-              stagingDescription === undefined
-                ? { tools: nestedTools }
-                : { tools: nestedTools, staging: stagingDescription }
-            )
-          )
+        ? withToolDescription(tool.def, tool.describe(nestedDescription))
         : tool.def
 
     const instructions = resolved.flatMap(item => {
-      const instruct = item.tool.instruct
-
-      if (item.tool.nestedToolAccess !== true || instruct === undefined) return []
-
-      const instruction = instruct(
-        stagingDescription === undefined
-          ? { tools: nestedTools }
-          : { tools: nestedTools, staging: stagingDescription }
-      )
+      const instruction = item.tool.instruct?.(nestedDescription)
 
       return instruction === undefined ? [] : [instruction]
     })
+
+    // Two instructions with one key would each find the other's message and append every turn.
+    const duplicateInstructionKey = instructions.find(
+      (instruction, index) =>
+        instructions.findIndex(other => other.key === instruction.key) !== index
+    )
+
+    if (duplicateInstructionKey !== undefined) {
+      return yield* Effect.fail(
+        new ToolRegistryError({
+          cause: 'duplicate_instruction',
+          message: `Two resolved tools contribute the instruction ${duplicateInstructionKey.key}.`
+        })
+      )
+    }
 
     const tools = Arr.map(resolved, item => {
       const def = describedDef(item.tool)

@@ -410,6 +410,19 @@ const stageGlobal = (
   }
 })
 
+/** A direct call of a stage-only tool rejects with a hint to stage it (ADR 0007). */
+const stageOnlyRejections = (stageOnly: ReadonlyArray<CodeModeCatalogTool>) =>
+  stageOnly.flatMap(tool => {
+    const message = `${tool.name} is approval-gated: record it with stage(${JSON.stringify(tool.name)}, args) instead of calling it.`
+
+    return tool.identifier === tool.name
+      ? [{ key: tool.name, message }]
+      : [
+          { key: tool.identifier, message },
+          { key: tool.name, message }
+        ]
+  })
+
 const planNotice = (plan: CodeModeStagedPlan) =>
   `\n\nStaged ${plan.count} call${plan.count === 1 ? '' : 's'} as plan ${plan.id}; nothing was applied yet. To apply them, call ${plan.reviewToolName}(${JSON.stringify({ planId: plan.id, planDigest: plan.digest })}): a person reviews the plan and selects the calls to apply.`
 
@@ -637,6 +650,11 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             execute: callTool(tool)
           }))
 
+          const stageOnly =
+            plan === undefined || staging === undefined
+              ? []
+              : codeModeStageOnlyCatalog(staging.tools)
+
           const result = yield* Effect.tryPromise({
             try: signal =>
               options.executor.execute(input.code, {
@@ -645,12 +663,10 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   plan === undefined || staging === undefined
                     ? discoveryGlobals(catalog)
                     : [
-                        ...discoveryGlobals([
-                          ...catalog,
-                          ...codeModeStageOnlyCatalog(staging.tools)
-                        ]),
+                        ...discoveryGlobals([...catalog, ...stageOnly]),
                         stageGlobal(plan, stageFork, staging.tools)
                       ],
+                unbound: stageOnlyRejections(stageOnly),
                 timeoutMs,
                 memoryLimitBytes: limits.memoryLimitBytes,
                 store,
@@ -938,8 +954,13 @@ export const makeCodeModeTool = <Context>(
 
   const instructed = options.catalog === 'instructions'
 
+  // In description mode `stage()` is documented once a stageable tool exists (the description
+  // lists them anyway). In instructions mode the description must not depend on tools: staging
+  // availability alone decides.
   const offered = (staging: CodeModeStagingDescription | undefined) =>
-    options.staging === false || staging === undefined || staging.tools.length === 0
+    options.staging === false ||
+    staging === undefined ||
+    (!instructed && staging.tools.length === 0)
       ? undefined
       : staging
 

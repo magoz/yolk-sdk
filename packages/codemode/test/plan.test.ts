@@ -543,3 +543,39 @@ describe('stage-only tools', () => {
     })
   )
 })
+
+describe('stage-only tools in the pi executor', () => {
+  it.effect('reject a direct call with a hint to stage them, and stage by identifier', () =>
+    Effect.gen(function* () {
+      const archived: Array<string> = []
+
+      const env = yield* stagingSetup(() => Promise.resolve(undefined), {
+        extraTools: [archiveTool(archived)],
+        codemode: { executor: makePiCodeModeExecutor() }
+      })
+
+      const result = yield* env.toolSet.execute(
+        ToolCall.make({
+          id: 'call_pi',
+          name: 'codemode',
+          params: {
+            code: `const direct = await tools.archive_resource({ resource: 'r1' }).catch(error => error.message)
+              const listed = ALL_TOOLS.map(tool => tool.name)
+              const receipt = await stage('archive_resource', { resource: 'r1' })
+              return { direct, listed, key: receipt.key }`
+          }
+        })
+      )
+
+      const output = text(result.content)
+
+      expect(result.isError).toBeUndefined()
+      expect(output).toContain(
+        'archive-resource is approval-gated: record it with stage(\\"archive-resource\\", args) instead of calling it.'
+      )
+      expect(output).not.toMatch(/"listed":\[[^\]]*archive/)
+      expect(output).toContain('"key":"call_pi/s1"')
+      expect(archived).toEqual([])
+    })
+  )
+})

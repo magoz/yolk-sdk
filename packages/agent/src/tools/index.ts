@@ -2,10 +2,7 @@ export type { BackgroundToolHost } from './background.ts'
 
 export {
   EmptyToolParams,
-  defaultToolSearchLimit,
   makeTool,
-  makeToolSearchTool,
-  maxToolSearchLimit,
   makeToolExecutorLayer,
   modelVisibleToolError,
   modelVisibleToolErrorResult,
@@ -210,6 +207,9 @@ export type {
 export type { ToolExecutionOptions } from './registry.ts'
 
 export {
+  defaultToolSearchLimit,
+  makeToolSearchTool,
+  maxToolSearchLimit,
   rankToolSearchDocuments,
   toolSearchTokens,
   type ToolSearchDocument

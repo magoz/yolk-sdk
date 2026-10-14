@@ -16,34 +16,40 @@ export type ToolSearchActivation = typeof ToolSearchActivation.Type
 const decodeActivation = Schema.decodeUnknownOption(ToolSearchActivation)
 
 /**
- * Tool names activated by `tool_search` results in the transcript: only results of calls the
- * assistant made to `tool_search`, so other tool results can never activate a tool.
+ * Tool names activated by `tool_search` results in the transcript. A result counts only when it
+ * answers a `tool_search` call of the assistant message it follows (providers may reuse call ids
+ * across turns, so ids are matched against the latest assistant message only), so other tool
+ * results can never activate a tool.
  */
 export const activatedToolNames = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> => {
-  const searchCalls = new Set(
-    messages.flatMap(message =>
-      Predicate.isTagged(message, 'Assistant')
-        ? message.parts.flatMap(part =>
-            Predicate.isTagged(part, 'HostToolCall') && part.call.name === toolSearchToolName
-              ? [part.call.id]
-              : []
-          )
-        : []
-    )
-  )
+  const activated = new Set<string>()
+  let pendingSearches = new Set<string>()
 
-  return new Set(
-    messages.flatMap(message =>
+  for (const message of messages) {
+    if (Predicate.isTagged(message, 'Assistant')) {
+      pendingSearches = new Set(
+        message.parts.flatMap(part =>
+          Predicate.isTagged(part, 'HostToolCall') && part.call.name === toolSearchToolName
+            ? [part.call.id]
+            : []
+        )
+      )
+    } else if (
       Predicate.isTagged(message, 'ToolResult') &&
-      searchCalls.has(message.toolCallId) &&
-      message.isError !== true
-        ? Option.match(decodeActivation(message.structuredContent), {
-            onNone: () => [],
-            onSome: activation => activation.toolSearch.activated
-          })
-        : []
-    )
-  )
+      pendingSearches.has(message.toolCallId)
+    ) {
+      pendingSearches.delete(message.toolCallId)
+
+      const decoded =
+        message.isError === true ? Option.none() : decodeActivation(message.structuredContent)
+
+      if (Option.isSome(decoded)) {
+        for (const name of decoded.value.toolSearch.activated) activated.add(name)
+      }
+    }
+  }
+
+  return activated
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   toCodemodeIdentifier
 } from '@earendil-works/pi-codemode/declarations'
 import { isDeferredTool, toolDiscovery } from '@yolk-sdk/agent/protocol'
+import type { RunInstruction } from '@yolk-sdk/agent/loop'
 import type { NestedTool } from '@yolk-sdk/agent/tools'
 import type { CodeModeJsonSchema } from './executor.ts'
 
@@ -265,17 +266,33 @@ const stageLine = (reviewToolName: string) =>
 /** Stageable tool names listed in the description; the rest are summarized with a count. */
 const maxListedStageableTools = 20
 
-/** Stageable tools the description names: every one except stage-only `search` tools. */
-const listedStageableNames = (staging: CodeModeStagingDescription) =>
-  staging.tools.flatMap(({ def }) => (toolDiscovery(def) === 'search' ? [] : [def.name]))
+/** Stageable tools the description names: `pinned` ones first, never stage-only `search` ones. */
+type StageableNames = {
+  readonly pinned: ReadonlyArray<string>
+  readonly listed: ReadonlyArray<string>
+}
 
-const stageableSection = (names: ReadonlyArray<string>) => {
-  const hidden = names.length - maxListedStageableTools
+const listedStageableNames = (staging: CodeModeStagingDescription): StageableNames => ({
+  pinned: staging.tools.flatMap(({ def }) => (toolDiscovery(def) === 'pinned' ? [def.name] : [])),
+  listed: staging.tools.flatMap(({ def }) => {
+    const discovery = toolDiscovery(def)
+
+    return discovery === 'search' || discovery === 'pinned' ? [] : [def.name]
+  })
+})
+
+const hasStageableNames = (names: StageableNames) =>
+  names.pinned.length > 0 || names.listed.length > 0
+
+/** `pinned` names are always shown; the cap applies to the others. */
+const stageableSection = (names: StageableNames) => {
+  const room = Math.max(0, maxListedStageableTools - names.pinned.length)
+  const hidden = names.listed.length - room
 
   return [
     '## Stageable tools',
     'Approval-gated tools a script cannot call through `tools`, only stage with `await stage("<name>", args)` (arguments as for the tool of the same name):',
-    ...names.slice(0, maxListedStageableTools).map(name => `- \`${name}\``),
+    ...[...names.pinned, ...names.listed.slice(0, room)].map(name => `- \`${name}\``),
     ...(hidden > 0 ? [`- … and ${hidden} more (find them with \`searchTools\`).`] : [])
   ].join('\n')
 }
@@ -355,7 +372,8 @@ export const renderCodeModeDescription = (input: CodeModeDescriptionInput): stri
   const staging =
     input.staging !== undefined && input.staging.tools.length > 0 ? input.staging : undefined
 
-  const stageableNames = staging === undefined ? [] : listedStageableNames(staging)
+  const stageableNames =
+    staging === undefined ? { pinned: [], listed: [] } : listedStageableNames(staging)
 
   return [
     intro,
@@ -367,7 +385,7 @@ export const renderCodeModeDescription = (input: CodeModeDescriptionInput): stri
     sections.length === 0
       ? 'Nested tools: none are listed here.'
       : ['## Nested tools by namespace', ...sections].join('\n\n'),
-    ...(stageableNames.length === 0 ? [] : [stageableSection(stageableNames)]),
+    ...(hasStageableNames(stageableNames) ? [stageableSection(stageableNames)] : []),
     unlistedToolsLine
   ].join('\n\n')
 }
@@ -409,31 +427,18 @@ const CodeModeCatalogNamespace = Schema.Struct({
 /** The catalog an instruction message records as its state (JSON, never model-visible). */
 export const CodeModeCatalogSummary = Schema.Struct({
   namespaces: Schema.Array(CodeModeCatalogNamespace),
-  /** Stageable tool names the catalog lists (never stage-only `search` tools). */
-  stageable: Schema.Array(Schema.String)
+  /** Stageable tool names the catalog lists: `pinned` ones, then `listed` ones (never `search`). */
+  stageable: Schema.Struct({
+    pinned: Schema.Array(Schema.String),
+    listed: Schema.Array(Schema.String)
+  })
 })
 
 export type CodeModeCatalogSummary = typeof CodeModeCatalogSummary.Type
 
 const decodeCatalogSummary = Schema.decodeUnknownOption(CodeModeCatalogSummary)
 
-const namespaceJson = (namespace: CodeModeCatalogSummary['namespaces'][number]): Schema.Json => {
-  const base = {
-    name: namespace.name,
-    count: namespace.count,
-    shown: namespace.shown,
-    listing: namespace.listing
-  } satisfies Schema.Json
-
-  return namespace.description === undefined
-    ? base
-    : ({ ...base, description: namespace.description } satisfies Schema.Json)
-}
-
-const catalogSummaryJson = (summary: CodeModeCatalogSummary): Schema.Json => ({
-  namespaces: summary.namespaces.map(namespaceJson),
-  stageable: [...summary.stageable]
-})
+const encodeCatalogSummary = Schema.encodeOption(CodeModeCatalogSummary)
 
 const namespaceListing = (tools: ReadonlyArray<CodeModeCatalogTool>) => {
   const declared = tools.filter(tool => tool.exposure !== 'all')
@@ -480,7 +485,8 @@ export const summarizeCodeModeCatalog = (input: {
 
   return {
     namespaces,
-    stageable: input.staging === undefined ? [] : listedStageableNames(input.staging)
+    stageable:
+      input.staging === undefined ? { pinned: [], listed: [] } : listedStageableNames(input.staging)
   }
 }
 
@@ -506,7 +512,7 @@ export const renderCodeModeCatalog = (summary: CodeModeCatalogSummary): string =
     ...summary.namespaces.flatMap(namespace =>
       namespace.listing.length === 0 ? [] : [`### ${namespace.name}\n${namespace.listing}`]
     ),
-    ...(summary.stageable.length === 0 ? [] : [stageableSection(summary.stageable)])
+    ...(hasStageableNames(summary.stageable) ? [stageableSection(summary.stageable)] : [])
   ].join('\n\n')
 
 const listingsOf = (summary: CodeModeCatalogSummary) =>
@@ -560,27 +566,23 @@ export const renderCodeModeCatalogChange = (input: {
 }
 
 /**
- * The host instruction of the code mode catalog (`RunInstruction` shape): its state is the
- * summary, and its render the full catalog, a delta, or a removal notice.
+ * The host instruction of the code mode catalog: its state is the encoded summary, and its render
+ * the full catalog, a delta, or a removal notice.
  */
 export const codeModeCatalogInstruction = (input: {
   readonly tools: ReadonlyArray<NestedTool>
   readonly staging?: CodeModeStagingDescription
   readonly inlineBudget?: number
-}) => {
+}): RunInstruction => {
   const summary = summarizeCodeModeCatalog(input)
 
   return {
     key: codeModeCatalogInstructionKey,
-    // The summary is plain JSON (strings, numbers, arrays): its encoded form is itself.
-    state: summary.namespaces.length === 0 ? undefined : catalogSummaryJson(summary),
-    render: ({
-      previous,
-      current
-    }: {
-      readonly previous: Schema.Json | undefined
-      readonly current: Schema.Json | undefined
-    }) => {
+    state:
+      summary.namespaces.length === 0
+        ? undefined
+        : Option.getOrUndefined(encodeCatalogSummary(summary)),
+    render: ({ previous, current }) => {
       const decodedCurrent = current === undefined ? Option.none() : decodeCatalogSummary(current)
 
       if (Option.isNone(decodedCurrent))
