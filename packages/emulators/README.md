@@ -440,14 +440,14 @@ gateway.evaluate.faults.add({
 
 `makeOpenCodeGoEmulator(options?)` (`@yolk-sdk/emulators/opencode`) answers the origin
 `https://opencode.ai` with one fetch handler for the routes the OpenCode Go provider and usage
-fetcher call under `/zen/go/v1`. Each route is fixture-only and answers its Go conformance fixture:
+fetcher call under `/inference/go/v1`. Each route is fixture-only and answers its Go conformance fixture:
 
-| Route                              | Headers the provider sends                   | Recorded answer                                                     |
-| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
-| `POST /zen/go/v1/chat/completions` | `Authorization: Bearer`                      | Streamed plain text with a usage chunk and `data: [DONE]`           |
-| `POST /zen/go/v1/messages`         | `x-api-key`, `anthropic-version: 2023-06-01` | Streamed plain text ending with `message_stop`                      |
-| `POST /zen/go/v1/responses`        | `Authorization: Bearer`                      | Streamed plain text, or (replayed tool turn) a streamed text answer |
-| `GET /zen/go/v1/usage`             | `Authorization: Bearer`                      | `usage.rolling` / `weekly` / `monthly` as `{ percent, resetsAt }`   |
+| Route                                    | Headers the provider sends                   | Recorded answer                                                     |
+| ---------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| `POST /inference/go/v1/chat/completions` | `Authorization: Bearer`                      | Streamed plain text with a usage chunk and `data: [DONE]`           |
+| `POST /inference/go/v1/messages`         | `x-api-key`, `anthropic-version: 2023-06-01` | Streamed plain text ending with `message_stop`                      |
+| `POST /inference/go/v1/responses`        | `Authorization: Bearer`                      | Streamed plain text, or (replayed tool turn) a streamed text answer |
+| `GET /inference/go/v1/usage`             | `Authorization: Bearer`                      | `usage.rolling` / `weekly` / `monthly` as `{ percent, resetsAt }`   |
 
 Only the recorded models are emulated (`openCodeGoEmulatorDefaultModels`: `synthetic-go-chat`,
 `synthetic-go-messages`, `synthetic-go-responses`, one per protocol). It returns
@@ -492,7 +492,7 @@ are not checked except Grok's fixed `X-XAI-Token-Auth: xai-grok-cli`.
 | `/anthropic` | `GET /api/oauth/usage`           | Bearer, `anthropic-beta` listing `oauth-2025-04-20`                                   | `five_hour`, `seven_day` as `{ utilization, resets_at }` |
 | `/codex`     | `GET /backend-api/wham/usage`    | Bearer, `ChatGPT-Account-Id`                                                          | `rate_limit.primary_window` / `secondary_window`         |
 | `/xai`       | `GET /v1/billing?format=credits` | Bearer, `X-XAI-Token-Auth`, `x-userid`, `x-grok-client-version`, `x-grok-client-mode` | `config.creditUsagePercent` and `config.currentPeriod`   |
-| `/opencode`  | `GET /zen/go/v1/usage`           | Bearer                                                                                | `usage.rolling` / `weekly` / `monthly`                   |
+| `/opencode`  | `GET /inference/go/v1/usage`     | Bearer                                                                                | `usage.rolling` / `weekly` / `monthly`                   |
 
 The ledger records `anthropic-beta` (Claude) and `x-grok-client-version` / `x-grok-client-mode`
 (Grok), never `ChatGPT-Account-Id` or `x-userid`. The manifests

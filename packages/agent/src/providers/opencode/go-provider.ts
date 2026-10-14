@@ -1,13 +1,20 @@
-import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Stream } from 'effect'
 import type { HttpClient } from 'effect/http'
-import { decorateLLMProvider, LLMError, type LLMProvider } from '@yolk-sdk/agent/loop'
-import { makeOpenAiProviderLayer } from '../openai/provider.ts'
+import {
+  decorateLLMProvider,
+  LLMError,
+  type LLMEvent,
+  type LLMProvider,
+  type LLMProviderError,
+  type LLMRequest
+} from '@yolk-sdk/agent/loop'
+import { makeOpenAiProviderLayer, openAiChatResponseIssues } from '../openai/provider.ts'
 import { makeOpenAiResponsesProviderLayer } from '../openai-responses-provider-internal.ts'
 import { makeAnthropicMessagesProviderLayer } from '../anthropic-messages-provider-internal.ts'
 
 export const openCodeGoProviderId = 'opencode_go'
 
-export const openCodeGoBaseUrl = 'https://opencode.ai/zen/go/v1'
+export const openCodeGoBaseUrl = 'https://opencode.ai/inference/go/v1'
 
 export type OpenCodeGoProtocol = 'chat-completions' | 'messages' | 'responses'
 
@@ -129,12 +136,92 @@ const makeOpenCodeGoProtocolLayer = (
     })
   )
 
+/**
+ * Malformed-response codes that earn one re-routed attempt: the parser rejected what an upstream
+ * sent, or the stream ended before its terminal event. Model decisions (`length`,
+ * `content_filter`, `max_tokens`) and provider-reported errors are never re-routed.
+ */
+const reroutableResponseCodes: ReadonlySet<string> = new Set<string>([
+  ...openAiChatResponseIssues,
+  'incomplete_stream',
+  'unexpected_content_type'
+])
+
+/** The malformed-response code of a reroutable failure, else `undefined`. */
+const reroutableCodeOf = (error: LLMProviderError): string | undefined => {
+  if (!Predicate.isTagged(error, 'LLMError') || error.cause !== 'invalid_response') return undefined
+
+  const code = error.provider?.providerCode
+
+  return code !== undefined && reroutableResponseCodes.has(code) ? code : undefined
+}
+
+// Last case variant wins, matching the lowercased extras the protocol layer sends.
+const sessionHeaderOf = (headers: Readonly<Record<string, string>> | undefined) => {
+  let session: string | undefined
+
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === 'x-opencode-session') session = value
+  }
+
+  return session
+}
+
+/**
+ * Go pins a session (`x-opencode-session`) to one upstream server for routing and prompt caching,
+ * so a retry under the same session reaches the server that just sent a malformed response. A
+ * stream that fails with a reroutable code before emitting any event is sent once more under
+ * `<session>.reroute`, which routes it afresh at the cost of that request's cached prefix. A
+ * request without a session is sent once more unchanged. Errors after the first event, and the
+ * second attempt's errors, propagate.
+ */
+const streamWithReroute = (
+  provider: typeof LLMProvider.Service,
+  request: LLMRequest,
+  sessionId: string | undefined
+): Stream.Stream<LLMEvent, LLMProviderError> =>
+  Stream.unwrap(
+    Ref.make(false).pipe(
+      Effect.map(emitted =>
+        provider.stream(request).pipe(
+          Stream.tap(() => Ref.set(emitted, true)),
+          Stream.catch(error =>
+            Stream.unwrap(
+              Ref.get(emitted).pipe(
+                Effect.map(started => {
+                  const code = reroutableCodeOf(error)
+
+                  if (started || code === undefined) return Stream.fail(error)
+
+                  const rerouted =
+                    sessionId === undefined
+                      ? request
+                      : { ...request, cacheKey: `${sessionId}.reroute` }
+
+                  return Stream.fromEffect(
+                    Effect.logWarning(
+                      `OpenCode Go sent a malformed response (${code}); retrying once on a fresh route`
+                    )
+                  ).pipe(Stream.drain, Stream.concat(provider.stream(rerouted)))
+                })
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+
 export const makeOpenCodeGoProviderLayer = (
   config: OpenCodeGoProviderConfig
 ): Layer.Layer<LLMProvider, LLMError, HttpClient.HttpClient> =>
   decorateLLMProvider(provider => ({
     stream: request =>
-      provider.stream(request).pipe(
+      streamWithReroute(
+        provider,
+        request,
+        request.cacheKey ?? sessionHeaderOf(config.extraHeaders)
+      ).pipe(
         Stream.mapError(error =>
           Predicate.isTagged(error, 'LLMError') && error.provider !== undefined
             ? new LLMError({

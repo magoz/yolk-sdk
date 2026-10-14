@@ -12,14 +12,14 @@ export const openCodeGoChatPlainTextFixture: WireFixture = {
   evidence: 'unverified',
   recordedAt: '2026-09-30',
   account: 'synthetic',
-  endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+  endpoint: 'https://opencode.ai/inference/go/v1/chat/completions',
   model: 'synthetic-go-chat',
   note: 'Synthetic placeholder shaped like OpenAI-compatible chat.completion.chunk SSE from OpenCode Go. Not recorded from a live service; replace with a verified recording from pnpm conformance:opencode --live --owner-approved --account <label> (with the per-protocol model flags).',
   exchanges: [
     {
       request: {
         method: 'POST',
-        url: 'https://opencode.ai/zen/go/v1/chat/completions',
+        url: 'https://opencode.ai/inference/go/v1/chat/completions',
         headers: {
           accept: 'text/event-stream',
           'content-type': 'application/json'

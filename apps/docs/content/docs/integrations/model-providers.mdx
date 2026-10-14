@@ -91,13 +91,21 @@ redacted API key, explicit `protocol`, and host-owned `maxOutputTokens`. See
 | `messages`         | `/messages`         | `x-api-key`    | SSE or JSON response                            |
 | `responses`        | `/responses`        | Bearer API key | SSE or JSON response                            |
 
-All endpoints default to `https://opencode.ai/zen/go/v1`. Choose the protocol advertised for the
+All endpoints default to `https://opencode.ai/inference/go/v1`. Choose the protocol advertised for the
 selected model in [OpenCode's Go catalog](https://opencode.ai/docs/go/#endpoints); model availability
 can change. Pass the API model ID without the `opencode-go/` CLI prefix. Yolk neither fetches the
 catalog nor infers protocols or limits from model names.
 
 Messages uses native system instructions and tool names, not Claude Code OAuth fingerprints.
 Responses supports a host output limit and does not send Codex account or originator headers.
+Go pins each `x-opencode-session` to one upstream server, so a retry under the same session reaches
+the server that just failed. When a response is malformed (a Chat Completions parser code such as
+`invalid_stream_json`, a chat response that is not SSE, or a chat or Responses stream missing its
+terminal event) before any event was emitted, the adapter sends the request once more under `<session>.reroute`, giving up that
+request's cached prefix; model decisions such as `length` are never retried. The session is the
+request `cacheKey`, else the `x-opencode-session` extra header; without either the request is resent
+unchanged.
+
 Go reports safe failures under provider ID `opencode_go`. Credentials, model capabilities, supported
 reasoning efforts, allowance polling/persistence, and UI remain host-owned. Read allowance with
 `fetchOpenCodeGoSubscriptionUsage` from `@yolk-sdk/agent/providers/opencode/usage`.
@@ -255,7 +263,7 @@ Grok release. The adapter reports its programmatic request as `headless`.
 
 For Go, call `fetchOpenCodeGoSubscriptionUsage(Redacted.make(hostOpenCodeGoApiKey), options)` from
 `@yolk-sdk/agent/providers/opencode/usage`. Unlike the OAuth adapters, it uses a Bearer API key at
-`https://opencode.ai/zen/go/v1/usage`. The API key must belong to the subscription's user and workspace;
+`https://opencode.ai/inference/go/v1/usage`. The API key must belong to the subscription's user and workspace;
 403 means the key is not entitled to Go usage. It returns `five-hour`, `seven-day`, and `monthly`
 windows, preserving the provider's absolute reset times. Monthly resets are subscription-anniversary
 based, not calendar-month boundaries. Missing/invalid percentages are omitted rather than filled

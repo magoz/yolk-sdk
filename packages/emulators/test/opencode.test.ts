@@ -1,6 +1,6 @@
 /**
  * The OpenCode Go emulator: one origin serving the fixture-only chat, Messages, Responses, and
- * usage routes under `/zen/go/v1`. Recorded requests (within the documented request-shape
+ * usage routes under `/inference/go/v1`. Recorded requests (within the documented request-shape
  * latitude) get the recorded responses; everything else is one ledgered 400 not-emulated that
  * uses up no fault or turn. Per-part ledgers, faults, turns, and control planes, the combined
  * coverage and reset, and the manifest.
@@ -370,9 +370,9 @@ describe('makeOpenCodeGoEmulator not-emulated requests', () => {
   it('fails unknown routes as a ledgered 400 not-emulated through the chat part', async () => {
     const emulator = makeOpenCodeGoEmulator()
 
-    await expectNotEmulated(await get(emulator, '/zen/go/v1/models', bearer))
+    await expectNotEmulated(await get(emulator, '/inference/go/v1/models', bearer))
     expect(emulator.chat.ledger.entries()).toMatchObject([
-      { path: '/zen/go/v1/models', evidence: 'unknown-route', status: 400 }
+      { path: '/inference/go/v1/models', evidence: 'unknown-route', status: 400 }
     ])
     expect(emulator.coverage().unknownRouteRequests).toBe(1)
   })
@@ -524,18 +524,28 @@ describe('openCodeGoEmulatorRoutes', () => {
         route.caseIds
       ])
     ).toEqual([
-      ['POST', '/zen/go/v1/chat/completions', 'unverified', ['opencode.go.chat.stream.plain-text']],
-      ['POST', '/zen/go/v1/messages', 'unverified', ['opencode.go.messages.stream.plain-text']],
       [
         'POST',
-        '/zen/go/v1/responses',
+        '/inference/go/v1/chat/completions',
+        'unverified',
+        ['opencode.go.chat.stream.plain-text']
+      ],
+      [
+        'POST',
+        '/inference/go/v1/messages',
+        'unverified',
+        ['opencode.go.messages.stream.plain-text']
+      ],
+      [
+        'POST',
+        '/inference/go/v1/responses',
         'unverified',
         [
           'opencode.go.responses.stream.plain-text',
           'opencode.go.responses.stream.commentary-replay'
         ]
       ],
-      ['GET', '/zen/go/v1/usage', 'unverified', ['opencode.go.usage.snapshot']]
+      ['GET', '/inference/go/v1/usage', 'unverified', ['opencode.go.usage.snapshot']]
     ])
 
     for (const route of openCodeGoEmulatorRoutes) {

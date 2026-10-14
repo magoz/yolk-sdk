@@ -1,12 +1,12 @@
 /**
  * OpenCode Go emulator: one plain fetch handler for the origin `https://opencode.ai`, serving the
- * routes the OpenCode Go provider and usage fetcher call under `/zen/go/v1`:
+ * routes the OpenCode Go provider and usage fetcher call under `/inference/go/v1`:
  *
- * - `POST /zen/go/v1/chat/completions` (Bearer, `max_tokens`, streamed with usage);
- * - `POST /zen/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`, streamed);
- * - `POST /zen/go/v1/responses` (Bearer, `max_output_tokens`, streamed; plain text or a replayed
+ * - `POST /inference/go/v1/chat/completions` (Bearer, `max_tokens`, streamed with usage);
+ * - `POST /inference/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`, streamed);
+ * - `POST /inference/go/v1/responses` (Bearer, `max_output_tokens`, streamed; plain text or a replayed
  *   tool turn with commentary-tagged text);
- * - `GET /zen/go/v1/usage` (Bearer).
+ * - `GET /inference/go/v1/usage` (Bearer).
  *
  * Fixture-only (the owner rule for new routes; `fixture-route.ts`): a request matching a recorded
  * request shape, within the documented request-shape latitude, gets that Go conformance fixture's
@@ -49,14 +49,14 @@ export type {
   FixtureRouteScriptedTurn as OpenCodeGoScriptedTurn
 } from './fixture-route.ts'
 
-export const openCodeGoChatCompletionsPath = '/zen/go/v1/chat/completions'
+export const openCodeGoChatCompletionsPath = '/inference/go/v1/chat/completions'
 
-export const openCodeGoMessagesPath = '/zen/go/v1/messages'
+export const openCodeGoMessagesPath = '/inference/go/v1/messages'
 
-export const openCodeGoResponsesPath = '/zen/go/v1/responses'
+export const openCodeGoResponsesPath = '/inference/go/v1/responses'
 
 /** The Go subscription-usage path (`openCodeGoSubscriptionUsageUrl` in the SDK). */
-export const openCodeGoUsagePath = '/zen/go/v1/usage'
+export const openCodeGoUsagePath = '/inference/go/v1/usage'
 
 const recordingsFor = (path: string): ReadonlyArray<FixtureRecording> =>
   openCodeGoRecordings.filter(recording => recording.request.path === path)
@@ -167,13 +167,13 @@ export type OpenCodeGoEmulator = {
   readonly reset: () => void
   /** Every route's coverage, in manifest order. */
   readonly coverage: () => EmulatorCoverage
-  /** `POST /zen/go/v1/chat/completions` (control plane `/_emulate/chat/*`). */
+  /** `POST /inference/go/v1/chat/completions` (control plane `/_emulate/chat/*`). */
   readonly chat: OpenCodeGoRouteEmulator
-  /** `POST /zen/go/v1/messages` (control plane `/_emulate/messages/*`). */
+  /** `POST /inference/go/v1/messages` (control plane `/_emulate/messages/*`). */
   readonly messages: OpenCodeGoRouteEmulator
-  /** `POST /zen/go/v1/responses` (control plane `/_emulate/responses/*`). */
+  /** `POST /inference/go/v1/responses` (control plane `/_emulate/responses/*`). */
   readonly responses: OpenCodeGoRouteEmulator
-  /** `GET /zen/go/v1/usage` (control plane `/_emulate/usage/*`). */
+  /** `GET /inference/go/v1/usage` (control plane `/_emulate/usage/*`). */
   readonly usage: OpenCodeGoRouteEmulator
 }
 

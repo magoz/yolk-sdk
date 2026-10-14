@@ -151,7 +151,7 @@ export const openCodeFixtureModules: ReadonlyArray<OpenCodeFixtureModule> = [
     caseId: 'opencode.go.usage.snapshot',
     fileName: 'usage-snapshot.ts',
     exportName: 'openCodeGoUsageSnapshotFixture',
-    doc: 'OpenCode Go subscription-usage snapshot: `GET /zen/go/v1/usage` answering `usage.rolling`, `usage.weekly`, and `usage.monthly` as `{ percent, resetsAt }`.',
+    doc: 'OpenCode Go subscription-usage snapshot: `GET /inference/go/v1/usage` answering `usage.rolling`, `usage.weekly`, and `usage.monthly` as `{ percent, resetsAt }`.',
     endpoint: openCodeGoConformanceUsageUrl,
     model: undefined
   }
@@ -179,7 +179,7 @@ export const openCodeRedaction: RedactionSpec = {
 const usage = `Usage: pnpm conformance:opencode [--live --owner-approved --account <label> --chat-model <id> --messages-model <id> --responses-model <id>] [options]
 
 Dry run by default: lists the OpenCode Go conformance cases and performs no network I/O and no
-credential read. --live runs each case against https://opencode.ai/zen/go/v1 through the wire
+credential read. --live runs each case against https://opencode.ai/inference/go/v1 through the wire
 recorder, replays the new fixtures through the same cases, and writes the fixture modules only if
 every case passes.
 

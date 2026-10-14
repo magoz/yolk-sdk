@@ -563,11 +563,6 @@ const snapshotOpenAiRequestExtras = (
   return Effect.succeed(surviving)
 }
 
-const decodeJsonString = (raw: string, message: string) =>
-  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
-    Effect.mapError(schemaErrorToLlmError('invalid_response', message))
-  )
-
 const unsupportedContentError = (contentType: string, providerName: string) =>
   new LLMError({
     cause: 'provider_error',
@@ -1080,8 +1075,21 @@ export const toOpenAiRequestBody = (
     return body
   })
 
-const parseToolArguments = (raw: string, providerName: string) =>
-  decodeJsonString(raw, `Invalid ${providerName} tool arguments JSON`)
+const parseToolArguments = (
+  raw: string,
+  providerIdentity: OpenAiProviderIdentity,
+  stream: ProviderStreamDiagnostics | undefined
+) =>
+  Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
+    Effect.mapError(
+      chatSchemaIssueError({
+        providerIdentity,
+        issue: 'invalid_tool_arguments',
+        message: `Invalid ${providerIdentity.name} tool arguments JSON`,
+        stream
+      })
+    )
+  )
 
 const toLlmEvents = (
   choice: OpenAiChoiceResponse,
@@ -1111,10 +1119,12 @@ const toLlmEvents = (
           choice.message.reasoning_content ?? choice.message.reasoning ?? null
         ).pipe(
           Effect.mapError(
-            schemaErrorToLlmError(
-              'invalid_response',
-              `Invalid ${providerIdentity.name} reasoning content`
-            )
+            chatSchemaIssueError({
+              providerIdentity,
+              issue: 'invalid_reasoning',
+              message: `Invalid ${providerIdentity.name} reasoning content`,
+              stream: undefined
+            })
           )
         )) ?? '')
       : ''
@@ -1126,7 +1136,7 @@ const toLlmEvents = (
     if (content.length > 0) textEvents.push(LLMTextDelta.make({ text: content }))
 
     const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
-      parseToolArguments(call.function.arguments, providerIdentity.name).pipe(
+      parseToolArguments(call.function.arguments, providerIdentity, undefined).pipe(
         Effect.map(params =>
           LLMToolCall.make({
             call: ToolCall.make({
@@ -1180,6 +1190,12 @@ type OpenAiChatStreamState = {
   readonly outputStarted: boolean
 }
 
+type ChatStreamContext = {
+  readonly providerIdentity: OpenAiProviderIdentity
+  readonly reasoningContent: boolean
+  readonly responseFormat: ProviderStreamResponseFormat
+}
+
 const initialOpenAiChatStreamState: OpenAiChatStreamState = {
   buffer: '',
   toolCalls: [],
@@ -1219,13 +1235,82 @@ const chatSseBlockData = (block: string) => {
   return { done, payload: data.length > 0 ? data : undefined }
 }
 
-// Stream construction failures use fixed messages: schema diagnostics and
-// upstream values stay out of LLMError per provider sanitization policy.
-const invalidChatStreamEvent = (providerIdentity: OpenAiProviderIdentity) =>
+/**
+ * `ProviderErrorInfo.providerCode` values (kind `invalid_response`) naming the check a Chat
+ * Completions response failed. Fixed literals that never carry upstream values, so hosts can log
+ * and persist them:
+ *
+ * - `invalid_stream_json`: an SSE `data:` payload is not JSON.
+ * - `invalid_stream_chunk`: a stream chunk does not match the `chat.completion.chunk` shape.
+ * - `invalid_reasoning`: reasoning content is neither a string nor null.
+ * - `invalid_tool_call`: a streamed tool call has no id or no name.
+ * - `invalid_tool_arguments`: tool call arguments are not JSON.
+ * - `invalid_usage`: the usage block lacks its token counts.
+ * - `invalid_response_json`: a JSON (non-streaming) response body is not JSON.
+ * - `invalid_response_body`: a JSON response does not match the `chat.completion` shape.
+ * - `missing_choices`: a JSON response has no choices.
+ */
+export const openAiChatResponseIssues = [
+  'invalid_stream_json',
+  'invalid_stream_chunk',
+  'invalid_reasoning',
+  'invalid_tool_call',
+  'invalid_tool_arguments',
+  'invalid_usage',
+  'invalid_response_json',
+  'invalid_response_body',
+  'missing_choices'
+] as const
+
+export type OpenAiChatResponseIssue = (typeof openAiChatResponseIssues)[number]
+
+const chatResponseIssueError = (input: {
+  readonly providerIdentity: OpenAiProviderIdentity
+  readonly issue: OpenAiChatResponseIssue
+  readonly message: string
+  readonly stream: ProviderStreamDiagnostics | undefined
+}) =>
   new LLMError({
     cause: 'invalid_response',
-    message: `Invalid ${providerIdentity.name} stream event`,
-    retryable: false
+    message: input.message,
+    retryable: false,
+    provider:
+      input.stream === undefined
+        ? providerErrorInfo({
+            provider: input.providerIdentity.id,
+            kind: 'invalid_response',
+            providerCode: input.issue
+          })
+        : providerErrorInfo({
+            provider: input.providerIdentity.id,
+            kind: 'invalid_response',
+            providerCode: input.issue,
+            stream: input.stream
+          })
+  })
+
+const chatSchemaIssueError =
+  (input: {
+    readonly providerIdentity: OpenAiProviderIdentity
+    readonly issue: OpenAiChatResponseIssue
+    readonly message: string
+    readonly stream: ProviderStreamDiagnostics | undefined
+  }) =>
+  (error: Schema.SchemaError) =>
+    chatResponseIssueError({ ...input, message: `${input.message}: ${schemaErrorMessage(error)}` })
+
+// Stream construction failures use fixed messages: schema diagnostics and
+// upstream values stay out of LLMError per provider sanitization policy.
+const invalidChatStreamEvent = (
+  context: ChatStreamContext,
+  issue: OpenAiChatResponseIssue,
+  state: OpenAiChatStreamState
+) =>
+  chatResponseIssueError({
+    providerIdentity: context.providerIdentity,
+    issue,
+    message: `Invalid ${context.providerIdentity.name} stream event`,
+    stream: chatStreamDiagnostics(context.responseFormat, state)
   })
 
 const chatStreamError = (
@@ -1269,12 +1354,13 @@ const mergeChatToolCallDelta = (
 }
 
 const decodeChatDeltaReasoning = (
-  providerIdentity: OpenAiProviderIdentity,
+  context: ChatStreamContext,
+  state: OpenAiChatStreamState,
   reasoning: unknown
 ): Effect.Effect<string, LLMError> =>
   Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(reasoning).pipe(
     Effect.map(value => value ?? ''),
-    Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
+    Effect.mapError(() => invalidChatStreamEvent(context, 'invalid_reasoning', state))
   )
 
 type OpenAiChatStreamStep = {
@@ -1283,24 +1369,23 @@ type OpenAiChatStreamStep = {
 }
 
 const processChatStreamPayload = (
-  providerIdentity: OpenAiProviderIdentity,
-  reasoningContent: boolean,
+  context: ChatStreamContext,
   state: OpenAiChatStreamState,
   payload: string
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
   Effect.gen(function* () {
     const parsed = yield* Schema.decodeUnknownEffect(JsonFromJsonString)(payload).pipe(
-      Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
+      Effect.mapError(() => invalidChatStreamEvent(context, 'invalid_stream_json', state))
     )
 
     const envelope = isJsonRecord(parsed) ? jsonRecordField(parsed, 'error') : undefined
 
     if (envelope !== undefined && isJsonRecord(envelope)) {
-      return yield* chatStreamError(providerIdentity, payload)
+      return yield* chatStreamError(context.providerIdentity, payload)
     }
 
     const chunk = yield* Schema.decodeUnknownEffect(OpenAiChatStreamChunk)(parsed).pipe(
-      Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
+      Effect.mapError(() => invalidChatStreamEvent(context, 'invalid_stream_chunk', state))
     )
 
     const events: Array<LLMEvent> = []
@@ -1314,11 +1399,12 @@ const processChatStreamPayload = (
       }
 
       if (
-        reasoningContent &&
+        context.reasoningContent &&
         (choice.delta?.reasoning_content != null || choice.delta?.reasoning != null)
       ) {
         const reasoning = yield* decodeChatDeltaReasoning(
-          providerIdentity,
+          context,
+          state,
           choice.delta.reasoning_content ?? choice.delta.reasoning ?? null
         )
 
@@ -1356,8 +1442,7 @@ const processChatStreamPayload = (
   })
 
 const processChatStreamBlock = (
-  providerIdentity: OpenAiProviderIdentity,
-  reasoningContent: boolean,
+  context: ChatStreamContext,
   state: OpenAiChatStreamState,
   block: string
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
@@ -1374,7 +1459,7 @@ const processChatStreamBlock = (
 
     if (payload === undefined) return { state: current, events: [] }
 
-    return yield* processChatStreamPayload(providerIdentity, reasoningContent, current, payload)
+    return yield* processChatStreamPayload(context, current, payload)
   })
 
 const chatStreamDiagnostics = (
@@ -1391,8 +1476,7 @@ const chatStreamDiagnostics = (
   })
 
 const processChatStreamText = (
-  providerIdentity: OpenAiProviderIdentity,
-  reasoningContent: boolean,
+  context: ChatStreamContext,
   state: OpenAiChatStreamState,
   text: string
 ): Effect.Effect<OpenAiChatStreamStep, LLMError> =>
@@ -1402,7 +1486,7 @@ const processChatStreamText = (
     const events: Array<LLMEvent> = []
 
     for (const block of split.completeBlocks) {
-      const step = yield* processChatStreamBlock(providerIdentity, reasoningContent, current, block)
+      const step = yield* processChatStreamBlock(context, current, block)
       current = step.state
       events.push(...step.events)
     }
@@ -1411,11 +1495,12 @@ const processChatStreamText = (
   })
 
 const finalizeChatStreamState = (
-  providerIdentity: OpenAiProviderIdentity,
-  responseFormat: ProviderStreamResponseFormat,
+  context: ChatStreamContext,
   state: OpenAiChatStreamState
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
+    const { providerIdentity, responseFormat } = context
+
     if (!state.hasTerminal) {
       return yield* Effect.fail(
         new LLMError({
@@ -1476,17 +1561,20 @@ const finalizeChatStreamState = (
 
       if (id === undefined || name === undefined) {
         return Effect.fail(
-          new LLMError({
-            cause: 'invalid_response',
+          chatResponseIssueError({
+            providerIdentity,
+            issue: 'invalid_tool_call',
             message: `Invalid ${providerIdentity.name} streamed tool call`,
-            retryable: false
+            stream: chatStreamDiagnostics(responseFormat, state)
           })
         )
       }
 
-      return parseToolArguments(call.arguments, providerIdentity.name).pipe(
-        Effect.map(params => LLMToolCall.make({ call: ToolCall.make({ id, name, params }) }))
-      )
+      return parseToolArguments(
+        call.arguments,
+        providerIdentity,
+        chatStreamDiagnostics(responseFormat, state)
+      ).pipe(Effect.map(params => LLMToolCall.make({ call: ToolCall.make({ id, name, params }) })))
     })
 
     const events: Array<LLMEvent> = [...toolCallEvents]
@@ -1495,7 +1583,7 @@ const finalizeChatStreamState = (
 
     if (state.usage !== undefined) {
       const usage = yield* Schema.decodeUnknownEffect(OpenAiUsageResponse)(state.usage).pipe(
-        Effect.mapError(() => invalidChatStreamEvent(providerIdentity))
+        Effect.mapError(() => invalidChatStreamEvent(context, 'invalid_usage', state))
       )
 
       events.push(LLMUsage.make({ usage: toAgentUsage(usage) }))
@@ -1561,6 +1649,8 @@ const streamOpenAiChatResponse = (
   Stream.unwrap(
     Ref.make(initialOpenAiChatStreamState).pipe(
       Effect.map(stateRef => {
+        const context: ChatStreamContext = { providerIdentity, reasoningContent, responseFormat }
+
         const chunks = response.stream.pipe(
           Stream.mapError(toHttpClientLlmError(providerIdentity, true)),
           Stream.tap(chunk =>
@@ -1574,12 +1664,7 @@ const streamOpenAiChatResponse = (
             Effect.gen(function* () {
               const state = yield* Ref.get(stateRef)
 
-              const step = yield* processChatStreamText(
-                providerIdentity,
-                reasoningContent,
-                state,
-                chunk
-              )
+              const step = yield* processChatStreamText(context, state, chunk)
 
               yield* Ref.set(stateRef, step.state)
 
@@ -1590,11 +1675,7 @@ const streamOpenAiChatResponse = (
         )
 
         const finalEvents = Stream.fromEffect(
-          Ref.get(stateRef).pipe(
-            Effect.flatMap(state =>
-              finalizeChatStreamState(providerIdentity, responseFormat, state)
-            )
-          )
+          Ref.get(stateRef).pipe(Effect.flatMap(state => finalizeChatStreamState(context, state)))
         ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
 
         return chunks.pipe(Stream.concat(finalEvents))
@@ -1617,23 +1698,28 @@ const toHttpClientLlmError =
 
 const parseOpenAiResponseJson = (
   response: HttpClientResponse.HttpClientResponse,
-  providerName: string
+  providerIdentity: OpenAiProviderIdentity
 ): Effect.Effect<Schema.Json, LLMError> =>
   Effect.gen(function* () {
     const raw = yield* response.json.pipe(
-      Effect.mapError(
-        error =>
-          new LLMError({
-            cause: 'invalid_response',
-            message: `Could not parse ${providerName} response JSON: ${error.message}`,
-            retryable: false
-          })
+      Effect.mapError(error =>
+        chatResponseIssueError({
+          providerIdentity,
+          issue: 'invalid_response_json',
+          message: `Could not parse ${providerIdentity.name} response JSON: ${error.message}`,
+          stream: undefined
+        })
       )
     )
 
     return yield* Schema.decodeUnknownEffect(Schema.Json)(raw).pipe(
       Effect.mapError(
-        schemaErrorToLlmError('invalid_response', `Could not parse ${providerName} response JSON`)
+        chatSchemaIssueError({
+          providerIdentity,
+          issue: 'invalid_response_json',
+          message: `Could not parse ${providerIdentity.name} response JSON`,
+          stream: undefined
+        })
       )
     )
   })
@@ -1831,11 +1917,16 @@ const sendOpenAiRequest = (
       request.cacheKey
     )
 
-    const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
+    const json = yield* parseOpenAiResponseJson(response, providerIdentity)
 
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
       Effect.mapError(
-        schemaErrorToLlmError('invalid_response', `Invalid ${providerIdentity.name} response`)
+        chatSchemaIssueError({
+          providerIdentity,
+          issue: 'invalid_response_body',
+          message: `Invalid ${providerIdentity.name} response`,
+          stream: undefined
+        })
       )
     )
 
@@ -1843,10 +1934,11 @@ const sendOpenAiRequest = (
 
     if (choice === undefined) {
       return yield* Effect.fail(
-        new LLMError({
-          cause: 'invalid_response',
+        chatResponseIssueError({
+          providerIdentity,
+          issue: 'missing_choices',
           message: `${providerIdentity.name} response contained no choices`,
-          retryable: false
+          stream: undefined
         })
       )
     }

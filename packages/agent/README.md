@@ -233,13 +233,19 @@ const GoLayer = makeOpenCodeGoProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-The default base URL is `https://opencode.ai/zen/go/v1`. Chat streams SSE (the Go adapter sets
+The default base URL is `https://opencode.ai/inference/go/v1`. Chat streams SSE (the Go adapter sets
 `streaming: true`) with Bearer auth; Messages uses SSE and `x-api-key`; Responses uses SSE and Bearer
 auth. All normalize to `LLMEvent`s.
 Messages retains native tool names and system instructions, without Claude OAuth fingerprinting.
 Responses sends `max_output_tokens`, unlike Codex. Go requires a nonempty key and positive safe-integer
 limit at layer construction. `extraHeaders` cannot override required protocol headers, regardless of
 case. Only override `baseUrl` with a trusted proxy because it receives the credential.
+A chat parser rejection (for example a stream payload that is not JSON), a chat response that is not
+SSE, or a chat or Responses stream ending before its terminal event is retried once, before any
+event, under `<session>.reroute` so Go routes it to another upstream. The session is the request
+`cacheKey`, else the `x-opencode-session` extra header; without either the request is resent
+unchanged. Messages failures are not re-routed. Errors carrying provider metadata read
+`OpenCode Go <cause>`, with the failed check in `provider.providerCode`.
 
 Request `reasoningEffort` becomes chat `reasoning_effort`, Messages `output_config.effort` (omitting
 `minimal`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the

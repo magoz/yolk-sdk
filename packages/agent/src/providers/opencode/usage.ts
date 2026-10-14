@@ -17,7 +17,7 @@ import {
   type ProviderSubscriptionUsageError
 } from '../subscription-usage.ts'
 
-export const openCodeGoSubscriptionUsageUrl = 'https://opencode.ai/zen/go/v1/usage'
+export const openCodeGoSubscriptionUsageUrl = 'https://opencode.ai/inference/go/v1/usage'
 
 export type OpenCodeGoSubscriptionUsageOptions = {
   readonly requestTimeoutMs?: number
