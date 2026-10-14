@@ -60,6 +60,10 @@ Rules:
 - A `done: false` result with no tool calls continues directly to the next model step without
   invoking `runToolBatchStep`; use this when host-promoted input already advanced model state.
 - Put assistant/model-created messages in `createdMessages`.
+- With [host instructions](/docs/agent/loop-runtime#host-instructions) (for example the code mode
+  catalog), append `instructionMessages(transcript, instructions)` from `@yolk-sdk/agent/loop`
+  before calling `runModelTurn`, and return them in `createdMessages` ahead of the assistant
+  message; `runModelTurn` does not accept `instructions`.
 - Carry `eventSequence` if the model step wrote durable stream events.
 
 The Next example keeps that model result finalized: it folds `collectModelTurn(runModelTurn(...))`

@@ -1,9 +1,17 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef } from '@yolk-sdk/agent/protocol'
+import { compactWindowMessages } from '@yolk-sdk/agent/compaction'
+import { instructionMessages } from '@yolk-sdk/agent/loop'
+import {
+  isInstructionMessage,
+  ToolApprovalPolicy,
+  ToolDef,
+  UserMessage
+} from '@yolk-sdk/agent/protocol'
 import { resolveTools, type NestedTool } from '@yolk-sdk/agent/tools'
 import {
   codeModeCatalog,
+  codeModeCatalogInstructionKey,
   makeCodeModeTool,
   renderCodeModeDescription,
   searchCodeModeTools,
@@ -20,7 +28,7 @@ const nestedTool = (
   moduleId: string,
   name: string,
   options: {
-    readonly exposure?: 'all' | 'listed' | 'search'
+    readonly exposure?: 'all' | 'listed' | 'search' | 'pinned'
     readonly description?: string
     readonly outputSchema?: ToolDef['outputSchema']
     readonly moduleDescription?: string
@@ -333,5 +341,225 @@ describe('searchTools', () => {
 
   it('indexes namespace descriptions', () => {
     expect(searchCodeModeTools(catalog, 'invoices').map(hit => hit.name)).toEqual(['ledger_read'])
+  })
+})
+
+describe('pinned tools', () => {
+  it('are always listed, outside the inline budget', () => {
+    const tools = [
+      nestedTool('crm', 'crm_pinned', { exposure: 'pinned' }),
+      nestedTool('crm', 'crm_listed'),
+      nestedTool('crm', 'crm_hidden', { exposure: 'search' })
+    ]
+
+    expect(listedNames(tools, 0)).toEqual(['crm.crm_pinned'])
+  })
+})
+
+describe('catalog instructions', () => {
+  const resolveInstructed = (tools: ReadonlyArray<Parameters<typeof moduleOf>[1][number]>) =>
+    resolveTools(
+      [
+        moduleOf('host', [makeCodeModeTool({ executor: unusedExecutor, catalog: 'instructions' })]),
+        moduleOf('crm', tools)
+      ],
+      context
+    )
+
+  const instructionOf = (toolSet: Effect.Success<ReturnType<typeof resolveInstructed>>) => {
+    const instruction = toolSet.instructions.find(
+      candidate => candidate.key === codeModeCatalogInstructionKey
+    )
+
+    if (instruction === undefined) throw new Error('Missing catalog instruction')
+
+    return instruction
+  }
+
+  const descriptionOf = (toolSet: Effect.Success<ReturnType<typeof resolveInstructed>>) =>
+    toolSet.tools.find(tool => tool.name === 'codemode')?.description
+
+  it.effect('keep the description invariant and render every namespace with its count', () =>
+    Effect.gen(function* () {
+      const small = yield* resolveInstructed([
+        queryTool('crm_list', { exposure: { callableBy: 'codemode' } })
+      ])
+
+      const large = yield* resolveInstructed([
+        queryTool('crm_list', { exposure: { callableBy: 'codemode' } }),
+        queryTool('crm_find', { exposure: { callableBy: 'codemode', discovery: 'search' } })
+      ])
+
+      expect(descriptionOf(large)).toBe(descriptionOf(small))
+      expect(descriptionOf(large)).toContain('"Code mode catalog"')
+      expect(descriptionOf(large)).not.toContain('crm_list')
+
+      const first = instructionOf(large).render(instructionOf(large).state)
+
+      expect(first).toContain('# Code mode catalog')
+      expect(first).toContain('- `crm` (2 tools, 1 listed)')
+      expect(first).toContain('crm_list')
+      expect(first).not.toContain('crm_find')
+    })
+  )
+
+  it.effect('render every change as the whole catalog, so the latest one stands alone', () =>
+    Effect.gen(function* () {
+      const before = instructionOf(
+        yield* resolveInstructed([queryTool('crm_list', { exposure: { callableBy: 'codemode' } })])
+      )
+
+      const searchAdded = instructionOf(
+        yield* resolveInstructed([
+          queryTool('crm_list', { exposure: { callableBy: 'codemode' } }),
+          queryTool('crm_find', { exposure: { callableBy: 'codemode', discovery: 'search' } })
+        ])
+      )
+
+      const listedAdded = instructionOf(
+        yield* resolveInstructed([
+          queryTool('crm_list', { exposure: { callableBy: 'codemode' } }),
+          queryTool('crm_get', { exposure: { callableBy: 'codemode' } })
+        ])
+      )
+
+      const counted = searchAdded.render(searchAdded.state)
+      const listed = listedAdded.render(listedAdded.state)
+
+      expect(counted).toContain('# Code mode catalog')
+      expect(counted).toContain('replaces any earlier one')
+      expect(counted).toContain('- `crm` (2 tools, 1 listed)')
+      expect(counted).toContain('crm_list')
+      expect(listed).toContain('crm_get')
+      expect(before.render(undefined)).toContain('no longer available')
+    })
+  )
+
+  it.effect('survive compaction whole: the kept latest message carries the full catalog', () =>
+    Effect.gen(function* () {
+      const user = UserMessage.make({ content: 'hello' })
+
+      const before = instructionOf(
+        yield* resolveInstructed([queryTool('crm_list', { exposure: { callableBy: 'codemode' } })])
+      )
+
+      const after = instructionOf(
+        yield* resolveInstructed([
+          queryTool('crm_list', { exposure: { callableBy: 'codemode' } }),
+          queryTool('crm_find', { exposure: { callableBy: 'codemode', discovery: 'search' } })
+        ])
+      )
+
+      const first = instructionMessages([user], [before])
+      const filler = UserMessage.make({ content: 'filler '.repeat(400) })
+      const changed = instructionMessages([user, ...first, filler], [after])
+
+      const compacted = compactWindowMessages(
+        [user, ...first, filler, ...changed, filler, UserMessage.make({ content: 'latest' })],
+        {
+          strategy: 'test',
+          thresholdTokens: 10,
+          tailMessageCount: 1,
+          makeSummaryMessage: () => UserMessage.make({ content: 'summary' })
+        }
+      ).messages
+
+      const kept = compacted.filter(isInstructionMessage)
+
+      expect(kept).toHaveLength(1)
+      expect(kept[0]?.content).toContain('# Code mode catalog')
+      expect(kept[0]?.content).toContain('- `crm` (2 tools, 1 listed)')
+      expect(kept[0]?.content).toContain('crm_list')
+    })
+  )
+
+  it.effect('are absent in the default description mode', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          moduleOf('host', [makeCodeModeTool({ executor: unusedExecutor })]),
+          moduleOf('crm', [queryTool('crm_list', { exposure: { callableBy: 'codemode' } })])
+        ],
+        context
+      )
+
+      expect(toolSet.instructions).toEqual([])
+      expect(toolSet.tools.find(tool => tool.name === 'codemode')?.description).toContain(
+        'crm_list'
+      )
+    })
+  )
+})
+
+describe('deferred tools', () => {
+  it('are found by search, never listed: their declaration is not in model context', () => {
+    const deferred: NestedTool = {
+      moduleId: 'github',
+      def: ToolDef.make({
+        name: 'list_issues',
+        description: 'List issues',
+        parameters: { type: 'object' },
+        loading: 'deferred'
+      })
+    }
+
+    const tools = [deferred, nestedTool('github', 'get_me', { exposure: 'all' })]
+
+    expect(codeModeCatalog(tools).map(tool => tool.exposure)).toEqual(['search', 'all'])
+    expect(renderCodeModeDescription({ tools })).not.toContain('list_issues')
+    expect(searchCodeModeTools(codeModeCatalog(tools), 'issues').map(hit => hit.name)).toEqual([
+      'list_issues'
+    ])
+  })
+})
+
+describe('stageable tools in the description', () => {
+  const approval = ToolApprovalPolicy.make({ mode: 'manual' })
+
+  const stageable = (name: string, discovery?: 'listed' | 'search' | 'pinned'): NestedTool => ({
+    moduleId: 'cms',
+    def:
+      discovery === undefined
+        ? ToolDef.make({
+            name,
+            description: `${name} tool`,
+            parameters: { type: 'object' },
+            approval,
+            staging: true
+          })
+        : ToolDef.make({
+            name,
+            description: `${name} tool`,
+            parameters: { type: 'object' },
+            approval,
+            staging: true,
+            callableBy: 'codemode',
+            discovery
+          })
+  })
+
+  it('always names pinned stage-only tools, past the cap', () => {
+    const tools = [
+      ...Array.from({ length: 25 }, (_, index) => stageable(`bulk_${index}`)),
+      stageable('archive', 'pinned')
+    ]
+
+    const description = renderCodeModeDescription({
+      tools: [],
+      staging: { tools, reviewToolName: 'review_plan' }
+    })
+
+    expect(description).toContain('- `archive`')
+    expect(description).toContain('… and 6 more')
+  })
+
+  it('keeps the instructed description invariant when the first stageable tool connects', () => {
+    const registration = makeCodeModeTool({ executor: unusedExecutor, catalog: 'instructions' })
+
+    const describe = (tools: ReadonlyArray<NestedTool>) =>
+      registration.describe?.({ tools: [], staging: { tools, reviewToolName: 'review_plan' } })
+
+    expect(describe([stageable('archive', 'search')])).toBe(describe([]))
+    expect(describe([])).toContain('`await stage(name, args)`')
   })
 })

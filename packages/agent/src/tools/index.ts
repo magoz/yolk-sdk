@@ -194,6 +194,7 @@ export type {
   ModelVisibleToolErrorStructuredContent,
   NestedTool,
   NestedToolDescriber,
+  NestedToolInstructor,
   NestedToolExecutor,
   NestedToolStagingDescription,
   ToolChangePreviewHandler,
@@ -204,6 +205,15 @@ export type {
 } from './registry.ts'
 
 export type { ToolExecutionOptions } from './registry.ts'
+
+export {
+  defaultToolSearchLimit,
+  makeToolSearchTool,
+  maxToolSearchLimit,
+  rankToolSearchDocuments,
+  toolSearchTokens,
+  type ToolSearchDocument
+} from './tool-search.ts'
 
 export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 

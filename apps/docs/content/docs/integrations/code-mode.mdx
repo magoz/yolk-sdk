@@ -50,8 +50,9 @@ const program = Effect.gen(function* () {
 })
 ```
 
-Pass `toolSet.tools` and the executor layer to the loop as usual. The resolved `codemode`
-definition lists the tools scripts can call.
+Pass `toolSet.tools` and the executor layer to the loop as usual. By default the resolved
+`codemode` definition lists the tools scripts can call; with many or changing tools, deliver that
+catalog as an instruction instead (see [Deliver the catalog as instructions](#deliver-the-catalog-as-instructions)).
 
 ### Next.js
 
@@ -101,6 +102,10 @@ Exposure is set on each tool with `callableBy` and, for code-mode-only tools, `d
 | `callableBy: 'model'`                           | yes            | no              | no                                                                         |
 | `callableBy: 'codemode'`, `discovery: 'listed'` | no             | yes             | TypeScript declaration, within the inline budget                           |
 | `callableBy: 'codemode'`, `discovery: 'search'` | no             | yes             | never; scripts find it with `searchTools()`                                |
+| `callableBy: 'codemode'`, `discovery: 'pinned'` | no             | yes             | TypeScript declaration, always, outside the inline budget                  |
+
+An `all` tool with `loading: 'deferred'` (see [Defer rarely used tools](../agent/tools-hitl#defer-rarely-used-tools))
+is not in the model's context until loaded, so the catalog treats it like a `search` tool.
 
 ```ts
 import { makeTool } from '@yolk-sdk/agent/tools'
@@ -119,7 +124,8 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
 
 - Approval, input, interaction, and background tools, and the `question` and `subagent` tools,
   never run from code mode. Marking them `all` behaves as `model`; marking them `codemode` fails
-  resolution. Approval-gated tools you mark `staging` can be staged for one review instead (see
+  resolution, except an approval-gated tool you mark `staging`, which may be
+  [stage-only](#stage-only-tools). Stageable tools can be staged for one review instead (see
   [Stage approval-gated writes](#stage-approval-gated-writes)).
 - `codemode`-only tools are never sent to model providers.
 - Listed tools fill an inline budget (default 3,000 estimated tokens) fairly across tool modules:
@@ -136,8 +142,8 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
 
 ### Connector and MCP tools
 
-Generated tools take the same exposure through an `exposure` option: one value for every tool, or
-a resolver per tool. Connector modules resolve per action (`(actionId, action) => exposure`, where
+Generated tools take the same exposure (`callableBy`, `discovery`, `loading`) through an `exposure`
+option: one value for every tool, or a resolver per tool. Connector modules resolve per action (`(actionId, action) => exposure`, where
 `action` carries the declared `access`); MCP definitions resolve per listed tool
 (`(tool, serverName) => exposure`). This marks every connector action as a code-mode-only search
 tool:
@@ -168,7 +174,35 @@ const tools = listMcpServerTools(serverConfig, {
 ```
 
 The fail-closed rules above still apply: resolution fails when an exposure contradicts the tool
-(for example `codemode` on a registration that requires approval).
+(for example `codemode` on a non-stageable registration that requires approval).
+
+## Deliver the catalog as instructions
+
+`makeCodeModeTool({ executor, catalog: 'instructions' })` keeps the `codemode` description
+invariant and delivers the catalog as a host instruction instead: every namespace with its tool
+count and description, `listed` tools within the inline budget, and `pinned` tools always. A
+changed catalog is appended to the conversation, whole, so connecting or disconnecting tools never
+rewrites the cached request prefix (tool definitions and earlier messages).
+
+```ts
+const codemode = makeCodeModeTool<HostContext>({ executor, catalog: 'instructions' })
+
+const toolSet =
+  yield * resolveTools([{ id: 'codemode', tools: [codemode] }, ...hostModules], hostContext)
+
+// run() appends the catalog instruction when it changed:
+run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instructions, model })
+```
+
+- Durable hosts driving `runModelTurn` append and persist
+  `instructionMessages(transcript, toolSet.instructions)` from `@yolk-sdk/agent/loop` before each
+  model step (see [Host instructions](../agent/loop-runtime#host-instructions)).
+- Hosts that cannot append messages to their conversation can render the instruction into the
+  system prompt (`instruction.render(instruction.state)`, only while `instruction.state` is defined:
+  `undefined` renders the removal notice); a catalog change then invalidates the cache from the
+  system prompt on.
+- Custom compaction must keep `latestInstructionMessages(...)` after its summary, as window
+  compaction does. `catalog: 'description'` (the default) keeps the catalog in the description.
 
 ## What scripts see
 
@@ -333,6 +367,15 @@ approvals show.
 **Per-call authority:** applied plan calls do not pass through `beforeNestedCall` or decorators
 around your `ToolExecutor`: they run inside the review action. Pass the same per-call authorizer as
 `makePlanReviewTool({ beforeCall })`; it is the only per-call host hook for applied calls.
+
+### Stage-only tools
+
+A stageable approval-gated tool may be `callableBy: 'codemode'` (usually with
+`discovery: 'search'`): it is never declared to the model and costs no context. Scripts find it
+with `searchTools()` (hits carry `stageOnly: true`), read it with `describeTool()` (rendered as the
+`stage()` call), and can only `stage()` it; a direct `tools.<name>()` call rejects with a hint to
+stage it. Resolution warns when a stage-only tool resolves without `plans`, where it would be
+unreachable.
 
 ## Make tools ready for code mode
 

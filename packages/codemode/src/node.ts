@@ -121,7 +121,7 @@ const maxArgumentDepth = 64
  * proxy (close-match suggestions). Not a security boundary (`globalThis.tools` is unguarded):
  * arguments are still decoded by the host.
  */
-const toolsGuardSource = `(function (tools, labels) {
+const toolsGuardSource = `(function (tools, labels, unbound) {
   // Captured before the script runs, so a script that changes built-ins cannot change the checks.
   const { apply, getPrototypeOf, setPrototypeOf } = Reflect
   const isFinite = Number.isFinite
@@ -259,8 +259,13 @@ const toolsGuardSource = `(function (tools, labels) {
     if (!wrappers.has(call)) wrappers.set(call, wrap('tools[' + JSON.stringify(key) + ']', call))
     guarded[key] = wrappers.get(call)
   }
+  // Unbound keys (stage-only tools) reject with their hint instead of being undefined.
+  const rejections = create(null)
+  for (const [key, message] of unbound) {
+    if (!(key in guarded)) rejections[key] = async () => { throw new TypeErrorCtor(message) }
+  }
   return new Proxy(Object.freeze(guarded), {
-    get: (target, key) => (key in target ? target[key] : tools[key])
+    get: (target, key) => (key in target ? target[key] : key in rejections ? rejections[key] : tools[key])
   })
 })`
 
@@ -275,7 +280,10 @@ const jsonSource = (value: unknown) =>
     char === '\u2028' ? '\\u2028' : '\\u2029'
   )
 
-const guardSuffix = (tools: ReadonlyArray<CodeModeExecutorTool>) => {
+const guardSuffix = (
+  tools: ReadonlyArray<CodeModeExecutorTool>,
+  unbound: CodeModeExecuteOptions['unbound']
+) => {
   const names = tools.map(tool => tool.name)
   const labels = codeModeCallLabels(names)
 
@@ -285,7 +293,9 @@ const guardSuffix = (tools: ReadonlyArray<CodeModeExecutorTool>) => {
     tool.callLabel ?? labels[index] ?? `tools[${JSON.stringify(tool.name)}]`
   ])
 
-  return `\n})(${toolsGuardSource}(tools, ${jsonSource(pairs)}), console)`
+  const rejected = (unbound ?? []).map(entry => [entry.key, entry.message])
+
+  return `\n})(${toolsGuardSource}(tools, ${jsonSource(pairs)}, ${jsonSource(rejected)}), console)`
 }
 
 const lineTerminators = /\r\n?|[\n\u2028\u2029]/g
@@ -510,11 +520,14 @@ export const makePiCodeModeExecutor = (
 
     try {
       return fromPiResult(
-        await sandbox.execute(`${guardPrefix}${stripped.code}${guardSuffix(execution.tools)}`, {
-          signal: execution.signal,
-          store: execution.store,
-          timeoutMs
-        }),
+        await sandbox.execute(
+          `${guardPrefix}${stripped.code}${guardSuffix(execution.tools, execution.unbound)}`,
+          {
+            signal: execution.signal,
+            store: execution.store,
+            timeoutMs
+          }
+        ),
         scriptLineCount(stripped.code)
       )
     } finally {

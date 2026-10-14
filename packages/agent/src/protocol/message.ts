@@ -31,10 +31,70 @@ const MessageEnvelopeSchema = {
   annotations: Schema.optional(MessageAnnotations)
 }
 
+/**
+ * Marks a user-role message the loop appended as a host instruction (ADR 0007): `key` names the
+ * instruction and `state` is the JSON state it rendered, so the next request can tell whether the
+ * instruction changed; no `state` records a removal. Never model-visible (only `content` is); UIs
+ * should not show these messages as user input (`isInstructionMessage`).
+ */
+export const MessageInstruction = Schema.Struct({
+  key: Schema.NonEmptyString,
+  state: Schema.optional(Schema.Json)
+})
+
+export type MessageInstruction = typeof MessageInstruction.Type
+
 export class UserMessage extends Schema.TaggedClass<UserMessage>()('User', {
   ...MessageEnvelopeSchema,
-  content: Content
+  content: Content,
+  instruction: Schema.optional(MessageInstruction)
 }) {}
+
+/** A user-role message the loop appended as a host instruction (ADR 0007). */
+export const isInstructionMessage = (
+  message: AgentMessage
+): message is UserMessage & { readonly instruction: MessageInstruction } =>
+  Predicate.isTagged(message, 'User') && message.instruction !== undefined
+
+/**
+ * The latest instruction message of each key that still holds a state (a removal drops the key),
+ * in transcript order. Compaction keeps them verbatim after its summary, so a compacted request
+ * still carries every current instruction; the loop compares against the uncompacted transcript
+ * and would never re-append them.
+ */
+export const latestInstructionMessages = (
+  messages: ReadonlyArray<AgentMessage>
+): ReadonlyArray<UserMessage & { readonly instruction: MessageInstruction }> => {
+  const latest = new Map<string, UserMessage & { readonly instruction: MessageInstruction }>()
+
+  for (const message of messages) {
+    if (isInstructionMessage(message)) {
+      latest.delete(message.instruction.key)
+
+      if (message.instruction.state !== undefined) latest.set(message.instruction.key, message)
+    }
+  }
+
+  return [...latest.values()]
+}
+
+/**
+ * The state of the latest instruction message with `key`, or `undefined` when there is none or
+ * the latest one recorded a removal.
+ */
+export const latestInstructionState = (
+  messages: ReadonlyArray<AgentMessage>,
+  key: string
+): Schema.Json | undefined => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+
+    if (message !== undefined && isInstructionMessage(message) && message.instruction.key === key)
+      return message.instruction.state
+  }
+
+  return undefined
+}
 
 export class AssistantTextPart extends Schema.TaggedClass<AssistantTextPart>()('Text', {
   content: Content

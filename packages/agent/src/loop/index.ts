@@ -39,6 +39,8 @@ export type {
 
 export { decorateLLMProvider, makeAgentLoopLayer } from './layer.ts'
 
+export { instructionMessages, type RunInstruction } from './instructions.ts'
+
 export {
   run,
   runModelTurn,

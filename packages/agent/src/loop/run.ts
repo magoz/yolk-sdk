@@ -51,6 +51,7 @@ import {
   hitlResponseEvent,
   questionResponseStructuredContent,
   makeSubagentRunId,
+  declaredToolDefs,
   providerToolDefs,
   ToolApprovalRequest,
   toolResultMessageFromResult,
@@ -98,6 +99,7 @@ import {
   ToolError
 } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
+import { withInstructionMessages, type RunInstruction } from './instructions.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
 import { LoopConfig, type LoopConfigSettings } from './services/loop-config.ts'
@@ -109,6 +111,11 @@ export type RunConfig = {
   readonly messages: ReadonlyArray<AgentMessage>
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
+  /** Host instructions kept current in the conversation (ADR 0007), for example
+   * `ResolvedToolSet.instructions`: before each model request a changed one is appended as a
+   * user-role instruction message, never rewriting earlier messages.
+   */
+  readonly instructions?: ReadonlyArray<RunInstruction>
   readonly hitlResponses?: ReadonlyArray<HitlResponse>
   /** Server-side input validators by tool name (from ResolvedToolSet.inputs). */
   readonly inputs?: Readonly<Record<string, InputToolHandler>>
@@ -138,7 +145,13 @@ export type RunConfig = {
   readonly cacheKey?: string
 }
 
-export type ModelTurnConfig = RunConfig & {
+/**
+ * One model step for durable hosts. They append and persist `instructionMessages(...)` before
+ * the step themselves (ADR 0007), so `instructions` is not accepted here: a step cannot report
+ * messages it appended, and they would be re-appended, unpersisted, on every step.
+ */
+export type ModelTurnConfig = Omit<RunConfig, 'instructions'> & {
+  readonly instructions?: never
   readonly turn: number
 }
 
@@ -1782,10 +1795,18 @@ const makeModelOnlyAfterLlmStream = (
 
 type ProviderRequestFields = { -readonly [Key in keyof LLMRequest]: LLMRequest[Key] }
 
-const providerRequest = (config: RunConfig, messages: ReadonlyArray<AgentMessage>): LLMRequest => {
+/**
+ * One provider request. `transcript` is the full conversation before any context transform:
+ * deferred tools activated by `tool_search` results in it are declared (ADR 0007).
+ */
+const providerRequest = (
+  config: RunConfig,
+  messages: ReadonlyArray<AgentMessage>,
+  transcript: ReadonlyArray<AgentMessage>
+): LLMRequest => {
   const request: ProviderRequestFields = {
     messages,
-    tools: providerToolDefs(config.tools),
+    tools: declaredToolDefs(config.tools, transcript),
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     systemPrompt: config.systemPrompt
@@ -1803,7 +1824,8 @@ const makeLlmStream = (
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages))
+  const makeStream = () =>
+    input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
@@ -1839,7 +1861,8 @@ const makeModelOnlyLlmStream = (
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
   result: ContextTransformResult
 ): Stream.Stream<AgentEvent, AgentLoopError> => {
-  const makeStream = () => input.provider.stream(providerRequest(input.config, result.messages))
+  const makeStream = () =>
+    input.provider.stream(providerRequest(input.config, result.messages, input.currentMessages))
 
   return Stream.fromIterable(result.events)
     .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
@@ -1877,6 +1900,24 @@ const makeModelOnlyLlmStream = (
 const withoutConsumedAnswers = (config: RunConfig): RunConfig =>
   Struct.omit(config, ['hitlResponses', 'awaitingRequests', 'resume'])
 
+/**
+ * Appends the instruction messages this model request needs (ADR 0007) to the turn's messages and
+ * to the run's created messages, so later turns and the host's persisted transcript see them.
+ */
+const withTurnInstructions = (input: TurnStreamInput) =>
+  Effect.gen(function* () {
+    const { messages, appended } = withInstructionMessages(
+      input.currentMessages,
+      input.config.instructions
+    )
+
+    if (appended.length === 0) return input
+
+    yield* Ref.update(input.createdMessages, created => [...created, ...appended])
+
+    return { ...input, currentMessages: messages }
+  })
+
 const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.suspend(() => {
     if (input.turn > input.loopConfig.maxTurns) {
@@ -1886,10 +1927,11 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
     const llmStream = Stream.unwrap(
       Effect.gen(function* () {
         const llmEvents = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
-        const result = yield* input.contextTransformer.transform(input.currentMessages)
+        const instructed = yield* withTurnInstructions(input)
+        const result = yield* input.contextTransformer.transform(instructed.currentMessages)
         yield* validateCapabilities(input.config, result.messages)
 
-        return makeLlmStream(input, llmEvents, result)
+        return makeLlmStream(instructed, llmEvents, result)
       })
     )
 

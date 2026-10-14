@@ -202,7 +202,8 @@ export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject
     cause: 'protocol'
   })
 
-/** Code mode exposure for adapted MCP tools: one value for every tool, or per listed tool.
+/** Tool exposure (`callableBy`/`discovery`/`loading`) for adapted MCP tools: one value for every
+ * tool, or per listed tool.
  * Omitted: the agent defaults (`callableBy: 'all'`). `resolveTools` still rejects invalid
  * combinations (for example `discovery` without `callableBy: 'codemode'`).
  */
@@ -217,11 +218,12 @@ type McpToolDefFields = {
   outputSchema?: ToolDef['outputSchema']
   callableBy?: ToolDef['callableBy']
   discovery?: ToolDef['discovery']
+  loading?: ToolDef['loading']
 }
 
 /** Adapts one listed MCP tool. A present `outputSchema` that is a plain JSON Schema object
  * passes through as declaration-only `ToolDef.outputSchema`; any other value is omitted.
- * `exposure` (host policy) sets `callableBy`/`discovery`; without it neither is set.
+ * `exposure` (host policy) sets `callableBy`/`discovery`/`loading`; without it none is set.
  */
 export const mcpToolToToolDef = (input: {
   readonly serverName: string
@@ -245,6 +247,8 @@ export const mcpToolToToolDef = (input: {
   if (exposure?.callableBy !== undefined) fields.callableBy = exposure.callableBy
 
   if (exposure?.discovery !== undefined) fields.discovery = exposure.discovery
+
+  if (exposure?.loading !== undefined) fields.loading = exposure.loading
 
   return ToolDef.make(fields)
 }

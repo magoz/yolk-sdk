@@ -15,7 +15,9 @@ import {
   interactionRequestId,
   isCodeModeCallable,
   isToolStageable,
+  providerToolDefs,
   type InteractionHost,
+  type ToolExposure,
   type InteractionRef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -80,6 +82,11 @@ const linkPreview = (ctx: Ctx, params: typeof Link.Type): ToolChangePreview => (
 
 type Applied = Array<{ readonly resource: string; readonly key: string | undefined }>
 
+// ADR 0007: scripts find the tool by search and can only stage it; it is never declared.
+const stageOnlyExposure = { callableBy: 'codemode', discovery: 'search' } satisfies ToolExposure
+
+const defaultExposure = { callableBy: 'all' } satisfies ToolExposure
+
 const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
   makeTool<Ctx, typeof Link>({
     name: 'link_curriculum',
@@ -87,6 +94,7 @@ const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
     parameters: Link,
     access: 'write',
     approval: manual,
+    ...(options.stageOnly === true ? stageOnlyExposure : defaultExposure),
     changePreview: ({ params, context }) =>
       params.resource === 'unpreviewable'
         ? Effect.fail(
@@ -197,6 +205,7 @@ type Gate = {
 }
 
 type LinkToolOptions = {
+  stageOnly?: boolean
   failOn?: string
   dieOn?: string
   prechecks?: PrecheckTracker
@@ -250,6 +259,7 @@ type ResolveOptionFields = {
 }
 
 type SetupOptions = {
+  readonly stageOnly?: boolean
   readonly host?: boolean
   readonly plans?: boolean
   readonly review?: MakePlanReviewToolOptions<Ctx> | false
@@ -286,6 +296,8 @@ const setup = (options: SetupOptions = {}) =>
       (options.review === false ? undefined : makePlanReviewTool<Ctx>(options.review ?? {}))
 
     const linkOptions: LinkToolOptions = {}
+
+    if (options.stageOnly === true) linkOptions.stageOnly = true
 
     if (options.failOn !== undefined) linkOptions.failOn = options.failOn
 
@@ -569,6 +581,128 @@ describe('stageable tool definitions', () => {
         expect(env.toolSet.plans).toBeUndefined()
         expect(env.toolSet.interactions.review_plan).toBeUndefined()
       }
+    })
+  )
+})
+
+describe('stage-only tools (ADR 0007)', () => {
+  it.effect('resolves a stageable approval tool as codemode-only, never declared', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ stageOnly: true })
+      const link = env.toolSet.tools.find(tool => tool.name === 'link_curriculum')
+
+      expect(link).toMatchObject({ callableBy: 'codemode', discovery: 'search', staging: true })
+      expect(providerToolDefs(env.toolSet.tools).map(tool => tool.name)).not.toContain(
+        'link_curriculum'
+      )
+      // Still fail-closed for scripts: never a nested tool, only stageable.
+      expect(env.box.nested?.tools.map(tool => tool.def.name)).toEqual(['lookup', 'note'])
+      expect(env.box.nested?.staging?.tools.map(tool => tool.def.name)).toEqual(['link_curriculum'])
+    })
+  )
+
+  it.effect('rejects direct calls from the provider and from scripts, running nothing', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ stageOnly: true, ledger: true })
+      const nested = env.box.nested
+
+      if (nested === undefined) throw new Error('Missing nested executor')
+
+      const call = (id: string) =>
+        ToolCall.make({ id, name: 'link_curriculum', params: { resource: 'r1', curriculum: 'x' } })
+
+      const direct = yield* env.toolSet.execute(call('direct_1')).pipe(Effect.flip)
+      const scripted = yield* nested.execute(call('script_1/1'))
+
+      expect(direct.message).toContain('link_curriculum')
+      expect(scripted.isError).toBe(true)
+      expect(textOf(scripted)).toContain('not callable from code mode')
+      expect(env.applied).toEqual([])
+      expect(yield* env.ledgerStore.list('script_1')).toEqual([])
+    })
+  )
+
+  it.effect('stages, reviews and applies like any stageable tool', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ stageOnly: true, ledger: true })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const { result } = yield* reviewAndApply(env, plan, ['script_1/s1', 'script_1/s2'])
+
+      expect((yield* outcomeOf(result)).result?.state).toBe('applied')
+      expect(env.applied).toEqual([
+        { resource: 'r1', key: 'conversation_1:review_1/1' },
+        { resource: 'r2', key: 'conversation_1:review_1/2' }
+      ])
+      expect((yield* env.ledgerStore.list('review_1')).map(entry => entry.key)).toEqual([
+        'review_1/1',
+        'review_1/2'
+      ])
+    })
+  )
+
+  it.effect('keeps every other codemode-only approval tool unsupported', () =>
+    Effect.gen(function* () {
+      const resolve = (tool: ToolRegistration<Ctx>) =>
+        resolveTools([{ id: 'm', tools: [tool] }], context).pipe(Effect.flip)
+
+      const notStageable = yield* resolve(
+        makeTool<Ctx, typeof Link>({
+          name: 'gated',
+          description: 'x',
+          parameters: Link,
+          access: 'write',
+          approval: manual,
+          ...stageOnlyExposure,
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+        })
+      )
+
+      const nestedAccess = yield* resolve(
+        makeTool<Ctx, typeof Link>({
+          name: 'gated_script',
+          description: 'x',
+          parameters: Link,
+          access: 'write',
+          approval: manual,
+          staging: true,
+          nestedToolAccess: true,
+          ...stageOnlyExposure,
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+        })
+      )
+
+      const rawWithoutValidator = yield* resolve({
+        def: ToolDef.make({
+          name: 'raw',
+          description: 'x',
+          parameters: { type: 'object' },
+          approval: manual,
+          staging: true,
+          ...stageOnlyExposure
+        }),
+        access: 'write',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+      })
+
+      expect(notStageable.cause).toBe('codemode_unsupported_tool')
+      expect(nestedAccess.cause).toBe('codemode_unsupported_tool')
+      expect(rawWithoutValidator.cause).toBe('staging_validation_required')
+    })
+  )
+
+  it.effect('names close stageable tools when stage() gets an unknown name', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ stageOnly: true })
+
+      const error = yield* builderOf(env)
+        .stage({ name: 'link_resource', params: { resource: 'r1', curriculum: 'x' } })
+        .pipe(Effect.flip)
+
+      expect(error.message).toBe(
+        'link_resource cannot be staged. Stageable tools: link_curriculum.'
+      )
     })
   )
 })

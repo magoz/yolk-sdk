@@ -101,6 +101,12 @@ export type CodeModeExecuteOptions = {
   /** Values the script reads with `load(key)`. */
   readonly store: CodeModeStore
   readonly signal: AbortSignal
+  /**
+   * Keys of `tools` a script may reach for that have no binding (stage-only tools, ADR 0007), with
+   * the message their call rejects with, for example a hint to use `stage()`. Absent keys keep the
+   * engine's own behavior.
+   */
+  readonly unbound?: ReadonlyArray<{ readonly key: string; readonly message: string }>
 }
 
 /**

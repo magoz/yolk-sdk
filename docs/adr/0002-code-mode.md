@@ -31,16 +31,16 @@ world only through the host's resolved tools.
 
 ## Decision summary
 
-| Area             | Decision                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Engine           | Depend on `@earendil-works/pi-codemode`, pinned exactly, behind a Yolk executor interface.                       |
-| Package          | New public package `@yolk-sdk/codemode`; the pi executor lives behind a Node subpath.                            |
-| Placement        | Scripts run inside the host's tool-batch step, never inside a `'use workflow'` function.                         |
-| Nested calls     | Execute through the resolved tool set's normal execute path with the same host context.                          |
-| Exposure         | New `callableBy` (`all` / `model` / `codemode`) and, for `codemode`, `discovery` (`listed` / `search`) on tools. |
-| Fail-closed rule | Approval, input, interaction, and background tools never run from code mode, whatever their `callableBy` says.   |
-| Approvals        | Never inside scripts. Gated writes are staged and reviewed once ([ADR 0005](0005-staged-tool-plans.md)).         |
-| Re-execution     | A host-supplied durable tool ledger runs each ledgered call (top-level and nested) at most once per key.         |
+| Area             | Decision                                                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Engine           | Depend on `@earendil-works/pi-codemode`, pinned exactly, behind a Yolk executor interface.                                                                                          |
+| Package          | New public package `@yolk-sdk/codemode`; the pi executor lives behind a Node subpath.                                                                                               |
+| Placement        | Scripts run inside the host's tool-batch step, never inside a `'use workflow'` function.                                                                                            |
+| Nested calls     | Execute through the resolved tool set's normal execute path with the same host context.                                                                                             |
+| Exposure         | New `callableBy` (`all` / `model` / `codemode`) and, for `codemode`, `discovery` (`listed` / `search`) on tools. ADR 0007 adds `pinned` discovery, `loading`, and stage-only tools. |
+| Fail-closed rule | Approval, input, interaction, and background tools never run from code mode, whatever their `callableBy` says.                                                                      |
+| Approvals        | Never inside scripts. Gated writes are staged and reviewed once ([ADR 0005](0005-staged-tool-plans.md)).                                                                            |
+| Re-execution     | A host-supplied durable tool ledger runs each ledgered call (top-level and nested) at most once per key.                                                                            |
 
 ## Engine
 
@@ -158,10 +158,17 @@ type ToolCallableBy =
 Tools with `callableBy: 'codemode'` are not sent to providers. Without a code mode tool in the
 same tool set, they are unreachable, and resolution warns.
 
+[ADR 0007](./0007-tool-exposure-and-catalog.md) adds `discovery: 'pinned'` (always listed, outside
+the budget), the `loading` axis (deferred `all` tools count as `search` in the catalog), stage-only
+approval tools, and `catalog: 'instructions'`, which moves the catalog below out of the
+description into an instruction message.
+
 Fail-closed rule: a tool with `ToolDef.approval`, `ToolDef.input`, `ToolDef.interaction`, or
 `ToolDef.execution === 'background-v1'`, and the package-owned `question` and `subagent` tools,
 are never callable from code mode. Marking them `all` behaves as `model`; marking them `codemode`
-is a resolution error.
+is a resolution error, except a stageable approval tool ([ADR 0005](0005-staged-tool-plans.md)),
+which may be stage-only: scripts find it and only `stage()` it
+([ADR 0007](0007-tool-exposure-and-catalog.md)).
 
 ### Nested tool access
 

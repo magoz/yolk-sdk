@@ -127,6 +127,12 @@ const projectMessagesForModel = (
 Do not persist the checkpoint returned by `makeCompactionCheckpointMessage` as a raw message. It is a
 model-input projection only.
 
+If you use [host instructions](/docs/agent/loop-runtime#host-instructions) (for example the code
+mode catalog), keep the instruction messages the checkpoint folds away: put
+`latestInstructionMessages(compacted)` from `@yolk-sdk/agent/protocol` after the checkpoint, minus
+keys that `laterMessages` already carry. The loop compares instruction state with the full
+transcript and never re-appends them.
+
 ## Plan when to compact
 
 Use the same token estimate you use for model-context warnings. `planWindowCompaction` keeps a recent
@@ -330,6 +336,8 @@ overflow compaction retry per provider stream.
 - Keep raw messages append-only.
 - Store completed and failed compactions as ledger entries, not raw messages.
 - Project checkpoints only at model/provider boundaries.
+- Keep the latest instruction message of each key after the checkpoint when you use host
+  instructions.
 - Guard compaction writes with active run id and expected sequence.
 - Ignore failed compaction rows during projection.
 - Merge previous compactions by passing both `previousSummary` and `previousRecent`, then drop the

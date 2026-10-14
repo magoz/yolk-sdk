@@ -111,6 +111,25 @@ const stream = runRuntime(
 
 Production apps implement `SessionEventStore`; tests can use the in-memory layer.
 
+## Host instructions
+
+A `RunInstruction` (`{ key, state, render }`) is host context kept current in the conversation,
+for example the code mode catalog (`toolSet.instructions` from `resolveTools`). Pass it as
+`RunConfig.instructions` or `RuntimeConfig.instructions`.
+
+- Before each model request the loop compares `state` with the latest instruction message of the
+  same `key`. Only when it changed does it append a user-role message with `render(state)` and a
+  non-model-visible `instruction: { key, state }` envelope (`state: undefined` appends a removal
+  notice once). Earlier messages never change, so the cached request prefix survives.
+- `render` gets only the current state: compaction keeps the latest message of each key, so every
+  message must stand alone.
+- Appended messages are part of the run's created messages (persist them with the turn) but emit no
+  `UserMessage` event. Chat projections hide them and `toAgentMessages` round-trips them.
+- Durable hosts driving `runModelTurn` append and persist
+  `instructionMessages(transcript, instructions)` before each model step; `runModelTurn` does not
+  accept `instructions`.
+- Two instructions with one key fail resolution (`duplicate_instruction`).
+
 ## Add compaction
 
 `@yolk-sdk/agent/compaction` provides helpers for budgets, token estimation, preview summaries,

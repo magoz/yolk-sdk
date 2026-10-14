@@ -29,7 +29,21 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
-### Canary.108: Claude Code 2.1.299
+### Canary.108: tool exposure, catalog instructions, Claude Code 2.1.299
+
+New, opt-in ([ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md)):
+
+- `loading: 'deferred'` keeps a tool out of provider requests until the package `tool_search`
+  tool loads it. See [Defer rarely used tools](./agent/tools-hitl#defer-rarely-used-tools).
+- A stageable approval tool may be `callableBy: 'codemode'` (stage-only); resolution used to reject
+  this. See [Stage-only tools](./integrations/code-mode#stage-only-tools).
+- `makeCodeModeTool({ catalog: 'instructions' })` delivers the code mode catalog as a host
+  instruction (`RunConfig.instructions`); `catalog: 'description'` stays the default. Hosts with
+  custom compaction must keep `latestInstructionMessages(...)`, and durable `runModelTurn` hosts
+  append `instructionMessages(...)` themselves. See
+  [Deliver the catalog as instructions](./integrations/code-mode#deliver-the-catalog-as-instructions).
+- `ToolDiscovery` gains `pinned`, and `ToolRegistryError` gains `deferred_unsupported_tool` and
+  `duplicate_instruction`: exhaustive `switch`es over them need a new case.
 
 The Claude subscription transport identifies as Claude Code 2.1.299 (was 2.1.112), so Anthropic
 accepts newer models such as Claude Opus 5.5; no code change is required. Proxies or tests that

@@ -259,17 +259,35 @@ export const ToolCallableBy = Schema.Literals(['all', 'model', 'codemode'])
 
 export type ToolCallableBy = typeof ToolCallableBy.Type
 
-/** How scripts find a `codemode`-only tool: listed in the code mode description (default) or
- * found through search. Only meaningful with `callableBy: 'codemode'`.
+/** How scripts find a `codemode`-only tool: listed in the code mode catalog when its budget
+ * allows (default), found through search, or `pinned` (always listed, outside the budget; ADR
+ * 0007). Only meaningful with `callableBy: 'codemode'`.
  */
-export const ToolDiscovery = Schema.Literals(['listed', 'search'])
+export const ToolDiscovery = Schema.Literals(['listed', 'search', 'pinned'])
 
 export type ToolDiscovery = typeof ToolDiscovery.Type
 
-/** Registration-level exposure options: `discovery` exists only for `codemode`-only tools. */
+/** When the model sees a model-callable tool (ADR 0007): declared on every request (`eager`, the
+ * default) or only once a `tool_search` result in the transcript activated it (`deferred`).
+ */
+export const ToolLoading = Schema.Literals(['eager', 'deferred'])
+
+export type ToolLoading = typeof ToolLoading.Type
+
+/** Registration-level exposure options: `discovery` exists only for `codemode`-only tools and
+ * `loading` only for model-callable ones.
+ */
 export type ToolExposure =
-  | { readonly callableBy?: 'all' | 'model'; readonly discovery?: never }
-  | { readonly callableBy: 'codemode'; readonly discovery?: ToolDiscovery }
+  | {
+      readonly callableBy?: 'all' | 'model'
+      readonly discovery?: never
+      readonly loading?: ToolLoading
+    }
+  | {
+      readonly callableBy: 'codemode'
+      readonly discovery?: ToolDiscovery
+      readonly loading?: never
+    }
 
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
@@ -284,6 +302,8 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   callableBy: Schema.optional(ToolCallableBy),
   /** Only with `callableBy: 'codemode'`; absent means `listed`. */
   discovery: Schema.optional(ToolDiscovery),
+  /** Only on model-callable tools; absent means `eager` (ADR 0007). */
+  loading: Schema.optional(ToolLoading),
   approval: Schema.optional(ToolApprovalPolicy),
   background: Schema.optional(Schema.Boolean),
   execution: Schema.optional(Schema.Literal('background-v1')),
@@ -1442,6 +1462,10 @@ export const isProviderToolDef = (def: ToolDef): boolean => def.callableBy !== '
 /** The definitions a model provider may receive; `codemode`-only tools are removed. */
 export const providerToolDefs = (tools: ReadonlyArray<ToolDef>): ReadonlyArray<ToolDef> =>
   tools.every(isProviderToolDef) ? tools : tools.filter(isProviderToolDef)
+
+/** A model-callable tool declared only once activated by `tool_search` (ADR 0007). */
+export const isDeferredTool = (def: ToolDef): boolean =>
+  def.loading === 'deferred' && def.callableBy !== 'codemode'
 
 /** Effective discovery of a `codemode`-only tool (`listed` by default); undefined otherwise. */
 export const toolDiscovery = (def: ToolDef): ToolDiscovery | undefined =>

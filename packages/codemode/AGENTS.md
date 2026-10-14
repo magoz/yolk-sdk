@@ -2,8 +2,8 @@
 
 `@yolk-sdk/codemode` implements code mode (`docs/adr/0002-code-mode.md`): a tool whose scripts call
 the other code-mode-callable tools of the same `resolveTools` resolution. The agent tool contract
-(`callableBy`, `discovery`, output schemas, nested tool access, nested-call records, the `describe`
-hook) lives in `@yolk-sdk/agent`; this package never redefines it.
+(`callableBy`, `discovery`, `loading`, output schemas, nested tool access, nested-call records, the
+`describe` and `instruct` hooks) lives in `@yolk-sdk/agent`; this package never redefines it.
 
 ## Subpaths
 
@@ -131,6 +131,13 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   `{ id, digest, count, reviewToolName }`; a failed save makes the result `isError` with
   `{ ok: false }`. The description lists `stage` and the stageable tool names only when staging is
   offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
+- Stage-only tools (ADR 0007: stageable with `callableBy: 'codemode'`): while the script may stage,
+  `codeModeStageOnlyCatalog` adds them to the discovery catalog only (`exposure: 'stage'`, no
+  `tools` binding, not in `ALL_TOOLS`; the executor gets them as `unbound` keys so a direct call
+  rejects with a hint to `stage()` them). `searchTools`/`describeNamespace` return their raw name with
+  `stageOnly: true`; `describeTool` renders the `stage()` call and its argument type; `stage()`
+  accepts the raw name or the catalog identifier. The description never names stage-only `search`
+  tools, so they leave it byte-identical once any stageable tool exists.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
   host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
   script's queue never holds process permits). Per-script semaphores are keyed by the parent tool
@@ -141,6 +148,15 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   interruption while waiting never leaks a permit. `costUsd` has no
   `AgentUsage` field: nested-call records carry token usage only, and cost stays in the result's
   `structuredContent.usage`.
+- Catalog placement (ADR 0007): `makeCodeModeTool({ catalog })`. `description` (default) keeps the
+  catalog in the tool description. `instructions` makes the description invariant
+  (`renderCodeModeInstructedDescription`: intro, globals, `stage()` whenever staging is offered,
+  even with no stageable tool yet, a pointer to the catalog) and contributes `instruct`:
+  `codeModeCatalogInstruction`, key `yolk.codemode.catalog`, state `CodeModeCatalogSummary` (every namespace with count, description,
+  listed count and listing; listed stageable names), always rendered in full (compaction keeps only
+  the latest message, so a delta would lose the rest). `pinned` tools are always listed,
+  outside the budget. Deferred `all` tools count as `search` (their declaration is not in model
+  context). `searchCodeModeTools` ranks with the shared `rankToolSearchDocuments`.
 
 ## Tests
 

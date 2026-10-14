@@ -19,6 +19,7 @@ import {
   type LLMProvider,
   type LoopConfig,
   type RunConfig,
+  type RunInstruction,
   type ToolExecutor
 } from '@yolk-sdk/agent/loop'
 import { runtimeErrorToAgentError, SessionConflictError } from './error.ts'
@@ -56,6 +57,10 @@ export type RuntimeConfig = {
   readonly capabilities?: AgentModelCapabilities
   /** Forwarded as `LLMRequest.cacheKey`; typically the session id. */
   readonly cacheKey?: string
+  /** Host instructions kept current in the conversation (ADR 0007), for example
+   * `ResolvedToolSet.instructions`; forwarded as `RunConfig.instructions`.
+   */
+  readonly instructions?: ReadonlyArray<RunInstruction>
 }
 
 export type RuntimeRequest = Data.TaggedEnum<{
@@ -121,6 +126,10 @@ const runtimeRunConfig = (
 
   if (config.cacheKey !== undefined) {
     runConfig.cacheKey = config.cacheKey
+  }
+
+  if (config.instructions !== undefined) {
+    runConfig.instructions = config.instructions
   }
 
   return runConfig

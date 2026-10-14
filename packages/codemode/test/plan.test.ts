@@ -30,13 +30,26 @@ type Call = (name: string, args?: unknown) => Promise<unknown>
 
 type Stage = (name: string, args?: unknown) => Promise<unknown>
 
+type Global = (name: string, args?: unknown) => Promise<unknown>
+
 /** A fake engine running a host-side script over the executor's tools and its `stage` global. */
-const scriptedExecutor = (script: (call: Call, stage: Stage) => Promise<unknown>) => {
-  const state = { globals: Array<string>() }
+const scriptedExecutor = (
+  script: (call: Call, stage: Stage, global: Global) => Promise<unknown>
+) => {
+  const state = { globals: Array<string>(), tools: Array<string>() }
 
   const executor: CodeModeExecutor = {
     execute: (_code, options) => {
       state.globals = options.globals.map(global => global.name)
+      state.tools = options.tools.map(tool => tool.name)
+
+      const global: Global = (name, args) => {
+        const found = options.globals.find(candidate => candidate.name === name)
+
+        return found === undefined
+          ? Promise.reject(new Error(`${name} is not defined`))
+          : found.execute(args, { signal: options.signal })
+      }
 
       const call: Call = (name, args) => {
         const tool = options.tools.find(candidate => candidate.name === name)
@@ -54,7 +67,7 @@ const scriptedExecutor = (script: (call: Call, stage: Stage) => Promise<unknown>
           : global.execute([name, args], { signal: options.signal })
       }
 
-      return script(call, stage).then(
+      return script(call, stage, global).then(
         value => ({ ok: true, value, output: [] }),
         (error: unknown) => ({
           ok: false,
@@ -116,8 +129,9 @@ type ResolveOptionFields = {
 }
 
 const stagingSetup = (
-  script: (call: Call, stage: Stage) => Promise<unknown>,
+  script: (call: Call, stage: Stage, global: Global) => Promise<unknown>,
   options: {
+    readonly extraTools?: ReadonlyArray<ToolRegistration<TestContext>>
     readonly plans?: boolean
     readonly planId?: ToolPlanOptions['planId']
     readonly ledger?: boolean
@@ -136,7 +150,12 @@ const stagingSetup = (
         makeCodeModeTool<TestContext>({ executor, ...options.codemode }),
         makePlanReviewTool<TestContext>()
       ]),
-      moduleOf('cms', [linkTool(applied), noteTool(notes), queryTool('lookup')])
+      moduleOf('cms', [
+        linkTool(applied),
+        noteTool(notes),
+        queryTool('lookup'),
+        ...(options.extraTools ?? [])
+      ])
     ]
 
     const resolveOptions: ResolveOptionFields = { interactionHost: unusedHost }
@@ -434,6 +453,129 @@ describe('code mode staging', () => {
       expect(result.isError).toBe(true)
       expect(yield* codemodeOf(result)).toEqual({ ok: false })
       expect(text(result.content)).toContain('the plan could not be saved')
+    })
+  )
+})
+
+const ArchiveParams = Schema.Struct({ resource: Schema.String })
+
+/** A stage-only tool (ADR 0007): approval-gated, stageable, script-only and found by search. */
+const archiveTool = (archived: Array<string>): ToolRegistration<TestContext> =>
+  makeTool<TestContext, typeof ArchiveParams>({
+    name: 'archive-resource',
+    description: 'Archive a published resource',
+    parameters: ArchiveParams,
+    access: 'write',
+    approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+    staging: true,
+    callableBy: 'codemode',
+    discovery: 'search',
+    execute: ({ call, params }) =>
+      Effect.sync(() => {
+        archived.push(params.resource)
+
+        return ToolResult.make({ toolCallId: call.id, content: 'archived' })
+      })
+  })
+
+describe('stage-only tools', () => {
+  it.effect('leave the description byte-identical once any stageable tool exists', () =>
+    Effect.gen(function* () {
+      const without = yield* stagingSetup(() => Promise.resolve(undefined))
+
+      const withStageOnly = yield* stagingSetup(() => Promise.resolve(undefined), {
+        extraTools: [archiveTool([])]
+      })
+
+      const description = (toolSet: typeof without.toolSet) =>
+        toolSet.tools.find(tool => tool.name === 'codemode')?.description
+
+      expect(description(withStageOnly.toolSet)).toBe(description(without.toolSet))
+      expect(description(withStageOnly.toolSet)).not.toContain('archive')
+    })
+  )
+
+  it.effect('are found by search, described as stage() calls, and never bound in tools', () =>
+    Effect.gen(function* () {
+      const archived: Array<string> = []
+
+      const env = yield* stagingSetup(
+        async (call, stage, global) => {
+          const hits = await global('searchTools', ['archive resource'])
+          const described = await global('describeTool', 'archive-resource')
+          const namespace = await global('describeNamespace', 'cms')
+          const direct = await call('archive-resource', { resource: 'r1' }).catch(String)
+          const staged = await stage('archive_resource', { resource: 'r1' })
+
+          return { hits, described, namespace, direct, staged }
+        },
+        { extraTools: [archiveTool(archived)] }
+      )
+
+      const result = yield* env.run()
+      const output = text(result.content)
+      const stored = yield* env.store.get('call_1')
+
+      expect(result.isError).toBeUndefined()
+      expect(output).toContain(
+        '{"name":"archive-resource","description":"Archive a published resource","stageOnly":true}'
+      )
+      expect(output).toContain('await stage(\\"archive-resource\\", args)')
+      expect(output).toContain('args: { resource: string; }')
+      expect(output).toContain('unknown tool archive-resource')
+      expect(env.state.tools).not.toContain('archive-resource')
+      // Staged by its catalog identifier, recorded under its name; nothing ran.
+      expect(stored?.plan.calls.map(staged => staged.toolName)).toEqual(['archive-resource'])
+      expect(archived).toEqual([])
+    })
+  )
+
+  it.effect('are not discoverable when staging is off', () =>
+    Effect.gen(function* () {
+      const env = yield* stagingSetup(
+        (_call, _stage, global) => global('searchTools', ['archive resource']),
+        { extraTools: [archiveTool([])], codemode: { staging: false } }
+      )
+
+      const result = yield* env.run()
+
+      expect(text(result.content)).not.toContain('archive-resource')
+    })
+  )
+})
+
+describe('stage-only tools in the pi executor', () => {
+  it.effect('reject a direct call with a hint to stage them, and stage by identifier', () =>
+    Effect.gen(function* () {
+      const archived: Array<string> = []
+
+      const env = yield* stagingSetup(() => Promise.resolve(undefined), {
+        extraTools: [archiveTool(archived)],
+        codemode: { executor: makePiCodeModeExecutor() }
+      })
+
+      const result = yield* env.toolSet.execute(
+        ToolCall.make({
+          id: 'call_pi',
+          name: 'codemode',
+          params: {
+            code: `const direct = await tools.archive_resource({ resource: 'r1' }).catch(error => error.message)
+              const listed = ALL_TOOLS.map(tool => tool.name)
+              const receipt = await stage('archive_resource', { resource: 'r1' })
+              return { direct, listed, key: receipt.key }`
+          }
+        })
+      )
+
+      const output = text(result.content)
+
+      expect(result.isError).toBeUndefined()
+      expect(output).toContain(
+        'archive-resource is approval-gated: record it with stage(\\"archive-resource\\", args) instead of calling it.'
+      )
+      expect(output).not.toMatch(/"listed":\[[^\]]*archive/)
+      expect(output).toContain('"key":"call_pi/s1"')
+      expect(archived).toEqual([])
     })
   )
 })

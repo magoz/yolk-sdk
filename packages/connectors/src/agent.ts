@@ -24,7 +24,8 @@ export type ConnectorToolAccessResolver = ToolAccess | ((actionId: string) => To
 /** The declared metadata of a connector action, as exposure resolvers see it. */
 export type ConnectorToolActionInfo = Pick<ConnectorAction, 'id' | 'description' | 'access'>
 
-/** Code mode exposure for connector tools: one value for every action, or per action (`action`
+/** Tool exposure (`callableBy`/`discovery`/`loading`) for connector tools: one value for every
+ * action, or per action (`action`
  * is `undefined` when the connector does not declare `actionId`). Omitted: the agent defaults
  * (`callableBy: 'all'`).
  */
@@ -42,8 +43,8 @@ export type MakeConnectorToolModuleOptions<Context, Env> = {
   readonly description?: string
   readonly namePrefix?: string
   readonly access?: ConnectorToolAccessResolver
-  /** Applied through `makeTool`'s `callableBy`/`discovery`; `resolveTools` still rejects invalid
-   * combinations (for example `discovery` without `callableBy: 'codemode'`).
+  /** Applied through `makeTool`'s `callableBy`/`discovery`/`loading`; `resolveTools` still rejects
+   * invalid combinations (for example `discovery` without `callableBy: 'codemode'`).
    */
   readonly exposure?: ConnectorToolExposureResolver
 }
