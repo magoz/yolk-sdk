@@ -100,8 +100,8 @@ Messages uses native system instructions and tool names, not Claude Code OAuth f
 Responses supports a host output limit and does not send Codex account or originator headers.
 Go pins each `x-opencode-session` to one upstream server, so a retry under the same session reaches
 the server that just failed. When a response is malformed (a Chat Completions parser code such as
-`invalid_stream_json`, `incomplete_stream`, or `unexpected_content_type`) before any event was
-emitted, the adapter sends the request once more under `<session>.reroute`, giving up that
+`invalid_stream_json`, a chat response that is not SSE, or a chat or Responses stream missing its
+terminal event) before any event was emitted, the adapter sends the request once more under `<session>.reroute`, giving up that
 request's cached prefix; model decisions such as `length` are never retried. The session is the
 request `cacheKey`, else the `x-opencode-session` extra header; without either the request is resent
 unchanged.
