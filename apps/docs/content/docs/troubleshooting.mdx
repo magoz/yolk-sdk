@@ -79,6 +79,16 @@ Chat Completions and Responses HTTP failures copy the envelope string `code` (fa
 raw upstream bodies stay out of typed failures: diagnose from `providerCode`, status, and kind
 rather than logging raw response bodies.
 
+Claude subscription (`anthropic_claude`) HTTP and stream errors report the more specific
+`error.details.error_code` when present, then `error.type`, then `error.code`.
+
+### Claude rejects a model with claude_code_version_too_old
+
+Anthropic gates newer models by the Claude Code version the Claude subscription transport reports.
+An HTTP 400 with `providerCode: 'claude_code_version_too_old'` means the installed
+`@yolk-sdk/agent` reports a version that model does not accept yet: upgrade to the latest canary, or
+pick an older model until a release supports it.
+
 ### Diagnose chat stream failures with stream diagnostics
 
 OpenAI-compatible chat streaming expects server-sent events. When a 2xx response declares an

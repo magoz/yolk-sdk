@@ -29,6 +29,15 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.108: Claude Code 2.1.299
+
+The Claude subscription transport identifies as Claude Code 2.1.299 (was 2.1.112), so Anthropic
+accepts newer models such as Claude Opus 5.5; no code change is required. Proxies or tests that
+assert the `user-agent` or billing header need updating. Claude errors now report
+`error.details.error_code` (for example `claude_code_version_too_old`) as `providerCode` when
+present, so hosts that match `providerCode: 'invalid_request_error'` for those failures should match
+the specific code.
+
 ### Canary.107: provider prompt caching and Fortnox scopes
 
 Prompt caching is always on and changes outbound provider requests; no code change is required.
