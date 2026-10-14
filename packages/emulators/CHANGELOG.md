@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.111
+
+### Patch Changes
+
+- a1e32bb: Advance unchanged public packages in lockstep with `@yolk-sdk/codemode`, whose description now tells the model to call known tools without searching again. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.110
 
 ### Patch Changes
