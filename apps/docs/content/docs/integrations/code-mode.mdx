@@ -375,7 +375,8 @@ A stageable approval-gated tool may be `callableBy: 'codemode'` (usually with
 with `searchTools()` (hits carry `stageOnly: true`), read it with `describeTool()` (rendered as the
 `stage()` call), and can only `stage()` it; a direct `tools.<name>()` call rejects with a hint to
 stage it. Resolution warns when a stage-only tool resolves without `plans`, where it would be
-unreachable.
+unreachable. Model-callable stageable tools (`callableBy: 'all'`, deferred or not) are searchable,
+describable, and stageable from scripts the same way.
 
 ## Make tools ready for code mode
 

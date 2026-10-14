@@ -115,7 +115,9 @@ the miss.
   background). Every other `codemode` + approval combination stays `codemode_unsupported_tool`.
   `isCodeModeFailClosed` is unchanged, so they are never in `nestedRegistrations` and
   `tools.<name>()` stays fail-closed.
-- Code mode adds them to its catalog marked `stage`: `searchTools` hits carry `stageOnly: true` and
+- Code mode adds every stageable tool to its catalog marked `stage` (stageable tools are
+  approval-gated, so scripts can only stage them whatever their `callableBy`; `all` ones,
+  deferred or not, are found the same way): `searchTools` hits carry `stageOnly: true` and
   `describeTool` renders `stage("<name>", args: …)`. They have no callable `tools` binding: the
   executor gets them as `unbound` keys (identifier and raw name), so `tools.<id>(args)` rejects with
   "`<name>` is approval-gated: record it with `stage("<name>", args)` instead of calling it".
@@ -123,7 +125,7 @@ the miss.
   points to `searchTools`, not every stageable tool.
 - `ALL_TOOLS` lists callable tools only, so it excludes stage-only tools; `searchTools` and
   `describeNamespace` include them, marked stage-only.
-- The Stageable section names stageable tools except stage-only `search` ones: `pinned` ones
+- The Stageable section names stageable tools except `search` and deferred ones: `pinned` ones
   always, the others up to a cap of 20 with a count of the rest.
 - Plan apply is unchanged: the plan executor uses `executeRegistration` over the stageable
   registrations, not the model-facing `execute` that drops codemode-only tools. Ledger keys, fences
@@ -143,8 +145,8 @@ resolves), and a pointer to the catalog. Nothing in it depends on tools.
 - full signatures of `listed` and `pinned` tools, filled round-robin across namespaces, cheapest
   first, within the inline budget (`defaultCodeModeInlineBudget`, host-configurable); `pinned`
   tools are always shown, outside the budget; `search` tools never are;
-- stage-only tools counted in their namespace and named in the Stageable section when `listed` or
-  `pinned` (as above).
+- stageable tools counted in their namespace and named in the Stageable section when `listed` or
+  `pinned` and not deferred (as above).
 
 `ToolDiscovery` gains `pinned` (`listed` = shown when the budget allows, `search` = never shown,
 `pinned` = always shown), valid only with `callableBy: 'codemode'` like the others.

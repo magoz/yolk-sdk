@@ -94,16 +94,15 @@ export const codeModeCatalog = (
 }
 
 /**
- * Catalog entries of the stage-only tools among the stageable ones (`callableBy: 'codemode'`,
- * ADR 0007): searchable and describable, never callable (no `tools` binding), so their call label
- * is the `stage()` call that records them.
+ * Catalog entries of the stageable tools (ADR 0007). Stageable tools are approval-gated, so scripts
+ * can only `stage()` them whatever their `callableBy` (stage-only `codemode` ones are also never
+ * declared to the model): searchable and describable, never callable (no `tools` binding), so
+ * their call label is the `stage()` call that records them.
  */
 export const codeModeStageOnlyCatalog = (
   stageable: ReadonlyArray<NestedTool>
 ): ReadonlyArray<CodeModeCatalogTool> =>
-  stageable.flatMap(({ def, moduleId, moduleDescription }) => {
-    if (def.callableBy !== 'codemode') return []
-
+  stageable.map(({ def, moduleId, moduleDescription }) => {
     const tool: CodeModeCatalogTool = {
       name: def.name,
       identifier: toCodemodeIdentifier(def.name),
@@ -116,9 +115,9 @@ export const codeModeStageOnlyCatalog = (
       exposure: 'stage'
     }
 
-    return [
-      moduleDescription === undefined ? tool : { ...tool, namespaceDescription: moduleDescription }
-    ]
+    return moduleDescription === undefined
+      ? tool
+      : { ...tool, namespaceDescription: moduleDescription }
   })
 
 /** Default inline budget of the nested tool listing, in estimated tokens. */
@@ -266,7 +265,10 @@ const stageLine = (reviewToolName: string) =>
 /** Stageable tool names listed in the description; the rest are summarized with a count. */
 const maxListedStageableTools = 20
 
-/** Stageable tools the description names: `pinned` ones first, never stage-only `search` ones. */
+/**
+ * Stageable tools the description names: `pinned` ones first, never `search` or deferred ones
+ * (whose declaration is not in model context; scripts find them by search, ADR 0007).
+ */
 type StageableNames = {
   readonly pinned: ReadonlyArray<string>
   readonly listed: ReadonlyArray<string>
@@ -277,7 +279,7 @@ const listedStageableNames = (staging: CodeModeStagingDescription): StageableNam
   listed: staging.tools.flatMap(({ def }) => {
     const discovery = toolDiscovery(def)
 
-    return discovery === 'search' || discovery === 'pinned' ? [] : [def.name]
+    return discovery === 'search' || discovery === 'pinned' || isDeferredTool(def) ? [] : [def.name]
   })
 })
 

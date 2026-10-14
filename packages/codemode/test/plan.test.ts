@@ -19,6 +19,7 @@ import {
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
+  codeModeCatalogInstructionKey,
   makeCodeModeTool,
   type CodeModeExecutor,
   type MakeCodeModeToolOptions
@@ -540,6 +541,79 @@ describe('stage-only tools', () => {
       const result = yield* env.run()
 
       expect(text(result.content)).not.toContain('archive-resource')
+    })
+  )
+})
+
+/** An approval-gated stageable tool the model calls directly once `tool_search` loads it. */
+const deferredArchiveTool = (archived: Array<string>): ToolRegistration<TestContext> =>
+  makeTool<TestContext, typeof ArchiveParams>({
+    name: 'archive-resource',
+    description: 'Archive a published resource',
+    parameters: ArchiveParams,
+    access: 'write',
+    approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+    staging: true,
+    loading: 'deferred',
+    execute: ({ call, params }) =>
+      Effect.sync(() => {
+        archived.push(params.resource)
+
+        return ToolResult.make({ toolCallId: call.id, content: 'archived' })
+      })
+  })
+
+describe('stageable tools model-callable too', () => {
+  it.effect('are found by search as stage-only and staged, eager or deferred', () =>
+    Effect.gen(function* () {
+      const archived: Array<string> = []
+
+      const env = yield* stagingSetup(
+        async (_call, stage, global) => {
+          const eager = await global('searchTools', ['link curriculum'])
+          const deferred = await global('searchTools', ['archive resource'])
+          const described = await global('describeTool', 'archive-resource')
+          const staged = await stage('archive-resource', { resource: 'r1' })
+
+          return { eager, deferred, described, staged }
+        },
+        { extraTools: [deferredArchiveTool(archived)] }
+      )
+
+      const output = text((yield* env.run()).content)
+
+      expect(output).toContain('"name":"link_curriculum"')
+      expect(output).toContain(
+        '{"name":"archive-resource","description":"Archive a published resource","stageOnly":true}'
+      )
+      expect(output).toContain('await stage(\\"archive-resource\\", args)')
+      expect(archived).toEqual([])
+    })
+  )
+
+  it.effect('count a deferred one in its namespace but never name it in the catalog', () =>
+    Effect.gen(function* () {
+      const catalogOf = (extraTools: ReadonlyArray<ToolRegistration<TestContext>>) =>
+        stagingSetup(() => Promise.resolve(undefined), {
+          extraTools,
+          codemode: { catalog: 'instructions' }
+        }).pipe(
+          Effect.map(({ toolSet }) => {
+            const instruction = toolSet.instructions.find(
+              candidate => candidate.key === codeModeCatalogInstructionKey
+            )
+
+            return instruction === undefined ? '' : instruction.render(instruction.state)
+          })
+        )
+
+      const without = yield* catalogOf([])
+      const withDeferred = yield* catalogOf([deferredArchiveTool([])])
+      const cmsCount = (catalog: string) => Number(/- `cms` \((\d+) tools/.exec(catalog)?.[1])
+
+      expect(cmsCount(withDeferred)).toBe(cmsCount(without) + 1)
+      expect(withDeferred).toContain('- `link_curriculum`')
+      expect(withDeferred).not.toContain('archive-resource')
     })
   )
 })
