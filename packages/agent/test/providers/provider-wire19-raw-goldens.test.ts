@@ -17,9 +17,9 @@ import { openAiRealtimeToolParameters } from '../../src/providers/openai/realtim
 
 const goldens = {
   'anthropic-output-config-omitted':
-    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123}',
+    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.299.4fa; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123}',
   'anthropic-output-config-present':
-    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.112.e61; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123,"output_config":{"effort":"medium"}}',
+    '{"model":"claude-opus-5","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.299.4fa; cc_entrypoint=sdk-cli; cch=185f8;"},{"type":"text","text":"You are Claude Code, Anthropic\'s official CLI for Claude."}],"messages":[{"role":"user","content":[{"type":"text","text":"Be concise.\\n\\nHello","cache_control":{"type":"ephemeral"}}]}],"max_tokens":123,"output_config":{"effort":"medium"}}',
   'anthropic-schema-union':
     '{"type":"object","properties":{"operation":{"type":"string","enum":["search","list"],"description":"op"},"query":{"type":"string"},"limit":{"type":"number"}},"required":["operation"],"$defs":{"SearchMeta":{"type":"string"},"ListMeta":{"type":"number"}},"additionalProperties":false}',
   'anthropic-schema-allof-empty': '{"type":"object","properties":{},"required":[],"$defs":{}}',

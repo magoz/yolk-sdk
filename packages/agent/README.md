@@ -431,6 +431,8 @@ policy and emits protocol-visible retry/error state:
   [stream diagnostics guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/troubleshooting.mdx#diagnose-chat-stream-failures-with-stream-diagnostics).
 - Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
   `type`) into `provider.providerCode`; free-text upstream bodies stay out of `LLMError`.
+- Claude subscription (`anthropic_claude`) HTTP and stream errors use `error.details.error_code`
+  (for example `claude_code_version_too_old`), then `error.type`, then `error.code`.
 - `AgentRetry.provider` exposes current retry metadata and chosen `delayMs`.
 - `AgentError.provider` preserves final terminal metadata.
 - `AgentErrorCode` includes `rate_limit`, `overloaded`, `context_overflow`, and generic

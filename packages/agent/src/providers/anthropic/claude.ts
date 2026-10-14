@@ -6,7 +6,13 @@ export const anthropicClaudeProviderId = 'anthropic-claude'
 
 export const anthropicClaudeClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 
-export const anthropicClaudeCodeVersion = '2.1.112'
+/**
+ * The Claude Code version the subscription transport identifies as (user agent and billing
+ * header). Anthropic gates newer models by it: an outdated version answers HTTP 400
+ * `claude_code_version_too_old`. Keep it at a current release, and on every bump re-verify the
+ * billing header algorithm (salt, sampled positions, suffix) against that release.
+ */
+export const anthropicClaudeCodeVersion = '2.1.299'
 
 export const anthropicClaudeCodeEntrypoint = 'sdk-cli'
 

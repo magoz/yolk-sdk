@@ -160,7 +160,7 @@ describe('AnthropicClaudeProviderLayer', () => {
           {
             type: 'text',
             text: expect.stringMatching(
-              /^x-anthropic-billing-header: cc_version=2\.1\.112\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
+              /^x-anthropic-billing-header: cc_version=2\.1\.299\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
             )
           },
           { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }

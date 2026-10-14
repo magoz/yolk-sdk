@@ -239,7 +239,7 @@ describe('Anthropic Claude provider', () => {
         {
           type: 'text',
           text: expect.stringMatching(
-            /^x-anthropic-billing-header: cc_version=2\.1\.112\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
+            /^x-anthropic-billing-header: cc_version=2\.1\.299\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
           )
         },
         { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
@@ -961,7 +961,7 @@ describe('Anthropic Claude provider', () => {
         'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,context-management-2025-06-27,advisor-tool-2026-03-01,effort-2025-11-24'
       )
       expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true')
-      expect(headers['user-agent']).toBe('claude-cli/2.1.112 (external, sdk-cli)')
+      expect(headers['user-agent']).toBe('claude-cli/2.1.299 (external, sdk-cli)')
       expect(headers['x-app']).toBe('cli')
       expect(headers['x-client-request-id']).toBeDefined()
       expect(headers['x-claude-code-session-id']).toBeDefined()
@@ -1060,6 +1060,37 @@ describe('Anthropic Claude provider', () => {
           kind: 'context_overflow',
           status: 400,
           providerCode: 'invalid_request_error'
+        }
+      })
+    })
+  )
+
+  it.effect('reports the specific details.error_code of an Anthropic error', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const response = new Response(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message:
+              'Claude Code 2.1.112 does not support this model; version 2.1.280 or newer is required.',
+            details: { error_code: 'claude_code_version_too_old' }
+          }
+        }),
+        { status: 400 }
+      )
+
+      const error = yield* runMinimalProviderRequest({ response }, requests).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        retryable: false,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'unknown',
+          status: 400,
+          providerCode: 'claude_code_version_too_old'
         }
       })
     })
@@ -1379,6 +1410,29 @@ describe('Anthropic Claude provider', () => {
           kind: 'overloaded',
           providerCode: 'overloaded_error'
         }
+      })
+    })
+  )
+
+  it.effect('reports the details.error_code of an Anthropic stream error', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.112 does not support this model.","details":{"error_code":"claude_code_version_too_old"}}}\n\n'
+        ])
+      )
+
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        retryable: false,
+        provider: { provider: 'anthropic_claude', providerCode: 'claude_code_version_too_old' }
       })
     })
   )
