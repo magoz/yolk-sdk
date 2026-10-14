@@ -239,7 +239,7 @@ describe('Anthropic Claude provider', () => {
         {
           type: 'text',
           text: expect.stringMatching(
-            /^x-anthropic-billing-header: cc_version=2\.1\.112\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
+            /^x-anthropic-billing-header: cc_version=2\.1\.299\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
           )
         },
         { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
@@ -961,7 +961,7 @@ describe('Anthropic Claude provider', () => {
         'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,context-management-2025-06-27,advisor-tool-2026-03-01,effort-2025-11-24'
       )
       expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true')
-      expect(headers['user-agent']).toBe('claude-cli/2.1.112 (external, sdk-cli)')
+      expect(headers['user-agent']).toBe('claude-cli/2.1.299 (external, sdk-cli)')
       expect(headers['x-app']).toBe('cli')
       expect(headers['x-client-request-id']).toBeDefined()
       expect(headers['x-claude-code-session-id']).toBeDefined()
