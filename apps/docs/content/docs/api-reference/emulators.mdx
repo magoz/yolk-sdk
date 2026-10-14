@@ -266,19 +266,19 @@ of these routes are `unverified` (synthetic fixtures).
 
 `@yolk-sdk/emulators/opencode`
 
-| Export                             | Purpose                                                                                             |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `makeOpenCodeGoEmulator(options?)` | `{ fetch, reset, coverage, chat, messages, responses, usage }` for `https://opencode.ai/zen/go/v1`  |
-| `openCodeGoEmulatorRoutes`         | Route evidence manifest (four routes) linked to the OpenCode Go conformance cases                   |
-| `openCodeGoUsageDefault`           | The recorded usage body (`usage.rolling`, `.weekly`, `.monthly` as `{ percent, resetsAt }`)         |
-| `openCodeGoEmulatorDefaultModels`  | The recorded model ids (one per protocol); no other model is emulated                               |
-| `OpenCodeGoEmulatorInputInvalid`   | Thrown by a part's `faults.add` / `script.enqueue`, or for a differently shaped `subscriptionUsage` |
+| Export                             | Purpose                                                                                                  |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `makeOpenCodeGoEmulator(options?)` | `{ fetch, reset, coverage, chat, messages, responses, usage }` for `https://opencode.ai/inference/go/v1` |
+| `openCodeGoEmulatorRoutes`         | Route evidence manifest (four routes) linked to the OpenCode Go conformance cases                        |
+| `openCodeGoUsageDefault`           | The recorded usage body (`usage.rolling`, `.weekly`, `.monthly` as `{ percent, resetsAt }`)              |
+| `openCodeGoEmulatorDefaultModels`  | The recorded model ids (one per protocol); no other model is emulated                                    |
+| `OpenCodeGoEmulatorInputInvalid`   | Thrown by a part's `faults.add` / `script.enqueue`, or for a differently shaped `subscriptionUsage`      |
 
 One fetch handler serves the four routes the OpenCode Go provider and usage fetcher call, each
-answering its Go fixture: `POST /zen/go/v1/chat/completions` (Bearer; streamed plain text with
-usage), `POST /zen/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`; streamed plain
-text), `POST /zen/go/v1/responses` (Bearer; streamed plain text, or a text answer to a replayed tool
-turn with commentary-tagged text), and `GET /zen/go/v1/usage` (Bearer). Each part (`emulator.chat`,
+answering its Go fixture: `POST /inference/go/v1/chat/completions` (Bearer; streamed plain text with
+usage), `POST /inference/go/v1/messages` (`x-api-key`, `anthropic-version: 2023-06-01`; streamed plain
+text), `POST /inference/go/v1/responses` (Bearer; streamed plain text, or a text answer to a replayed tool
+turn with commentary-tagged text), and `GET /inference/go/v1/usage` (Bearer). Each part (`emulator.chat`,
 `.messages`, `.responses`, `.usage`) is a full emulator API with its own ledger, faults, and turns,
 and its control plane over HTTP is `/_emulate/<part>/*`; `coverage()` / `GET /_emulate/coverage`
 combine every route, and `reset()` / `POST /_emulate/reset` reset every part. Requests on no route

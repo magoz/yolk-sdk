@@ -1087,9 +1087,11 @@ describe('repo emulator manifests', () => {
       'WARN  codex-usage  GET /backend-api/wham/usage  unverified evidence'
     )
     expect(result.stdout).toContain('WARN  xai-usage  GET /v1/billing  unverified evidence')
-    expect(result.stdout).toContain('WARN  opencode  GET /zen/go/v1/usage  unverified evidence')
     expect(result.stdout).toContain(
-      'WARN  opencode  POST /zen/go/v1/responses  unverified evidence (2 case(s))'
+      'WARN  opencode  GET /inference/go/v1/usage  unverified evidence'
+    )
+    expect(result.stdout).toContain(
+      'WARN  opencode  POST /inference/go/v1/responses  unverified evidence (2 case(s))'
     )
     expect(result.stdout).toContain(
       'WARN  email  PORT EmailClient.createDraft  PENDING until 2026-11-29'

@@ -135,11 +135,11 @@ describe('OpenCode Go subscription usage', () => {
       })
 
       yield* fetchOpenCodeGoSubscriptionUsage(apiKey, {
-        url: 'http://127.0.0.1:4010/zen/go/v1/usage'
+        url: 'http://127.0.0.1:4010/inference/go/v1/usage'
       }).pipe(Effect.provideService(HttpClient.HttpClient, client))
 
       expect(requests.map(request => [request.method, request.url])).toEqual([
-        ['GET', 'http://127.0.0.1:4010/zen/go/v1/usage']
+        ['GET', 'http://127.0.0.1:4010/inference/go/v1/usage']
       ])
       expect(requests[0]?.headers.authorization).toBe('Bearer go-secret')
     })

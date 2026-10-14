@@ -14,7 +14,7 @@ import { makeAnthropicMessagesProviderLayer } from '../anthropic-messages-provid
 
 export const openCodeGoProviderId = 'opencode_go'
 
-export const openCodeGoBaseUrl = 'https://opencode.ai/zen/go/v1'
+export const openCodeGoBaseUrl = 'https://opencode.ai/inference/go/v1'
 
 export type OpenCodeGoProtocol = 'chat-completions' | 'messages' | 'responses'
 

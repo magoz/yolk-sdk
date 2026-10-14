@@ -233,7 +233,7 @@ const GoLayer = makeOpenCodeGoProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-The default base URL is `https://opencode.ai/zen/go/v1`. Chat streams SSE (the Go adapter sets
+The default base URL is `https://opencode.ai/inference/go/v1`. Chat streams SSE (the Go adapter sets
 `streaming: true`) with Bearer auth; Messages uses SSE and `x-api-key`; Responses uses SSE and Bearer
 auth. All normalize to `LLMEvent`s.
 Messages retains native tool names and system instructions, without Claude OAuth fingerprinting.

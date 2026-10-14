@@ -13,7 +13,7 @@ export const openCodeGoRecordings: ReadonlyArray<FixtureRecording> = [
     caseId: 'opencode.go.chat.stream.plain-text',
     request: {
       method: 'POST',
-      path: '/zen/go/v1/chat/completions',
+      path: '/inference/go/v1/chat/completions',
       query: '',
       headers: {
         accept: 'text/event-stream',
@@ -61,7 +61,7 @@ export const openCodeGoRecordings: ReadonlyArray<FixtureRecording> = [
     caseId: 'opencode.go.messages.stream.plain-text',
     request: {
       method: 'POST',
-      path: '/zen/go/v1/messages',
+      path: '/inference/go/v1/messages',
       query: '',
       headers: {
         accept: 'text/event-stream',
@@ -121,7 +121,7 @@ export const openCodeGoRecordings: ReadonlyArray<FixtureRecording> = [
     caseId: 'opencode.go.responses.stream.plain-text',
     request: {
       method: 'POST',
-      path: '/zen/go/v1/responses',
+      path: '/inference/go/v1/responses',
       query: '',
       headers: {
         accept: 'text/event-stream',
@@ -168,7 +168,7 @@ export const openCodeGoRecordings: ReadonlyArray<FixtureRecording> = [
     caseId: 'opencode.go.responses.stream.commentary-replay',
     request: {
       method: 'POST',
-      path: '/zen/go/v1/responses',
+      path: '/inference/go/v1/responses',
       query: '',
       headers: {
         accept: 'text/event-stream',
@@ -248,7 +248,7 @@ export const openCodeGoRecordings: ReadonlyArray<FixtureRecording> = [
     caseId: 'opencode.go.usage.snapshot',
     request: {
       method: 'GET',
-      path: '/zen/go/v1/usage',
+      path: '/inference/go/v1/usage',
       query: '',
       headers: {
         accept: 'application/json'

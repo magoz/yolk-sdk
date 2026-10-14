@@ -3,10 +3,10 @@
  *
  * Each protocol case builds the public Go provider (`makeOpenCodeGoProviderLayer` with an explicit
  * `protocol`, the redacted API key, the host output limit, and the default
- * `https://opencode.ai/zen/go/v1` base) from `OpenCodeGoConformanceConfig`, sends one request
+ * `https://opencode.ai/inference/go/v1` base) from `OpenCodeGoConformanceConfig`, sends one request
  * through `LLMProvider`, and asserts one wire claim from the events it sees (the commentary-replay
  * case also reads the request it sends at its own `HttpClient` boundary). The usage case calls the
- * public `fetchOpenCodeGoSubscriptionUsage` (default `https://opencode.ai/zen/go/v1/usage`, Bearer
+ * public `fetchOpenCodeGoSubscriptionUsage` (default `https://opencode.ai/inference/go/v1/usage`, Bearer
  * API key) and shares its shape with the Claude, Codex, and Grok usage cases. Cases need only
  * `HttpClient.HttpClient` and the config service, so the same case runs against replayed fixtures
  * (`ReplayHttpClient`), the `@yolk-sdk/emulators/opencode` emulator, or a host's live
@@ -178,11 +178,11 @@ const doneReasons = (events: ReadonlyArray<LLMEvent>): Array<string> =>
 
 const protocolWire: Readonly<Record<OpenCodeGoProtocol, string>> = {
   'chat-completions':
-    '`POST /zen/go/v1/chat/completions` with Bearer auth, `max_tokens`, `stream: true`, and `stream_options.include_usage` streams OpenAI-compatible `chat.completion.chunk` server-sent events (text in `delta.content`, a `finish_reason: stop` chunk, a usage chunk) ending with `data: [DONE]`.',
+    '`POST /inference/go/v1/chat/completions` with Bearer auth, `max_tokens`, `stream: true`, and `stream_options.include_usage` streams OpenAI-compatible `chat.completion.chunk` server-sent events (text in `delta.content`, a `finish_reason: stop` chunk, a usage chunk) ending with `data: [DONE]`.',
   messages:
-    '`POST /zen/go/v1/messages` with `x-api-key`, `anthropic-version: 2023-06-01`, `max_tokens`, and `stream: true` streams Anthropic Messages events (`message_start`, a text block of `text_delta` events, `message_delta` with `stop_reason: end_turn` and usage, and the required `message_stop`).',
+    '`POST /inference/go/v1/messages` with `x-api-key`, `anthropic-version: 2023-06-01`, `max_tokens`, and `stream: true` streams Anthropic Messages events (`message_start`, a text block of `text_delta` events, `message_delta` with `stop_reason: end_turn` and usage, and the required `message_stop`).',
   responses:
-    '`POST /zen/go/v1/responses` with Bearer auth, `max_output_tokens`, `store: false`, and `stream: true` streams OpenAI Responses events (`response.created`, a `message` item of `response.output_text.delta` events, and the required `response.completed` with the output and usage).'
+    '`POST /inference/go/v1/responses` with Bearer auth, `max_output_tokens`, `store: false`, and `stream: true` streams OpenAI Responses events (`response.created`, a `message` item of `response.output_text.delta` events, and the required `response.completed` with the output and usage).'
 }
 
 const plainTextCase = (
@@ -344,7 +344,7 @@ export const openCodeGoUsageSnapshotCase: OpenCodeGoConformanceCase =
   makeSubscriptionUsageConformanceCase({
     id: 'opencode.go.usage.snapshot',
     title: 'Go subscription usage normalizes the reported windows only',
-    docs: 'The Go usage endpoint (`GET /zen/go/v1/usage`, Bearer API key, not console cookies or OAuth) answers JSON whose `usage` carries `rolling`, `weekly`, and `monthly` windows as `{ percent, resetsAt }` (any may be `null` or absent); the fetcher maps them to `five-hour`, `seven-day`, and `monthly`, trusting the provider reset instants.',
+    docs: 'The Go usage endpoint (`GET /inference/go/v1/usage`, Bearer API key, not console cookies or OAuth) answers JSON whose `usage` carries `rolling`, `weekly`, and `monthly` windows as `{ percent, resetsAt }` (any may be `null` or absent); the fetcher maps them to `five-hour`, `seven-day`, and `monthly`, trusting the provider reset instants.',
     wire: 'A wire window is reported when its `percent` is a number from 0 to 100; its reset instant is `resetsAt` when readable (never an inferred calendar boundary).',
     providerId: openCodeGoProviderId,
     windowIds: goWindows.map(window => window.id),
