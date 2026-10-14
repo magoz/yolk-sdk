@@ -126,7 +126,7 @@ describe('code mode catalog', () => {
     // Search hits carry signatures: no describe step before every call. Known names are called
     // without searching; a found tool is never called in the script that found it.
     expect(description).toContain('`signature` is the call with its argument and result types')
-    expect(description).toContain("When you already know a tool's exact name")
+    expect(description).toContain('When you already know the exact name of a tool')
     expect(description).toContain('Never call a tool in the same script that found it.')
     expect(description).toContain(
       'call a tool whose exact name you already know directly, without searching'
