@@ -117,7 +117,8 @@ the miss.
   `tools.<name>()` stays fail-closed.
 - Code mode adds every stageable tool to its catalog marked `stage` (stageable tools are
   approval-gated, so scripts can only stage them whatever their `callableBy`; `all` ones,
-  deferred or not, are found the same way): `searchTools` hits carry `stageOnly: true` and
+  deferred or not, are found the same way): `searchTools` hits carry `stageOnly: true` and the
+  `stage("<name>", args)` signature, and
   `describeTool` renders `stage("<name>", args: …)`. They have no callable `tools` binding: the
   executor gets them as `unbound` keys (identifier and raw name), so `tools.<id>(args)` rejects with
   "`<name>` is approval-gated: record it with `stage("<name>", args)` instead of calling it".

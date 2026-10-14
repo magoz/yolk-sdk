@@ -133,8 +133,8 @@ const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
   the model, so their lines sit outside the budget.
 - `search` tools contribute nothing to the description: no namespace heading, hint, or count.
   Adding or removing them, even a whole module of them, leaves the description byte-identical and
-  the prompt cache intact. One fixed line always tells scripts to use `searchTools()`,
-  `describeTool()`, and `describeNamespace()` for unlisted tools.
+  the prompt cache intact. One fixed line always tells scripts to find unlisted tools with
+  `searchTools()` (each hit has its call signature) or `describeNamespace()`.
 - Give a module a `description` (`{ id, description, tools }`) to show it under the module's
   heading, return it from `describeNamespace()`, and make it searchable.
 - Tools that poll (no timers in scripts) should stay `callableBy: 'model'` until they offer a wait
@@ -239,7 +239,10 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
   with a defect rejects with `<label> failed unexpectedly.` and is recorded as `error`.
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
-  and `store(key, value)` / `load(key)`.
+  and `store(key, value)` / `load(key)`. `searchTools` hits include a one-line `signature`
+  (argument and result types), so scripts call a found tool in the next script without
+  `describeTool`. Large fetched data can be kept with `store()` and filtered later instead of
+  fetched again.
 - No Node.js, network, filesystem, `require`, `fetch`, or timers.
 
 The result starts with `Script completed` or `Script failed`, then the wall time, the output in
@@ -372,7 +375,7 @@ around your `ToolExecutor`: they run inside the review action. Pass the same per
 
 A stageable approval-gated tool may be `callableBy: 'codemode'` (usually with
 `discovery: 'search'`): it is never declared to the model and costs no context. Scripts find it
-with `searchTools()` (hits carry `stageOnly: true`), read it with `describeTool()` (rendered as the
+with `searchTools()` (hits carry `stageOnly: true` and the `stage()` signature), read it with `describeTool()` (rendered as the
 `stage()` call), and can only `stage()` it; a direct `tools.<name>()` call rejects with a hint to
 stage it. Resolution warns when a stage-only tool resolves without `plans`, where it would be
 unreachable. Model-callable stageable tools (`callableBy: 'all'`, deferred or not) are searchable,

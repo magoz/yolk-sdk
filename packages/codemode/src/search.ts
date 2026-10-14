@@ -1,5 +1,5 @@
 import { rankToolSearchDocuments, toolSearchTokens } from '@yolk-sdk/agent/tools'
-import type { CodeModeCatalogTool } from './catalog.ts'
+import { codeModeToolSignature, type CodeModeCatalogTool } from './catalog.ts'
 
 /** Default number of `searchTools` results. */
 export const defaultCodeModeSearchLimit = 8
@@ -15,6 +15,8 @@ export type CodeModeSearchHit = {
    */
   readonly name: string
   readonly description: string
+  /** The call with its argument and result types (`codeModeToolSignature`), bounded. */
+  readonly signature: string
   /** A stage-only tool (ADR 0007): no `tools` binding, only `stage()` it. */
   readonly stageOnly?: true
 }
@@ -36,8 +38,17 @@ export const searchCodeModeTools = (
 
   const hit = (tool: CodeModeCatalogTool): CodeModeSearchHit =>
     tool.exposure === 'stage'
-      ? { name: tool.name, description: tool.description, stageOnly: true }
-      : { name: tool.identifier, description: tool.description }
+      ? {
+          name: tool.name,
+          description: tool.description,
+          signature: codeModeToolSignature(tool),
+          stageOnly: true
+        }
+      : {
+          name: tool.identifier,
+          description: tool.description,
+          signature: codeModeToolSignature(tool)
+        }
 
   return rankToolSearchDocuments(
     scoped.map(tool => ({

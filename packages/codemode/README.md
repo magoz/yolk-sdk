@@ -82,8 +82,10 @@ const program = Effect.gen(function* () {
   always declared, outside the budget, and deferred (`loading: 'deferred'`) `all` tools count as
   `search` tools. One fixed line tells scripts to
   find unlisted tools with `searchTools(query, { limit?, namespace? })` (BM25 over names,
-  descriptions, namespaces, and module descriptions), `describeTool(name)`, and
-  `describeNamespace(name)`.
+  descriptions, namespaces, and module descriptions) and call them in the next script: each hit
+  has a one-line `signature` with the argument and result types (`codeModeToolSignature`; past
+  800 characters it is cut with a `describeTool` pointer). `describeTool(name)` gives the full documented declaration and
+  `describeNamespace(name)` a namespace's tools.
 - Results start with `Script completed` or `Script failed`, include the wall time, output, and the
   JSON return value, and are cut head and tail at `maxOutputChars`. Images beyond `maxImages` or
   `maxImageBytes` are dropped with a note. Failed scripts keep partial output and list the tool
@@ -144,7 +146,7 @@ to lower the cap.
 
 A stageable tool may be **stage-only** (`callableBy: 'codemode'`, usually with `discovery: 'search'`):
 it is never declared to the model, scripts find it with `searchTools()` (hits marked
-`stageOnly: true`) and read it with `describeTool()`, and the only thing they can do with it is
+`stageOnly: true`, with the `stage("<name>", args)` signature), and the only thing they can do with it is
 `stage()` it. Model-callable stageable tools (`all`, deferred or not) are found the same way. See
 [ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
 

@@ -67,7 +67,7 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   (defects and synchronous throws included: the invocation runs inside `Effect.suspend`) is logged
   and never changes the call's result or record.
 - Description: intro, globals one line each, nested tools by namespace (with the module
-  `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
+  `description` under the heading), then one fixed line pointing to `searchTools` (hits carry signatures) and
   `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within
   `inlineBudget` (four characters per estimated token), chosen fairly (each round every namespace
   places its cheapest remaining tool; a namespace whose next tool does not fit drops out). `all`
@@ -75,7 +75,9 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   headings, hints, or counts), so adding or removing them, even whole namespaces, leaves the text
   byte-identical.
 - Globals (`searchTools`, `describeTool`, `describeNamespace`) cover every nested tool and are not
-  recorded as calls.
+  recorded as calls. `searchTools` hits carry `signature` (`codeModeToolSignature`: the call on one
+  line without description comments, cut at `maxCodeModeSearchSignatureChars`), so a found tool is
+  called in the next script without a `describeTool` round trip.
 - Store writes are reported only for successful scripts and only in `structuredContent.codemode`.
   `codeModeStoreFromToolResults` takes `{ toolName, result }` entries and applies only results of
   the configured code mode tool name; it keeps pi's bounds (256 Ki characters of JSON per value,

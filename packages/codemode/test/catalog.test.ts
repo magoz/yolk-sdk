@@ -13,6 +13,7 @@ import {
   codeModeCatalog,
   codeModeCatalogInstructionKey,
   makeCodeModeTool,
+  maxCodeModeSearchSignatureChars,
   renderCodeModeDescription,
   searchCodeModeTools,
   selectCodeModeListing,
@@ -30,6 +31,7 @@ const nestedTool = (
   options: {
     readonly exposure?: 'all' | 'listed' | 'search' | 'pinned'
     readonly description?: string
+    readonly parameters?: ToolDef['parameters']
     readonly outputSchema?: ToolDef['outputSchema']
     readonly moduleDescription?: string
   } = {}
@@ -39,7 +41,7 @@ const nestedTool = (
   const def = ToolDef.make({
     name,
     description: options.description ?? `${name} tool`,
-    parameters: {
+    parameters: options.parameters ?? {
       type: 'object',
       properties: { query: { type: 'string' } },
       required: ['query']
@@ -121,7 +123,13 @@ describe('code mode catalog', () => {
     expect(description).toContain(
       'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })`'
     )
+    // Search hits carry signatures: no describe step before every call.
+    expect(description).toContain('`signature` is the call with its argument and result types')
+    expect(description).not.toContain('before calling it')
     expect(description).not.toContain('store(key, value)')
+    expect(renderCodeModeDescription({ tools: [], store: true })).toContain(
+      'When fetched data is large, store it and return a summary'
+    )
   })
 
   it('fills the budget fairly, one cheapest tool per namespace per round', () => {
@@ -318,7 +326,8 @@ describe('searchTools', () => {
     ])
     expect(searchCodeModeTools(catalog, 'deals')[0]).toEqual({
       name: 'crmListDeals',
-      description: 'List open deals'
+      description: 'List open deals',
+      signature: 'tools.crmListDeals({ query: string; }): Promise<string>'
     })
     // Namespace matches count: both mail tools, shorter document first.
     expect(searchCodeModeTools(catalog, 'mail').map(hit => hit.name)).toEqual([
@@ -341,6 +350,81 @@ describe('searchTools', () => {
 
   it('indexes namespace descriptions', () => {
     expect(searchCodeModeTools(catalog, 'invoices').map(hit => hit.name)).toEqual(['ledger_read'])
+  })
+
+  it('renders signatures on one line without description comments, inputs and results', () => {
+    const described = codeModeCatalog([
+      nestedTool('crm', 'crm_find', {
+        description: 'Find a contact',
+        parameters: {
+          type: 'object',
+          properties: {
+            filter: {
+              type: 'object',
+              description: 'Which contacts.\nSecond line of the description.',
+              properties: { email: { type: 'string', description: 'Exact email' } },
+              required: ['email']
+            },
+            mode: { type: 'string', enum: ['// not a comment', 'fast'] }
+          },
+          required: ['filter']
+        },
+        outputSchema: {
+          type: 'object',
+          properties: { id: { type: 'string', description: 'Contact id' } },
+          required: ['id']
+        }
+      })
+    ])
+
+    expect(searchCodeModeTools(described, 'find contact')[0]?.signature).toBe(
+      'tools.crm_find({ filter: { email: string; }; mode?: "// not a comment" | "fast"; }): Promise<{ id: string; }>'
+    )
+  })
+
+  it('cuts a long signature within the limit, with a pointer to describeTool', () => {
+    const wide = codeModeCatalog([
+      nestedTool('crm', 'crm_bulk', {
+        description: 'Bulk update',
+        parameters: {
+          type: 'object',
+          properties: Object.fromEntries(
+            Array.from({ length: 120 }, (_, index) => [`field${index}`, { type: 'string' }])
+          )
+        }
+      })
+    ])
+
+    const signature = searchCodeModeTools(wide, 'bulk')[0]?.signature ?? ''
+
+    expect(signature.startsWith('tools.crm_bulk({ field0?: string;')).toBe(true)
+    expect(signature.endsWith('… (describeTool for the full declaration)')).toBe(true)
+    expect(signature).toHaveLength(maxCodeModeSearchSignatureChars)
+  })
+
+  it('never splits a surrogate pair when it cuts', () => {
+    // Names one character apart shift the cut by one, so one of them lands inside an emoji.
+    const emoji = codeModeCatalog(
+      ['crm_react', 'crm_reacts'].map(name =>
+        nestedTool('crm', name, {
+          description: 'React',
+          parameters: {
+            type: 'object',
+            properties: { reaction: { type: 'string', const: '😀'.repeat(400) } }
+          }
+        })
+      )
+    )
+
+    const signatures = searchCodeModeTools(emoji, 'react').map(hit => hit.signature)
+
+    expect(signatures).toHaveLength(2)
+
+    for (const signature of signatures) {
+      expect(signature.endsWith('… (describeTool for the full declaration)')).toBe(true)
+      expect(signature.length).toBeLessThanOrEqual(maxCodeModeSearchSignatureChars)
+      expect(signature).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
+    }
   })
 })
 
@@ -392,6 +476,7 @@ describe('catalog instructions', () => {
 
       expect(descriptionOf(large)).toBe(descriptionOf(small))
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
+      expect(descriptionOf(large)).not.toContain('before calling it')
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render(instructionOf(large).state)
