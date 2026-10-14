@@ -298,7 +298,7 @@ const SearchOptions = Schema.Struct({
 const decodeSearchOptions = Schema.decodeUnknownOption(SearchOptions)
 
 /** `searchTools`, `describeTool`, and `describeNamespace` over every nested tool and, while the
- * script may stage, every stage-only tool. */
+ * script may stage, every stageable tool. */
 const discoveryGlobals = (
   catalog: ReadonlyArray<CodeModeCatalogTool>
 ): ReadonlyArray<CodeModeExecutorGlobal> => [
@@ -410,7 +410,7 @@ const stageGlobal = (
   }
 })
 
-/** A direct call of a stage-only tool rejects with a hint to stage it (ADR 0007). */
+/** A direct call of a stageable tool rejects with a hint to stage it (ADR 0007). */
 const stageOnlyRejections = (stageOnly: ReadonlyArray<CodeModeCatalogTool>) =>
   stageOnly.flatMap(tool => {
     const message = `${tool.name} is approval-gated: record it with stage(${JSON.stringify(tool.name)}, args) instead of calling it.`

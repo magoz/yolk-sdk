@@ -123,8 +123,9 @@ the miss.
   "`<name>` is approval-gated: record it with `stage("<name>", args)` instead of calling it".
 - `stage()` accepts the catalog identifier or the raw name. `not_stageable` names close matches and
   points to `searchTools`, not every stageable tool.
-- `ALL_TOOLS` lists callable tools only, so it excludes stage-only tools; `searchTools` and
-  `describeNamespace` include them, marked stage-only.
+- `ALL_TOOLS` lists callable tools only, so it excludes stageable tools; `searchTools` and
+  `describeNamespace` include them, marked `stageOnly`. `describeTool` matches a stageable tool's
+  exact name before callable identifiers, so a callable sharing its identifier never answers for it.
 - The Stageable section names stageable tools except `search` and deferred ones: `pinned` ones
   always, the others up to a cap of 20 with a count of the rest.
 - Plan apply is unchanged: the plan executor uses `executeRegistration` over the stageable
@@ -145,8 +146,8 @@ resolves), and a pointer to the catalog. Nothing in it depends on tools.
 - full signatures of `listed` and `pinned` tools, filled round-robin across namespaces, cheapest
   first, within the inline budget (`defaultCodeModeInlineBudget`, host-configurable); `pinned`
   tools are always shown, outside the budget; `search` tools never are;
-- stageable tools counted in their namespace and named in the Stageable section when `listed` or
-  `pinned` and not deferred (as above).
+- stageable tools counted in their namespace and named in the Stageable section unless `search` or
+  deferred (as above).
 
 `ToolDiscovery` gains `pinned` (`listed` = shown when the budget allows, `search` = never shown,
 `pinned` = always shown), valid only with `callableBy: 'codemode'` like the others.

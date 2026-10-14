@@ -546,9 +546,12 @@ describe('stage-only tools', () => {
 })
 
 /** An approval-gated stageable tool the model calls directly once `tool_search` loads it. */
-const deferredArchiveTool = (archived: Array<string>): ToolRegistration<TestContext> =>
+const deferredArchiveTool = (
+  archived: Array<string>,
+  name = 'archive-resource'
+): ToolRegistration<TestContext> =>
   makeTool<TestContext, typeof ArchiveParams>({
-    name: 'archive-resource',
+    name,
     description: 'Archive a published resource',
     parameters: ArchiveParams,
     access: 'write',
@@ -582,7 +585,7 @@ describe('stageable tools model-callable too', () => {
 
       const output = text((yield* env.run()).content)
 
-      expect(output).toContain('"name":"link_curriculum"')
+      expect(output).toMatch(/\{"name":"link_curriculum","description":"[^"]*","stageOnly":true\}/)
       expect(output).toContain(
         '{"name":"archive-resource","description":"Archive a published resource","stageOnly":true}'
       )
@@ -609,47 +612,80 @@ describe('stageable tools model-callable too', () => {
 
       const without = yield* catalogOf([])
       const withDeferred = yield* catalogOf([deferredArchiveTool([])])
-      const cmsCount = (catalog: string) => Number(/- `cms` \((\d+) tools/.exec(catalog)?.[1])
+      const cmsCount = (catalog: string) => /- `cms` \((\d+) tools/.exec(catalog)?.[1]
 
-      expect(cmsCount(withDeferred)).toBe(cmsCount(without) + 1)
+      expect(cmsCount(without)).toBe('3')
+      expect(cmsCount(withDeferred)).toBe('4')
       expect(withDeferred).toContain('- `link_curriculum`')
       expect(withDeferred).not.toContain('archive-resource')
     })
   )
 })
 
-describe('stage-only tools in the pi executor', () => {
-  it.effect('reject a direct call with a hint to stage them, and stage by identifier', () =>
-    Effect.gen(function* () {
-      const archived: Array<string> = []
+describe('stageable tools in the pi executor', () => {
+  for (const [kind, toolOf] of [
+    ['stage-only', archiveTool],
+    ['deferred model-callable', deferredArchiveTool]
+  ] as const) {
+    it.effect(`reject a direct call of a ${kind} one with a hint, and stage by identifier`, () =>
+      Effect.gen(function* () {
+        const archived: Array<string> = []
 
+        const env = yield* stagingSetup(() => Promise.resolve(undefined), {
+          extraTools: [toolOf(archived)],
+          codemode: { executor: makePiCodeModeExecutor() }
+        })
+
+        const result = yield* env.toolSet.execute(
+          ToolCall.make({
+            id: 'call_pi',
+            name: 'codemode',
+            params: {
+              code: `const direct = await tools.archive_resource({ resource: 'r1' }).catch(error => error.message)
+                const listed = ALL_TOOLS.map(tool => tool.name)
+                const receipt = await stage('archive_resource', { resource: 'r1' })
+                return { direct, listed, key: receipt.key }`
+            }
+          })
+        )
+
+        const output = text(result.content)
+
+        expect(result.isError).toBeUndefined()
+        expect(output).toContain(
+          'archive-resource is approval-gated: record it with stage(\\"archive-resource\\", args) instead of calling it.'
+        )
+        expect(output).not.toMatch(/"listed":\[[^\]]*archive/)
+        expect(output).toContain('"key":"call_pi/s1"')
+        expect(archived).toEqual([])
+      })
+    )
+  }
+
+  it.effect('describe a stageable tool by its name, not a callable sharing its identifier', () =>
+    Effect.gen(function* () {
+      // The callable `archive-resource` binds `tools.archive_resource`, the stageable tool's name.
+      const env = yield* stagingSetup(
+        (_call, _stage, global) => global('describeTool', 'archive_resource'),
+        { extraTools: [queryTool('archive-resource'), deferredArchiveTool([], 'archive_resource')] }
+      )
+
+      const output = text((yield* env.run()).content)
+
+      expect(output).toContain('await stage(\\"archive_resource\\", args)')
+    })
+  )
+
+  it.effect('never name a deferred stageable tool in the description', () =>
+    Effect.gen(function* () {
       const env = yield* stagingSetup(() => Promise.resolve(undefined), {
-        extraTools: [archiveTool(archived)],
-        codemode: { executor: makePiCodeModeExecutor() }
+        extraTools: [deferredArchiveTool([])]
       })
 
-      const result = yield* env.toolSet.execute(
-        ToolCall.make({
-          id: 'call_pi',
-          name: 'codemode',
-          params: {
-            code: `const direct = await tools.archive_resource({ resource: 'r1' }).catch(error => error.message)
-              const listed = ALL_TOOLS.map(tool => tool.name)
-              const receipt = await stage('archive_resource', { resource: 'r1' })
-              return { direct, listed, key: receipt.key }`
-          }
-        })
-      )
+      const description = env.toolSet.tools.find(tool => tool.name === 'codemode')?.description
 
-      const output = text(result.content)
-
-      expect(result.isError).toBeUndefined()
-      expect(output).toContain(
-        'archive-resource is approval-gated: record it with stage(\\"archive-resource\\", args) instead of calling it.'
-      )
-      expect(output).not.toMatch(/"listed":\[[^\]]*archive/)
-      expect(output).toContain('"key":"call_pi/s1"')
-      expect(archived).toEqual([])
+      expect(description).toContain('- `link_curriculum`')
+      expect(description).not.toContain('archive-resource')
     })
   )
 })

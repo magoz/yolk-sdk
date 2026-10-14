@@ -13,8 +13,8 @@ import type { NestedTool } from '@yolk-sdk/agent/tools'
 import type { CodeModeJsonSchema } from './executor.ts'
 
 /** How a nested tool reaches scripts: `all` tools are also direct model tools; `listed` and
- * `search` are the two discovery modes of `codemode`-only tools; `stage` marks a stage-only tool
- * (ADR 0007): found by search, never callable, only passed to `stage()`.
+ * `search` are the two discovery modes of `codemode`-only tools; `stage` marks a stageable tool
+ * (approval-gated, ADR 0007): found by search, never callable, only passed to `stage()`.
  */
 export type CodeModeToolExposure = 'all' | 'listed' | 'search' | 'pinned' | 'stage'
 
@@ -345,7 +345,7 @@ export type CodeModeDescriptionInput = {
   readonly inlineBudget?: number
   /** Mention `store()`/`load()` persistence. */
   readonly store?: boolean
-  /** Document `stage()` and list the stageable tools that are not stage-only `search` tools. */
+  /** Document `stage()` and list the stageable tools that are neither `search` nor deferred. */
   readonly staging?: CodeModeStagingDescription
 }
 
@@ -355,8 +355,9 @@ export type CodeModeDescriptionInput = {
  * `all` tools get one line each outside the budget; `listed` tools are declared within the inline
  * budget; `search` tools never contribute, so adding or removing them (even whole namespaces of
  * them) leaves the text byte-identical. With `staging` (and stageable tools), `stage()` is listed
- * with the globals and the stageable tool names follow the nested tools; stage-only `search` tools
- * are never named, so they leave the text byte-identical too once any stageable tool exists.
+ * with the globals and the stageable tool names follow the nested tools; `search` and deferred
+ * stageable tools are never named, so they leave the text byte-identical too once any stageable
+ * tool exists.
  */
 export const renderCodeModeDescription = (input: CodeModeDescriptionInput): string => {
   const catalog = codeModeCatalog(input.tools)
@@ -405,12 +406,18 @@ export const describeCodeModeTool = (tool: CodeModeCatalogTool): string =>
       ].join('\n\n')
     : renderToolSample(declarationTool(tool))
 
-/** Finds a tool by identifier or raw name. */
+/**
+ * Finds a tool by identifier or raw name. A stageable tool's exact raw name wins first: it has no
+ * binding, so a callable tool sharing its identifier (`archive-resource` vs `archive_resource`)
+ * must not answer for it; callable lookups keep identifier precedence, as their bindings do.
+ */
 export const findCodeModeTool = (
   catalog: ReadonlyArray<CodeModeCatalogTool>,
   name: string
 ): CodeModeCatalogTool | undefined =>
-  catalog.find(tool => tool.identifier === name) ?? catalog.find(tool => tool.name === name)
+  catalog.find(tool => tool.exposure === 'stage' && tool.name === name) ??
+  catalog.find(tool => tool.identifier === name) ??
+  catalog.find(tool => tool.name === name)
 
 /** The instruction key of the code mode catalog (`catalog: 'instructions'`, ADR 0007). */
 export const codeModeCatalogInstructionKey = 'yolk.codemode.catalog'
@@ -429,7 +436,8 @@ const CodeModeCatalogNamespace = Schema.Struct({
 /** The catalog an instruction message records as its state (JSON, never model-visible). */
 export const CodeModeCatalogSummary = Schema.Struct({
   namespaces: Schema.Array(CodeModeCatalogNamespace),
-  /** Stageable tool names the catalog lists: `pinned` ones, then `listed` ones (never `search`). */
+  /** Stageable tool names the catalog lists: `pinned` ones, then the others (never `search` or
+   * deferred ones). */
   stageable: Schema.Struct({
     pinned: Schema.Array(Schema.String),
     listed: Schema.Array(Schema.String)
