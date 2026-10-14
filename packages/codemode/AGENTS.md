@@ -67,7 +67,7 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   (defects and synchronous throws included: the invocation runs inside `Effect.suspend`) is logged
   and never changes the call's result or record.
 - Description: intro, globals one line each, nested tools by namespace (with the module
-  `description` under the heading), then one fixed line pointing to `searchTools`/`describeTool`/
+  `description` under the heading), then one fixed line pointing to `searchTools` (hits carry signatures) and
   `describeNamespace`. `codemode` + `listed` tools are declared with pi's renderer within
   `inlineBudget` (four characters per estimated token), chosen fairly (each round every namespace
   places its cheapest remaining tool; a namespace whose next tool does not fit drops out). `all`

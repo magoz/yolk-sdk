@@ -351,7 +351,7 @@ export type CodeModeDescriptionInput = {
 
 /**
  * The code mode tool description: intro, globals one per line, then nested tools grouped by
- * namespace, then one fixed line pointing to `searchTools`/`describeTool`/`describeNamespace`.
+ * namespace, then one fixed line pointing to `searchTools` and `describeNamespace`.
  * `all` tools get one line each outside the budget; `listed` tools are declared within the inline
  * budget; `search` tools never contribute, so adding or removing them (even whole namespaces of
  * them) leaves the text byte-identical. With `staging` (and stageable tools), `stage()` is listed
@@ -393,16 +393,35 @@ export const renderCodeModeDescription = (input: CodeModeDescriptionInput): stri
   ].join('\n\n')
 }
 
-/** Longest `searchTools` signature; a longer one is cut (`describeTool` has the whole declaration). */
+/** Longest `searchTools` signature, cut marker included (`describeTool` has the whole declaration). */
 export const maxCodeModeSearchSignatureChars = 800
 
-// The argument type on one line, without the description comments (`describeTool` keeps them).
-const compactType = (schema: CodeModeJsonSchema) =>
-  schemaToType(schema)
+const signatureCutMarker = '… (describeTool for the full declaration)'
+
+// A rendered type on one line, without its description comments (`describeTool` keeps them). pi
+// puts every description line on its own `//` line and JSON-quotes keys and literals, so no other
+// line starts with `//`.
+const compactText = (rendered: string) =>
+  rendered
     .split('\n')
     .map(line => line.trim())
     .filter(line => !line.startsWith('//'))
     .join(' ')
+
+const compactResultType = (schema: CodeModeJsonSchema) => {
+  const rendered = compactText(renderToolOutputType(schema))
+
+  return rendered.length <= maxShortTypeChars ? rendered : shortType(schema)
+}
+
+// Cuts at a code point boundary: never leaves half of a surrogate pair.
+const cutSignature = (signature: string) => {
+  const end = maxCodeModeSearchSignatureChars - signatureCutMarker.length
+  const kept = signature.slice(0, end)
+  const last = kept.charCodeAt(kept.length - 1)
+
+  return `${last >= 0xd800 && last <= 0xdbff ? kept.slice(0, -1) : kept}${signatureCutMarker}`
+}
 
 /**
  * The call a `searchTools` hit shows, enough to call the tool without `describeTool`:
@@ -412,12 +431,10 @@ const compactType = (schema: CodeModeJsonSchema) =>
 export const codeModeToolSignature = (tool: CodeModeCatalogTool): string => {
   const signature =
     tool.exposure === 'stage'
-      ? `stage(${JSON.stringify(tool.name)}, ${compactType(tool.inputSchema)})`
-      : `${tool.callLabel}(${compactType(tool.inputSchema)}): Promise<${shortType(tool.outputSchema)}>`
+      ? `stage(${JSON.stringify(tool.name)}, ${compactText(schemaToType(tool.inputSchema))})`
+      : `${tool.callLabel}(${compactText(schemaToType(tool.inputSchema))}): Promise<${compactResultType(tool.outputSchema)}>`
 
-  return signature.length <= maxCodeModeSearchSignatureChars
-    ? signature
-    : `${signature.slice(0, maxCodeModeSearchSignatureChars)}… (describeTool for the full declaration)`
+  return signature.length <= maxCodeModeSearchSignatureChars ? signature : cutSignature(signature)
 }
 
 /**
