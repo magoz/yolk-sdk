@@ -80,15 +80,15 @@ const program = Effect.gen(function* () {
   `search` tools contribute nothing (no headings or hints), so the description stays
   byte-identical when they, or whole namespaces of them, change. `codemode` + `pinned` tools are
   always declared, outside the budget, and deferred (`loading: 'deferred'`) `all` tools count as
-  `search` tools. One fixed line tells scripts to
-  find unlisted tools with `searchTools(query, { limit?, namespace? })` (BM25 over names,
-  descriptions, namespaces, and module descriptions): each hit has a one-line `signature` with
-  the argument and result types (`codeModeToolSignature`; past 800 characters it is cut with a
-  `describeTool` pointer). The description tells the model to call a tool whose exact name it
-  already knows (listed, returned by an earlier search, or called before) directly, without
-  searching, and never to call a tool in the same script that found it: ranking is lexical and
-  hits carry no access metadata, so an unseen hit could be a write. `describeTool(name)` gives the full documented
-  declaration and `describeNamespace(name)` a namespace's tools.
+  `search` tools. One fixed line tells scripts to find unlisted tools with
+  `searchTools(query, { limit?, namespace? })` (BM25 over names, descriptions, namespaces, and
+  module descriptions): each hit has a one-line `signature` with the argument and result types
+  (`codeModeToolSignature`; past 800 characters it is cut with a `describeTool` pointer). The
+  description tells the model to call a tool whose exact name it already knows (listed, returned
+  by an earlier search, or called before) without searching, and never to call a tool in the same
+  script that found it: ranking is lexical and hits carry no access metadata, so an unseen hit
+  could be a write. `describeTool(name)` gives the full documented declaration and
+  `describeNamespace(name)` a namespace's tools.
 - Results start with `Script completed` or `Script failed`, include the wall time, output, and the
   JSON return value, and are cut head and tail at `maxOutputChars`. Images beyond `maxImages` or
   `maxImageBytes` are dropped with a note. Failed scripts keep partial output and list the tool
