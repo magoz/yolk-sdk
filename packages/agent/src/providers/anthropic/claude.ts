@@ -9,9 +9,8 @@ export const anthropicClaudeClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 /**
  * The Claude Code version the subscription transport identifies as (user agent and billing
  * header). Anthropic gates newer models by it: an outdated version answers HTTP 400
- * `claude_code_version_too_old` (Claude Opus 5.5 needs 2.1.280 or newer). Keep it at a current
- * release; the billing header algorithm (salt, sampled positions, suffix) was verified unchanged
- * for this version.
+ * `claude_code_version_too_old`. Keep it at a current release, and on every bump re-verify the
+ * billing header algorithm (salt, sampled positions, suffix) against that release.
  */
 export const anthropicClaudeCodeVersion = '2.1.299'
 

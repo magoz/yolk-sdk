@@ -1414,6 +1414,29 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('reports the details.error_code of an Anthropic stream error', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.112 does not support this model.","details":{"error_code":"claude_code_version_too_old"}}}\n\n'
+        ])
+      )
+
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        retryable: false,
+        provider: { provider: 'anthropic_claude', providerCode: 'claude_code_version_too_old' }
+      })
+    })
+  )
+
   it.effect('marks Anthropic stream read failures retryable', () =>
     Effect.gen(function* () {
       const response = streamErrorHttpResponse()

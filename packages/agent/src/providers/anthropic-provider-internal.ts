@@ -1469,7 +1469,7 @@ const boundedAnthropicHttpErrorMessage = (message: string) =>
  * `claude_code_version_too_old`) when present, as it is more specific than the generic `type`
  * (`invalid_request_error`), so hosts can explain the failure.
  */
-const anthropicErrorProviderCode = (error: ReturnType<typeof jsonField>) =>
+const anthropicErrorProviderCode = (error: Schema.Json | undefined) =>
   stringField(jsonField(error, 'details'), 'error_code') ??
   stringField(error, 'type') ??
   stringField(error, 'code')
