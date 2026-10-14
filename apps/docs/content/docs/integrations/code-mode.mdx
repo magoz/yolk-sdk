@@ -240,8 +240,9 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
   and `store(key, value)` / `load(key)`. `searchTools` hits include a one-line `signature`
-  (argument and result types), so scripts call a found tool in the next script without
-  `describeTool`. Large fetched data can be kept with `store()` and filtered later instead of
+  (argument and result types), so scripts call a found tool without `describeTool`. The
+  description lets a script search and call a read-only tool in one run when its arguments are
+  clear; tools that change something are called only after the model has seen their hit. Large fetched data can be kept with `store()` and filtered later instead of
   fetched again.
 - No Node.js, network, filesystem, `require`, `fetch`, or timers.
 

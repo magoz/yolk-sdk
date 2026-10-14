@@ -123,8 +123,18 @@ describe('code mode catalog', () => {
     expect(description).toContain(
       'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })`'
     )
-    // Search hits carry signatures: no describe step before every call.
+    // Search hits carry signatures: no describe step before every call; reads can be found and
+    // called in one script, writes only after the hit was seen.
     expect(description).toContain('`signature` is the call with its argument and result types')
+    expect(description).toContain(
+      'When a found tool only reads and its arguments are clear from your query'
+    )
+    expect(description).toContain(
+      'Call a tool that changes something only after you have seen its hit.'
+    )
+    expect(description).toContain(
+      'call a found read-only tool in the same script when its arguments are clear'
+    )
     expect(description).not.toContain('before calling it')
     expect(description).not.toContain('store(key, value)')
     expect(renderCodeModeDescription({ tools: [], store: true })).toContain(
@@ -477,9 +487,16 @@ describe('catalog instructions', () => {
       expect(descriptionOf(large)).toBe(descriptionOf(small))
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('before calling it')
+      expect(descriptionOf(large)).toContain(
+        'call a found read-only tool in the same script when its arguments are clear'
+      )
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render(instructionOf(large).state)
+
+      expect(first).toContain(
+        'call a found read-only tool in the same script when its arguments are clear'
+      )
 
       expect(first).toContain('# Code mode catalog')
       expect(first).toContain('- `crm` (2 tools, 1 listed)')
