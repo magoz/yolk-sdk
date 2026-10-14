@@ -123,8 +123,14 @@ describe('code mode catalog', () => {
     expect(description).toContain(
       'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })`'
     )
-    // Search hits carry signatures: no describe step before every call.
+    // Search hits carry signatures: no describe step before every call. Known names are called
+    // without searching; a found tool is never called in the script that found it.
     expect(description).toContain('`signature` is the call with its argument and result types')
+    expect(description).toContain('When you already know the exact name of a tool')
+    expect(description).toContain('Never call a tool in the same script that found it.')
+    expect(description).toContain(
+      'call a tool whose exact name you already know directly, without searching'
+    )
     expect(description).not.toContain('before calling it')
     expect(description).not.toContain('store(key, value)')
     expect(renderCodeModeDescription({ tools: [], store: true })).toContain(
@@ -477,9 +483,16 @@ describe('catalog instructions', () => {
       expect(descriptionOf(large)).toBe(descriptionOf(small))
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('before calling it')
+      expect(descriptionOf(large)).toContain(
+        'call a tool whose exact name you already know directly, without searching'
+      )
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render(instructionOf(large).state)
+
+      expect(first).toContain(
+        'call a tool whose exact name you already know directly, without searching'
+      )
 
       expect(first).toContain('# Code mode catalog')
       expect(first).toContain('- `crm` (2 tools, 1 listed)')

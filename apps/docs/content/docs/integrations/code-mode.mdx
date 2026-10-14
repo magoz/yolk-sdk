@@ -240,9 +240,10 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
   and `store(key, value)` / `load(key)`. `searchTools` hits include a one-line `signature`
-  (argument and result types), so scripts call a found tool in the next script without
-  `describeTool`. Large fetched data can be kept with `store()` and filtered later instead of
-  fetched again.
+  (argument and result types), so scripts call a found tool without `describeTool`. The
+  description tells the model to call a tool whose exact name it already knows without searching,
+  and never to call a tool in the same script that found it (an unseen hit could be a write).
+  Large fetched data can be kept with `store()` and filtered later instead of fetched again.
 - No Node.js, network, filesystem, `require`, `fetch`, or timers.
 
 The result starts with `Script completed` or `Script failed`, then the wall time, the output in
