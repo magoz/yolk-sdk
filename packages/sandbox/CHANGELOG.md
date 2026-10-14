@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.109
+
+### Patch Changes
+
+- 8bb8c83: Advance unchanged public packages in lockstep with the `@yolk-sdk/codemode` fix that makes every stageable tool searchable and describable from code mode scripts, including model-callable and deferred ones. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [8bb8c83]
+  - @yolk-sdk/agent@0.1.0-canary.109
+
 ## 0.1.0-canary.108
 
 ### Patch Changes
