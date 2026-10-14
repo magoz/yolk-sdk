@@ -131,13 +131,14 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   `{ id, digest, count, reviewToolName }`; a failed save makes the result `isError` with
   `{ ok: false }`. The description lists `stage` and the stageable tool names only when staging is
   offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
-- Stage-only tools (ADR 0007: stageable with `callableBy: 'codemode'`): while the script may stage,
-  `codeModeStageOnlyCatalog` adds them to the discovery catalog only (`exposure: 'stage'`, no
+- Stageable tools (ADR 0007; approval-gated, so scripts only stage them whatever their
+  `callableBy`; stage-only ones are `callableBy: 'codemode'`): while the script may stage,
+  `codeModeStageOnlyCatalog` adds every one to the discovery catalog only (`exposure: 'stage'`, no
   `tools` binding, not in `ALL_TOOLS`; the executor gets them as `unbound` keys so a direct call
   rejects with a hint to `stage()` them). `searchTools`/`describeNamespace` return their raw name with
   `stageOnly: true`; `describeTool` renders the `stage()` call and its argument type; `stage()`
-  accepts the raw name or the catalog identifier. The description never names stage-only `search`
-  tools, so they leave it byte-identical once any stageable tool exists.
+  accepts the raw name or the catalog identifier. The description never names `search` or deferred
+  stageable tools, so they leave it byte-identical once any stageable tool exists.
 - `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
   host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
   script's queue never holds process permits). Per-script semaphores are keyed by the parent tool

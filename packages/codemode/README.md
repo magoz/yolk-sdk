@@ -145,7 +145,8 @@ to lower the cap.
 A stageable tool may be **stage-only** (`callableBy: 'codemode'`, usually with `discovery: 'search'`):
 it is never declared to the model, scripts find it with `searchTools()` (hits marked
 `stageOnly: true`) and read it with `describeTool()`, and the only thing they can do with it is
-`stage()` it. See [ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
+`stage()` it. Model-callable stageable tools (`all`, deferred or not) are found the same way. See
+[ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
 
 Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
 decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
