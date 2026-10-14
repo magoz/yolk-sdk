@@ -21,7 +21,7 @@ This ADR separates **who may call a tool** from **when the model sees it**, lets
 stage gated tools, and moves the catalog into append-only instructions. State of the art it follows:
 Cloudflare Code Mode and `McpConnector`, Anthropic code execution with MCP and Tool Search
 (`defer_loading`), Pi 1.0 exposure (`direct`/`deferred`/`codemode`/`hidden`), and OpenCode v2's
-catalog instructions with delta updates.
+catalog instructions (which append deltas; Yolk appends whole catalogs, see Compaction).
 
 ## Terms
 
@@ -33,7 +33,7 @@ catalog instructions with delta updates.
 - **Stage-only tool**: a stageable approval-gated tool with `callableBy: 'codemode'`; scripts find
   it and can only `stage()` it.
 - **Catalog instructions**: the code mode catalog delivered as an instruction message, not in the
-  `codemode` tool description; changes are appended as deltas.
+  `codemode` tool description; a change appends the whole new catalog.
 
 ## Decision summary
 
@@ -44,7 +44,7 @@ catalog instructions with delta updates.
 | Gated tools      | `deferred` is valid with approval: direct calls keep their one-click approval once activated.                                                                                                     |
 | Stage-only       | `callableBy: 'codemode'` is valid on stageable approval tools; scripts find them by search and only `stage()` them.                                                                               |
 | Catalog          | The `codemode` description is invariant. The catalog is an instruction message: every namespace always listed (name, count, description), signatures within a budget, pinned tools always listed. |
-| Catalog changes  | Appended as a delta instruction message; earlier messages and tool definitions never change.                                                                                                      |
+| Catalog changes  | Appended as a new, complete instruction message; earlier messages and tool definitions never change.                                                                                              |
 | Fail-closed      | Unchanged: approval tools never run from scripts. Deferral saves context, not authority: an allowed deferred tool runs when called by name.                                                       |
 | Provider-native  | Optional later: Anthropic `defer_loading` + tool search and `cache_control` breakpoints map to the same model.                                                                                    |
 
@@ -163,17 +163,22 @@ place, so a transcript rebuilt from chat messages keeps them.
 **Compaction.** The loop compares with the uncompacted transcript, so a summary that folded an
 instruction away would leave the model without it and never re-append it. Window compaction
 (`applyCompactionPlan`) keeps the latest instruction message of each key verbatim after its
-summary. Hosts with their own compaction must do the same (`latestInstructionMessages`).
+summary. Hosts with their own compaction must do the same (`latestInstructionMessages`). Because
+only the latest message of a key survives, every instruction message must be self-contained: a
+delta would leave the model with the change but without the rest. `render` therefore never sees
+the previous state, which makes a delta unrepresentable rather than a rule to remember; a changed
+catalog costs one full render (bounded by the inline budget), still appended after the cached
+prefix.
 
-**Delivery.** `RunInstruction` is `{ key, state, render({ previous, current }) }`. Before each
-model request the loop compares `state` with the latest recorded state of the key (canonical JSON):
-equal appends nothing; different appends one instruction message (first render, delta or full
-replacement, or a removal notice once). States compare as JSON values independent of object key
+**Delivery.** `RunInstruction` is `{ key, state, render(current) }`. Before each model request the
+loop compares `state` with the latest recorded state of the key (canonical JSON): equal appends
+nothing; different appends one instruction message (the full render, or a removal notice once). States compare as JSON values independent of object key
 order (`interactionJsonEquals`). `run()` does it for `RunConfig.instructions` and returns
 the messages with its created messages; it never emits a `UserMessage` event (not user input).
 Durable hosts driving `runModelTurn` own their transcript: they append
-`instructionMessages(transcript, instructions)` themselves and persist them before the model step;
-the loop then finds the state current and appends nothing, so doing both never duplicates.
+`instructionMessages(transcript, instructions)` themselves and persist them before the model step.
+`runModelTurn` does not accept `instructions` (`ModelTurnConfig`): a single step cannot report
+messages it appended, so they would be re-appended, unpersisted, on every step.
 
 **Registry.** A nested-access registration may declare `instruct` (like `describe`);
 `ResolvedToolSet.instructions` collects them for `RunConfig.instructions`. `instruct` without
@@ -181,7 +186,7 @@ the loop then finds the state current and appends nothing, so doing both never d
 `duplicate_instruction` (each would find the other's message and append every turn).
 
 A host that cannot append messages to its persisted conversation may render the instruction's
-first render (`render({ previous: undefined, current: state })`) into its system prompt instead:
+render (`render(state)`) into its system prompt instead:
 the catalog then invalidates the cache from the system prompt on when it changes (rarely), never
 the tool definitions before it.
 
@@ -189,6 +194,9 @@ Code mode ships the catalog as one such instruction with `makeCodeModeTool({ cat
 'instructions' })` (`codeModeCatalogInstruction`, key `yolk.codemode.catalog`); the default
 `catalog: 'description'` keeps the previous behavior for existing hosts. Hosts drop their own
 "which servers exist" prompt sections: the namespace inventory replaces them.
+
+Realtime voice sessions declare tools once per session (`providerToolDefs`), so they declare
+deferred tools eagerly and have no use for `tool_search`; deferral applies to the text loop.
 
 ## 5. Provider-native mapping (later)
 
@@ -234,9 +242,10 @@ anyway: an allowed deferred tool called by name runs.
   connects; summary namespace lines, counts, budget, pinned (pinned stage-only names past the
   cap); stage-only search marker and declaration; `stage` by identifier; the pi executor rejects a
   direct call with the stage hint and keeps it out of `ALL_TOOLS`.
-- Instructions: initial, delta, full replacement, removal, `null` state; idempotent per transcript
+- Instructions: initial, change (whole render), removal, `null` state; idempotent per transcript
   (key order independent); `run()` keeps them for later turns, never as user message events; kept
-  through window compaction; hidden in and round-tripped through the chat projection.
+  through window compaction, the kept code mode catalog complete after a change; hidden in and
+  round-tripped through the chat projection.
 
 ## Implementation plan
 

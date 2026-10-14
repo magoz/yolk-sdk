@@ -274,10 +274,20 @@ export const ToolLoading = Schema.Literals(['eager', 'deferred'])
 
 export type ToolLoading = typeof ToolLoading.Type
 
-/** Registration-level exposure options: `discovery` exists only for `codemode`-only tools. */
+/** Registration-level exposure options: `discovery` exists only for `codemode`-only tools and
+ * `loading` only for model-callable ones.
+ */
 export type ToolExposure =
-  | { readonly callableBy?: 'all' | 'model'; readonly discovery?: never }
-  | { readonly callableBy: 'codemode'; readonly discovery?: ToolDiscovery }
+  | {
+      readonly callableBy?: 'all' | 'model'
+      readonly discovery?: never
+      readonly loading?: ToolLoading
+    }
+  | {
+      readonly callableBy: 'codemode'
+      readonly discovery?: ToolDiscovery
+      readonly loading?: never
+    }
 
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,

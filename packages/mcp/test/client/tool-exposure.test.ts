@@ -97,6 +97,15 @@ describe('MCP tool exposure', () => {
     expect([search.callableBy, search.discovery]).toEqual(['codemode', 'search'])
     expect([remove.callableBy, Object.hasOwn(remove, 'discovery')]).toEqual(['model', false])
     expect(seen).toEqual(['docs/search', 'docs/delete'])
+
+    const deferred = mcpToolToToolDef({
+      serverName: 'docs',
+      tool: searchTool,
+      exposure: { callableBy: 'all', loading: 'deferred' }
+    })
+
+    expect([deferred.callableBy, deferred.loading]).toEqual(['all', 'deferred'])
+    expect(Object.hasOwn(plain, 'loading')).toBe(false)
   })
 
   it.effect('keeps codemode-only MCP tools off providers but callable from scripts', () =>

@@ -1,6 +1,13 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolApprovalPolicy, ToolDef } from '@yolk-sdk/agent/protocol'
+import { compactWindowMessages } from '@yolk-sdk/agent/compaction'
+import { instructionMessages } from '@yolk-sdk/agent/loop'
+import {
+  isInstructionMessage,
+  ToolApprovalPolicy,
+  ToolDef,
+  UserMessage
+} from '@yolk-sdk/agent/protocol'
 import { resolveTools, type NestedTool } from '@yolk-sdk/agent/tools'
 import {
   codeModeCatalog,
@@ -387,10 +394,7 @@ describe('catalog instructions', () => {
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('crm_list')
 
-      const first = instructionOf(large).render({
-        previous: undefined,
-        current: instructionOf(large).state
-      })
+      const first = instructionOf(large).render(instructionOf(large).state)
 
       expect(first).toContain('# Code mode catalog')
       expect(first).toContain('- `crm` (2 tools, 1 listed)')
@@ -399,7 +403,7 @@ describe('catalog instructions', () => {
     })
   )
 
-  it.effect('render a short delta when only counts change, else a replacement', () =>
+  it.effect('render every change as the whole catalog, so the latest one stands alone', () =>
     Effect.gen(function* () {
       const before = instructionOf(
         yield* resolveInstructed([queryTool('crm_list', { exposure: { callableBy: 'codemode' } })])
@@ -419,17 +423,53 @@ describe('catalog instructions', () => {
         ])
       )
 
-      const delta = searchAdded.render({ previous: before.state, current: searchAdded.state })
-      const replacement = listedAdded.render({ previous: before.state, current: listedAdded.state })
+      const counted = searchAdded.render(searchAdded.state)
+      const listed = listedAdded.render(listedAdded.state)
 
-      expect(delta).toBe(
-        'The code mode catalog changed:\n- `crm` (2 tools, 1 listed) (changed: search it again)'
+      expect(counted).toContain('# Code mode catalog')
+      expect(counted).toContain('replaces any earlier one')
+      expect(counted).toContain('- `crm` (2 tools, 1 listed)')
+      expect(counted).toContain('crm_list')
+      expect(listed).toContain('crm_get')
+      expect(before.render(undefined)).toContain('no longer available')
+    })
+  )
+
+  it.effect('survive compaction whole: the kept latest message carries the full catalog', () =>
+    Effect.gen(function* () {
+      const user = UserMessage.make({ content: 'hello' })
+
+      const before = instructionOf(
+        yield* resolveInstructed([queryTool('crm_list', { exposure: { callableBy: 'codemode' } })])
       )
-      expect(replacement).toContain('This catalog replaces the previous one.')
-      expect(replacement).toContain('crm_get')
-      expect(before.render({ previous: before.state, current: undefined })).toContain(
-        'no longer available'
+
+      const after = instructionOf(
+        yield* resolveInstructed([
+          queryTool('crm_list', { exposure: { callableBy: 'codemode' } }),
+          queryTool('crm_find', { exposure: { callableBy: 'codemode', discovery: 'search' } })
+        ])
       )
+
+      const first = instructionMessages([user], [before])
+      const filler = UserMessage.make({ content: 'filler '.repeat(400) })
+      const changed = instructionMessages([user, ...first, filler], [after])
+
+      const compacted = compactWindowMessages(
+        [user, ...first, filler, ...changed, filler, UserMessage.make({ content: 'latest' })],
+        {
+          strategy: 'test',
+          thresholdTokens: 10,
+          tailMessageCount: 1,
+          makeSummaryMessage: () => UserMessage.make({ content: 'summary' })
+        }
+      ).messages
+
+      const kept = compacted.filter(isInstructionMessage)
+
+      expect(kept).toHaveLength(1)
+      expect(kept[0]?.content).toContain('# Code mode catalog')
+      expect(kept[0]?.content).toContain('- `crm` (2 tools, 1 listed)')
+      expect(kept[0]?.content).toContain('crm_list')
     })
   )
 

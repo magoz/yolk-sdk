@@ -2,8 +2,8 @@
 
 `@yolk-sdk/codemode` implements code mode (`docs/adr/0002-code-mode.md`): a tool whose scripts call
 the other code-mode-callable tools of the same `resolveTools` resolution. The agent tool contract
-(`callableBy`, `discovery`, output schemas, nested tool access, nested-call records, the `describe`
-hook) lives in `@yolk-sdk/agent`; this package never redefines it.
+(`callableBy`, `discovery`, `loading`, output schemas, nested tool access, nested-call records, the
+`describe` and `instruct` hooks) lives in `@yolk-sdk/agent`; this package never redefines it.
 
 ## Subpaths
 
@@ -148,14 +148,13 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   interruption while waiting never leaks a permit. `costUsd` has no
   `AgentUsage` field: nested-call records carry token usage only, and cost stays in the result's
   `structuredContent.usage`.
-
 - Catalog placement (ADR 0007): `makeCodeModeTool({ catalog })`. `description` (default) keeps the
   catalog in the tool description. `instructions` makes the description invariant
   (`renderCodeModeInstructedDescription`: intro, globals, `stage()` whenever staging is offered,
   even with no stageable tool yet, a pointer to the catalog) and contributes `instruct`: `codeModeCatalogInstruction`, key
   `yolk.codemode.catalog`, state `CodeModeCatalogSummary` (every namespace with count, description,
-  listed count and listing; listed stageable names), rendered in full, as a delta when only
-  namespaces/counts/descriptions changed, or as a replacement. `pinned` tools are always listed,
+  listed count and listing; listed stageable names), always rendered in full (compaction keeps only
+  the latest message, so a delta would lose the rest). `pinned` tools are always listed,
   outside the budget. Deferred `all` tools count as `search` (their declaration is not in model
   context). `searchCodeModeTools` ranks with the shared `rankToolSearchDocuments`.
 

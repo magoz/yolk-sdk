@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ToolDef,
@@ -6,6 +6,8 @@ import {
   toolSearchToolName,
   type ToolSearchActivation
 } from '@yolk-sdk/agent/protocol'
+import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
+import { decodeToolArguments } from './arguments.ts'
 import type { ToolRegistration } from './registry.ts'
 
 // Standard BM25 parameters: `k1` saturates repeated terms, `b` normalizes by document length.
@@ -94,7 +96,7 @@ const ToolSearchParams = Schema.Struct({
   )
 })
 
-const decodeToolSearchParams = Schema.decodeUnknownOption(ToolSearchParams)
+const decodeToolSearchParams = decodeToolArguments(ToolSearchParams)
 
 const toolSearchDescription = [
   'Find and load tools that are not declared yet: they become callable directly from your next step on, for the rest of the conversation.',
@@ -145,15 +147,18 @@ export const makeToolSearchTool = <Context>(
   }),
   access: 'read',
   execute: ({ call }) =>
-    Effect.sync(() =>
-      Option.match(decodeToolSearchParams(call.params), {
-        onNone: () =>
+    decodeToolSearchParams(call.params).pipe(
+      Effect.match({
+        onFailure: error =>
           ToolResult.make({
             toolCallId: call.id,
-            content: `Invalid ${toolSearchToolName} arguments: pass { query: string, limit?: 1 to ${maxToolSearchLimit} }.`,
+            content: withToolArgumentsErrorHint(
+              `Invalid ${toolSearchToolName} arguments: pass { query: string, limit?: 1 to ${maxToolSearchLimit} }.`,
+              error
+            ),
             isError: true
           }),
-        onSome: params => {
+        onSuccess: params => {
           const found = rankToolSearchDocuments(
             deferred.map(tool => ({
               value: tool.def,

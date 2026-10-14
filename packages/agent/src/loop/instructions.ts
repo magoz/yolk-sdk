@@ -10,22 +10,20 @@ import {
  * A host instruction kept current in the conversation (ADR 0007), for example the code mode tool
  * catalog. Before each model request the loop compares `state` with the state of the latest
  * instruction message with the same `key` in the transcript; only when they differ it appends one
- * user-role instruction message whose content is `render({ previous, current })`. Earlier
- * messages never change, so a changing instruction never rewrites the cached request prefix, and
- * a redelivered step decides the same from the same transcript.
+ * user-role instruction message whose content is `render(current)`. Earlier messages never change,
+ * so a changing instruction never rewrites the cached request prefix, and a redelivered step
+ * decides the same from the same transcript.
  */
 export type RunInstruction = {
   readonly key: string
   /** The current state; `undefined` when the instruction no longer applies. */
   readonly state: Schema.Json | undefined
   /**
-   * The model-visible text for a change: the first render (`previous` undefined), a delta or a
-   * full replacement, or a removal notice (`current` undefined).
+   * The model-visible text of a state, or a removal notice (`undefined`). Self-contained: it never
+   * sees the previous state, because compaction keeps only the latest message of each key
+   * (`latestInstructionMessages`), so that message alone must carry the whole instruction.
    */
-  readonly render: (input: {
-    readonly previous: Schema.Json | undefined
-    readonly current: Schema.Json | undefined
-  }) => string
+  readonly render: (current: Schema.Json | undefined) => string
 }
 
 /**
@@ -46,7 +44,7 @@ export const instructionMessages = (
 
       return [
         UserMessage.make({
-          content: instruction.render({ previous, current: undefined }),
+          content: instruction.render(undefined),
           instruction: { key: instruction.key }
         })
       ]
@@ -54,7 +52,7 @@ export const instructionMessages = (
 
     if (previous !== undefined && interactionJsonEquals(previous, current)) return []
 
-    const content = instruction.render({ previous, current })
+    const content = instruction.render(current)
 
     return content.trim().length === 0
       ? []

@@ -97,6 +97,24 @@ describe('tool_search', () => {
     })
   )
 
+  it.effect('rejects unknown arguments, naming them, instead of ignoring them', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(modules, context)
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'search_2',
+          name: 'tool_search',
+          params: { query: 'issues', state: 'open' }
+        })
+      )
+
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain('state')
+      expect(result.structuredContent).toBeUndefined()
+    })
+  )
+
   it.effect('is not added without deferred tools, when the host opts out, or when one exists', () =>
     Effect.gen(function* () {
       const eager = yield* resolveTools([{ id: 'm', tools: [tool('lookup', 'x')] }], context)
@@ -144,6 +162,17 @@ describe('tool_search', () => {
 
       expect(codemodeOnly.cause).toBe('invalid_tool_exposure')
       expect(nestedAccess.cause).toBe('deferred_unsupported_tool')
+
+      makeTool<Ctx, typeof Query>({
+        name: 'script_only',
+        description: 'x',
+        parameters: Query,
+        access: 'read',
+        callableBy: 'codemode',
+        // @ts-expect-error `loading` is only for model-callable tools.
+        loading: 'deferred',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+      })
     })
   )
 })

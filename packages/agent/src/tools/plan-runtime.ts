@@ -50,6 +50,7 @@ import {
   type ToolPlanStore
 } from './plan.ts'
 import { sha256HexSync } from './sha256.ts'
+import { toolSearchTokens } from './tool-search.ts'
 import type { NestedTool, ToolAccess, ToolRegistration } from './registry.ts'
 
 /** What a resolution supplies to staging and to the plan executor (internal to `tools`). */
@@ -119,13 +120,7 @@ const stagedCall = (fields: {
 
 const maxSuggestedStageableTools = 5
 
-const nameTokens = (name: string) =>
-  new Set(
-    name
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter(token => token.length > 0)
-  )
+const nameTokens = (name: string) => new Set(toolSearchTokens(name))
 
 /**
  * The stageable tools a rejected `stage(name)` suggests: the closest names by shared words (catalog

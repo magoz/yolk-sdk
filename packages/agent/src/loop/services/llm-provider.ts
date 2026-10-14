@@ -6,8 +6,9 @@ import type { LLMEvent } from '../llm-event.ts'
 
 export type LLMRequest = {
   readonly messages: ReadonlyArray<AgentMessage>
-  /** Provider-facing definitions. The loop omits `callableBy: 'codemode'` tools
-   * (`providerToolDefs`); hosts calling providers directly must do the same.
+  /** Provider-facing definitions. The loop sends `declaredToolDefs(tools, messages)`: no
+   * `callableBy: 'codemode'` tools, and deferred tools only once a `tool_search` result activated
+   * them (ADR 0007); hosts calling providers directly must do the same.
    */
   readonly tools: ReadonlyArray<ToolDef>
   readonly model: string

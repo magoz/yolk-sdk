@@ -453,10 +453,6 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
-  /** Model-callable tools only: `deferred` declares the tool once `tool_search` activated it
-   * (ADR 0007). Absent means `eager`.
-   */
-  readonly loading?: ToolDef['loading']
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
   ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>

@@ -42,7 +42,7 @@ export type MakeConnectorToolModuleOptions<Context, Env> = {
   readonly description?: string
   readonly namePrefix?: string
   readonly access?: ConnectorToolAccessResolver
-  /** Applied through `makeTool`'s `callableBy`/`discovery`; `resolveTools` still rejects invalid
+  /** Applied through `makeTool`'s `callableBy`/`discovery`/`loading`; `resolveTools` still rejects invalid
    * combinations (for example `discovery` without `callableBy: 'codemode'`).
    */
   readonly exposure?: ConnectorToolExposureResolver

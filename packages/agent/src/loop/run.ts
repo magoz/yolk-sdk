@@ -145,7 +145,13 @@ export type RunConfig = {
   readonly cacheKey?: string
 }
 
-export type ModelTurnConfig = RunConfig & {
+/**
+ * One model step for durable hosts. They append and persist `instructionMessages(...)` before
+ * the step themselves (ADR 0007), so `instructions` is not accepted here: a step cannot report
+ * messages it appended, and they would be re-appended, unpersisted, on every step.
+ */
+export type ModelTurnConfig = Omit<RunConfig, 'instructions'> & {
+  readonly instructions?: never
   readonly turn: number
 }
 
@@ -2052,11 +2058,10 @@ const makeModelOnlyTurnStream = (
     const llmStream = Stream.unwrap(
       Effect.gen(function* () {
         const llmEvents = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
-        const instructed = yield* withTurnInstructions(input)
-        const result = yield* input.contextTransformer.transform(instructed.currentMessages)
+        const result = yield* input.contextTransformer.transform(input.currentMessages)
         yield* validateCapabilities(input.config, result.messages)
 
-        return makeModelOnlyLlmStream(instructed, llmEvents, result)
+        return makeModelOnlyLlmStream(input, llmEvents, result)
       })
     )
 

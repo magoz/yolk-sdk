@@ -78,7 +78,9 @@ const program = Effect.gen(function* () {
   declarations within `inlineBudget` (default 3,000 estimated tokens, filled fairly across
   namespaces); `callableBy: 'all'` tools get one line each outside the budget; `codemode` +
   `search` tools contribute nothing (no headings or hints), so the description stays
-  byte-identical when they, or whole namespaces of them, change. One fixed line tells scripts to
+  byte-identical when they, or whole namespaces of them, change. `codemode` + `pinned` tools are
+  always declared, outside the budget, and deferred (`loading: 'deferred'`) `all` tools count as
+  `search` tools. One fixed line tells scripts to
   find unlisted tools with `searchTools(query, { limit?, namespace? })` (BM25 over names,
   descriptions, namespaces, and module descriptions), `describeTool(name)`, and
   `describeNamespace(name)`.
@@ -145,21 +147,22 @@ it is never declared to the model, scripts find it with `searchTools()` (hits ma
 `stageOnly: true`) and read it with `describeTool()`, and the only thing they can do with it is
 `stage()` it. See [ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
 
-### Catalog as instructions
+Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
+decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
+show each staged call with the tool's `changePreview` from `@yolk-sdk/agent/tools`. See
+[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md) and
+[ADR 0006](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0006-tool-change-previews.md).
+
+## Catalog as instructions
 
 `makeCodeModeTool({ executor, catalog: 'instructions' })` keeps the `codemode` description
 invariant and delivers the catalog (every namespace with its tool count, listed tools within
 `inlineBudget`, `pinned` tools always) as a host instruction: pass `toolSet.instructions` to
 `RunConfig.instructions`, or, for durable hosts driving `runModelTurn`, append and persist
 `instructionMessages(transcript, toolSet.instructions)` from `@yolk-sdk/agent/loop` before each
-model step. A changed catalog is appended to the conversation as a delta instead of rewriting the
-cached request prefix.
-
-Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
-decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
-show each staged call with the tool's `changePreview` from `@yolk-sdk/agent/tools`. See
-[ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md) and
-[ADR 0006](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0006-tool-change-previews.md).
+model step. A changed catalog is appended to the conversation, whole, instead of rewriting the
+cached request prefix. Hosts with their own compaction keep `latestInstructionMessages(...)` from
+`@yolk-sdk/agent/protocol` after their summary, as window compaction does.
 
 ## Limits
 
@@ -185,7 +188,7 @@ permits. Nested-call records carry token usage; cost stays in the result's
 
 ## Host responsibilities
 
-- Which tools are callable from scripts (`callableBy`, `discovery`), approvals, and policy.
+- Which tools are callable from scripts (`callableBy`, `discovery`, `loading`), approvals, and policy.
 - Run authority for nested calls: decorators around the `ToolExecutor` (outside
   `ResolvedToolSet.execute`) do not see nested calls. Use `beforeNestedCall` or registration-level
   wrappers for per-call checks.

@@ -507,7 +507,7 @@ const namespaceLine = (namespace: CodeModeCatalogSummary['namespaces'][number]) 
 export const renderCodeModeCatalog = (summary: CodeModeCatalogSummary): string =>
   [
     '# Code mode catalog',
-    'Tools `codemode` scripts can call, by namespace. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` and read one with `await describeTool(name)` before calling it.',
+    'Tools `codemode` scripts can call, by namespace; the latest catalog in the conversation replaces any earlier one. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` and read one with `await describeTool(name)` before calling it.',
     ['## Namespaces', ...summary.namespaces.map(namespaceLine)].join('\n'),
     ...summary.namespaces.flatMap(namespace =>
       namespace.listing.length === 0 ? [] : [`### ${namespace.name}\n${namespace.listing}`]
@@ -515,59 +515,9 @@ export const renderCodeModeCatalog = (summary: CodeModeCatalogSummary): string =
     ...(hasStageableNames(summary.stageable) ? [stageableSection(summary.stageable)] : [])
   ].join('\n\n')
 
-const listingsOf = (summary: CodeModeCatalogSummary) =>
-  JSON.stringify([
-    summary.namespaces.flatMap(namespace =>
-      namespace.listing.length === 0 ? [] : [[namespace.name, namespace.listing]]
-    ),
-    summary.stageable
-  ])
-
-/**
- * The text of a catalog change. When only namespaces, counts or descriptions changed (the listed
- * tools did not), a short delta; otherwise the full catalog, marked as replacing the previous one.
- */
-export const renderCodeModeCatalogChange = (input: {
-  readonly previous: CodeModeCatalogSummary | undefined
-  readonly current: CodeModeCatalogSummary
-}): string => {
-  const { previous, current } = input
-
-  if (previous === undefined) return renderCodeModeCatalog(current)
-
-  const replacement = `The code mode catalog changed. This catalog replaces the previous one.\n\n${renderCodeModeCatalog(current)}`
-
-  if (listingsOf(previous) !== listingsOf(current)) return replacement
-
-  const before = new Map(previous.namespaces.map(namespace => [namespace.name, namespace]))
-  const after = new Set(current.namespaces.map(namespace => namespace.name))
-
-  const added = current.namespaces.filter(namespace => !before.has(namespace.name))
-
-  const changed = current.namespaces.filter(namespace => {
-    const old = before.get(namespace.name)
-
-    return (
-      old !== undefined &&
-      (old.count !== namespace.count || old.description !== namespace.description)
-    )
-  })
-
-  const removed = previous.namespaces.filter(namespace => !after.has(namespace.name))
-
-  const delta = [
-    'The code mode catalog changed:',
-    ...added.map(namespace => `${namespaceLine(namespace)} (new)`),
-    ...changed.map(namespace => `${namespaceLine(namespace)} (changed: search it again)`),
-    ...removed.map(namespace => `- \`${namespace.name}\`: removed, do not use its tools`)
-  ].join('\n')
-
-  return delta.length < replacement.length ? delta : replacement
-}
-
 /**
  * The host instruction of the code mode catalog: its state is the encoded summary, and its render
- * the full catalog, a delta, or a removal notice.
+ * the full catalog (every change renders it whole, see `RunInstruction.render`) or a removal notice.
  */
 export const codeModeCatalogInstruction = (input: {
   readonly tools: ReadonlyArray<NestedTool>
@@ -582,19 +532,12 @@ export const codeModeCatalogInstruction = (input: {
       summary.namespaces.length === 0
         ? undefined
         : Option.getOrUndefined(encodeCatalogSummary(summary)),
-    render: ({ previous, current }) => {
-      const decodedCurrent = current === undefined ? Option.none() : decodeCatalogSummary(current)
+    render: current => {
+      const decoded = current === undefined ? Option.none() : decodeCatalogSummary(current)
 
-      if (Option.isNone(decodedCurrent))
-        return 'Code mode tools are no longer available: do not call previously listed code mode tools.'
-
-      return renderCodeModeCatalogChange({
-        previous:
-          previous === undefined
-            ? undefined
-            : Option.getOrUndefined(decodeCatalogSummary(previous)),
-        current: decodedCurrent.value
-      })
+      return Option.isNone(decoded)
+        ? 'Code mode tools are no longer available: do not call previously listed code mode tools.'
+        : renderCodeModeCatalog(decoded.value)
     }
   }
 }

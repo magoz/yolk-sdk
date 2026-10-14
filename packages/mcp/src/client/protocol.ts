@@ -217,11 +217,12 @@ type McpToolDefFields = {
   outputSchema?: ToolDef['outputSchema']
   callableBy?: ToolDef['callableBy']
   discovery?: ToolDef['discovery']
+  loading?: ToolDef['loading']
 }
 
 /** Adapts one listed MCP tool. A present `outputSchema` that is a plain JSON Schema object
  * passes through as declaration-only `ToolDef.outputSchema`; any other value is omitted.
- * `exposure` (host policy) sets `callableBy`/`discovery`; without it neither is set.
+ * `exposure` (host policy) sets `callableBy`/`discovery`/`loading`; without it none is set.
  */
 export const mcpToolToToolDef = (input: {
   readonly serverName: string
@@ -245,6 +246,8 @@ export const mcpToolToToolDef = (input: {
   if (exposure?.callableBy !== undefined) fields.callableBy = exposure.callableBy
 
   if (exposure?.discovery !== undefined) fields.discovery = exposure.discovery
+
+  if (exposure?.loading !== undefined) fields.loading = exposure.loading
 
   return ToolDef.make(fields)
 }

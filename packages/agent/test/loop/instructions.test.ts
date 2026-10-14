@@ -32,16 +32,12 @@ const echoExecutor = Layer.succeed(
   })
 )
 
-/** An instruction that renders its state, or a delta when there was a previous one. */
+/** An instruction that renders its whole state. */
 const catalog = (state: Schema.Json | undefined): RunInstruction => ({
   key: 'catalog',
   state,
-  render: ({ previous, current }) =>
-    current === undefined
-      ? 'catalog removed'
-      : previous === undefined
-        ? `catalog: ${JSON.stringify(current)}`
-        : `catalog changed: ${JSON.stringify(current)}`
+  render: current =>
+    current === undefined ? 'catalog removed' : `catalog: ${JSON.stringify(current)}`
 })
 
 const user = UserMessage.make({ content: 'hello' })
@@ -55,17 +51,15 @@ describe('instruction messages', () => {
 
     expect(contentOf(first)).toEqual(['catalog: {"tools":2}'])
     expect(first.every(isInstructionMessage)).toBe(true)
-
-    // The same state appends nothing.
     expect(instructionMessages([user, ...first], [catalog({ tools: 2 })])).toEqual([])
 
     const changed = instructionMessages([user, ...first], [catalog({ tools: 3 })])
 
-    expect(contentOf(changed)).toEqual(['catalog changed: {"tools":3}'])
+    expect(contentOf(changed)).toEqual(['catalog: {"tools":3}'])
     expect(latestInstructionState([user, ...first, ...changed], 'catalog')).toEqual({ tools: 3 })
   })
 
-  it('records a removal once, and renders the next state as a first render', () => {
+  it('records a removal once, and renders the next state again', () => {
     const first = instructionMessages([user], [catalog({ tools: 1 })])
     const removed = instructionMessages([user, ...first], [catalog(undefined)])
 
@@ -128,7 +122,7 @@ describe('instructions in the loop', () => {
     })
   )
 
-  it.effect('applies instructions to single model turns too, idempotently for durable hosts', () =>
+  it.effect('sends the instructions a durable host appended to a single model turn', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
       const recorded = instructionMessages([user], [catalog({ tools: 2 })])
@@ -137,7 +131,6 @@ describe('instructions in the loop', () => {
         messages: [user, ...recorded],
         systemPrompt: 'Be brief.',
         tools: [],
-        instructions: [catalog({ tools: 2 })],
         model: 'faux',
         turn: 1
       }).pipe(
@@ -246,11 +239,7 @@ describe('instruction messages through compaction', () => {
       makeSummaryMessage: () => UserMessage.make({ content: 'summary' })
     })
 
-    expect(contentOf(result.messages)).toEqual([
-      'summary',
-      'catalog changed: {"tools":2}',
-      'latest'
-    ])
+    expect(contentOf(result.messages)).toEqual(['summary', 'catalog: {"tools":2}', 'latest'])
     // The loop compares with the uncompacted transcript: nothing to re-append.
     expect(instructionMessages(transcript, [catalog({ tools: 2 })])).toEqual([])
   })

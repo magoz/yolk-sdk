@@ -1811,10 +1811,9 @@ export const buildAgentChatMessages = ({
     (current, message, index) => {
       if (isInstructionMessage(message)) return withInstructionAfterLast(current, message)
 
-      const currentTurnId =
-        Predicate.isTagged(message, 'User') && !isInstructionMessage(message)
-          ? turnId(index)
-          : (lastTurnId(current) ?? turnId(index))
+      const currentTurnId = Predicate.isTagged(message, 'User')
+        ? turnId(index)
+        : (lastTurnId(current) ?? turnId(index))
 
       return [
         ...current,

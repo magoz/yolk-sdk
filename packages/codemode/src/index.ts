@@ -24,7 +24,6 @@ export {
   estimateCodeModeTokens,
   findCodeModeTool,
   renderCodeModeCatalog,
-  renderCodeModeCatalogChange,
   renderCodeModeDescription,
   renderCodeModeInstructedDescription,
   selectCodeModeListing,
