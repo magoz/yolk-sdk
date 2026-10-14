@@ -126,14 +126,13 @@ describe('code mode catalog', () => {
     // Search hits carry signatures: no describe step before every call; reads can be found and
     // called in one script, writes only after the hit was seen.
     expect(description).toContain('`signature` is the call with its argument and result types')
+    expect(description).toContain('pick the hit by the exact name you expect')
+    expect(description).toContain('Never call a hit you did not pick by name.')
     expect(description).toContain(
-      'When a found tool only reads and its arguments are clear from your query'
+      'Call a found tool that changes something only in a later script, after its hit came back to you.'
     )
     expect(description).toContain(
-      'Call a tool that changes something only after you have seen its hit.'
-    )
-    expect(description).toContain(
-      'call a found read-only tool in the same script when its arguments are clear'
+      'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
     )
     expect(description).not.toContain('before calling it')
     expect(description).not.toContain('store(key, value)')
@@ -488,14 +487,14 @@ describe('catalog instructions', () => {
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('before calling it')
       expect(descriptionOf(large)).toContain(
-        'call a found read-only tool in the same script when its arguments are clear'
+        'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
       )
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render(instructionOf(large).state)
 
       expect(first).toContain(
-        'call a found read-only tool in the same script when its arguments are clear'
+        'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
       )
 
       expect(first).toContain('# Code mode catalog')

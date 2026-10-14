@@ -304,7 +304,7 @@ const globalLines = (store: boolean) => [
   '- `image(dataUrl)`: append a base64 image (a `data:` URL or `{ type: "image", data, mimeType }`).',
   '- `exit()`: end the script successfully.',
   '- `ALL_TOOLS`: `{ name, description }` of every callable tool.',
-  '- `await searchTools(query, { limit?, namespace? })`: find tools by topic; resolves to `Array<{ name: string; description: string; signature: string }>` (default limit 8). `signature` is the call with its argument and result types. When a found tool only reads and its arguments are clear from your query (for example "list pull requests" with `owner` and `repo`), search and call it in the same script with `tools[hit.name](args)`. Call a tool that changes something only after you have seen its hit. Otherwise return the hits and call the tool in your next script. If a call fails on its arguments, read its `signature` (or `describeTool`) and retry.',
+  '- `await searchTools(query, { limit?, namespace? })`: find tools by topic; resolves to `Array<{ name: string; description: string; signature: string }>` (default limit 8). `signature` is the call with its argument and result types. To save a step, a script may search and call a read-only tool together when you already know which tool you need and its arguments: pick the hit by the exact name you expect (`const hit = hits.find(h => h.name.endsWith("find_contact"))`), call `tools[hit.name](args)` only if it was found, and otherwise return the hits. Never call a hit you did not pick by name. Call a found tool that changes something only in a later script, after its hit came back to you. If a call fails on its arguments, read its `signature` (or `describeTool`) and retry.',
   '- `await describeTool(name)`: the full description and documented TypeScript declaration of a tool, or `undefined`; needed only when a signature is cut or unclear.',
   '- `await describeNamespace(name)`: `{ name, description?, tools: Array<{ name, description }> }` for a namespace, or `undefined`.',
   ...(store
@@ -332,7 +332,7 @@ const namespaceSection = (namespace: string, tools: ReadonlyArray<CodeModeCatalo
 
 // Fixed text: never derived from `search` tools or from which tools did not fit the budget.
 const unlistedToolsLine =
-  'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` (each hit has its call signature) or `await describeNamespace(name)`; call a found read-only tool in the same script when its arguments are clear, otherwise in your next script.'
+  'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` (each hit has its call signature) or `await describeNamespace(name)`; a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name, otherwise call found tools in your next script.'
 
 /** Staged tool plans as the description shows them (`NestedToolStagingDescription`). */
 export type CodeModeStagingDescription = {
@@ -561,7 +561,7 @@ const namespaceLine = (namespace: CodeModeCatalogSummary['namespaces'][number]) 
 export const renderCodeModeCatalog = (summary: CodeModeCatalogSummary): string =>
   [
     '# Code mode catalog',
-    'Tools `codemode` scripts can call, by namespace; the latest catalog in the conversation replaces any earlier one. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` (each hit has its call signature); call a found read-only tool in the same script when its arguments are clear, otherwise in your next script.',
+    'Tools `codemode` scripts can call, by namespace; the latest catalog in the conversation replaces any earlier one. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` (each hit has its call signature); a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name, otherwise call found tools in your next script.',
     ['## Namespaces', ...summary.namespaces.map(namespaceLine)].join('\n'),
     ...summary.namespaces.flatMap(namespace =>
       namespace.listing.length === 0 ? [] : [`### ${namespace.name}\n${namespace.listing}`]
@@ -611,5 +611,5 @@ export const renderCodeModeInstructedDescription = (input: {
       ...globalLines(input.store === true),
       ...(input.staging === undefined ? [] : [stageLine(input.staging.reviewToolName)])
     ].join('\n'),
-    'The tools scripts can call are in the "Code mode catalog" (namespaces, tool counts and listed tools; the latest one applies). Find the others with `await searchTools(query, { namespace? })` (each hit has its call signature); call a found read-only tool in the same script when its arguments are clear, otherwise in your next script.'
+    'The tools scripts can call are in the "Code mode catalog" (namespaces, tool counts and listed tools; the latest one applies). Find the others with `await searchTools(query, { namespace? })` (each hit has its call signature); a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name, otherwise call found tools in your next script.'
   ].join('\n\n')
