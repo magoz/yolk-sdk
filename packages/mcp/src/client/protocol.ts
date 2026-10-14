@@ -202,7 +202,8 @@ export const jsonRpcErrorToMcpError = (server: string, error: JsonRpcErrorObject
     cause: 'protocol'
   })
 
-/** Code mode exposure for adapted MCP tools: one value for every tool, or per listed tool.
+/** Tool exposure (`callableBy`/`discovery`/`loading`) for adapted MCP tools: one value for every
+ * tool, or per listed tool.
  * Omitted: the agent defaults (`callableBy: 'all'`). `resolveTools` still rejects invalid
  * combinations (for example `discovery` without `callableBy: 'codemode'`).
  */

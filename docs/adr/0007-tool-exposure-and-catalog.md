@@ -172,8 +172,8 @@ prefix.
 
 **Delivery.** `RunInstruction` is `{ key, state, render(current) }`. Before each model request the
 loop compares `state` with the latest recorded state of the key (canonical JSON): equal appends
-nothing; different appends one instruction message (the full render, or a removal notice once). States compare as JSON values independent of object key
-order (`interactionJsonEquals`). `run()` does it for `RunConfig.instructions` and returns
+nothing; different appends one instruction message (the full render, or a removal notice once).
+States compare as JSON values independent of object key order (`interactionJsonEquals`). `run()` does it for `RunConfig.instructions` and returns
 the messages with its created messages; it never emits a `UserMessage` event (not user input).
 Durable hosts driving `runModelTurn` own their transcript: they append
 `instructionMessages(transcript, instructions)` themselves and persist them before the model step.
@@ -185,10 +185,10 @@ messages it appended, so they would be re-appended, unpersisted, on every step.
 `nestedToolAccess` is `invalid_tool_exposure`; two instructions with one key are
 `duplicate_instruction` (each would find the other's message and append every turn).
 
-A host that cannot append messages to its persisted conversation may render the instruction's
-render (`render(state)`) into its system prompt instead:
-the catalog then invalidates the cache from the system prompt on when it changes (rarely), never
-the tool definitions before it.
+A host that cannot append messages to its persisted conversation may put the instruction
+(`render(state)`, only while `state` is defined; `undefined` renders the removal notice) into its
+system prompt instead: the catalog then invalidates the cache from the system prompt on when it
+changes (rarely), never the tool definitions before it.
 
 Code mode ships the catalog as one such instruction with `makeCodeModeTool({ catalog:
 'instructions' })` (`codeModeCatalogInstruction`, key `yolk.codemode.catalog`); the default

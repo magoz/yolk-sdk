@@ -105,8 +105,9 @@ const listIssues = makeTool<HostContext, typeof ListIssuesParams>({
   Opt out with `resolveTools(modules, context, { toolSearch: false })` or register your own
   `tool_search`.
 - Activation is read from `tool_search` results in the transcript, never stored, so redelivered
-  and resumed steps declare the same tools. Loading appends to the tool list once; earlier cached
-  messages stay valid.
+  and resumed steps declare the same tools. Loading a tool changes the declared tools, which start
+  the request, so that request misses the prompt cache once; later requests reuse the new prefix.
+  Prefer code mode scripts for exploratory use.
 - Deferral saves context, not authority: approval-gated tools keep their approval, and an allowed
   deferred tool still runs when called by name.
 - `loading` applies to model-callable tools only (a type error on `callableBy: 'codemode'`).

@@ -975,8 +975,9 @@ tools without spending context on them ([ADR 0007](https://github.com/magoz/yolk
   `resolveTools(modules, context, { toolSearch: false })`, or register your own `tool_search`.
 - Activation is derived from the transcript, never stored: each request declares
   `declaredToolDefs(tools, messages)`, the eager tools plus deferred tools a `tool_search` result
-  activated, so replayed and resumed steps declare the same tools. Loading a tool appends to the
-  tool list once; earlier cached messages stay valid.
+  activated, so replayed and resumed steps declare the same tools. Loading a tool changes the
+  declared tools, which start the request, so that request misses the prompt cache once; later
+  requests reuse the new prefix. Prefer code mode scripts for exploratory use.
 - Deferral saves context; it is not authority. Approval-gated tools keep their approval when
   deferred. `loading` on a `callableBy: 'codemode'` tool is a type error (`invalid_tool_exposure` at
   resolution for raw definitions); `tool_search`, `question`, `subagent`, input, interaction, plan
@@ -1002,6 +1003,8 @@ for example the code mode catalog (`ResolvedToolSet.instructions`). Pass it as
 - Window compaction keeps instruction messages after its summary; custom compaction must keep
   `latestInstructionMessages(...)` too. Chat projections hide them (`isInstructionMessage`) and
   `toAgentMessages` round-trips them. Duplicate keys fail resolution (`duplicate_instruction`).
+- Hosts that cannot append messages to their conversation may put `render(state)` into the system
+  prompt instead, only while `state` is defined (`undefined` renders the removal notice).
 
 ## Durable tool ledger
 
@@ -1073,8 +1076,8 @@ aborts, and implementation bugs outside typed tool execution.
   protocol `declaredToolDefs(tools, messages)`: codemode-only tools must never reach providers, and
   deferred tools only once a `tool_search` result activated them.
 - Durable hosts driving `runModelTurn` append and persist `instructionMessages(...)` before each
-  model step (see Host instructions). Executor decorators
-  outside `ResolvedToolSet.execute` do not see nested code mode calls.
+  model step (see Host instructions).
+- Executor decorators outside `ResolvedToolSet.execute` do not see nested code mode calls.
 - Compact context and decide memory/search policy.
 
 ## Boundaries

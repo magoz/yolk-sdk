@@ -32,7 +32,6 @@ const echoExecutor = Layer.succeed(
   })
 )
 
-/** An instruction that renders its whole state. */
 const catalog = (state: Schema.Json | undefined): RunInstruction => ({
   key: 'catalog',
   state,
@@ -126,6 +125,16 @@ describe('instructions in the loop', () => {
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
       const recorded = instructionMessages([user], [catalog({ tools: 2 })])
+
+      runModelTurn({
+        messages: [user],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        // @ts-expect-error Durable hosts append `instructionMessages` themselves.
+        instructions: [catalog({ tools: 2 })],
+        model: 'faux',
+        turn: 1
+      })
 
       yield* runModelTurn({
         messages: [user, ...recorded],

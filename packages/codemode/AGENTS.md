@@ -151,8 +151,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - Catalog placement (ADR 0007): `makeCodeModeTool({ catalog })`. `description` (default) keeps the
   catalog in the tool description. `instructions` makes the description invariant
   (`renderCodeModeInstructedDescription`: intro, globals, `stage()` whenever staging is offered,
-  even with no stageable tool yet, a pointer to the catalog) and contributes `instruct`: `codeModeCatalogInstruction`, key
-  `yolk.codemode.catalog`, state `CodeModeCatalogSummary` (every namespace with count, description,
+  even with no stageable tool yet, a pointer to the catalog) and contributes `instruct`:
+  `codeModeCatalogInstruction`, key `yolk.codemode.catalog`, state `CodeModeCatalogSummary` (every namespace with count, description,
   listed count and listing; listed stageable names), always rendered in full (compaction keeps only
   the latest message, so a delta would lose the rest). `pinned` tools are always listed,
   outside the budget. Deferred `all` tools count as `search` (their declaration is not in model

@@ -198,8 +198,9 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
   `instructionMessages(transcript, toolSet.instructions)` from `@yolk-sdk/agent/loop` before each
   model step (see [Host instructions](../agent/loop-runtime#host-instructions)).
 - Hosts that cannot append messages to their conversation can render the instruction into the
-  system prompt (`instruction.render(instruction.state)`); a catalog change then invalidates the
-  cache from the system prompt on.
+  system prompt (`instruction.render(instruction.state)`, only while `instruction.state` is defined:
+  `undefined` renders the removal notice); a catalog change then invalidates the cache from the
+  system prompt on.
 - Custom compaction must keep `latestInstructionMessages(...)` after its summary, as window
   compaction does. `catalog: 'description'` (the default) keeps the catalog in the description.
 
