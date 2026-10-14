@@ -98,6 +98,12 @@ catalog nor infers protocols or limits from model names.
 
 Messages uses native system instructions and tool names, not Claude Code OAuth fingerprints.
 Responses supports a host output limit and does not send Codex account or originator headers.
+Go pins each `x-opencode-session` to one upstream server, so a retry under the same session reaches
+the server that just failed. When a response is malformed (a Chat Completions parser code such as
+`invalid_stream_json`, `incomplete_stream`, or `unexpected_content_type`) before any event was
+emitted, the adapter sends the request once more under `<session>.reroute`, giving up that
+request's cached prefix; model decisions such as `length` are never retried.
+
 Go reports safe failures under provider ID `opencode_go`. Credentials, model capabilities, supported
 reasoning efforts, allowance polling/persistence, and UI remain host-owned. Read allowance with
 `fetchOpenCodeGoSubscriptionUsage` from `@yolk-sdk/agent/providers/opencode/usage`.

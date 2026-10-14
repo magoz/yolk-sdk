@@ -633,7 +633,7 @@ and safe logging; see [provider setup](../integrations/provider-setup#bound-pdf-
 
 | Subpath                                                  | Main exports                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai/provider`              | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`                                                                                                                                                                                                                                                                                             |
+| `@yolk-sdk/agent/providers/openai/provider`              | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`, `openAiChatResponseIssues`, `OpenAiChatResponseIssue`                                                                                                                                                                                                                                      |
 | `@yolk-sdk/agent/providers/openai/conformance`           | `openAiConformanceFixtures`, `openAiConformanceCases`, `OpenAiConformanceConfig`, and four synthetic OpenAI chat `WireFixture`s; `openAiCodexConformanceFixtures`, `openAiCodexConformanceCases`, `OpenAiCodexConformanceConfig`, four synthetic Codex Responses `WireFixture`s, and the Codex usage case (`openAiCodexUsageSnapshotCase`, `OpenAiCodexUsageConformanceConfig`) and fixture |
 | `@yolk-sdk/agent/providers/openai/codex`                 | Codex request, auth, OAuth token, and broker helpers                                                                                                                                                                                                                                                                                                                                        |
 | `@yolk-sdk/agent/providers/openai/codex-usage`           | `fetchOpenAiCodexSubscriptionUsage`, parser, URL, and options                                                                                                                                                                                                                                                                                                                               |
@@ -703,6 +703,13 @@ sends no output limit. Yolk does not infer limits from model ids. Generic OpenAI
 select `OpenAiProviderConfig.completionTokenField`, add endpoint extensions through `extraBody`, and
 set `providerIdentity` for accurate safe error metadata; canonical request fields and required HTTP
 headers take precedence.
+
+Chat Completions responses the parser rejects fail non-retryable `invalid_response` with
+`provider.kind: 'invalid_response'` and a `providerCode` from `openAiChatResponseIssues` naming the
+failed check (`invalid_stream_json`, `invalid_stream_chunk`, `invalid_reasoning`,
+`invalid_tool_call`, `invalid_tool_arguments`, `invalid_usage`, `invalid_response_json`,
+`invalid_response_body`, `missing_choices`). Streamed failures also carry `provider.stream`
+diagnostics. The codes are fixed literals, never upstream values, so hosts can log and persist them.
 
 Claude lowering (`toAnthropicClaudeRequestBody` / `makeAnthropicClaudeProviderLayer`) requires
 `ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`. Non-JSON fails non-retryable

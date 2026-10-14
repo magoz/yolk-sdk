@@ -764,6 +764,63 @@ describe('OpenAI provider', () => {
       )
     })
   )
+
+  it.effect('codes malformed JSON responses without stream diagnostics', () =>
+    Effect.gen(function* () {
+      const runFailure = (response: Response) =>
+        Effect.gen(function* () {
+          const provider = yield* LLMProvider
+
+          return yield* provider
+            .stream({
+              messages: [UserMessage.make({ content: 'hello' })],
+              tools: [],
+              model: 'gpt-test',
+              systemPrompt: 'Be brief.'
+            })
+            .pipe(Stream.runCollect)
+        }).pipe(Effect.provide(makeProviderLayer(makeHttpClientLayer(response, []))), Effect.flip)
+
+      const cases = [
+        [new Response('not json', { status: 200 }), 'invalid_response_json'],
+        [Response.json({ choices: 'nope' }), 'invalid_response_body'],
+        [Response.json({ choices: [] }), 'missing_choices'],
+        [
+          Response.json({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    { id: 'call_1', type: 'function', function: { name: 'f', arguments: '{' } }
+                  ]
+                },
+                finish_reason: 'tool_calls'
+              }
+            ]
+          }),
+          'invalid_tool_arguments'
+        ]
+      ] as const
+
+      for (const [response, providerCode] of cases) {
+        const error = yield* runFailure(response)
+
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          retryable: false,
+          provider: { provider: 'openai', kind: 'invalid_response', providerCode }
+        })
+
+        if (!Predicate.isTagged(error, 'LLMError')) {
+          expect.fail('expected LLMError')
+        }
+
+        expect(error.provider?.stream).toBeUndefined()
+      }
+    })
+  )
 })
 
 describe('OpenAI provider streaming', () => {
@@ -1275,8 +1332,112 @@ describe('OpenAI provider streaming', () => {
       ).pipe(Effect.flip)
 
       expect(error._tag).toBe('LLMError')
-      expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'invalid_tool_call',
+          stream: { protocol: 'chat-completions', responseFormat: 'sse', terminalSeen: true }
+        }
+      })
       expect(error.message).toBe('Invalid OpenAI streamed tool call')
+    })
+  )
+
+  it.effect('codes stream payloads that are not JSON without leaking them', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        rawSseStream(['data: upstream private detail\n\n', 'data: [DONE]\n\n'])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false,
+        message: 'Invalid OpenAI stream event',
+        provider: {
+          provider: 'openai',
+          kind: 'invalid_response',
+          providerCode: 'invalid_stream_json',
+          stream: { protocol: 'chat-completions', outputStarted: false, terminalSeen: false }
+        }
+      })
+      expect(JSON.stringify(error)).not.toContain('private detail')
+    })
+  )
+
+  it.effect('codes stream chunks of the wrong shape', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(chatSse([{ choices: null }])).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: { kind: 'invalid_response', providerCode: 'invalid_stream_chunk' }
+      })
+    })
+  )
+
+  it.effect('codes reasoning that is not text after earlier output', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        sseStreamResponse([
+          `data: ${JSON.stringify(chatChunk({ reasoning_content: 'Thinking' }))}\n\n`,
+          `data: ${JSON.stringify(chatChunk({ reasoning: { text: 'nested' } }))}\n\n`
+        ]),
+        true
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: {
+          providerCode: 'invalid_reasoning',
+          stream: { outputStarted: true, terminalSeen: false }
+        }
+      })
+    })
+  )
+
+  it.effect('codes streamed tool arguments that are not JSON', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          {
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    { index: 0, id: 'call_1', function: { name: 'lookup', arguments: '{"q":' } }
+                  ]
+                }
+              }
+            ]
+          },
+          { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: { providerCode: 'invalid_tool_arguments', stream: { terminalSeen: true } }
+      })
+    })
+  )
+
+  it.effect('codes usage without token counts', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          { choices: [{ delta: { content: 'Hi' }, finish_reason: 'stop' }] },
+          { choices: [], usage: { input_tokens: 3 } }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: { providerCode: 'invalid_usage', stream: { outputStarted: true } }
+      })
     })
   )
 

@@ -116,14 +116,16 @@ const runQueued = <A, E>(
   protocol: OpenCodeGoProtocol,
   responses: ReadonlyArray<Response>,
   requests: Array<HttpClientRequest.HttpClientRequest>,
-  effect: Effect.Effect<A, E, LLMProvider>
+  effect: Effect.Effect<A, E, LLMProvider>,
+  overrides: Partial<OpenCodeGoProviderConfig> = {}
 ) =>
   effect.pipe(
     Effect.provide(
       makeOpenCodeGoProviderLayer({
         apiKey: Redacted.make('go-key'),
         protocol,
-        maxOutputTokens: 2048
+        maxOutputTokens: 2048,
+        ...overrides
       }).pipe(
         Layer.provide(
           Layer.succeed(
@@ -145,6 +147,13 @@ const runQueued = <A, E>(
       )
     )
   )
+
+const streamOnce = (request: LLMRequest) =>
+  Effect.gen(function* () {
+    const provider = yield* LLMProvider
+
+    return yield* provider.stream(request).pipe(Stream.runCollect)
+  })
 
 const tool = ToolDef.make({
   name: 'mcp_Search',
@@ -399,13 +408,24 @@ describe('OpenCode Go', () => {
     Effect.gen(function* () {
       const json = { choices: [{ message: { content: 'Hello', reasoning_content: 123 } }] }
 
-      const error = yield* run(
+      const invalidReasoning = () =>
+        sse([{ choices: [{ delta: { content: 'Hello', reasoning_content: 123 } }] }])
+
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+      const error = yield* runQueued(
         'chat-completions',
-        sse([{ choices: [{ delta: { content: 'Hello', reasoning_content: 123 } }] }]),
-        []
+        [invalidReasoning(), invalidReasoning()],
+        requests,
+        streamOnce(input)
       ).pipe(Effect.flip)
 
-      expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        provider: { providerCode: 'invalid_reasoning' }
+      })
+      expect(requests).toHaveLength(2)
 
       const events = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -763,6 +783,173 @@ describe('OpenCode Go', () => {
       })
     })
   )
+
+  describe('malformed response reroute', () => {
+    const malformed = () =>
+      new Response('data: upstream private detail\n\n', {
+        headers: { 'content-type': 'text/event-stream' }
+      })
+
+    it.effect('chat: retries once under a fresh session before any output', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        const events = yield* runQueued(
+          'chat-completions',
+          [malformed(), success('chat-completions')],
+          requests,
+          streamOnce({ ...input, cacheKey: 'session-1' })
+        )
+
+        expect(events).toMatchObject([{ _tag: 'TextDelta', text: 'Hello' }, { _tag: 'Done' }])
+        expect(requests.map(request => request.headers['x-opencode-session'])).toEqual([
+          'session-1',
+          'session-1.reroute'
+        ])
+        expect(bodyOfRequest(requests[1])).toEqual(bodyOfRequest(requests[0]))
+      })
+    )
+
+    it.effect('chat: reroutes the host session header when the request has no cache key', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        yield* runQueued(
+          'chat-completions',
+          [malformed(), success('chat-completions')],
+          requests,
+          streamOnce(input),
+          { extraHeaders: { 'X-OpenCode-Session': 'host-session' } }
+        )
+
+        expect(requests.map(request => request.headers['x-opencode-session'])).toEqual([
+          'host-session',
+          'host-session.reroute'
+        ])
+      })
+    )
+
+    it.effect('chat: retries a request without a session unchanged', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        yield* runQueued(
+          'chat-completions',
+          [malformed(), success('chat-completions')],
+          requests,
+          streamOnce(input)
+        )
+
+        expect(requests).toHaveLength(2)
+        expect(requests[1]?.headers['x-opencode-session']).toBeUndefined()
+      })
+    )
+
+    it.effect('chat: propagates the second failure with its diagnostics', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        const error = yield* runQueued(
+          'chat-completions',
+          [malformed(), malformed()],
+          requests,
+          streamOnce({ ...input, cacheKey: 'session-1' })
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          retryable: false,
+          message: 'OpenCode Go invalid_response',
+          provider: {
+            provider: openCodeGoProviderId,
+            kind: 'invalid_response',
+            providerCode: 'invalid_stream_json',
+            stream: { protocol: 'chat-completions', outputStarted: false }
+          }
+        })
+        expect(JSON.stringify(error)).not.toContain('private detail')
+        expect(requests).toHaveLength(2)
+      })
+    )
+
+    it.effect('chat: never retries after output was emitted', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+        const observed: Array<string> = []
+
+        const error = yield* runQueued(
+          'chat-completions',
+          [
+            new Response(
+              new ReadableStream({
+                start(controller) {
+                  const encoder = new TextEncoder()
+
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`
+                    )
+                  )
+                  controller.enqueue(encoder.encode('data: upstream private detail\n\n'))
+                  controller.close()
+                }
+              }),
+              { headers: { 'content-type': 'text/event-stream' } }
+            )
+          ],
+          requests,
+          Effect.gen(function* () {
+            const provider = yield* LLMProvider
+
+            return yield* provider.stream({ ...input, cacheKey: 'session-1' }).pipe(
+              Stream.tap(event => Effect.sync(() => observed.push(event._tag))),
+              Stream.runCollect
+            )
+          })
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({ provider: { providerCode: 'invalid_stream_json' } })
+        expect(observed).toEqual(['TextDelta'])
+        expect(requests).toHaveLength(1)
+      })
+    )
+
+    it.effect('chat: never retries model decisions', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        const error = yield* runQueued(
+          'chat-completions',
+          [sse([{ choices: [{ delta: {}, finish_reason: 'length' }] }], true)],
+          requests,
+          streamOnce({ ...input, cacheKey: 'session-1' })
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({ provider: { providerCode: 'length' } })
+        expect(requests).toHaveLength(1)
+      })
+    )
+
+    it.effect('responses: retries once after a stream without its terminal event', () =>
+      Effect.gen(function* () {
+        const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
+        const events = yield* runQueued(
+          'responses',
+          [sse([{ type: 'response.created', response: {} }]), success('responses')],
+          requests,
+          streamOnce({ ...input, cacheKey: 'session-1' })
+        )
+
+        expect(events).toMatchObject([{ _tag: 'TextDelta', text: 'Hello' }, { _tag: 'Done' }])
+        expect(requests.map(request => request.headers['x-opencode-session'])).toEqual([
+          'session-1',
+          'session-1.reroute'
+        ])
+      })
+    )
+  })
 
   it.effect('responses: sanitizes streamed errors that echo credentials', () =>
     Effect.gen(function* () {

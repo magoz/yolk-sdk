@@ -240,6 +240,9 @@ Messages retains native tool names and system instructions, without Claude OAuth
 Responses sends `max_output_tokens`, unlike Codex. Go requires a nonempty key and positive safe-integer
 limit at layer construction. `extraHeaders` cannot override required protocol headers, regardless of
 case. Only override `baseUrl` with a trusted proxy because it receives the credential.
+A malformed response before any event (for example a stream payload that is not JSON) is retried
+once under `<session>.reroute` so Go routes it to another upstream; the error otherwise carries the
+failed check as `provider.providerCode`.
 
 Request `reasoningEffort` becomes chat `reasoning_effort`, Messages `output_config.effort` (omitting
 `minimal`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the
