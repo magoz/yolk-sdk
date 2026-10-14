@@ -75,7 +75,9 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   headings, hints, or counts), so adding or removing them, even whole namespaces, leaves the text
   byte-identical.
 - Globals (`searchTools`, `describeTool`, `describeNamespace`) cover every nested tool and are not
-  recorded as calls.
+  recorded as calls. `searchTools` hits carry `signature` (`codeModeToolSignature`: the call on one
+  line without description comments, cut at `maxCodeModeSearchSignatureChars`), so a found tool is
+  called in the next script without a `describeTool` round trip.
 - Store writes are reported only for successful scripts and only in `structuredContent.codemode`.
   `codeModeStoreFromToolResults` takes `{ toolName, result }` entries and applies only results of
   the configured code mode tool name; it keeps pi's bounds (256 Ki characters of JSON per value,

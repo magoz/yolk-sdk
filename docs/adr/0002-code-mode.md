@@ -231,7 +231,8 @@ of. There is no `mode` option in v1: the only behavior is the former `mode: 'on'
   outside the budget, saying how scripts call it and what it resolves to. An optional
   `ToolModule.description` shows under the namespace heading.
 - **Globals**: `tools.<name>(args)`, `searchTools(query, { limit?, namespace? })` (BM25 over names,
-  descriptions, and namespace descriptions), `describeTool(name)`, `describeNamespace(name)`,
+  descriptions, and namespace descriptions; hits carry a one-line call `signature`),
+  `describeTool(name)`, `describeNamespace(name)`,
   `text()`, `image()`, `console.*`, `return`, `exit()`, `store()`/`load()`.
 - **Preprocessing**: strip TypeScript annotations before execution; both evaluated engines reject
   them and models shown TypeScript declarations write them.

@@ -13,6 +13,7 @@ import {
   codeModeCatalog,
   codeModeCatalogInstructionKey,
   makeCodeModeTool,
+  maxCodeModeSearchSignatureChars,
   renderCodeModeDescription,
   searchCodeModeTools,
   selectCodeModeListing,
@@ -30,6 +31,7 @@ const nestedTool = (
   options: {
     readonly exposure?: 'all' | 'listed' | 'search' | 'pinned'
     readonly description?: string
+    readonly parameters?: ToolDef['parameters']
     readonly outputSchema?: ToolDef['outputSchema']
     readonly moduleDescription?: string
   } = {}
@@ -39,7 +41,7 @@ const nestedTool = (
   const def = ToolDef.make({
     name,
     description: options.description ?? `${name} tool`,
-    parameters: {
+    parameters: options.parameters ?? {
       type: 'object',
       properties: { query: { type: 'string' } },
       required: ['query']
@@ -316,9 +318,11 @@ describe('searchTools', () => {
       'crm_find_contact',
       'mail_send'
     ])
+    // The signature is enough to call the tool without `describeTool`.
     expect(searchCodeModeTools(catalog, 'deals')[0]).toEqual({
       name: 'crmListDeals',
-      description: 'List open deals'
+      description: 'List open deals',
+      signature: 'tools.crmListDeals({ query: string; }): Promise<string>'
     })
     // Namespace matches count: both mail tools, shorter document first.
     expect(searchCodeModeTools(catalog, 'mail').map(hit => hit.name)).toEqual([
@@ -341,6 +345,26 @@ describe('searchTools', () => {
 
   it('indexes namespace descriptions', () => {
     expect(searchCodeModeTools(catalog, 'invoices').map(hit => hit.name)).toEqual(['ledger_read'])
+  })
+
+  it('cuts a long signature with a pointer to describeTool', () => {
+    const wide = codeModeCatalog([
+      nestedTool('crm', 'crm_bulk', {
+        description: 'Bulk update',
+        parameters: {
+          type: 'object',
+          properties: Object.fromEntries(
+            Array.from({ length: 120 }, (_, index) => [`field${index}`, { type: 'string' }])
+          )
+        }
+      })
+    ])
+
+    const [hit] = searchCodeModeTools(wide, 'bulk')
+
+    expect(hit?.signature.startsWith('tools.crm_bulk({ field0?: string;')).toBe(true)
+    expect(hit?.signature.endsWith('… (describeTool for the full declaration)')).toBe(true)
+    expect(hit?.signature.length).toBeLessThan(maxCodeModeSearchSignatureChars + 60)
   })
 })
 

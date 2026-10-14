@@ -304,12 +304,12 @@ const globalLines = (store: boolean) => [
   '- `image(dataUrl)`: append a base64 image (a `data:` URL or `{ type: "image", data, mimeType }`).',
   '- `exit()`: end the script successfully.',
   '- `ALL_TOOLS`: `{ name, description }` of every callable tool.',
-  '- `await searchTools(query, { limit?, namespace? })`: find tools by topic; resolves to `Array<{ name: string; description: string }>` (default limit 8).',
-  '- `await describeTool(name)`: the description and TypeScript declaration of a tool, or `undefined`.',
+  '- `await searchTools(query, { limit?, namespace? })`: find tools by topic; resolves to `Array<{ name: string; description: string; signature: string }>` (default limit 8). `signature` is the call with its argument and result types: enough to call the tool in your next script.',
+  '- `await describeTool(name)`: the full description and documented TypeScript declaration of a tool, or `undefined`; needed only when a signature is cut or unclear.',
   '- `await describeNamespace(name)`: `{ name, description?, tools: Array<{ name, description }> }` for a namespace, or `undefined`.',
   ...(store
     ? [
-        '- `store(key, value)` and `load(key)`: keep small JSON values for later scripts; writes are saved only when the script succeeds.'
+        '- `store(key, value)` and `load(key)`: keep JSON values (up to 256 KiB each) for later scripts; writes are saved only when the script succeeds. When fetched data is large, store it and return a summary, then filter it with `load()` in a later script instead of calling the tools again.'
       ]
     : [])
 ]
@@ -332,7 +332,7 @@ const namespaceSection = (namespace: string, tools: ReadonlyArray<CodeModeCatalo
 
 // Fixed text: never derived from `search` tools or from which tools did not fit the budget.
 const unlistedToolsLine =
-  'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` or `await describeNamespace(name)` before calling it.'
+  'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })` (each hit has its call signature) or `await describeNamespace(name)`, then call them in your next script.'
 
 /** Staged tool plans as the description shows them (`NestedToolStagingDescription`). */
 export type CodeModeStagingDescription = {
@@ -391,6 +391,33 @@ export const renderCodeModeDescription = (input: CodeModeDescriptionInput): stri
     ...(hasStageableNames(stageableNames) ? [stageableSection(stageableNames)] : []),
     unlistedToolsLine
   ].join('\n\n')
+}
+
+/** Longest `searchTools` signature; a longer one is cut (`describeTool` has the whole declaration). */
+export const maxCodeModeSearchSignatureChars = 800
+
+// The argument type on one line, without the description comments (`describeTool` keeps them).
+const compactType = (schema: CodeModeJsonSchema) =>
+  schemaToType(schema)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => !line.startsWith('//'))
+    .join(' ')
+
+/**
+ * The call a `searchTools` hit shows, enough to call the tool without `describeTool`:
+ * `tools.<id>(args): Promise<result>`, or `stage("<name>", args)` for a stageable tool. Bounded:
+ * a long one ends with a pointer to `describeTool`.
+ */
+export const codeModeToolSignature = (tool: CodeModeCatalogTool): string => {
+  const signature =
+    tool.exposure === 'stage'
+      ? `stage(${JSON.stringify(tool.name)}, ${compactType(tool.inputSchema)})`
+      : `${tool.callLabel}(${compactType(tool.inputSchema)}): Promise<${shortType(tool.outputSchema)}>`
+
+  return signature.length <= maxCodeModeSearchSignatureChars
+    ? signature
+    : `${signature.slice(0, maxCodeModeSearchSignatureChars)}… (describeTool for the full declaration)`
 }
 
 /**
@@ -517,7 +544,7 @@ const namespaceLine = (namespace: CodeModeCatalogSummary['namespaces'][number]) 
 export const renderCodeModeCatalog = (summary: CodeModeCatalogSummary): string =>
   [
     '# Code mode catalog',
-    'Tools `codemode` scripts can call, by namespace; the latest catalog in the conversation replaces any earlier one. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` and read one with `await describeTool(name)` before calling it.',
+    'Tools `codemode` scripts can call, by namespace; the latest catalog in the conversation replaces any earlier one. Call a listed tool as `await tools.<id>(args)`; find the others with `await searchTools(query, { namespace })` (each hit has its call signature) and call them in your next script.',
     ['## Namespaces', ...summary.namespaces.map(namespaceLine)].join('\n'),
     ...summary.namespaces.flatMap(namespace =>
       namespace.listing.length === 0 ? [] : [`### ${namespace.name}\n${namespace.listing}`]
@@ -567,5 +594,5 @@ export const renderCodeModeInstructedDescription = (input: {
       ...globalLines(input.store === true),
       ...(input.staging === undefined ? [] : [stageLine(input.staging.reviewToolName)])
     ].join('\n'),
-    'The tools scripts can call are in the "Code mode catalog" (namespaces, tool counts and listed tools; the latest one applies). Find the others with `await searchTools(query, { namespace? })` and read one with `await describeTool(name)` before calling it.'
+    'The tools scripts can call are in the "Code mode catalog" (namespaces, tool counts and listed tools; the latest one applies). Find the others with `await searchTools(query, { namespace? })` (each hit has its call signature) and call them in your next script.'
   ].join('\n\n')

@@ -82,8 +82,10 @@ const program = Effect.gen(function* () {
   always declared, outside the budget, and deferred (`loading: 'deferred'`) `all` tools count as
   `search` tools. One fixed line tells scripts to
   find unlisted tools with `searchTools(query, { limit?, namespace? })` (BM25 over names,
-  descriptions, namespaces, and module descriptions), `describeTool(name)`, and
-  `describeNamespace(name)`.
+  descriptions, namespaces, and module descriptions) and call them in the next script: each hit
+  has a one-line `signature` with the argument and result types (`codeModeToolSignature`, at most
+  800 characters). `describeTool(name)` gives the full documented declaration and
+  `describeNamespace(name)` a namespace's tools.
 - Results start with `Script completed` or `Script failed`, include the wall time, output, and the
   JSON return value, and are cut head and tail at `maxOutputChars`. Images beyond `maxImages` or
   `maxImageBytes` are dropped with a note. Failed scripts keep partial output and list the tool

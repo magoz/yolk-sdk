@@ -519,7 +519,7 @@ describe('stage-only tools', () => {
 
       expect(result.isError).toBeUndefined()
       expect(output).toContain(
-        '{"name":"archive-resource","description":"Archive a published resource","stageOnly":true}'
+        '{"name":"archive-resource","description":"Archive a published resource","signature":"stage(\\"archive-resource\\", { resource: string; })","stageOnly":true}'
       )
       expect(output).toContain('await stage(\\"archive-resource\\", args)')
       expect(output).toContain('args: { resource: string; }')
@@ -585,9 +585,11 @@ describe('stageable tools model-callable too', () => {
 
       const output = text((yield* env.run()).content)
 
-      expect(output).toMatch(/\{"name":"link_curriculum","description":"[^"]*","stageOnly":true\}/)
+      expect(output).toMatch(
+        /\{"name":"link_curriculum","description":"[^"]*","signature":"stage\(\\"link_curriculum\\", \{ curriculum: string; resource: string; \}\)","stageOnly":true\}/
+      )
       expect(output).toContain(
-        '{"name":"archive-resource","description":"Archive a published resource","stageOnly":true}'
+        '{"name":"archive-resource","description":"Archive a published resource","signature":"stage(\\"archive-resource\\", { resource: string; })","stageOnly":true}'
       )
       expect(output).toContain('await stage(\\"archive-resource\\", args)')
       expect(archived).toEqual([])
