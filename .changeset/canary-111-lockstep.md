@@ -11,4 +11,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Advance unchanged public packages in lockstep with `@yolk-sdk/codemode`, whose description now lets scripts search and call a read-only tool in one run. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+Advance unchanged public packages in lockstep with `@yolk-sdk/codemode`, whose description now tells the model to call known tools without searching again. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.

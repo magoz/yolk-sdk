@@ -77,11 +77,10 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 - Globals (`searchTools`, `describeTool`, `describeNamespace`) cover every nested tool and are not
   recorded as calls. `searchTools` hits carry `signature` (`codeModeToolSignature`: the call on one
   line without description comments, cut at `maxCodeModeSearchSignatureChars`), so a found tool is
-  called without a `describeTool` round trip. The description lets scripts search and call a
-  read-only tool in one script when they pick the hit by its exact expected name (never the first
-  hit blindly: ranking is lexical and hits carry no access metadata); a found tool that changes
-  something is called only in a later script, after its hit came back (writes may run without
-  approval in hosts).
+  called without a `describeTool` round trip. The description tells the model to call tools whose
+  exact name it already knows (listed, earlier hits, earlier calls) without searching, and never to
+  call a tool in the same script that found it: ranking is lexical and hits carry no access
+  metadata, so an unseen top hit could be a write (hosts may run writes without approval).
 - Store writes are reported only for successful scripts and only in `structuredContent.codemode`.
   `codeModeStoreFromToolResults` takes `{ toolName, result }` entries and applies only results of
   the configured code mode tool name; it keeps pi's bounds (256 Ki characters of JSON per value,

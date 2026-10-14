@@ -123,16 +123,13 @@ describe('code mode catalog', () => {
     expect(description).toContain(
       'More tools may be callable than are listed here: find them with `await searchTools(query, { namespace? })`'
     )
-    // Search hits carry signatures: no describe step before every call; reads can be found and
-    // called in one script, writes only after the hit was seen.
+    // Search hits carry signatures: no describe step before every call. Known names are called
+    // without searching; a found tool is never called in the script that found it.
     expect(description).toContain('`signature` is the call with its argument and result types')
-    expect(description).toContain('pick the hit by the exact name you expect')
-    expect(description).toContain('Never call a hit you did not pick by name.')
+    expect(description).toContain('Call a tool directly when you already know its exact name')
+    expect(description).toContain('Never call a tool in the same script that found it.')
     expect(description).toContain(
-      'Call a found tool that changes something only in a later script, after its hit came back to you.'
-    )
-    expect(description).toContain(
-      'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
+      'call a tool whose exact name you already know directly, without searching'
     )
     expect(description).not.toContain('before calling it')
     expect(description).not.toContain('store(key, value)')
@@ -487,14 +484,14 @@ describe('catalog instructions', () => {
       expect(descriptionOf(large)).toContain('"Code mode catalog"')
       expect(descriptionOf(large)).not.toContain('before calling it')
       expect(descriptionOf(large)).toContain(
-        'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
+        'call a tool whose exact name you already know directly, without searching'
       )
       expect(descriptionOf(large)).not.toContain('crm_list')
 
       const first = instructionOf(large).render(instructionOf(large).state)
 
       expect(first).toContain(
-        'a script may call a found read-only tool in the same run only if it picks the hit by its exact expected name'
+        'call a tool whose exact name you already know directly, without searching'
       )
 
       expect(first).toContain('# Code mode catalog')

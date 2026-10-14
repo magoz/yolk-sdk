@@ -84,9 +84,10 @@ const program = Effect.gen(function* () {
   find unlisted tools with `searchTools(query, { limit?, namespace? })` (BM25 over names,
   descriptions, namespaces, and module descriptions): each hit has a one-line `signature` with
   the argument and result types (`codeModeToolSignature`; past 800 characters it is cut with a
-  `describeTool` pointer). The description lets a script search and call a read-only tool in
-  one run when it picks the hit by the exact name it expects (never the first hit blindly); a found
-  tool that changes something is called only in a later script, after its hit came back. `describeTool(name)` gives the full documented
+  `describeTool` pointer). The description tells the model to call a tool whose exact name it
+  already knows (listed, returned by an earlier search, or called before) directly, without
+  searching, and never to call a tool in the same script that found it: ranking is lexical and
+  hits carry no access metadata, so an unseen hit could be a write. `describeTool(name)` gives the full documented
   declaration and `describeNamespace(name)` a namespace's tools.
 - Results start with `Script completed` or `Script failed`, include the wall time, output, and the
   JSON return value, and are cut head and tail at `maxOutputChars`. Images beyond `maxImages` or
