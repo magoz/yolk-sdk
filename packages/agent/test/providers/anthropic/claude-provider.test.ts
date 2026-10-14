@@ -1065,6 +1065,37 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('reports the specific details.error_code of an Anthropic error', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const response = new Response(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message:
+              'Claude Code 2.1.112 does not support this model; version 2.1.280 or newer is required.',
+            details: { error_code: 'claude_code_version_too_old' }
+          }
+        }),
+        { status: 400 }
+      )
+
+      const error = yield* runMinimalProviderRequest({ response }, requests).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        retryable: false,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'unknown',
+          status: 400,
+          providerCode: 'claude_code_version_too_old'
+        }
+      })
+    })
+  )
+
   it.effect('streams Anthropic text deltas as they arrive', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

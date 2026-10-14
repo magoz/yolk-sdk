@@ -1464,12 +1464,22 @@ const boundedAnthropicHttpErrorMessage = (message: string) =>
     ? message
     : `${message.slice(0, maxAnthropicHttpErrorMessageCharacters)}…`
 
+/**
+ * The provider code of an Anthropic error object: `details.error_code` (for example
+ * `claude_code_version_too_old`) when present, as it is more specific than the generic `type`
+ * (`invalid_request_error`), so hosts can explain the failure.
+ */
+const anthropicErrorProviderCode = (error: ReturnType<typeof jsonField>) =>
+  stringField(jsonField(error, 'details'), 'error_code') ??
+  stringField(error, 'type') ??
+  stringField(error, 'code')
+
 const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
   Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
     Effect.map(parsed => {
       const error = jsonField(parsed, 'error')
       const message = stringField(error, 'message')
-      const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
+      const providerCode = anthropicErrorProviderCode(error)
 
       const fields: AnthropicHttpErrorInfoFields = {}
 
@@ -1958,7 +1968,7 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
 
     if (type === 'error') {
       const error = jsonField(data, 'error')
-      const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
+      const providerCode = anthropicErrorProviderCode(error)
 
       return Effect.fail(
         providerSignalError(
