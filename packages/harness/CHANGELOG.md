@@ -1,5 +1,13 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.110
+
+### Patch Changes
+
+- 47e7fb3: Advance unchanged public packages in lockstep with `@yolk-sdk/codemode`, whose `searchTools` hits now include each tool's call signature. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [47e7fb3]
+  - @yolk-sdk/agent@0.1.0-canary.110
+
 ## 0.1.0-canary.109
 
 ### Patch Changes
