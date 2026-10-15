@@ -15,7 +15,8 @@
     "@yolk-sdk/codemode": "0.1.0-canary.95",
     "@yolk-sdk/conformance": "0.1.0-canary.95",
     "@yolk-sdk/emulators": "0.1.0-canary.95",
-    "@yolk-sdk/extractors": "0.1.0-canary.97"
+    "@yolk-sdk/extractors": "0.1.0-canary.97",
+    "@yolk-sdk/files": "0.1.0-canary.113"
   },
   "changesets": [
     "action-backed-interactions",
@@ -58,6 +59,7 @@
     "canary-110-lockstep",
     "canary-111-lockstep",
     "canary-113-lockstep",
+    "canary-114-lockstep",
     "canary-79-lockstep-notes",
     "canary-81-lockstep",
     "canary-82-lockstep",
@@ -129,6 +131,7 @@
     "extractors-readme-boundaries",
     "fast-claude-parity",
     "figma-runtime-secrets",
+    "file-claim-check",
     "finite-workflow-retries",
     "fix-afloat-endpoint",
     "fix-calendar-event-boundaries",
