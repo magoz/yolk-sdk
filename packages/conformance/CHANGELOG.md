@@ -1,5 +1,14 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.114
+
+### Patch Changes
+
+- e2de782: Advance unchanged public packages in lockstep with the file claim check (ADR 0009): agents move
+  files between tools by `fileId`, and the new `@yolk-sdk/files` package provides the object-storage
+  file store and file tools. These packages have no direct implementation changes in this release;
+  keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.113
 
 ### Patch Changes
