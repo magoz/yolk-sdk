@@ -280,6 +280,19 @@ describe('rankPool with fresh readings (expiring-first)', () => {
     )
   })
 
+  it('falls back past accounts a fresh reading shows used up', () => {
+    const entries = readings({ primary: reading(weekly(100, t0 + day)) })
+
+    // The pinned primary is used up and backup has no reading: backup serves.
+    expect(rank({ pin: 'primary', readings: entries })).toEqual(
+      PoolDecision.FillFirst({ accountId: 'backup' })
+    )
+    // With nothing else left, the used-up account still serves so the provider decides.
+    expect(rank({ accounts: [primary], pin: 'primary', readings: entries })).toEqual(
+      PoolDecision.Sticky({ accountId: 'primary' })
+    )
+  })
+
   it('ignores readings of unavailable accounts', () => {
     expect(
       rank({
@@ -314,6 +327,12 @@ describe('poolReadingFromSnapshot', () => {
         }),
         ProviderSubscriptionUsageWindow.make({ id: 'monthly', usedPercent: 30 }),
         ProviderSubscriptionUsageWindow.make({
+          id: 'primary',
+          usedPercent: 50,
+          resetsAfterSeconds: 7200,
+          windowDurationMinutes: 300
+        }),
+        ProviderSubscriptionUsageWindow.make({
           id: 'seven-day-opus',
           usedPercent: 100,
           windowDurationMinutes: week,
@@ -327,6 +346,7 @@ describe('poolReadingFromSnapshot', () => {
       windows: [
         { durationMinutes: 300, usedPercent: 4, resetsAtMs: t0 + hour, models: [] },
         { usedPercent: 30, models: [] },
+        { durationMinutes: 300, usedPercent: 50, resetsAtMs: t0 + 2 * hour, models: [] },
         { durationMinutes: week, usedPercent: 100, models: ['opus'] }
       ]
     })
@@ -395,6 +415,21 @@ describe('staleQuotaCooldowns', () => {
     windows
   })
 
+  it('clears even when a model-scoped window is used up', () => {
+    // Model-scoped windows block only their models (through ranking), never the whole account.
+    expect(
+      stale(
+        {
+          backup: fresh([
+            weekly(0, until),
+            { durationMinutes: week, usedPercent: 100, resetsAtMs: until, models: ['fable'] }
+          ])
+        },
+        t0 + 2 * minute
+      )
+    ).toEqual([quotaCooldown])
+  })
+
   it.each([
     ['no reading', {}, quotaCooldown],
     [
@@ -411,16 +446,6 @@ describe('staleQuotaCooldowns', () => {
     [
       'session used up',
       { backup: fresh([weekly(0, until), session(100, t0 + 4 * hour)]) },
-      quotaCooldown
-    ],
-    [
-      'scoped window out',
-      {
-        backup: fresh([
-          weekly(0, until),
-          { durationMinutes: week, usedPercent: 100, resetsAtMs: until, models: ['fable'] }
-        ])
-      },
       quotaCooldown
     ],
     [

@@ -70,16 +70,21 @@ sees tokens.
 
 ## Failover and retries
 
-| Failure before the first event                            | Pool                                             |
-| --------------------------------------------------------- | ------------------------------------------------ |
-| `rate_limit` with `quotaResetsAtMs` (Claude, Codex quota) | Cooldown until the reset, next account           |
-| `rate_limit` with `retryAfterMs` of 30 minutes or more    | Cooldown for that long, next account             |
-| `auth`                                                    | 30-minute cooldown, next account                 |
-| anything else, or any failure after an event              | Unchanged to the caller; the loop retries        |
-| every account out                                         | `rate_limit`, `retryable: false`, earliest reset |
+| Failure before the first event                            | Pool                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `rate_limit` with `quotaResetsAtMs` (Claude, Codex quota) | Cooldown until the reset, next account                                                         |
+| `rate_limit` with `retryAfterMs` of 30 minutes or more    | Cooldown for that long, next account                                                           |
+| `auth`                                                    | 30-minute cooldown, next account                                                               |
+| anything else, or any failure after an event              | Unchanged to the caller; the loop retries it only when it is retryable and nothing was emitted |
+| every account out on quota                                | `rate_limit`, `retryable: false`, earliest quota reset                                         |
+| every account out on rejected credentials only            | `auth` (`provider_error`), `retryable: false`                                                  |
 
 The loop's own retry calls the pool again, which picks again; the pool never retries transient
-errors itself, so attempts never multiply.
+errors itself, so attempts never multiply. Hints more than a year ahead are not trusted and pass
+through without a cooldown.
+
+When no account is usable by a fresh reading, the pool falls back to the route's pin or fill-first,
+skipping accounts a fresh reading shows used up unless nothing else is left.
 
 ## Store
 

@@ -1,4 +1,4 @@
-import { Chunk, Clock, Effect, Option } from 'effect'
+import { Chunk, Clock, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientRequest } from 'effect/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
@@ -53,11 +53,11 @@ class AnthropicClaudeSubscriptionUsageWire extends Schema.Class<AnthropicClaudeS
 const AnthropicClaudeScopedLimitWire = Schema.Struct({
   kind: Schema.Literal('weekly_scoped'),
   percent: Schema.Number,
-  resets_at: Schema.optional(NullableString),
+  resets_at: Schema.optional(Schema.Unknown),
   scope: Schema.Struct({
     model: Schema.Struct({
-      id: Schema.optional(NullableString),
-      display_name: Schema.optional(NullableString)
+      id: Schema.optional(Schema.Unknown),
+      display_name: Schema.optional(Schema.Unknown)
     })
   })
 })
@@ -75,17 +75,14 @@ export const anthropicClaudeScopedWindowIdPrefix = 'seven-day-'
  * The lowercase model substring a scoped limit applies to: the model id when present, else the
  * display name slugged (`Opus` → `opus`).
  */
-const scopedLimitModel = (model: {
-  readonly id?: string | null | undefined
-  readonly display_name?: string | null | undefined
-}) => {
-  const id = model.id?.trim().toLowerCase()
+const scopedLimitModel = (model: { readonly id?: unknown; readonly display_name?: unknown }) => {
+  const id = Predicate.isString(model.id) ? model.id.trim().toLowerCase() : ''
 
-  if (id !== undefined && id !== '') {
+  if (id !== '') {
     return id
   }
 
-  const slug = (model.display_name ?? '')
+  const slug = (Predicate.isString(model.display_name) ? model.display_name : '')
     .trim()
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, '-')
@@ -124,14 +121,14 @@ export const parseAnthropicClaudeSubscriptionUsage = (
       const pushWindow = (input: {
         readonly id: string
         readonly usedPercent: number
-        readonly resetsAt: string | null | undefined
+        readonly resetsAt: unknown
         readonly windowDurationMinutes: number
         readonly models?: ReadonlyArray<string>
       }) => {
         const resetsAt =
-          input.resetsAt === null || input.resetsAt === undefined
-            ? undefined
-            : canonicalSubscriptionUsageInstant(input.resetsAt)
+          Predicate.isString(input.resetsAt) || Predicate.isNumber(input.resetsAt)
+            ? canonicalSubscriptionUsageInstant(input.resetsAt)
+            : undefined
 
         const fields: AnthropicUsageWindowFields =
           resetsAt === undefined

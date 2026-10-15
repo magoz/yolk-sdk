@@ -98,11 +98,22 @@ const isOverageOnlyRejection = (headers: HeaderMap, statuses: ClaudeWindowStatus
   )
 }
 
+/** Resets further away than this are not trusted (malformed or unit-confused values). */
+const maxQuotaResetAheadMs = 366 * 24 * 60 * 60_000
+
+const plausibleReset = (resetMs: number | undefined, nowMs: number) =>
+  resetMs !== undefined &&
+  Number.isFinite(resetMs) &&
+  resetMs > nowMs &&
+  resetMs - nowMs <= maxQuotaResetAheadMs
+
 /**
  * When an exhausted Claude subscription quota resets, from the unified rate-limit headers of a
- * `429`: the latest reset among the rejected windows (five-hour, weekly, model weekly, unified),
- * ignoring resets that are not in the future. Undefined for transient or overage-only rejections.
- * Mirrors CLIProxyAPI `ParseClaudeRateLimitReset` without its fuzz.
+ * `429`: the latest reset among the rejected account-wide windows (five-hour, weekly), else the
+ * unified reset when the account itself is rejected. A model-scoped weekly rejection (`7d_oi`)
+ * yields none, so it never locks the account's other models (usage readings block that model), and
+ * neither do transient or overage-only rejections. Resets in the past or more than a year ahead are
+ * ignored. Derived from CLIProxyAPI `ParseClaudeRateLimitReset`, without its fuzz.
  */
 export const anthropicClaudeQuotaResetsAtMs = (input: {
   readonly status: number
@@ -122,32 +133,28 @@ export const anthropicClaudeQuotaResetsAtMs = (input: {
     sevenDayModel: status(headers, '-7d_oi')
   }
 
-  const overageOnly = isOverageOnlyRejection(headers, statuses)
-
-  const unifiedRejected =
-    !overageOnly &&
-    (statuses.unified === 'rejected' ||
-      statuses.fiveHour === 'rejected' ||
-      statuses.sevenDay === 'rejected' ||
-      statuses.sevenDayModel === 'rejected' ||
-      (statuses.unified === '' && !isAllowed(statuses.fiveHour) && !isAllowed(statuses.sevenDay)))
-
-  const resetHeaders = [
-    statuses.fiveHour === 'rejected' ? 'anthropic-ratelimit-unified-5h-reset' : undefined,
-    statuses.sevenDay === 'rejected' ? 'anthropic-ratelimit-unified-7d-reset' : undefined,
-    statuses.sevenDayModel === 'rejected' && !overageOnly
-      ? 'anthropic-ratelimit-unified-7d_oi-reset'
-      : undefined,
-    unifiedRejected ? 'anthropic-ratelimit-unified-reset' : undefined
-  ].filter(Predicate.isNotUndefined)
-
-  const resets = resetHeaders.flatMap(name => {
+  const resetOf = (name: string) => {
     const reset = parseResetMs(headerValue(headers, name))
 
-    return reset !== undefined && reset > input.nowMs ? [reset] : []
-  })
+    return plausibleReset(reset, input.nowMs) ? reset : undefined
+  }
 
-  return resets.length === 0 ? undefined : Math.max(...resets)
+  const windowResets = [
+    statuses.fiveHour === 'rejected' ? resetOf('anthropic-ratelimit-unified-5h-reset') : undefined,
+    statuses.sevenDay === 'rejected' ? resetOf('anthropic-ratelimit-unified-7d-reset') : undefined
+  ].filter(Predicate.isNotUndefined)
+
+  if (windowResets.length > 0) {
+    return Math.max(...windowResets)
+  }
+
+  const accountRejected =
+    statuses.sevenDayModel !== 'rejected' &&
+    !isOverageOnlyRejection(headers, statuses) &&
+    (statuses.unified === 'rejected' ||
+      (statuses.unified === '' && !isAllowed(statuses.fiveHour) && !isAllowed(statuses.sevenDay)))
+
+  return accountRejected ? resetOf('anthropic-ratelimit-unified-reset') : undefined
 }
 
 const UsageLimitError = Schema.Struct({
@@ -170,8 +177,8 @@ const positiveInteger = (value: unknown) =>
 /**
  * When an exhausted ChatGPT Codex quota resets, from a `429` body whose error type is
  * `usage_limit_reached`: `resets_at` (unix seconds, when in the future), else `now +
- * resets_in_seconds`. Undefined for other bodies, including transient `rate_limit_exceeded`.
- * Mirrors CLIProxyAPI `parseCodexRetryAfter`.
+ * resets_in_seconds`; resets more than a year ahead are ignored. Undefined for other bodies,
+ * including transient `rate_limit_exceeded`. Mirrors CLIProxyAPI `parseCodexRetryAfter`.
  */
 export const openAiCodexQuotaResetsAtMs = (input: {
   readonly status: number
@@ -201,13 +208,13 @@ export const openAiCodexQuotaResetsAtMs = (input: {
 
     const resetsAt = positiveInteger(error.value.resets_at)
 
-    if (resetsAt !== undefined && resetsAt * 1000 > input.nowMs) {
+    if (resetsAt !== undefined && plausibleReset(resetsAt * 1000, input.nowMs)) {
       return resetsAt * 1000
     }
 
     const resetsIn = positiveInteger(error.value.resets_in_seconds)
 
-    if (resetsIn !== undefined) {
+    if (resetsIn !== undefined && plausibleReset(input.nowMs + resetsIn * 1000, input.nowMs)) {
       return input.nowMs + resetsIn * 1000
     }
   }

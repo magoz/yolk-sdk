@@ -1,4 +1,4 @@
-import { Chunk, Effect } from 'effect'
+import { Chunk, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ProviderSubscriptionUsageSnapshot } from '@yolk-sdk/agent/providers/subscription-usage'
 import {
@@ -57,7 +57,11 @@ export type PoolStoreApi = {
     readonly expected: string | undefined
     readonly pin: PoolPin
   }) => Effect.Effect<boolean, PoolStoreError>
-  /** Records a cooldown; when the account already has one, the one that ends later stays. */
+  /**
+   * Records a cooldown; when the account already has one, the one that ends later stays, and of two
+   * that end together the one that started later (a newer failure must not be cleared by a reading
+   * taken before it).
+   */
   readonly putCooldown: (cooldown: PoolCooldown) => Effect.Effect<void, PoolStoreError>
   /**
    * Removes the account's cooldown only when it is the one observed (same `startedAtMs`). Returns
@@ -119,7 +123,11 @@ export const makeMemoryPoolStore = (): PoolStoreApi => {
       Effect.sync(() => {
         const current = cooldowns.get(cooldown.accountId)
 
-        if (current === undefined || cooldown.untilMs > current.untilMs) {
+        if (
+          current === undefined ||
+          cooldown.untilMs > current.untilMs ||
+          (cooldown.untilMs === current.untilMs && cooldown.startedAtMs > current.startedAtMs)
+        ) {
           cooldowns.set(cooldown.accountId, cooldown)
         }
       }),
@@ -281,7 +289,9 @@ export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
       const kept = (yield* load).cooldowns
 
       yield* expect(
-        kept.length === 1 && kept[0]?._tag === 'PoolQuotaCooldown' && kept[0].untilMs === 100,
+        kept.length === 1 &&
+          Predicate.isTagged(kept[0], 'PoolQuotaCooldown') &&
+          kept[0].untilMs === 100,
         'an earlier-ending cooldown does not replace a later one'
       )
 
@@ -293,16 +303,27 @@ export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
 
       yield* expect(
         replaced.length === 1 &&
-          replaced[0]?._tag === 'PoolAuthCooldown' &&
+          Predicate.isTagged(replaced[0], 'PoolAuthCooldown') &&
           replaced[0].startedAtMs === 3,
         'a later-ending cooldown replaces the current one'
       )
+
+      yield* store.putCooldown(
+        PoolQuotaCooldown.make({ accountId: 'a', startedAtMs: 4, untilMs: 200 })
+      )
+
+      const renewed = (yield* load).cooldowns
+
       yield* expect(
-        !(yield* store.clearCooldown({ accountId: 'a', startedAtMs: 1 })),
+        renewed.length === 1 && renewed[0]?.startedAtMs === 4,
+        'of two cooldowns that end together, the later-started one stays'
+      )
+      yield* expect(
+        !(yield* store.clearCooldown({ accountId: 'a', startedAtMs: 3 })),
         'clearing a cooldown that is no longer current is refused'
       )
       yield* expect(
-        yield* store.clearCooldown({ accountId: 'a', startedAtMs: 3 }),
+        yield* store.clearCooldown({ accountId: 'a', startedAtMs: 4 }),
         'clearing the observed cooldown succeeds'
       )
       yield* expect((yield* load).cooldowns.length === 0, 'a cleared cooldown is gone')

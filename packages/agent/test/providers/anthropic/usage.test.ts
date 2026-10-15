@@ -300,6 +300,12 @@ describe('Anthropic Claude subscription usage', () => {
               percent: 50,
               scope: { model: { id: null, display_name: 'Opus' } }
             },
+            {
+              kind: 'weekly_scoped',
+              percent: 7,
+              resets_at: 1_786_000_000,
+              scope: { model: { id: 42, display_name: 'Haiku' } }
+            },
             { kind: 'monthly_spend', percent: 30 },
             { kind: 'weekly_scoped', percent: 'n/a', scope: { model: { display_name: 'Sonnet' } } },
             'garbage'
@@ -335,6 +341,13 @@ describe('Anthropic Claude subscription usage', () => {
           usedPercent: 5,
           windowDurationMinutes: 10080,
           models: ['claude-fable-5-1']
+        },
+        {
+          id: 'seven-day-haiku',
+          usedPercent: 7,
+          resetsAt: new Date(1_786_000_000_000).toISOString(),
+          windowDurationMinutes: 10080,
+          models: ['haiku']
         }
       ])
     })

@@ -35,7 +35,8 @@ export const poolRoute = (model: string) => model.trim().toLowerCase()
 
 /**
  * A usage snapshot as the ranking reads it; an unreadable `fetchedAt` yields no reading. Windows
- * without a length still block a used-up account but never rank it.
+ * without a length still block a used-up account but never rank it. A window that reports only
+ * `resetsAfterSeconds` resets that long after the reading.
  */
 export const poolReadingFromSnapshot = (
   snapshot: ProviderSubscriptionUsageSnapshot
@@ -47,7 +48,12 @@ export const poolReadingFromSnapshot = (
   }
 
   const windows = Array.from(snapshot.windows).map((window): PoolWindow => {
-    const resetsAtMs = window.resetsAt === undefined ? Number.NaN : Date.parse(window.resetsAt)
+    const resetsAtMs =
+      window.resetsAt !== undefined
+        ? Date.parse(window.resetsAt)
+        : window.resetsAfterSeconds !== undefined
+          ? fetchedAtMs + window.resetsAfterSeconds * 1000
+          : Number.NaN
 
     const models = (window.models ?? []).flatMap(model => {
       const normalized = model.trim().toLowerCase()
@@ -75,9 +81,9 @@ export const poolReadingFromSnapshot = (
 export type PoolDecision = Data.TaggedEnum<{
   /** Fresh readings ranked it first; `resetsAtMs` is its longest window's reset, if started. */
   Quota: { readonly accountId: string; readonly resetsAtMs: number | undefined }
-  /** No fresh reading decided; the route's pin is still available. */
+  /** No candidate is usable by a fresh reading; the route's pin is still available. */
   Sticky: { readonly accountId: string }
-  /** No fresh reading decided and no usable pin: highest priority, then lowest id. */
+  /** No candidate is usable by a fresh reading and no pin is: highest priority, then lowest id. */
   FillFirst: { readonly accountId: string }
 }>
 
@@ -104,8 +110,11 @@ const hasStarted = (window: PoolWindow, nowMs: number) =>
   window.resetsAtMs !== undefined && window.resetsAtMs > nowMs
 
 type AccountRank =
-  | { readonly usable: false }
-  | { readonly usable: true; readonly resetsAtMs: number | undefined }
+  /** No window of the reading applies to the route: the reading says nothing. */
+  | { readonly kind: 'unknown' }
+  /** An applicable started window is used up to the reserve. */
+  | { readonly kind: 'exhausted' }
+  | { readonly kind: 'usable'; readonly resetsAtMs: number | undefined }
 
 /**
  * The reset of the account's longest window with a length that applies to the route (undefined
@@ -131,7 +140,7 @@ const accountRank = (
     const started = hasStarted(window, nowMs)
 
     if (started && window.usedPercent >= 100 - reservePercent) {
-      return { usable: false }
+      return { kind: 'exhausted' }
     }
 
     usable = true
@@ -153,7 +162,7 @@ const accountRank = (
     }
   }
 
-  return usable ? { usable: true, resetsAtMs } : { usable: false }
+  return usable ? { kind: 'usable', resetsAtMs } : { kind: 'unknown' }
 }
 
 type Ranked = { readonly candidate: PoolCandidate; readonly resetsAtMs: number | undefined }
@@ -200,12 +209,14 @@ const fillFirst = (candidates: ReadonlyArray<PoolCandidate>): PoolCandidate | un
 
 /**
  * Expiring-first: the available account whose longest applicable window resets soonest and still
- * has quota. Without a fresh reading (within `maxAgeMs`) that makes any available account usable,
- * it routes stickily: the pin while it is available, else fill-first. Undefined when no account is
- * available.
+ * has quota. When no available account is usable by a fresh reading (within `maxAgeMs`), it routes
+ * stickily: the pin while it is available, else fill-first, preferring accounts that no fresh
+ * reading shows used up; those serve only when nothing else is left, so the provider's own answer
+ * decides. Undefined when no account is available.
  */
 export const rankPool = (input: PoolRankInput): PoolDecision | undefined => {
   const candidates = input.accounts.filter(account => !input.unavailable.has(account.id))
+  const exhausted = new Set<string>()
 
   let best: Ranked | undefined
 
@@ -218,7 +229,11 @@ export const rankPool = (input: PoolRankInput): PoolDecision | undefined => {
 
     const rank = accountRank(reading, input.route, input.nowMs, input.reservePercent)
 
-    if (!rank.usable) {
+    if (rank.kind === 'exhausted') {
+      exhausted.add(candidate.id)
+    }
+
+    if (rank.kind !== 'usable') {
       continue
     }
 
@@ -233,11 +248,14 @@ export const rankPool = (input: PoolRankInput): PoolDecision | undefined => {
     return PoolDecision.Quota({ accountId: best.candidate.id, resetsAtMs: best.resetsAtMs })
   }
 
-  if (input.pin !== undefined && candidates.some(candidate => candidate.id === input.pin)) {
+  const unexhausted = candidates.filter(candidate => !exhausted.has(candidate.id))
+  const fallback = unexhausted.length > 0 ? unexhausted : candidates
+
+  if (input.pin !== undefined && fallback.some(candidate => candidate.id === input.pin)) {
     return PoolDecision.Sticky({ accountId: input.pin })
   }
 
-  const first = fillFirst(candidates)
+  const first = fillFirst(fallback)
 
   return first === undefined ? undefined : PoolDecision.FillFirst({ accountId: first.id })
 }
@@ -246,12 +264,18 @@ export const rankPool = (input: PoolRankInput): PoolDecision | undefined => {
 export const isCooldownActive = (cooldown: PoolCooldown, nowMs: number) => cooldown.untilMs > nowMs
 
 /**
- * Every window of the reading has quota left or has reset. A reading without windows proves
- * nothing.
+ * Every account-wide window of the reading has quota left or has reset; model-scoped windows block
+ * only their models through ranking, never the whole account. A reading without account-wide
+ * windows proves nothing.
  */
-const hasQuotaLeft = (reading: PoolReading, nowMs: number) =>
-  reading.windows.length > 0 &&
-  reading.windows.every(window => !hasStarted(window, nowMs) || window.usedPercent < 100)
+const hasQuotaLeft = (reading: PoolReading, nowMs: number) => {
+  const accountWide = reading.windows.filter(window => window.models.length === 0)
+
+  return (
+    accountWide.length > 0 &&
+    accountWide.every(window => !hasStarted(window, nowMs) || window.usedPercent < 100)
+  )
+}
 
 /**
  * Active quota cooldowns that a fresh reading taken after they began shows to be over (a limit

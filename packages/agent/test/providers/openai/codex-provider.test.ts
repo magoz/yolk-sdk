@@ -849,7 +849,8 @@ describe('OpenAI Codex provider', () => {
 
   it.effect('reports the quota reset of an exhausted Codex subscription before any event', () =>
     Effect.gen(function* () {
-      const resetsAtSeconds = 1_800_000_000
+      // The test clock starts at the epoch; the reset is three days after it.
+      const resetsAtSeconds = 3 * 86_400
 
       const { error, emitted } = yield* failedCodexRequest(
         new Response(

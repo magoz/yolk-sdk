@@ -34,6 +34,10 @@ windows (`windowDurationMinutes`, `models`) come from `@yolk-sdk/agent`.
 - Routes are `poolRoute(model)` (trimmed, lowercased); never fold reasoning effort into them.
 - Pins are written only when they change (compare-and-set); no per-request store writes.
 - Store failures never fail a request: reads fall back to stateless fill-first, writes are logged.
-- Logs and spans name pools, routes, and account ids only; never tokens or emails.
+- The fallback (no account usable by a fresh reading) skips accounts a fresh reading shows used up
+  unless nothing else is left; stale-cooldown clearing reads account-wide windows only (model-scoped
+  windows block their models through ranking).
+- Cooldowns are trusted only when finite and at most `poolMaxCooldownMs` ahead.
+- Logs and spans name pools, routes, account ids, and store operations only; never tokens, emails, or host store error messages (they may carry connection details).
 - `poolStoreContract` cases are the store semantics; change them only together with the ADR and
   `makeMemoryPoolStore`.

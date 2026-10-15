@@ -373,6 +373,37 @@ describe('makePool', () => {
     })
   )
 
+  it.effect('passes an implausibly far reset through without a cooldown', () =>
+    Effect.gen(function* () {
+      const farReset = quotaExhausted(t0 + 10 * 365 * day)
+      const primary = scripted('primary', 10, [fail(farReset)])
+      const backup = scripted('backup', 0)
+      const { pool } = yield* setup({ accounts: [primary.account, backup.account] })
+
+      expect(yield* Stream.runCollect(pool.provider.stream(request)).pipe(Effect.flip)).toBe(
+        farReset
+      )
+      expect((yield* pool.state).accounts.every(account => account.cooldown === undefined)).toBe(
+        true
+      )
+      expect(backup.calls).toHaveLength(0)
+    })
+  )
+
+  it.effect('rejects a request without a model id', () =>
+    Effect.gen(function* () {
+      const only = scripted('only', 0)
+      const { pool } = yield* setup({ accounts: [only.account] })
+
+      const error = yield* Stream.runCollect(pool.provider.stream({ ...request, model: ' ' })).pipe(
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'validation_error', retryable: false })
+      expect(only.calls).toHaveLength(0)
+    })
+  )
+
   it.effect('routes statelessly when the store fails', () =>
     Effect.gen(function* () {
       const failing = makeMemoryPoolStore()

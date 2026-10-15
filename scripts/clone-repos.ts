@@ -115,6 +115,12 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 'executor',
     repo: 'https://github.com/rhyssullivan/executor.git',
     branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'cpa-expiring-first',
+    repo: 'https://github.com/magoz/cpa-expiring-first.git',
+    branch: 'main'
   }
 ]
 

@@ -57,6 +57,50 @@ describe('anthropicClaudeQuotaResetsAtMs', () => {
     ).toBe(inHours(24))
   })
 
+  it('never locks the account for a model-scoped weekly rejection', () => {
+    // Five-hour and Opus weekly both rejected: only the five-hour reset is account-wide.
+    expect(
+      anthropicClaudeQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        headers: {
+          'anthropic-ratelimit-unified-status': 'rejected',
+          'anthropic-ratelimit-unified-5h-status': 'rejected',
+          'anthropic-ratelimit-unified-7d_oi-status': 'rejected',
+          'anthropic-ratelimit-unified-5h-reset': unixSeconds(inHours(2)),
+          'anthropic-ratelimit-unified-7d_oi-reset': unixSeconds(inHours(90)),
+          'anthropic-ratelimit-unified-reset': unixSeconds(inHours(90))
+        }
+      })
+    ).toBe(inHours(2))
+    // Only the model weekly window rejected: no account-wide reset.
+    expect(
+      anthropicClaudeQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        headers: {
+          'anthropic-ratelimit-unified-status': 'rejected',
+          'anthropic-ratelimit-unified-7d_oi-status': 'rejected',
+          'anthropic-ratelimit-unified-7d_oi-reset': unixSeconds(inHours(90)),
+          'anthropic-ratelimit-unified-reset': unixSeconds(inHours(90))
+        }
+      })
+    ).toBeUndefined()
+  })
+
+  it('ignores resets more than a year ahead', () => {
+    expect(
+      anthropicClaudeQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        headers: {
+          'anthropic-ratelimit-unified-status': 'rejected',
+          'anthropic-ratelimit-unified-reset': '1e13'
+        }
+      })
+    ).toBeUndefined()
+  })
+
   it('ignores resets in the past', () => {
     expect(
       anthropicClaudeQuotaResetsAtMs({
@@ -122,6 +166,23 @@ describe('openAiCodexQuotaResetsAtMs', () => {
         })
       })
     ).toBe(inHours(30))
+  })
+
+  it('ignores implausible resets_at and falls back to resets_in_seconds', () => {
+    expect(
+      openAiCodexQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        body: body({ type: 'usage_limit_reached', resets_at: 1e13, resets_in_seconds: 3600 })
+      })
+    ).toBe(inHours(1))
+    expect(
+      openAiCodexQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        body: body({ type: 'usage_limit_reached', resets_in_seconds: 1e10 })
+      })
+    ).toBeUndefined()
   })
 
   it('falls back to resets_in_seconds', () => {

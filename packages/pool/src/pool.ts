@@ -90,6 +90,9 @@ export const defaultPoolMaxAgeMs = 30 * 60_000
  */
 export const poolQuotaRetryAfterFloorMs = 30 * 60_000
 
+/** The longest cooldown the pool records; a later or non-finite hint is not trusted. */
+export const poolMaxCooldownMs = 366 * 24 * 60 * 60_000
+
 /** How long an account whose credentials were rejected sits out. */
 export const poolAuthCooldownMs = 30 * 60_000
 
@@ -126,11 +129,18 @@ export const poolFailureCooldown = (
     return undefined
   }
 
-  if (info.quotaResetsAtMs !== undefined && info.quotaResetsAtMs > nowMs) {
+  const trusted = (untilMs: number) =>
+    Number.isFinite(untilMs) && untilMs > nowMs && untilMs - nowMs <= poolMaxCooldownMs
+
+  if (info.quotaResetsAtMs !== undefined && trusted(info.quotaResetsAtMs)) {
     return PoolQuotaCooldown.make({ accountId, startedAtMs: nowMs, untilMs: info.quotaResetsAtMs })
   }
 
-  if (info.retryAfterMs !== undefined && info.retryAfterMs >= poolQuotaRetryAfterFloorMs) {
+  if (
+    info.retryAfterMs !== undefined &&
+    info.retryAfterMs >= poolQuotaRetryAfterFloorMs &&
+    trusted(nowMs + info.retryAfterMs)
+  ) {
     return PoolQuotaCooldown.make({
       accountId,
       startedAtMs: nowMs,
@@ -141,7 +151,11 @@ export const poolFailureCooldown = (
   return undefined
 }
 
-const iso = (ms: number) => new Date(ms).toISOString()
+const iso = (ms: number) => {
+  const date = new Date(ms)
+
+  return Number.isFinite(date.getTime()) ? date.toISOString() : String(ms)
+}
 
 const minUntil = (cooldowns: ReadonlyArray<PoolCooldown>) =>
   cooldowns.reduce<number | undefined>(
@@ -225,16 +239,15 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
         .pipe(
           Effect.catch(error =>
             Effect.logWarning('pool: store load failed; routing without pool state').pipe(
-              Effect.annotateLogs({ error: error.message }),
+              Effect.annotateLogs({ operation: error.operation }),
               Effect.as(emptySnapshot)
             )
           )
         )
 
-    const logStoreFailure = (operation: string) => (error: PoolStoreError) =>
-      Effect.logWarning(`pool: store ${operation} failed`).pipe(
-        Effect.annotateLogs({ error: error.message })
-      )
+    // Host store messages may carry connection details: log the operation only.
+    const logStoreFailure = (operation: PoolStoreError['operation']) => () =>
+      Effect.logWarning(`pool: store ${operation} failed`)
 
     const readingsOf = (snapshot: PoolStoreSnapshot) => {
       const readings = new Map<string, PoolReading>()
@@ -333,6 +346,7 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
 
       const quotaResetsAtMs = minUntil(quota)
       const until = minUntil(input.cooldowns)
+      // The vendor id of the last failure; the pool id when no account was tried in this request.
       const provider = input.lastError?.provider?.provider ?? poolId
 
       const message =
@@ -466,7 +480,16 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
           if (decision === undefined || account === undefined) {
             yield* Effect.logWarning('pool: every account is unavailable')
 
-            return Stream.fail(exhaustedError({ cooldowns, lastError: input.lastError }))
+            return Stream.fail(
+              exhaustedError({
+                // Cooldowns recorded by this request count even if they already ran out.
+                cooldowns: [
+                  ...cooldowns,
+                  ...input.recorded.filter(cooldown => !cooldowns.includes(cooldown))
+                ],
+                lastError: input.lastError
+              })
+            )
           }
 
           yield* updatePin({
@@ -493,14 +516,19 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
       )
 
     const provider: LLMProviderService = {
-      stream: request =>
-        pick({
-          request,
-          route: poolRoute(request.model),
-          excluded: new Set(),
-          recorded: [],
-          lastError: undefined
-        })
+      stream: request => {
+        const route = poolRoute(request.model)
+
+        return route === ''
+          ? Stream.fail(
+              new LLMError({
+                cause: 'validation_error',
+                message: `Pool ${poolId} needs a model id`,
+                retryable: false
+              })
+            )
+          : pick({ request, route, excluded: new Set(), recorded: [], lastError: undefined })
+      }
     }
 
     const recordReading = (accountId: string, snapshot: ProviderSubscriptionUsageSnapshot) =>

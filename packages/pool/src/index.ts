@@ -3,6 +3,7 @@ export {
   makePool,
   poolAuthCooldownMs,
   poolFailureCooldown,
+  poolMaxCooldownMs,
   poolQuotaRetryAfterFloorMs
 } from './pool.ts'
 

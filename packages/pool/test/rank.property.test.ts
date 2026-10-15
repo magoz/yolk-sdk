@@ -1,4 +1,4 @@
-import { Arbitrary } from 'effect'
+import { Arbitrary, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -122,6 +122,24 @@ const usableOnQuota = (input: PoolRankInput, accountId: string) => {
   )
 }
 
+/** A fresh reading shows an applicable started window used up to the reserve. */
+const exhaustedByReading = (input: PoolRankInput, accountId: string) => {
+  const reading = input.readings.get(accountId)
+
+  return (
+    reading !== undefined &&
+    input.nowMs - reading.fetchedAtMs <= input.maxAgeMs &&
+    reading.windows.some(
+      current =>
+        (current.models.length === 0 ||
+          current.models.some(model => input.route.includes(model))) &&
+        current.resetsAtMs !== undefined &&
+        current.resetsAtMs > input.nowMs &&
+        current.usedPercent >= 100 - input.reservePercent
+    )
+  )
+}
+
 describe('rankPool properties', () => {
   it.prop(
     'serves an available account whenever one exists, and only then',
@@ -181,17 +199,44 @@ describe('rankPool properties', () => {
   )
 
   it.prop(
+    'never falls back to an account a fresh reading shows used up while another remains',
+    [Arbitrary.schema(Scenario)],
+    ([scenario]) => {
+      const input = toInput(scenario)
+      const decision = rankPool(input)
+
+      const available = input.accounts.filter(account => !input.unavailable.has(account.id))
+      const unexhausted = available.filter(account => !exhaustedByReading(input, account.id))
+
+      if (
+        decision === undefined ||
+        Predicate.isTagged(decision, 'Quota') ||
+        unexhausted.length === 0
+      ) {
+        return
+      }
+
+      expect(unexhausted.map(account => account.id)).toContain(decision.accountId)
+    },
+    propertyOptions
+  )
+
+  it.prop(
     'keeps an available pin when no fresh reading decides',
     [Arbitrary.schema(Scenario)],
     ([scenario]) => {
       const input = toInput(scenario)
       const decision = rankPool(input)
 
+      const available = input.accounts.filter(account => !input.unavailable.has(account.id))
+      const anyUnexhausted = available.some(account => !exhaustedByReading(input, account.id))
+
       if (
         decision?._tag === 'Quota' ||
         input.pin === undefined ||
         input.unavailable.has(input.pin) ||
-        !input.accounts.some(account => account.id === input.pin)
+        !input.accounts.some(account => account.id === input.pin) ||
+        (anyUnexhausted && exhaustedByReading(input, input.pin))
       ) {
         return
       }

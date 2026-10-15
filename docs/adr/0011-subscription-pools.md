@@ -1,6 +1,6 @@
 # Subscription pools
 
-Status: proposed.
+Status: accepted.
 
 Hosts that run agents on consumer subscriptions (Claude Max over OAuth, ChatGPT/Codex over OAuth,
 OpenCode Go over an API key) often hold several accounts of the same provider. With one
@@ -59,14 +59,16 @@ Every request:
    - a window applies when it has no `models` or the route contains one of them (case-insensitive).
 3. Serve the top-ranked account and pin the route to it. The ranking only changes at a window reset,
    at exhaustion, or when a reading moves a reset, so pins stay put and prompt caches survive.
-4. Without fresh readings for any candidate: keep the route's pin while it is a candidate, otherwise
-   move to fill-first (highest priority, then lowest id). The pool knows why an account is out, so
-   there is no grace period and no cooldown-length heuristic. A pin to an account no longer
-   configured moves at once.
+4. When no candidate is usable by a fresh reading: keep the route's pin while it is a candidate,
+   otherwise move to fill-first (highest priority, then lowest id). Candidates a fresh reading shows
+   used up are skipped unless nothing else is left; then the provider's own answer decides (a quota
+   `429` cools the account down). The pool knows why an account is out, so there is no grace period
+   and no cooldown-length heuristic. A pin to an account no longer configured moves at once.
 5. A pin is written only when it changes, and every move is logged with its reason.
 
 A fresh reading with `fetchedAt` later than a quota cooldown's `startedAt` that shows quota left on
-every window (none started and fully used) clears that cooldown (a limit reset was spent, or the
+every account-wide window (none started and fully used; model-scoped windows block only their
+models, through ranking) clears that cooldown (a limit reset was spent, or the
 provider reset early). A reading from before the lockout never clears it, and readings never clear
 an auth cooldown.
 
@@ -89,6 +91,7 @@ therefore switches accounts within one call only for account-scoped failures, an
 | anything else, or any failure after an event       | Unchanged to the caller; no cooldown                                                            |
 | interruption                                       | Unchanged; never a cooldown                                                                     |
 | no candidate left                                  | `rate_limit`, `retryable: false`, earliest quota reset (`auth` when only auth cooldowns remain) |
+| hint not finite or more than a year ahead          | Unchanged; no cooldown                                                                          |
 
 The 30-minute line is the plugin's `QuotaCooldownFloor`: provider quota lockouts are hours away,
 transient rate limits are seconds or minutes. A non-retryable error when every account is out keeps
@@ -103,8 +106,9 @@ its database:
 - pins: `(poolId, route) → accountId, pinnedAt`, created if absent and moved by compare-and-set on
   the expected account, so concurrent instances converge;
 - cooldowns: one per account, a tagged union `PoolQuotaCooldown` or `PoolAuthCooldown` with
-  `startedAtMs` and `untilMs`; writing keeps the one that ends later, clearing requires the observed
-  `startedAtMs`. Model-scoped exhaustion is handled through readings (model-scoped windows), not
+  `startedAtMs` and `untilMs`; writing keeps the one that ends later (of two that end together, the
+  later-started one, so a newer failure is never cleared by an older reading), clearing requires
+  the observed `startedAtMs`. Model-scoped exhaustion is handled through readings (model-scoped windows), not
   cooldowns: Claude's model-only rejections carry no quota reset, and a Codex quota error does not
   say whether it is model-scoped, so it cools the whole account;
 - readings: the latest `ProviderSubscriptionUsageSnapshot` per account.
@@ -120,9 +124,11 @@ other times (`createdAtMs`, `retryAfterMs`). A new failure kind was rejected: ev
 exhaustive switch over `ProviderFailureKind` and the `AgentErrorCode` mapping would change for every
 consumer. Sources:
 
-- Claude: the unified rate-limit headers of a `429`, the latest reset among the rejected windows
-  (`5h`, `7d`, `7d_oi`, unified); an overage-only rejection while the shared windows still allow
-  requests carries none (as CLIProxyAPI's `ParseClaudeRateLimitReset`);
+- Claude: the unified rate-limit headers of a `429`, the latest reset among the rejected
+  account-wide windows (`5h`, `7d`), else the unified reset when the account itself is rejected.
+  A model-scoped weekly rejection (`7d_oi`) and an overage-only rejection carry none, so a model
+  limit never locks the account's other models (derived from CLIProxyAPI's
+  `ParseClaudeRateLimitReset`, which also counts `7d_oi`);
 - Codex: a `429` whose error type is `usage_limit_reached`, `resets_at` or else `resets_in_seconds`.
 
 Claude usage now reports window durations (300 and 10080 minutes) and the model-scoped weekly limits
