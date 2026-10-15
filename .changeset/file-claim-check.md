@@ -48,3 +48,15 @@ mimeType, size }]`, merged into an object result or as `{ text, files }`; the co
   tools they return a file instead of base64 (`connector.invoke` is unchanged). New
   `connectorActionFile`, `sniffBase64MimeType`, `GmailGetAttachmentFileOutput`,
   `OutlookGetAttachmentFileOutput` and `EmailGetAttachmentFileOutput`.
+
+Host migration:
+
+- `ContentPart` has a new `File` member: exhaustive `Match`es over content parts need a case
+  (render `filePartText`).
+- Custom `VercelSandboxHandle` implementations and fakes need `readFile`.
+- As agent tools, `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` now
+  return a file instead of base64 (`structuredContent` keeps only metadata), and connector sinks
+  such as Gmail draft attachments do not take `fileId`s yet: hosts that forwarded attachment
+  base64 through the model need their own file-aware tool.
+- MCP embedded blobs reach the model as a file label instead of base64 text.
+- The code mode description gains one line (one cache prefix change).

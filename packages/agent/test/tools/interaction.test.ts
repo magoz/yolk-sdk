@@ -9,6 +9,8 @@ import {
   InteractionRequest,
   InteractionResponse,
   InteractionValidationError,
+  FilePart,
+  inlineBase64AttachmentSource,
   ToolCall,
   ToolResult,
   TextPart,
@@ -868,6 +870,35 @@ describe('immutable action-backed interaction authority', () => {
           ).pipe(Effect.flip)).cause
         ).toBe('interaction_unsupported_policy')
       }
+    })
+  )
+})
+
+describe('interaction results and files', () => {
+  it.effect('captures file bytes before the host stores the settled result', () =>
+    Effect.gen(function* () {
+      const base64 = globalThis.btoa('%PDF-1.7 signed')
+
+      const { fake, tools, interaction } = yield* setup({}, () =>
+        Effect.succeed({
+          outcome: 'completed',
+          content: [
+            TextPart.make({ text: 'Signed' }),
+            FilePart.make({
+              source: inlineBase64AttachmentSource(base64),
+              mimeType: 'application/pdf',
+              filename: 'signed.pdf'
+            })
+          ]
+        })
+      )
+
+      const ref = yield* fake.accept(response(), interaction)
+      const result = yield* run(tools, ref)
+
+      expect(JSON.stringify(result)).not.toContain(base64)
+      expect(JSON.stringify(fake.receiptFor(ref.slot))).not.toContain(base64)
+      expect(JSON.stringify(result)).toContain('file not captured (no file store): signed.pdf')
     })
   )
 })

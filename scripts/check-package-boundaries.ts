@@ -136,7 +136,7 @@ const extractorsForbiddenImports = [
   'react'
 ]
 
-// Files depend only on `@yolk-sdk/agent` and the `@yolk-sdk/sandbox` core and stay runtime-neutral (no Node builtins): hosts
+// Files depend only on `@yolk-sdk/agent` (the sandbox is a structural port) and stay runtime-neutral (no Node builtins): hosts
 // provide object storage and the upload transport. Listed explicitly for the same self-import
 // reason as conformance.
 const filesForbiddenImports = [
@@ -150,8 +150,7 @@ const filesForbiddenImports = [
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
-  // Only the sandbox core (Effect-only): never its Vercel adapter, agent tool or testing fakes.
-  '@yolk-sdk/sandbox/',
+  '@yolk-sdk/sandbox',
   '@yolk-sdk/vercel-workflows',
   'next',
   'react',

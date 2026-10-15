@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   contentText,
+  filePartText,
   TextPart,
   ToolResult,
   type Content,
@@ -415,13 +416,17 @@ const reducedNote = '[The stored copy of this result was reduced to fit the tool
 
 const mediaPlaceholder = (tag: string) => `[${tag.toLowerCase()} omitted from the stored result]`
 
+// Files keep their label (their `fileId` stays model-visible on replay, ADR 0009); other media
+// parts become placeholders.
 const textOnlyContent = (content: Content): Content =>
   Predicate.isString(content)
     ? content
     : content.map(part =>
         Predicate.isTagged(part, 'Text')
           ? part
-          : TextPart.make({ text: mediaPlaceholder(part._tag) })
+          : Predicate.isTagged(part, 'File')
+            ? TextPart.make({ text: filePartText(part) })
+            : TextPart.make({ text: mediaPlaceholder(part._tag) })
       )
 
 const withNote = (content: Content): Content =>

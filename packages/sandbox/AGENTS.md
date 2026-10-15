@@ -25,7 +25,7 @@
 
 ## Design rules
 
-- Binary file transfer (`SandboxApi.writeFile`/`readFile`, optional members) takes workspace-relative paths only (`normalizeWorkspacePath`: no absolute paths, NUL or escapes); reads stream and stop past `maxBytes` (`file_too_large`), missing files are `file_not_found`. The Vercel layer runs them under the same one-at-a-time semaphore as commands; `makeFakeSandboxFiles` is the in-memory fake.
+- Binary file transfer (`SandboxApi.writeFile`/`readFile`, optional members) takes workspace-relative paths only (`normalizeWorkspacePath` returns the `NormalizedWorkspacePath` brand that `absoluteSandboxPath` requires: no absolute paths, NUL or escapes; whitespace is kept); reads stream and stop past `maxBytes` (`file_too_large`), missing files are `file_not_found`. The Vercel layer runs them under the same one-at-a-time semaphore as commands; `makeFakeSandboxFiles` is the in-memory fake.
 - One sandbox per host-provided `sandboxSessionId`.
 - `sandboxSessionId` must already include user/session scope; package never models users.
 - Vercel sandbox names are stable hashes from `sandboxSessionId`.

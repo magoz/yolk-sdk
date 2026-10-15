@@ -1007,6 +1007,8 @@ const executeInteractionTool = <Context>(input: {
   readonly context: Context
   readonly ref: InteractionRef | undefined
   readonly host: InteractionHost | undefined
+  /** File capture (ADR 0009): the settled result is captured before the host stores it. */
+  readonly files: ToolFileCaptureOptions | undefined
 }): Effect.Effect<ToolResult, ToolError> =>
   Effect.gen(function* () {
     const name = input.call.name
@@ -1250,16 +1252,19 @@ const executeInteractionTool = <Context>(input: {
 
           const outcome: InteractionOutcome = {
             status: actionResult.outcome,
-            result: makeInteractionToolResult({
-              toolCallId: stored.call.id,
-              requestId: stored.slot,
-              slot: stored.slot,
-              submissionId: stored.submissionId,
-              actionId: actionId ?? '',
-              outcome: actionResult.outcome,
-              content: actionResult.content,
-              structuredContent: actionResult.structuredContent
-            })
+            result: yield* captureToolResultFiles(
+              makeInteractionToolResult({
+                toolCallId: stored.call.id,
+                requestId: stored.slot,
+                slot: stored.slot,
+                submissionId: stored.submissionId,
+                actionId: actionId ?? '',
+                outcome: actionResult.outcome,
+                content: actionResult.content,
+                structuredContent: actionResult.structuredContent
+              }),
+              input.files
+            )
           }
 
           const settled = yield* restore(
@@ -1992,7 +1997,8 @@ export const resolveTools = <Context>(
           call,
           context,
           ref: executionOptions?.interaction,
-          host: options.interactionHost
+          host: options.interactionHost,
+          files: options.files
         })
       }
 
@@ -2079,7 +2085,8 @@ export const resolveTools = <Context>(
             call,
             context,
             ref: executionOptions.interaction,
-            host: options.interactionHost
+            host: options.interactionHost,
+            files: options.files
           })
         : Option.match(
             Arr.findFirst(

@@ -22,4 +22,9 @@ export {
   makeFileToolModule
 } from './tools.ts'
 
-export type { FileToolModuleOptions, FileUploadTransportApi } from './tools.ts'
+export type {
+  FileSandboxApi,
+  FileSandboxError,
+  FileToolModuleOptions,
+  FileUploadTransportApi
+} from './tools.ts'

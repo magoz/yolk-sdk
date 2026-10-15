@@ -469,12 +469,13 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
-      '@yolk-sdk/sandbox':
-        specifier: workspace:^
-        version: link:../sandbox
       effect:
         specifier: 'catalog:'
         version: 4.0.0
+    devDependencies:
+      '@yolk-sdk/sandbox':
+        specifier: workspace:^
+        version: link:../sandbox
 
   packages/harness:
     dependencies:

@@ -7,12 +7,17 @@ import {
   ActionResult,
   connectorActionFile,
   defineAction,
+  sniffBase64MimeType,
   defineConnector,
   makeIntegration
 } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule, makeConnectorToolRegistration } from '@yolk-sdk/connectors/agent'
 import { EmailGetAttachmentFileOutput, emailGetAttachmentAction } from '@yolk-sdk/connectors/email'
-import { GmailGetAttachmentFileOutput, gmailGetAttachmentAction } from '@yolk-sdk/connectors/google'
+import {
+  GmailGetAttachmentFileOutput,
+  GmailGetAttachmentOutput,
+  gmailGetAttachmentAction
+} from '@yolk-sdk/connectors/google'
 import {
   OutlookGetAttachmentFileOutput,
   outlookGetAttachmentAction
@@ -115,6 +120,36 @@ describe('connector actions that yield files', () => {
       expect(JSON.stringify(result)).not.toContain(pdfBase64)
     })
   )
+
+  it('tells RIFF containers apart by their format marker', () => {
+    const riff = (format: string) => globalThis.btoa(`RIFF\u0000\u0000\u0000\u0000${format}data`)
+
+    expect(sniffBase64MimeType(riff('WEBP'))).toBe('image/webp')
+    expect(sniffBase64MimeType(riff('WAVE'))).toBe('audio/wav')
+    expect(sniffBase64MimeType(riff('AVI '))).toBeUndefined()
+    expect(sniffBase64MimeType('not base64!')).toBeUndefined()
+  })
+
+  it('names gmail attachments from the listed filename and type', () => {
+    const output = GmailGetAttachmentOutput.make({
+      messageId: 'm1',
+      attachmentId: 'a1',
+      filename: 'Faktura_225.pdf',
+      mimeType: 'application/pdf',
+      size: 16,
+      data: 'JVBERi0',
+      contentBase64: pdfBase64
+    })
+
+    const split = Option.getOrUndefined(
+      gmailGetAttachmentAction.fileOutput?.split(output) ?? Option.none()
+    )
+
+    expect(split?.files).toEqual([
+      { base64: pdfBase64, mimeType: 'application/pdf', filename: 'Faktura_225.pdf' }
+    ])
+    expect(JSON.stringify(split?.value)).not.toContain(pdfBase64)
+  })
 
   it('falls back to the declared or octet-stream type', () => {
     expect(connectorActionFile({ base64: 'AAAA', mimeType: 'text/csv' }).mimeType).toBe('text/csv')

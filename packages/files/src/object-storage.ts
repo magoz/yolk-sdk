@@ -1,6 +1,11 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { FileDescriptor } from '@yolk-sdk/agent/protocol'
+import {
+  FileDescriptor,
+  isFileId,
+  normalizeFileMimeType,
+  replaceLoneSurrogates
+} from '@yolk-sdk/agent/protocol'
 import { FileStoreError, type FileStoreApi } from '@yolk-sdk/agent/tools'
 
 /** Object storage failures: `not_found` (no such key), `too_large`, or `unavailable`. */
@@ -120,7 +125,8 @@ const decodeName = (value: string | undefined) => {
  * A `FileStoreApi` over host object storage (ADR 0009): key `<prefix>/<scope>/<fileId>`, name and
  * sha256 in object metadata, no database. `put` is idempotent: the same bytes in the same scope
  * resolve to the existing object. A `fileId` from another scope never resolves, because keys are
- * always built from this store's scope. Fails with a defect for an invalid scope.
+ * always built from this store's scope, and a malformed one reads as missing without touching
+ * storage. Throws for an invalid scope (a host bug).
  */
 export const makeObjectStorageFileStore = (
   options: ObjectStorageFileStoreOptions
@@ -134,6 +140,9 @@ export const makeObjectStorageFileStore = (
   const storage = options.storage
 
   const head = (fileId: string) =>
+    !isFileId(fileId) ? Effect.succeed(Option.none<FileDescriptor>()) : headExisting(fileId)
+
+  const headExisting = (fileId: string) =>
     storage.head(keyOf(fileId)).pipe(
       Effect.mapError(toFileStoreError),
       Effect.map(
@@ -160,8 +169,10 @@ export const makeObjectStorageFileStore = (
     )
 
   return {
-    put: ({ bytes, name, mimeType }) =>
+    put: ({ bytes, name: rawName, mimeType: rawMimeType }) =>
       Effect.gen(function* () {
+        const name = replaceLoneSurrogates(rawName)
+        const mimeType = normalizeFileMimeType(rawMimeType)
         const digest = hex(yield* sha256(bytes))
         const fileId = yield* fileIdFor({ scope: options.scope, sha256Hex: digest })
         const stored = yield* head(fileId)

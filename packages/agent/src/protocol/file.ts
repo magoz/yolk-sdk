@@ -33,20 +33,38 @@ export const formatFileSize = (size: number) => {
   return unit === 0 ? `${size} B` : `${value.toFixed(value >= 10 ? 0 : 1)} ${byteUnits[unit]}`
 }
 
+const mimeTypePattern = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u
+
+/**
+ * `type/subtype` of an untrusted MIME type, lower-cased and without parameters; anything that is
+ * not one becomes `application/octet-stream`.
+ */
+export const normalizeFileMimeType = (mimeType: string | null | undefined) => {
+  const essence = (mimeType ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? ''
+
+  return mimeTypePattern.test(essence) ? essence : 'application/octet-stream'
+}
+
+// Names come from untrusted sources (email, MCP): no control characters or brackets, so a name
+// cannot end a label or forge another one.
+const labelText = (text: string) => text.replace(/[\u0000-\u001f\u007f[\]]/gu, '_')
+
 /** The model-visible line for a captured file. */
 export const fileLabel = (file: {
   readonly fileId: string
   readonly name: string
   readonly mimeType: string
   readonly size?: number
-}) =>
-  file.size === undefined
-    ? `[file ${file.fileId}: ${file.name}, ${file.mimeType}]`
-    : `[file ${file.fileId}: ${file.name}, ${file.mimeType}, ${formatFileSize(file.size)}]`
+}) => {
+  const head = `${file.fileId}: ${labelText(file.name)}, ${labelText(file.mimeType)}`
+
+  return file.size === undefined ? `[file ${head}]` : `[file ${head}, ${formatFileSize(file.size)}]`
+}
 
 /** The model-visible line for bytes that were not stored, so no base64 reaches the model. */
 export const fileNotCapturedLabel = (input: {
   readonly name: string
   readonly mimeType: string
   readonly reason: string
-}) => `[file not captured (${input.reason}): ${input.name}, ${input.mimeType}]`
+}) =>
+  `[file not captured (${input.reason}): ${labelText(input.name)}, ${labelText(input.mimeType)}]`

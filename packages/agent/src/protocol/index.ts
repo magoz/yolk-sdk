@@ -56,7 +56,8 @@ export {
   fileLabel,
   fileNotCapturedLabel,
   formatFileSize,
-  isFileId
+  isFileId,
+  normalizeFileMimeType
 } from './file.ts'
 
 export {

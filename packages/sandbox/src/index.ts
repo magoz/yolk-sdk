@@ -10,6 +10,7 @@ export {
   maxSandboxCommandTimeoutMs,
   NormalizedWorkspaceCwd,
   normalizeWorkspaceCwd,
+  NormalizedWorkspacePath,
   normalizeWorkspacePath,
   sandboxCommandTimeoutMs,
   sandboxLifecycleOrDefault,

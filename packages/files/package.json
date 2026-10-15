@@ -56,9 +56,11 @@
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"
   },
+  "devDependencies": {
+    "@yolk-sdk/sandbox": "workspace:^"
+  },
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
-    "@yolk-sdk/sandbox": "workspace:^",
     "effect": "catalog:"
   }
 }

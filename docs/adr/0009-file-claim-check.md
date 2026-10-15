@@ -1,6 +1,6 @@
 # File claim check
 
-Status: proposed.
+Status: accepted.
 
 Agents cannot move files between tools. Bytes that a tool produces either become model content
 (an image or PDF the model reads, extracted text) or are dropped, so nothing else can consume them:
@@ -26,7 +26,9 @@ transcript, and swap the id back for bytes (or a signed link) at the edge that c
 - **`fileId`**: the agent-facing reference to a file, `file_` followed by an opaque id. The field
   name follows provider and framework usage (`file_id` in OpenAI, Anthropic, LangChain, Pydantic
   AI; camelCase like `messageId`); `fileRef`/`fileHandle` have no precedent, `artifact` means a
-  versioned deliverable (ADK, A2A) and `resource` means MCP server content.
+  versioned deliverable (ADK, A2A) and `resource` means MCP server content. Some
+  connector inputs are also named `fileId` (Drive, Telegram, Fortnox provider ids); the `file_`
+  prefix and the `FileId` schema tell them apart, and file tools reject anything else.
 - **File descriptor**: `{ fileId, name, mimeType, size }`, what the model and scripts see.
 - **Capture**: storing bytes from a tool result and replacing them with a descriptor.
 - **Scope**: the host-derived owner of a file (for example workspace and session). Never supplied
@@ -82,7 +84,11 @@ be fetched again later.
 
 Without `files`, inline `File` parts still become the "not captured" label, so no base64 reaches a
 provider; image, document and audio parts keep today's behaviour. Hosts pass `files` only on
-surfaces allowed to capture (for example not on automatic continuations).
+surfaces allowed to capture (for example not on automatic continuations); to share files with a
+subagent, they give it a store bound to the same scope.
+
+Interaction tool results are captured before the host stores the settled receipt. When the ledger
+reduces a stored result, a `File` part becomes its label, so replays keep the `fileId` visible.
 
 ## 3. Scripts
 
@@ -207,7 +213,8 @@ authorized upload) on the way out; the agent-facing `fileId` does not change.
 
 ## Not done
 
-- `fileOutput` on further connector actions.
+- `fileOutput` on further connector actions, and `fileId` inputs for connector sinks (Gmail and
+  Outlook draft attachments, ...): until then hosts attach files through their own tools.
 - Rewriting captured image, document and audio sources to `Ref`.
 - A guarded Node `FileUploadTransportApi` in the package (hosts provide one).
 - Multipart/form uploads (`file_upload` is `PUT` only).

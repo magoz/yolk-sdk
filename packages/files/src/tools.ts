@@ -6,15 +6,15 @@ import {
   FileId,
   fileLabel,
   formatFileSize,
+  normalizeFileMimeType,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
-import type { SandboxApi, SandboxError } from '@yolk-sdk/sandbox'
 import {
-  FileStoreError,
   makeTool,
   modelVisibleToolError,
   withToolArgumentsErrorHint,
   type FileStoreApi,
+  type FileStoreError,
   type ToolModule,
   type ToolRegistration,
   type ToolRegistryError
@@ -53,6 +53,31 @@ export type FileUploadTransportApi = {
   }) => Effect.Effect<{ readonly status: number; readonly etag?: string }, FileUploadTransportError>
 }
 
+/**
+ * The sandbox failures the file tools tell apart: `SandboxInputError` (a bad path, a missing or
+ * too large file: model-visible) versus anything else (the sandbox is unavailable).
+ */
+export type FileSandboxError = {
+  readonly _tag: string
+  readonly message: string
+  readonly cause?: unknown
+}
+
+/**
+ * The file transfer part of a sandbox, structurally compatible with `@yolk-sdk/sandbox`
+ * `SandboxApi` (pass the invoking runtime's own sandbox). Paths are workspace-relative.
+ */
+export type FileSandboxApi = {
+  readonly writeFile?: (input: {
+    readonly path: string
+    readonly bytes: Uint8Array
+  }) => Effect.Effect<string, FileSandboxError>
+  readonly readFile?: (input: {
+    readonly path: string
+    readonly maxBytes: number
+  }) => Effect.Effect<Uint8Array, FileSandboxError>
+}
+
 export type FileToolModuleOptions<Context> = {
   readonly store: FileStoreApi
   /** Omit to leave out `file_upload`. */
@@ -60,10 +85,11 @@ export type FileToolModuleOptions<Context> = {
   /** The invoking runtime's own sandbox. Without `writeFile`/`readFile`, `file_to_sandbox` and
    * `file_from_sandbox` are left out.
    */
-  readonly sandbox?: SandboxApi
+  readonly sandbox?: FileSandboxApi
   /** Largest file `file_upload` reads into memory. Default 50 MiB. */
   readonly maxTransferBytes?: number
-  /** Default lifetime of `file_url` links. Default one hour. */
+  /** Default lifetime of `file_url` links, clamped to one minute to seven days. Default one
+   * hour. */
   readonly defaultUrlTtlSeconds?: number
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
 }
@@ -71,6 +97,9 @@ export type FileToolModuleOptions<Context> = {
 export const defaultMaxFileTransferBytes = 50 * 1024 * 1024
 
 const maxUrlTtlMinutes = 7 * 24 * 60
+
+const defaultUrlTtlSeconds = (options: { readonly defaultUrlTtlSeconds?: number }) =>
+  Math.min(Math.max(Math.floor(options.defaultUrlTtlSeconds ?? 3_600), 60), maxUrlTtlMinutes * 60)
 
 const forbiddenHeaders = new Set([
   'connection',
@@ -118,7 +147,7 @@ const FileUrlParams = Schema.Struct({
     Schema.Number.check(
       Schema.isInt(),
       Schema.isBetween({ minimum: 1, maximum: maxUrlTtlMinutes })
-    ).pipe(Schema.annotate({ description: 'Link lifetime in minutes. Default 60, max 10080.' }))
+    ).pipe(Schema.annotate({ description: 'Link lifetime in minutes, at most 10080.' }))
   )
 })
 
@@ -126,6 +155,13 @@ const FileUrlOutput = Schema.Struct({
   url: Schema.String,
   expiresAt: Schema.String
 })
+
+const notFound = (tool: string, fileId: string) =>
+  modelVisibleToolError({
+    tool,
+    message: `No file ${fileId} in this session.`,
+    reason: 'not_found'
+  })
 
 const invalid = (tool: string, message: string) =>
   modelVisibleToolError({ tool, message, reason: 'invalid_input' })
@@ -271,21 +307,14 @@ const urlTool = <Context>(
     execute: ({ call, params }) =>
       Effect.gen(function* () {
         const ttlSeconds =
-          params.ttlMinutes === undefined
-            ? (options.defaultUrlTtlSeconds ?? 3_600)
-            : params.ttlMinutes * 60
+          params.ttlMinutes === undefined ? defaultUrlTtlSeconds(options) : params.ttlMinutes * 60
 
         const file = yield* store
           .head(params.fileId)
           .pipe(Effect.mapError(storeError(fileUrlToolName, params.fileId)))
 
         if (Option.isNone(file)) {
-          return yield* Effect.fail(
-            storeError(
-              fileUrlToolName,
-              params.fileId
-            )(new FileStoreError({ reason: 'not_found', message: params.fileId }))
-          )
+          return yield* Effect.fail(notFound(fileUrlToolName, params.fileId))
         }
 
         const url = yield* store
@@ -307,7 +336,7 @@ const FileToSandboxParams = Schema.Struct({
   path: Schema.optional(
     Schema.String.pipe(
       Schema.annotate({
-        description: 'Workspace-relative destination path. Default files/<file name>.'
+        description: 'Workspace-relative destination path. Default files/<fileId>/<file name>.'
       })
     )
   )
@@ -328,7 +357,7 @@ const FileFromSandboxParams = Schema.Struct({
 })
 
 const FileFromSandboxOutput = Schema.Struct({
-  fileId: Schema.String,
+  fileId: FileId,
   name: Schema.String,
   mimeType: Schema.String,
   size: Schema.Number
@@ -379,7 +408,7 @@ const safeFileName = (name: string) => {
   return cleaned.length === 0 || cleaned === '.' || cleaned === '..' ? 'file' : cleaned
 }
 
-const sandboxError = (tool: string) => (error: SandboxError) =>
+const sandboxError = (tool: string) => (error: FileSandboxError) =>
   Predicate.isTagged(error, 'SandboxInputError')
     ? modelVisibleToolError({
         tool,
@@ -390,7 +419,7 @@ const sandboxError = (tool: string) => (error: SandboxError) =>
 
 const toSandboxTool = <Context>(
   store: FileStoreApi,
-  writeFile: NonNullable<SandboxApi['writeFile']>,
+  writeFile: NonNullable<FileSandboxApi['writeFile']>,
   options: FileToolModuleOptions<Context>
 ): ToolRegistration<Context> =>
   makeTool<Context, typeof FileToSandboxParams>({
@@ -410,12 +439,7 @@ const toSandboxTool = <Context>(
           .pipe(Effect.mapError(storeError(fileToSandboxToolName, params.fileId)))
 
         if (Option.isNone(file)) {
-          return yield* Effect.fail(
-            storeError(
-              fileToSandboxToolName,
-              params.fileId
-            )(new FileStoreError({ reason: 'not_found', message: params.fileId }))
-          )
+          return yield* Effect.fail(notFound(fileToSandboxToolName, params.fileId))
         }
 
         const bytes = yield* store
@@ -426,7 +450,8 @@ const toSandboxTool = <Context>(
           .pipe(Effect.mapError(storeError(fileToSandboxToolName, params.fileId)))
 
         const path = yield* writeFile({
-          path: params.path ?? `files/${safeFileName(file.value.name)}`,
+          // Unique per file: names repeat (two `invoice.pdf`) and unnamed files are all `file`.
+          path: params.path ?? `files/${params.fileId}/${safeFileName(file.value.name)}`,
           bytes
         }).pipe(Effect.mapError(sandboxError(fileToSandboxToolName)))
 
@@ -440,7 +465,7 @@ const toSandboxTool = <Context>(
 
 const fromSandboxTool = <Context>(
   store: FileStoreApi,
-  readFile: NonNullable<SandboxApi['readFile']>,
+  readFile: NonNullable<FileSandboxApi['readFile']>,
   options: FileToolModuleOptions<Context>
 ): ToolRegistration<Context> =>
   makeTool<Context, typeof FileFromSandboxParams>({
@@ -466,7 +491,14 @@ const fromSandboxTool = <Context>(
         const name = safeFileName(params.name ?? basename(params.path))
 
         const file = yield* store
-          .put({ bytes, name, mimeType: params.mimeType ?? inferredMimeType(name) })
+          .put({
+            bytes,
+            name,
+            mimeType:
+              params.mimeType === undefined
+                ? inferredMimeType(name)
+                : normalizeFileMimeType(params.mimeType)
+          })
           .pipe(Effect.mapError(storeError(fileFromSandboxToolName, params.path)))
 
         return ToolResult.make({

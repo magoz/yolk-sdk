@@ -5,6 +5,7 @@ import {
   FilePart,
   fileLabel,
   fileNotCapturedLabel,
+  normalizeFileMimeType,
   refAttachmentSource,
   TextPart,
   ToolResult,
@@ -80,7 +81,6 @@ const defaultName = (part: FilePart | InlineAttachmentPart) =>
       ? 'audio'
       : 'file')
 
-// The stored file, or why it was not stored.
 type Stored = Result.Result<FileDescriptor, string>
 
 const storeInline = (
@@ -97,7 +97,7 @@ const storeInline = (
 
   return decodeBase64(data).pipe(
     Effect.flatMap(bytes =>
-      options.store.put({ bytes, name, mimeType }).pipe(
+      options.store.put({ bytes, name, mimeType: normalizeFileMimeType(mimeType) }).pipe(
         Effect.map((file): Stored => Result.succeed(file)),
         Effect.catchTag('FileStoreError', error =>
           Effect.logWarning('Tool result file was not captured', { reason: error.reason }).pipe(

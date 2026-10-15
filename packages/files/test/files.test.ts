@@ -150,6 +150,40 @@ describe('object storage file store', () => {
     })
   )
 
+  it.effect('reads malformed ids as missing without touching storage', () =>
+    Effect.gen(function* () {
+      const storage = memoryStorage()
+      const heads: Array<string> = []
+
+      const store = makeObjectStorageFileStore({
+        storage: { ...storage, head: key => (heads.push(key), storage.head(key)) },
+        scope: 'ws_1/session_1'
+      })
+
+      expect(Option.isNone(yield* store.head('../ws_2/session_1/file_x'))).toBe(true)
+      expect(
+        (yield* store.read({ fileId: 'file_x/..', maxBytes: 1 }).pipe(Effect.flip)).reason
+      ).toBe('not_found')
+      expect(heads).toEqual([])
+    })
+  )
+
+  it.effect('stores untrusted names and MIME types safely', () =>
+    Effect.gen(function* () {
+      const storage = memoryStorage()
+      const store = makeObjectStorageFileStore({ storage, scope: 'ws_1/session_1' })
+
+      const file = yield* store.put({
+        bytes: pdf,
+        name: 'bad\uD800name.pdf',
+        mimeType: 'text/html\r\nX-Evil: 1'
+      })
+
+      expect(file.name).toBe('bad\uFFFDname.pdf')
+      expect(file.mimeType).toBe('application/octet-stream')
+    })
+  )
+
   it.effect('rejects unsafe scopes and deletes a scope prefix', () =>
     Effect.gen(function* () {
       const storage = memoryStorage()
@@ -322,14 +356,16 @@ describe('sandbox file tools', () => {
     return { file, call, sandboxFiles, store, toolSet }
   })
 
-  it.effect('copies a file into the workspace under its name', () =>
+  it.effect('copies a file into the workspace under a per-file directory', () =>
     Effect.gen(function* () {
       const { file, call, sandboxFiles } = yield* sandboxSetup
 
       const result = yield* call('file_to_sandbox', { fileId: file.fileId })
 
-      expect(result.structuredContent).toEqual({ path: 'files/In voice.pdf', size: pdf.byteLength })
-      expect(sandboxFiles.files.get('files/In voice.pdf')).toEqual(pdf)
+      const path = `files/${file.fileId}/In voice.pdf`
+
+      expect(result.structuredContent).toEqual({ path, size: pdf.byteLength })
+      expect(sandboxFiles.files.get(path)).toEqual(pdf)
     })
   )
 

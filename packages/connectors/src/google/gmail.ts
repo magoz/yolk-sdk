@@ -505,7 +505,20 @@ export class GmailGetAttachmentInput extends Schema.Class<GmailGetAttachmentInpu
   'GmailGetAttachmentInput'
 )({
   messageId: Schema.String,
-  attachmentId: Schema.String
+  attachmentId: Schema.String,
+  filename: Schema.optional(
+    Schema.String.pipe(
+      Schema.annotate({
+        description:
+          'The attachment filename from gmail.list_attachments; Gmail does not return it with the content.'
+      })
+    )
+  ),
+  mimeType: Schema.optional(
+    Schema.String.pipe(
+      Schema.annotate({ description: 'The attachment MIME type from gmail.list_attachments.' })
+    )
+  )
 }) {}
 
 export class GmailModifyLabelsInput extends Schema.Class<GmailModifyLabelsInput>(
@@ -697,10 +710,22 @@ export class GmailGetAttachmentOutput extends Schema.Class<GmailGetAttachmentOut
 )({
   messageId: Schema.String,
   attachmentId: Schema.String,
+  filename: Schema.optional(Schema.String),
+  mimeType: Schema.optional(Schema.String),
   size: GmailAttachmentSize,
   data: GmailAttachmentBase64Url,
   contentBase64: GmailAttachmentBase64
 }) {}
+
+type GmailGetAttachmentOutputFields = {
+  readonly messageId: string
+  readonly attachmentId: string
+  readonly size: GmailGetAttachmentOutput['size']
+  readonly data: GmailGetAttachmentOutput['data']
+  readonly contentBase64: GmailGetAttachmentOutput['contentBase64']
+  filename?: string
+  mimeType?: string
+}
 
 /** The model-facing `gmail.get_attachment` output (ADR 0009): the bytes travel as a file. */
 export class GmailGetAttachmentFileOutput extends Schema.Class<GmailGetAttachmentFileOutput>(
@@ -708,6 +733,8 @@ export class GmailGetAttachmentFileOutput extends Schema.Class<GmailGetAttachmen
 )({
   messageId: Schema.String,
   attachmentId: Schema.String,
+  filename: Schema.optional(Schema.String),
+  mimeType: Schema.optional(Schema.String),
   size: GmailAttachmentSize
 }) {}
 
@@ -2429,14 +2456,20 @@ export const gmailGetAttachmentAction = defineAction({
   outputSchema: GmailGetAttachmentOutput,
   fileOutput: {
     schema: GmailGetAttachmentFileOutput,
-    split: output => ({
-      value: GmailGetAttachmentFileOutput.make({
-        messageId: output.messageId,
-        attachmentId: output.attachmentId,
-        size: output.size
-      }),
-      files: [connectorActionFile({ base64: output.contentBase64 })]
-    })
+    split: output => {
+      const { data: _data, contentBase64, ...metadata } = output
+
+      return {
+        value: GmailGetAttachmentFileOutput.make(metadata),
+        files: [
+          connectorActionFile({
+            base64: contentBase64,
+            mimeType: metadata.mimeType,
+            filename: metadata.filename
+          })
+        ]
+      }
+    }
   },
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
@@ -2466,15 +2499,19 @@ export const gmailGetAttachmentAction = defineAction({
 
       const output = yield* decodeJsonResponse(GmailAttachmentWireOutput, response)
 
-      return ActionResult.success(
-        GmailGetAttachmentOutput.make({
-          messageId: input.messageId,
-          attachmentId: input.attachmentId,
-          size: output.size,
-          data: output.data,
-          contentBase64: base64UrlToBase64(output.data)
-        })
-      )
+      const fields: GmailGetAttachmentOutputFields = {
+        messageId: input.messageId,
+        attachmentId: input.attachmentId,
+        size: output.size,
+        data: output.data,
+        contentBase64: base64UrlToBase64(output.data)
+      }
+
+      if (input.filename !== undefined) fields.filename = input.filename
+
+      if (input.mimeType !== undefined) fields.mimeType = input.mimeType
+
+      return ActionResult.success(GmailGetAttachmentOutput.make(fields))
     })
 })
 
