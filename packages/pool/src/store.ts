@@ -312,11 +312,15 @@ export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
         PoolQuotaCooldown.make({ accountId: 'a', startedAtMs: 4, untilMs: 200 })
       )
 
+      yield* store.putCooldown(
+        PoolQuotaCooldown.make({ accountId: 'a', startedAtMs: 2, untilMs: 200 })
+      )
+
       const renewed = (yield* load).cooldowns
 
       yield* expect(
         renewed.length === 1 && renewed[0]?.startedAtMs === 4,
-        'of two cooldowns that end together, the later-started one stays'
+        'of two cooldowns that end together, the later-started one stays, whatever the write order'
       )
       yield* expect(
         !(yield* store.clearCooldown({ accountId: 'a', startedAtMs: 3 })),

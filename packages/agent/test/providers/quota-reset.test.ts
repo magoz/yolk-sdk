@@ -88,6 +88,21 @@ describe('anthropicClaudeQuotaResetsAtMs', () => {
     ).toBeUndefined()
   })
 
+  it('falls back to the unified reset when a rejected account-wide window has none', () => {
+    expect(
+      anthropicClaudeQuotaResetsAtMs({
+        status: 429,
+        nowMs,
+        headers: {
+          'anthropic-ratelimit-unified-status': 'rejected',
+          'anthropic-ratelimit-unified-5h-status': 'rejected',
+          'anthropic-ratelimit-unified-7d_oi-status': 'rejected',
+          'anthropic-ratelimit-unified-reset': unixSeconds(inHours(3))
+        }
+      })
+    ).toBe(inHours(3))
+  })
+
   it('ignores resets more than a year ahead', () => {
     expect(
       anthropicClaudeQuotaResetsAtMs({

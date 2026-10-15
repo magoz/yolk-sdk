@@ -174,7 +174,7 @@ const emptySnapshot: PoolStoreSnapshot = { pin: undefined, cooldowns: [], readin
  * account-scoped failure before the first event (an exhausted quota, rejected credentials) cools the
  * account down and the same request moves to the next account; every other failure, and any failure
  * after an event, reaches the caller unchanged. With every account out it fails `rate_limit`
- * (non-retryable) carrying the earliest quota reset.
+ * (non-retryable) carrying the earliest quota reset, or `auth` when only auth cooldowns remain.
  *
  * Store failures never fail a request: reads fall back to stateless fill-first and writes are
  * logged.
@@ -292,7 +292,13 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
             )
           }
 
-          return input.excluded.has(input.from) ? 'failed this request' : 'not configured'
+          if (input.excluded.has(input.from)) {
+            return 'failed this request'
+          }
+
+          return accountsById.has(input.from)
+            ? 'a fresh reading shows it used up'
+            : 'not configured'
         })
       )
 
@@ -337,15 +343,15 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
     }
 
     const exhaustedError = (input: {
-      readonly cooldowns: ReadonlyArray<PoolCooldown>
+      /** Cooldowns still active at the final pick. */
+      readonly active: ReadonlyArray<PoolCooldown>
+      /** Every cooldown that put an account out, including ones this request recorded that ran out. */
+      readonly all: ReadonlyArray<PoolCooldown>
       readonly lastError: LLMError | undefined
     }) => {
-      const quota = input.cooldowns.filter(cooldown =>
-        Predicate.isTagged(cooldown, 'PoolQuotaCooldown')
-      )
-
-      const quotaResetsAtMs = minUntil(quota)
-      const until = minUntil(input.cooldowns)
+      const isQuota = (cooldown: PoolCooldown) => Predicate.isTagged(cooldown, 'PoolQuotaCooldown')
+      const quotaResetsAtMs = minUntil(input.active.filter(isQuota))
+      const until = minUntil(input.active)
       // The vendor id of the last failure; the pool id when no account was tried in this request.
       const provider = input.lastError?.provider?.provider ?? poolId
 
@@ -354,19 +360,24 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
           ? `Every account of pool ${poolId} is unavailable`
           : `Every account of pool ${poolId} is unavailable until ${iso(until)}`
 
-      return quotaResetsAtMs === undefined
-        ? new LLMError({
-            cause: 'provider_error',
-            message,
-            retryable: false,
-            provider: ProviderErrorInfo.make({ provider, kind: 'auth' })
-          })
-        : new LLMError({
-            cause: 'rate_limit',
-            message,
-            retryable: false,
-            provider: ProviderErrorInfo.make({ provider, kind: 'rate_limit', quotaResetsAtMs })
-          })
+      if (!input.all.some(isQuota)) {
+        return new LLMError({
+          cause: 'provider_error',
+          message,
+          retryable: false,
+          provider: ProviderErrorInfo.make({ provider, kind: 'auth' })
+        })
+      }
+
+      return new LLMError({
+        cause: 'rate_limit',
+        message,
+        retryable: false,
+        provider:
+          quotaResetsAtMs === undefined
+            ? ProviderErrorInfo.make({ provider, kind: 'rate_limit' })
+            : ProviderErrorInfo.make({ provider, kind: 'rate_limit', quotaResetsAtMs })
+      })
     }
 
     const attempt = (input: {
@@ -482,8 +493,9 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
 
             return Stream.fail(
               exhaustedError({
-                // Cooldowns recorded by this request count even if they already ran out.
-                cooldowns: [
+                active: cooldowns,
+                // Cooldowns recorded by this request decide the kind even if they already ran out.
+                all: [
                   ...cooldowns,
                   ...input.recorded.filter(cooldown => !cooldowns.includes(cooldown))
                 ],

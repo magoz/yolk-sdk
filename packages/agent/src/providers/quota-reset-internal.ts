@@ -148,8 +148,12 @@ export const anthropicClaudeQuotaResetsAtMs = (input: {
     return Math.max(...windowResets)
   }
 
+  const accountWideRejected = statuses.fiveHour === 'rejected' || statuses.sevenDay === 'rejected'
+
+  // A rejected account-wide window whose own reset is unreadable falls back to the unified reset,
+  // even alongside a model-scoped rejection; a model-scoped rejection alone never does.
   const accountRejected =
-    statuses.sevenDayModel !== 'rejected' &&
+    (accountWideRejected || statuses.sevenDayModel !== 'rejected') &&
     !isOverageOnlyRejection(headers, statuses) &&
     (statuses.unified === 'rejected' ||
       (statuses.unified === '' && !isAllowed(statuses.fiveHour) && !isAllowed(statuses.sevenDay)))

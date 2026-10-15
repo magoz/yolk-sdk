@@ -35,6 +35,37 @@ describe('poolStoreContract', () => {
     })
   )
 
+  it.effect('catches a store that overwrites a cooldown ending at the same time', () =>
+    Effect.gen(function* () {
+      const broken = (): PoolStoreApi => {
+        const store = makeMemoryPoolStore()
+
+        return {
+          ...store,
+          putCooldown: cooldown =>
+            store.load({ poolId: 'pool', route: 'model', accountIds: [cooldown.accountId] }).pipe(
+              Effect.flatMap(({ cooldowns }) => {
+                const current = cooldowns[0]
+
+                return current !== undefined && current.untilMs === cooldown.untilMs
+                  ? store
+                      .clearCooldown({
+                        accountId: current.accountId,
+                        startedAtMs: current.startedAtMs
+                      })
+                      .pipe(Effect.andThen(store.putCooldown(cooldown)))
+                  : store.putCooldown(cooldown)
+              })
+            )
+        }
+      }
+
+      expect(yield* failures(broken)).toContain(
+        'of two cooldowns that end together, the later-started one stays, whatever the write order'
+      )
+    })
+  )
+
   it.effect('catches a store that lets an earlier cooldown win', () =>
     Effect.gen(function* () {
       const broken = (): PoolStoreApi => {

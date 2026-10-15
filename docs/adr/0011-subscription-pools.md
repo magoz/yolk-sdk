@@ -23,7 +23,7 @@ policy in process, not a gateway.
 | Shape       | `makePool` decorates one `LLMProvider` per account of one provider into one `LLMProvider`                                      |
 | Policy      | Expiring-first with fresh readings, sticky fill-first without; a pure `rank` function                                          |
 | Failover    | Only account-scoped failures before the first event; everything else goes to the loop's retry unchanged                        |
-| Exhausted   | All accounts out: `rate_limit`, `retryable: false`, earliest reset in the error                                                |
+| Exhausted   | All accounts out: `rate_limit`, `retryable: false`, earliest quota reset (`auth` when only auth cooldowns remain)              |
 | State       | `PoolStoreApi` port (pins, cooldowns, readings); in-memory store and `poolStoreContract` cases in `./store`                    |
 | Readings    | Pushed by the host (`recordReading`); never fetched on the request path                                                        |
 | Reset hints | `ProviderErrorInfo.quotaResetsAtMs` (epoch ms, like `retryAfterMs`), from Claude and Codex quota errors; kind stays rate_limit |
@@ -91,7 +91,7 @@ therefore switches accounts within one call only for account-scoped failures, an
 | anything else, or any failure after an event       | Unchanged to the caller; no cooldown                                                            |
 | interruption                                       | Unchanged; never a cooldown                                                                     |
 | no candidate left                                  | `rate_limit`, `retryable: false`, earliest quota reset (`auth` when only auth cooldowns remain) |
-| hint not finite or more than a year ahead          | Unchanged; no cooldown                                                                          |
+| hint not finite or more than a year ahead          | That hint is ignored; another trusted hint (a long `retryAfterMs`) still applies                |
 
 The 30-minute line is the plugin's `QuotaCooldownFloor`: provider quota lockouts are hours away,
 transient rate limits are seconds or minutes. A non-retryable error when every account is out keeps

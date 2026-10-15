@@ -36,8 +36,9 @@ export class PoolAuthCooldown extends Schema.TaggedClass<PoolAuthCooldown>()('Po
 }) {}
 
 /**
- * Why an account sits out. One cooldown per account: writing keeps the one that ends later, and a
- * reading can clear only a quota cooldown it postdates.
+ * Why an account sits out. One cooldown per account: writing keeps the one that ends later (on a
+ * tie, the one that started later; see `PoolStoreApi.putCooldown`), and a reading can clear only a
+ * quota cooldown it postdates.
  */
 export const PoolCooldown = Schema.Union([PoolQuotaCooldown, PoolAuthCooldown])
 

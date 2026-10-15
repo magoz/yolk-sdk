@@ -80,8 +80,9 @@ sees tokens.
 | every account out on rejected credentials only            | `auth` (`provider_error`), `retryable: false`                                                  |
 
 The loop's own retry calls the pool again, which picks again; the pool never retries transient
-errors itself, so attempts never multiply. Hints more than a year ahead are not trusted and pass
-through without a cooldown.
+errors itself, so attempts never multiply. A hint that is not finite or is more than a year ahead
+is ignored on its own; another trusted hint on the same error (a long `retryAfterMs`) can still
+cool the account down, otherwise the error passes through.
 
 When no account is usable by a fresh reading, the pool falls back to the route's pin or fill-first,
 skipping accounts a fresh reading shows used up unless nothing else is left.

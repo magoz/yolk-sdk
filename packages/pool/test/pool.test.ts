@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer, Predicate, Result, Stream } from 'effect'
+import { Chunk, Effect, Layer, Logger, Predicate, References, Result, Stream } from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -22,6 +22,8 @@ import {
   makePool,
   PoolAuthCooldown,
   poolAuthCooldownMs,
+  poolFailureCooldown,
+  poolMaxCooldownMs,
   PoolQuotaCooldown,
   type PoolAccount,
   type PoolOptions
@@ -43,6 +45,8 @@ type Outcome =
   | { readonly kind: 'reply' }
   | { readonly kind: 'fail'; readonly error: LLMError }
   | { readonly kind: 'fail_after_event'; readonly error: LLMError }
+  /** Moves the test clock forward, then fails before any event. */
+  | { readonly kind: 'fail_later'; readonly afterMs: number; readonly error: LLMError }
 
 const reply: Outcome = { kind: 'reply' }
 
@@ -91,6 +95,13 @@ const scripted = (id: string, priority: number, outcomes: ReadonlyArray<Outcome>
 
           if (outcome.kind === 'fail_after_event') {
             return Stream.make(text).pipe(Stream.concat(Stream.fail(outcome.error)))
+          }
+
+          if (outcome.kind === 'fail_later') {
+            return Stream.fromEffect(TestClock.adjust(outcome.afterMs)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.fail(outcome.error))
+            )
           }
 
           return Stream.make(text, LLMDone.make({ stopReason: 'stop' }))
@@ -404,6 +415,69 @@ describe('makePool', () => {
     })
   )
 
+  it.effect(
+    'reports quota exhaustion even when this request’s cooldown ran out before the end',
+    () =>
+      Effect.gen(function* () {
+        // Primary's quota resets 1 ms after it fails; backup's credentials are rejected 5 ms later.
+        const primary = scripted('primary', 10, [fail(quotaExhausted(t0 + 1))])
+
+        const backup = scripted('backup', 0, [
+          { kind: 'fail_later', afterMs: 5, error: llmError({ kind: 'auth' }) }
+        ])
+
+        const { pool } = yield* setup({ accounts: [primary.account, backup.account] })
+
+        const error = yield* Stream.runCollect(pool.provider.stream(request)).pipe(Effect.flip)
+
+        expect(error).toMatchObject({
+          cause: 'rate_limit',
+          retryable: false,
+          provider: { kind: 'rate_limit' }
+        })
+        // The only quota cooldown already ran out: no reset in the past is reported.
+        expect(JSON.stringify(error)).not.toContain('quotaResetsAtMs')
+        expect(primary.calls).toHaveLength(1)
+      })
+  )
+
+  it.effect('never logs store error messages', () =>
+    Effect.gen(function* () {
+      const entries: Array<string> = []
+
+      const logger = Logger.make(options =>
+        entries.push(
+          JSON.stringify({
+            message: options.message,
+            annotations: options.fiber.getRef(References.CurrentLogAnnotations)
+          })
+        )
+      )
+
+      const down = (operation: PoolStoreError['operation']) =>
+        Effect.fail(new PoolStoreError({ operation, message: 'postgres://user:secret@db down' }))
+
+      const store: PoolStoreApi = {
+        ...makeMemoryPoolStore(),
+        load: () => down('load'),
+        movePin: () => down('movePin'),
+        putCooldown: () => down('putCooldown')
+      }
+
+      const primary = scripted('primary', 10, [fail(quotaExhausted(t0 + day))])
+      const backup = scripted('backup', 0)
+      const { pool } = yield* setup({ accounts: [primary.account, backup.account], store })
+
+      yield* Stream.runCollect(pool.provider.stream(request)).pipe(
+        Effect.provide(Logger.layer([logger]))
+      )
+
+      expect(entries.some(entry => entry.includes('store load failed'))).toBe(true)
+      expect(entries.some(entry => entry.includes('store putCooldown failed'))).toBe(true)
+      expect(entries.join('\n')).not.toContain('secret')
+    })
+  )
+
   it.effect('routes statelessly when the store fails', () =>
     Effect.gen(function* () {
       const failing = makeMemoryPoolStore()
@@ -531,4 +605,43 @@ describe('pool under the agent loop', () => {
       expect(primary.calls).toHaveLength(1)
     })
   )
+})
+
+describe('poolFailureCooldown', () => {
+  const at = (info: { readonly retryAfterMs?: number; readonly quotaResetsAtMs?: number }) =>
+    poolFailureCooldown(llmError({ kind: 'rate_limit', ...info }), 'a', t0)
+
+  it('trusts hints up to poolMaxCooldownMs ahead', () => {
+    expect(at({ quotaResetsAtMs: t0 + poolMaxCooldownMs })?.untilMs).toBe(t0 + poolMaxCooldownMs)
+    expect(at({ quotaResetsAtMs: t0 + poolMaxCooldownMs + 1 })).toBeUndefined()
+    expect(at({ retryAfterMs: poolMaxCooldownMs })?.untilMs).toBe(t0 + poolMaxCooldownMs)
+    expect(at({ retryAfterMs: poolMaxCooldownMs + 1 })).toBeUndefined()
+  })
+
+  it('ignores non-finite and past hints', () => {
+    expect(at({ quotaResetsAtMs: Number.POSITIVE_INFINITY })).toBeUndefined()
+    expect(at({ quotaResetsAtMs: Number.NaN })).toBeUndefined()
+    expect(at({ quotaResetsAtMs: t0 - 1 })).toBeUndefined()
+    expect(at({ retryAfterMs: Number.POSITIVE_INFINITY })).toBeUndefined()
+  })
+
+  it('ignores an untrusted reset but keeps a trusted long Retry-After', () => {
+    expect(
+      poolFailureCooldown(
+        new LLMError({
+          cause: 'rate_limit',
+          message: 'quota',
+          retryable: true,
+          provider: ProviderErrorInfo.make({
+            provider: 'anthropic_claude',
+            kind: 'rate_limit',
+            retryAfterMs: 2 * hour,
+            quotaResetsAtMs: Number.POSITIVE_INFINITY
+          })
+        }),
+        'a',
+        t0
+      )?.untilMs
+    ).toBe(t0 + 2 * hour)
+  })
 })
