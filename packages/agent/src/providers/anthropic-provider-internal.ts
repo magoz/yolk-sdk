@@ -2124,10 +2124,9 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
       if (blockType === 'redacted_thinking') {
         return Effect.succeed({
           state,
-          events: redactedReasoningEvents(
-            stringField(block, 'data'),
-            options.reasoningReplayProvider
-          )
+          events: state.hasUnsignedThinking
+            ? []
+            : redactedReasoningEvents(stringField(block, 'data'), options.reasoningReplayProvider)
         })
       }
 
@@ -2147,8 +2146,12 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         return Effect.succeed({ state, events: [LLMTextDelta.make({ text })] })
       }
 
+      // After an unsigned block no reasoning is emitted: later text would join that open part.
       if (deltaType === 'thinking_delta' && thinking !== undefined) {
-        return Effect.succeed({ state, events: reasoningDeltaEvents(thinking) })
+        return Effect.succeed({
+          state,
+          events: state.hasUnsignedThinking ? [] : reasoningDeltaEvents(thinking)
+        })
       }
 
       if (index !== undefined && deltaType === 'signature_delta' && signature !== undefined) {
@@ -2184,7 +2187,9 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
 
         return Effect.succeed({
           state,
-          events: signedReasoningEvents(thinkingSignature, options.reasoningReplayProvider)
+          events: state.hasUnsignedThinking
+            ? []
+            : signedReasoningEvents(thinkingSignature, options.reasoningReplayProvider)
         })
       }
 

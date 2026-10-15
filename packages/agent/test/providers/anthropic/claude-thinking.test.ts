@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Exit, Layer, Predicate, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -12,7 +12,12 @@ import {
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
-import { accumulateAssistantMessage, LLMProvider } from '@yolk-sdk/agent/loop'
+import {
+  accumulateAssistantMessage,
+  LLMProvider,
+  LLMReasoningDelta,
+  type LLMEvent
+} from '@yolk-sdk/agent/loop'
 import {
   makeAnthropicClaudeProviderLayer,
   toAnthropicClaudeRequestBody,
@@ -100,6 +105,27 @@ const httpClientLayer = (body: string, captured: Captured) =>
     HttpClient.make(request =>
       Effect.sync(() => {
         captured.push(request)
+
+        return HttpClientResponse.fromWeb(request, new Response(body, { status: 200 }))
+      })
+    )
+  )
+
+/** One network chunk per SSE event, so events before a failing one are delivered first. */
+const chunkedHttpClientLayer = (events: ReadonlyArray<object>) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        const encoder = new TextEncoder()
+
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const event of events) controller.enqueue(encoder.encode(sse([event])))
+
+            controller.close()
+          }
+        })
 
         return HttpClientResponse.fromWeb(request, new Response(body, { status: 200 }))
       })
@@ -522,6 +548,68 @@ describe('Anthropic Claude thinking', () => {
       }
     })
   )
+
+  it.effect('emits no reasoning after an unsigned block, even when the turn errors early', () =>
+    Effect.gen(function* () {
+      const seen: Array<LLMEvent> = []
+
+      const exit = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+
+        yield* provider
+          .stream({
+            model: 'claude-opus-5-5',
+            systemPrompt: '',
+            messages: [UserMessage.make({ content: 'hi' })],
+            tools: []
+          })
+          .pipe(Stream.runForEach(event => Effect.sync(() => seen.push(event))))
+      }).pipe(
+        Effect.provide(
+          makeAnthropicClaudeProviderLayer({ token: token(), maxTokens }).pipe(
+            Layer.provide(
+              chunkedHttpClientLayer([
+                {
+                  type: 'content_block_start',
+                  index: 0,
+                  content_block: { type: 'thinking', thinking: '', signature: '' }
+                },
+                {
+                  type: 'content_block_delta',
+                  index: 0,
+                  delta: { type: 'thinking_delta', thinking: 'Unsigned.' }
+                },
+                { type: 'content_block_stop', index: 0 },
+                {
+                  type: 'content_block_start',
+                  index: 1,
+                  content_block: { type: 'thinking', thinking: '', signature: '' }
+                },
+                {
+                  type: 'content_block_delta',
+                  index: 1,
+                  delta: { type: 'thinking_delta', thinking: 'Signed.' }
+                },
+                {
+                  type: 'content_block_delta',
+                  index: 1,
+                  delta: { type: 'signature_delta', signature: 'sig' }
+                },
+                { type: 'content_block_stop', index: 1 },
+                { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }
+              ])
+            )
+          )
+        ),
+        Effect.exit
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      // The merged part a later signature would close never forms.
+      expect(seen).toEqual([LLMReasoningDelta.make({ text: 'Unsigned.' })])
+    })
+  )
+
   it.effect('reports max_tokens rather than an unsigned block it cut off', () =>
     Effect.gen(function* () {
       const error = yield* streamClaude(
