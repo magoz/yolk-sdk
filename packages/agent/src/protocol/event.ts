@@ -53,6 +53,11 @@ export const AgentErrorCode = Schema.Literals([
 
 export type AgentErrorCode = typeof AgentErrorCode.Type
 
+/** Why an `aborted` run stopped: `user` cancelled it, the `system` stopped it, or it hit `max_turns`. */
+export const AgentAbortReason = Schema.Literals(['user', 'system', 'max_turns'])
+
+export type AgentAbortReason = typeof AgentAbortReason.Type
+
 export const ProviderFailureKind = Schema.Literals([
   'rate_limit',
   'overloaded',
@@ -110,7 +115,9 @@ export class AgentError extends Schema.TaggedClass<AgentError>()('AgentError', {
   code: AgentErrorCode,
   message: Schema.String,
   retryable: Schema.Boolean,
-  provider: Schema.optional(ProviderErrorInfo)
+  provider: Schema.optional(ProviderErrorInfo),
+  /** Set with code `aborted`; absent on events recorded before it existed. */
+  abortReason: Schema.optional(AgentAbortReason)
 }) {}
 
 export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {
@@ -399,6 +406,32 @@ export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()(
 ) {}
 
 export const makeSubagentRunId = (parentToolCallId: string) => `subagent:${parentToolCallId}`
+
+const ownStringField = (input: unknown, key: string): string | undefined => {
+  if (!Predicate.isObjectOrArray(input)) {
+    return undefined
+  }
+
+  const value: unknown = Object.getOwnPropertyDescriptor(input, key)?.value
+
+  return Predicate.isString(value) ? value : undefined
+}
+
+const isSubagentResultOfType = (callId: string, result: ToolResult, type: string) =>
+  ownStringField(result.structuredContent, 'type') === type &&
+  ownStringField(result.structuredContent, 'subagent_run_id') === makeSubagentRunId(callId)
+
+/**
+ * The `subagent` call's result acknowledges background work (`makeSubagentAcceptedToolResult`):
+ * the call completed, the child did not.
+ */
+export const isSubagentAcceptedToolResult = (callId: string, result: ToolResult) =>
+  isSubagentResultOfType(callId, result, 'subagent_accepted') &&
+  ownStringField(result.structuredContent, 'status') === 'accepted'
+
+/** A host observation of the subagent started by `callId`; never a child completion. */
+export const isSubagentObservationToolResult = (callId: string, result: ToolResult) =>
+  isSubagentResultOfType(callId, result, 'subagent_observation')
 
 type QuestionAnswerCopyFields = {
   questionId: QuestionAnswer['questionId']

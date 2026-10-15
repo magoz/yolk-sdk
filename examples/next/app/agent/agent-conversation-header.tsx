@@ -7,12 +7,12 @@ import {
   MicIcon,
   SlidersHorizontalIcon
 } from 'lucide-react'
-import type { AgentRunStatus } from '@yolk-sdk/agent/client'
-import type { AgentUsage } from '@yolk-sdk/agent/protocol'
+import type { AgentStatus, AgentUsage } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { activityPanelId } from './agent-activity-model'
-import { textStatusVariant, voiceStatusVariant } from './agent-status'
+import { voiceStatusVariant } from './agent-status'
+import { textStatusLabel, textStatusVariant } from './agent-status-model'
 import { AgentUsageBadge, type AgentCompactionState } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
@@ -22,7 +22,7 @@ type AgentConversationHeaderProps = {
   readonly activityVisible: boolean
   readonly activityCount: number
   readonly liveActivityCount: number
-  readonly textStatus: AgentRunStatus
+  readonly textStatus: AgentStatus
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
@@ -68,7 +68,7 @@ export function AgentConversationHeader({
           compaction={compaction}
         />
         <Badge variant={textStatusVariant(textStatus)} className="hidden sm:inline-flex">
-          {textStatus}
+          {textStatusLabel(textStatus)}
         </Badge>
         <Badge variant={voiceStatusVariant(voiceStatus)} className="hidden sm:inline-flex">
           voice {voiceStatus}

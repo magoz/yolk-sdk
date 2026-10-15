@@ -455,8 +455,9 @@ policy and emits protocol-visible retry/error state:
 - `AgentError.provider` preserves final terminal metadata.
 - `AgentErrorCode` includes `rate_limit`, `overloaded`, `context_overflow`, and generic
   `provider_error`.
-- Client and React state keep `error: string | null` for compatibility and add typed `errorInfo` /
-  `retryInfo`.
+- Client and React state carry an `AgentStatus` (ADR 0010): terminal errors are `Failed` (with the
+  `AgentError` when the stream sent one) and pending retries `Working(Retrying)`
+  (`agentStatusRetry`).
 - `buildAgentChatItems` can project active retry state as an `AgentChatItem` with `_tag: 'Retry'`.
 - Anthropic prompt-too-long responses become non-retryable `context_overflow`; the host-owned
   compaction wrapper may compact and retry once.

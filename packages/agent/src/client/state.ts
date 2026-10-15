@@ -1,8 +1,14 @@
 import {
+  AgentFailed,
+  idleAgentStatus,
+  nextAgentStatusTree,
+  settleAgentStatusTree,
+  startAgentStatusTree,
   type AgentError,
   type AgentEvent,
   type AgentMessage,
-  type AgentRetry,
+  type AgentStatus,
+  type AgentStatusTree,
   type HitlRequest,
   type InputRequest,
   type InputResponse,
@@ -17,8 +23,6 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { Data, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
-
-export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' | 'aborted'
 
 export type AgentToolRun =
   | {
@@ -104,15 +108,14 @@ type StartedAgentToolRun = Extract<
 >
 
 export type AgentClientState = {
-  readonly status: AgentRunStatus
+  /** Run status; failures and pending retries live here (`Failed`, `Working(Retrying)`). */
+  readonly status: AgentStatus
+  readonly subagents: AgentStatusTree['subagents']
   readonly messages: ReadonlyArray<AgentMessage>
   readonly liveMessages: ReadonlyArray<AgentMessage>
   readonly text: string
   readonly reasoning: string
   readonly toolRuns: ReadonlyArray<AgentToolRun>
-  readonly error: string | null
-  readonly errorInfo: AgentError | null
-  readonly retryInfo: AgentRetry | null
   readonly seenEventIds: ReadonlyArray<string>
 }
 
@@ -134,20 +137,25 @@ const AgentToolRunDenied = Schema.TaggedStruct('Denied', {
 export type AgentTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
 
 export const initialAgentClientState: AgentClientState = {
-  status: 'idle',
+  status: idleAgentStatus,
+  subagents: [],
   messages: [],
   liveMessages: [],
   text: '',
   reasoning: '',
   toolRuns: [],
-  error: null,
-  errorInfo: null,
-  retryInfo: null,
   seenEventIds: []
 }
 
-const clearRetryInfo = (state: AgentClientState): AgentClientState =>
-  state.retryInfo === null ? state : { ...state, retryInfo: null }
+const statusTree = (state: AgentClientState): AgentStatusTree => ({
+  root: state.status,
+  subagents: state.subagents
+})
+
+const withStatusTree = (state: AgentClientState, tree: AgentStatusTree): AgentClientState =>
+  tree.root === state.status && tree.subagents === state.subagents
+    ? state
+    : { ...state, status: tree.root, subagents: tree.subagents }
 
 const hasSeenEvent = (state: AgentClientState, event: AgentEvent) =>
   event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
@@ -457,7 +465,37 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
-  return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
+  const activeCallId = activeEventToolCallId(event)
+
+  if (activeCallId !== undefined && isAcknowledgedCall(state, activeCallId)) {
+    // Hydration need not restore transient runs; the transcript itself is a replay fence.
+    return rememberEvent(
+      {
+        ...state,
+        toolRuns: state.toolRuns.filter(
+          run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
+        )
+      },
+      event
+    )
+  }
+
+  return rememberEvent(
+    withStatusTree(
+      applyAgentEventUnchecked(state, event, nowMs),
+      nextAgentStatusTree(statusTree(state), event)
+    ),
+    event
+  )
+}
+
+const isAcknowledgedCall = (state: AgentClientState, toolCallId: string) => {
+  const acknowledges = (message: AgentMessage) =>
+    Predicate.isTagged(message, 'ToolResult') &&
+    message.toolCallId === toolCallId &&
+    message.acceptance !== undefined
+
+  return state.messages.some(acknowledges) || state.liveMessages.some(acknowledges)
 }
 
 const activeEventToolCallId = (event: AgentEvent): string | undefined =>
@@ -479,70 +517,42 @@ const applyAgentEventUnchecked = (
   state: AgentClientState,
   event: AgentEvent,
   nowMs: number
-): AgentClientState => {
-  const activeCallId = activeEventToolCallId(event)
-
-  const acknowledgesActiveCall = (message: AgentMessage) =>
-    Predicate.isTagged(message, 'ToolResult') &&
-    message.toolCallId === activeCallId &&
-    message.acceptance !== undefined
-
-  if (
-    activeCallId !== undefined &&
-    (state.messages.some(acknowledgesActiveCall) || state.liveMessages.some(acknowledgesActiveCall))
-  ) {
-    // Hydration need not restore transient runs; the transcript itself is a replay fence.
-    return {
-      ...state,
-      toolRuns: state.toolRuns.filter(
-        run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
-      )
-    }
-  }
-
-  return Match.value(event)
+): AgentClientState =>
+  Match.value(event)
     .pipe(
       Match.withReturnType<AgentClientState>(),
       Match.tag('AgentStart', () => ({
         ...state,
-        status: 'running',
         text: '',
         reasoning: '',
         liveMessages: [],
-        toolRuns: retainedSettledToolRuns(state.toolRuns),
-        error: null,
-        errorInfo: null,
-        retryInfo: null
+        toolRuns: retainedSettledToolRuns(state.toolRuns)
       })),
-      Match.tag('AgentError', current => markAgentError(state, current.message, current)),
-      Match.tag('LLMTextDelta', current =>
-        clearRetryInfo({ ...state, text: `${state.text}${current.text}` })
-      ),
-      Match.tag('LLMReasoningDelta', current =>
-        clearRetryInfo({ ...state, reasoning: `${state.reasoning}${current.text}` })
-      ),
-      Match.tag('LLMReasoningReplay', () => clearRetryInfo(state)),
-      Match.tag('ToolInputStart', current =>
-        clearRetryInfo({
-          ...state,
-          toolRuns: replaceToolRun(
-            state.toolRuns,
-            AgentToolRunInputStreaming.make({ id: current.id, name: current.name, input: '' })
-          )
-        })
-      ),
-      Match.tag('ToolInputDelta', current =>
-        clearRetryInfo({
-          ...state,
-          toolRuns: appendToolInputDelta(state.toolRuns, current.id, current.delta)
-        })
-      ),
-      Match.tag('ToolInputEnd', current =>
-        clearRetryInfo({
-          ...state,
-          toolRuns: replaceToolRun(state.toolRuns, AgentToolRun.InputReady({ call: current.call }))
-        })
-      ),
+      Match.tag('AgentError', () => ({
+        ...state,
+        toolRuns: retainedSettledToolRuns(state.toolRuns)
+      })),
+      Match.tag('LLMTextDelta', current => ({ ...state, text: `${state.text}${current.text}` })),
+      Match.tag('LLMReasoningDelta', current => ({
+        ...state,
+        reasoning: `${state.reasoning}${current.text}`
+      })),
+      Match.tag('ToolInputStart', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRunInputStreaming.make({ id: current.id, name: current.name, input: '' })
+        )
+      })),
+      Match.tag('ToolInputDelta', current => ({
+        ...state,
+        toolRuns: appendToolInputDelta(state.toolRuns, current.id, current.delta)
+      })),
+      Match.tag('ToolInputEnd', current => ({
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, AgentToolRun.InputReady({ call: current.call }))
+      })),
+      Match.tag('LLMReasoningReplay', () => state),
       Match.tag('ToolApprovalRequested', current => ({
         ...state,
         toolRuns: replaceToolRun(
@@ -695,46 +705,36 @@ const applyAgentEventUnchecked = (
           })
         )
       })),
-      Match.tag('ProviderToolResult', current =>
-        clearRetryInfo({
-          ...state,
-          toolRuns: replaceToolRun(
-            state.toolRuns,
-            AgentToolRun.ProviderCompleted({ call: current.call, result: current.result })
-          )
-        })
-      ),
-      Match.tag('UserMessage', 'AssistantMessage', current =>
-        clearRetryInfo({
-          ...state,
-          liveMessages: [...state.liveMessages, current.message],
-          text: '',
-          reasoning: ''
-        })
-      ),
+      Match.tag('ProviderToolResult', current => ({
+        ...state,
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          AgentToolRun.ProviderCompleted({ call: current.call, result: current.result })
+        )
+      })),
+      Match.tag('UserMessage', 'AssistantMessage', current => ({
+        ...state,
+        liveMessages: [...state.liveMessages, current.message],
+        text: '',
+        reasoning: ''
+      })),
       Match.tag('AgentEnd', current => ({
         ...state,
-        status: 'done',
         messages: [...state.messages, ...current.messages],
         liveMessages: [],
         text: '',
         reasoning: '',
-        toolRuns: retainedSettledToolRuns(state.toolRuns),
-        retryInfo: null
+        toolRuns: retainedSettledToolRuns(state.toolRuns)
       })),
       Match.tag('AgentAwaitingInput', current => ({
         ...state,
-        status: 'waiting',
         messages: [...state.messages, ...current.messages],
         liveMessages: [],
         text: '',
-        reasoning: '',
-        error: null,
-        errorInfo: null,
-        retryInfo: null
+        reasoning: ''
       })),
-      Match.tag('AgentRetry', current => ({ ...state, retryInfo: current })),
       Match.tag(
+        'AgentRetry',
         'CompactionEnd',
         'CompactionStart',
         'LLMStreamEnd',
@@ -748,46 +748,44 @@ const applyAgentEventUnchecked = (
       ),
       Match.exhaustive
     )
-}
 
 export const submitAgentUserMessage = (
   state: AgentClientState,
   message: UserMessage
-): AgentClientState => ({
-  ...state,
-  status: 'running',
-  messages: appendAgentMessage(state.messages, message),
-  liveMessages: [],
-  text: '',
-  reasoning: '',
-  toolRuns: retainedSettledToolRuns(state.toolRuns),
-  error: null,
-  errorInfo: null,
-  retryInfo: null,
-  seenEventIds: []
-})
+): AgentClientState =>
+  withStatusTree(
+    {
+      ...state,
+      messages: appendAgentMessage(state.messages, message),
+      liveMessages: [],
+      text: '',
+      reasoning: '',
+      toolRuns: retainedSettledToolRuns(state.toolRuns),
+      seenEventIds: []
+    },
+    startAgentStatusTree(statusTree(state))
+  )
 
+/** Marks the run `Failed`, e.g. after a transport failure that produced no `AgentError` event. */
 export const markAgentError = (
   state: AgentClientState,
   message = 'Agent request failed',
-  errorInfo: AgentError | null = null
-): AgentClientState => ({
-  ...state,
-  status: 'error',
-  toolRuns: retainedSettledToolRuns(state.toolRuns),
-  error: message,
-  errorInfo,
-  retryInfo: null
-})
+  error?: AgentError
+): AgentClientState =>
+  withStatusTree(
+    { ...state, toolRuns: retainedSettledToolRuns(state.toolRuns) },
+    settleAgentStatusTree(
+      statusTree(state),
+      error === undefined ? AgentFailed.make({ message }) : AgentFailed.make({ message, error })
+    )
+  )
 
-export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
-  ...state,
-  status: 'aborted',
-  toolRuns: retainedSettledToolRuns(state.toolRuns),
-  error: null,
-  errorInfo: null,
-  retryInfo: null
-})
+/** The person stopped the run; per OSC 7501 a cancelled run is `Idle`. */
+export const markAgentAborted = (state: AgentClientState): AgentClientState =>
+  withStatusTree(
+    { ...state, toolRuns: retainedSettledToolRuns(state.toolRuns) },
+    settleAgentStatusTree(statusTree(state), idleAgentStatus)
+  )
 
 export const reduceAgentEvents = (
   events: ReadonlyArray<AgentEvent>,

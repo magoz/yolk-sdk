@@ -1,5 +1,4 @@
-import type { AgentRunStatus } from '@yolk-sdk/agent/client'
-import type { AgentReasoningEffort, AgentUsage } from '@yolk-sdk/agent/protocol'
+import type { AgentReasoningEffort, AgentStatus, AgentUsage } from '@yolk-sdk/agent/protocol'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +19,7 @@ import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/ope
 import { AnthropicClaudeAuthPanel } from './anthropic-claude-auth-panel'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
 import { AgentUsagePanel, type AgentCompactionState } from './agent-usage-meter'
+import { textStatusLabel, textStatusVariant } from './agent-status-model'
 import type { VoiceStatus } from './use-realtime-voice'
 
 export const voiceStatusVariant = (status: VoiceStatus) => {
@@ -34,25 +34,11 @@ export const voiceStatusVariant = (status: VoiceStatus) => {
   }
 }
 
-export const textStatusVariant = (status: AgentRunStatus) => {
-  switch (status) {
-    case 'done':
-      return 'secondary'
-    case 'error':
-      return 'destructive'
-    case 'aborted':
-    case 'idle':
-    case 'running':
-    case 'waiting':
-      return 'outline'
-  }
-}
-
 type AgentStatusPanelProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
   readonly anthropicClaudeConnected: boolean
-  readonly textStatus: AgentRunStatus
+  readonly textStatus: AgentStatus
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
@@ -250,7 +236,7 @@ export function AgentStatusPanel({
           <Badge variant="outline">{defaultOpenAiRealtimeReasoningEffort}</Badge>
         </StatusRow>
         <StatusRow label="Status">
-          <Badge variant={textStatusVariant(textStatus)}>{textStatus}</Badge>
+          <Badge variant={textStatusVariant(textStatus)}>{textStatusLabel(textStatus)}</Badge>
         </StatusRow>
         <StatusRow label="Voice">
           <Badge variant={voiceStatusVariant(voiceStatus)}>{voiceStatus}</Badge>

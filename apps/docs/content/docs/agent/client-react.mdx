@@ -54,6 +54,9 @@ classes). Build parts with `AgentChatPart.Text({ id, content, state })` rather t
 constructors and returns the hook-result constructors. Duration descriptors use
 `Schema.TaggedStruct.make`.
 
+Client and chat state carry the run's `status` as an [`AgentStatus`](./status) plus `subagents`;
+failures and pending retries are statuses (`Failed`, `Working(Retrying)`), not separate fields.
+
 The package is headless. It does not ship Yolk UI components, styling, auth, uploads, or route handlers. Your UI owns the input box, message bubbles, attachments, voice controls, pending states, and errors.
 
 ## Replay-safe projection

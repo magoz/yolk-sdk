@@ -1,5 +1,5 @@
-import type { AgentRunStatus } from '@yolk-sdk/agent/client'
-import type { AgentError, AgentRetry } from '@yolk-sdk/agent/protocol'
+import { Predicate } from 'effect'
+import { agentStatusRetry, type AgentStatus } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import { countLabel } from './agent-format'
 import {
@@ -11,7 +11,8 @@ import {
   type ActivityTone,
   type AgentActivityItem
 } from './agent-activity-model'
-import { textStatusVariant, voiceStatusVariant } from './agent-status'
+import { voiceStatusVariant } from './agent-status'
+import { textStatusLabel, textStatusVariant } from './agent-status-model'
 import type { VoiceStatus } from './use-realtime-voice'
 
 const activityToneClass = (tone: ActivityTone) => {
@@ -44,13 +45,10 @@ const activityToneVariant = (tone: ActivityTone) => {
 
 type AgentActivityPanelProps = {
   readonly items: ReadonlyArray<AgentActivityItem>
-  readonly textStatus: AgentRunStatus
+  readonly textStatus: AgentStatus
   readonly voiceStatus: VoiceStatus
   readonly activeToolCallCount: number
   readonly toolResultCount: number
-  readonly error: string | null
-  readonly errorInfo: AgentError | null
-  readonly retryInfo: AgentRetry | null
   readonly workflowRunId: string | null
   readonly workflowResumeDisabled: boolean
   readonly onResumeWorkflowRun: () => void
@@ -62,18 +60,17 @@ export function AgentActivityPanel({
   voiceStatus,
   activeToolCallCount,
   toolResultCount,
-  error,
-  errorInfo,
-  retryInfo,
   workflowRunId,
   workflowResumeDisabled,
   onResumeWorkflowRun
 }: AgentActivityPanelProps) {
+  const retry = agentStatusRetry(textStatus)
+
   return (
     <div id={activityPanelId} className="border-b border-foreground/10 bg-muted/20 p-4">
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
-          <Badge variant={textStatusVariant(textStatus)}>text {textStatus}</Badge>
+          <Badge variant={textStatusVariant(textStatus)}>text {textStatusLabel(textStatus)}</Badge>
           <Badge variant={voiceStatusVariant(voiceStatus)}>voice {voiceStatus}</Badge>
           {activeToolCallCount > 0 ? (
             <Badge variant="outline">{countLabel(activeToolCallCount, 'active tool')}</Badge>
@@ -100,20 +97,22 @@ export function AgentActivityPanel({
           </div>
         ) : null}
 
-        {retryInfo !== null ? (
+        {retry !== undefined ? (
           <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
-            <div className="font-medium">{agentRetryTitle(retryInfo)}</div>
-            <div className="mt-1 whitespace-pre-wrap leading-5">{agentRetryDetail(retryInfo)}</div>
+            <div className="font-medium">{agentRetryTitle(retry)}</div>
+            <div className="mt-1 whitespace-pre-wrap leading-5">{agentRetryDetail(retry)}</div>
           </div>
         ) : null}
 
-        {error !== null ? (
+        {Predicate.isTagged(textStatus, 'Failed') ? (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">
-              {errorInfo === null ? 'Current error' : agentErrorTitle(errorInfo)}
+              {textStatus.error === undefined ? 'Current error' : agentErrorTitle(textStatus.error)}
             </div>
             <div className="mt-1 whitespace-pre-wrap leading-5">
-              {errorInfo === null ? error : agentErrorDetail(errorInfo)}
+              {textStatus.error === undefined
+                ? textStatus.message
+                : agentErrorDetail(textStatus.error)}
             </div>
           </div>
         ) : null}

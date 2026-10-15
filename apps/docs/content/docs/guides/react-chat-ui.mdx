@@ -17,7 +17,8 @@ pnpm add @yolk-sdk/agent@canary effect@4.0.0 react react-dom
 'use client'
 
 import { useState } from 'react'
-import { Option } from 'effect'
+import { Option, Predicate } from 'effect'
+import { agentStatusRetry } from '@yolk-sdk/agent/protocol'
 import { buildAgentChatItems, useAgentChat } from '@yolk-sdk/agent/react'
 
 export function AgentChat() {
@@ -31,7 +32,7 @@ export function AgentChat() {
     messages: chat.chatMessages,
     isRunning: chat.isRunning,
     activeToolLabel: Option.none(),
-    retryInfo: chat.state.retryInfo
+    retryInfo: agentStatusRetry(chat.status)
   })
 
   return (
@@ -47,7 +48,7 @@ export function AgentChat() {
           <li key={item.id}>{renderChatItem(item)}</li>
         ))}
       </ol>
-      {chat.error === null ? null : <p role="alert">{chat.error}</p>}
+      {Predicate.isTagged(chat.status, 'Failed') ? <p role="alert">{chat.status.message}</p> : null}
       <input
         value={input}
         disabled={!chat.canSubmitText(input)}
@@ -68,8 +69,10 @@ export function AgentChat() {
 
 ## HITL controls
 
-When `chat.isWaiting` is true, render approval/question/input controls from tool run items. These
-are alternative fragments; use the method matching the pending request:
+When `chat.isWaiting` is true (`chat.status` is `Blocked`), render approval/question/input controls
+from tool run items. `chat.status.kind` says whether the run needs a `permission` or a `question`
+(see [Agent status](../agent/status)). These are alternative fragments; use the method matching the
+pending request:
 
 ```ts
 chat.submitToolApprovalResponse(approvalResponse)
@@ -90,6 +93,6 @@ Use `useAgentChat` for normal browser chats. For replayed durable event logs, us
 
 - Disable submit while running or awaiting HITL.
 - Keep stop local: it aborts the current browser stream. Server-side cancellation is a separate route.
-- Show retry state from `chat.state.retryInfo`.
+- Show retry state from `agentStatusRetry(chat.status)` and failures from `Failed` statuses.
 - Keep approval/question/input controls accessible and auditable.
 - Never render raw provider error bodies.

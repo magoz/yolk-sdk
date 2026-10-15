@@ -108,6 +108,17 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, poll empty non-terminal chunks without advancing `startIndex`, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
 - Client public helpers are Effect-native: stream helpers return `Stream`; `cancelAgentRun`, `collectAgentEvents`, `textFromBlob`, and `documentPartFromTextFile` return `Effect`; HTTP helpers accept `httpClientLayer`.
 
+## Agent status
+
+- ADR `docs/adr/0010-agent-status.md`; OSC 7501 vocabulary, not its wire format. `protocol/status.ts` owns `AgentStatus` (`Idle`, `Working{activity}`, `Blocked{kind, requests}`, `Done`, `Failed{message, error?}`), `AgentActivity`, `AgentBlockedKind` (exactly `permission | question | auth`), and `AgentStatusTree`.
+- `nextAgentStatus` is the only event → status mapping; client and React reducers fold `nextAgentStatusTree` and never set status by hand except through `startAgentStatusTree` (local submit/resume/regenerate/edit) and `settleAgentStatusTree` (transport failure, abort). Keep its `Match` exhaustive so new events must choose a mapping.
+- Work events move any status to `Working` (durable resumes may skip `AgentStart`); neutral events never change a settled status. A person's cancel is `Idle`; `aborted` errors carry `abortReason` and only `user` (or absent, older events) maps to `Idle`. Never derive status from message text.
+- Stored statuses go through `reconcileAgentStatus(status, { runActive })`: live statuses need host-proven liveness. Seen/unread, labels, notifications, and terminal output stay host-owned.
+- Background subagent entries are host-owned via `withSubagentStatus`. Detection: a `ToolExecutionCompleted` whose result passes `isSubagentAcceptedToolResult` (the loop's own predicate for skipping `SubagentCompleted`; never duplicate it) or a `ToolExecutionAccepted`. Run settlement idles only live inline entries.
+- Reducers skip status for replayed starts of calls already settled in their transcript (client: acknowledged `ToolResult`; React: `Completed`/`Accepted` tool part).
+- Client/React state has no `error`/`errorInfo`/`retryInfo`: use `Failed` and `agentStatusRetry`.
+- Tests: `test/protocol/status.test.ts`, `test/property/status.property.test.ts`.
+
 ## Tests
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/classification`, `test/compaction`, `test/tools`, `test/react`, `test/oauth`, `test/providers`, `test/skillset`, `test/voice`, and `test/property`.

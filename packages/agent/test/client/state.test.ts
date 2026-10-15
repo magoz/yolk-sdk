@@ -3,6 +3,9 @@ import {
   AgentAwaitingInput,
   AgentEnd,
   AgentError,
+  AgentFailed,
+  agentStatusRetry,
+  idleAgentStatus,
   AgentRetry,
   AgentStart,
   AssistantAgentMessage,
@@ -75,7 +78,7 @@ describe('reduceAgentEvents', () => {
       { nowMs: 123 }
     )
 
-    expect(state.status).toBe('done')
+    expect(state.status._tag).toBe('Done')
     expect(state.text).toBe('')
     expect(state.liveMessages).toEqual([])
     expect(state.toolRuns).toEqual([
@@ -84,7 +87,6 @@ describe('reduceAgentEvents', () => {
       )
     ])
     expect(state.messages).toEqual([message, toolResultMessage])
-    expect(state.error).toBeNull()
   })
 
   it('keeps tool runs anchored in live messages during active runs', () => {
@@ -233,7 +235,7 @@ describe('reduceAgentEvents', () => {
       })
     ])
 
-    expect(state.status).toBe('waiting')
+    expect(state.status._tag).toBe('Blocked')
     expect(state.messages).toEqual([message])
   })
 
@@ -250,10 +252,8 @@ describe('reduceAgentEvents', () => {
     const state = reduceAgentEvents([AgentStart.make({}), error])
 
     expect(state).toMatchObject({
-      status: 'error',
-      toolRuns: [],
-      error: 'Provider failed',
-      errorInfo: error
+      status: AgentFailed.make({ message: 'Provider failed', error }),
+      toolRuns: []
     })
   })
 
@@ -275,12 +275,12 @@ describe('reduceAgentEvents', () => {
 
     const retrying = reduceAgentEvents([AgentStart.make({}), retry])
 
-    expect(retrying.retryInfo).toBe(retry)
-    expect(retrying.errorInfo).toBeNull()
+    expect(agentStatusRetry(retrying.status)).toBe(retry)
 
     const resumed = reduceAgentEvents([LLMTextDelta.make({ text: 'ok' })], retrying)
 
-    expect(resumed.retryInfo).toBeNull()
+    expect(agentStatusRetry(resumed.status)).toBeUndefined()
+    expect(resumed.status._tag).toBe('Working')
     expect(resumed.text).toBe('ok')
   })
 
@@ -311,9 +311,8 @@ describe('reduceAgentEvents', () => {
     const state = reduceAgentEvents([AgentStart.make({})])
 
     expect(markAgentError(state)).toMatchObject({
-      status: 'error',
-      toolRuns: [],
-      error: 'Agent request failed'
+      status: AgentFailed.make({ message: 'Agent request failed' }),
+      toolRuns: []
     })
   })
 
@@ -322,13 +321,12 @@ describe('reduceAgentEvents', () => {
     const state = submitAgentUserMessage(reduceAgentEvents([]), message)
 
     expect(state).toMatchObject({
-      status: 'running',
+      status: { _tag: 'Working', activity: { _tag: 'Busy' } },
       messages: [message],
       liveMessages: [],
       text: '',
       toolRuns: [],
-      reasoning: '',
-      error: null
+      reasoning: ''
     })
   })
 
@@ -362,10 +360,9 @@ describe('reduceAgentEvents', () => {
     const state = reduceAgentEvents([AgentStart.make({}), LLMTextDelta.make({ text: 'partial' })])
 
     expect(markAgentAborted(state)).toMatchObject({
-      status: 'aborted',
+      status: idleAgentStatus,
       text: 'partial',
-      toolRuns: [],
-      error: null
+      toolRuns: []
     })
   })
 })

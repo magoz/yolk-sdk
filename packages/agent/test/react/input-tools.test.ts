@@ -290,14 +290,14 @@ describe('input headless state', () => {
         hook.value.submitText('word')
         await tick()
       })
-      await waitFor(() => hook.value.status === 'waiting')
+      await waitFor(() => Predicate.isTagged(hook.value.status, 'Blocked'))
       await act(async () => {
         hook.value.submitInputResponse(
           InputResponse.make({ ...submittedResponse, data: 'invalid' })
         )
         await tick()
       })
-      await waitFor(() => hook.value.status === 'waiting')
+      await waitFor(() => Predicate.isTagged(hook.value.status, 'Blocked'))
       expect(findToolCall(hook.value.chatMessages)?.state._tag).toBe('InputRequested')
       expect(hook.value.messages.some(message => Predicate.isTagged(message, 'ToolResult'))).toBe(
         false
@@ -306,7 +306,7 @@ describe('input headless state', () => {
         hook.value.submitInputResponse(submittedResponse)
         await tick()
       })
-      await waitFor(() => hook.value.status === 'done')
+      await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
       expect(requests).toHaveLength(3)
       expect(requests[2]?.messages.some(message => Predicate.isTagged(message, 'ToolResult'))).toBe(
         false
@@ -341,12 +341,12 @@ describe('input headless state', () => {
         hook.value.submitText('word')
         await tick()
       })
-      await waitFor(() => hook.value.status === 'waiting')
+      await waitFor(() => Predicate.isTagged(hook.value.status, 'Blocked'))
       await act(async () => {
         hook.value.submitInputResponse(submittedResponse)
         await tick()
       })
-      await waitFor(() => hook.value.status === 'error')
+      await waitFor(() => Predicate.isTagged(hook.value.status, 'Failed'))
       expect(hook.value.messages.some(message => Predicate.isTagged(message, 'ToolResult'))).toBe(
         false
       )
@@ -354,7 +354,7 @@ describe('input headless state', () => {
         hook.value.applyEvent(pending)
         await tick()
       })
-      expect(hook.value.status).toBe('waiting')
+      expect(hook.value.status._tag).toBe('Blocked')
       expect(hook.value.canSubmitHitlResponse()).toBe(true)
       expect(findToolCall(hook.value.chatMessages)?.state._tag).toBe('InputRequested')
     } finally {
@@ -402,7 +402,7 @@ describe('input headless state', () => {
       await tick()
     })
 
-    await waitFor(() => hook.value.status === 'waiting')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Blocked'))
 
     expect(hook.value.canSubmitHitlResponse()).toBe(true)
 
@@ -419,7 +419,7 @@ describe('input headless state', () => {
       await tick()
     })
 
-    await waitFor(() => hook.value.status === 'done')
+    await waitFor(() => Predicate.isTagged(hook.value.status, 'Done'))
 
     expect(requests).toHaveLength(2)
 

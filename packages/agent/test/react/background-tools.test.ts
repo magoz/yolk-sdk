@@ -27,6 +27,7 @@ import {
   ToolResult,
   toolResultMessageFromResult,
   ToolExecutionAccepted,
+  ToolExecutionCompleted,
   ToolExecutionStarted,
   makeBackgroundToolAcceptedResult
 } from '@yolk-sdk/agent/protocol'
@@ -407,5 +408,30 @@ it('projects only result fields from hydrated messages, never their tag or envel
 
     expect(part.state.result).toStrictEqual(original)
     expect(Equal.equals(part.state.result, original)).toBe(true)
+  }
+})
+
+it('keeps the chat status when a replayed start reaches a settled call', () => {
+  const completed = ToolExecutionCompleted.make({
+    call,
+    result: ToolResult.make({ toolCallId: call.id, content: 'done' })
+  })
+
+  for (const settle of [accepted, completed]) {
+    const settled = [
+      AgentStart.make({}),
+      started,
+      settle,
+      AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })
+    ].reduce(
+      (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+      initialAgentChatState
+    )
+
+    expect(settled.status._tag).toBe('Done')
+
+    const replayed = reduceAgentChatState(settled, AgentChatAction.Event({ event: started }))
+
+    expect(replayed.status).toBe(settled.status)
   }
 })
