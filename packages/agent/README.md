@@ -121,9 +121,9 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 
 ## Headless React chat
 
-`useAgentChat` exposes protocol messages, render-oriented chat messages, run/error/waiting state,
-and actions for submit, stop, edit, regenerate, delete, tool approval, question, and typed input responses. The
-package supplies no components, styling, auth, or route ownership, and React remains an optional
+`useAgentChat` exposes protocol messages, render-oriented chat messages, the run `status`
+(`AgentStatus`), per-subagent `subagents` statuses, running/waiting flags, and actions for submit,
+stop, edit, regenerate, delete, tool approval, question, and typed input responses. The package supplies no components, styling, auth, or route ownership, and React remains an optional
 peer used only by React subpaths.
 
 Chat ADTs on `@yolk-sdk/agent/react` are value constructors: `AgentChatPart`, `ChatToolState`,

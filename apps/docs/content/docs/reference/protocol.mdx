@@ -15,6 +15,7 @@ description: Core transcript and event terms used across Yolk packages.
 | `ToolCall`              | model request to execute a host tool                                                  |
 | `ToolResult`            | host result returned to the model                                                     |
 | `AgentAwaitingInput`    | logical terminal pause state for approvals/questions                                  |
+| `AgentStatus`           | one run status: `Idle`, `Working`, `Blocked`, `Done`, or `Failed` (OSC 7501 terms)    |
 | `FilePart`              | file bytes a tool yields for other tools to move; the model only sees its label       |
 | `fileId`                | `file_…` handle of a captured file (`ToolResult.files` lists them)                    |
 | `ToolChangePreview`     | tool-agnostic before → after diff of one call, shown on approvals and plan reviews    |

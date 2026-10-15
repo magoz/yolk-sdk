@@ -77,9 +77,10 @@ replace them. Base `runActive` on your authoritative run record, never on the la
 order. `nextAgentStatusTree` and `agentStatusTreeFromEvents` fold events into it:
 
 - `SubagentStarted` adds a `Working` entry; `SubagentCompleted` sets `Done` or `Failed`.
-- A subagent call that the host accepts as background work (its result is
-  `makeSubagentAcceptedToolResult`, or a `ToolExecutionAccepted` event) is marked
-  `background: true`. Its status comes from you after that: write it with `withSubagentStatus`.
+- A subagent call that the host accepts as background work (its result passes
+  `isSubagentAcceptedToolResult`, as one built by `makeSubagentAcceptedToolResult` does, or a
+  `ToolExecutionAccepted` event) is marked `background: true`. Its status comes from you after
+  that: write it with `withSubagentStatus`.
 - When the run stops (`AgentEnd`, `AgentError`, a local stop, or a transport failure), live inline
   subagents become `Idle`.
 - `AgentStart` drops entries settled in earlier runs.
