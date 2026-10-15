@@ -219,7 +219,7 @@ Either way the provider keeps each thinking block's signature, or a redacted blo
 tool-use turns keep their reasoning. Never edit, truncate or reorder a reasoning part that has
 `replay` (Anthropic rejects modified thinking); hosts that rewrite history per request can skip parts
 whose `replay.provider` is `anthropicClaudeReasoningReplayProvider`. Reasoning from another provider
-is never sent to Claude, and native Messages transports neither capture nor replay it.
+is never sent to Claude, and native Messages transports neither capture nor replay signatures.
 
 ## Prompt caching
 

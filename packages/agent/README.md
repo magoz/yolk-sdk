@@ -305,14 +305,14 @@ responsible for choosing an effort accepted by the selected provider and model.
 
 Newer Claude models think by default but return empty thinking blocks unless asked. Set
 `thinking: { display: 'summarized' }` on `makeAnthropicClaudeProviderLayer` to stream readable
-summaries as reasoning deltas; `prefixMismatchBehavior: 'drop_block'` keeps requests succeeding when
-an earlier part of the conversation changed (Anthropic drops the affected thinking instead of
-failing). With or without `thinking`, the Claude provider keeps each thinking block's signature, or
+summaries as reasoning deltas; `prefixMismatchBehavior` (`'drop_block'` or `'error'`) sets what
+Anthropic does with replayed thinking whose earlier context changed (absent: the account default).
+With or without `thinking`, the Claude provider keeps each thinking block's signature, or
 a redacted block's data, on its reasoning part (`AssistantReasoningPart.replay`, an
 `AssistantReasoningReplay`) and sends the block back unchanged, in produced order, so tool-use turns
-keep their reasoning. Reasoning from another provider is never sent to Claude. Do not edit the text
-of a reasoning part that has `replay`: Anthropic rejects modified thinking blocks. Hosts that
-rewrite history per request can skip parts whose `replay.provider` is
+keep their reasoning. Reasoning from another provider is never sent to Claude. Never edit, truncate
+or reorder a reasoning part that has `replay`: Anthropic rejects modified thinking blocks. Hosts
+that rewrite history per request can skip parts whose `replay.provider` is
 `anthropicClaudeReasoningReplayProvider`.
 
 ### Prompt caching
