@@ -1275,7 +1275,8 @@ const executeInteractionTool = <Context>(input: {
             Effect.timeoutOption(interactionFileCaptureTimeout),
             Effect.flatMap(
               Option.match({
-                onNone: () => captureToolResultFiles(actionToolResult, undefined),
+                onNone: () =>
+                  captureToolResultFiles(actionToolResult, undefined, 'storage timed out'),
                 onSome: Effect.succeed
               })
             )

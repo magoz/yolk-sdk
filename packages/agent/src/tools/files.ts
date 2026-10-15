@@ -126,13 +126,14 @@ const notCaptured = (part: FilePart, reason: string): Captured => ({
 
 const captureFilePart = (
   part: FilePart,
-  options: ToolFileCaptureOptions | undefined
+  options: ToolFileCaptureOptions | undefined,
+  uncapturedReason: string
 ): Effect.Effect<Captured> => {
   if (!Predicate.isTagged(part.source, 'InlineBase64')) {
     return Effect.succeed({ parts: [part], files: [] })
   }
 
-  if (options === undefined) return Effect.succeed(notCaptured(part, 'no file store'))
+  if (options === undefined) return Effect.succeed(notCaptured(part, uncapturedReason))
 
   return storeInline(part.source.data, defaultName(part), part.mimeType, options).pipe(
     Effect.map(
@@ -179,9 +180,10 @@ const captureViewablePart = (
 
 const capturePart = (
   part: ContentPart,
-  options: ToolFileCaptureOptions | undefined
+  options: ToolFileCaptureOptions | undefined,
+  uncapturedReason: string
 ): Effect.Effect<Captured> => {
-  if (Predicate.isTagged(part, 'File')) return captureFilePart(part, options)
+  if (Predicate.isTagged(part, 'File')) return captureFilePart(part, options, uncapturedReason)
 
   if (Predicate.isTagged(part, 'Text')) return Effect.succeed({ parts: [part], files: [] })
 
@@ -238,12 +240,13 @@ const withCaptured = (result: ToolResult, captured: ReadonlyArray<Captured>) => 
  * and rewritten to `Ref { id: fileId }` (the model sees their label), inline image, document and
  * audio parts are stored and followed by their label, and `ToolResult.files` lists every captured
  * file. Without `options`, or when storing fails or the file is over the bound, inline `File`
- * parts become a "not captured" label: base64 never reaches the model. Results without inline
- * bytes are returned unchanged. Never fails.
+ * parts become a "not captured" label (`uncapturedReason` names why without a store): base64
+ * never reaches the model. Results without inline bytes are returned unchanged. Never fails.
  */
 export const captureToolResultFiles = (
   result: ToolResult,
-  options: ToolFileCaptureOptions | undefined
+  options: ToolFileCaptureOptions | undefined,
+  uncapturedReason = 'no file store'
 ): Effect.Effect<ToolResult> => {
   const content = result.content
 
@@ -251,7 +254,7 @@ export const captureToolResultFiles = (
     return Effect.succeed(result)
   }
 
-  return Effect.forEach(content, part => capturePart(part, options)).pipe(
+  return Effect.forEach(content, part => capturePart(part, options, uncapturedReason)).pipe(
     Effect.map(captured => withCaptured(result, captured))
   )
 }
