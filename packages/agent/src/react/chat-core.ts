@@ -307,6 +307,7 @@ export const reduceAgentChatState = (
           'AssistantMessage',
           'CompactionStart',
           'LLMReasoningDelta',
+          'LLMReasoningReplay',
           'LLMStreamEnd',
           'LLMStreamStart',
           'LLMTextDelta',

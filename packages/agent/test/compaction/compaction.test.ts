@@ -3,6 +3,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
   AssistantReasoningPart,
+  SignedReasoningReplay,
   AssistantTextPart,
   HostToolCallPart,
   ProviderToolCallPart,
@@ -17,6 +18,7 @@ import {
 import {
   ContextTransformer,
   LLMError,
+  LLMReasoningReplay,
   LLMTextDelta,
   type LLMEvent,
   type LLMProviderError,
@@ -431,6 +433,39 @@ describe('agent compaction', () => {
 
       const error = yield* retryProvider
         .stream({ messages: original, tools: [], model: 'test', systemPrompt: 'test' })
+        .pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toBe(overflow)
+      expect(compactCalls).toBe(0)
+    })
+  )
+
+  it.effect('treats a closed reasoning block as started output', () =>
+    Effect.gen(function* () {
+      const overflow = contextOverflowError()
+      let compactCalls = 0
+
+      const retryProvider = yield* makeContextOverflowRetryProvider({
+        provider: {
+          // Omitted thinking: a signed block with no text, then the overflow.
+          stream: () =>
+            Stream.make(
+              LLMReasoningReplay.make({
+                replay: SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 's' })
+              })
+            ).pipe(Stream.concat(Stream.fail(overflow)))
+        },
+        compact: () => {
+          compactCalls += 1
+
+          return Effect.succeed(
+            ContextOverflowRetryCompactionResult.Compacted({ messages: [user('checkpoint')] })
+          )
+        }
+      })
+
+      const error = yield* retryProvider
+        .stream({ messages: [user('original')], tools: [], model: 'test', systemPrompt: 'test' })
         .pipe(Stream.runCollect, Effect.flip)
 
       expect(error).toBe(overflow)

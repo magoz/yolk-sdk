@@ -13,6 +13,7 @@ import { applyAssistantLlmEvent } from './accumulator.ts'
 import {
   LLMProviderToolResult,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolCall,
   type LLMEvent
@@ -120,6 +121,7 @@ const eventStartsOutput = (event: AgentEvent) =>
     Match.tag(
       'LLMTextDelta',
       'LLMReasoningDelta',
+      'LLMReasoningReplay',
       'AssistantMessage',
       'ToolInputStart',
       'ToolInputDelta',
@@ -134,6 +136,7 @@ const llmEventFromAgentEvent = (event: AgentEvent): LLMEvent | undefined =>
   Match.value(event).pipe(
     Match.tag('LLMTextDelta', current => LLMTextDelta.make({ text: current.text })),
     Match.tag('LLMReasoningDelta', current => LLMReasoningDelta.make({ text: current.text })),
+    Match.tag('LLMReasoningReplay', current => LLMReasoningReplay.make({ replay: current.replay })),
     Match.tag('ToolInputEnd', current => LLMToolCall.make({ call: current.call })),
     Match.tag('ProviderToolResult', current =>
       LLMProviderToolResult.make({ call: current.call, result: current.result })

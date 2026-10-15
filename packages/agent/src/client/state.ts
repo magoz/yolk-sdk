@@ -521,6 +521,7 @@ const applyAgentEventUnchecked = (
       Match.tag('LLMReasoningDelta', current =>
         clearRetryInfo({ ...state, reasoning: `${state.reasoning}${current.text}` })
       ),
+      Match.tag('LLMReasoningReplay', () => clearRetryInfo(state)),
       Match.tag('ToolInputStart', current =>
         clearRetryInfo({
           ...state,

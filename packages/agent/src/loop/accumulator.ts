@@ -41,22 +41,21 @@ const appendTextPartMutable = (parts: Array<AssistantPart>, text: string) => {
   return parts
 }
 
-/** A reasoning part the provider has not closed with replay state yet. */
-const isOpenReasoningPart = (part: AssistantPart | undefined): part is AssistantReasoningPart =>
-  Predicate.isTagged(part, 'Reasoning') && part.replay === undefined
+/** `part` when it is a reasoning part the provider has not closed with replay state yet. */
+const openReasoningPart = (part: AssistantPart | undefined) =>
+  Predicate.isTagged(part, 'Reasoning') && part.replay === undefined ? part : undefined
 
 /** A `Signed` replay closes the open reasoning block it signs; anything else is its own block. */
-const closesLastReasoningPart = (
+const reasoningPartClosedBy = (
   last: AssistantPart | undefined,
   replay: AssistantReasoningReplay
-): last is AssistantReasoningPart =>
-  Predicate.isTagged(replay, 'Signed') && isOpenReasoningPart(last)
+) => (Predicate.isTagged(replay, 'Signed') ? openReasoningPart(last) : undefined)
 
 const appendReasoningPartMutable = (parts: Array<AssistantPart>, text: string) => {
-  const last = parts.at(-1)
+  const open = openReasoningPart(parts.at(-1))
 
-  if (isOpenReasoningPart(last)) {
-    parts[parts.length - 1] = AssistantReasoningPart.make({ text: `${last.text}${text}` })
+  if (open !== undefined) {
+    parts[parts.length - 1] = AssistantReasoningPart.make({ text: `${open.text}${text}` })
   } else {
     parts.push(AssistantReasoningPart.make({ text }))
   }
@@ -68,10 +67,10 @@ const closeReasoningPartMutable = (
   parts: Array<AssistantPart>,
   replay: AssistantReasoningReplay
 ) => {
-  const last = parts.at(-1)
+  const closed = reasoningPartClosedBy(parts.at(-1), replay)
 
-  if (closesLastReasoningPart(last, replay)) {
-    parts[parts.length - 1] = AssistantReasoningPart.make({ text: last.text, replay })
+  if (closed !== undefined) {
+    parts[parts.length - 1] = AssistantReasoningPart.make({ text: closed.text, replay })
   } else {
     parts.push(AssistantReasoningPart.make({ text: '', replay }))
   }
@@ -132,10 +131,10 @@ const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
 }
 
 const appendReasoningPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
-  const last = parts.at(-1)
+  const open = openReasoningPart(parts.at(-1))
 
-  return isOpenReasoningPart(last)
-    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: `${last.text}${text}` })]
+  return open !== undefined
+    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: `${open.text}${text}` })]
     : [...parts, AssistantReasoningPart.make({ text })]
 }
 
@@ -143,10 +142,10 @@ const closeReasoningPart = (
   parts: ReadonlyArray<AssistantPart>,
   replay: AssistantReasoningReplay
 ) => {
-  const last = parts.at(-1)
+  const closed = reasoningPartClosedBy(parts.at(-1), replay)
 
-  return closesLastReasoningPart(last, replay)
-    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: last.text, replay })]
+  return closed !== undefined
+    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: closed.text, replay })]
     : [...parts, AssistantReasoningPart.make({ text: '', replay })]
 }
 

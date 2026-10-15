@@ -1281,9 +1281,10 @@ const flattenedAssistantMessage = (
   )
 
 /**
- * Blocks in the order the model produced them, replayed thinking included: Anthropic rejects
+ * The turn exactly as the model produced it, replayed thinking included: Anthropic rejects
  * thinking blocks that are reordered or edited in the latest assistant turn, and drops later ones
- * when anything before them changed.
+ * when anything before them changed. So no envelope context text is rendered here: it would be a
+ * block the model never wrote, in front of signed thinking.
  */
 const orderedAssistantMessage = (
   message: AssistantAgentMessage,
@@ -1310,22 +1311,7 @@ const orderedAssistantMessage = (
         Match.tag('ProviderToolCall', 'ProviderToolResult', () => Effect.succeed([])),
         Match.exhaustive
       )
-  ).pipe(
-    Effect.flatMap(groups => {
-      const context = messageContextText(message)
-
-      return (
-        context.length === 0
-          ? Effect.succeed('')
-          : contentToText(prependMessageContextToContent([], context), 'Assistant')
-      ).pipe(
-        Effect.map(contextText => ({
-          role: 'assistant' as const,
-          content: [...textBlocks(contextText), ...groups.flat()]
-        }))
-      )
-    })
-  )
+  ).pipe(Effect.map(groups => ({ role: 'assistant' as const, content: groups.flat() })))
 
 const toAnthropicMessage = (
   message: AgentMessage,
@@ -1916,6 +1902,18 @@ const redactedReasoningEvents = (
     ? []
     : [LLMReasoningReplay.make({ replay: RedactedReasoningReplay.make({ provider, data }) })]
 
+/**
+ * A replayed provider always signs its thinking. An unsigned block could not be sent back, and
+ * the next block's text would join it under that block's signature, an edited block Anthropic
+ * rejects; so the turn fails instead.
+ */
+const unsignedThinkingError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Anthropic Claude thinking block ended without a signature',
+    retryable: false
+  })
+
 const toLlmEvents = (
   response: AnthropicMessageResponse,
   options: AnthropicResponseOptions
@@ -1923,6 +1921,15 @@ const toLlmEvents = (
   Effect.gen(function* () {
     if (response.stop_reason === 'max_tokens' || response.stop_reason === 'content_filter') {
       return yield* Effect.fail(anthropicTerminalError(response.stop_reason))
+    }
+
+    if (
+      options.reasoningReplayProvider !== undefined &&
+      response.content.some(
+        block => block.type === 'thinking' && (block.signature ?? '').length === 0
+      )
+    ) {
+      return yield* Effect.fail(unsignedThinkingError())
     }
 
     const events = response.content.flatMap((block): ReadonlyArray<LLMEvent> => {
@@ -2165,6 +2172,10 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
 
       if (index !== undefined && thinkingSignature !== undefined) {
         thinkingBlocks.delete(index)
+
+        if (options.reasoningReplayProvider !== undefined && thinkingSignature.length === 0) {
+          return Effect.fail(unsignedThinkingError())
+        }
 
         return Effect.succeed({
           state,

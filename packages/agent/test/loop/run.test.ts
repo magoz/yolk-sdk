@@ -200,7 +200,7 @@ describe('run', () => {
     })
   )
 
-  it.effect('keeps reasoning replay state on the assistant message, off the event stream', () =>
+  it.effect('streams reasoning replay state and keeps it on the assistant message', () =>
     Effect.gen(function* () {
       const replay = { _tag: 'Signed', provider: 'anthropic_claude', signature: 'sig' } as const
 
@@ -236,6 +236,7 @@ describe('run', () => {
         'TurnStart',
         'LLMStreamStart',
         'LLMReasoningDelta',
+        'LLMReasoningReplay',
         'LLMTextDelta',
         'LLMStreamEnd',
         'AssistantMessage',

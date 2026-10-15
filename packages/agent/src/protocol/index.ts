@@ -57,6 +57,7 @@ export {
   CompactionEnd,
   CompactionStart,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,

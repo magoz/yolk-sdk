@@ -405,7 +405,7 @@ describe('Anthropic Claude thinking', () => {
     })
   )
 
-  it.effect('renders message context before replayed blocks', () =>
+  it.effect('replays a turn exactly as produced, without its envelope context', () =>
     Effect.gen(function* () {
       const body = yield* toAnthropicClaudeRequestBody(
         {
@@ -430,17 +430,96 @@ describe('Anthropic Claude thinking', () => {
         { maxTokens }
       )
 
+      // A context block would be text the model never wrote, in front of signed thinking.
       expect(body.messages[1]).toEqual({
         role: 'assistant',
         content: [
-          {
-            type: 'text',
-            text: 'Message metadata:\n- sent_at: 1970-01-01T00:00:00.000Z\n\nMessage:'
-          },
           { type: 'thinking', thinking: 'Greet.', signature },
           { type: 'text', text: 'Hi.' }
         ]
       })
+    })
+  )
+
+  it.effect('joins a signature split across deltas', () =>
+    Effect.gen(function* () {
+      const events = yield* streamClaude(
+        sse([
+          {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'thinking', thinking: '', signature: '' }
+          },
+          {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'Hmm.' }
+          },
+          {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'signature_delta', signature: 'part-one.' }
+          },
+          {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'signature_delta', signature: 'part-two' }
+          },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+          { type: 'message_stop' }
+        ]),
+        []
+      )
+
+      expect(accumulateAssistantMessage(events).parts).toEqual([
+        AssistantReasoningPart.make({
+          text: 'Hmm.',
+          replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 'part-one.part-two' }
+        })
+      ])
+    })
+  )
+
+  it.effect('fails a turn whose thinking block ends unsigned, streamed or not', () =>
+    Effect.gen(function* () {
+      const streamed = yield* streamClaude(
+        sse([
+          {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'thinking', thinking: '', signature: '' }
+          },
+          {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'Hmm.' }
+          },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_stop' }
+        ]),
+        []
+      ).pipe(Effect.flip)
+
+      const json = yield* streamClaude(
+        JSON.stringify({
+          content: [
+            { type: 'thinking', thinking: 'Hmm.' },
+            { type: 'text', text: 'Hi.' }
+          ],
+          stop_reason: 'end_turn'
+        }),
+        []
+      ).pipe(Effect.flip)
+
+      for (const error of [streamed, json]) {
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          retryable: false,
+          message: 'Anthropic Claude thinking block ended without a signature'
+        })
+      }
     })
   )
 })
