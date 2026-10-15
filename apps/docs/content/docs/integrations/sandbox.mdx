@@ -46,3 +46,9 @@ The tool declares `SandboxToolOutput` as its output: `structuredContent` carries
 `durationMs`, `timedOut`, `truncated`, `workspaceReset`, optional `backgroundId`, the same bounded
 `stdout` and `stderr` slices as the text, `previewUrls`, and `state`. A non-zero exit or timeout is
 still an error result.
+
+## Move files in and out
+
+The Vercel layer implements the optional `writeFile`/`readFile` on `Sandbox` for workspace-relative
+paths. To let the agent copy files between tools and the workspace, pass the sandbox to
+`makeFileToolModule` from `@yolk-sdk/files`; see [Move files between tools](./files).

@@ -413,12 +413,12 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 
 ## Sandbox
 
-| Subpath                     | Main exports                                                                                                               |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/sandbox`         | `Sandbox`, `SandboxStateStore`, `normalizeWorkspaceCwd`, `NormalizedWorkspaceCwd`, command/result/lifecycle/source schemas |
-| `@yolk-sdk/sandbox/agent`   | `makeSandboxToolModule`, `makeSandboxToolModuleFromApi`, `sandboxToolName`, `SandboxToolOutput`                            |
-| `@yolk-sdk/sandbox/vercel`  | `makeVercelSandboxLayer`, `makeVercelSandboxLayerWithClient`                                                               |
-| `@yolk-sdk/sandbox/testing` | `makeFakeSandboxLayer`, `makeInMemorySandboxStateStoreLayer`                                                               |
+| Subpath                     | Main exports                                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/sandbox`         | `Sandbox`, `SandboxStateStore`, `normalizeWorkspaceCwd`, `NormalizedWorkspaceCwd`, `normalizeWorkspacePath`, `NormalizedWorkspacePath`, `SandboxReadFileInput`, `SandboxWriteFileInput`, command/result/lifecycle/source schemas |
+| `@yolk-sdk/sandbox/agent`   | `makeSandboxToolModule`, `makeSandboxToolModuleFromApi`, `sandboxToolName`, `SandboxToolOutput`                                                                                                                                  |
+| `@yolk-sdk/sandbox/vercel`  | `makeVercelSandboxLayer`, `makeVercelSandboxLayerWithClient`, `VercelSandboxFileTooLargeError`                                                                                                                                   |
+| `@yolk-sdk/sandbox/testing` | `makeFakeSandboxLayer`, `makeFakeSandboxFiles`, `makeInMemorySandboxStateStoreLayer`                                                                                                                                             |
 
 ## Code mode
 
@@ -440,9 +440,20 @@ See [Add code mode](../integrations/code-mode); `makeCodeModeTool({ catalog: 'in
 `@yolk-sdk/extractors/node/extraction-worker` is the worker entry the Node layer starts; do not
 import it directly. See [Extract file text](../integrations/file-extraction).
 
+## Files
+
+| Subpath           | Main exports                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/files` | `makeObjectStorageFileStore`, `ObjectStorageApi`, `ObjectStorageHead`, `ObjectStorageError`, `ObjectStorageFileStoreOptions`, `deleteScopeFiles`, `fileIdFor`, `isValidFileScope`, `makeFileToolModule`, `FileToolModuleOptions`, `FileUploadTransportApi`, `FileUploadTransportError`, `FileSandboxApi`, `FileSandboxError`, `fileUploadToolName`, `fileUrlToolName`, `fileToSandboxToolName`, `fileFromSandboxToolName`, `defaultMaxFileTransferBytes` |
+
+Capture itself (`FilePart`, `FileStoreApi`, `resolveTools({ files })`) is in `@yolk-sdk/agent`. See
+[Move files between tools](../integrations/files).
+
 ## Connector file APIs
 
-The root additionally exports `ConnectorBinaryWriteHttpClient`, `ConnectorBinaryWriteHttpClientApi`
+The root also exports `connectorActionFile`, `sniffBase64MimeType` and the action `fileOutput`
+types (`ConnectorActionFile`, `ConnectorActionFileOutput`, `UnknownConnectorActionFileOutput`):
+actions whose output carries bytes return them to agent tools as files. The root additionally exports `ConnectorBinaryWriteHttpClient`, `ConnectorBinaryWriteHttpClientApi`
 (with optional `uploadSession`), `ConnectorBinaryWriteHttpRequest`, `ConnectorBinaryUploadSessionRequest`, `ConnectorFileTransferError`, `ConnectorFileTransferBudget` and
 `ConnectorFileBytes`. Existing GET-only binary ports remain unchanged.
 

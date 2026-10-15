@@ -10,13 +10,14 @@ Yolk packages are canary-stage. APIs can change between canary releases.
 Keep every public package on the same canary version:
 
 ```bash
-pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary @yolk-sdk/harness@canary @yolk-sdk/codemode@canary @yolk-sdk/extractors@canary
+pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary @yolk-sdk/harness@canary @yolk-sdk/codemode@canary @yolk-sdk/extractors@canary @yolk-sdk/files@canary
 pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
 ```
 
 Add only the packages you use. `@yolk-sdk/harness` is available from `0.1.0-canary.77`.
 `@yolk-sdk/codemode`, `@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from
-`0.1.0-canary.96`. `@yolk-sdk/extractors` is available from `0.1.0-canary.98`. Keep each of them
+`0.1.0-canary.96`. `@yolk-sdk/extractors` is available from `0.1.0-canary.98`, and `@yolk-sdk/files` from
+`0.1.0-canary.114`. Keep each of them
 on the same lockstep version as the other public packages.
 
 Check installed versions:
@@ -28,6 +29,24 @@ pnpm list '@yolk-sdk/*'
 Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
+
+### Canary.114: file claim check
+
+New, opt-in ([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md)):
+agents move files between tools by `fileId`. See [Move files between tools](./integrations/files).
+
+- `ContentPart` has a new `File` member (`FilePart`): exhaustive `Match`es over content parts need
+  a case; render it with `filePartText`.
+- `resolveTools` captures file bytes even without the new `files` option: an inline `FilePart`
+  becomes a "file not captured" label. Pass `files: { store }` to store them.
+- MCP embedded resource blobs reach the model as a file label instead of base64 text.
+- As agent tools, `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment`
+  return a file instead of base64 (`connector.invoke` is unchanged), and connector sinks such as
+  Gmail draft attachments do not take `fileId`s yet: hosts that forwarded attachment base64
+  through the model need their own file-aware tool.
+- Custom `VercelSandboxHandle` implementations and fakes need `readFile`.
+- The code mode description gains one line about `files`, which changes the cached prompt prefix
+  once.
 
 ### Canary.113: Claude thinking summaries and signed thinking replay
 

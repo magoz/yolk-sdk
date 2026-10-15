@@ -52,6 +52,10 @@ const result = await Effect.runPromise(
 
 Return `result` from your agent `ToolExecutor`.
 
+Embedded resource blobs in the result become `FilePart`s (named from the URI), so the model sees a
+file label instead of base64; pass `files` to `resolveTools` to store them and get `fileId`s
+([Move files between tools](./files)). Embedded text stays text.
+
 ## Host responsibilities
 
 Persist server config, credentials, auth headers, and allow/deny policy in your app. Keep local stdio behind Node-only hosts via `@yolk-sdk/mcp/client/node`.

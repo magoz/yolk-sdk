@@ -18,6 +18,7 @@ Public packages are lockstep/fixed:
 @yolk-sdk/emulators
 @yolk-sdk/codemode
 @yolk-sdk/extractors
+@yolk-sdk/files
 ```
 
 All public packages share one version, even if only one package changed.

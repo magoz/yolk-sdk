@@ -270,6 +270,22 @@ arguments are invalid), `invalid` (not a `ToolChangePreview`), `too_large` (labe
 summary, warnings, or `blocked` alone exceed `maxBytes`), or `timeout`. Show the raw arguments in
 that case. See [Preview the change](./agent/tools-hitl#preview-the-change).
 
+### A file shows as "file not captured"
+
+A tool returned file bytes (`FilePart`) that were not stored, so the model sees
+`[file not captured (reason): name, mime]` instead of a `fileId`. `no file store`: pass
+`files: { store }` to `resolveTools` on that surface. `too large`: the file is over `maxFileBytes`
+(default 100 MiB). `storage unavailable` or `storage timed out`: the store failed; check its logs.
+File tools report a missing or foreign `fileId` as not found. A `file_upload` that got no complete
+response has an unknown outcome: check the destination before retrying. See
+[Move files between tools](./integrations/files).
+
+### Attachment tools return a `fileId` instead of base64
+
+Since `0.1.0-canary.114`, `gmail.get_attachment`, `outlook.get_attachment` and
+`email.get_attachment` return the attachment as a file when used as agent tools. Move it with the
+`@yolk-sdk/files` tools, or call `connector.invoke` for the base64 output.
+
 ### Approval pauses forever
 
 If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.
@@ -323,7 +339,7 @@ Stdio MCP is Node-only. Keep it behind `@yolk-sdk/mcp/client/node` and run it fr
 
 ### Tool result shape differs from agent results
 
-Use the MCP client/server adapters so `structuredContent`, `isError`, and supported content blocks are preserved.
+Use the MCP client/server adapters so `structuredContent`, `isError`, and supported content blocks are preserved. Embedded resource blobs arrive as `FilePart`s (file labels), not base64 text.
 
 ## Knowledge errors
 

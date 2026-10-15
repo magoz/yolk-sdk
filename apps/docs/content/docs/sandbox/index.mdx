@@ -68,6 +68,13 @@ resolves dot segments and rejects absolute paths, NUL, and workspace escape. It 
 that belongs to remaining directory names. The brand records lexical validation, not filesystem
 or symlink confinement.
 
+`SandboxApi` may also transfer files: `writeFile({ path, bytes })` and `readFile({ path, maxBytes })`
+take workspace-relative paths (`normalizeWorkspacePath` returns a `NormalizedWorkspacePath`).
+Absolute paths and escapes fail with `SandboxInputError` `invalid_path`, a missing file with
+`file_not_found`, and a read past `maxBytes` with `file_too_large`. The Vercel layer implements
+both; custom `VercelSandboxHandle`s need `readFile`. `@yolk-sdk/files` uses them for
+[`file_to_sandbox` and `file_from_sandbox`](../integrations/files).
+
 ## Agent tool results
 
 The `@yolk-sdk/sandbox/agent` adapter converts command failures into agent tool results:

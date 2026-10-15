@@ -189,6 +189,15 @@ const step = Effect.gen(function* () {
 - Legacy-era elicitation (a server-initiated request answered while the call's stream is open) is
   not supported; resuming against a legacy connection fails with `unsupported_era`.
 
+### Files in tool results
+
+The client maps embedded resource blobs in tool results to `FilePart`s (named from the URI), so
+`resolveTools({ files })` stores them and the model sees a `fileId` label instead of base64
+([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md));
+embedded text stays text, and images and audio stay viewable parts. When adapting Yolk tools into
+an MCP server, an inline `FilePart` leaves as an embedded resource blob and a captured one as its
+label.
+
 ## Connect to a local stdio server
 
 Node hosts can use the convenience wrappers from `client/node`:

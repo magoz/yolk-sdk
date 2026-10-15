@@ -213,6 +213,9 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
   `structuredContent` for tools with an output schema and to the text content otherwise, and
   rejects with an `Error` when the tool returns an error result. Unknown names suggest close
   matches. Calls still running when the script ends are cancelled.
+- A call whose result captured files also resolves `files: [{ fileId, name, mimeType, size }]`,
+  merged into an object result or as `{ text, files }`. Pass the `fileId`s to other tools; file
+  bytes never enter the script ([Move files between tools](./files)).
 - Arguments make a JSON round trip, and the tool decodes them exactly as it decodes model calls:
   - The argument is read once, the way `JSON.stringify` reads it (each getter and `toJSON` runs
     once), into a checked JSON copy, and that copy is what the call sends.
