@@ -70,8 +70,8 @@ every window (none started and fully used) clears that cooldown (a limit reset w
 provider reset early). A reading from before the lockout never clears it, and readings never clear
 an auth cooldown.
 
-Windows without a duration (OpenCode Go usage today) cannot be ranked and are ignored; an account
-whose readings have none routes stickily.
+Windows without a length (OpenCode Go's billing month) still make a used-up account unusable but
+never rank it; an account whose applicable windows all lack a length ranks as not started.
 
 ## Failover and the loop's retry
 

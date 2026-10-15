@@ -4,13 +4,16 @@ import type { PoolCooldown } from './model.ts'
 
 /** One usage window of a reading, as the ranking reads it. */
 export type PoolWindow = {
-  readonly durationMinutes: number
+  /** Window length; absent when the provider's window has no fixed length (a billing month). */
+  readonly durationMinutes?: number
   readonly usedPercent: number
   /** When the window resets; absent when it has not started. */
   readonly resetsAtMs?: number
   /** Lowercase model substrings the window limits; empty for every model. */
   readonly models: ReadonlyArray<string>
 }
+
+type MutablePoolWindow = { -readonly [Key in keyof PoolWindow]: PoolWindow[Key] }
 
 /** The latest quota reading of one account. */
 export type PoolReading = {
@@ -31,8 +34,8 @@ export type PoolCandidate = {
 export const poolRoute = (model: string) => model.trim().toLowerCase()
 
 /**
- * A usage snapshot as the ranking reads it. Windows without a duration cannot be ranked and are
- * dropped; an unreadable `fetchedAt` yields no reading.
+ * A usage snapshot as the ranking reads it; an unreadable `fetchedAt` yields no reading. Windows
+ * without a length still block a used-up account but never rank it.
  */
 export const poolReadingFromSnapshot = (
   snapshot: ProviderSubscriptionUsageSnapshot
@@ -43,11 +46,7 @@ export const poolReadingFromSnapshot = (
     return undefined
   }
 
-  const windows = Array.from(snapshot.windows).flatMap((window): Array<PoolWindow> => {
-    if (window.windowDurationMinutes === undefined) {
-      return []
-    }
-
+  const windows = Array.from(snapshot.windows).map((window): PoolWindow => {
     const resetsAtMs = window.resetsAt === undefined ? Number.NaN : Date.parse(window.resetsAt)
 
     const models = (window.models ?? []).flatMap(model => {
@@ -56,20 +55,17 @@ export const poolReadingFromSnapshot = (
       return normalized === '' ? [] : [normalized]
     })
 
-    return [
-      Number.isFinite(resetsAtMs)
-        ? {
-            durationMinutes: window.windowDurationMinutes,
-            usedPercent: window.usedPercent,
-            resetsAtMs,
-            models
-          }
-        : {
-            durationMinutes: window.windowDurationMinutes,
-            usedPercent: window.usedPercent,
-            models
-          }
-    ]
+    const fields: MutablePoolWindow = { usedPercent: window.usedPercent, models }
+
+    if (window.windowDurationMinutes !== undefined) {
+      fields.durationMinutes = window.windowDurationMinutes
+    }
+
+    if (Number.isFinite(resetsAtMs)) {
+      fields.resetsAtMs = resetsAtMs
+    }
+
+    return fields
   })
 
   return { fetchedAtMs, windows }
@@ -112,9 +108,10 @@ type AccountRank =
   | { readonly usable: true; readonly resetsAtMs: number | undefined }
 
 /**
- * The reset of the account's longest window that applies to the route (undefined when it has not
- * started). Unusable when no window applies or an applicable started window is used up to the
- * reserve; a window whose reset has passed counts as fresh, whatever the reading said.
+ * The reset of the account's longest window with a length that applies to the route (undefined
+ * when it has not started, or no applicable window has a length). Unusable when no window applies
+ * or an applicable started window is used up to the reserve; a window whose reset has passed counts
+ * as fresh, whatever the reading said.
  */
 const accountRank = (
   reading: PoolReading,
@@ -138,6 +135,10 @@ const accountRank = (
     }
 
     usable = true
+
+    if (window.durationMinutes === undefined) {
+      continue
+    }
 
     if (window.durationMinutes > longest) {
       longest = window.durationMinutes

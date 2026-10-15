@@ -221,6 +221,31 @@ describe('rankPool with fresh readings (expiring-first)', () => {
     ).toBe('primary')
   })
 
+  it('blocks on windows without a length but ranks only by windows with one', () => {
+    const monthly = (usedPercent: number, resetsAtMs: number): PoolWindow => ({
+      usedPercent,
+      resetsAtMs,
+      models: []
+    })
+
+    // backup's monthly allowance is used up, so it sits out although its week resets sooner.
+    expect(
+      rank({
+        readings: readings({
+          backup: reading(weekly(10, t0 + day), monthly(100, t0 + 10 * day)),
+          primary: reading(weekly(10, t0 + 2 * day), monthly(20, t0 + 3 * day))
+        })
+      })
+    ).toEqual(PoolDecision.Quota({ accountId: 'primary', resetsAtMs: t0 + 2 * day }))
+    // A reading of only length-less windows makes the account usable but unranked.
+    expect(
+      rank({
+        accounts: [backup],
+        readings: readings({ backup: reading(monthly(20, t0 + day)) })
+      })
+    ).toEqual(PoolDecision.Quota({ accountId: 'backup', resetsAtMs: undefined }))
+  })
+
   it.each([
     ['no readings', new Map<string, PoolReading>()],
     [
@@ -276,7 +301,7 @@ describe('poolRoute', () => {
 })
 
 describe('poolReadingFromSnapshot', () => {
-  it('keeps windows with a duration and normalizes models', () => {
+  it('keeps every window and normalizes models', () => {
     const snapshot = ProviderSubscriptionUsageSnapshot.make({
       provider: 'anthropic-claude',
       fetchedAt: '2026-10-09T12:00:00.000Z',
@@ -301,6 +326,7 @@ describe('poolReadingFromSnapshot', () => {
       fetchedAtMs: t0,
       windows: [
         { durationMinutes: 300, usedPercent: 4, resetsAtMs: t0 + hour, models: [] },
+        { usedPercent: 30, models: [] },
         { durationMinutes: week, usedPercent: 100, models: ['opus'] }
       ]
     })
