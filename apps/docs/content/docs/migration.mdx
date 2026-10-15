@@ -29,6 +29,26 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.113: Claude thinking summaries and signed thinking replay
+
+- Opus 5 and later think by default but return thinking blocks without text. Set
+  `thinking: { display: 'summarized' }` on `makeAnthropicClaudeProviderLayer` to stream readable
+  summaries. See [Thinking](./integrations/model-providers#thinking).
+- The Claude provider now keeps each thinking block's signature (or redacted data) on
+  `AssistantReasoningPart.replay` and sends it back unchanged on later requests, with or without
+  `thinking`. Never edit, truncate or reorder a reasoning part that has `replay`; hosts that rewrite
+  history per request can skip parts whose `replay.provider` is
+  `anthropicClaudeReasoningReplayProvider`.
+- `LLMReasoningReplay` is a new `AgentEvent` (and loop `LLMEvent`, tag `ReasoningReplay`) member:
+  exhaustive matches need a case. Live chat projections can ignore it.
+- Claude turns emit it on almost every thinking block, and older SDKs reject unknown event tags:
+  deploy servers and clients together, reload open tabs, and do not roll back to an older SDK over
+  durable logs that contain it.
+- A Claude thinking block that ends without a signature now fails the turn as non-retryable
+  `invalid_response`.
+- Persist `AssistantReasoningPart.replay` with the message. React `toAgentMessages` rebuilds reasoning without `replay`: hosts that resend chat-derived history
+  should resend the protocol messages instead to keep the reasoning.
+
 ### Canary.108: tool exposure, catalog instructions, Claude Code 2.1.299
 
 New, opt-in ([ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md)):

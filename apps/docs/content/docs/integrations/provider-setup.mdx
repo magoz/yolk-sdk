@@ -189,6 +189,10 @@ const ClaudeLayer = makeAnthropicClaudeProviderLayer({
 
 OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/providers/anthropic/claude`.
 
+Add `thinking: { display: 'summarized' }` to stream thinking summaries from models that think by
+default (Opus 5 and later). Signed thinking is replayed unchanged either way; see
+[Thinking](./model-providers#thinking).
+
 Anthropic prompt-too-long responses are non-retryable `context_overflow` failures. If your host owns
 durable compaction, wrap the provider with `makeContextOverflowRetryProvider` to compact and retry
 once. See [Implement durable compaction](../guides/durable-compaction).
