@@ -42,6 +42,8 @@ const store = makeObjectStorageFileStore({
 - Keys are `files/<scope>/<fileId>`; name and sha256 live in object metadata (no database).
 - The same bytes in the same scope get the same `fileId`: replays and duplicates write nothing.
 - A `fileId` from another scope, or a malformed one, does not resolve.
+- Scope segments are `/`-separated and use only `A-Z a-z 0-9 . _ -`; the store throws for an
+  invalid scope (check untrusted values with `isValidFileScope`).
 - `deleteScopeFiles({ storage, scope })` removes a scope's files, for example with its session.
 
 ## Tools
@@ -61,8 +63,10 @@ const files = makeFileToolModule({ store, transport: guardedUploadTransport, san
 
 All four are `write` tools. `file_upload` is left out without a `FileUploadTransportApi`, and the
 sandbox tools without a sandbox that has `writeFile`/`readFile` (`FileSandboxApi`, which the
-`@yolk-sdk/sandbox` Vercel layer satisfies). Results and errors name only the destination host,
-never the URL.
+`@yolk-sdk/sandbox` Vercel layer satisfies). `file_upload` results and errors name only the
+destination host, never the URL. Options: `maxTransferBytes` (default 50 MiB; transfers read the
+whole file into memory, so larger captured files cannot be transferred), `defaultUrlTtlSeconds`
+(default one hour, clamped to one minute to seven days) and `isEnabled`.
 
 A code mode script moves a file from one tool to another without seeing its bytes:
 

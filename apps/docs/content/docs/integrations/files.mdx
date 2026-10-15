@@ -34,6 +34,8 @@ documents and audio the model views keep their source and also get a stored copy
 
 ## Store
 
+Fragment; your app supplies `r2ObjectStorage`, `workspaceId` and `sessionId`:
+
 ```ts
 import { makeObjectStorageFileStore } from '@yolk-sdk/files'
 
@@ -46,21 +48,26 @@ const store = makeObjectStorageFileStore({
 Keys are `files/<scope>/<fileId>`, with the name and sha256 in object metadata: no database. The
 `fileId` is derived from the scope and the content hash, so replays and duplicates write nothing,
 and a `fileId` from another scope never resolves. `deleteScopeFiles({ storage, scope })` removes a
-scope's files, for example with its session.
+scope's files, for example with its session. Scope segments are `/`-separated and use only
+`A-Z a-z 0-9 . _ -` (no `.` or `..` segments); the store throws for an invalid scope, so check
+untrusted values with `isValidFileScope`.
 
 ## Tools
 
+Fragment; your app supplies `modules`, `context`, the transport and the sandbox:
+
 ```ts
+import { Effect } from 'effect'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import { makeFileToolModule } from '@yolk-sdk/files'
 
-const tools =
-  yield *
-  resolveTools(
+const toolSet = Effect.gen(function* () {
+  return yield* resolveTools(
     [...modules, makeFileToolModule({ store, transport: guardedUploadTransport, sandbox })],
     context,
     { files: { store } }
   )
+})
 ```
 
 | Tool                | Input                        | Does                                                                         |
@@ -72,14 +79,19 @@ const tools =
 
 All four are `write` tools without approval. `file_upload` exists only with a
 `FileUploadTransportApi`, and the sandbox tools only with a sandbox that has `writeFile`/`readFile`
-(the `@yolk-sdk/sandbox` Vercel layer has them). Results and errors name the destination host,
-never the URL. A network failure during an upload is an unknown outcome: the agent is told to check
-the destination before retrying.
+(the `@yolk-sdk/sandbox` Vercel layer has them). `file_upload` results and errors name the
+destination host, never the URL. A network failure during an upload is an unknown outcome: the
+agent is told to check the destination before retrying.
+
+`makeFileToolModule` also takes `maxTransferBytes` (default 50 MiB: `file_upload` and the sandbox
+tools read the whole file into memory, so a captured file larger than this cannot be transferred),
+`defaultUrlTtlSeconds` (default one hour, clamped to one minute to seven days) and `isEnabled`.
 
 ## From a code mode script
 
 Nested calls that captured files resolve `files: [{ fileId, name, mimeType, size }]`, so one script
-moves a Gmail attachment to an MCP server's presigned upload URL:
+moves a Gmail attachment to an MCP server's presigned upload URL (script fragment; the IDs come
+from earlier calls):
 
 ```js
 const attachment = await tools['gmail.get_attachment']({ messageId, attachmentId, filename })

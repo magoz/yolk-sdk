@@ -116,6 +116,7 @@ npm view @yolk-sdk/conformance dist-tags
 npm view @yolk-sdk/emulators dist-tags
 npm view @yolk-sdk/codemode dist-tags
 npm view @yolk-sdk/extractors dist-tags
+npm view @yolk-sdk/files dist-tags
 git fetch --tags
 git tag --list 'v<version>'
 git ls-remote --tags origin 'refs/tags/v<version>'

@@ -16,9 +16,9 @@ pnpm add -D @yolk-sdk/conformance@canary @yolk-sdk/emulators@canary
 
 Add only the packages you use. `@yolk-sdk/harness` is available from `0.1.0-canary.77`.
 `@yolk-sdk/codemode`, `@yolk-sdk/conformance`, and `@yolk-sdk/emulators` are available from
-`0.1.0-canary.96`. `@yolk-sdk/extractors` is available from `0.1.0-canary.98`, and `@yolk-sdk/files` from
-`0.1.0-canary.114`. Keep each of them
-on the same lockstep version as the other public packages.
+`0.1.0-canary.96`. `@yolk-sdk/extractors` is available from `0.1.0-canary.98`, and
+`@yolk-sdk/files` from `0.1.0-canary.114`. Keep each of them on the same lockstep version as the
+other public packages.
 
 Check installed versions:
 
@@ -44,7 +44,9 @@ agents move files between tools by `fileId`. See [Move files between tools](./in
   return a file instead of base64 (`connector.invoke` is unchanged), and connector sinks such as
   Gmail draft attachments do not take `fileId`s yet: hosts that forwarded attachment base64
   through the model need their own file-aware tool.
-- Custom `VercelSandboxHandle` implementations and fakes need `readFile`.
+- Custom `VercelSandboxHandle` implementations and fakes need `readFile`, and
+  `SandboxInputErrorCause` gains `invalid_path`, `file_not_found` and `file_too_large`: exhaustive
+  matches on it need cases.
 - The code mode description gains one line about `files`, which changes the cached prompt prefix
   once.
 
