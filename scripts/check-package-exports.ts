@@ -201,6 +201,12 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     root: 'full'
   },
   {
+    packageDir: 'packages/files',
+    packageName: '@yolk-sdk/files',
+    expectedExports: ['./package.json', '.'],
+    root: 'full'
+  },
+  {
     packageDir: 'packages/codemode',
     packageName: '@yolk-sdk/codemode',
     expectedExports: ['./package.json', '.', './node'],

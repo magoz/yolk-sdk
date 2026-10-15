@@ -34,6 +34,9 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 
 - Nested calls go only through `nested.execute` (the resolved execute path). Never call tool
   executors directly; never bypass input decoding or registration wrappers.
+- A nested result with captured files (`ToolResult.files`, ADR 0009) resolves with `files`
+  descriptors (merged into an object value, else `{ text, files }`); scripts pass `fileId`s, never
+  bytes.
 - Host decorators around the `ToolExecutor` (outside `ResolvedToolSet.execute`) never see nested
   calls. Per-call run-authority checks belong in `beforeNestedCall` (a failure rejects the call in
   the script and records it as `error` without executing) or registration-level wrappers.

@@ -96,6 +96,7 @@ import {
   type ToolPlanResolution
 } from './plan-runtime.ts'
 import { makeToolSearchTool } from './tool-search.ts'
+import { captureToolResultFiles, type ToolFileCaptureOptions } from './files.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -1356,6 +1357,11 @@ export const resolveTools = <Context>(
      * model-callable tool is `loading: 'deferred'` and no tool is named `tool_search`.
      */
     readonly toolSearch?: false
+    /** File capture (ADR 0009): bytes in every executed result (direct, nested, staged) are stored
+     * through `store` and replaced by `fileId` labels before the ledger, transcript or scripts see
+     * them. Absent: inline `File` parts become "not captured" labels; other parts are unchanged.
+     */
+    readonly files?: ToolFileCaptureOptions
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -2010,7 +2016,17 @@ export const resolveTools = <Context>(
         : runRegistration(match, call, idempotencyKey)
     }
 
+    // Every registration result passes file capture before the ledger, transcript or scripts.
     const runRegistration = (
+      match: ResolvedRegistration<Context>,
+      call: ToolCall,
+      idempotencyKey: string | undefined
+    ): Effect.Effect<ToolResult, ToolError> =>
+      runRegistrationUncaptured(match, call, idempotencyKey).pipe(
+        Effect.flatMap(result => captureToolResultFiles(result, options.files))
+      )
+
+    const runRegistrationUncaptured = (
       match: ResolvedRegistration<Context>,
       call: ToolCall,
       idempotencyKey: string | undefined

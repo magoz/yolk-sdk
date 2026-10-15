@@ -4,11 +4,13 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
   DocumentPart,
+  FilePart,
   ImagePart,
   TextPart,
   ToolDef,
   ToolResult,
-  inlineBase64Source
+  inlineBase64Source,
+  refAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import { McpServerError, makeMcpToolServer } from '../../src/server'
 
@@ -55,7 +57,18 @@ const richResultServer = makeMcpToolServer({
                 mimeType: 'application/pdf',
                 filename: 'brief v1.pdf'
               }),
-              AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' })
+              AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' }),
+              FilePart.make({
+                source: inlineBase64Source('emlw'),
+                mimeType: 'application/zip',
+                filename: 'out.zip'
+              }),
+              FilePart.make({
+                source: refAttachmentSource('file_abc'),
+                mimeType: 'application/zip',
+                filename: 'kept.zip',
+                size: 3
+              })
             ],
             isError: true,
             structuredContent: { ok: true }
@@ -290,7 +303,12 @@ describe('MCP tool server', () => {
                 blob: 'ghi='
               }
             },
-            { type: 'audio', data: 'def', mimeType: 'audio/mpeg' }
+            { type: 'audio', data: 'def', mimeType: 'audio/mpeg' },
+            {
+              type: 'resource',
+              resource: { uri: 'file:///out.zip', mimeType: 'application/zip', blob: 'emlw' }
+            },
+            { type: 'text', text: '[file file_abc: kept.zip, application/zip, 3 B]' }
           ],
           isError: true,
           structuredContent: { ok: true }

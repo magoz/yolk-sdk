@@ -34,6 +34,7 @@ import {
   attachmentSourceDataUrl,
   contentParts,
   contentText,
+  filePartText,
   type Content,
   type ContentPart,
   type QuestionPrompt,
@@ -1217,6 +1218,14 @@ function MessageContentParts({
             </div>
           )),
           Match.tag('Document', () => null),
+          Match.tag('File', current => (
+            <div
+              key={`file-${index}`}
+              className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
+            >
+              {filePartText(current)}
+            </div>
+          )),
           Match.exhaustive
         )
       )}

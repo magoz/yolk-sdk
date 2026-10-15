@@ -50,6 +50,9 @@ Do not put secrets, auth state, private ids, or hidden policy in envelope fields
 - `ImagePart`
 - `DocumentPart`
 - `AudioPart`
+- `FilePart`: bytes a tool yields for other tools to move, not for the model to view. Tool
+  resolution stores them and the model only sees a `fileId` label (the file claim check,
+  `docs/adr/0009-file-claim-check.md` in the repository; tools in `@yolk-sdk/files`).
 
 Media sources can be inline base64, durable URLs, or host-owned refs:
 

@@ -47,7 +47,8 @@ Current Changesets config:
       "@yolk-sdk/conformance",
       "@yolk-sdk/emulators",
       "@yolk-sdk/codemode",
-      "@yolk-sdk/extractors"
+      "@yolk-sdk/extractors",
+      "@yolk-sdk/files"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -179,6 +180,7 @@ Publish all public packages together:
 - `@yolk-sdk/emulators` (experimental)
 - `@yolk-sdk/codemode`
 - `@yolk-sdk/extractors`
+- `@yolk-sdk/files`
 
 Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
@@ -255,7 +257,8 @@ for package in \
   @yolk-sdk/conformance \
   @yolk-sdk/emulators \
   @yolk-sdk/codemode \
-  @yolk-sdk/extractors; do
+  @yolk-sdk/extractors \
+  @yolk-sdk/files; do
   npm view "$package" dist-tags --json
 done
 git fetch --tags
@@ -273,7 +276,7 @@ commands if they run back to back:
 
 ```bash
 version=<version>
-for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode extractors; do
+for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode extractors files; do
   npm dist-tag add "@yolk-sdk/$package@$version" latest --otp=<code>
 done
 ```

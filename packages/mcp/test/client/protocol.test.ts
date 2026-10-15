@@ -1,7 +1,13 @@
 import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AudioPart, ImagePart, TextPart, inlineBase64Source } from '@yolk-sdk/agent/protocol'
+import {
+  AudioPart,
+  FilePart,
+  ImagePart,
+  TextPart,
+  inlineBase64Source
+} from '@yolk-sdk/agent/protocol'
 import {
   defaultMcpSecurityPolicy,
   InitializeClientInfo,
@@ -285,21 +291,32 @@ describe('MCP protocol helpers', () => {
     ])
   })
 
-  it('maps embedded blob resources to agent-readable text', () => {
+  it('maps embedded blob resources to file parts, never base64 text', () => {
     const result = toolCallResultToToolResult({
       toolCallId: 'call_1',
       result: {
         content: [
           {
             type: 'resource',
-            resource: { uri: 'file:///tmp/out.bin', blob: 'Ym9keQ==', mimeType: 'text/plain' }
-          }
+            resource: { uri: 'file:///tmp/out%20one.bin', blob: 'Ym9keQ==', mimeType: 'text/plain' }
+          },
+          { type: 'resource', resource: { uri: 'mem://', blob: 'Ym9keQ==' } },
+          { type: 'resource', resource: { uri: 'file:///tmp/note.txt', text: 'note' } }
         ]
       }
     })
 
     expect(result.content).toEqual([
-      TextPart.make({ text: 'MCP resource: file:///tmp/out.bin\nYm9keQ==' })
+      FilePart.make({
+        source: inlineBase64Source('Ym9keQ=='),
+        mimeType: 'text/plain',
+        filename: 'out one.bin'
+      }),
+      FilePart.make({
+        source: inlineBase64Source('Ym9keQ=='),
+        mimeType: 'application/octet-stream'
+      }),
+      TextPart.make({ text: 'note' })
     ])
   })
 

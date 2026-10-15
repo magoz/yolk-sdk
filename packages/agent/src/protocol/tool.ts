@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { ToolChangePreview, ToolChangePreviewFailure } from './change-preview.ts'
 import { Content, TextPart } from './content.ts'
+import { FileDescriptor } from './file.ts'
 import { NestedToolCalls } from './nested-tool-calls.ts'
 import { AgentUsage } from './usage.ts'
 
@@ -356,7 +357,11 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   /** Summed usage reported by nested work. Not model-visible; the loop does not add it to run
    * usage (hosts decide, as for subagents).
    */
-  usage: Schema.optional(AgentUsage)
+  usage: Schema.optional(AgentUsage),
+  /** Files captured from this result (ADR 0009). Not sent to providers: the content carries each
+   * file's label. Code mode scripts receive them as `files`.
+   */
+  files: Schema.optional(Schema.Array(FileDescriptor))
 }) {}
 
 /** One provider-facing acknowledgement for the original call; never append its terminal result again. */

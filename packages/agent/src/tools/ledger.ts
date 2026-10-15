@@ -408,6 +408,7 @@ type StoredResultFields = {
   acceptance?: ToolResult['acceptance']
   nestedCalls?: ToolResult['nestedCalls']
   usage?: ToolResult['usage']
+  files?: ToolResult['files']
 }
 
 const reducedNote = '[The stored copy of this result was reduced to fit the tool ledger bound.]'
@@ -522,6 +523,9 @@ export const toolLedgerResult = (
   }
 
   if (result.nestedCalls !== undefined) full.nestedCalls = result.nestedCalls
+
+  // Captured files are identifiers only (ADR 0009): every reduction step keeps them.
+  if (result.files !== undefined) full.files = result.files
 
   if (resultBytes(full) <= maxBytes) return ToolResult.make(full)
 
@@ -747,6 +751,8 @@ const replay = (
   if (stored.nestedCalls !== undefined) fields.nestedCalls = stored.nestedCalls
 
   if (stored.usage !== undefined) fields.usage = stored.usage
+
+  if (stored.files !== undefined) fields.files = stored.files
 
   return Effect.succeed(ToolResult.make(fields))
 }
