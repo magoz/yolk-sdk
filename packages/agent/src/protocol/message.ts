@@ -100,10 +100,37 @@ export class AssistantTextPart extends Schema.TaggedClass<AssistantTextPart>()('
   content: Content
 }) {}
 
+/**
+ * Opaque provider state that lets the provider that produced a reasoning block receive it back
+ * unchanged, so the model keeps its earlier reasoning: `Signed` is a block whose `signature`
+ * carries the encrypted reasoning, `Redacted` a safety-redacted block with only encrypted `data`.
+ * `provider` names the producing provider; provider lowering replays only its own blocks and
+ * never edits them (Anthropic rejects an edited or reordered block in the latest assistant turn).
+ */
+export const SignedReasoningReplay = Schema.TaggedStruct('Signed', {
+  provider: Schema.NonEmptyString,
+  signature: Schema.NonEmptyString
+})
+
+export const RedactedReasoningReplay = Schema.TaggedStruct('Redacted', {
+  provider: Schema.NonEmptyString,
+  data: Schema.NonEmptyString
+})
+
+export const AssistantReasoningReplay = Schema.Union([
+  SignedReasoningReplay,
+  RedactedReasoningReplay
+])
+
+export type AssistantReasoningReplay = typeof AssistantReasoningReplay.Type
+
 export class AssistantReasoningPart extends Schema.TaggedClass<AssistantReasoningPart>()(
   'Reasoning',
   {
-    text: Schema.String
+    /** Readable reasoning summary; empty when the provider returned the block without text. */
+    text: Schema.String,
+    /** Set once the provider closed the block; a part with `replay` takes no further text. */
+    replay: Schema.optionalKey(AssistantReasoningReplay)
   }
 ) {}
 

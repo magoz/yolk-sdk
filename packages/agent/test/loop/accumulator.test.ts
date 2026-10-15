@@ -1,13 +1,16 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Predicate } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import {
+  AgentMessage,
   assistantContent,
   assistantHostToolCalls,
   assistantReasoningText,
   AssistantTextPart,
   contentText,
   ToolCall,
-  ToolResult
+  ToolResult,
+  SignedReasoningReplay,
+  type AssistantPart
 } from '@yolk-sdk/agent/protocol'
 import {
   accumulateAssistantMessage,
@@ -20,6 +23,7 @@ import {
   LLMDone,
   LLMProviderToolResult,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolCall,
   LLMToolInputDelta,
@@ -99,6 +103,89 @@ describe('accumulateAssistantMessage', () => {
     expect(contentText(assistantContent(message))).toBe('ABCD')
     expect(assistantReasoningText(message)).toBe('r1r2r3r4')
   })
+
+  it('closes reasoning blocks with replay state, in both reducers', () => {
+    const signed = (signature: string) =>
+      LLMReasoningReplay.make({
+        replay: { _tag: 'Signed', provider: 'anthropic_claude', signature }
+      })
+
+    const redacted = LLMReasoningReplay.make({
+      replay: { _tag: 'Redacted', provider: 'anthropic_claude', data: 'opaque' }
+    })
+
+    const events = [
+      LLMReasoningDelta.make({ text: 'r1' }),
+      LLMReasoningDelta.make({ text: 'r2' }),
+      signed('s1'),
+      // A new block after a closed one never joins it.
+      LLMReasoningDelta.make({ text: 'r3' }),
+      signed('s2'),
+      redacted,
+      // Omitted thinking: a signature with no text.
+      signed('s3'),
+      LLMTextDelta.make({ text: 'Done.' })
+    ]
+
+    const expected = [
+      {
+        _tag: 'Reasoning',
+        text: 'r1r2',
+        replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 's1' }
+      },
+      {
+        _tag: 'Reasoning',
+        text: 'r3',
+        replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 's2' }
+      },
+      {
+        _tag: 'Reasoning',
+        text: '',
+        replay: { _tag: 'Redacted', provider: 'anthropic_claude', data: 'opaque' }
+      },
+      {
+        _tag: 'Reasoning',
+        text: '',
+        replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 's3' }
+      },
+      { _tag: 'Text', content: 'Done.' }
+    ]
+
+    const batch = accumulateAssistantMessage(events).parts
+
+    const incremental = events.reduce<ReadonlyArray<AssistantPart>>(applyAssistantLlmEvent, [])
+
+    expect(JSON.parse(JSON.stringify(batch))).toEqual(expected)
+    expect(JSON.parse(JSON.stringify(incremental))).toEqual(expected)
+  })
+
+  it.effect('round-trips reasoning replay state through the protocol schema', () =>
+    Effect.gen(function* () {
+      const message = accumulateAssistantMessage([
+        LLMReasoningDelta.make({ text: 'why' }),
+        LLMReasoningReplay.make({
+          replay: SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+        }),
+        LLMReasoningDelta.make({ text: 'unsigned' })
+      ])
+
+      const encoded = yield* Schema.encodeEffect(AgentMessage)(message)
+
+      // An unsigned part encodes without a `replay` key at all.
+      expect(encoded).toEqual({
+        _tag: 'Assistant',
+        parts: [
+          {
+            _tag: 'Reasoning',
+            text: 'why',
+            replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 'sig' }
+          },
+          { _tag: 'Reasoning', text: 'unsigned' }
+        ]
+      })
+      expect(yield* Schema.decodeUnknownEffect(AgentMessage)(encoded)).toEqual(message)
+    })
+  )
 
   it('ignores Done, usage, and tool-input events', () => {
     const usage = AgentUsage.make({

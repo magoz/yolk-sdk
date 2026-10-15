@@ -18,7 +18,11 @@ import {
   messageContextText,
   replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
+  RedactedReasoningReplay,
+  SignedReasoningReplay,
   type AgentMessage,
+  type AssistantAgentMessage,
+  type AssistantPart,
   type Content,
   type ContentPart,
   type ProviderFailureKind,
@@ -29,6 +33,7 @@ import {
   LLMDone,
   LLMProvider,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolCall,
   LLMUsage,
@@ -56,6 +61,19 @@ import { validateProviderTranscript } from './transcript.ts'
  */
 export type AnthropicPromptCacheTtl = '5m' | '1h'
 
+/**
+ * Adaptive thinking (`thinking: { type: 'adaptive' }`). `display: 'summarized'` returns readable
+ * thinking summaries; `omitted`, the API default on newer models, returns thinking blocks with
+ * empty text. `prefixMismatchBehavior` sets `block_binding.prefix_mismatch_behavior` (with the
+ * `thinking-binding-controls-2026-08-01` beta): what Anthropic does with a replayed thinking block
+ * whose earlier system prompt, tools or messages changed. `drop_block` drops it (the model thinks
+ * again); `error` rejects the request. Absent, Anthropic applies its account default.
+ */
+export type AnthropicThinkingConfig = {
+  readonly display: 'summarized' | 'omitted'
+  readonly prefixMismatchBehavior?: 'error' | 'drop_block'
+}
+
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
   readonly messagesUrl?: string
@@ -63,6 +81,8 @@ export type AnthropicClaudeProviderConfig = {
   readonly extraHeaders?: Readonly<Record<string, string>>
   /** Default `5m`. */
   readonly promptCacheTtl?: AnthropicPromptCacheTtl
+  /** Absent: no `thinking` field, so the model's own default applies. */
+  readonly thinking?: AnthropicThinkingConfig
 }
 
 type AnthropicCacheControl = {
@@ -136,7 +156,22 @@ type AnthropicUserBlock =
   | AnthropicDocumentBlock
   | AnthropicToolResultBlock
 
-type AnthropicAssistantBlock = AnthropicTextBlock | AnthropicToolUseBlock
+type AnthropicThinkingBlock = {
+  readonly type: 'thinking'
+  readonly thinking: string
+  readonly signature: string
+}
+
+type AnthropicRedactedThinkingBlock = {
+  readonly type: 'redacted_thinking'
+  readonly data: string
+}
+
+type AnthropicAssistantBlock =
+  | AnthropicTextBlock
+  | AnthropicToolUseBlock
+  | AnthropicThinkingBlock
+  | AnthropicRedactedThinkingBlock
 
 type AnthropicMessage =
   | { readonly role: 'user'; readonly content: string | ReadonlyArray<AnthropicUserBlock> }
@@ -156,6 +191,16 @@ type AnthropicTool = {
   readonly cache_control?: AnthropicCacheControl
 }
 
+type AnthropicThinkingRequest = {
+  readonly type: 'adaptive'
+  readonly display: AnthropicThinkingConfig['display']
+  readonly block_binding?: {
+    readonly prefix_mismatch_behavior: NonNullable<
+      AnthropicThinkingConfig['prefixMismatchBehavior']
+    >
+  }
+}
+
 type AnthropicRequestBody = {
   readonly model: string
   readonly system: ReadonlyArray<AnthropicSystemBlock>
@@ -164,6 +209,7 @@ type AnthropicRequestBody = {
   readonly output_config?: {
     readonly effort: 'low' | 'medium' | 'high' | 'xhigh'
   }
+  readonly thinking?: AnthropicThinkingRequest
   readonly stream?: true
   readonly tools?: ReadonlyArray<AnthropicTool>
   readonly tool_choice?: { readonly type: 'none' }
@@ -190,6 +236,8 @@ const anthropicClaudeCchPositions: ReadonlyArray<number> = [4, 7, 20]
 const anthropicClaudeEffortBeta = 'effort-2025-11-24'
 
 const anthropicClaudeInterleavedThinkingBeta = 'interleaved-thinking-2025-05-14'
+
+const anthropicThinkingBindingControlsBeta = 'thinking-binding-controls-2026-08-01'
 
 const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
   'claude-code-20250219',
@@ -235,6 +283,11 @@ const unprefixClaudeToolName = (name: string) => {
 }
 
 const anthropicClaudeMessagesUrl = 'https://api.anthropic.com/v1/messages?beta=true'
+
+const anthropicClaudeProvider = 'anthropic_claude'
+
+/** `AssistantReasoningReplay.provider` of the reasoning the Claude provider captures and replays. */
+export const anthropicClaudeReasoningReplayProvider = anthropicClaudeProvider
 
 const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   type: 'text',
@@ -363,7 +416,7 @@ const sanitizeAnthropicClaudeSystemText = (text: string) => {
   return result
 }
 
-const anthropicClaudeBetaHeader = (model: string) => {
+const anthropicClaudeModelBetas = (model: string) => {
   const lowerModel = model.toLowerCase()
 
   const baseBetas = lowerModel.includes('haiku')
@@ -375,17 +428,29 @@ const anthropicClaudeBetaHeader = (model: string) => {
     (lowerModel.includes('4-6') || lowerModel.includes('4-7')) &&
     !baseBetas.includes(anthropicClaudeEffortBeta)
   ) {
-    return [...baseBetas, anthropicClaudeEffortBeta].join(',')
+    return [...baseBetas, anthropicClaudeEffortBeta]
   }
 
-  return baseBetas.join(',')
+  return baseBetas
+}
+
+const anthropicClaudeBetaHeader = (input: {
+  readonly model: string
+  readonly thinking: AnthropicThinkingConfig | undefined
+}) => {
+  const betas = anthropicClaudeModelBetas(input.model)
+
+  return input.thinking?.prefixMismatchBehavior === undefined
+    ? betas.join(',')
+    : [...betas, anthropicThinkingBindingControlsBeta].join(',')
 }
 
 const makeAnthropicClaudeCompatibilityHeaders = (input: {
   readonly model: string
   readonly sessionId: string
+  readonly thinking: AnthropicThinkingConfig | undefined
 }) => ({
-  'anthropic-beta': anthropicClaudeBetaHeader(input.model),
+  'anthropic-beta': anthropicClaudeBetaHeader(input),
   'anthropic-dangerous-direct-browser-access': 'true',
   'anthropic-version': anthropicClaudeVersion,
   'user-agent': anthropicClaudeOAuthUserAgent,
@@ -444,7 +509,15 @@ class AnthropicThinkingResponseBlock extends Schema.Class<AnthropicThinkingRespo
   'AnthropicThinkingResponseBlock'
 )({
   type: Schema.Literal('thinking'),
-  thinking: Schema.String
+  thinking: Schema.String,
+  signature: Schema.optional(Schema.String)
+}) {}
+
+class AnthropicRedactedThinkingResponseBlock extends Schema.Class<AnthropicRedactedThinkingResponseBlock>(
+  'AnthropicRedactedThinkingResponseBlock'
+)({
+  type: Schema.Literal('redacted_thinking'),
+  data: Schema.String
 }) {}
 
 class AnthropicToolUseResponseBlock extends Schema.Class<AnthropicToolUseResponseBlock>(
@@ -459,6 +532,7 @@ class AnthropicToolUseResponseBlock extends Schema.Class<AnthropicToolUseRespons
 const AnthropicContentResponseBlock = Schema.Union([
   AnthropicTextResponseBlock,
   AnthropicThinkingResponseBlock,
+  AnthropicRedactedThinkingResponseBlock,
   AnthropicToolUseResponseBlock
 ])
 
@@ -1155,9 +1229,108 @@ const anthropicToolInputSchema = (schema: Schema.Json): Schema.Json => {
   return normalizeAnthropicToolSchema({ ...schema, type: 'object' })
 }
 
+/** The block that replays a reasoning part, when `reasoningReplayProvider` produced it. */
+const replayedReasoningBlock = (
+  part: AssistantPart,
+  reasoningReplayProvider: string | undefined
+): AnthropicThinkingBlock | AnthropicRedactedThinkingBlock | undefined => {
+  if (
+    !Predicate.isTagged(part, 'Reasoning') ||
+    part.replay === undefined ||
+    part.replay.provider !== reasoningReplayProvider
+  ) {
+    return undefined
+  }
+
+  const text = part.text
+
+  return Match.value(part.replay).pipe(
+    Match.withReturnType<AnthropicThinkingBlock | AnthropicRedactedThinkingBlock>(),
+    Match.tag('Signed', replay => ({
+      type: 'thinking',
+      thinking: text,
+      signature: replay.signature
+    })),
+    Match.tag('Redacted', replay => ({ type: 'redacted_thinking', data: replay.data })),
+    Match.exhaustive
+  )
+}
+
+const textBlocks = (text: string): ReadonlyArray<AnthropicTextBlock> =>
+  text.length === 0 ? [] : [{ type: 'text', text }]
+
+/** Text first, then host tool calls; reasoning is not sent. */
+const flattenedAssistantMessage = (
+  message: AssistantAgentMessage,
+  claudeCompatibility: boolean
+): Effect.Effect<AnthropicMessage, LLMError> =>
+  contentToText(
+    prependMessageContextToContent(assistantContent(message), messageContextText(message)),
+    'Assistant'
+  ).pipe(
+    Effect.flatMap(text =>
+      Effect.forEach(assistantHostToolCalls(message), call =>
+        toolCallToAnthropicBlock(call, claudeCompatibility)
+      ).pipe(
+        Effect.map(toolBlocks => ({
+          role: 'assistant' as const,
+          content: [...textBlocks(text), ...toolBlocks]
+        }))
+      )
+    )
+  )
+
+/**
+ * Blocks in the order the model produced them, replayed thinking included: Anthropic rejects
+ * thinking blocks that are reordered or edited in the latest assistant turn, and drops later ones
+ * when anything before them changed.
+ */
+const orderedAssistantMessage = (
+  message: AssistantAgentMessage,
+  claudeCompatibility: boolean,
+  reasoningReplayProvider: string | undefined
+): Effect.Effect<AnthropicMessage, LLMError> =>
+  Effect.forEach(
+    message.parts,
+    (part): Effect.Effect<ReadonlyArray<AnthropicAssistantBlock>, LLMError> =>
+      Match.value(part).pipe(
+        Match.tag('Text', current =>
+          contentToText(current.content, 'Assistant').pipe(Effect.map(textBlocks))
+        ),
+        Match.tag('Reasoning', current => {
+          const block = replayedReasoningBlock(current, reasoningReplayProvider)
+
+          return Effect.succeed(block === undefined ? [] : [block])
+        }),
+        Match.tag('HostToolCall', current =>
+          toolCallToAnthropicBlock(current.call, claudeCompatibility).pipe(
+            Effect.map(block => [block])
+          )
+        ),
+        Match.tag('ProviderToolCall', 'ProviderToolResult', () => Effect.succeed([])),
+        Match.exhaustive
+      )
+  ).pipe(
+    Effect.flatMap(groups => {
+      const context = messageContextText(message)
+
+      return (
+        context.length === 0
+          ? Effect.succeed('')
+          : contentToText(prependMessageContextToContent([], context), 'Assistant')
+      ).pipe(
+        Effect.map(contextText => ({
+          role: 'assistant' as const,
+          content: [...textBlocks(contextText), ...groups.flat()]
+        }))
+      )
+    })
+  )
+
 const toAnthropicMessage = (
   message: AgentMessage,
-  claudeCompatibility: boolean
+  claudeCompatibility: boolean,
+  reasoningReplayProvider: string | undefined
 ): Effect.Effect<AnthropicMessage, LLMError> =>
   Match.value(message).pipe(
     Match.withReturnType<Effect.Effect<AnthropicMessage, LLMError>>(),
@@ -1166,24 +1339,14 @@ const toAnthropicMessage = (
         prependMessageContextToContent(current.content, messageContextText(current))
       ).pipe(Effect.map(content => ({ role: 'user' as const, content })))
     ),
+    // Without replayable reasoning the flattened shape stays byte-identical, so earlier
+    // conversations keep their prompt cache.
     Match.tag('Assistant', current =>
-      contentToText(
-        prependMessageContextToContent(assistantContent(current), messageContextText(current)),
-        'Assistant'
-      ).pipe(
-        Effect.flatMap(text =>
-          Effect.forEach(assistantHostToolCalls(current), call =>
-            toolCallToAnthropicBlock(call, claudeCompatibility)
-          ).pipe(
-            Effect.map(toolBlocks => {
-              const textBlocks: ReadonlyArray<AnthropicTextBlock> =
-                text.length === 0 ? [] : [{ type: 'text', text }]
-
-              return { role: 'assistant' as const, content: [...textBlocks, ...toolBlocks] }
-            })
-          )
-        )
+      current.parts.some(
+        part => replayedReasoningBlock(part, reasoningReplayProvider) !== undefined
       )
+        ? orderedAssistantMessage(current, claudeCompatibility, reasoningReplayProvider)
+        : flattenedAssistantMessage(current, claudeCompatibility)
     ),
     Match.tag('ToolResult', current =>
       contentToAnthropicContent(
@@ -1240,10 +1403,19 @@ const toAnthropicTool = (
 const anthropicCacheControl = (ttl: AnthropicPromptCacheTtl | undefined): AnthropicCacheControl =>
   ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' }
 
-const isMarkableBlock = (block: AnthropicUserBlock | AnthropicAssistantBlock) =>
-  block.type !== 'text' || block.text.length > 0
+type AnthropicMarkableBlock = Exclude<
+  AnthropicUserBlock | AnthropicAssistantBlock,
+  AnthropicThinkingBlock | AnthropicRedactedThinkingBlock
+>
 
-/** Marks the last block of a message. Anthropic rejects markers on empty text. */
+const isMarkableBlock = (
+  block: AnthropicUserBlock | AnthropicAssistantBlock
+): block is AnthropicMarkableBlock =>
+  block.type === 'text'
+    ? block.text.length > 0
+    : block.type !== 'thinking' && block.type !== 'redacted_thinking'
+
+/** Marks the last block of a message. Anthropic rejects markers on empty text and thinking. */
 const withMessageCacheControl = (
   message: AnthropicMessage,
   cacheControl: AnthropicCacheControl
@@ -1329,6 +1501,23 @@ const withTurnContext = (
   return [...messages.slice(0, -1), { role: 'user', content: [...content, block] }]
 }
 
+const anthropicThinkingRequest = (thinking: AnthropicThinkingConfig): AnthropicThinkingRequest =>
+  thinking.prefixMismatchBehavior === undefined
+    ? { type: 'adaptive', display: thinking.display }
+    : {
+        type: 'adaptive',
+        display: thinking.display,
+        block_binding: { prefix_mismatch_behavior: thinking.prefixMismatchBehavior }
+      }
+
+/**
+ * The provider id stamped on replayed reasoning. Only the Claude subscription keeps thinking
+ * signatures: a signature reaches Anthropic only from the endpoint that issued it (a foreign one
+ * always fails the request), and native Messages backends are not proven to accept them back.
+ */
+const anthropicReasoningReplayProvider = (config: { readonly claudeCompatibility?: boolean }) =>
+  (config.claudeCompatibility ?? true) ? anthropicClaudeProvider : undefined
+
 /**
  * Prompt caching is always on, with at most four breakpoints: the last tool (shared by every
  * conversation with the same tools), the system prompt when it is sent in `system[]` (native
@@ -1342,6 +1531,7 @@ export const toAnthropicRequestBody = (
     readonly stream?: boolean
     readonly claudeCompatibility?: boolean
     readonly promptCacheTtl?: AnthropicPromptCacheTtl
+    readonly thinking?: AnthropicThinkingConfig
   }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
@@ -1350,7 +1540,7 @@ export const toAnthropicRequestBody = (
     yield* validateProviderTranscript(request.messages)
 
     const rawMessages = yield* Effect.forEach(request.messages, message =>
-      toAnthropicMessage(message, claudeCompatibility)
+      toAnthropicMessage(message, claudeCompatibility, anthropicReasoningReplayProvider(config))
     )
 
     const system: ReadonlyArray<AnthropicSystemBlock> = claudeCompatibility
@@ -1385,6 +1575,7 @@ export const toAnthropicRequestBody = (
       messages: ReadonlyArray<AnthropicMessage>
       max_tokens: number
       output_config?: AnthropicRequestBody['output_config']
+      thinking?: AnthropicRequestBody['thinking']
     }
 
     const baseBody: AnthropicBaseRequestBodyFields = {
@@ -1396,6 +1587,10 @@ export const toAnthropicRequestBody = (
 
     if (outputConfig !== undefined) {
       baseBody.output_config = outputConfig
+    }
+
+    if (config.thinking !== undefined) {
+      baseBody.thinking = anthropicThinkingRequest(config.thinking)
     }
 
     const body: AnthropicRequestBody =
@@ -1417,8 +1612,6 @@ export const toAnthropicRequestBody = (
       ? { ...body, tools: markedTools, tool_choice: { type: 'none' } }
       : { ...body, tools: markedTools }
   })
-
-const anthropicClaudeProvider = 'anthropic_claude'
 
 const toHttpClientLlmError =
   (message: string, retryable: boolean, kind: ProviderFailureKind = 'network') =>
@@ -1687,31 +1880,72 @@ const emptyUsageStep = (previous: AnthropicUsageComponents): AnthropicStreamUsag
   events: []
 })
 
+/**
+ * How a response is read. Claude decodes its prefixed tool names, completes at EOF and keeps
+ * thinking signatures under `reasoningReplayProvider`; without one, thinking stays text only.
+ */
+type AnthropicResponseOptions = {
+  readonly decodeToolName: (name: string) => string
+  readonly allowEofCompletion: boolean
+  readonly reasoningReplayProvider: string | undefined
+}
+
+const anthropicClaudeResponseOptions: AnthropicResponseOptions = {
+  decodeToolName: unprefixClaudeToolName,
+  allowEofCompletion: true,
+  reasoningReplayProvider: anthropicClaudeProvider
+}
+
+/** Thinking text; omitted thinking (`display: 'omitted'`) has none and emits nothing. */
+const reasoningDeltaEvents = (text: string): ReadonlyArray<LLMEvent> =>
+  text.length === 0 ? [] : [LLMReasoningDelta.make({ text })]
+
+const signedReasoningEvents = (
+  signature: string | undefined,
+  provider: string | undefined
+): ReadonlyArray<LLMEvent> =>
+  provider === undefined || signature === undefined || signature.length === 0
+    ? []
+    : [LLMReasoningReplay.make({ replay: SignedReasoningReplay.make({ provider, signature }) })]
+
+const redactedReasoningEvents = (
+  data: string | undefined,
+  provider: string | undefined
+): ReadonlyArray<LLMEvent> =>
+  provider === undefined || data === undefined || data.length === 0
+    ? []
+    : [LLMReasoningReplay.make({ replay: RedactedReasoningReplay.make({ provider, data }) })]
+
 const toLlmEvents = (
   response: AnthropicMessageResponse,
-  decodeToolName: (name: string) => string
+  options: AnthropicResponseOptions
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     if (response.stop_reason === 'max_tokens' || response.stop_reason === 'content_filter') {
       return yield* Effect.fail(anthropicTerminalError(response.stop_reason))
     }
 
-    const events = yield* Effect.forEach(response.content, block => {
+    const events = response.content.flatMap((block): ReadonlyArray<LLMEvent> => {
       switch (block.type) {
         case 'text':
-          return Effect.succeed<LLMEvent>(LLMTextDelta.make({ text: block.text }))
+          return [LLMTextDelta.make({ text: block.text })]
         case 'thinking':
-          return Effect.succeed<LLMEvent>(LLMReasoningDelta.make({ text: block.thinking }))
+          return [
+            ...reasoningDeltaEvents(block.thinking),
+            ...signedReasoningEvents(block.signature, options.reasoningReplayProvider)
+          ]
+        case 'redacted_thinking':
+          return redactedReasoningEvents(block.data, options.reasoningReplayProvider)
         case 'tool_use':
-          return Effect.succeed<LLMEvent>(
+          return [
             LLMToolCall.make({
               call: ToolCall.make({
                 id: block.id,
-                name: decodeToolName(block.name),
+                name: options.decodeToolName(block.name),
                 params: block.input
               })
             })
-          )
+          ]
       }
     })
 
@@ -1730,15 +1964,14 @@ const decodeAnthropicMessageResponse = (json: Schema.Json) =>
 
 const parseAnthropicJsonResponse = (
   raw: string,
-  decodeToolName: (name: string) => string,
-  allowEofCompletion: boolean
+  options: AnthropicResponseOptions
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse Anthropic Claude response JSON')
     const parsed = yield* decodeAnthropicMessageResponse(json)
 
     if (
-      !allowEofCompletion &&
+      !options.allowEofCompletion &&
       (parsed.stop_reason === null || parsed.stop_reason.trim().length === 0)
     ) {
       return yield* Effect.fail(
@@ -1750,7 +1983,7 @@ const parseAnthropicJsonResponse = (
       )
     }
 
-    return yield* toLlmEvents(parsed, decodeToolName)
+    return yield* toLlmEvents(parsed, options)
   })
 
 type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
@@ -1827,8 +2060,10 @@ const anthropicTerminalError = (reason: 'max_tokens' | 'content_filter') =>
     retryable: false
   })
 
-const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) => {
+const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
   const toolBlocks = new Map<number, AnthropicToolBlockState>()
+  // Open thinking blocks by index, with the signature received so far.
+  const thinkingBlocks = new Map<number, string>()
 
   return (
     state: AnthropicSseState,
@@ -1854,8 +2089,9 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
     if (type === 'content_block_start') {
       const index = numberField(data, 'index')
       const block = jsonField(data, 'content_block')
+      const blockType = stringField(block, 'type')
 
-      if (index !== undefined && stringField(block, 'type') === 'tool_use') {
+      if (index !== undefined && blockType === 'tool_use') {
         const id = stringField(block, 'id')
         const name = stringField(block, 'name')
 
@@ -1865,8 +2101,22 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
 
         toolBlocks.set(index, {
           id,
-          name: decodeToolName(name),
+          name: options.decodeToolName(name),
           partialJson: ''
+        })
+      }
+
+      if (index !== undefined && blockType === 'thinking') {
+        thinkingBlocks.set(index, stringField(block, 'signature') ?? '')
+      }
+
+      if (blockType === 'redacted_thinking') {
+        return Effect.succeed({
+          state,
+          events: redactedReasoningEvents(
+            stringField(block, 'data'),
+            options.reasoningReplayProvider
+          )
         })
       }
 
@@ -1879,6 +2129,7 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
       const deltaType = stringField(delta, 'type')
       const text = stringField(delta, 'text')
       const thinking = stringField(delta, 'thinking')
+      const signature = stringField(delta, 'signature')
       const partialJson = stringField(delta, 'partial_json')
 
       if (deltaType === 'text_delta' && text !== undefined) {
@@ -1886,7 +2137,15 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
       }
 
       if (deltaType === 'thinking_delta' && thinking !== undefined) {
-        return Effect.succeed({ state, events: [LLMReasoningDelta.make({ text: thinking })] })
+        return Effect.succeed({ state, events: reasoningDeltaEvents(thinking) })
+      }
+
+      if (index !== undefined && deltaType === 'signature_delta' && signature !== undefined) {
+        const current = thinkingBlocks.get(index)
+
+        if (current !== undefined) thinkingBlocks.set(index, `${current}${signature}`)
+
+        return Effect.succeed({ state, events: [] })
       }
 
       if (index !== undefined && deltaType === 'input_json_delta' && partialJson !== undefined) {
@@ -1902,6 +2161,17 @@ const makeAnthropicStreamEmitter = (decodeToolName: (name: string) => string) =>
 
     if (type === 'content_block_stop') {
       const index = numberField(data, 'index')
+      const thinkingSignature = index === undefined ? undefined : thinkingBlocks.get(index)
+
+      if (index !== undefined && thinkingSignature !== undefined) {
+        thinkingBlocks.delete(index)
+
+        return Effect.succeed({
+          state,
+          events: signedReasoningEvents(thinkingSignature, options.reasoningReplayProvider)
+        })
+      }
+
       const toolBlock = index === undefined ? undefined : toolBlocks.get(index)
 
       if (toolBlock === undefined) return Effect.succeed({ state, events: [] })
@@ -2064,15 +2334,14 @@ const processBodyChunk = (
 const finalizeBodyState = (
   emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
   state: AnthropicBodyState,
-  decodeToolName: (name: string) => string,
-  allowEofCompletion: boolean
+  options: AnthropicResponseOptions
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const buffer = normalizeNewlines(state.buffer)
     const format = state.format === 'undecided' ? classifyAnthropicBody(buffer) : state.format
 
     if (format === 'json') {
-      return yield* parseAnthropicJsonResponse(buffer, decodeToolName, allowEofCompletion)
+      return yield* parseAnthropicJsonResponse(buffer, options)
     }
 
     const events: Array<LLMEvent> = []
@@ -2096,7 +2365,7 @@ const finalizeBodyState = (
     }
 
     if (!sseState.hasDone) {
-      if (!allowEofCompletion) {
+      if (!options.allowEofCompletion) {
         return yield* Effect.fail(
           new LLMError({
             cause: 'invalid_response',
@@ -2114,13 +2383,12 @@ const finalizeBodyState = (
 
 export const streamAnthropicResponse = (
   response: HttpClientResponse.HttpClientResponse,
-  decodeToolName: (name: string) => string = unprefixClaudeToolName,
-  allowEofCompletion = true
+  options: AnthropicResponseOptions = anthropicClaudeResponseOptions
 ): Stream.Stream<LLMEvent, LLMError> =>
   Stream.unwrap(
     Ref.make(initialBodyState).pipe(
       Effect.map(bodyStateRef => {
-        const emitData = makeAnthropicStreamEmitter(decodeToolName)
+        const emitData = makeAnthropicStreamEmitter(options)
 
         const chunks = response.stream.pipe(
           Stream.mapError(
@@ -2141,9 +2409,7 @@ export const streamAnthropicResponse = (
 
         const finalEvents = Stream.fromEffect(
           Ref.get(bodyStateRef).pipe(
-            Effect.flatMap(state =>
-              finalizeBodyState(emitData, state, decodeToolName, allowEofCompletion)
-            )
+            Effect.flatMap(state => finalizeBodyState(emitData, state, options))
           )
         ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
 
@@ -2186,7 +2452,8 @@ const sendAnthropicClaudeRequest = (
         'content-type': 'application/json',
         ...makeAnthropicClaudeCompatibilityHeaders({
           model: request.model,
-          sessionId: requestSessionId
+          sessionId: requestSessionId,
+          thinking: config.thinking
         }),
         ...config.extraHeaders
       }),

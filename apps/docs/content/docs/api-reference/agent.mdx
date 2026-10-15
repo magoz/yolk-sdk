@@ -693,7 +693,9 @@ Provider prompt caching is always on. `LLMRequest.cacheKey` (set it once as `cac
 `RunConfig` or `RuntimeConfig`) routes a conversation to its cached prefix, `LLMRequest.turnContext`
 carries per-request text after the conversation, and `LLMRequest.toolChoice: 'none'` forbids tool
 calls while keeping the definitions. `AnthropicClaudeProviderConfig.promptCacheTtl` (`'5m'` default
-or `'1h'`) sets the Claude cache lifetime; `OpenAiProviderConfig.cacheKeyHeaders` opts a generic
+or `'1h'`) sets the Claude cache lifetime; `AnthropicClaudeProviderConfig.thinking` (`display`, and
+optional `prefixMismatchBehavior`) requests adaptive thinking summaries. Claude thinking signatures
+are kept on `AssistantReasoningPart.replay` and replayed unchanged; `OpenAiProviderConfig.cacheKeyHeaders` opts a generic
 OpenAI-compatible endpoint into session headers. See
 [Prompt caching](../integrations/model-providers#prompt-caching).
 

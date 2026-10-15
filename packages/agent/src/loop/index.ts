@@ -22,6 +22,7 @@ export {
   LLMEvent,
   LLMProviderToolResult,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolCall,
   LLMToolInputDelta,

@@ -1,5 +1,10 @@
 import * as Schema from 'effect/Schema'
-import { AgentUsage, ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  AgentUsage,
+  AssistantReasoningReplay,
+  ToolCall,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
 
 export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('TextDelta', {
   text: Schema.String
@@ -8,6 +13,18 @@ export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('TextDelta'
 export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()('ReasoningDelta', {
   text: Schema.String
 }) {}
+
+/**
+ * Closes a reasoning block with the provider state that replays it. A `Signed` replay closes the
+ * open reasoning part (the preceding `ReasoningDelta` text); a `Redacted` replay is a block of its
+ * own. Never surfaced as an agent event: it only reaches the assistant message.
+ */
+export class LLMReasoningReplay extends Schema.TaggedClass<LLMReasoningReplay>()(
+  'ReasoningReplay',
+  {
+    replay: AssistantReasoningReplay
+  }
+) {}
 
 export class LLMDone extends Schema.TaggedClass<LLMDone>()('Done', {
   stopReason: Schema.Literals(['stop', 'tool_use'])
@@ -42,6 +59,7 @@ export class LLMUsage extends Schema.TaggedClass<LLMUsage>()('Usage', {
 export const LLMEvent = Schema.Union([
   LLMTextDelta,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMDone,
   LLMToolCall,
   LLMToolInputStart,

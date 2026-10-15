@@ -149,7 +149,13 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
               return response
             })
           ).pipe(
-            Stream.flatMap(response => streamAnthropicResponse(response, name => name, false)),
+            Stream.flatMap(response =>
+              streamAnthropicResponse(response, {
+                decodeToolName: name => name,
+                allowEofCompletion: false,
+                reasoningReplayProvider: undefined
+              })
+            ),
             Stream.mapError(mapError)
           )
       })

@@ -303,6 +303,15 @@ configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` th
 `output_config.effort`. It omits `minimal`, which Anthropic does not support. Hosts remain
 responsible for choosing an effort accepted by the selected provider and model.
 
+Newer Claude models think by default but return empty thinking blocks unless asked. Set
+`thinking: { display: 'summarized' }` on `makeAnthropicClaudeProviderLayer` to stream readable
+summaries as reasoning deltas; `prefixMismatchBehavior: 'drop_block'` keeps requests succeeding when
+an earlier part of the conversation changed (Anthropic drops the affected thinking instead of
+failing). The Claude provider keeps each thinking block's signature on its reasoning part
+(`AssistantReasoningPart.replay`) and sends the block back unchanged, in produced order, so tool-use
+turns keep their reasoning. Do not edit the text of a reasoning part that has `replay`: Anthropic
+rejects modified thinking blocks.
+
 ### Prompt caching
 
 Provider prompt caching is always on (ADR 0008). Set `cacheKey` (for example the session id) on

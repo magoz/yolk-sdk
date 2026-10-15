@@ -407,6 +407,8 @@ const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> =>
   Match.value(event).pipe(
     Match.tag('TextDelta', current => [AgentLLMTextDelta.make({ text: current.text })]),
     Match.tag('ReasoningDelta', current => [AgentLLMReasoningDelta.make({ text: current.text })]),
+    // Opaque provider state: it reaches the assistant message, never the event stream.
+    Match.tag('ReasoningReplay', () => []),
     Match.tag('ToolCall', current => [ToolInputEnd.make({ call: current.call })]),
     Match.tag('ToolInputStart', current => [
       ToolInputStart.make({ id: current.id, name: current.name })
@@ -427,6 +429,7 @@ const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEven
     Match.tag(
       'TextDelta',
       'ReasoningDelta',
+      'ReasoningReplay',
       'Done',
       'ToolCall',
       'ToolInputStart',

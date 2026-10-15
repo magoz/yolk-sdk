@@ -6,7 +6,8 @@ import {
   HostToolCallPart,
   ProviderToolCallPart,
   ProviderToolResultPart,
-  type AssistantPart
+  type AssistantPart,
+  type AssistantReasoningReplay
 } from '@yolk-sdk/agent/protocol'
 import type { LLMEvent } from './llm-event.ts'
 import { Match, Predicate } from 'effect'
@@ -40,13 +41,39 @@ const appendTextPartMutable = (parts: Array<AssistantPart>, text: string) => {
   return parts
 }
 
+/** A reasoning part the provider has not closed with replay state yet. */
+const isOpenReasoningPart = (part: AssistantPart | undefined): part is AssistantReasoningPart =>
+  Predicate.isTagged(part, 'Reasoning') && part.replay === undefined
+
+/** A `Signed` replay closes the open reasoning block it signs; anything else is its own block. */
+const closesLastReasoningPart = (
+  last: AssistantPart | undefined,
+  replay: AssistantReasoningReplay
+): last is AssistantReasoningPart =>
+  Predicate.isTagged(replay, 'Signed') && isOpenReasoningPart(last)
+
 const appendReasoningPartMutable = (parts: Array<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  if (Predicate.isTagged(last, 'Reasoning')) {
+  if (isOpenReasoningPart(last)) {
     parts[parts.length - 1] = AssistantReasoningPart.make({ text: `${last.text}${text}` })
   } else {
     parts.push(AssistantReasoningPart.make({ text }))
+  }
+
+  return parts
+}
+
+const closeReasoningPartMutable = (
+  parts: Array<AssistantPart>,
+  replay: AssistantReasoningReplay
+) => {
+  const last = parts.at(-1)
+
+  if (closesLastReasoningPart(last, replay)) {
+    parts[parts.length - 1] = AssistantReasoningPart.make({ text: last.text, replay })
+  } else {
+    parts.push(AssistantReasoningPart.make({ text: '', replay }))
   }
 
   return parts
@@ -56,6 +83,7 @@ const applyAssistantLlmEventMutable = (parts: Array<AssistantPart>, event: LLMEv
   Match.value(event).pipe(
     Match.tag('TextDelta', current => appendTextPartMutable(parts, current.text)),
     Match.tag('ReasoningDelta', current => appendReasoningPartMutable(parts, current.text)),
+    Match.tag('ReasoningReplay', current => closeReasoningPartMutable(parts, current.replay)),
     Match.tag('ToolCall', current => {
       parts.push(HostToolCallPart.make({ call: current.call }))
 
@@ -81,6 +109,7 @@ export const applyAssistantLlmEvent = (
   Match.value(event).pipe(
     Match.tag('TextDelta', current => appendTextPart(parts, current.text)),
     Match.tag('ReasoningDelta', current => appendReasoningPart(parts, current.text)),
+    Match.tag('ReasoningReplay', current => closeReasoningPart(parts, current.replay)),
     Match.tag('ToolCall', current => [...parts, HostToolCallPart.make({ call: current.call })]),
     Match.tag('ProviderToolResult', current => [
       ...parts,
@@ -105,9 +134,20 @@ const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
 const appendReasoningPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
-  return Predicate.isTagged(last, 'Reasoning')
+  return isOpenReasoningPart(last)
     ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: `${last.text}${text}` })]
     : [...parts, AssistantReasoningPart.make({ text })]
+}
+
+const closeReasoningPart = (
+  parts: ReadonlyArray<AssistantPart>,
+  replay: AssistantReasoningReplay
+) => {
+  const last = parts.at(-1)
+
+  return closesLastReasoningPart(last, replay)
+    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: last.text, replay })]
+    : [...parts, AssistantReasoningPart.make({ text: '', replay })]
 }
 
 const accumulateAssistantParts = (events: ReadonlyArray<LLMEvent>) =>
