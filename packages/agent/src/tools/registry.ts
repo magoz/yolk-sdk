@@ -987,6 +987,9 @@ const interactionToolError = (input: {
 /** Bound of an interaction's `unknownOutcome` description; past it the generic notice is used. */
 const interactionUnknownDescriptionTimeout = Duration.seconds(3)
 
+// Bound of storing an interaction result's files before settlement (ADR 0009).
+const interactionFileCaptureTimeout = Duration.seconds(60)
+
 const hostErrorToToolError = (tool: string) => (error: unknown) =>
   interactionToolError({
     tool,
@@ -1096,7 +1099,10 @@ const executeInteractionTool = <Context>(input: {
           Effect.logWarning(
             `Interaction ${stored.slot}: unknownOutcome failed; using the generic notice: ${defect instanceof Error ? defect.message : String(defect)}`
           ).pipe(Effect.as(genericUnknownResult()))
-        )
+        ),
+        // Descriptions may carry file parts: never store or replay their bytes (no I/O here, so
+        // the seal keeps its bound).
+        Effect.flatMap(result => captureToolResultFiles(result, undefined))
       )
     }
 
@@ -1250,22 +1256,32 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
-          const outcome: InteractionOutcome = {
-            status: actionResult.outcome,
-            result: yield* captureToolResultFiles(
-              makeInteractionToolResult({
-                toolCallId: stored.call.id,
-                requestId: stored.slot,
-                slot: stored.slot,
-                submissionId: stored.submissionId,
-                actionId: actionId ?? '',
-                outcome: actionResult.outcome,
-                content: actionResult.content,
-                structuredContent: actionResult.structuredContent
-              }),
-              input.files
+          const actionToolResult = makeInteractionToolResult({
+            toolCallId: stored.call.id,
+            requestId: stored.slot,
+            slot: stored.slot,
+            submissionId: stored.submissionId,
+            actionId: actionId ?? '',
+            outcome: actionResult.outcome,
+            content: actionResult.content,
+            structuredContent: actionResult.structuredContent
+          })
+
+          // Storing files is interruptible and bounded; past the bound the bytes become
+          // "not captured" labels, so the real outcome is still settled.
+          const captured = yield* restore(
+            captureToolResultFiles(actionToolResult, input.files)
+          ).pipe(
+            Effect.timeoutOption(interactionFileCaptureTimeout),
+            Effect.flatMap(
+              Option.match({
+                onNone: () => captureToolResultFiles(actionToolResult, undefined),
+                onSome: Effect.succeed
+              })
             )
-          }
+          )
+
+          const outcome: InteractionOutcome = { status: actionResult.outcome, result: captured }
 
           const settled = yield* restore(
             Effect.suspend(() => host.settle(claim.token, outcome))

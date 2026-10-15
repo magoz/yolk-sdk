@@ -710,7 +710,9 @@ export class GmailGetAttachmentOutput extends Schema.Class<GmailGetAttachmentOut
 )({
   messageId: Schema.String,
   attachmentId: Schema.String,
+  /** Caller-supplied (`GmailGetAttachmentInput`), not verified against Gmail. */
   filename: Schema.optional(Schema.String),
+  /** Caller-supplied (`GmailGetAttachmentInput`), not verified against Gmail. */
   mimeType: Schema.optional(Schema.String),
   size: GmailAttachmentSize,
   data: GmailAttachmentBase64Url,

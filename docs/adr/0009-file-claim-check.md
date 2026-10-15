@@ -78,7 +78,7 @@ nested code mode calls and applied staged plans, before the ledger records it. F
 2. `Image`, `Document`, `Audio`: stored and followed by their label; on failure left as they are.
 
 Capture runs before the ledger and durable history, so replays, the transcript and code mode stores
-only hold `fileId`s. The ledger keeps `files` through every reduction step and on replay. Results
+hold `fileId`s instead of `File` bytes (viewable media keep their inline source in this slice). The ledger keeps `files` through every reduction step and on replay. Results
 without inline bytes pass through unchanged. Capture is eager: MCP blobs and fetched bodies cannot
 be fetched again later.
 
@@ -162,7 +162,7 @@ defaultUrlTtlSeconds?, isEnabled? })`:
   friction without protection. Hosts claim and ledger them as writes and may add prompt guidance
   about destinations named only in untrusted content. A future session-level egress policy, if
   any, covers the sandbox and these tools together.
-- `file_to_sandbox` writes the bytes to a workspace-relative path (default `files/<name>`) and
+- `file_to_sandbox` writes the bytes to a workspace-relative path (default `files/<fileId>/<name>`) and
   `file_from_sandbox` stores a workspace file (MIME type inferred from the extension unless given).
   They use the invoking runtime's own sandbox, through the optional binary
   `SandboxApi.writeFile`/`readFile` (`@yolk-sdk/sandbox`: workspace-relative paths only, streamed

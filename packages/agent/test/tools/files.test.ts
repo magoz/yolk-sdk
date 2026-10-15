@@ -286,6 +286,25 @@ describe('tool result file capture', () => {
     expect(contentText(stored.content)).toContain('[image omitted from the stored result]')
   })
 
+  it('keeps file labels when the ledger has to cut the text', () => {
+    const stored = toolLedgerResult(
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content: [
+          TextPart.make({ text: 'x'.repeat(5_000) }),
+          FilePart.make({
+            source: refAttachmentSource('file_a'),
+            mimeType: 'application/pdf',
+            filename: 'a.pdf'
+          })
+        ]
+      }),
+      600
+    )
+
+    expect(contentText(stored.content)).toMatch(/^\[file file_a: a\.pdf, application\/pdf\]\n/u)
+  })
+
   it('keeps untrusted names from forging labels', () => {
     expect(
       contentText([

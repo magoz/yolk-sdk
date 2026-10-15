@@ -550,7 +550,22 @@ export const toolLedgerResult = (
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  return fitText(withoutStructured, contentText(textOnlyContent(result.content)), maxBytes)
+  return fitText(withoutStructured, labelsFirstText(result.content), maxBytes)
+}
+
+// The text the last reduction step cuts: file labels first, so a long text cannot cut them off.
+const labelsFirstText = (content: Content) => {
+  if (Predicate.isString(content)) return content
+
+  const labels = content.flatMap(part =>
+    Predicate.isTagged(part, 'File') ? [filePartText(part)] : []
+  )
+
+  const rest = contentText(
+    textOnlyContent(content.filter(part => !Predicate.isTagged(part, 'File')))
+  )
+
+  return [...labels, rest].join('\n')
 }
 
 const nestedSeq = (key: string) => {

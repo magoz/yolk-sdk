@@ -401,8 +401,8 @@ The three draft actions also take optional `attachments`: an array of
 `{ filename, mimeType, contentBase64 }` (`GmailDraftAttachment`), the `filename`/`mimeType` pair
 `gmail.list_attachments` reports and the standard-base64 `contentBase64` `gmail.get_attachment`
 returns when invoked directly, so a host can attach a fetched attachment again unchanged. As agent
-tools, `get_attachment` returns a file (`fileId`) instead and the draft actions do not take
-`fileId`s yet.
+tools, `get_attachment` returns a file (`fileId`) instead (pass the listed `filename` and
+`mimeType` to name it) and the draft actions do not take `fileId`s yet.
 
 - Limits: at most 10 attachments (`gmailDraftAttachmentsMaxItems`), at most 25 MiB decoded in total
   (`gmailDraftAttachmentsMaxBytes`), and at most 35 MiB of decoded MIME

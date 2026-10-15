@@ -8,7 +8,7 @@ the model views keep their inline source for now (a stored copy and its label ar
 
 Capture is part of `@yolk-sdk/agent`: tools emit `FilePart` (`filePartFromBytes`), and
 `resolveTools(modules, context, { files: { store } })` stores the bytes and replaces them with
-`[file file_… name, mime, size]` labels. This package provides the default store and the tools.
+`[file file_…: name, mime, size]` labels. This package provides the default store and the tools.
 
 ## Store
 

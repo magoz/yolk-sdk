@@ -98,8 +98,14 @@ export const defaultMaxFileTransferBytes = 50 * 1024 * 1024
 
 const maxUrlTtlMinutes = 7 * 24 * 60
 
-const defaultUrlTtlSeconds = (options: { readonly defaultUrlTtlSeconds?: number }) =>
-  Math.min(Math.max(Math.floor(options.defaultUrlTtlSeconds ?? 3_600), 60), maxUrlTtlMinutes * 60)
+const defaultUrlTtlSeconds = (options: { readonly defaultUrlTtlSeconds?: number }) => {
+  const configured = options.defaultUrlTtlSeconds
+
+  const seconds =
+    configured === undefined || !Number.isFinite(configured) ? 3_600 : Math.floor(configured)
+
+  return Math.min(Math.max(seconds, 60), maxUrlTtlMinutes * 60)
+}
 
 const forbiddenHeaders = new Set([
   'connection',
@@ -168,13 +174,7 @@ const invalid = (tool: string, message: string) =>
 
 const storeError = (tool: string, fileId: string) => (error: FileStoreError) =>
   Match.value(error.reason).pipe(
-    Match.when('not_found', () =>
-      modelVisibleToolError({
-        tool,
-        message: `No file ${fileId} in this session.`,
-        reason: 'not_found'
-      })
-    ),
+    Match.when('not_found', () => notFound(tool, fileId)),
     Match.when('too_large', () =>
       modelVisibleToolError({
         tool,
@@ -296,7 +296,7 @@ const urlTool = <Context>(
     name: fileUrlToolName,
     description: [
       'Get a temporary https download link for a file (fileId), for destinations that fetch a file from a URL or for sharing.',
-      'Anyone with the link can download the file until it expires (default one hour).'
+      `Anyone with the link can download the file until it expires (default ${Math.round(defaultUrlTtlSeconds(options) / 60)} minutes).`
     ].join(' '),
     parameters: FileUrlParams,
     output: FileUrlOutput,

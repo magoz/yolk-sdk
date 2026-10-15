@@ -25,6 +25,7 @@ import {
   modelVisibleToolError,
   resolveTools,
   type InteractionActionResult,
+  type ToolFileCaptureOptions,
   type ResolvedToolSet,
   type ToolModule
 } from '../../src/tools/index.ts'
@@ -98,7 +99,8 @@ const moduleFor = (
 
 const setup = (
   options: Parameters<typeof makeFakeInteractionHost>[0] = {},
-  execute?: Parameters<typeof moduleFor>[0]
+  execute?: Parameters<typeof moduleFor>[0],
+  files?: ToolFileCaptureOptions
 ) =>
   Effect.gen(function* () {
     const fake = makeFakeInteractionHost(options)
@@ -116,7 +118,12 @@ const setup = (
       )
     ]
 
-    const tools = yield* resolveTools(modules, context, { interactionHost: fake.host })
+    const tools = yield* resolveTools(
+      modules,
+      context,
+      files === undefined ? { interactionHost: fake.host } : { interactionHost: fake.host, files }
+    )
+
     const interaction = tools.interactions.document
 
     if (interaction === undefined || interaction.def.interaction === undefined)
@@ -897,6 +904,49 @@ describe('interaction results and files', () => {
       const result = yield* run(tools, ref)
 
       expect(JSON.stringify(result)).not.toContain(base64)
+      expect(JSON.stringify(fake.receiptFor(ref.slot))).not.toContain(base64)
+      expect(JSON.stringify(result)).toContain('file not captured (no file store): signed.pdf')
+    })
+  )
+
+  it.effect('settles with labels when storing the files does not finish in time', () =>
+    Effect.gen(function* () {
+      const base64 = globalThis.btoa('%PDF-1.7 signed')
+
+      const files: ToolFileCaptureOptions = {
+        store: {
+          put: () => Effect.never,
+          head: () => Effect.die(new Error('not used')),
+          read: () => Effect.die(new Error('not used')),
+          signRead: () => Effect.die(new Error('not used'))
+        }
+      }
+
+      const { fake, tools, interaction } = yield* setup(
+        {},
+        () =>
+          Effect.succeed({
+            outcome: 'completed',
+            content: [
+              FilePart.make({
+                source: inlineBase64AttachmentSource(base64),
+                mimeType: 'application/pdf',
+                filename: 'signed.pdf'
+              })
+            ]
+          }),
+        files
+      )
+
+      const ref = yield* fake.accept(response(), interaction)
+      const fiber = yield* Effect.forkChild(run(tools, ref))
+
+      yield* TestClock.adjust('61 seconds')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(outcomeOf(result)).toBe('completed')
+      expect(fake.receiptFor(ref.slot)?.status).toBe('settled')
       expect(JSON.stringify(fake.receiptFor(ref.slot))).not.toContain(base64)
       expect(JSON.stringify(result)).toContain('file not captured (no file store): signed.pdf')
     })
