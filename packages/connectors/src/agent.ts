@@ -1,4 +1,4 @@
-import { Effect, Match, Predicate } from 'effect'
+import { Effect, Match, Option, Predicate } from 'effect'
 import type { Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
@@ -9,7 +9,13 @@ import {
   type ToolModule,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
-import { ToolResult, type ToolExposure } from '@yolk-sdk/agent/protocol'
+import {
+  FilePart,
+  inlineBase64AttachmentSource,
+  TextPart,
+  ToolResult,
+  type ToolExposure
+} from '@yolk-sdk/agent/protocol'
 import type { ConnectorAction, ConnectorActionAccess } from './action.ts'
 import type { Connector } from './connector.ts'
 import type { ConnectorIntegration } from './integration.ts'
@@ -126,7 +132,9 @@ const toolName = (prefix: string | undefined, actionId: string) =>
  * declared `ToolDef.outputSchema` (a `Chunk` becomes an array, a `DateTime` an ISO string). A value
  * that does not encode fails the call with an `execution` `ToolError`. Provider failures become
  * error results whose `structuredContent` is the JSON encoding of the `ProviderFailure` (a
- * non-JSON `underlying` is dropped).
+ * non-JSON `underlying` is dropped). Actions with `fileOutput` (ADR 0009) declare its byte-free
+ * schema as the tool output and return their bytes as `FilePart`s after the text, which tool
+ * resolution captures into `fileId`s.
  */
 export const makeConnectorToolRegistration = <Context, Env = never, Error = never>(
   connector: Connector<Env, Error>,
@@ -136,32 +144,78 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
   const action = connector.actions.find(item => item.id === actionId)
   const name = toolName(options.namePrefix, actionId)
 
+  const fileOutput = action?.fileOutput
+
+  // Actions whose output carries file bytes declare their byte-free output (ADR 0009).
+  const declaredOutput = fileOutput?.schema ?? action?.outputSchema
+
   const encode =
-    action === undefined
+    declaredOutput === undefined
       ? undefined
-      : Schema.encodeUnknownEffect(Schema.toCodecJson(action.outputSchema))
+      : Schema.encodeUnknownEffect(Schema.toCodecJson(declaredOutput))
 
   // Without a declared action there is no output schema to encode to: keep the value as is.
+  const outputMismatch = () =>
+    new ToolError({
+      tool: name,
+      message: `${name} returned a result that does not match its output schema.`,
+      cause: 'execution'
+    })
+
   const encodeOutput = (value: unknown): Effect.Effect<unknown, ToolError> =>
     encode === undefined
       ? Effect.succeed(value)
-      : encode(value).pipe(
-          Effect.mapError(
-            () =>
-              new ToolError({
-                tool: name,
-                message: `${name} returned a result that does not match its output schema.`,
-                cause: 'execution'
-              })
+      : encode(value).pipe(Effect.mapError(outputMismatch))
+
+  // The success result: the encoded output as text and `structuredContent`, then any file parts.
+  const successResult = (callId: string, output: unknown) => {
+    if (fileOutput === undefined) {
+      return encodeOutput(output).pipe(
+        Effect.map(value =>
+          ToolResult.make({
+            toolCallId: callId,
+            content: successContent(value),
+            structuredContent: value
+          })
+        )
+      )
+    }
+
+    return Option.match(fileOutput.split(output), {
+      onNone: () => Effect.fail(outputMismatch()),
+      onSome: split =>
+        encodeOutput(split.value).pipe(
+          Effect.map(value =>
+            ToolResult.make({
+              toolCallId: callId,
+              content: [
+                TextPart.make({ text: successContent(value) }),
+                ...split.files.map(file =>
+                  file.filename === undefined
+                    ? FilePart.make({
+                        source: inlineBase64AttachmentSource(file.base64),
+                        mimeType: file.mimeType
+                      })
+                    : FilePart.make({
+                        source: inlineBase64AttachmentSource(file.base64),
+                        mimeType: file.mimeType,
+                        filename: file.filename
+                      })
+                )
+              ],
+              structuredContent: value
+            })
           )
         )
+    })
+  }
 
   return makeTool({
     ...resolveExposure(options.exposure, actionId, action),
     name,
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
-    output: action?.outputSchema,
+    output: declaredOutput,
     access: resolveAccess(options.access, actionId, action?.access),
     invalidParamsMessage: error =>
       withToolArgumentsErrorHint(
@@ -189,17 +243,7 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
         ),
         Effect.flatMap(result =>
           Match.value(result).pipe(
-            Match.tag('Success', current =>
-              encodeOutput(current.value).pipe(
-                Effect.map(value =>
-                  ToolResult.make({
-                    toolCallId: call.id,
-                    content: successContent(value),
-                    structuredContent: value
-                  })
-                )
-              )
-            ),
+            Match.tag('Success', current => successResult(call.id, current.value)),
             Match.tag('Failure', current =>
               failureStructuredContent(current.error).pipe(
                 Effect.map(structuredContent =>

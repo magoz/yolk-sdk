@@ -18,6 +18,10 @@ export {
 
 export { omitNullOptionalToolArguments } from './arguments.ts'
 
+export { captureToolResultFiles, defaultMaxCapturedFileBytes, FileStoreError } from './files.ts'
+
+export type { FileStoreApi, ToolFileCaptureOptions } from './files.ts'
+
 export {
   boundToolChangePreview,
   defaultToolChangePreviewMaxBytes,

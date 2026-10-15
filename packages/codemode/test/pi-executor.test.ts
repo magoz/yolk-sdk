@@ -1,8 +1,21 @@
 import { Deferred, Effect, Fiber, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { providerToolDefs, ToolApprovalPolicy, ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeQuestionToolRegistration, makeTool, resolveTools } from '@yolk-sdk/agent/tools'
+import {
+  FileDescriptor,
+  filePartFromBytes,
+  providerToolDefs,
+  TextPart,
+  ToolApprovalPolicy,
+  ToolCall,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
+import {
+  makeQuestionToolRegistration,
+  makeTool,
+  resolveTools,
+  type FileStoreApi
+} from '@yolk-sdk/agent/tools'
 import {
   codeModeStoreFromToolResults,
   makeCodeModeTool,
@@ -1244,6 +1257,89 @@ describe('pi executor concurrency', () => {
 
       expect(text(next.content)).toContain('Return value:\n"next"')
       expect(Date.now() - startedAt).toBeLessThan(3_000)
+    })
+  )
+})
+
+describe('code mode with captured files', () => {
+  const pdf = new TextEncoder().encode('%PDF invoice')
+
+  const store: FileStoreApi = {
+    put: ({ name, mimeType, bytes }) =>
+      Effect.succeed(
+        FileDescriptor.make({ fileId: 'file_a1', name, mimeType, size: bytes.length })
+      ),
+    head: () => Effect.succeed(Option.none()),
+    read: () => Effect.succeed(pdf),
+    signRead: () => Effect.succeed('https://files.example/file_a1')
+  }
+
+  const attachment = filePartFromBytes({
+    bytes: pdf,
+    mimeType: 'application/pdf',
+    filename: 'invoice.pdf'
+  })
+
+  const textProducer = makeTool<TestContext, typeof QueryParams>({
+    name: 'get_attachment',
+    description: 'Yields a file with text',
+    parameters: QueryParams,
+    access: 'read',
+    execute: ({ call }) =>
+      Effect.succeed(
+        ToolResult.make({
+          toolCallId: call.id,
+          content: [TextPart.make({ text: 'attachment' }), attachment]
+        })
+      )
+  })
+
+  const structuredProducer = makeTool<TestContext, typeof QueryParams>({
+    name: 'export_hits',
+    description: 'Yields a file with structured output',
+    parameters: QueryParams,
+    output: HitsOutput,
+    access: 'read',
+    execute: ({ call }) =>
+      Effect.succeed(
+        ToolResult.make({
+          toolCallId: call.id,
+          content: [attachment],
+          structuredContent: { hits: [{ id: 'a', score: 1 }] }
+        })
+      )
+  })
+
+  it.live('gives scripts file descriptors and never the bytes', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [moduleOf('host', [codemode()]), moduleOf('mail', [textProducer, structuredProducer])],
+        context,
+        { files: { store } }
+      )
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'codemode',
+          params: {
+            code: `const a = await tools.get_attachment({ query: 'x' })
+                   const b = await tools.export_hits({ query: 'y' })
+                   return { text: a.text, a: a.files, b: b.files, hits: b.hits.length }`
+          }
+        })
+      )
+
+      const file = { fileId: 'file_a1', name: 'invoice.pdf', mimeType: 'application/pdf', size: 12 }
+
+      expect(text(result.content)).toContain(
+        `Return value:\n${JSON.stringify({
+          text: 'attachment\n[file file_a1: invoice.pdf, application/pdf, 12 B]',
+          a: [file],
+          b: [file],
+          hits: 1
+        })}`
+      )
     })
   )
 })

@@ -221,7 +221,9 @@ type NestedResolution =
 /** What a nested call resolves to: `structuredContent` for tools with an output schema (when
  * present), text content otherwise; error results reject with their text. A tool that declares an
  * output schema but returns no `structuredContent` resolves to its text: that is a tool bug, kept
- * readable rather than turned into a failure.
+ * readable rather than turned into a failure. When the result captured files (ADR 0009), the
+ * script also gets their descriptors as `files`: merged into an object `structuredContent`,
+ * otherwise as `{ text, files }`.
  */
 const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
   const text = nestedText(result.content)
@@ -230,9 +232,21 @@ const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): Nes
     return { ok: false, message: text.length > 0 ? text : `Tool ${tool.name} failed.` }
   }
 
-  return tool.structured && result.structuredContent !== undefined
-    ? { ok: true, value: result.structuredContent }
-    : { ok: true, value: text }
+  const value =
+    tool.structured && result.structuredContent !== undefined ? result.structuredContent : text
+
+  if (result.files === undefined || result.files.length === 0) return { ok: true, value }
+
+  const files = result.files.map(file => ({
+    fileId: file.fileId,
+    name: file.name,
+    mimeType: file.mimeType,
+    size: file.size
+  }))
+
+  return Predicate.isObject(value) && !Array.isArray(value)
+    ? { ok: true, value: { ...value, files } }
+    : { ok: true, value: { text, files } }
 }
 
 type CallOutcome = {

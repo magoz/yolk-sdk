@@ -1,5 +1,6 @@
 import { Array as Arr, Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
+import { fileLabel, fileNotCapturedLabel, isFileId } from './file.ts'
 
 export class TextPart extends Schema.TaggedClass<TextPart>()('Text', {
   text: Schema.String
@@ -51,7 +52,19 @@ export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
   durationMs: Schema.optional(Schema.Number)
 }) {}
 
-export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart])
+/**
+ * Bytes the agent can move between tools, not content for the model to view (ADR 0009). Producers
+ * emit an `InlineBase64` source; tool resolution captures it into the host file store and rewrites
+ * it to `Ref { id: fileId }`. Providers lower it to its text label only, never as an attachment.
+ */
+export class FilePart extends Schema.TaggedClass<FilePart>()('File', {
+  source: AttachmentSource,
+  mimeType: Schema.String,
+  filename: Schema.optional(Schema.String),
+  size: Schema.optional(Schema.Number)
+}) {}
+
+export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart, FilePart])
 
 export type ContentPart = typeof ContentPart.Type
 
@@ -109,6 +122,8 @@ const resolveContentPartAttachmentSource = <E, R>(
         )
       )
     ),
+    // Files are never provider attachments: they lower to their label, so nothing to resolve.
+    Match.tag('File', current => Effect.succeed(current)),
     Match.exhaustive
   )
 
@@ -120,10 +135,27 @@ export const resolveContentAttachmentSources = <E, R>(
     ? Effect.succeed(content)
     : Effect.forEach(content, part => resolveContentPartAttachmentSource(part, resolver))
 
+/**
+ * The model-visible text of a file part: its label when captured (`Ref` to a file id), otherwise a
+ * "not captured" line. Inline bytes are never rendered.
+ */
+export const filePartText = (part: FilePart) => {
+  const name = part.filename ?? 'file'
+
+  if (Predicate.isTagged(part.source, 'Ref') && isFileId(part.source.id)) {
+    return part.size === undefined
+      ? fileLabel({ fileId: part.source.id, name, mimeType: part.mimeType })
+      : fileLabel({ fileId: part.source.id, name, mimeType: part.mimeType, size: part.size })
+  }
+
+  return fileNotCapturedLabel({ name, mimeType: part.mimeType, reason: 'no file store' })
+}
+
 export const contentPartText = (part: ContentPart) =>
   Match.value(part).pipe(
     Match.tag('Text', current => current.text),
     Match.tag('Image', 'Document', 'Audio', () => ''),
+    Match.tag('File', filePartText),
     Match.exhaustive
   )
 
@@ -133,6 +165,7 @@ export const contentPartPreview = (part: ContentPart) =>
     Match.tag('Image', () => 'Image'),
     Match.tag('Document', current => `Document: ${current.title ?? current.filename}`),
     Match.tag('Audio', () => 'Audio'),
+    Match.tag('File', current => `File: ${current.filename ?? current.mimeType}`),
     Match.exhaustive
   )
 
@@ -209,6 +242,38 @@ export const urlAttachmentSource = (url: string) => UrlAttachmentSource.make({ u
 export const refAttachmentSource = (id: string) => RefAttachmentSource.make({ id })
 
 export const inlineBase64Source = inlineBase64AttachmentSource
+
+const base64ChunkBytes = 0x8000
+
+/** Standard base64 of `bytes`, chunked so large files do not exceed argument limits. */
+export const bytesToBase64 = (bytes: Uint8Array) => {
+  let binary = ''
+
+  for (let offset = 0; offset < bytes.length; offset += base64ChunkBytes) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + base64ChunkBytes))
+  }
+
+  return globalThis.btoa(binary)
+}
+
+/** A `FilePart` carrying `bytes` inline, for tools that yield files (ADR 0009). */
+export const filePartFromBytes = (input: {
+  readonly bytes: Uint8Array
+  readonly mimeType: string
+  readonly filename?: string
+}) =>
+  input.filename === undefined
+    ? FilePart.make({
+        source: inlineBase64AttachmentSource(bytesToBase64(input.bytes)),
+        mimeType: input.mimeType,
+        size: input.bytes.byteLength
+      })
+    : FilePart.make({
+        source: inlineBase64AttachmentSource(bytesToBase64(input.bytes)),
+        mimeType: input.mimeType,
+        filename: input.filename,
+        size: input.bytes.byteLength
+      })
 
 export const attachmentSourcePreview = (source: AttachmentSource) =>
   Match.value(source).pipe(

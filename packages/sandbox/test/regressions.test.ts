@@ -141,6 +141,7 @@ const makeHandle = (input: {
 
     return Effect.void
   },
+  readFile: () => Effect.succeed(null),
   runDetachedCommand: command => {
     input.commands.push(command)
 

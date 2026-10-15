@@ -14,6 +14,7 @@ import {
   attachmentSourceText,
   assistantContent,
   assistantHostToolCalls,
+  filePartText,
   isTextDocumentMimeType,
   messageContextText,
   replaceLoneSurrogatesDeep,
@@ -676,6 +677,9 @@ const contentPartToAnthropicBlock = (
           : Effect.fail(unsupportedContentError(`Document ${current.mimeType}`))
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio'))),
+    Match.tag('File', (current): Effect.Effect<AnthropicToolResultContentBlock, LLMError> =>
+      Effect.succeed({ type: 'text', text: filePartText(current) })
+    ),
     Match.exhaustive
   )
 
@@ -692,6 +696,7 @@ const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<stri
     Match.tag('Image', () => Effect.fail(unsupportedContentError(`${owner} image`))),
     Match.tag('Document', () => Effect.fail(unsupportedContentError(`${owner} document`))),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`))),
+    Match.tag('File', current => Effect.succeed(filePartText(current))),
     Match.exhaustive
   )
 

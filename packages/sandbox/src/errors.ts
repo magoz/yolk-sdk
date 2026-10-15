@@ -3,7 +3,10 @@ import * as Schema from 'effect/Schema'
 export const SandboxInputErrorCause = Schema.Literals([
   'empty_command',
   'invalid_cwd',
-  'invalid_timeout'
+  'invalid_timeout',
+  'invalid_path',
+  'file_not_found',
+  'file_too_large'
 ])
 
 export type SandboxInputErrorCause = typeof SandboxInputErrorCause.Type

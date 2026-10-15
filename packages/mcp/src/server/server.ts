@@ -14,6 +14,7 @@ import {
   ToolResult,
   attachmentSourceBase64,
   attachmentSourcePreview,
+  filePartText,
   contentParts,
   type ContentPart,
   type ToolDef
@@ -211,6 +212,20 @@ const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock =>
           text: `Audio attachment: ${attachmentSourcePreview(current.source)}`
         }),
         onSome: data => ({ type: 'audio', data, mimeType: current.mimeType })
+      })
+    ),
+    // Inline file bytes leave as an embedded resource; a captured file only as its label.
+    Match.tag('File', current =>
+      Option.match(attachmentSourceBase64(current.source), {
+        onNone: () => ({ type: 'text', text: filePartText(current) }),
+        onSome: data => ({
+          type: 'resource',
+          resource: {
+            uri: documentResourceUri(current.filename ?? 'file'),
+            mimeType: current.mimeType,
+            blob: data
+          }
+        })
       })
     ),
     Match.exhaustive

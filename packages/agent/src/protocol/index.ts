@@ -17,6 +17,7 @@ export {
   type AttachmentSourceResolver,
   attachmentSourcePreview,
   AudioPart,
+  bytesToBase64,
   Content,
   ContentPart,
   contentParts,
@@ -28,6 +29,9 @@ export {
   replaceLoneSurrogatesDeep,
   DocumentPart,
   documentPartFromText,
+  FilePart,
+  filePartFromBytes,
+  filePartText,
   ImagePart,
   inferTextDocumentMimeType,
   InlineBase64AttachmentSource,
@@ -44,6 +48,17 @@ export {
   UrlAttachmentSource,
   TextPart
 } from './content.ts'
+
+export {
+  FileDescriptor,
+  FileId,
+  fileIdPattern,
+  fileLabel,
+  fileNotCapturedLabel,
+  formatFileSize,
+  isFileId,
+  normalizeFileMimeType
+} from './file.ts'
 
 export {
   AgentAwaitingInput,

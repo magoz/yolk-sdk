@@ -13,6 +13,7 @@ import {
 import { Context, Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { connectorActionFile } from '../file-output.ts'
 import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import {
@@ -257,6 +258,13 @@ export class EmailGetAttachmentOutput extends Schema.Class<EmailGetAttachmentOut
   'EmailGetAttachmentOutput'
 )({
   attachment: EmailAttachmentContent
+}) {}
+
+/** The model-facing `email.get_attachment` output (ADR 0009): the bytes travel as a file. */
+export class EmailGetAttachmentFileOutput extends Schema.Class<EmailGetAttachmentFileOutput>(
+  'EmailGetAttachmentFileOutput'
+)({
+  attachment: EmailAttachmentMetadata
 }) {}
 
 const EmailNonEmptyMessageId = Schema.Trimmed.check(Schema.isNonEmpty())
@@ -1124,10 +1132,30 @@ export const emailGetMessageAction = defineAction({
 
 export const emailGetAttachmentAction = defineAction({
   id: 'email.get_attachment',
-  description: 'Get one decoded attachment from a configured IMAP or POP3 account as base64.',
+  description:
+    'Get one decoded attachment from a configured IMAP or POP3 account. As an agent tool it returns the attachment as a file (fileId) with its metadata; invoked directly it returns base64.',
   access: 'read',
   inputSchema: EmailGetAttachmentInput,
   outputSchema: EmailGetAttachmentOutput,
+  fileOutput: {
+    schema: EmailGetAttachmentFileOutput,
+    split: output => {
+      const { contentBase64, ...metadata } = output.attachment
+
+      return {
+        value: EmailGetAttachmentFileOutput.make({
+          attachment: EmailAttachmentMetadata.make(metadata)
+        }),
+        files: [
+          connectorActionFile({
+            base64: contentBase64,
+            mimeType: metadata.contentType,
+            filename: metadata.filename
+          })
+        ]
+      }
+    }
+  },
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const connection = yield* incomingConnection(integration)

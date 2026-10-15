@@ -10,6 +10,8 @@ export {
   maxSandboxCommandTimeoutMs,
   NormalizedWorkspaceCwd,
   normalizeWorkspaceCwd,
+  NormalizedWorkspacePath,
+  normalizeWorkspacePath,
   sandboxCommandTimeoutMs,
   sandboxLifecycleOrDefault,
   sandboxSourceOrDefault,
@@ -57,6 +59,6 @@ export {
 
 export type { SandboxError } from './errors.ts'
 
-export type { SandboxApi } from './service.ts'
+export type { SandboxApi, SandboxReadFileInput, SandboxWriteFileInput } from './service.ts'
 
 export type { SandboxStateStoreApi } from './state-store.ts'

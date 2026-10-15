@@ -366,6 +366,12 @@ const validateContent = (message: AgentMessage, capabilities: AgentModelCapabili
           ? Effect.void
           : Effect.fail(unsupportedInputError('Audio input is not supported by this model'))
       ),
+      // Files lower to their text label, never as a provider attachment.
+      Match.tag('File', () =>
+        capabilities.input.text
+          ? Effect.void
+          : Effect.fail(unsupportedInputError('Text input is not supported by this model'))
+      ),
       Match.exhaustive
     )
   )

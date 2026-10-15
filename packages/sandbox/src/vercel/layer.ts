@@ -12,11 +12,13 @@ import {
 } from 'effect'
 import {
   absoluteSandboxCwd,
+  absoluteSandboxPath,
   backgroundSandboxProbeMs,
   defaultSandboxPorts,
   defaultSandboxWorkspaceRoot,
   initialSandboxState,
   normalizeWorkspaceCwd,
+  normalizeWorkspacePath,
   sandboxCommandTimeoutMs,
   sandboxLifecycleOrDefault,
   sandboxSourceOrDefault,
@@ -35,13 +37,14 @@ import {
   type SandboxLifecycle,
   type SandboxState
 } from '../model.ts'
-import { Sandbox } from '../service.ts'
+import { Sandbox, type SandboxReadFileInput, type SandboxWriteFileInput } from '../service.ts'
 import { SandboxStateStore } from '../state-store.ts'
-import { SandboxProviderError } from '../errors.ts'
+import { SandboxInputError, SandboxProviderError } from '../errors.ts'
 import type { SandboxError } from '../errors.ts'
 import {
   VercelSandboxClient,
   VercelSandboxClientLive,
+  VercelSandboxFileTooLargeError,
   type VercelDetachedCommand,
   type VercelNetworkPolicy,
   type VercelSandboxHandle,
@@ -98,6 +101,24 @@ const tryProvider = <A>(operation: string, effect: Effect.Effect<A, unknown>) =>
           message: `Vercel Sandbox ${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
           underlying: error
         })
+    )
+  )
+
+// Like `tryProvider`, but input errors raised while reading stay as they are.
+const tryProviderKeepingInput = <A>(
+  operation: string,
+  effect: Effect.Effect<A, SandboxInputError | unknown>
+) =>
+  effect.pipe(
+    Effect.mapError(error =>
+      error instanceof SandboxInputError
+        ? error
+        : new SandboxProviderError({
+            provider: 'vercel',
+            operation,
+            message: `Vercel Sandbox ${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
+            underlying: error
+          })
     )
   )
 
@@ -482,8 +503,55 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
           })
         })
 
+      const writeFileUnlocked = (input: SandboxWriteFileInput) =>
+        Effect.gen(function* () {
+          const path = yield* normalizeWorkspacePath(input.path)
+          const active = yield* ensureSandbox(yield* Clock.currentTimeMillis)
+
+          yield* tryProvider(
+            'writeFiles',
+            active.handle.writeFiles([
+              { path: absoluteSandboxPath(workspaceRoot, path), content: input.bytes }
+            ])
+          )
+
+          return path
+        })
+
+      const readFileUnlocked = (input: SandboxReadFileInput) =>
+        Effect.gen(function* () {
+          const path = yield* normalizeWorkspacePath(input.path)
+          const active = yield* ensureSandbox(yield* Clock.currentTimeMillis)
+
+          const bytes = yield* active.handle
+            .readFile({ path: absoluteSandboxPath(workspaceRoot, path), maxBytes: input.maxBytes })
+            .pipe(
+              Effect.catchIf(
+                error => error instanceof VercelSandboxFileTooLargeError,
+                () =>
+                  Effect.fail(
+                    new SandboxInputError({
+                      cause: 'file_too_large',
+                      message: `${path} is larger than ${input.maxBytes} bytes`
+                    })
+                  )
+              ),
+              effect => tryProviderKeepingInput('readFile', effect)
+            )
+
+          if (bytes === null) {
+            return yield* Effect.fail(
+              new SandboxInputError({ cause: 'file_not_found', message: `${path} does not exist` })
+            )
+          }
+
+          return bytes
+        })
+
       return Sandbox.of({
         run: input => semaphore.withPermits(1)(runUnlocked(input)),
+        writeFile: input => semaphore.withPermits(1)(writeFileUnlocked(input)),
+        readFile: input => semaphore.withPermits(1)(readFileUnlocked(input)),
         currentState: store.load(config.sandboxSessionId),
         delete: Effect.gen(function* () {
           const loaded = yield* store.load(config.sandboxSessionId)

@@ -96,6 +96,7 @@ import {
   type ToolPlanResolution
 } from './plan-runtime.ts'
 import { makeToolSearchTool } from './tool-search.ts'
+import { captureToolResultFiles, type ToolFileCaptureOptions } from './files.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -986,6 +987,9 @@ const interactionToolError = (input: {
 /** Bound of an interaction's `unknownOutcome` description; past it the generic notice is used. */
 const interactionUnknownDescriptionTimeout = Duration.seconds(3)
 
+// Bound of storing an interaction result's files before settlement (ADR 0009).
+const interactionFileCaptureTimeout = Duration.seconds(60)
+
 const hostErrorToToolError = (tool: string) => (error: unknown) =>
   interactionToolError({
     tool,
@@ -1006,6 +1010,8 @@ const executeInteractionTool = <Context>(input: {
   readonly context: Context
   readonly ref: InteractionRef | undefined
   readonly host: InteractionHost | undefined
+  /** File capture (ADR 0009): the settled result is captured before the host stores it. */
+  readonly files: ToolFileCaptureOptions | undefined
 }): Effect.Effect<ToolResult, ToolError> =>
   Effect.gen(function* () {
     const name = input.call.name
@@ -1093,7 +1099,10 @@ const executeInteractionTool = <Context>(input: {
           Effect.logWarning(
             `Interaction ${stored.slot}: unknownOutcome failed; using the generic notice: ${defect instanceof Error ? defect.message : String(defect)}`
           ).pipe(Effect.as(genericUnknownResult()))
-        )
+        ),
+        // Descriptions may carry file parts: never store or replay their bytes (no I/O here, so
+        // the seal keeps its bound).
+        Effect.flatMap(result => captureToolResultFiles(result, undefined))
       )
     }
 
@@ -1247,19 +1256,33 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
-          const outcome: InteractionOutcome = {
-            status: actionResult.outcome,
-            result: makeInteractionToolResult({
-              toolCallId: stored.call.id,
-              requestId: stored.slot,
-              slot: stored.slot,
-              submissionId: stored.submissionId,
-              actionId: actionId ?? '',
-              outcome: actionResult.outcome,
-              content: actionResult.content,
-              structuredContent: actionResult.structuredContent
-            })
-          }
+          const actionToolResult = makeInteractionToolResult({
+            toolCallId: stored.call.id,
+            requestId: stored.slot,
+            slot: stored.slot,
+            submissionId: stored.submissionId,
+            actionId: actionId ?? '',
+            outcome: actionResult.outcome,
+            content: actionResult.content,
+            structuredContent: actionResult.structuredContent
+          })
+
+          // Storing files is interruptible and bounded; past the bound the bytes become
+          // "not captured" labels, so the real outcome is still settled.
+          const captured = yield* restore(
+            captureToolResultFiles(actionToolResult, input.files)
+          ).pipe(
+            Effect.timeoutOption(interactionFileCaptureTimeout),
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  captureToolResultFiles(actionToolResult, undefined, 'storage timed out'),
+                onSome: Effect.succeed
+              })
+            )
+          )
+
+          const outcome: InteractionOutcome = { status: actionResult.outcome, result: captured }
 
           const settled = yield* restore(
             Effect.suspend(() => host.settle(claim.token, outcome))
@@ -1356,6 +1379,11 @@ export const resolveTools = <Context>(
      * model-callable tool is `loading: 'deferred'` and no tool is named `tool_search`.
      */
     readonly toolSearch?: false
+    /** File capture (ADR 0009): bytes in every executed result (direct, nested, staged) are stored
+     * through `store` and replaced by `fileId` labels before the ledger, transcript or scripts see
+     * them. Absent: inline `File` parts become "not captured" labels; other parts are unchanged.
+     */
+    readonly files?: ToolFileCaptureOptions
   } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
@@ -1986,7 +2014,8 @@ export const resolveTools = <Context>(
           call,
           context,
           ref: executionOptions?.interaction,
-          host: options.interactionHost
+          host: options.interactionHost,
+          files: options.files
         })
       }
 
@@ -2010,7 +2039,17 @@ export const resolveTools = <Context>(
         : runRegistration(match, call, idempotencyKey)
     }
 
+    // Every registration result passes file capture before the ledger, transcript or scripts.
     const runRegistration = (
+      match: ResolvedRegistration<Context>,
+      call: ToolCall,
+      idempotencyKey: string | undefined
+    ): Effect.Effect<ToolResult, ToolError> =>
+      runRegistrationUncaptured(match, call, idempotencyKey).pipe(
+        Effect.flatMap(result => captureToolResultFiles(result, options.files))
+      )
+
+    const runRegistrationUncaptured = (
       match: ResolvedRegistration<Context>,
       call: ToolCall,
       idempotencyKey: string | undefined
@@ -2063,7 +2102,8 @@ export const resolveTools = <Context>(
             call,
             context,
             ref: executionOptions.interaction,
-            host: options.interactionHost
+            host: options.interactionHost,
+            files: options.files
           })
         : Option.match(
             Arr.findFirst(

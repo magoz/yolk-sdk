@@ -8,10 +8,15 @@ export type {
 
 export { defineAction } from './action.ts'
 
+export { connectorActionFile, sniffBase64MimeType } from './file-output.ts'
+
 export type {
   ActionExecutionInput,
   ConnectorAction,
   ConnectorActionAccess,
+  ConnectorActionFile,
+  ConnectorActionFileOutput,
+  UnknownConnectorActionFileOutput,
   DefineActionOptions,
   TypedConnectorAction,
   UnknownActionExecutionInput

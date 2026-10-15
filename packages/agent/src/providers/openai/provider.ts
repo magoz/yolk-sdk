@@ -30,6 +30,7 @@ import {
   assistantContent,
   assistantHostToolCalls,
   assistantReasoningText,
+  filePartText,
   isTextDocumentMimeType,
   messageContextText,
   replaceLoneSurrogatesDeep,
@@ -654,6 +655,11 @@ const contentPartToUserPart = (
           : Effect.fail(unsupportedContentError('Document', providerName))
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio', providerName))),
+    Match.tag(
+      'File',
+      (current): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> =>
+        Effect.succeed({ type: 'text', text: filePartText(current) })
+    ),
     Match.exhaustive
   )
 
@@ -681,6 +687,7 @@ const contentPartToText = (
       Effect.fail(unsupportedContentError(`${owner} document`, providerName))
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`, providerName))),
+    Match.tag('File', current => Effect.succeed(filePartText(current))),
     Match.exhaustive
   )
 
@@ -769,6 +776,11 @@ const toolResultToOpenAi = (
         Match.tag('Text', current =>
           Effect.sync(() => {
             textSegments.push(current.text)
+          })
+        ),
+        Match.tag('File', current =>
+          Effect.sync(() => {
+            textSegments.push(filePartText(current))
           })
         ),
         Match.tag('Audio', () =>

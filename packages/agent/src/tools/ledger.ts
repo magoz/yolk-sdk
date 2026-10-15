@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   contentText,
+  filePartText,
   TextPart,
   ToolResult,
   type Content,
@@ -408,19 +409,24 @@ type StoredResultFields = {
   acceptance?: ToolResult['acceptance']
   nestedCalls?: ToolResult['nestedCalls']
   usage?: ToolResult['usage']
+  files?: ToolResult['files']
 }
 
 const reducedNote = '[The stored copy of this result was reduced to fit the tool ledger bound.]'
 
 const mediaPlaceholder = (tag: string) => `[${tag.toLowerCase()} omitted from the stored result]`
 
+// Files keep their label (their `fileId` stays model-visible on replay, ADR 0009); other media
+// parts become placeholders.
 const textOnlyContent = (content: Content): Content =>
   Predicate.isString(content)
     ? content
     : content.map(part =>
         Predicate.isTagged(part, 'Text')
           ? part
-          : TextPart.make({ text: mediaPlaceholder(part._tag) })
+          : Predicate.isTagged(part, 'File')
+            ? TextPart.make({ text: filePartText(part) })
+            : TextPart.make({ text: mediaPlaceholder(part._tag) })
       )
 
 const withNote = (content: Content): Content =>
@@ -523,6 +529,9 @@ export const toolLedgerResult = (
 
   if (result.nestedCalls !== undefined) full.nestedCalls = result.nestedCalls
 
+  // Captured files are identifiers only (ADR 0009): every reduction step keeps them.
+  if (result.files !== undefined) full.files = result.files
+
   if (resultBytes(full) <= maxBytes) return ToolResult.make(full)
 
   const textOnly: StoredResultFields = { ...full, content: withNote(textOnlyContent(full.content)) }
@@ -541,7 +550,22 @@ export const toolLedgerResult = (
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  return fitText(withoutStructured, contentText(textOnlyContent(result.content)), maxBytes)
+  return fitText(withoutStructured, labelsFirstText(result.content), maxBytes)
+}
+
+// The text the last reduction step cuts: file labels first, so a long text cannot cut them off.
+const labelsFirstText = (content: Content) => {
+  if (Predicate.isString(content)) return content
+
+  const labels = content.flatMap(part =>
+    Predicate.isTagged(part, 'File') ? [filePartText(part)] : []
+  )
+
+  const rest = contentText(
+    textOnlyContent(content.filter(part => !Predicate.isTagged(part, 'File')))
+  )
+
+  return [...labels, rest].join('\n')
 }
 
 const nestedSeq = (key: string) => {
@@ -747,6 +771,8 @@ const replay = (
   if (stored.nestedCalls !== undefined) fields.nestedCalls = stored.nestedCalls
 
   if (stored.usage !== undefined) fields.usage = stored.usage
+
+  if (stored.files !== undefined) fields.files = stored.files
 
   return Effect.succeed(ToolResult.make(fields))
 }

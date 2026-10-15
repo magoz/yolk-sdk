@@ -69,6 +69,7 @@ const conformanceForbiddenImports = [
   '@yolk-sdk/agent',
   '@yolk-sdk/codemode',
   '@yolk-sdk/extractors',
+  '@yolk-sdk/files',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -88,6 +89,7 @@ const emulatorsForbiddenImports = [
   '@yolk-sdk/codemode',
   '@yolk-sdk/conformance',
   '@yolk-sdk/extractors',
+  '@yolk-sdk/files',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -106,6 +108,7 @@ const codeModeForbiddenImports = [
   '@yolk-sdk/connectors',
   '@yolk-sdk/emulators',
   '@yolk-sdk/extractors',
+  '@yolk-sdk/files',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
@@ -124,12 +127,34 @@ const extractorsForbiddenImports = [
   '@yolk-sdk/conformance',
   '@yolk-sdk/connectors',
   '@yolk-sdk/emulators',
+  '@yolk-sdk/files',
   '@yolk-sdk/harness',
   '@yolk-sdk/mcp',
   '@yolk-sdk/sandbox',
   '@yolk-sdk/vercel-workflows',
   'next',
   'react'
+]
+
+// Files depend only on `@yolk-sdk/agent` (the sandbox is a structural port) and stay runtime-neutral (no Node builtins): hosts
+// provide object storage and the upload transport. Listed explicitly for the same self-import
+// reason as conformance.
+const filesForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/agent/react',
+  '@yolk-sdk/codemode',
+  '@yolk-sdk/conformance',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/emulators',
+  '@yolk-sdk/extractors',
+  '@yolk-sdk/harness',
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
+  'next',
+  'react',
+  'node:'
 ]
 
 const rules: ReadonlyArray<BoundaryRule> = [
@@ -251,6 +276,15 @@ const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'packages/extractors/src',
     forbiddenImports: extractorsForbiddenImports
+  },
+  {
+    packageDir: 'packages/files/src',
+    forbiddenImports: filesForbiddenImports
+  },
+  {
+    // Agent never imports files: files build on the agent tool contract.
+    packageDir: 'packages/agent/src',
+    forbiddenImports: ['@yolk-sdk/files']
   },
   {
     packageDir: 'packages/extractors/src',

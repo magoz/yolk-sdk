@@ -2,6 +2,7 @@ import { Array as Arr, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AudioPart,
+  FilePart,
   ImagePart,
   TextPart,
   ToolDef,
@@ -294,17 +295,36 @@ const fallbackTextForContentBlock = (block: GenericContentBlock) => {
   }
 }
 
-const embeddedResourceText = (block: GenericContentBlock): Option.Option<string> =>
-  Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
-    Option.flatMap(({ resource }) => {
-      if (resource.text !== undefined) {
-        return Option.some(resource.text)
-      }
+const resourceFilename = (uri: string) => {
+  const segments = (uri.split(/[?#]/u, 1)[0] ?? '').split('/').filter(part => part.length > 0)
+  const segment = segments[segments.length - 1]
 
-      return Option.all({
-        uri: Option.fromNullishOr(resource.uri),
-        blob: Option.fromNullishOr(resource.blob)
-      }).pipe(Option.map(({ uri, blob }) => `MCP resource: ${uri}\n${blob}`))
+  if (segment === undefined || segment.endsWith(':')) return undefined
+
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+// Embedded text stays text; a blob becomes a file part that tool resolution captures (ADR 0009),
+// so its base64 never reaches the model.
+const embeddedResourcePart = (block: GenericContentBlock): Option.Option<ContentPart> =>
+  Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
+    Option.flatMap(({ resource }): Option.Option<ContentPart> => {
+      if (resource.text !== undefined) return Option.some(TextPart.make({ text: resource.text }))
+
+      if (resource.blob === undefined) return Option.none()
+
+      const mimeType = resource.mimeType ?? 'application/octet-stream'
+      const filename = resource.uri === undefined ? undefined : resourceFilename(resource.uri)
+
+      return Option.some(
+        filename === undefined
+          ? FilePart.make({ source: inlineBase64Source(resource.blob), mimeType })
+          : FilePart.make({ source: inlineBase64Source(resource.blob), mimeType, filename })
+      )
     })
   )
 
@@ -357,11 +377,9 @@ const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {
   }
 
   if (type === 'resource') {
-    return TextPart.make({
-      text: embeddedResourceText(block).pipe(
-        Option.getOrElse(() => fallbackTextForContentBlock(block))
-      )
-    })
+    return Option.getOrElse(embeddedResourcePart(block), () =>
+      TextPart.make({ text: fallbackTextForContentBlock(block) })
+    )
   }
 
   if (type === 'resource_link') {

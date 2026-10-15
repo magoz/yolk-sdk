@@ -26,6 +26,7 @@ import {
   assistantContent,
   assistantHostToolCalls,
   contentParts,
+  filePartText,
   messageContextText,
   replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
@@ -318,6 +319,7 @@ const contentPartToText = (
       Effect.fail(unsupportedContentError(`${owner} document`, providerName))
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError(`${owner} audio`, providerName))),
+    Match.tag('File', current => Effect.succeed(filePartText(current))),
     Match.exhaustive
   )
 
@@ -387,6 +389,9 @@ const contentPartToResponsesInputPart = (
       )
     ),
     Match.tag('Audio', () => Effect.fail(unsupportedContentError('Audio', providerName))),
+    Match.tag('File', current =>
+      Effect.succeed({ type: 'input_text', text: filePartText(current) })
+    ),
     Match.exhaustive
   )
 

@@ -2,6 +2,7 @@ import {
   assistantContent,
   assistantHostToolCalls,
   assistantReasoningText,
+  filePartText,
   type AgentMessage,
   type Content
 } from '@yolk-sdk/agent/protocol'
@@ -50,6 +51,7 @@ export const estimateContentTokens = (content: Content, options: TokenEstimateOp
       Match.value(part).pipe(
         Match.tag('Text', current => estimateTextTokens(current.text, options)),
         Match.tag('Image', 'Document', 'Audio', () => mediaPartTokens(options)),
+        Match.tag('File', current => estimateTextTokens(filePartText(current), options)),
         Match.exhaustive
       ),
     0

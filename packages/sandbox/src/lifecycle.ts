@@ -47,6 +47,19 @@ export const NormalizedWorkspaceCwd = Schema.String.pipe(
 
 export type NormalizedWorkspaceCwd = typeof NormalizedWorkspaceCwd.Type
 
+const isNormalizedWorkspacePath = (value: string) =>
+  value !== '.' && isNormalizedWorkspaceCwd(value)
+
+/** A workspace-relative file path: normalized segments, never the workspace root itself. */
+export const NormalizedWorkspacePath = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter(isNormalizedWorkspacePath, { identifier: 'NormalizedWorkspacePath' })
+  ),
+  Schema.brand('NormalizedWorkspacePath')
+)
+
+export type NormalizedWorkspacePath = typeof NormalizedWorkspacePath.Type
+
 export const defaultSandboxLifecycle = DisposableSandboxLifecycle.make({
   idleTtlMs: defaultSandboxIdleTtlMs,
   maxLifetimeMs: defaultSandboxMaxLifetimeMs
@@ -157,6 +170,47 @@ export const normalizeWorkspaceCwd = (
     )
   )
 }
+
+const invalidPath = (message: string) =>
+  Effect.fail(new SandboxInputError({ cause: 'invalid_path', message }))
+
+/**
+ * A workspace-relative file path with `.` segments removed and `..` resolved. Absolute paths,
+ * NUL bytes, escapes from the workspace, and paths that name the workspace itself are rejected.
+ * Whitespace is part of file names and is kept.
+ */
+export const normalizeWorkspacePath = (
+  path: string
+): Effect.Effect<NormalizedWorkspacePath, SandboxInputError> => {
+  if (path.startsWith('/') || path.includes('\0')) {
+    return invalidPath('path must be workspace-relative')
+  }
+
+  const parts: Array<string> = []
+
+  for (const segment of path.split('/')) {
+    if (segment.length === 0 || segment === '.') continue
+
+    if (segment === '..') {
+      if (parts.pop() === undefined) return invalidPath('path must not escape the workspace')
+
+      continue
+    }
+
+    parts.push(segment)
+  }
+
+  return Schema.decodeUnknownEffect(NormalizedWorkspacePath)(parts.join('/')).pipe(
+    Effect.mapError(
+      () => new SandboxInputError({ cause: 'invalid_path', message: 'path must name a file' })
+    )
+  )
+}
+
+export const absoluteSandboxPath = (
+  workspaceRoot: string,
+  normalizedPath: NormalizedWorkspacePath
+) => `${workspaceRoot}/${normalizedPath}`
 
 export const absoluteSandboxCwd = (workspaceRoot: string, normalizedCwd: NormalizedWorkspaceCwd) =>
   normalizedCwd === '.' ? workspaceRoot : `${workspaceRoot}/${normalizedCwd}`
