@@ -93,6 +93,8 @@ type Family<Req> = {
   readonly headers: Readonly<Record<string, string>>
   /** Window ids of the committed fixture. */
   readonly windowIds: ReadonlyArray<string>
+  /** Model-scoped window ids of the committed fixture, after `windowIds`. */
+  readonly scopedWindowIds?: ReadonlyArray<string>
   /** The public parser of the family's usage body. */
   readonly parse: (
     value: unknown,
@@ -123,6 +125,7 @@ const claude: Family<AnthropicClaudeUsageConformanceConfig> = {
   }),
   headers: { 'anthropic-beta': 'oauth-2025-04-20' },
   windowIds: ['five-hour', 'seven-day'],
+  scopedWindowIds: ['seven-day-opus'],
   parse: parseAnthropicClaudeSubscriptionUsage,
   withoutWindows: { five_hour: null, seven_day: { utilization: null } },
   oneWindow: claudeOneWindow
@@ -324,7 +327,10 @@ const describeFamily = <Req>(family: Family<Req>) => {
 
         const snapshot = yield* family.parse(JSON.parse(text), '2026-09-15T12:00:00.000Z')
 
-        expect(Array.from(snapshot.windows).map(window => window.id)).toEqual(family.windowIds)
+        expect(Array.from(snapshot.windows).map(window => window.id)).toEqual([
+          ...family.windowIds,
+          ...(family.scopedWindowIds ?? [])
+        ])
         expect(family.testCase.wire).toContain(family.windowIds.map(id => `\`${id}\``).join(', '))
       })
     )
@@ -447,6 +453,17 @@ describe('the shared usage claim catches a snapshot that disagrees with the wire
 
   it.effect('passes untampered, fails a fabricated, dropped, or altered window', () =>
     Effect.gen(function* () {
+      // The drill reads only the account-wide windows, so it replays a body without scoped limits.
+      const standardFixture = withResponse(
+        anthropicClaudeUsageSnapshotFixture,
+        'standard-windows',
+        200,
+        JSON.stringify({
+          five_hour: { utilization: 18, resets_at: '2026-10-01T05:00:00.000Z' },
+          seven_day: { utilization: 42, resets_at: '2026-10-06T00:00:00.000Z' }
+        })
+      )
+
       const oneWindowFixture = withResponse(
         anthropicClaudeUsageSnapshotFixture,
         'one-window',
@@ -457,7 +474,7 @@ describe('the shared usage claim catches a snapshot that disagrees with the wire
       expect(
         (yield* run(
           tamperedCase(snapshot => snapshot),
-          anthropicClaudeUsageSnapshotFixture
+          standardFixture
         ))?.status
       ).toBe('passed')
 
@@ -476,7 +493,7 @@ describe('the shared usage claim catches a snapshot that disagrees with the wire
         withWindows(snapshot, Array.from(snapshot.windows).slice(0, 1))
       )
 
-      expect((yield* run(dropped, anthropicClaudeUsageSnapshotFixture))?.failure).toEqual(
+      expect((yield* run(dropped, standardFixture))?.failure).toEqual(
         mismatch('expected one window per reported wire window (none fabricated, none dropped)')
       )
 
@@ -489,15 +506,17 @@ describe('the shared usage claim catches a snapshot that disagrees with the wire
         )
       )
 
-      expect((yield* run(altered, anthropicClaudeUsageSnapshotFixture))?.failure).toEqual(
-        mismatch('expected each window to carry the wire used percentage and reset instant')
+      expect((yield* run(altered, standardFixture))?.failure).toEqual(
+        mismatch(
+          'expected each window to carry the wire used percentage, reset instant, and scoped models'
+        )
       )
 
       const reordered = tamperedCase(snapshot =>
         withWindows(snapshot, Array.from(snapshot.windows).reverse())
       )
 
-      expect((yield* run(reordered, anthropicClaudeUsageSnapshotFixture))?.failure).toEqual(
+      expect((yield* run(reordered, standardFixture))?.failure).toEqual(
         mismatch('expected windows in the vendor order')
       )
     })

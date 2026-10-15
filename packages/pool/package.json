@@ -1,0 +1,73 @@
+{
+  "name": "@yolk-sdk/pool",
+  "version": "0.1.0-canary.115",
+  "description": "Subscription account pools for Yolk agents: expiring-first routing and failover across several accounts of one provider behind one LLMProvider.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/pool"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "agents",
+    "llm",
+    "subscriptions",
+    "routing",
+    "failover",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./store": {
+      "types": "./src/store.ts",
+      "default": "./src/store.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk-sdk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

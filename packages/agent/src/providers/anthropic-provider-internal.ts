@@ -1,4 +1,4 @@
-import { Effect, Layer, Match, Option, Predicate, Ref, Result, Stream } from 'effect'
+import { Clock, Effect, Layer, Match, Option, Predicate, Ref, Result, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -55,6 +55,7 @@ import {
   providerFailureRetryable
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
+import { anthropicClaudeQuotaResetsAtMs } from './quota-reset-internal.ts'
 
 /**
  * Lifetime of the prompt-cache entries the request writes. `5m` is Anthropic's default; `1h` costs
@@ -1699,6 +1700,7 @@ type AnthropicHttpClassifyFields = {
   body: string
   message?: string
   providerCode?: string
+  quotaResetsAtMs?: number
 }
 
 const providerSignalError = (input: {
@@ -2512,6 +2514,12 @@ const sendAnthropicClaudeRequest = (
 
       const errorInfo = yield* decodeAnthropicHttpErrorInfo(errorText)
 
+      const quotaResetsAtMs = anthropicClaudeQuotaResetsAtMs({
+        status: response.status,
+        headers: response.headers,
+        nowMs: yield* Clock.currentTimeMillis
+      })
+
       const provider = classifyProviderFailure(
         (() => {
           const fields: AnthropicHttpClassifyFields = {
@@ -2519,6 +2527,10 @@ const sendAnthropicClaudeRequest = (
             status: response.status,
             headers: response.headers,
             body: errorText
+          }
+
+          if (quotaResetsAtMs !== undefined) {
+            fields.quotaResetsAtMs = quotaResetsAtMs
           }
 
           if (errorInfo.message !== undefined) {

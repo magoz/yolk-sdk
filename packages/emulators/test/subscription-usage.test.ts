@@ -133,7 +133,15 @@ const families: ReadonlyArray<Family> = [
     body: anthropicSubscriptionUsageDefault,
     otherValues: {
       five_hour: { utilization: 1, resets_at: '2026-10-02T00:00:00.000Z' },
-      seven_day: { utilization: 2, resets_at: '2026-10-09T00:00:00.000Z' }
+      seven_day: { utilization: 2, resets_at: '2026-10-09T00:00:00.000Z' },
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          percent: 3,
+          resets_at: '2026-10-09T00:00:00.000Z',
+          scope: { model: { id: null, display_name: 'Sonnet' } }
+        }
+      ]
     },
     routes: anthropicSubscriptionUsageEmulatorRoutes,
     wireRoutes: anthropicEmulatorRoutes,

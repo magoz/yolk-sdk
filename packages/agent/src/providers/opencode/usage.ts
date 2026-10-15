@@ -52,7 +52,14 @@ type OpenCodeGoUsageWindowFields = {
   id: string
   usedPercent: number
   resetsAt?: string
+  windowDurationMinutes?: number
 }
+
+/**
+ * Lengths of the fixed rolling windows, in minutes. The monthly window follows the billing month,
+ * so it has none: never infer calendar-month boundaries.
+ */
+const openCodeGoWindowMinutes = { rolling: 300, weekly: 10_080 } as const
 
 /** Normalize provider-reported allowance, never infer it from per-request token usage. */
 export const parseOpenCodeGoSubscriptionUsage = (
@@ -74,21 +81,28 @@ export const parseOpenCodeGoSubscriptionUsage = (
     Effect.map(decoded => {
       const windows: Array<ProviderSubscriptionUsageWindow> = []
 
-      const append = (wire: OpenCodeGoUsageWindowWire | null | undefined, id: string) => {
+      const append = (
+        wire: OpenCodeGoUsageWindowWire | null | undefined,
+        id: string,
+        windowDurationMinutes?: number
+      ) => {
         if (!validSubscriptionUsagePercent(wire?.percent)) return
-
-        const fields: OpenCodeGoUsageWindowFields = { id, usedPercent: wire.percent }
 
         const resetsAt =
           wire.resetsAt == null ? undefined : canonicalSubscriptionUsageInstant(wire.resetsAt)
 
+        const fields: OpenCodeGoUsageWindowFields = { id, usedPercent: wire.percent }
+
         if (resetsAt !== undefined) fields.resetsAt = resetsAt
+
+        if (windowDurationMinutes !== undefined)
+          fields.windowDurationMinutes = windowDurationMinutes
 
         windows.push(ProviderSubscriptionUsageWindow.make(fields))
       }
 
-      append(decoded.usage.rolling, 'five-hour')
-      append(decoded.usage.weekly, 'seven-day')
+      append(decoded.usage.rolling, 'five-hour', openCodeGoWindowMinutes.rolling)
+      append(decoded.usage.weekly, 'seven-day', openCodeGoWindowMinutes.weekly)
       append(decoded.usage.monthly, 'monthly')
 
       return ProviderSubscriptionUsageSnapshot.make({

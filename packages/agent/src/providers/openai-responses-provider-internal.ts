@@ -1,5 +1,6 @@
 import {
   Array as Arr,
+  Clock,
   Effect,
   Layer,
   Match,
@@ -56,6 +57,7 @@ import {
   providerFailureCause,
   providerFailureRetryable
 } from './provider-error.ts'
+import { openAiCodexQuotaResetsAtMs } from './quota-reset-internal.ts'
 import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import { validateProviderTranscript } from './transcript.ts'
 
@@ -1681,13 +1683,30 @@ const sendOpenAiResponsesRequest = (
 
       const errorCode = yield* decodeOpenAiHttpErrorCode(errorText)
 
-      const provider = classifyProviderFailure({
-        provider: config.providerId,
+      const quotaResetsAtMs = openAiCodexQuotaResetsAtMs({
         status: response.status,
-        headers: response.headers,
         body: errorText,
-        providerCode: errorCode
+        nowMs: yield* Clock.currentTimeMillis
       })
+
+      const provider = classifyProviderFailure(
+        quotaResetsAtMs === undefined
+          ? {
+              provider: config.providerId,
+              status: response.status,
+              headers: response.headers,
+              body: errorText,
+              providerCode: errorCode
+            }
+          : {
+              provider: config.providerId,
+              status: response.status,
+              headers: response.headers,
+              body: errorText,
+              providerCode: errorCode,
+              quotaResetsAtMs
+            }
+      )
 
       return yield* Effect.fail(
         new LLMError({

@@ -94,6 +94,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 | `executor`                     | `.repos/executor`            | Connector/source/tool/plugin architecture reference |
 | `t3code`                       | `.repos/t3code`              | Agent chat/product UI reference                     |
 | `mcp-sdk`                      | `.repos/mcp-sdk`             | MCP protocol reference                              |
+| `cpa-expiring-first`           | `.repos/cpa-expiring-first`  | `@yolk-sdk/pool` behavior spec (Go plugin + tests)  |
 | `pi`, `kody`, `flue`, `clanka` | `.repos/*`                   | Architecture/tooling inspiration                    |
 
 Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-repos` to fetch. Keep `.repos/**` out of workspace, lint, typecheck, test, and build.

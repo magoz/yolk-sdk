@@ -36,13 +36,26 @@ describe('OpenCode Go subscription usage', () => {
       expect(snapshot.provider).toBe('opencode_go')
       expect(snapshot.fetchedAt).toBe(fetchedAt)
       expect(Array.from(snapshot.windows)).toMatchObject([
-        { id: 'five-hour', usedPercent: 25, resetsAt: '2026-09-15T14:00:00.000Z' },
-        { id: 'seven-day', usedPercent: 40.5, resetsAt: '2026-09-21T00:00:00.000Z' },
-        { id: 'monthly', usedPercent: 100, resetsAt: '2026-10-11T12:34:56.000Z' }
+        {
+          id: 'five-hour',
+          usedPercent: 25,
+          resetsAt: '2026-09-15T14:00:00.000Z',
+          windowDurationMinutes: 300
+        },
+        {
+          id: 'seven-day',
+          usedPercent: 40.5,
+          resetsAt: '2026-09-21T00:00:00.000Z',
+          windowDurationMinutes: 10_080
+        },
+        {
+          id: 'monthly',
+          usedPercent: 100,
+          resetsAt: '2026-10-11T12:34:56.000Z'
+        }
       ])
-      expect(
-        Array.from(snapshot.windows).every(window => window.windowDurationMinutes === undefined)
-      ).toBe(true)
+      // The monthly window follows the billing month: no length is inferred for it.
+      expect(Array.from(snapshot.windows).at(-1)?.windowDurationMinutes).toBeUndefined()
     })
   )
 

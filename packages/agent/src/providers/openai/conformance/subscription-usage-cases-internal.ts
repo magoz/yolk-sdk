@@ -37,6 +37,8 @@ export type SubscriptionUsageExpectedWindow = {
   readonly id: string
   readonly usedPercent: number
   readonly resetsAt: string | undefined
+  /** Model substrings of a model-scoped window; absent for account-wide windows. */
+  readonly models?: ReadonlyArray<string>
 }
 
 export type SubscriptionUsageConformanceCase<R> = ConformanceCase<
@@ -56,6 +58,11 @@ export type SubscriptionUsageConformanceSpec<Settings, R> = {
   readonly providerId: string
   /** The vendor's window ids, in the order the snapshot lists them. */
   readonly windowIds: ReadonlyArray<string>
+  /**
+   * Id prefix of model-scoped windows, whose ids depend on the reported models. They follow the
+   * known windows in wire order.
+   */
+  readonly scopedWindowIdPrefix?: string
   readonly settings: Effect.Effect<Settings, never, R>
   /** The public fetcher, called with its default URL. */
   readonly fetch: (
@@ -125,13 +132,27 @@ const capturingBodies = (
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
+const sameModels = (
+  actual: ReadonlyArray<string> | undefined,
+  expected: ReadonlyArray<string> | undefined
+) =>
+  actual === undefined || expected === undefined
+    ? actual === expected
+    : actual.length === expected.length && actual.every((model, index) => model === expected[index])
+
 const sameWindow = (
-  actual: { readonly id: string; readonly usedPercent: number; readonly resetsAt?: string },
+  actual: {
+    readonly id: string
+    readonly usedPercent: number
+    readonly resetsAt?: string
+    readonly models?: ReadonlyArray<string>
+  },
   expected: SubscriptionUsageExpectedWindow
 ): boolean =>
   actual.id === expected.id &&
   actual.usedPercent === expected.usedPercent &&
-  actual.resetsAt === expected.resetsAt
+  actual.resetsAt === expected.resetsAt &&
+  sameModels(actual.models, expected.models)
 
 /** Build one vendor's subscription-usage snapshot case. */
 export const makeSubscriptionUsageConformanceCase = <Settings, R>(
@@ -142,7 +163,7 @@ export const makeSubscriptionUsageConformanceCase = <Settings, R>(
     title: spec.title,
     safety: 'read',
     docs: spec.docs,
-    wire: `The fetcher (default URL) succeeds with a snapshot for provider \`${spec.providerId}\` carrying at least one window; window ids are distinct, drawn from ${spec.windowIds.map(id => `\`${id}\``).join(', ')}, and listed in that order. No window is fabricated or dropped: the case reads the same response body at its own HttpClient boundary (handing the provider the same bytes) and requires exactly one JSON body whose reported windows (those with a numeric used percentage from 0 to 100) match the snapshot one for one, with the same id, used percentage, and reset instant (absent when the wire has none). ${spec.wire}`,
+    wire: `The fetcher (default URL) succeeds with a snapshot for provider \`${spec.providerId}\` carrying at least one window; window ids are distinct, drawn from ${spec.windowIds.map(id => `\`${id}\``).join(', ')}, and listed in that order${spec.scopedWindowIdPrefix === undefined ? '' : `; model-scoped windows (ids starting with \`${spec.scopedWindowIdPrefix}\`) follow them in wire order`}. No window is fabricated or dropped: the case reads the same response body at its own HttpClient boundary (handing the provider the same bytes) and requires exactly one JSON body whose reported windows (those with a numeric used percentage from 0 to 100) match the snapshot one for one, with the same id, used percentage, reset instant (absent when the wire has none), and model substrings of a scoped window. ${spec.wire}`,
     fixtures: [spec.fixture],
     run: Effect.gen(function* () {
       const settings = yield* spec.settings
@@ -155,17 +176,22 @@ export const makeSubscriptionUsageConformanceCase = <Settings, R>(
 
       const windows = Array.from(snapshot.windows)
       const ids = windows.map(window => window.id)
+      const scopedPrefix = spec.scopedWindowIdPrefix
+
+      const isScoped = (id: string) =>
+        scopedPrefix !== undefined && id.startsWith(scopedPrefix) && id.length > scopedPrefix.length
 
       yield* expectEqual(snapshot.provider, spec.providerId, 'expected the vendor provider id')
       yield* expectConformance(windows.length > 0, 'expected at least one usage window')
       yield* expectConformance(
-        new Set(ids).size === ids.length && ids.every(id => spec.windowIds.includes(id)),
+        new Set(ids).size === ids.length &&
+          ids.every(id => spec.windowIds.includes(id) || isScoped(id)),
         'expected distinct window ids from the known set',
         { expected: [...spec.windowIds], actual: ids }
       )
       yield* expectEqual(
         ids,
-        spec.windowIds.filter(id => ids.includes(id)),
+        [...spec.windowIds.filter(id => ids.includes(id)), ...ids.filter(isScoped)],
         'expected windows in the vendor order'
       )
 
@@ -193,7 +219,7 @@ export const makeSubscriptionUsageConformanceCase = <Settings, R>(
 
           return wire !== undefined && sameWindow(window, wire)
         }),
-        'expected each window to carry the wire used percentage and reset instant'
+        'expected each window to carry the wire used percentage, reset instant, and scoped models'
       )
     })
   })

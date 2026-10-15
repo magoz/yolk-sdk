@@ -15,6 +15,8 @@ type ProviderFailureInput = {
   readonly message?: string
   readonly providerCode?: string
   readonly fallbackKind?: ProviderFailureKind
+  /** Quota reset already parsed by the vendor adapter; see `ProviderErrorInfo.quotaResetsAtMs`. */
+  readonly quotaResetsAtMs?: number
   /** Current time for HTTP-date `Retry-After` values; defaults to `Date.now()`. */
   readonly nowMs?: number
 }
@@ -25,6 +27,7 @@ type ProviderErrorInfoInput = {
   readonly status?: number
   readonly providerCode?: string
   readonly retryAfterMs?: number
+  readonly quotaResetsAtMs?: number
   readonly stream?: ProviderStreamDiagnostics
 }
 
@@ -208,6 +211,7 @@ type ProviderErrorInfoFields = {
   status?: ProviderErrorInfoInput['status']
   providerCode?: ProviderErrorInfoInput['providerCode']
   retryAfterMs?: ProviderErrorInfoInput['retryAfterMs']
+  quotaResetsAtMs?: ProviderErrorInfoInput['quotaResetsAtMs']
   stream?: ProviderErrorInfoInput['stream']
 }
 
@@ -229,6 +233,10 @@ export const providerErrorInfo = (input: ProviderErrorInfoInput) =>
 
       if (input.retryAfterMs !== undefined) {
         fields.retryAfterMs = input.retryAfterMs
+      }
+
+      if (input.quotaResetsAtMs !== undefined) {
+        fields.quotaResetsAtMs = input.quotaResetsAtMs
       }
 
       if (input.stream !== undefined) {
@@ -259,6 +267,10 @@ export const classifyProviderFailure = (input: ProviderFailureInput) => {
 
       if (input.headers !== undefined) {
         fields.retryAfterMs = retryAfterMsFromHeaders(input.headers, input.nowMs)
+      }
+
+      if (input.quotaResetsAtMs !== undefined && kind === 'rate_limit') {
+        fields.quotaResetsAtMs = input.quotaResetsAtMs
       }
 
       return fields

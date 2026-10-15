@@ -525,6 +525,15 @@ importers:
         specifier: ^3.0.0
         version: 3.0.8
 
+  packages/pool:
+    dependencies:
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0
+
   packages/sandbox:
     dependencies:
       '@vercel/sandbox':

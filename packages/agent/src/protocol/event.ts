@@ -103,6 +103,12 @@ export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('Provider
   status: Schema.optional(Schema.Number),
   providerCode: Schema.optional(Schema.String),
   retryAfterMs: Schema.optional(Schema.Number),
+  /**
+   * When an exhausted subscription quota resets (epoch milliseconds), read from the provider's
+   * quota signal (Claude unified rate-limit headers, Codex `usage_limit_reached`). Present only on
+   * quota exhaustion, never on transient rate limits; account pools cool the account down until it.
+   */
+  quotaResetsAtMs: Schema.optional(Schema.Number),
   stream: Schema.optional(ProviderStreamDiagnostics)
 }) {}
 
