@@ -16,6 +16,7 @@ import {
   ProviderErrorInfo,
   QuestionAnswer,
   QuestionResponse,
+  SignedReasoningReplay,
   ToolCall,
   ToolApprovalPolicy,
   ToolApprovalResponse,
@@ -31,6 +32,8 @@ import {
   LLMError,
   LLMProvider,
   LLMProviderToolResult,
+  LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolInputDelta,
   LLMToolInputStart,
@@ -195,6 +198,57 @@ describe('run', () => {
       const assistant = assistantMessageFromEvents(events)
       expect(assistantContent(assistant)).toBe('ok')
       expect(assistantReasoningText(assistant)).toBe('thinking')
+    })
+  )
+
+  it.effect('streams reasoning replay state and keeps it on the assistant message', () =>
+    Effect.gen(function* () {
+      const replay = SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () =>
+            Stream.make(
+              LLMReasoningDelta.make({ text: 'thinking' }),
+              LLMReasoningReplay.make({ replay }),
+              LLMTextDelta.make({ text: 'ok' }),
+              LLMDone.make({ stopReason: 'stop' })
+            )
+        })
+      )
+
+      const events = Array.from(
+        yield* run({
+          messages: [UserMessage.make({ content: 'hello' })],
+          systemPrompt: 'Be brief.',
+          tools: [],
+          model: 'faux'
+        }).pipe(
+          Stream.runCollect,
+          Effect.provide(
+            Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(Layer.provideMerge(BaseLayer))
+          )
+        )
+      )
+
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMReasoningDelta',
+        'LLMReasoningReplay',
+        'LLMTextDelta',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'TurnEnd',
+        'AgentEnd'
+      ])
+      expect(assistantMessageFromEvents(events).parts[0]).toMatchObject({
+        _tag: 'Reasoning',
+        text: 'thinking',
+        replay
+      })
     })
   )
 

@@ -203,4 +203,4 @@ Pass `overflowCompactionAttempt` (default `0`). A successful compact returns `at
 
 Do not persist `ContextTransformer` checkpoints. Do not wrap the provider in `makeContextOverflowRetryProvider` and also treat `Compacted` as durable compaction on the same path.
 
-Incomplete streams (`LLMError.responseIssue === 'missing_done'`, still `invalid_response` / `retryable: false`) become `RecoverFull` before output or `Continue` after partial text/reasoning/completed calls. Content-filter and other nonretryable provider terminals stay failed. `onEvent` sink errors and compact/Abort errors are not classified as provider failures. `Continue` does not invent message IDs or execute tools.
+Incomplete streams (`LLMError.responseIssue === 'missing_done'`, still `invalid_response` / `retryable: false`) become `RecoverFull` before output or `Continue` after partial text/reasoning/completed calls (reasoning keeps its replay state; replay state alone is not output). Content-filter and other nonretryable provider terminals stay failed. `onEvent` sink errors and compact/Abort errors are not classified as provider failures. `Continue` does not invent message IDs or execute tools.

@@ -4,9 +4,15 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  AssistantAgentMessage,
+  AssistantReasoningPart,
   assistantContent,
   assistantReasoningText,
+  HostToolCallPart,
   LLMTextDelta as AgentLLMTextDelta,
+  RedactedReasoningReplay,
+  SignedReasoningReplay,
+  ToolCall,
   ToolDef,
   UserMessage,
   type AgentEvent,
@@ -18,7 +24,9 @@ import {
   LLMError,
   LLMProvider,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
+  LLMToolCall,
   makeAgentLoopLayer,
   runModelTurn
 } from '../../src/loop'
@@ -281,6 +289,89 @@ describe('collectModelTurnAttempt', () => {
 
       if (outcome.collection.partialAssistantMessage?._tag !== 'Assistant') return
       expect(assistantReasoningText(outcome.collection.partialAssistantMessage)).toBe('thinking')
+    })
+  )
+
+  it.effect('keeps reasoning replay state on the partial message of a failed turn', () =>
+    Effect.gen(function* () {
+      const signed = SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+
+      const redacted = RedactedReasoningReplay.make({
+        provider: 'anthropic_claude',
+        data: 'opaque'
+      })
+
+      const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: {} })
+
+      // The stream ends without Done: the turn fails after a completed, signed tool-use block.
+      const outcome = yield* collectModelTurnAttempt(
+        runModelTurn({
+          messages: [UserMessage.make({ content: 'hello' })],
+          systemPrompt: 'Be brief.',
+          tools: [],
+          model: 'faux',
+          turn: 1
+        })
+      ).pipe(
+        Effect.provide(
+          makeAgentLoopLayer({
+            provider: Layer.succeed(
+              LLMProvider,
+              LLMProvider.of({
+                stream: () =>
+                  Stream.make(
+                    LLMReasoningDelta.make({ text: 'thinking' }),
+                    LLMReasoningReplay.make({ replay: signed }),
+                    LLMReasoningReplay.make({ replay: redacted }),
+                    LLMToolCall.make({ call })
+                  )
+              })
+            )
+          })
+        )
+      )
+
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return expect.fail('Expected StreamFailed')
+      expect(outcome.collection.partialAssistantMessage).toEqual(
+        AssistantAgentMessage.make({
+          parts: [
+            AssistantReasoningPart.make({ text: 'thinking', replay: signed }),
+            AssistantReasoningPart.make({ text: '', replay: redacted }),
+            HostToolCallPart.make({ call })
+          ]
+        })
+      )
+    })
+  )
+
+  it.effect('does not count replay state alone as started output', () =>
+    Effect.gen(function* () {
+      const replay = SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+
+      // Omitted thinking: only a signature arrived before the stream ended without Done.
+      const outcome = yield* collectModelTurnAttempt(
+        runModelTurn({
+          messages: [UserMessage.make({ content: 'hello' })],
+          systemPrompt: 'Be brief.',
+          tools: [],
+          model: 'faux',
+          turn: 1
+        })
+      ).pipe(
+        Effect.provide(
+          makeAgentLoopLayer({
+            provider: Layer.succeed(
+              LLMProvider,
+              LLMProvider.of({
+                stream: () => Stream.make(LLMReasoningReplay.make({ replay }))
+              })
+            )
+          })
+        )
+      )
+
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return expect.fail('Expected StreamFailed')
+      expect(outcome.collection.outputStarted).toBe(false)
     })
   )
 

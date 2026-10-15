@@ -1421,6 +1421,9 @@ export const applyAgentEventToChatMessages = (
           reasoningSoFar: current.reasoningSoFar
         })
       ),
+      // The live projection keeps one reasoning part per streaming message; the final
+      // `AssistantMessage` brings the replay state and one part per block.
+      Match.tag('LLMReasoningReplay', () => messages),
       Match.tag('ToolInputEnd', current =>
         upsertToolCallPart(messages, current.call, ChatToolState.Called())
       ),

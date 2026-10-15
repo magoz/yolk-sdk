@@ -13,6 +13,7 @@ import { applyAssistantLlmEvent } from './accumulator.ts'
 import {
   LLMProviderToolResult,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMTextDelta,
   LLMToolCall,
   type LLMEvent
@@ -115,6 +116,8 @@ const toModelTurnResult = (collection: ModelTurnCollection): ModelTurnResult => 
   stopReason: collection.stopReason
 })
 
+// `LLMReasoningReplay` alone published nothing visible: a turn that fails after only that is
+// redone from scratch rather than continued from a partial holding bare signed thinking.
 const eventStartsOutput = (event: AgentEvent) =>
   Match.value(event).pipe(
     Match.tag(
@@ -134,6 +137,7 @@ const llmEventFromAgentEvent = (event: AgentEvent): LLMEvent | undefined =>
   Match.value(event).pipe(
     Match.tag('LLMTextDelta', current => LLMTextDelta.make({ text: current.text })),
     Match.tag('LLMReasoningDelta', current => LLMReasoningDelta.make({ text: current.text })),
+    Match.tag('LLMReasoningReplay', current => LLMReasoningReplay.make({ replay: current.replay })),
     Match.tag('ToolInputEnd', current => LLMToolCall.make({ call: current.call })),
     Match.tag('ProviderToolResult', current =>
       LLMProviderToolResult.make({ call: current.call, result: current.result })

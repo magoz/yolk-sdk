@@ -1,6 +1,11 @@
 import * as Schema from 'effect/Schema'
 import { Match, Predicate } from 'effect'
-import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
+import {
+  AssistantAgentMessage,
+  AgentMessage,
+  AssistantReasoningReplay,
+  UserMessage
+} from './message.ts'
 import {
   HitlRequest,
   InputRequest,
@@ -180,6 +185,19 @@ export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()(
     ...EventIdentity,
     text: Schema.String,
     reasoningSoFar: Schema.optional(Schema.String)
+  }
+) {}
+
+/**
+ * Closes the reasoning block streamed so far with the provider state that replays it (see
+ * `AssistantReasoningReplay`), so a fold of the event stream rebuilds the same assistant message.
+ * Opaque: UIs show nothing for it beyond ending the current reasoning block.
+ */
+export class LLMReasoningReplay extends Schema.TaggedClass<LLMReasoningReplay>()(
+  'LLMReasoningReplay',
+  {
+    ...EventIdentity,
+    replay: AssistantReasoningReplay
   }
 ) {}
 
@@ -582,6 +600,7 @@ export const AgentEvent = Schema.Union([
   LLMStreamStart,
   LLMTextDelta,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   ToolInputStart,
   ToolInputDelta,
   ToolInputEnd,

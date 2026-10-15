@@ -63,6 +63,7 @@ const llmEventStartsOutput = (event: LLMEvent) =>
     Match.tag(
       'TextDelta',
       'ReasoningDelta',
+      'ReasoningReplay',
       'ToolCall',
       'ToolInputStart',
       'ToolInputDelta',

@@ -23,6 +23,7 @@ import {
   contentPreview,
   decodeBackgroundToolInput,
   LLMReasoningDelta as AgentLLMReasoningDelta,
+  LLMReasoningReplay as AgentLLMReasoningReplay,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta as AgentLLMTextDelta,
@@ -407,6 +408,9 @@ const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> =>
   Match.value(event).pipe(
     Match.tag('TextDelta', current => [AgentLLMTextDelta.make({ text: current.text })]),
     Match.tag('ReasoningDelta', current => [AgentLLMReasoningDelta.make({ text: current.text })]),
+    Match.tag('ReasoningReplay', current => [
+      AgentLLMReasoningReplay.make({ replay: current.replay })
+    ]),
     Match.tag('ToolCall', current => [ToolInputEnd.make({ call: current.call })]),
     Match.tag('ToolInputStart', current => [
       ToolInputStart.make({ id: current.id, name: current.name })
@@ -427,6 +431,7 @@ const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEven
     Match.tag(
       'TextDelta',
       'ReasoningDelta',
+      'ReasoningReplay',
       'Done',
       'ToolCall',
       'ToolInputStart',

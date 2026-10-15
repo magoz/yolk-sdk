@@ -276,7 +276,7 @@ describe('AnthropicClaudeProviderLayer', () => {
         makeHttpClientLayer(
           {
             content: [
-              { type: 'thinking', thinking: 'check tool' },
+              { type: 'thinking', thinking: 'check tool', signature: 'sig-1' },
               { type: 'tool_use', id: 'call_1', name: 'mcp_Weather', input: { city: 'Paris' } }
             ],
             stop_reason: 'tool_use',
@@ -307,16 +307,20 @@ describe('AnthropicClaudeProviderLayer', () => {
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual([
         'ReasoningDelta',
+        'ReasoningReplay',
         'ToolCall',
         'Done',
         'Usage'
       ])
       expect(events[0]).toMatchObject({ text: 'check tool' })
       expect(events[1]).toMatchObject({
+        replay: { _tag: 'Signed', provider: 'anthropic_claude', signature: 'sig-1' }
+      })
+      expect(events[2]).toMatchObject({
         call: { id: 'call_1', name: 'weather', params: { city: 'Paris' } }
       })
-      expect(events[2]).toMatchObject({ stopReason: 'tool_use' })
-      expect(events[3]).toMatchObject({
+      expect(events[3]).toMatchObject({ stopReason: 'tool_use' })
+      expect(events[4]).toMatchObject({
         usage: {
           input: { total: 15, uncached: 10, cacheRead: 3, cacheWrite: 2 },
           output: { total: 4, text: 4 }
