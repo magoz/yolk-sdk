@@ -78,6 +78,16 @@ trims raw outer whitespace, resolves dot segments, and rejects absolute/NUL/esca
 Whitespace belonging to remaining directory names is preserved. The brand records lexical path
 validation, not filesystem or symlink confinement.
 
+## Binary file transfer
+
+`SandboxApi` has optional `writeFile({ path, bytes })` and `readFile({ path, maxBytes })` on
+workspace-relative paths (`normalizeWorkspacePath` returns a `NormalizedWorkspacePath`; absolute
+paths, NUL bytes and escapes fail with `SandboxInputError` `invalid_path`). Reads stream and stop
+past `maxBytes` (`file_too_large`); a missing file is `file_not_found`. The Vercel layer implements
+both under the same one-at-a-time lock as commands (custom `VercelSandboxHandle`s need `readFile`).
+`@yolk-sdk/files` uses them for `file_to_sandbox`/`file_from_sandbox`. In tests, pass `files` to
+`makeFakeSandboxLayer` or use `makeFakeSandboxFiles` from `@yolk-sdk/sandbox/testing`.
+
 ## Initial source model
 
 `SandboxInitialSource` is a tagged union:

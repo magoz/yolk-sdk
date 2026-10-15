@@ -63,6 +63,10 @@ const program = Effect.gen(function* () {
   with an `Error` whose message is `tools.<id>: <text>`, or `tools["<name>"]: <text>` for a tool
   whose identifier an earlier tool already uses (the nested-call record keeps the raw text). Calls
   still running when the script ends are cancelled and recorded as `cancelled`.
+- A call whose result captured files (`ToolResult.files`, ADR 0009) also resolves
+  `files: [{ fileId, name, mimeType, size }]`, merged into an object result (replacing any own
+  `files` key) or as `{ text, files }`. Scripts pass `fileId`s to other tools; file bytes never
+  enter the script.
 - Arguments make a JSON round trip: `undefined` keys and `null` optionals are absent, unknown keys
   reject with a hint naming the allowed keys, and values JSON would silently change (`NaN`,
   `Infinity`, invalid `Date`s, `undefined` array items, `Map`, `Set`, functions, class instances)

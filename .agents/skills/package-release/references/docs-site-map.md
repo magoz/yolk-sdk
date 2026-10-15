@@ -76,6 +76,19 @@ the README for the full XLSX and Office archive security model. The docs site al
 and its `extractors/knowledge -> knowledge` edge in `reference/architecture.mdx`; update those
 with the package list or dependency direction.
 
+## Files package
+
+| Change                                                   | Docs                                                                                                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| exports, store, tools, transport/sandbox ports           | `integrations/files.mdx`, `api-reference/integrations.mdx`, `reference/packages.mdx`, `packages/files/README.md`              |
+| capture (`FilePart`, `ToolResult.files`, `resolveTools`) | `integrations/files.mdx`, `agent/protocol.mdx`, `api-reference/agent.mdx`, `agent/tools-hitl.mdx`, `packages/agent/README.md` |
+| code mode `files`, MCP blobs, connector `fileOutput`     | `integrations/code-mode.mdx`, `integrations/mcp-tools.mdx`, `integrations/connectors.mdx`, package READMEs                    |
+| sandbox `writeFile`/`readFile`                           | `sandbox/index.mdx`, `integrations/sandbox.mdx`, `api-reference/integrations.mdx`, `packages/sandbox/README.md`               |
+
+The package is also listed in `index.mdx`, `installation.mdx`, `integrations/index.mdx`,
+`reference/packages.mdx`, `reference/architecture.mdx`, and the canary.114 section of
+`migration.mdx`.
+
 ## Conformance and emulators packages
 
 | Change                                        | Docs                                                                                              |

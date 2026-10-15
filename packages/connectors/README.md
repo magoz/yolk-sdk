@@ -68,6 +68,12 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **R2ObjectClient**: host-provided conditional object port for R2 get/create/update.
 - **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
+- **fileOutput**: optional on an action whose output carries file bytes (ADR 0009): a byte-free
+  `schema` (the agent tool output) and `split` into that value plus `ConnectorActionFile`s
+  (`connectorActionFile`, with `sniffBase64MimeType` for common types). The agent bridge returns
+  the bytes as `FilePart`s that tool resolution captures into `fileId`s; `connector.invoke` keeps
+  the full output. `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment`
+  declare it.
 
 `makeConnectorToolModule` uses the connector `description` as the module description (override
 with `description`) and returns each action result as the JSON encoding of its `outputSchema`
@@ -260,7 +266,8 @@ base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `E
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
 typed validation error. Successful host output is schema-validated at the connector boundary before
 it is returned. Hosts that implement it own MIME parsing, base64 encoding, size policy,
-storage, and content scanning.
+storage, and content scanning. As an agent tool the action returns the attachment as a file
+(`fileId`) with its metadata instead of base64.
 IMAP adapters should fetch parts without marking messages read when supported. POP3 has no standard
 partial-part fetch, so adapters may retrieve the whole stable UIDL-addressed message before
 extracting the part. POP3 rejects `folder` for attachment retrieval just as it does for list/get.
@@ -1106,7 +1113,8 @@ expect `contentId` there; fetch the individual file attachment for `cid:` mappin
 returns those bytes as required `contentBase64`. Item and reference attachments remain available only
 as list metadata and are rejected by this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
-size policy, durable storage, and content scanning.
+size policy, durable storage, and content scanning. As an agent tool `outlook.get_attachment`
+returns the attachment as a file (`fileId`) with its metadata instead of base64.
 
 To add a file to an existing draft (for example one from `outlook.create_draft` or
 `outlook.create_reply_draft`) before `outlook.send_draft`, host code calls the host-only

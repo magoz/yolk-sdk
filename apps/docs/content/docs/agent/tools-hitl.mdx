@@ -231,6 +231,10 @@ const resolveStepTools = Effect.gen(function* () {
 
 Argument previews are cut at `toolLedgerMaxArgsBytes` (8 KiB).
 
+Pass `files: { store, maxFileBytes? }` to `resolveTools` as well to capture file bytes before the
+ledger stores a result: results then hold `fileId` labels and `ToolResult.files`, and a reduced
+stored result keeps its file labels. See [Move files between tools](../integrations/files).
+
 ## Ask a human
 
 Human-in-the-loop is protocol-level:
