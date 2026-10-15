@@ -49,7 +49,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                                                                                      |
 | `@yolk-sdk/agent/providers/anthropic/claude`             | Claude request and auth helpers                                                                                                                                |
 | `@yolk-sdk/agent/providers/anthropic/usage`              | Claude subscription-allowance snapshots                                                                                                                        |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude LLM provider factory                                                                                                                                    |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`    | Claude LLM provider factory, thinking config, and reasoning replay provider id                                                                                 |
 | `@yolk-sdk/agent/providers/anthropic/conformance`        | Synthetic Anthropic Messages and Claude usage fixtures and conformance cases                                                                                   |
 | `@yolk-sdk/agent/providers/xai`                          | Grok subscription OAuth and token broker helpers                                                                                                               |
 | `@yolk-sdk/agent/providers/xai/grok`                     | Grok subscription request and auth helpers                                                                                                                     |
@@ -162,7 +162,7 @@ const program = run({
 Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
 Merge them with `makeAgentLoopLayer`. Omitted tools use `ToolExecutor.unavailable`; omitted transformer/config use identity and `LoopConfig.defaultLayer`.
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
-Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`.
+Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`.
 
 ```ts
 import { makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
@@ -307,10 +307,13 @@ Newer Claude models think by default but return empty thinking blocks unless ask
 `thinking: { display: 'summarized' }` on `makeAnthropicClaudeProviderLayer` to stream readable
 summaries as reasoning deltas; `prefixMismatchBehavior: 'drop_block'` keeps requests succeeding when
 an earlier part of the conversation changed (Anthropic drops the affected thinking instead of
-failing). The Claude provider keeps each thinking block's signature on its reasoning part
-(`AssistantReasoningPart.replay`) and sends the block back unchanged, in produced order, so tool-use
-turns keep their reasoning. Do not edit the text of a reasoning part that has `replay`: Anthropic
-rejects modified thinking blocks.
+failing). With or without `thinking`, the Claude provider keeps each thinking block's signature, or
+a redacted block's data, on its reasoning part (`AssistantReasoningPart.replay`, an
+`AssistantReasoningReplay`) and sends the block back unchanged, in produced order, so tool-use turns
+keep their reasoning. Reasoning from another provider is never sent to Claude. Do not edit the text
+of a reasoning part that has `replay`: Anthropic rejects modified thinking blocks. Hosts that
+rewrite history per request can skip parts whose `replay.provider` is
+`anthropicClaudeReasoningReplayProvider`.
 
 ### Prompt caching
 
@@ -654,7 +657,9 @@ hidden policy in annotations, author, or timestamps; providers may send them to 
 
 Durable transports may reconnect or replay overlapping chunks. Protocol events can carry optional
 `eventId`; `LLMTextDelta` and `LLMReasoningDelta` can also carry `textSoFar` / `reasoningSoFar`
-snapshots when a host can provide cumulative text.
+snapshots when a host can provide cumulative text. `LLMReasoningReplay` closes a reasoning block
+with opaque provider state; projections can ignore it (the final `AssistantMessage` carries it), but
+exhaustive `AgentEvent` matches need a case.
 
 Use `applyAgentEventToChatProjection` for replayable event logs:
 

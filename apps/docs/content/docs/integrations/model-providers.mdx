@@ -206,6 +206,21 @@ OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and the exact `@yolk
 - Claude OAuth URLs/constants
 - `fetchAnthropicClaudeSubscriptionUsage` from `@yolk-sdk/agent/providers/anthropic/usage`
 
+### Thinking
+
+Claude Opus 5 and later think by default but return thinking blocks without text unless asked.
+`thinking: { display: 'summarized' }` requests adaptive thinking summaries, streamed as reasoning
+deltas. Optional `prefixMismatchBehavior` (`'drop_block'` or `'error'`, sent with the
+`thinking-binding-controls-2026-08-01` beta) decides what Anthropic does with replayed thinking whose
+earlier system prompt, tools or messages changed. Without `thinking`, no `thinking` field is sent.
+
+Either way the provider keeps each thinking block's signature, or a redacted block's data, on
+`AssistantReasoningPart.replay` and sends the turn back exactly as produced on later requests, so
+tool-use turns keep their reasoning. Never edit, truncate or reorder a reasoning part that has
+`replay` (Anthropic rejects modified thinking); hosts that rewrite history per request can skip parts
+whose `replay.provider` is `anthropicClaudeReasoningReplayProvider`. Reasoning from another provider
+is never sent to Claude, and native Messages transports neither capture nor replay it.
+
 ## Prompt caching
 
 Agent turns resend the whole conversation, so every adapter asks its provider to reuse the repeated
