@@ -260,12 +260,83 @@ describe('Anthropic Claude subscription usage', () => {
 
       const [fiveHour, sevenDay] = Array.from(snapshot.windows)
 
-      expect(Object.keys(fiveHour ?? {})).toEqual(['id', 'usedPercent'])
-      expect(JSON.stringify(fiveHour)).toBe('{"id":"five-hour","usedPercent":1}')
-      expect(Object.keys(sevenDay ?? {})).toEqual(['id', 'usedPercent', 'resetsAt'])
-      expect(JSON.stringify(sevenDay)).toBe(
-        '{"id":"seven-day","usedPercent":2,"resetsAt":"2026-08-11T10:00:00.000Z"}'
+      expect(Object.keys(fiveHour ?? {})).toEqual(['id', 'usedPercent', 'windowDurationMinutes'])
+      expect(JSON.stringify(fiveHour)).toBe(
+        '{"id":"five-hour","usedPercent":1,"windowDurationMinutes":300}'
       )
+      expect(Object.keys(sevenDay ?? {})).toEqual([
+        'id',
+        'usedPercent',
+        'resetsAt',
+        'windowDurationMinutes'
+      ])
+      expect(JSON.stringify(sevenDay)).toBe(
+        '{"id":"seven-day","usedPercent":2,"resetsAt":"2026-08-11T10:00:00.000Z","windowDurationMinutes":10080}'
+      )
+    })
+  )
+
+  it.effect('normalizes model-scoped weekly limits with their model substring', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* parseAnthropicClaudeSubscriptionUsage(
+        {
+          five_hour: { utilization: 4, resets_at: '2026-08-11T10:00:00Z' },
+          seven_day: { utilization: 18, resets_at: '2026-08-14T20:00:00Z' },
+          limits: [
+            {
+              kind: 'weekly_scoped',
+              percent: 100,
+              resets_at: '2026-08-14T20:00:00Z',
+              scope: { model: { id: null, display_name: 'Opus' } }
+            },
+            {
+              kind: 'weekly_scoped',
+              percent: 5,
+              resets_at: null,
+              scope: { model: { id: 'claude-fable-5-1', display_name: 'Fable 5.1' } }
+            },
+            {
+              kind: 'weekly_scoped',
+              percent: 50,
+              scope: { model: { id: null, display_name: 'Opus' } }
+            },
+            { kind: 'monthly_spend', percent: 30 },
+            { kind: 'weekly_scoped', percent: 'n/a', scope: { model: { display_name: 'Sonnet' } } },
+            'garbage'
+          ]
+        },
+        fetchedAt
+      )
+
+      expect(
+        Array.from(snapshot.windows).map(window => JSON.parse(JSON.stringify(window)))
+      ).toEqual([
+        {
+          id: 'five-hour',
+          usedPercent: 4,
+          resetsAt: '2026-08-11T10:00:00.000Z',
+          windowDurationMinutes: 300
+        },
+        {
+          id: 'seven-day',
+          usedPercent: 18,
+          resetsAt: '2026-08-14T20:00:00.000Z',
+          windowDurationMinutes: 10080
+        },
+        {
+          id: 'seven-day-opus',
+          usedPercent: 100,
+          resetsAt: '2026-08-14T20:00:00.000Z',
+          windowDurationMinutes: 10080,
+          models: ['opus']
+        },
+        {
+          id: 'seven-day-claude-fable-5-1',
+          usedPercent: 5,
+          windowDurationMinutes: 10080,
+          models: ['claude-fable-5-1']
+        }
+      ])
     })
   )
 })

@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
 import type * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -194,6 +194,40 @@ const collectProviderEvents = (response: Response, requests: Array<CapturedReque
         })
         .pipe(Stream.runCollect)
     }).pipe(Effect.provide(providerLayer))
+  })
+
+/** Runs one request that must fail; returns its error and how many events preceded it. */
+const failedProviderRequest = (response: Response) =>
+  Effect.gen(function* () {
+    const emitted = yield* Ref.make(0)
+
+    const providerLayer = makeAnthropicClaudeProviderLayer({
+      token: new OAuthAccessToken({
+        provider: 'anthropic-claude',
+        accessToken: 'token',
+        expiresAt: Date.now() + 60_000
+      }),
+      maxTokens: anthropicTestMaxTokens
+    }).pipe(Layer.provide(makeHttpClientLayer(response, [])))
+
+    const error = yield* Effect.gen(function* () {
+      const provider = yield* LLMProvider
+
+      return yield* provider
+        .stream({
+          model: 'claude-sonnet-4-6',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: []
+        })
+        .pipe(
+          Stream.tap(() => Ref.update(emitted, count => count + 1)),
+          Stream.runDrain,
+          Effect.flip
+        )
+    }).pipe(Effect.provide(providerLayer))
+
+    return { error, emitted: yield* Ref.get(emitted) }
   })
 
 describe('Anthropic Claude provider', () => {
@@ -1062,6 +1096,66 @@ describe('Anthropic Claude provider', () => {
           providerCode: 'invalid_request_error'
         }
       })
+    })
+  )
+
+  it.effect('reports the quota reset of an exhausted Claude subscription before any event', () =>
+    Effect.gen(function* () {
+      const resetsAtSeconds = 1_800_000_000
+
+      const response = new Response(
+        JSON.stringify({
+          type: 'error',
+          error: { type: 'rate_limit_error', message: 'This request would exceed your limit' }
+        }),
+        {
+          status: 429,
+          headers: {
+            'anthropic-ratelimit-unified-status': 'rejected',
+            'anthropic-ratelimit-unified-5h-status': 'allowed',
+            'anthropic-ratelimit-unified-7d-status': 'rejected',
+            'anthropic-ratelimit-unified-7d-reset': String(resetsAtSeconds),
+            'anthropic-ratelimit-unified-reset': String(resetsAtSeconds)
+          }
+        }
+      )
+
+      const { error, emitted } = yield* failedProviderRequest(response)
+
+      expect(emitted).toBe(0)
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'rate_limit',
+        retryable: true,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'rate_limit',
+          status: 429,
+          quotaResetsAtMs: resetsAtSeconds * 1000
+        }
+      })
+    })
+  )
+
+  it.effect('omits the quota reset on transient Claude rate limits', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      const response = new Response(
+        JSON.stringify({
+          type: 'error',
+          error: { type: 'rate_limit_error', message: 'slow down' }
+        }),
+        { status: 429, headers: { 'retry-after': '20' } }
+      )
+
+      const error = yield* collectProviderEvents(response, requests).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        provider: { kind: 'rate_limit', retryAfterMs: 20_000 }
+      })
+      expect(JSON.stringify(error)).not.toContain('quotaResetsAtMs')
     })
   )
 

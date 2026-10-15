@@ -17,18 +17,18 @@ policy in process, not a gateway.
 
 ## Decision summary
 
-| Area        | Decision                                                                                                          |
-| ----------- | ----------------------------------------------------------------------------------------------------------------- |
-| Package     | New `@yolk-sdk/pool`, depending only on `@yolk-sdk/agent`; subpaths `.` and `./store`                             |
-| Shape       | `makePool` decorates one `LLMProvider` per account of one provider into one `LLMProvider`                         |
-| Policy      | Expiring-first with fresh readings, sticky fill-first without; a pure `rank` function                             |
-| Failover    | Only account-scoped failures before the first event; everything else goes to the loop's retry unchanged           |
-| Exhausted   | All accounts out: `rate_limit`, `retryable: false`, earliest reset in the error                                   |
-| State       | `PoolStore` port (pins, cooldowns, readings); in-memory store and a store conformance suite in `./store`          |
-| Readings    | Pushed by the host (`recordReadings`); never fetched on the request path                                          |
-| Reset hints | `ProviderErrorInfo.quotaResetsAt` (ISO instant), parsed from Claude and Codex quota errors; kind stays rate_limit |
-| Usage       | `ProviderSubscriptionUsageWindow.models`; Claude windows gain durations and model-scoped weekly limits            |
-| Host-owned  | Accounts, credentials and their refresh, persistence, reading schedule, labels, UI                                |
+| Area        | Decision                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Package     | New `@yolk-sdk/pool`, depending only on `@yolk-sdk/agent`; subpaths `.` and `./store`                                          |
+| Shape       | `makePool` decorates one `LLMProvider` per account of one provider into one `LLMProvider`                                      |
+| Policy      | Expiring-first with fresh readings, sticky fill-first without; a pure `rank` function                                          |
+| Failover    | Only account-scoped failures before the first event; everything else goes to the loop's retry unchanged                        |
+| Exhausted   | All accounts out: `rate_limit`, `retryable: false`, earliest reset in the error                                                |
+| State       | `PoolStore` port (pins, cooldowns, readings); in-memory store and a store conformance suite in `./store`                       |
+| Readings    | Pushed by the host (`recordReadings`); never fetched on the request path                                                       |
+| Reset hints | `ProviderErrorInfo.quotaResetsAtMs` (epoch ms, like `retryAfterMs`), from Claude and Codex quota errors; kind stays rate_limit |
+| Usage       | `ProviderSubscriptionUsageWindow.models`; Claude windows gain durations and model-scoped weekly limits                         |
+| Host-owned  | Accounts, credentials and their refresh, persistence, reading schedule, labels, UI                                             |
 
 ## Ownership
 
@@ -79,7 +79,7 @@ therefore switches accounts within one call only for account-scoped failures, an
 
 | Failure                                            | Pool                                             |
 | -------------------------------------------------- | ------------------------------------------------ |
-| `rate_limit` with `quotaResetsAt`                  | Quota cooldown until that reset, next account    |
+| `rate_limit` with `quotaResetsAtMs`                | Quota cooldown until that reset, next account    |
 | `rate_limit` with `retryAfterMs` of 30 min or more | Quota cooldown for that long, next account       |
 | `auth`                                             | Auth cooldown (30 min), next account             |
 | anything else, or any failure after an event       | Unchanged to the caller; no cooldown             |
@@ -108,10 +108,19 @@ semantics every store must meet.
 
 ## Reset hints
 
-`ProviderErrorInfo` gains an optional `quotaResetsAt`. A new failure kind was rejected: every
+`ProviderErrorInfo` gains an optional `quotaResetsAtMs`, in epoch milliseconds like the protocol's
+other times (`createdAtMs`, `retryAfterMs`). A new failure kind was rejected: every
 exhaustive switch over `ProviderFailureKind` and the `AgentErrorCode` mapping would change for every
-consumer. Sources: Claude's `anthropic-ratelimit-unified-reset` header on a `429`, and Codex's
-`usage_limit_reached` error body (`resets_at` or `resets_in_seconds`).
+consumer. Sources:
+
+- Claude: the unified rate-limit headers of a `429`, the latest reset among the rejected windows
+  (`5h`, `7d`, `7d_oi`, unified); an overage-only rejection while the shared windows still allow
+  requests carries none (as CLIProxyAPI's `ParseClaudeRateLimitReset`);
+- Codex: a `429` whose error type is `usage_limit_reached`, `resets_at` or else `resets_in_seconds`.
+
+Claude usage now reports window durations (300 and 10080 minutes) and the model-scoped weekly limits
+of `limits[]` as `seven-day-<model>` windows with `models: [<model>]`, so a pool skips an account
+whose model weekly limit is used up only for routes of that model.
 
 ## Risks
 

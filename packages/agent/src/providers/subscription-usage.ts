@@ -30,7 +30,12 @@ export class ProviderSubscriptionUsageWindow extends Schema.Class<ProviderSubscr
   usedPercent: ProviderSubscriptionUsagePercent,
   resetsAt: Schema.optional(ProviderSubscriptionUsageInstant),
   resetsAfterSeconds: Schema.optional(PositiveNumber),
-  windowDurationMinutes: Schema.optional(PositiveNumber)
+  windowDurationMinutes: Schema.optional(PositiveNumber),
+  /**
+   * Model id substrings (lowercase) this window limits; absent means every model of the account.
+   * A model-scoped weekly window applies to a model whose id contains one of them.
+   */
+  models: Schema.optional(Schema.Array(NonEmptyTrimmedString))
 }) {}
 
 export class ProviderSubscriptionUsageSnapshot extends Schema.Class<ProviderSubscriptionUsageSnapshot>(

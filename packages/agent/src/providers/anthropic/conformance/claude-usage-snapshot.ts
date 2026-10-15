@@ -2,7 +2,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
  * Claude subscription-usage snapshot: `GET /api/oauth/usage` answering `five_hour` and
- * `seven_day` windows as `{ utilization, resets_at }`.
+ * `seven_day` windows as `{ utilization, resets_at }` and one model-scoped weekly limit in
+ * `limits[]`.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it. Regenerate
  * with `pnpm conformance:usage --family claude --live --owner-approved --account <label>`.
@@ -29,7 +30,7 @@ export const anthropicClaudeUsageSnapshotFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"five_hour":{"utilization":18,"resets_at":"2026-10-01T05:00:00.000Z"},"seven_day":{"utilization":42,"resets_at":"2026-10-06T00:00:00.000Z"}}'
+        body: '{"five_hour":{"utilization":18,"resets_at":"2026-10-01T05:00:00.000Z"},"seven_day":{"utilization":42,"resets_at":"2026-10-06T00:00:00.000Z"},"limits":[{"kind":"weekly_scoped","percent":64,"resets_at":"2026-10-06T00:00:00.000Z","scope":{"model":{"id":null,"display_name":"Opus"}}}]}'
       }
     }
   ]

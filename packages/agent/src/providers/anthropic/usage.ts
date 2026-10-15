@@ -1,4 +1,4 @@
-import { Chunk, Clock, Effect } from 'effect'
+import { Chunk, Clock, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientRequest } from 'effect/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
@@ -45,8 +45,54 @@ class AnthropicClaudeSubscriptionUsageWire extends Schema.Class<AnthropicClaudeS
   'AnthropicClaudeSubscriptionUsageWire'
 )({
   five_hour: Schema.optional(Schema.NullOr(AnthropicClaudeSubscriptionUsageWindowWire)),
-  seven_day: Schema.optional(Schema.NullOr(AnthropicClaudeSubscriptionUsageWindowWire))
+  seven_day: Schema.optional(Schema.NullOr(AnthropicClaudeSubscriptionUsageWindowWire)),
+  limits: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown)))
 }) {}
+
+/** A model-scoped weekly limit from `limits[]` (`kind: "weekly_scoped"`). */
+const AnthropicClaudeScopedLimitWire = Schema.Struct({
+  kind: Schema.Literal('weekly_scoped'),
+  percent: Schema.Number,
+  resets_at: Schema.optional(NullableString),
+  scope: Schema.Struct({
+    model: Schema.Struct({
+      id: Schema.optional(NullableString),
+      display_name: Schema.optional(NullableString)
+    })
+  })
+})
+
+const decodeScopedLimit = Schema.decodeUnknownOption(AnthropicClaudeScopedLimitWire)
+
+const fiveHourMinutes = 300
+
+const sevenDayMinutes = 10_080
+
+/** Window id prefix of model-scoped weekly limits: `seven-day-<model>`. */
+export const anthropicClaudeScopedWindowIdPrefix = 'seven-day-'
+
+/**
+ * The lowercase model substring a scoped limit applies to: the model id when present, else the
+ * display name slugged (`Opus` → `opus`).
+ */
+const scopedLimitModel = (model: {
+  readonly id?: string | null | undefined
+  readonly display_name?: string | null | undefined
+}) => {
+  const id = model.id?.trim().toLowerCase()
+
+  if (id !== undefined && id !== '') {
+    return id
+  }
+
+  const slug = (model.display_name ?? '')
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '')
+
+  return slug === '' ? undefined : slug
+}
 
 export const parseAnthropicClaudeSubscriptionUsage = (
   value: unknown,
@@ -67,45 +113,97 @@ export const parseAnthropicClaudeSubscriptionUsage = (
     Effect.map(decoded => {
       const windows: Array<ProviderSubscriptionUsageWindow> = []
 
+      type AnthropicUsageWindowFields = {
+        id: string
+        usedPercent: number
+        resetsAt?: string
+        windowDurationMinutes: number
+        models?: ReadonlyArray<string>
+      }
+
+      const pushWindow = (input: {
+        readonly id: string
+        readonly usedPercent: number
+        readonly resetsAt: string | null | undefined
+        readonly windowDurationMinutes: number
+        readonly models?: ReadonlyArray<string>
+      }) => {
+        const resetsAt =
+          input.resetsAt === null || input.resetsAt === undefined
+            ? undefined
+            : canonicalSubscriptionUsageInstant(input.resetsAt)
+
+        const fields: AnthropicUsageWindowFields =
+          resetsAt === undefined
+            ? {
+                id: input.id,
+                usedPercent: input.usedPercent,
+                windowDurationMinutes: input.windowDurationMinutes
+              }
+            : {
+                id: input.id,
+                usedPercent: input.usedPercent,
+                resetsAt,
+                windowDurationMinutes: input.windowDurationMinutes
+              }
+
+        if (input.models !== undefined) {
+          fields.models = input.models
+        }
+
+        windows.push(ProviderSubscriptionUsageWindow.make(fields))
+      }
+
       const append = (
         wire: AnthropicClaudeSubscriptionUsageWindowWire | null | undefined,
-        id: 'five-hour' | 'seven-day'
+        id: 'five-hour' | 'seven-day',
+        windowDurationMinutes: number
       ) => {
         if (!validSubscriptionUsagePercent(wire?.utilization)) {
           return
         }
 
-        const resetValue = wire.resets_at === null ? undefined : wire.resets_at
-
-        const resetsAt =
-          resetValue === undefined ? undefined : canonicalSubscriptionUsageInstant(resetValue)
-
-        type AnthropicUsageWindowFields = {
-          id: typeof id
-          usedPercent: number
-          resetsAt?: string
-        }
-
-        windows.push(
-          ProviderSubscriptionUsageWindow.make(
-            (() => {
-              const fields: AnthropicUsageWindowFields = {
-                id,
-                usedPercent: wire.utilization
-              }
-
-              if (resetsAt !== undefined) {
-                fields.resetsAt = resetsAt
-              }
-
-              return fields
-            })()
-          )
-        )
+        pushWindow({
+          id,
+          usedPercent: wire.utilization,
+          resetsAt: wire.resets_at,
+          windowDurationMinutes
+        })
       }
 
-      append(decoded.five_hour, 'five-hour')
-      append(decoded.seven_day, 'seven-day')
+      append(decoded.five_hour, 'five-hour', fiveHourMinutes)
+      append(decoded.seven_day, 'seven-day', sevenDayMinutes)
+
+      const scopedIds = new Set<string>()
+
+      for (const raw of decoded.limits ?? []) {
+        const limit = decodeScopedLimit(raw)
+
+        if (Option.isNone(limit) || !validSubscriptionUsagePercent(limit.value.percent)) {
+          continue
+        }
+
+        const model = scopedLimitModel(limit.value.scope.model)
+
+        if (model === undefined) {
+          continue
+        }
+
+        const id = `${anthropicClaudeScopedWindowIdPrefix}${model}`
+
+        if (scopedIds.has(id)) {
+          continue
+        }
+
+        scopedIds.add(id)
+        pushWindow({
+          id,
+          usedPercent: limit.value.percent,
+          resetsAt: limit.value.resets_at,
+          windowDurationMinutes: sevenDayMinutes,
+          models: [model]
+        })
+      }
 
       return ProviderSubscriptionUsageSnapshot.make({
         provider: anthropicClaudeProviderId,

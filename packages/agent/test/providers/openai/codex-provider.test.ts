@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -130,6 +130,27 @@ const collectCodexProviderEvents = (response: Response) =>
     const provider = yield* LLMProvider
 
     return yield* provider.stream(defaultCodexRequest).pipe(Stream.runCollect)
+  }).pipe(
+    Effect.provide(
+      makeOpenAiCodexProviderLayer({ token: codexToken }).pipe(
+        Layer.provide(makeHttpClientLayer(response))
+      )
+    )
+  )
+
+/** Runs one request that must fail; returns its error and how many events preceded it. */
+const failedCodexRequest = (response: Response) =>
+  Effect.gen(function* () {
+    const emitted = yield* Ref.make(0)
+    const provider = yield* LLMProvider
+
+    const error = yield* provider.stream(defaultCodexRequest).pipe(
+      Stream.tap(() => Ref.update(emitted, count => count + 1)),
+      Stream.runDrain,
+      Effect.flip
+    )
+
+    return { error, emitted: yield* Ref.get(emitted) }
   }).pipe(
     Effect.provide(
       makeOpenAiCodexProviderLayer({ token: codexToken }).pipe(
@@ -823,6 +844,39 @@ describe('OpenAI Codex provider', () => {
           Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
         )
       ).toEqual(['tool_use'])
+    })
+  )
+
+  it.effect('reports the quota reset of an exhausted Codex subscription before any event', () =>
+    Effect.gen(function* () {
+      const resetsAtSeconds = 1_800_000_000
+
+      const { error, emitted } = yield* failedCodexRequest(
+        new Response(
+          JSON.stringify({
+            error: {
+              type: 'usage_limit_reached',
+              message: 'The usage limit has been reached',
+              resets_at: resetsAtSeconds,
+              resets_in_seconds: 3600
+            }
+          }),
+          { status: 429 }
+        )
+      )
+
+      expect(emitted).toBe(0)
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({
+        cause: 'rate_limit',
+        retryable: true,
+        provider: {
+          provider: 'openai_codex',
+          kind: 'rate_limit',
+          status: 429,
+          quotaResetsAtMs: resetsAtSeconds * 1000
+        }
+      })
     })
   )
 
