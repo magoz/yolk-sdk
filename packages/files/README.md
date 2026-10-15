@@ -30,7 +30,7 @@ const store = makeObjectStorageFileStore({
 ```ts
 import { makeFileToolModule } from '@yolk-sdk/files'
 
-const files = makeFileToolModule({ store, transport: guardedUploadTransport })
+const files = makeFileToolModule({ store, transport: guardedUploadTransport, sandbox })
 ```
 
 | Tool          | Input                       | Does                                                                 |
@@ -40,7 +40,8 @@ const files = makeFileToolModule({ store, transport: guardedUploadTransport })
 
 Both are `write` tools: claim and ledger them like other writes. `file_upload` needs a
 `FileUploadTransportApi` from the host over a guarded client (public addresses only, TLS, no
-redirects, no ambient credentials, no URL logging); without one it is left out. Results and errors
+redirects, no ambient credentials, no URL logging); without one it is left out. The sandbox tools
+need a `SandboxApi` with `writeFile`/`readFile` (the Vercel layer has them). Results and errors
 name only the destination host, never the URL.
 
 A code mode script moves a file from one tool to another without seeing its bytes:

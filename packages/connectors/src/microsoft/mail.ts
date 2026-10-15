@@ -1,6 +1,7 @@
 import { Chunk, Effect, Match, Predicate, Result, SchemaTransformation } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { connectorActionFile } from '../file-output.ts'
 import { optionalStringConfig } from '../config.ts'
 import { resolveCredential } from '../credential.ts'
 import type { CredentialResolver, RuntimeCredential } from '../credential.ts'
@@ -359,6 +360,13 @@ export class OutlookGetAttachmentOutput extends Schema.Class<OutlookGetAttachmen
   'OutlookGetAttachmentOutput'
 )({
   attachment: OutlookAttachment
+}) {}
+
+/** The model-facing `outlook.get_attachment` output (ADR 0009): the bytes travel as a file. */
+export class OutlookGetAttachmentFileOutput extends Schema.Class<OutlookGetAttachmentFileOutput>(
+  'OutlookGetAttachmentFileOutput'
+)({
+  attachment: OutlookAttachmentMetadata
 }) {}
 
 const OutlookAttachmentApi = Schema.Struct({
@@ -1168,9 +1176,29 @@ export const outlookListAttachmentsAction = defineAction({
 
 export const outlookGetAttachmentAction = defineAction({
   id: 'outlook.get_attachment',
-  description: 'Get one Microsoft Outlook file attachment with base64 content.',
+  description:
+    'Get one Microsoft Outlook file attachment. As an agent tool it returns the attachment as a file (fileId) with its metadata; invoked directly it returns base64 content.',
   inputSchema: OutlookGetAttachmentInput,
   outputSchema: OutlookGetAttachmentOutput,
+  fileOutput: {
+    schema: OutlookGetAttachmentFileOutput,
+    split: output => {
+      const { contentBase64, ...metadata } = output.attachment
+
+      return {
+        value: OutlookGetAttachmentFileOutput.make({
+          attachment: OutlookAttachmentMetadata.make(metadata)
+        }),
+        files: [
+          connectorActionFile({
+            base64: contentBase64,
+            mimeType: metadata.contentType,
+            filename: metadata.name
+          })
+        ]
+      }
+    }
+  },
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const slot = yield* outlookReadSlot(integration, input.mailbox)

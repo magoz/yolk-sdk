@@ -158,6 +158,40 @@ export const normalizeWorkspaceCwd = (
   )
 }
 
+const invalidPath = (message: string) =>
+  Effect.fail(new SandboxInputError({ cause: 'invalid_path', message }))
+
+/**
+ * A workspace-relative file path with `.` segments removed and `..` resolved. Absolute paths,
+ * NUL bytes, escapes from the workspace, and paths that name the workspace itself are rejected.
+ */
+export const normalizeWorkspacePath = (path: string): Effect.Effect<string, SandboxInputError> => {
+  const trimmed = path.trim()
+
+  if (trimmed.startsWith('/') || trimmed.includes('\0')) {
+    return invalidPath('path must be workspace-relative')
+  }
+
+  const parts: Array<string> = []
+
+  for (const segment of trimmed.split('/')) {
+    if (segment.length === 0 || segment === '.') continue
+
+    if (segment === '..') {
+      if (parts.pop() === undefined) return invalidPath('path must not escape the workspace')
+
+      continue
+    }
+
+    parts.push(segment)
+  }
+
+  return parts.length === 0 ? invalidPath('path must name a file') : Effect.succeed(parts.join('/'))
+}
+
+export const absoluteSandboxPath = (workspaceRoot: string, normalizedPath: string) =>
+  `${workspaceRoot}/${normalizedPath}`
+
 export const absoluteSandboxCwd = (workspaceRoot: string, normalizedCwd: NormalizedWorkspaceCwd) =>
   normalizedCwd === '.' ? workspaceRoot : `${workspaceRoot}/${normalizedCwd}`
 

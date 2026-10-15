@@ -3,6 +3,8 @@
 '@yolk-sdk/codemode': minor
 '@yolk-sdk/mcp': minor
 '@yolk-sdk/files': minor
+'@yolk-sdk/sandbox': minor
+'@yolk-sdk/connectors': minor
 ---
 
 File claim check (ADR 0009): agents move files between tools by `fileId`; bytes never reach the
@@ -32,3 +34,17 @@ mimeType, size }]`, merged into an object result or as `{ text, files }`; the co
   hash, no database), `deleteScopeFiles`, `fileIdFor`, and `makeFileToolModule` with `file_upload`
   (`PUT` to an https URL over a host `FileUploadTransportApi`) and `file_url` (signed download
   link).
+- New `@yolk-sdk/files` tools `file_to_sandbox` (copy a file into the workspace, default
+  `files/<name>`) and `file_from_sandbox` (turn a workspace file into a `fileId`, MIME type inferred
+  from the extension), present when the host passes a sandbox with file transfer.
+- `@yolk-sdk/sandbox`: optional binary `SandboxApi.writeFile`/`readFile` on workspace-relative
+  paths (`normalizeWorkspacePath`), implemented by the Vercel layer (streamed, bounded reads) and
+  `makeFakeSandboxFiles`; `SandboxInputErrorCause` gains `invalid_path`, `file_not_found` and
+  `file_too_large`; `VercelSandboxHandle` gains `readFile` and `VercelSandboxFile.content` accepts
+  bytes.
+- `@yolk-sdk/connectors`: actions may declare `fileOutput` (a byte-free tool output schema and a
+  `split` into files). The agent bridge declares that schema and returns the bytes as `FilePart`s.
+  `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` use it, so as agent
+  tools they return a file instead of base64 (`connector.invoke` is unchanged). New
+  `connectorActionFile`, `sniffBase64MimeType`, `GmailGetAttachmentFileOutput`,
+  `OutlookGetAttachmentFileOutput` and `EmailGetAttachmentFileOutput`.

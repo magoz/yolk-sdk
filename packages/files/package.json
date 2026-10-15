@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
+    "@yolk-sdk/sandbox": "workspace:^",
     "effect": "catalog:"
   }
 }

@@ -12,6 +12,7 @@
 - Raw secrets may flow through host-provided Effect services at invocation time, but integrations store only opaque credential refs.
 - Provider modules may define vendor mechanics and schemas, not host policy.
 - Only `src/agent.ts` may import `@yolk-sdk/agent`; `@yolk-sdk/conformance` (wire and port fixtures) may be imported only under a `src/**/conformance/` directory; nothing imports `@yolk-sdk/emulators`. `scripts/check-package-boundaries.ts` enforces all three.
+- Actions whose output carries file bytes declare `fileOutput` (ADR 0009): a byte-free `schema` (the agent tool output) and `split` (that value plus `ConnectorActionFile`s via `connectorActionFile`). The agent bridge returns the bytes as `FilePart`s for tool resolution to capture; `connector.invoke` keeps the full output. Today: `gmail.get_attachment`, `outlook.get_attachment`, `email.get_attachment`.
 
 ## Public model
 

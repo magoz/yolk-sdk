@@ -1,7 +1,8 @@
 export {
   isVercelMissingSandboxError,
   VercelSandboxClient,
-  VercelSandboxClientLive
+  VercelSandboxClientLive,
+  VercelSandboxFileTooLargeError
 } from './client.ts'
 
 export { makeVercelSandboxLayer, makeVercelSandboxLayerWithClient } from './layer.ts'

@@ -86,6 +86,7 @@ export {
   GmailDeletePermanentlyInput,
   gmailGetAttachmentAction,
   GmailGetAttachmentInput,
+  GmailGetAttachmentFileOutput,
   GmailGetAttachmentOutput,
   gmailGetMessageAction,
   GmailGetMessageInput,

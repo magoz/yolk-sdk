@@ -43,7 +43,7 @@ transcript, and swap the id back for bytes (or a signed link) at the edge that c
 | Model view  | Captured `File` parts become `Ref { id: fileId }`, lowered as a text label; bytes never reach the model |
 | Scripts     | `ToolResult.files` lists descriptors; nested results resolve them as `files`                            |
 | Store       | Scope-bound `FileStoreApi` from the host; `@yolk-sdk/files` ships an object-storage implementation      |
-| Tools       | `file_upload` and `file_url` in `@yolk-sdk/files`; sandbox transfers follow                             |
+| Tools       | `file_upload`, `file_url`, `file_to_sandbox`, `file_from_sandbox` in `@yolk-sdk/files`                  |
 | Sinks       | Host and connector tools that take files accept `fileId`, in tagged unions where inputs vary            |
 | Authority   | Host-owned: it passes `files` and the file module only to surfaces allowed to use them                  |
 | Fail-closed | Without a store, inline `File` parts become "file not captured"; base64 never reaches the model         |
@@ -131,13 +131,15 @@ it needs to.
 
 ## 5. Tools
 
-`@yolk-sdk/files` exports `makeFileToolModule({ store, transport?, maxTransferBytes?,
+`@yolk-sdk/files` exports `makeFileToolModule({ store, transport?, sandbox?, maxTransferBytes?,
 defaultUrlTtlSeconds?, isEnabled? })`:
 
-| Tool          | Input                       | Output                    | Access  |
-| ------------- | --------------------------- | ------------------------- | ------- |
-| `file_upload` | `{ fileId, url, headers? }` | `{ status, size, etag? }` | `write` |
-| `file_url`    | `{ fileId, ttlMinutes? }`   | `{ url, expiresAt }`      | `write` |
+| Tool                | Input                        | Output                             | Access  |
+| ------------------- | ---------------------------- | ---------------------------------- | ------- |
+| `file_upload`       | `{ fileId, url, headers? }`  | `{ status, size, etag? }`          | `write` |
+| `file_url`          | `{ fileId, ttlMinutes? }`    | `{ url, expiresAt }`               | `write` |
+| `file_to_sandbox`   | `{ fileId, path? }`          | `{ path, size }`                   | `write` |
+| `file_from_sandbox` | `{ path, name?, mimeType? }` | `{ fileId, name, mimeType, size }` | `write` |
 
 - `file_upload` `PUT`s the stored bytes (up to `maxTransferBytes`, default 50 MiB) through the
   host's `FileUploadTransportApi`, which must be a guarded client: public addresses only (checked
@@ -154,8 +156,12 @@ defaultUrlTtlSeconds?, isEnabled? })`:
   friction without protection. Hosts claim and ledger them as writes and may add prompt guidance
   about destinations named only in untrusted content. A future session-level egress policy, if
   any, covers the sandbox and these tools together.
-- Next: `file_to_sandbox` and `file_from_sandbox`, which need binary `writeFile`/`readFile` on
-  `SandboxApi` (the Vercel client already has `writeFiles`).
+- `file_to_sandbox` writes the bytes to a workspace-relative path (default `files/<name>`) and
+  `file_from_sandbox` stores a workspace file (MIME type inferred from the extension unless given).
+  They use the invoking runtime's own sandbox, through the optional binary
+  `SandboxApi.writeFile`/`readFile` (`@yolk-sdk/sandbox`: workspace-relative paths only, streamed
+  reads bounded by `maxTransferBytes`), and exist only when the host passes a sandbox that has
+  them.
 
 ## 6. Producers and sinks
 
@@ -163,8 +169,13 @@ defaultUrlTtlSeconds?, isEnabled? })`:
   stays text; images and audio stay `ImagePart`/`AudioPart` with inline sources and are captured
   like any other part. The MCP server lowers an inline `FilePart` to an embedded resource blob and a
   captured one to its label. `resource_link` reads are a later addition.
-- `@yolk-sdk/connectors`: download and attachment actions move to returning `FilePart`s
-  (`filePartFromBytes` over `ConnectorFileBytes`); upload actions accept bytes the host resolved.
+- `@yolk-sdk/connectors`: an action whose output carries bytes declares `fileOutput`: a byte-free
+  `schema` (declared as the agent tool output) and `split` (that value plus base64 files, typed by
+  `connectorActionFile`, which sniffs common MIME types). The agent bridge returns the bytes as
+  `FilePart`s after the text; `connector.invoke` keeps the full output for hosts.
+  `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` use it. Host-only
+  downloaders (`downloadGoogleDriveFile`, ...) stay host APIs: hosts wrap their bytes with
+  `filePartFromBytes`.
 - Sinks take `fileId`, in a tagged union where a parameter accepts several kinds of input (for
   example `content: { kind: 'text', text } | { kind: 'file', fileId }`). The host reads bytes with
   `read` after its own authority and claim checks.
@@ -196,7 +207,7 @@ authorized upload) on the way out; the agent-facing `fileId` does not change.
 
 ## Not done
 
-- Sandbox transfers (`file_to_sandbox`, `file_from_sandbox`) and connector producers.
+- `fileOutput` on further connector actions.
 - Rewriting captured image, document and audio sources to `Ref`.
 - A guarded Node `FileUploadTransportApi` in the package (hosts provide one).
 - Multipart/form uploads (`file_upload` is `PUT` only).

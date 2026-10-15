@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConnectorError } from './error.ts'
 import type { ActionResult } from './result.ts'
@@ -20,12 +20,45 @@ export type UnknownActionExecutionInput = {
   readonly input: unknown
 }
 
+/** One file an action yields (ADR 0009): standard base64 bytes the agent bridge turns into a
+ * `FilePart`, so tool resolution stores them and the model only sees a `fileId`. */
+export type ConnectorActionFile = {
+  readonly base64: string
+  readonly mimeType: string
+  readonly filename?: string
+}
+
+/**
+ * How the agent bridge splits an action output that carries file bytes: `schema` is the
+ * model-facing output (the action output without the bytes, declared as the tool output) and
+ * `split` returns that value plus the files. `connector.invoke` is unchanged and still returns the
+ * full output to hosts.
+ */
+export type ConnectorActionFileOutput<Output> = {
+  readonly schema: ActionOutputSchema
+  readonly split: (output: Output) => {
+    readonly value: unknown
+    readonly files: ReadonlyArray<ConnectorActionFile>
+  }
+}
+
+/** `ConnectorActionFileOutput` over an unknown output: `split` is `None` when the value is not
+ * the action's output. */
+export type UnknownConnectorActionFileOutput = {
+  readonly schema: ActionOutputSchema
+  readonly split: (output: unknown) => Option.Option<{
+    readonly value: unknown
+    readonly files: ReadonlyArray<ConnectorActionFile>
+  }>
+}
+
 export type ConnectorAction<Env = never, Error = never> = {
   readonly id: string
   readonly description?: string
   readonly access?: ConnectorActionAccess
   readonly inputSchema: ActionInputSchema
   readonly outputSchema: ActionOutputSchema
+  readonly fileOutput?: UnknownConnectorActionFileOutput
   readonly execute: (
     input: UnknownActionExecutionInput
   ) => Effect.Effect<ActionResult<unknown>, Error | ConnectorError, Env>
@@ -52,6 +85,8 @@ export type DefineActionOptions<InputSchema extends ActionInputSchema, Output, E
   readonly access?: ConnectorActionAccess
   readonly inputSchema: InputSchema
   readonly outputSchema: Schema.Schema<Output> & { readonly EncodingServices: never }
+  /** Set when the output carries file bytes (ADR 0009). */
+  readonly fileOutput?: ConnectorActionFileOutput<Output>
   readonly execute: (
     input: ActionExecutionInput<InputSchema['Type']>
   ) => Effect.Effect<ActionResult<Output>, Error | ConnectorError, Env>
@@ -69,6 +104,7 @@ type ConnectorActionPrefixFields = {
   readonly id: string
   description?: string
   access?: ConnectorActionAccess
+  fileOutput?: UnknownConnectorActionFileOutput
 }
 
 export const defineAction = <
@@ -87,6 +123,17 @@ export const defineAction = <
 
     if (options.access !== undefined) {
       fields.access = options.access
+    }
+
+    const fileOutput = options.fileOutput
+
+    if (fileOutput !== undefined) {
+      const isOutput = Schema.is(Schema.toType(options.outputSchema))
+
+      fields.fileOutput = {
+        schema: fileOutput.schema,
+        split: output => (isOutput(output) ? Option.some(fileOutput.split(output)) : Option.none())
+      }
     }
 
     const run = (

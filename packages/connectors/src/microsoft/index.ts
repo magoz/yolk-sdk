@@ -50,6 +50,7 @@ export {
   outlookGetCategoryAction,
   OutlookGetCategoryInput,
   OutlookGetAttachmentInput,
+  OutlookGetAttachmentFileOutput,
   OutlookGetAttachmentOutput,
   outlookGetAttachmentAction,
   outlookGetMessageAction,

@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -10,6 +10,7 @@ import {
 import { makeInMemorySandboxStateStoreLayer } from '../src/testing/index.ts'
 import {
   VercelSandboxClient,
+  VercelSandboxFileTooLargeError,
   makeVercelSandboxLayerWithClient,
   type VercelDetachedCommand,
   type VercelFinishedCommand,
@@ -50,6 +51,17 @@ const makeHandle = (input: {
 
     return Effect.void
   },
+  readFile: ({ path, maxBytes }) => {
+    const content = input.files.findLast(file => file.path === path)?.content
+
+    if (content === undefined) return Effect.succeed(null)
+
+    const bytes = Predicate.isString(content) ? new TextEncoder().encode(content) : content
+
+    return bytes.byteLength > maxBytes
+      ? Effect.fail(new VercelSandboxFileTooLargeError({ maxBytes }))
+      : Effect.succeed(bytes)
+  },
   runDetachedCommand: command => {
     input.commands.push(command)
 
@@ -67,6 +79,53 @@ const makeHandle = (input: {
 })
 
 describe('vercel sandbox layer', () => {
+  it.effect('writes and reads binary workspace files under the workspace root', () =>
+    Effect.gen(function* () {
+      const files: Array<VercelSandboxFile> = []
+      const name = makeVercelSandboxName('session_1')
+      const handle = makeHandle({ name, files, commands: [], deleted: [] })
+
+      const clientLayer = Layer.succeed(
+        VercelSandboxClient,
+        VercelSandboxClient.of({
+          get: () => Effect.succeed(null),
+          create: () => Effect.succeed(handle)
+        })
+      )
+
+      const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId: 'session_1' }).pipe(
+        Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
+      )
+
+      const bytes = Uint8Array.from([0, 255, 37, 80])
+
+      const outcome = yield* Effect.gen(function* () {
+        const sandbox = yield* Sandbox
+        const write = sandbox.writeFile
+        const read = sandbox.readFile
+
+        if (write === undefined || read === undefined) {
+          return yield* Effect.die(new Error('Expected file transfer'))
+        }
+
+        const path = yield* write({ path: './in/../in/a.bin', bytes })
+        const back = yield* read({ path, maxBytes: 4 })
+        const tooLarge = yield* read({ path, maxBytes: 3 }).pipe(Effect.flip)
+        const missing = yield* read({ path: 'in/missing.bin', maxBytes: 4 }).pipe(Effect.flip)
+        const escape = yield* write({ path: '../etc/passwd', bytes }).pipe(Effect.flip)
+
+        return { path, back, tooLarge, missing, escape }
+      }).pipe(Effect.provide(layer))
+
+      expect(outcome.path).toBe('in/a.bin')
+      expect(files.at(-1)?.path).toBe('/vercel/sandbox/in/a.bin')
+      expect(outcome.back).toEqual(bytes)
+      expect(outcome.tooLarge).toMatchObject({ _tag: 'SandboxInputError', cause: 'file_too_large' })
+      expect(outcome.missing).toMatchObject({ _tag: 'SandboxInputError', cause: 'file_not_found' })
+      expect(outcome.escape).toMatchObject({ _tag: 'SandboxInputError', cause: 'invalid_path' })
+    })
+  )
+
   it.effect('creates sandbox lazily and runs wrapper command', () =>
     Effect.gen(function* () {
       const files: Array<VercelSandboxFile> = []

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Match } from 'effect'
+import { Context, Data, Effect, Layer, Match, Predicate } from 'effect'
 import {
   APIError,
   Sandbox as VercelSdkSandbox,
@@ -35,9 +35,14 @@ export type VercelDetachedCommand = {
 
 export type VercelSandboxFile = {
   readonly path: string
-  readonly content: string
+  readonly content: string | Uint8Array
   readonly mode?: number
 }
+
+/** `readFile` stopped because the file is larger than its `maxBytes`. */
+export class VercelSandboxFileTooLargeError extends Data.TaggedError(
+  'VercelSandboxFileTooLargeError'
+)<{ readonly maxBytes: number }> {}
 
 export type VercelRunCommandInput = {
   readonly cmd: string
@@ -66,6 +71,11 @@ export type VercelSandboxGetInput = {
 export type VercelSandboxHandle = {
   readonly name: string
   readonly writeFiles: (files: ReadonlyArray<VercelSandboxFile>) => Effect.Effect<void, unknown>
+  /** The file's bytes, `null` when it does not exist; fails past `maxBytes` while streaming. */
+  readonly readFile: (input: {
+    readonly path: string
+    readonly maxBytes: number
+  }) => Effect.Effect<Uint8Array | null, VercelSandboxFileTooLargeError | unknown>
   readonly runDetachedCommand: (
     input: VercelRunCommandInput
   ) => Effect.Effect<VercelDetachedCommand, unknown>
@@ -121,8 +131,44 @@ const toDetachedCommand = (command: Command): VercelDetachedCommand => ({
 
 type VercelWriteFilePayload = {
   readonly path: string
-  readonly content: string
+  readonly content: string | Uint8Array
   mode?: number
+}
+
+const chunkBytes = (chunk: unknown) =>
+  chunk instanceof Uint8Array
+    ? chunk
+    : Predicate.isString(chunk)
+      ? new TextEncoder().encode(chunk)
+      : new Uint8Array(0)
+
+// Reads at most `maxBytes`, failing as soon as the stream goes past it.
+const readBounded = async (
+  stream: AsyncIterable<unknown>,
+  maxBytes: number
+): Promise<Uint8Array> => {
+  const chunks: Array<Uint8Array> = []
+  let total = 0
+
+  for await (const chunk of stream) {
+    const bytes = chunkBytes(chunk)
+
+    total += bytes.byteLength
+
+    if (total > maxBytes) throw new VercelSandboxFileTooLargeError({ maxBytes })
+
+    chunks.push(bytes)
+  }
+
+  const result = new Uint8Array(total)
+  let offset = 0
+
+  for (const bytes of chunks) {
+    result.set(bytes, offset)
+    offset += bytes.byteLength
+  }
+
+  return result
 }
 
 type VercelRunCommandPayload = {
@@ -156,6 +202,12 @@ const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
         })
       )
     ),
+  readFile: ({ path, maxBytes }) =>
+    tryVercelPromise(async () => {
+      const stream = await sandbox.readFile({ path })
+
+      return stream === null ? null : readBounded(stream, maxBytes)
+    }),
   runDetachedCommand: input =>
     tryVercelPromise(() => {
       const command: VercelRunCommandPayload = {

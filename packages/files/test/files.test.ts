@@ -2,6 +2,8 @@ import { Effect, Option, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall, contentText, type ToolResult } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
+import type { SandboxApi } from '@yolk-sdk/sandbox'
+import { makeFakeSandboxFiles } from '@yolk-sdk/sandbox/testing'
 import {
   deleteScopeFiles,
   fileIdFor,
@@ -290,6 +292,90 @@ describe('file tools', () => {
       const { toolSet } = yield* setup()
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual(['file_url'])
+    })
+  )
+})
+
+describe('sandbox file tools', () => {
+  const sandboxSetup = Effect.gen(function* () {
+    const storage = memoryStorage()
+    const store = makeObjectStorageFileStore({ storage, scope: 'ws_1/session_1' })
+    const file = yield* store.put({ bytes: pdf, name: 'In voice.pdf', mimeType: 'application/pdf' })
+    const sandboxFiles = makeFakeSandboxFiles()
+
+    const sandbox: SandboxApi = {
+      run: () => Effect.die(new Error('not used')),
+      currentState: Effect.succeed(Option.none()),
+      delete: Effect.void,
+      writeFile: sandboxFiles.writeFile,
+      readFile: sandboxFiles.readFile
+    }
+
+    const toolSet = yield* resolveTools(
+      [makeFileToolModule<Record<never, never>>({ store, sandbox })],
+      {}
+    )
+
+    const call = (name: string, params: unknown) =>
+      toolSet.execute(ToolCall.make({ id: 'call_1', name, params }))
+
+    return { file, call, sandboxFiles, store, toolSet }
+  })
+
+  it.effect('copies a file into the workspace under its name', () =>
+    Effect.gen(function* () {
+      const { file, call, sandboxFiles } = yield* sandboxSetup
+
+      const result = yield* call('file_to_sandbox', { fileId: file.fileId })
+
+      expect(result.structuredContent).toEqual({ path: 'files/In voice.pdf', size: pdf.byteLength })
+      expect(sandboxFiles.files.get('files/In voice.pdf')).toEqual(pdf)
+    })
+  )
+
+  it.effect('turns a workspace file into a file with an inferred type', () =>
+    Effect.gen(function* () {
+      const { call, sandboxFiles, store } = yield* sandboxSetup
+      const report = new TextEncoder().encode('a,b\n1,2\n')
+
+      sandboxFiles.files.set('out/report.csv', report)
+
+      const result = yield* call('file_from_sandbox', { path: 'out/report.csv' })
+      const fileId = result.files?.[0]?.fileId ?? ''
+
+      expect(result.structuredContent).toMatchObject({
+        name: 'report.csv',
+        mimeType: 'text/csv',
+        size: report.byteLength
+      })
+      expect(resultText(result)).toBe(`[file ${fileId}: report.csv, text/csv, 8 B]`)
+      expect(yield* store.read({ fileId, maxBytes: 100 })).toEqual(report)
+    })
+  )
+
+  it.effect('reports missing paths and escapes as model-visible errors', () =>
+    Effect.gen(function* () {
+      const { call } = yield* sandboxSetup
+
+      const missing = yield* call('file_from_sandbox', { path: 'out/none.csv' })
+      const escape = yield* call('file_from_sandbox', { path: '../secret' })
+
+      expect(missing.isError).toBe(true)
+      expect(resultText(missing)).toContain('does not exist')
+      expect(escape.isError).toBe(true)
+      expect(resultText(escape)).toContain('must not escape the workspace')
+    })
+  )
+
+  it.effect('lists the sandbox tools when the sandbox transfers files', () =>
+    Effect.gen(function* () {
+      const { toolSet } = yield* sandboxSetup
+
+      expect(toolSet.tools.map(tool => tool.name)).toEqual([
+        'file_url',
+        'file_to_sandbox',
+        'file_from_sandbox'
+      ])
     })
   )
 })

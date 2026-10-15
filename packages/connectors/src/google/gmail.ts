@@ -7,6 +7,7 @@ import {
   type EmailBatchResultCode
 } from '../email-batch.ts'
 import { defineAction } from '../action.ts'
+import { connectorActionFile } from '../file-output.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
@@ -699,6 +700,15 @@ export class GmailGetAttachmentOutput extends Schema.Class<GmailGetAttachmentOut
   size: GmailAttachmentSize,
   data: GmailAttachmentBase64Url,
   contentBase64: GmailAttachmentBase64
+}) {}
+
+/** The model-facing `gmail.get_attachment` output (ADR 0009): the bytes travel as a file. */
+export class GmailGetAttachmentFileOutput extends Schema.Class<GmailGetAttachmentFileOutput>(
+  'GmailGetAttachmentFileOutput'
+)({
+  messageId: Schema.String,
+  attachmentId: Schema.String,
+  size: GmailAttachmentSize
 }) {}
 
 const GmailAttachmentWireOutput = Schema.Struct({
@@ -2414,9 +2424,20 @@ export const gmailListAttachmentsAction = defineAction({
 export const gmailGetAttachmentAction = defineAction({
   id: 'gmail.get_attachment',
   description:
-    'Get Gmail attachment content as standard base64 while preserving Gmail base64url data.',
+    'Get one Gmail attachment. As an agent tool it returns the attachment as a file (fileId); invoked directly it returns standard base64 and the Gmail base64url data.',
   inputSchema: GmailGetAttachmentInput,
   outputSchema: GmailGetAttachmentOutput,
+  fileOutput: {
+    schema: GmailGetAttachmentFileOutput,
+    split: output => ({
+      value: GmailGetAttachmentFileOutput.make({
+        messageId: output.messageId,
+        attachmentId: output.attachmentId,
+        size: output.size
+      }),
+      files: [connectorActionFile({ base64: output.contentBase64 })]
+    })
+  },
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
       const token = yield* resolveGoogleAccessToken(

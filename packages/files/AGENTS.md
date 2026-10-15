@@ -7,14 +7,15 @@
 
 ## Subpaths
 
-| Subpath           | Source         | Role                                                                                |
-| ----------------- | -------------- | ----------------------------------------------------------------------------------- |
-| `@yolk-sdk/files` | `src/index.ts` | `makeObjectStorageFileStore`, `deleteScopeFiles`, `fileIdFor`, `makeFileToolModule` |
+| Subpath           | Source         | Role                                                                                                                                                    |
+| ----------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/files` | `src/index.ts` | `makeObjectStorageFileStore`, `deleteScopeFiles`, `fileIdFor`, `makeFileToolModule` (`file_upload`, `file_url`, `file_to_sandbox`, `file_from_sandbox`) |
 
 ## Boundaries
 
-- Depends only on `@yolk-sdk/agent/{protocol,loop,tools}` and Effect; no Node builtins, provider
-  SDKs, or storage clients (boundary-enforced). Hosts implement `ObjectStorageApi` (R2, S3) and
+- Depends only on `@yolk-sdk/agent/{protocol,loop,tools}`, the `@yolk-sdk/sandbox` core (types),
+  and Effect; no Node builtins, provider SDKs, storage clients, or sandbox subpaths
+  (boundary-enforced). Hosts implement `ObjectStorageApi` (R2, S3) and
   `FileUploadTransportApi` (a guarded HTTP client).
 - `@yolk-sdk/agent` never imports this package.
 - Hosts own scope derivation (for example `<workspaceId>/<sessionId>`), which surfaces get the
@@ -32,4 +33,6 @@
   Errors and results name the host only; never echo the URL or its query (presigned URLs are
   bearer capabilities).
 - A transport `network` failure is an unknown outcome: say so, never retry automatically.
+- Sandbox tools use the invoking runtime's own sandbox (the host passes it) and only exist when it
+  has `writeFile`/`readFile`; destination names are single safe path segments.
 - Keep the package runtime-neutral: hashing uses Web Crypto `crypto.subtle`.

@@ -1,7 +1,14 @@
-import { Clock, Effect, Match, Option } from 'effect'
+import { Clock, Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { FileId, formatFileSize, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  FileDescriptor,
+  FileId,
+  fileLabel,
+  formatFileSize,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
+import type { SandboxApi, SandboxError } from '@yolk-sdk/sandbox'
 import {
   FileStoreError,
   makeTool,
@@ -16,6 +23,10 @@ import {
 export const fileUploadToolName = 'file_upload'
 
 export const fileUrlToolName = 'file_url'
+
+export const fileToSandboxToolName = 'file_to_sandbox'
+
+export const fileFromSandboxToolName = 'file_from_sandbox'
 
 /** Transport failures: `network` (no or partial response: the outcome is unknown) or `policy`
  * (the transport refused the destination before sending, for example a private address).
@@ -46,6 +57,10 @@ export type FileToolModuleOptions<Context> = {
   readonly store: FileStoreApi
   /** Omit to leave out `file_upload`. */
   readonly transport?: FileUploadTransportApi
+  /** The invoking runtime's own sandbox. Without `writeFile`/`readFile`, `file_to_sandbox` and
+   * `file_from_sandbox` are left out.
+   */
+  readonly sandbox?: SandboxApi
   /** Largest file `file_upload` reads into memory. Default 50 MiB. */
   readonly maxTransferBytes?: number
   /** Default lifetime of `file_url` links. Default one hour. */
@@ -287,18 +302,214 @@ const urlTool = <Context>(
       })
   })
 
+const FileToSandboxParams = Schema.Struct({
+  fileId: FileId,
+  path: Schema.optional(
+    Schema.String.pipe(
+      Schema.annotate({
+        description: 'Workspace-relative destination path. Default files/<file name>.'
+      })
+    )
+  )
+})
+
+const FileToSandboxOutput = Schema.Struct({ path: Schema.String, size: Schema.Number })
+
+const FileFromSandboxParams = Schema.Struct({
+  path: Schema.String.pipe(Schema.annotate({ description: 'Workspace-relative file path.' })),
+  name: Schema.optional(
+    Schema.String.pipe(Schema.annotate({ description: 'File name. Default: the path basename.' }))
+  ),
+  mimeType: Schema.optional(
+    Schema.String.pipe(
+      Schema.annotate({ description: 'MIME type. Default: inferred from the extension.' })
+    )
+  )
+})
+
+const FileFromSandboxOutput = Schema.Struct({
+  fileId: Schema.String,
+  name: Schema.String,
+  mimeType: Schema.String,
+  size: Schema.Number
+})
+
+const mimeTypeByExtension: ReadonlyMap<string, string> = new Map([
+  ['csv', 'text/csv'],
+  ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['gif', 'image/gif'],
+  ['html', 'text/html'],
+  ['jpeg', 'image/jpeg'],
+  ['jpg', 'image/jpeg'],
+  ['json', 'application/json'],
+  ['md', 'text/markdown'],
+  ['mp3', 'audio/mpeg'],
+  ['mp4', 'video/mp4'],
+  ['pdf', 'application/pdf'],
+  ['png', 'image/png'],
+  ['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  ['svg', 'image/svg+xml'],
+  ['txt', 'text/plain'],
+  ['wav', 'audio/wav'],
+  ['webp', 'image/webp'],
+  ['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ['xml', 'application/xml'],
+  ['zip', 'application/zip']
+])
+
+const basename = (path: string) => {
+  const parts = path.split('/').filter(part => part.length > 0)
+
+  return parts[parts.length - 1] ?? 'file'
+}
+
+const inferredMimeType = (name: string) => {
+  const extension = name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined
+
+  return (
+    (extension === undefined ? undefined : mimeTypeByExtension.get(extension)) ??
+    'application/octet-stream'
+  )
+}
+
+// A file name usable as one path segment: no separators, control characters or dot names.
+const safeFileName = (name: string) => {
+  const cleaned = name.replace(/[/\\\u0000-\u001f]/gu, '_').trim()
+
+  return cleaned.length === 0 || cleaned === '.' || cleaned === '..' ? 'file' : cleaned
+}
+
+const sandboxError = (tool: string) => (error: SandboxError) =>
+  Predicate.isTagged(error, 'SandboxInputError')
+    ? modelVisibleToolError({
+        tool,
+        message: error.message,
+        reason: error.cause === 'file_not_found' ? 'not_found' : 'invalid_input'
+      })
+    : new ToolError({ tool, message: 'The sandbox is unavailable.', cause: 'unavailable' })
+
+const toSandboxTool = <Context>(
+  store: FileStoreApi,
+  writeFile: NonNullable<SandboxApi['writeFile']>,
+  options: FileToolModuleOptions<Context>
+): ToolRegistration<Context> =>
+  makeTool<Context, typeof FileToSandboxParams>({
+    name: fileToSandboxToolName,
+    description:
+      'Copy a file (fileId) into the sandbox workspace to work on it with commands. Returns the workspace-relative path.',
+    parameters: FileToSandboxParams,
+    output: FileToSandboxOutput,
+    access: 'write',
+    isEnabled: options.isEnabled,
+    invalidParamsMessage: error =>
+      withToolArgumentsErrorHint('Invalid file_to_sandbox arguments: fileId, path?', error),
+    execute: ({ call, params }) =>
+      Effect.gen(function* () {
+        const file = yield* store
+          .head(params.fileId)
+          .pipe(Effect.mapError(storeError(fileToSandboxToolName, params.fileId)))
+
+        if (Option.isNone(file)) {
+          return yield* Effect.fail(
+            storeError(
+              fileToSandboxToolName,
+              params.fileId
+            )(new FileStoreError({ reason: 'not_found', message: params.fileId }))
+          )
+        }
+
+        const bytes = yield* store
+          .read({
+            fileId: params.fileId,
+            maxBytes: options.maxTransferBytes ?? defaultMaxFileTransferBytes
+          })
+          .pipe(Effect.mapError(storeError(fileToSandboxToolName, params.fileId)))
+
+        const path = yield* writeFile({
+          path: params.path ?? `files/${safeFileName(file.value.name)}`,
+          bytes
+        }).pipe(Effect.mapError(sandboxError(fileToSandboxToolName)))
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: `Copied ${file.value.name} (${formatFileSize(bytes.byteLength)}) to ${path}.`,
+          structuredContent: { path, size: bytes.byteLength }
+        })
+      })
+  })
+
+const fromSandboxTool = <Context>(
+  store: FileStoreApi,
+  readFile: NonNullable<SandboxApi['readFile']>,
+  options: FileToolModuleOptions<Context>
+): ToolRegistration<Context> =>
+  makeTool<Context, typeof FileFromSandboxParams>({
+    name: fileFromSandboxToolName,
+    description:
+      'Turn a file in the sandbox workspace into a file (fileId) that other tools accept, for example to upload, attach or share it.',
+    parameters: FileFromSandboxParams,
+    output: FileFromSandboxOutput,
+    access: 'write',
+    isEnabled: options.isEnabled,
+    invalidParamsMessage: error =>
+      withToolArgumentsErrorHint(
+        'Invalid file_from_sandbox arguments: path, name?, mimeType?',
+        error
+      ),
+    execute: ({ call, params }) =>
+      Effect.gen(function* () {
+        const bytes = yield* readFile({
+          path: params.path,
+          maxBytes: options.maxTransferBytes ?? defaultMaxFileTransferBytes
+        }).pipe(Effect.mapError(sandboxError(fileFromSandboxToolName)))
+
+        const name = safeFileName(params.name ?? basename(params.path))
+
+        const file = yield* store
+          .put({ bytes, name, mimeType: params.mimeType ?? inferredMimeType(name) })
+          .pipe(Effect.mapError(storeError(fileFromSandboxToolName, params.path)))
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: fileLabel(file),
+          structuredContent: {
+            fileId: file.fileId,
+            name: file.name,
+            mimeType: file.mimeType,
+            size: file.size
+          },
+          files: [FileDescriptor.make(file)]
+        })
+      })
+  })
+
 /**
- * The file tools of ADR 0009 over a host store: `file_upload` (only with a `transport`) and
- * `file_url`. Both are `write` tools: hosts claim and ledger them like other writes and decide
- * which surfaces get the module. Build it per resolution with the store bound to that scope.
+ * The file tools of ADR 0009 over a host store: `file_upload` (only with a `transport`),
+ * `file_url`, and `file_to_sandbox`/`file_from_sandbox` (only with a sandbox that transfers
+ * files). All are `write` tools: hosts claim and ledger them like other writes and decide which
+ * surfaces get the module. Build it per resolution with the store bound to that scope.
  */
 export const makeFileToolModule = <Context>(
   options: FileToolModuleOptions<Context>
-): ToolModule<Context> => ({
-  id: 'files',
-  description: 'Move files (fileId) the agent received to URLs and links.',
-  tools:
-    options.transport === undefined
-      ? [urlTool(options.store, options)]
-      : [uploadTool(options.store, options.transport, options), urlTool(options.store, options)]
-})
+): ToolModule<Context> => {
+  const tools: Array<ToolRegistration<Context>> = []
+  const writeFile = options.sandbox?.writeFile
+  const readFile = options.sandbox?.readFile
+
+  if (options.transport !== undefined) {
+    tools.push(uploadTool(options.store, options.transport, options))
+  }
+
+  tools.push(urlTool(options.store, options))
+
+  if (writeFile !== undefined) tools.push(toSandboxTool(options.store, writeFile, options))
+
+  if (readFile !== undefined) tools.push(fromSandboxTool(options.store, readFile, options))
+
+  return {
+    id: 'files',
+    description:
+      'Move files (fileId) between tools: upload URLs, download links and the sandbox workspace.',
+    tools
+  }
+}
