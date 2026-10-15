@@ -23,11 +23,13 @@ import {
   InputRequest,
   InteractionDescriptor,
   InteractionRequest,
+  LLMReasoningReplay,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,
   QuestionPrompt,
   QuestionRequest,
+  SignedReasoningReplay,
   SubagentCompleted,
   SubagentStarted,
   ToolApprovalPolicy,
@@ -220,6 +222,15 @@ describe('agent status', () => {
 
     expect(resumed).toEqual(AgentWorking.make({ activity: AgentGenerating.make({}) }))
     expect(agentStatusRetry(resumed)).toBeUndefined()
+
+    const replayed = nextAgentStatus(
+      retrying,
+      LLMReasoningReplay.make({
+        replay: SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+      })
+    )
+
+    expect(replayed).toEqual(AgentWorking.make({ activity: AgentGenerating.make({}) }))
   })
 
   it('blocks on awaiting input with the requests and their kind', () => {
