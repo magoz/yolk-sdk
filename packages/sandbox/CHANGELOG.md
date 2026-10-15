@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.113
+
+### Patch Changes
+
+- 2b74f9c: Advance unchanged public packages in lockstep with `@yolk-sdk/agent`, which now streams Claude thinking summaries and replays signed thinking. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [67ec15e]
+  - @yolk-sdk/agent@0.1.0-canary.113
+
 ## 0.1.0-canary.112
 
 ### Patch Changes
