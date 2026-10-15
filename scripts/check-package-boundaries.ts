@@ -70,6 +70,7 @@ const conformanceForbiddenImports = [
   '@yolk-sdk/codemode',
   '@yolk-sdk/extractors',
   '@yolk-sdk/files',
+  '@yolk-sdk/pool',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -90,6 +91,7 @@ const emulatorsForbiddenImports = [
   '@yolk-sdk/conformance',
   '@yolk-sdk/extractors',
   '@yolk-sdk/files',
+  '@yolk-sdk/pool',
   '@yolk-sdk/connectors',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
@@ -109,6 +111,7 @@ const codeModeForbiddenImports = [
   '@yolk-sdk/emulators',
   '@yolk-sdk/extractors',
   '@yolk-sdk/files',
+  '@yolk-sdk/pool',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
@@ -128,6 +131,7 @@ const extractorsForbiddenImports = [
   '@yolk-sdk/connectors',
   '@yolk-sdk/emulators',
   '@yolk-sdk/files',
+  '@yolk-sdk/pool',
   '@yolk-sdk/harness',
   '@yolk-sdk/mcp',
   '@yolk-sdk/sandbox',
@@ -147,6 +151,29 @@ const filesForbiddenImports = [
   '@yolk-sdk/connectors',
   '@yolk-sdk/emulators',
   '@yolk-sdk/extractors',
+  '@yolk-sdk/harness',
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/pool',
+  '@yolk-sdk/sandbox',
+  '@yolk-sdk/vercel-workflows',
+  'next',
+  'react',
+  'node:'
+]
+
+// Pools depend only on `@yolk-sdk/agent` and stay runtime-neutral (no Node builtins): hosts
+// provide the accounts' providers and the pool store. Listed explicitly for the same self-import
+// reason as conformance.
+const poolForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/agent/react',
+  '@yolk-sdk/codemode',
+  '@yolk-sdk/conformance',
+  '@yolk-sdk/connectors',
+  '@yolk-sdk/emulators',
+  '@yolk-sdk/extractors',
+  '@yolk-sdk/files',
   '@yolk-sdk/harness',
   '@yolk-sdk/knowledge',
   '@yolk-sdk/mcp',
@@ -285,6 +312,15 @@ const rules: ReadonlyArray<BoundaryRule> = [
     // Agent never imports files: files build on the agent tool contract.
     packageDir: 'packages/agent/src',
     forbiddenImports: ['@yolk-sdk/files']
+  },
+  {
+    packageDir: 'packages/pool/src',
+    forbiddenImports: poolForbiddenImports
+  },
+  {
+    // Agent never imports pools: pools decorate the agent's LLMProvider.
+    packageDir: 'packages/agent/src',
+    forbiddenImports: ['@yolk-sdk/pool']
   },
   {
     packageDir: 'packages/extractors/src',

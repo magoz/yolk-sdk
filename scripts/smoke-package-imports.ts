@@ -122,6 +122,7 @@ const packages: ReadonlyArray<PackageManifest> = [
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
   { name: '@yolk-sdk/files', exports: ['.'] },
+  { name: '@yolk-sdk/pool', exports: ['.', './store'] },
   { name: '@yolk-sdk/codemode', exports: ['.', './node'] },
   {
     name: '@yolk-sdk/extractors',

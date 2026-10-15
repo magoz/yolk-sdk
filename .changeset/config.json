@@ -15,7 +15,8 @@
       "@yolk-sdk/emulators",
       "@yolk-sdk/codemode",
       "@yolk-sdk/extractors",
-      "@yolk-sdk/files"
+      "@yolk-sdk/files",
+      "@yolk-sdk/pool"
     ]
   ],
   "linked": [],

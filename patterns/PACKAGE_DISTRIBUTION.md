@@ -48,7 +48,8 @@ Current Changesets config:
       "@yolk-sdk/emulators",
       "@yolk-sdk/codemode",
       "@yolk-sdk/extractors",
-      "@yolk-sdk/files"
+      "@yolk-sdk/files",
+      "@yolk-sdk/pool"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -181,6 +182,7 @@ Publish all public packages together:
 - `@yolk-sdk/codemode`
 - `@yolk-sdk/extractors`
 - `@yolk-sdk/files`
+- `@yolk-sdk/pool`
 
 Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
@@ -258,7 +260,8 @@ for package in \
   @yolk-sdk/emulators \
   @yolk-sdk/codemode \
   @yolk-sdk/extractors \
-  @yolk-sdk/files; do
+  @yolk-sdk/files \
+  @yolk-sdk/pool; do
   npm view "$package" dist-tags --json
 done
 git fetch --tags
@@ -276,7 +279,7 @@ commands if they run back to back:
 
 ```bash
 version=<version>
-for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode extractors files; do
+for package in agent mcp knowledge connectors sandbox vercel-workflows harness conformance emulators codemode extractors files pool; do
   npm dist-tag add "@yolk-sdk/$package@$version" latest --otp=<code>
 done
 ```
@@ -316,7 +319,7 @@ The Action publishes canaries with npm tag `canary` and stable versions with `la
 
 Trusted publishing can only be configured after a package exists on npm. For a renamed/new `@yolk-sdk/*` package, the first publish is the only approved local publish exception.
 
-Pending first publish: none. All public `@yolk-sdk/*` packages are published and use trusted publishing. When a new public package is added, list it here until its trusted publisher is configured.
+Pending first publish: `@yolk-sdk/pool`. Every other public `@yolk-sdk/*` package is published and uses trusted publishing. When a new public package is added, list it here until its trusted publisher is configured.
 
 Preconditions:
 

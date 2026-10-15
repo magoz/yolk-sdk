@@ -24,8 +24,8 @@ policy in process, not a gateway.
 | Policy      | Expiring-first with fresh readings, sticky fill-first without; a pure `rank` function                                          |
 | Failover    | Only account-scoped failures before the first event; everything else goes to the loop's retry unchanged                        |
 | Exhausted   | All accounts out: `rate_limit`, `retryable: false`, earliest reset in the error                                                |
-| State       | `PoolStore` port (pins, cooldowns, readings); in-memory store and a store conformance suite in `./store`                       |
-| Readings    | Pushed by the host (`recordReadings`); never fetched on the request path                                                       |
+| State       | `PoolStoreApi` port (pins, cooldowns, readings); in-memory store and `poolStoreContract` cases in `./store`                    |
+| Readings    | Pushed by the host (`recordReading`); never fetched on the request path                                                        |
 | Reset hints | `ProviderErrorInfo.quotaResetsAtMs` (epoch ms, like `retryAfterMs`), from Claude and Codex quota errors; kind stays rate_limit |
 | Usage       | `ProviderSubscriptionUsageWindow.models`; Claude windows gain durations and model-scoped weekly limits                         |
 | Host-owned  | Accounts, credentials and their refresh, persistence, reading schedule, labels, UI                                             |
@@ -49,7 +49,7 @@ model) are separate routes.
 
 Every request:
 
-1. Candidates are the configured accounts without an active cooldown that applies to the route.
+1. Candidates are the configured accounts without an active cooldown (cooldowns are account-wide).
 2. With fresh readings (`fetchedAt` within `maxAge`, default 30 minutes):
    - drop accounts with an applicable window at or above `100 - reservePercent` used; a window whose
      reset has passed counts as fresh;
@@ -65,9 +65,13 @@ Every request:
    configured moves at once.
 5. A pin is written only when it changes, and every move is logged with its reason.
 
-Readings with `fetchedAt` later than a quota cooldown's `startedAt` that show every applicable
-window below the threshold clear that cooldown (a limit reset was spent, or the provider reset
-early). A reading from before the lockout never clears it.
+A fresh reading with `fetchedAt` later than a quota cooldown's `startedAt` that shows quota left on
+every window (none started and fully used) clears that cooldown (a limit reset was spent, or the
+provider reset early). A reading from before the lockout never clears it, and readings never clear
+an auth cooldown.
+
+Windows without a duration (OpenCode Go usage today) cannot be ranked and are ignored; an account
+whose readings have none routes stickily.
 
 ## Failover and the loop's retry
 
@@ -77,14 +81,14 @@ again. Retrying transient errors inside the pool as well would multiply attempts
 therefore switches accounts within one call only for account-scoped failures, and only when no
 `LLMEvent` was emitted:
 
-| Failure                                            | Pool                                             |
-| -------------------------------------------------- | ------------------------------------------------ |
-| `rate_limit` with `quotaResetsAtMs`                | Quota cooldown until that reset, next account    |
-| `rate_limit` with `retryAfterMs` of 30 min or more | Quota cooldown for that long, next account       |
-| `auth`                                             | Auth cooldown (30 min), next account             |
-| anything else, or any failure after an event       | Unchanged to the caller; no cooldown             |
-| interruption                                       | Unchanged; never a cooldown                      |
-| no candidate left                                  | `rate_limit`, `retryable: false`, earliest reset |
+| Failure                                            | Pool                                                                                            |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `rate_limit` with `quotaResetsAtMs`                | Quota cooldown until that reset, next account                                                   |
+| `rate_limit` with `retryAfterMs` of 30 min or more | Quota cooldown for that long, next account                                                      |
+| `auth`                                             | Auth cooldown (30 min), next account                                                            |
+| anything else, or any failure after an event       | Unchanged to the caller; no cooldown                                                            |
+| interruption                                       | Unchanged; never a cooldown                                                                     |
+| no candidate left                                  | `rate_limit`, `retryable: false`, earliest quota reset (`auth` when only auth cooldowns remain) |
 
 The 30-minute line is the plugin's `QuotaCooldownFloor`: provider quota lockouts are hours away,
 transient rate limits are seconds or minutes. A non-retryable error when every account is out keeps
@@ -98,13 +102,16 @@ its database:
 
 - pins: `(poolId, route) → accountId, pinnedAt`, created if absent and moved by compare-and-set on
   the expected account, so concurrent instances converge;
-- cooldowns: per account and scope (the whole account, or models containing a substring), a tagged
-  union `Quota { until }` or `Auth { until }` with `startedAt`; writing keeps the later end, clearing
-  requires the observed `startedAt`;
+- cooldowns: one per account, a tagged union `PoolQuotaCooldown` or `PoolAuthCooldown` with
+  `startedAtMs` and `untilMs`; writing keeps the one that ends later, clearing requires the observed
+  `startedAtMs`. Model-scoped exhaustion is handled through readings (model-scoped windows), not
+  cooldowns: Claude's model-only rejections carry no quota reset, and a Codex quota error does not
+  say whether it is model-scoped, so it cools the whole account;
 - readings: the latest `ProviderSubscriptionUsageSnapshot` per account.
 
-The in-memory store serves tests and single-process hosts. A shared conformance suite pins the
-semantics every store must meet.
+The in-memory store serves tests and single-process hosts. `poolStoreContract` pins the semantics
+every store must meet; hosts run its cases against their implementation. Store failures never fail
+a request: reads fall back to stateless fill-first and writes are logged.
 
 ## Reset hints
 
