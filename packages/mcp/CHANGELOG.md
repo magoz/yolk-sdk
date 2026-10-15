@@ -1,5 +1,15 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.115
+
+### Patch Changes
+
+- e662c70: Advance unchanged public packages in lockstep with `@yolk-sdk/agent`, which now reports one typed `AgentStatus` per run and per subagent (ADR 0010). These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+- Updated dependencies [5f08b0f]
+- Updated dependencies [e662c70]
+  - @yolk-sdk/agent@0.1.0-canary.115
+  - @yolk-sdk/conformance@0.1.0-canary.115
+
 ## 0.1.0-canary.114
 
 ### Minor Changes
