@@ -231,6 +231,17 @@ describe('agent status', () => {
     )
 
     expect(replayed).toEqual(AgentWorking.make({ activity: AgentGenerating.make({}) }))
+
+    const done = AgentDone.make({})
+
+    expect(
+      nextAgentStatus(
+        done,
+        LLMReasoningReplay.make({
+          replay: SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+        })
+      )
+    ).toBe(done)
   })
 
   it('blocks on awaiting input with the requests and their kind', () => {
