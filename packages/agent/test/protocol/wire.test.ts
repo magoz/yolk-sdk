@@ -27,6 +27,7 @@ import {
   DocumentPart,
   ImagePart,
   LLMReasoningDelta,
+  LLMReasoningReplay,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,
@@ -43,7 +44,9 @@ import {
   QuestionResponse,
   QuestionResponseInput,
   QuestionRequested,
+  RedactedReasoningReplay,
   SessionSnapshot,
+  SignedReasoningReplay,
   SubagentCompleted,
   SubagentStarted,
   TextPart,
@@ -274,6 +277,12 @@ describe('protocol wire schemas', () => {
         LLMStreamStart.make({ turn: 1 }),
         LLMTextDelta.make({ text: 'hello' }),
         LLMReasoningDelta.make({ text: 'thinking' }),
+        LLMReasoningReplay.make({
+          replay: SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+        }),
+        LLMReasoningReplay.make({
+          replay: RedactedReasoningReplay.make({ provider: 'anthropic_claude', data: 'opaque' })
+        }),
         ToolInputStart.make({ id: call.id, name: call.name }),
         ToolInputDelta.make({ id: call.id, delta: '{"url"' }),
         ToolInputEnd.make({ call }),

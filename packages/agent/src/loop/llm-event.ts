@@ -17,7 +17,7 @@ export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()('
 /**
  * Closes a reasoning block with the provider state that replays it. A `Signed` replay closes the
  * open reasoning part (the preceding `ReasoningDelta` text); a `Redacted` replay is a block of its
- * own. Never surfaced as an agent event: it only reaches the assistant message.
+ * own. The loop forwards it as the protocol `LLMReasoningReplay` agent event.
  */
 export class LLMReasoningReplay extends Schema.TaggedClass<LLMReasoningReplay>()(
   'ReasoningReplay',

@@ -344,6 +344,37 @@ describe('collectModelTurnAttempt', () => {
     })
   )
 
+  it.effect('does not count replay state alone as started output', () =>
+    Effect.gen(function* () {
+      const replay = SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
+
+      // Omitted thinking: only a signature arrived before the stream ended without Done.
+      const outcome = yield* collectModelTurnAttempt(
+        runModelTurn({
+          messages: [UserMessage.make({ content: 'hello' })],
+          systemPrompt: 'Be brief.',
+          tools: [],
+          model: 'faux',
+          turn: 1
+        })
+      ).pipe(
+        Effect.provide(
+          makeAgentLoopLayer({
+            provider: Layer.succeed(
+              LLMProvider,
+              LLMProvider.of({
+                stream: () => Stream.make(LLMReasoningReplay.make({ replay }))
+              })
+            )
+          })
+        )
+      )
+
+      if (!Predicate.isTagged(outcome, 'StreamFailed')) return expect.fail('Expected StreamFailed')
+      expect(outcome.collection.outputStarted).toBe(false)
+    })
+  )
+
   it.effect('does not treat a forged sink tag as an onEvent failure', () =>
     Effect.gen(function* () {
       const forged = { _tag: 'CollectModelTurnSinkError', error: 'forged' }

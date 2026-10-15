@@ -16,6 +16,7 @@ import {
   ProviderErrorInfo,
   QuestionAnswer,
   QuestionResponse,
+  SignedReasoningReplay,
   ToolCall,
   ToolApprovalPolicy,
   ToolApprovalResponse,
@@ -202,7 +203,7 @@ describe('run', () => {
 
   it.effect('streams reasoning replay state and keeps it on the assistant message', () =>
     Effect.gen(function* () {
-      const replay = { _tag: 'Signed', provider: 'anthropic_claude', signature: 'sig' } as const
+      const replay = SignedReasoningReplay.make({ provider: 'anthropic_claude', signature: 'sig' })
 
       const provider = Layer.succeed(
         LLMProvider,

@@ -83,6 +83,7 @@ Streams emit `AgentEvent` values such as:
 - `AgentStart`, `AgentEnd`, `AgentError`, `AgentRetry`
 - `TurnStart`, `TurnEnd`
 - `LLMStreamStart`, `LLMTextDelta`, `LLMReasoningDelta`, `LLMStreamEnd`
+- `LLMReasoningReplay` (closes a reasoning block with opaque provider state for replay; UIs ignore it)
 - `ToolExecutionStarted`, `ToolExecutionCompleted`, `ToolExecutionError`
 - `ToolExecutionAccepted` (a host admitted a background tool call; not completion, no usage)
 - `UserMessageEvent`, `AssistantMessageEvent`

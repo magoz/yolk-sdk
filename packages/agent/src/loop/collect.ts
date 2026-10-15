@@ -116,12 +116,13 @@ const toModelTurnResult = (collection: ModelTurnCollection): ModelTurnResult => 
   stopReason: collection.stopReason
 })
 
+// `LLMReasoningReplay` alone published nothing visible: a turn that fails after only that is
+// redone from scratch rather than continued from a partial holding bare signed thinking.
 const eventStartsOutput = (event: AgentEvent) =>
   Match.value(event).pipe(
     Match.tag(
       'LLMTextDelta',
       'LLMReasoningDelta',
-      'LLMReasoningReplay',
       'AssistantMessage',
       'ToolInputStart',
       'ToolInputDelta',

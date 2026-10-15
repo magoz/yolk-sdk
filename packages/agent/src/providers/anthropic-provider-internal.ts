@@ -1998,6 +1998,8 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
+  /** A thinking block closed without the signature its replay needs. */
+  readonly hasUnsignedThinking: boolean
   readonly stopReason?: string
   readonly usage: AnthropicUsageComponents
 }
@@ -2005,6 +2007,7 @@ type AnthropicSseState = {
 type AnthropicSseStateFields = {
   hasToolCall: boolean
   hasDone: boolean
+  hasUnsignedThinking: boolean
   stopReason?: string
   usage: AnthropicUsageComponents
 }
@@ -2023,6 +2026,7 @@ type AnthropicBodyState = {
 const initialSseState: AnthropicSseState = {
   hasToolCall: false,
   hasDone: false,
+  hasUnsignedThinking: false,
   usage: zeroAnthropicUsageComponents
 }
 
@@ -2173,8 +2177,9 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
       if (index !== undefined && thinkingSignature !== undefined) {
         thinkingBlocks.delete(index)
 
+        // Fails once the message ends, so a `max_tokens` or `content_filter` stop wins.
         if (options.reasoningReplayProvider !== undefined && thinkingSignature.length === 0) {
-          return Effect.fail(unsignedThinkingError())
+          return Effect.succeed({ state: { ...state, hasUnsignedThinking: true }, events: [] })
         }
 
         return Effect.succeed({
@@ -2239,6 +2244,10 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
     if (type === 'message_stop') {
       if (state.stopReason === 'max_tokens' || state.stopReason === 'content_filter') {
         return Effect.fail(anthropicTerminalError(state.stopReason))
+      }
+
+      if (state.hasUnsignedThinking) {
+        return Effect.fail(unsignedThinkingError())
       }
 
       return Effect.succeed({
@@ -2373,6 +2382,10 @@ const finalizeBodyState = (
 
     if (sseState.stopReason === 'max_tokens' || sseState.stopReason === 'content_filter') {
       return yield* Effect.fail(anthropicTerminalError(sseState.stopReason))
+    }
+
+    if (sseState.hasUnsignedThinking) {
+      return yield* Effect.fail(unsignedThinkingError())
     }
 
     if (!sseState.hasDone) {

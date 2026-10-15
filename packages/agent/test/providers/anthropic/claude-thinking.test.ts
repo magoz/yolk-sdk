@@ -522,4 +522,31 @@ describe('Anthropic Claude thinking', () => {
       }
     })
   )
+  it.effect('reports max_tokens rather than an unsigned block it cut off', () =>
+    Effect.gen(function* () {
+      const error = yield* streamClaude(
+        sse([
+          {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'thinking', thinking: '', signature: '' }
+          },
+          {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'Hmm.' }
+          },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'max_tokens' } },
+          { type: 'message_stop' }
+        ]),
+        []
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        message: 'Anthropic Claude stopped after reaching max_tokens'
+      })
+    })
+  )
 })
