@@ -1,5 +1,16 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.115
+
+### Minor Changes
+
+- 5f08b0f: Add `AgentStatus` to `@yolk-sdk/agent/protocol` (ADR 0010): one typed run status in the OSC 7501 Program Status vocabulary, `Idle`, `Working` with an activity (`Busy`, `Generating`, `Tools`, `Compacting`, `Retrying`), `Blocked` with a kind (`permission` for approvals and interactions, `question` for questions and inputs, `auth` reserved) and its requests, `Done`, and `Failed`. `nextAgentStatus`/`agentStatusFromEvents` fold events; `reconcileAgentStatus` drops `Working`/`Blocked` for runs the host proves are not active; `AgentStatusTree` adds per-subagent statuses (`nextAgentStatusTree`, `withSubagentStatus` for host-owned background subagents). `isSubagentAcceptedToolResult`/`isSubagentObservationToolResult` expose the loop's subagent acknowledgement checks. `AgentError` gains an optional `abortReason` (`user`, `system`, `max_turns`), set by the loop. Breaking: `AgentRunStatus` is removed; `AgentClientState` and `AgentChatState` carry `status: AgentStatus` and `subagents` instead of the string status and `error`, `errorInfo`, and `retryInfo` (use `Failed` statuses and `agentStatusRetry`); `useAgentChat` no longer returns `error` and adds `subagents`; `markAgentError` takes an optional `AgentError` instead of `AgentError | null`; a stopped run is `Idle`.
+
+### Patch Changes
+
+- Updated dependencies [e662c70]
+  - @yolk-sdk/conformance@0.1.0-canary.115
+
 ## 0.1.0-canary.114
 
 ### Minor Changes
