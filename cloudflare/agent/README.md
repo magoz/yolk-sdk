@@ -65,7 +65,7 @@ The smoke command reads `.alchemy/state/YolkAgentWorker/dev_magoz/Api.json` unle
 
 ## Alchemy compatibility
 
-This app pins `alchemy@2.0.0-beta.80` against catalog Effect `4.0.0` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
+This app pins `alchemy@2.0.0-beta.80` against catalog Effect `4.0.5` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
 
 The beta.80 dependency cohort (`@alchemy.run/*` beta.80, `@distilled.cloud/*` rc.13) declares `effect ^4.0.0` and runs unpatched; the rc.115 compatibility patches were removed with the Effect 4.0.0 upgrade. Peer ranges are not suppressed. If a future Alchemy release regresses against catalog Effect, fix it upstream or with a reviewed `pnpm patch` rather than restoring removed Effect APIs.
 

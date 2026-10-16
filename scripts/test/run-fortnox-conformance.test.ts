@@ -1237,9 +1237,10 @@ describe('run-fortnox-conformance live runs are interruptible', () => {
     expect(errors[0]).toContain('SIGINT: interrupting the run (pid 4242)')
     expect(errors).toContain(`WARN ${restoreFailed}`)
     expect(errors.filter(line => line.startsWith('WARN '))).toEqual([`WARN ${restoreFailed}`])
-    // The run ends with the case's own RestoreFailed (not interrupt-only): exit 1, no report.
-    expect(errors.at(-1)).toBe(restoreFailed)
-    expect(exitCodes).toEqual([1])
+    // Effect drops the RestoreFailed the interruption kept from its handler, so the run ends
+    // interrupt-only: exit 130, no report; the WARN line is the record of the failed restore.
+    expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${fortnoxRecoveryAdvice}`)
+    expect(exitCodes).toEqual([130])
     expect(forcedExits).toEqual([])
     expect(out).toEqual([])
     expect(signals.registered()).toBe(0)
@@ -1347,7 +1348,7 @@ describe('run-fortnox-conformance live output is redacted of the live token', ()
     })
   }
 
-  it('prints no trace of a token echoed in an interrupted restore failure (WARN and run failure on stderr)', async () => {
+  it('prints no trace of a token echoed in an interrupted restore failure (WARN on stderr)', async () => {
     const signals = fakeSignals()
     const { io, errors, exitCodes, forcedExits } = fakeIo()
     const stdout: Array<string> = []
@@ -1361,7 +1362,8 @@ describe('run-fortnox-conformance live output is redacted of the live token', ()
 
     // The row case's first PUT is held until the interruption; its restore PUT then fails with the
     // token in the failure message, which the case's RestoreFailed summarizes: printed as the WARN
-    // line (the run's err) and as the run's own failure (the CLI io), both on stderr.
+    // line (the run's err, on stderr). The run itself ends interrupt-only, so the CLI io prints the
+    // interrupted advice, not the failure.
     const echoing = HttpClient.transform(client, (response, request) => {
       if (request.method !== 'PUT') return response
 
@@ -1405,12 +1407,11 @@ describe('run-fortnox-conformance live output is redacted of the live token', ()
     expect(warns).toHaveLength(1)
     expect(warns[0]).toContain('fortnox.invoice.row-discount-sticky: restore failed')
     expect(warns[0]).toContain(redactedLiveTokenMarker)
-    expect(errors.at(-1)).toContain('fortnox.invoice.row-discount-sticky: restore failed')
-    expect(errors.at(-1)).toContain(redactedLiveTokenMarker)
+    expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${fortnoxRecoveryAdvice}`)
     expect(textContainsAccessToken([...stdout, ...stderr, ...errors].join('\n'), liveToken)).toBe(
       false
     )
-    expect(exitCodes).toEqual([1])
+    expect(exitCodes).toEqual([130])
     expect(forcedExits).toEqual([])
     expect(stdout).toEqual([])
     expect(signals.registered()).toBe(0)

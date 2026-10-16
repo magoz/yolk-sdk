@@ -18,11 +18,11 @@ It is the in-process counterpart of a CLIProxyAPI gateway with the
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/pool@canary @yolk-sdk/agent@canary effect@4.0.0
+pnpm add @yolk-sdk/pool@canary @yolk-sdk/agent@canary effect@4.0.5
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0`) in host code.
+Use the SDK's matching Effect version (`4.0.5`) in host code.
 Published package metadata requires Node.js 22+. The package is runtime-neutral.
 
 ## Subpaths

@@ -1714,16 +1714,16 @@ describe('Dropbox conformance run interruption', () => {
 
         expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-        // Observed on effect 4.0.0: the run ends with the case's own RestoreFailed, and
-        // no Interrupt in the cause. Leaving the case's mask with a failure while an interruption
-        // is pending, the failure exit skips every error continuation (runConformance's Effect.exit
-        // included; finalizers still run), so the run produces no report and resumes no case.
+        // Observed on effect 4.0.5: the run ends interrupt-only. Leaving the case's mask with a
+        // failure while an interruption is pending skips every error continuation (runConformance's
+        // Effect.exit included; finalizers still run), and Effect drops a typed failure whose
+        // handler the interruption skipped. So the run produces no report, resumes no case, and the
+        // reporter's WARN is the only record of the failed restore.
         if (Exit.isSuccess(exit)) {
-          return expect.fail('expected the interrupted run to fail')
+          return expect.fail('expected the interrupted run to be interrupted')
         }
 
-        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'DropboxConformanceRestoreFailed' })
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
 
         const reported = yield* Ref.get(warnings)
 
@@ -1734,7 +1734,8 @@ describe('Dropbox conformance run interruption', () => {
   }
 
   // The CLI's exit-130 branch (and its after-interrupt leftover lookup) depends on this shape: a
-  // case whose cleanup succeeds under interruption ends the run interrupt-only.
+  // case interrupted mid-cleanup ends the run interrupt-only whether or not the cleanup succeeds;
+  // only the reporter (no WARN here) tells the two apart.
   it.effect(
     'ends interrupt-only, without a report or a later case, when the cleanup succeeds',
     () =>

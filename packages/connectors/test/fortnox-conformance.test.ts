@@ -1307,14 +1307,13 @@ describe('Fortnox conformance run interruption', () => {
 
         expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-        // As for Dropbox: the run ends with the case's own RestoreFailed, and no Interrupt in the
-        // cause, so it produces no report and resumes no case.
+        // As for Dropbox: the run ends interrupt-only (the RestoreFailed is dropped), produces no
+        // report, and resumes no case; the reporter's WARN records the failed restore.
         if (Exit.isSuccess(exit)) {
-          return expect.fail('expected the interrupted run to fail')
+          return expect.fail('expected the interrupted run to be interrupted')
         }
 
-        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'FortnoxConformanceRestoreFailed' })
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
         expect(yield* Ref.get(warnings)).toEqual([message])
       })
     )

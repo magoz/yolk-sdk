@@ -1273,12 +1273,15 @@ describe('R2 conformance interruption', () => {
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
       if (Exit.isSuccess(exit)) {
-        return expect.fail('expected the interrupted run to fail')
+        return expect.fail('expected the interrupted run to be interrupted')
       }
 
-      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-      expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'R2ConformanceActionFailed' })
-      expect(yield* Ref.get(warnings)).toHaveLength(1)
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+
+      const reported = yield* Ref.get(warnings)
+
+      expect(reported).toHaveLength(1)
+      expect(reported[0]).toContain('write outcome unknown')
     })
   )
 

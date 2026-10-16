@@ -910,13 +910,13 @@ describe('Notion conformance run interruption', () => {
 
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-      // The run ends with the case's own RestoreFailed, without an Interrupt in the cause.
+      // As for Dropbox: the run ends interrupt-only (the RestoreFailed is dropped); the reporter's
+      // WARN records the failed restore.
       if (Exit.isSuccess(exit)) {
-        return expect.fail('expected the interrupted run to fail')
+        return expect.fail('expected the interrupted run to be interrupted')
       }
 
-      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-      expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'NotionConformanceRestoreFailed' })
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
 
       const reported = yield* Ref.get(warnings)
 

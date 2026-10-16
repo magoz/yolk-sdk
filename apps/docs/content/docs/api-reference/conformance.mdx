@@ -614,15 +614,16 @@ mutation cases, the Telegram and Gmail sends, and the R2 puts also hand a cleanu
 (a failed cleanup, or a create, send, or put whose outcome is unknown) to `ConformanceCleanupReporter`
 from `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
-Effect version this repository pins, such a run ends with that failure itself (no Interrupt in the
-cause), and a run whose cleanup succeeded ends as a plain interruption; drills in the connector
-tests pin both, so an Effect upgrade that changes this fails visibly. The Dropbox, Notion, Todoist,
+Effect version this repository pins (4.0.5), such a run ends as a plain interruption, just like a
+run whose cleanup succeeded: Effect drops a typed failure whose recovery handler the interruption
+skipped, so the reporter is the only record of the cleanup problem. Drills in the connector tests
+pin this, so an Effect upgrade that changes it fails visibly. The Dropbox, Notion, Todoist,
 Telegram, GitHub, and Google live runners print reported problems to stderr as WARN lines. Their first
 SIGINT/SIGTERM interrupts the run fiber so the cleanup is attempted; duplicates within a second (one
 Ctrl-C reaches every process of the foreground group, and the wrappers relay it) are ignored, and a
-later signal exits at once. Only after an interrupt-only exit (code 130) does the read-only leftover
-lookup run again and list what is still present; a run that ends with a cleanup failure exits 1 with
-that failure's message. Run live runs as `pnpm conformance:<provider>` or with `tsx` directly:
+later signal exits at once. An interrupted run exits with code 130, whether or not its cleanup
+succeeded; the WARN lines tell which. After that exit the read-only leftover lookup runs again and
+lists what is still present. Run live runs as `pnpm conformance:<provider>` or with `tsx` directly:
 `pnpm exec tsx` returns to the prompt at once on Ctrl-C (observed), so later output prints after the
 prompt, `$?` is pnpm's own code, and the runner is then stopped with `kill -TERM <pid>` (the
 first-signal message prints the pid).

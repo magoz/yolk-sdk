@@ -1117,9 +1117,10 @@ describe('run-microsoft-conformance live runs are interruptible', () => {
 
     expect(errors[0]).toContain('SIGINT: interrupting the run (pid 4242)')
     expect(errors.filter(line => line.startsWith('WARN '))).toEqual([`WARN ${removalFailed}`])
-    // The run ends with the case's own RestoreFailed (not interrupt-only): exit 1, no report.
-    expect(errors.at(-1)).toBe(removalFailed)
-    expect(exitCodes).toEqual([1])
+    // Effect drops the RestoreFailed the interruption kept from its handler, so the run ends
+    // interrupt-only: exit 130, no report; the WARN line is the record of the failed removal.
+    expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${microsoftRecoveryAdvice}`)
+    expect(exitCodes).toEqual([130])
     expect(forcedExits).toEqual([])
     expect(out).toEqual([])
     expect(signals.registered()).toBe(0)
@@ -1206,7 +1207,7 @@ describe('run-microsoft-conformance live output is redacted of the live token', 
     })
   }
 
-  it('prints no trace of a token echoed in an interrupted removal failure (WARN and run failure on stderr)', async () => {
+  it('prints no trace of a token echoed in an interrupted removal failure (WARN on stderr)', async () => {
     const signals = fakeSignals()
     const { io, errors, exitCodes, forcedExits } = fakeIo()
     const stdout: Array<string> = []
@@ -1218,8 +1219,8 @@ describe('run-microsoft-conformance live output is redacted of the live token', 
 
     // The create-event case: its claim's GET after the create is held until the interruption; its
     // removal's DELETE then fails with the token in the failure message, which the case's
-    // RestoreFailed summarizes: printed as the WARN line (the run's err) and as the run's own
-    // failure (the CLI io), both on stderr.
+    // RestoreFailed summarizes: printed as the WARN line (the run's err, on stderr). The run itself
+    // ends interrupt-only, so the CLI io prints the interrupted advice, not the failure.
     let createSeen = false
     let held = false
 
@@ -1264,12 +1265,11 @@ describe('run-microsoft-conformance live output is redacted of the live token', 
     expect(warns).toHaveLength(1)
     expect(warns[0]).toContain('microsoft.calendar.create-returns-event-id: restore failed')
     expect(warns[0]).toContain(redactedLiveTokenMarker)
-    expect(errors.at(-1)).toContain('microsoft.calendar.create-returns-event-id: restore failed')
-    expect(errors.at(-1)).toContain(redactedLiveTokenMarker)
+    expect(errors.at(-1)).toBe(`Interrupted. Read the WARN lines. ${microsoftRecoveryAdvice}`)
     expect(textContainsAccessToken([...stdout, ...stderr, ...errors].join('\n'), liveToken)).toBe(
       false
     )
-    expect(exitCodes).toEqual([1])
+    expect(exitCodes).toEqual([130])
     expect(forcedExits).toEqual([])
     expect(stdout).toEqual([])
     expect(signals.registered()).toBe(0)

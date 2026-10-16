@@ -7,7 +7,7 @@ Effect `FileExtractor` service with Office archive validation, hyperlink-safe XL
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/extractors@canary effect@4.0.0
+pnpm add @yolk-sdk/extractors@canary effect@4.0.5
 # Only if you extract .xlsx files: SheetJS from the SheetJS CDN, not npm.
 pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 ```
@@ -15,11 +15,11 @@ pnpm add https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
 With knowledge ingestion (`@yolk-sdk/extractors/knowledge`):
 
 ```bash
-pnpm add @yolk-sdk/extractors@canary @yolk-sdk/knowledge@canary effect@4.0.0
+pnpm add @yolk-sdk/extractors@canary @yolk-sdk/knowledge@canary effect@4.0.5
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0`) in host code.
+Use the SDK's matching Effect version (`4.0.5`) in host code.
 Requires Node.js 22+. `@yolk-sdk/extractors/node` is server-only.
 
 ### Why SheetJS comes from its CDN

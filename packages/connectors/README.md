@@ -5,13 +5,13 @@ Effect-native connector primitives and reusable provider actions for hosts that 
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.5
 ```
 
 Running the experimental `@yolk-sdk/connectors/*/conformance` cases? Also add `@yolk-sdk/conformance@canary` (usually as a dev dependency); the examples import `@yolk-sdk/conformance/*` subpaths directly.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.0.0`) in host code.
+Use the SDK's matching Effect version (`4.0.5`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths
@@ -952,8 +952,8 @@ folder is never deleted (`DropboxConformanceCleanupRefused`). Neither the runner
 a request timeout, so a hanging request delays an interruption. The live runner turns the first
 SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not confirmed) and no
 further case starts: a cleanup problem raised meanwhile prints as a WARN line through
-`ConformanceCleanupReporter` and ends the run with that failure (exit 1); only an interrupt-only
-exit (130) runs the read-only leftover lookup again. Duplicate signals within a second (one Ctrl-C
+`ConformanceCleanupReporter`, and the run still ends interrupt-only (exit 130, then the read-only
+leftover lookup runs again). Duplicate signals within a second (one Ctrl-C
 reaches every process of the foreground group) are ignored; a later signal or a kill skips the
 cleanup. Run live runs as `pnpm conformance:dropbox` or with `tsx` directly: `pnpm exec tsx`
 returns to the prompt at once on Ctrl-C (observed), so later lines print after the prompt, `$?` is
@@ -1382,8 +1382,8 @@ trashes the page and checks that `notion.get_page` reports `archived: true`. A f
 with `NotionConformanceRestoreFailed`, and an ambiguous create fails with
 `NotionConformanceActionFailed` (`createOutcome: 'unknown'`) with manual-recovery advice. The live
 runner turns the first SIGINT/SIGTERM into a fiber interruption, so the cleanup is attempted (not
-confirmed; a cleanup problem raised meanwhile prints as a WARN line and ends the run with exit 1,
-and only an interrupt-only exit (130) runs the leftover search again; duplicate signals within a
+confirmed; a cleanup problem raised meanwhile prints as a WARN line, and the run still ends
+interrupt-only: exit 130, then the leftover search runs again; duplicate signals within a
 second are ignored, a later one or a kill skips the cleanup; use `pnpm conformance:notion` or `tsx`
 directly, not `pnpm exec tsx`, which returns to the prompt at once) and, before the write case,
 warns about untrashed `yolk-conformance page` pages found by a read-only, bounded (10 search pages),

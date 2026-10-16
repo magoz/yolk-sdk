@@ -14,7 +14,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add -D @yolk-sdk/conformance@canary effect@4.0.0
+pnpm add -D @yolk-sdk/conformance@canary effect@4.0.5
 ```
 
 ## Subpaths
