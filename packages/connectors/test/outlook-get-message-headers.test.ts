@@ -90,11 +90,31 @@ describe('Outlook get message headers', () => {
     })
   )
 
-  it.effect('fails when headers are omitted or malformed', () =>
+  // Graph omits headers (or returns null) for Sent Items and drafts.
+  it.effect('returns no headers when Graph omits them or returns null', () =>
     Effect.gen(function* () {
       for (const body of [
-        '{"id":"m1"}',
-        '{"id":"m1","internetMessageHeaders":null}',
+        '{"id":"m1","subject":"Sent"}',
+        '{"id":"m1","subject":"Sent","internetMessageHeaders":null}'
+      ]) {
+        const host = makeHost(body)
+
+        const result = yield* outlookGetMessageAction
+          .execute({ integration, input: { messageId: 'm1' } })
+          .pipe(Effect.provide(host.layer))
+
+        expect(result).toMatchObject({
+          _tag: 'Success',
+          value: { id: 'm1', subject: 'Sent', internetMessageHeaders: [] }
+        })
+      }
+    })
+  )
+
+  it.effect('fails when headers are malformed', () =>
+    Effect.gen(function* () {
+      for (const body of [
+        '{"id":"m1","internetMessageHeaders":{}}',
         '{"id":"m1","internetMessageHeaders":[{"name":"Subject"}]}'
       ]) {
         const host = makeHost(body)

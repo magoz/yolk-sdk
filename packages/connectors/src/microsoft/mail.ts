@@ -189,20 +189,26 @@ const OutlookMessagesApiWireOutput = Schema.Struct({
 const { isFlagged: _outlookMessageWithHeadersIsFlagged, ...OutlookMessageWithHeadersWireFields } =
   OutlookMessageWithHeaders.fields
 
+// Graph carries internet headers only for messages that arrived through transport:
+// Sent Items and drafts omit them or return null. Decode that as no headers.
 const OutlookMessageWithHeadersWire = Schema.Struct({
   ...OutlookMessageWithHeadersWireFields,
+  internetMessageHeaders: Schema.optional(
+    Schema.NullOr(OutlookMessageWithHeadersWireFields.internetMessageHeaders)
+  ),
   flag: OutlookFlagWire
 })
 
 const normalizeOutlookMessageWithHeaders = (
   wire: typeof OutlookMessageWithHeadersWire.Type
 ): OutlookMessageWithHeaders => {
-  const { flag, ...rest } = wire
+  const { flag, internetMessageHeaders, ...rest } = wire
   const isFlagged = normalizeOutlookFlagStatus(flag ?? undefined)
+  const fields = { ...rest, internetMessageHeaders: internetMessageHeaders ?? [] }
 
   return isFlagged === undefined
-    ? OutlookMessageWithHeaders.make({ ...rest })
-    : OutlookMessageWithHeaders.make({ ...rest, isFlagged })
+    ? OutlookMessageWithHeaders.make(fields)
+    : OutlookMessageWithHeaders.make({ ...fields, isFlagged })
 }
 
 // Models use null/blank placeholders for absent read options. Normalize at

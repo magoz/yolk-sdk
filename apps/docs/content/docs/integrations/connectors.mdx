@@ -807,7 +807,8 @@ continuations. The connector accepts only global Graph v1.0 links for the select
 folder collection. Read and draft-returning requests
 use Graph immutable IDs; `outlook.get_message` requests text for the full body plus required
 `internetMessageHeaders` (name/value pairs: `List-Unsubscribe`, `References`, and authentication
-results when the message carries them). List, draft, and mutation responses return the base message without headers. A draft ID can still
+results when the message carries them; an empty array when Graph returns none, as for Sent Items
+and drafts). List, draft, and mutation responses return the base message without headers. A draft ID can still
 change when sent, which is a documented immutable-ID exception.
 
 `outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |
