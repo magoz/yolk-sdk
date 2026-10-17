@@ -1083,7 +1083,7 @@ export const outlookSearchMessagesAction = defineAction({
 export const outlookGetMessageAction = defineAction({
   id: 'outlook.get_message',
   description:
-    'Get one Microsoft Outlook message with its body normalized to text and required internet headers (List-Unsubscribe, References, and authentication results when the message carries them).',
+    'Get one Microsoft Outlook message with its body normalized to text and required internet headers (List-Unsubscribe, References, and authentication results when the message carries them; empty for Sent Items and drafts).',
   inputSchema: OutlookMessageIdInput,
   outputSchema: OutlookMessageWithHeaders,
   execute: ({ integration, input }) =>

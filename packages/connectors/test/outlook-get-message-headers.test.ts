@@ -90,7 +90,6 @@ describe('Outlook get message headers', () => {
     })
   )
 
-  // Graph omits headers (or returns null) for Sent Items and drafts.
   it.effect('returns no headers when Graph omits them or returns null', () =>
     Effect.gen(function* () {
       for (const body of [
@@ -115,7 +114,9 @@ describe('Outlook get message headers', () => {
     Effect.gen(function* () {
       for (const body of [
         '{"id":"m1","internetMessageHeaders":{}}',
-        '{"id":"m1","internetMessageHeaders":[{"name":"Subject"}]}'
+        '{"id":"m1","internetMessageHeaders":[{"name":"Subject"}]}',
+        '{"id":"m1","internetMessageHeaders":[{"value":"x"}]}',
+        '{"id":"m1","internetMessageHeaders":[{"name":" ","value":"x"}]}'
       ]) {
         const host = makeHost(body)
 
