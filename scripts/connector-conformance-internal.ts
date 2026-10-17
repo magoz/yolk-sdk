@@ -2329,8 +2329,9 @@ export type RunInterruptiblyOptions = {
  * the prompt at the first Ctrl-C (observed; `pnpm <script>` and `tsx` itself wait), so the
  * first-signal message names the pid to `kill -TERM` from there. Resolves when the program ends:
  * an interrupt-only exit prints a not-confirmed note plus the `afterInterrupt` lines and sets
- * exit code 130; any other failure (including a cleanup failure raised during the interruption)
- * prints its message and sets exit code 1. The signal handlers stay installed until everything, `afterInterrupt` included, is done.
+ * exit code 130 (also when a case's cleanup failed meanwhile: Effect drops a typed failure whose
+ * handler the interruption skipped, so the WARN lines carry it); any other failure prints its
+ * message and sets exit code 1. The signal handlers stay installed until everything, `afterInterrupt` included, is done.
  */
 export const runInterruptibly = <E>(
   program: Effect.Effect<void, E>,

@@ -134,8 +134,8 @@ issue. The lookup is read-only and bounded; nothing is changed automatically. Cl
 In the live runner, the first SIGINT or SIGTERM (Ctrl-C) interrupts the run fiber; the running
 case's cleanup is attempted before the process exits, and no further case starts. A cleanup that
 fails, or a write whose outcome is unknown, while the case is being interrupted prints its full
-message as a WARN line (through the case's `ConformanceCleanupReporter`), and the run ends with that
-error (exit code 1); a plain interruption ends with exit code 130 after the leftover lookup runs
+message as a WARN line (through the case's `ConformanceCleanupReporter`), the record of the problem;
+either way the run ends as a plain interruption with exit code 130 after the leftover lookup runs
 again. Further signals within a second count as the same keypress; a later one exits at once and may
 skip the cleanup. Run live runs as `pnpm conformance:github …` or
 `./node_modules/.bin/tsx scripts/run-github-conformance.ts …`, not `pnpm exec tsx …`, which returns

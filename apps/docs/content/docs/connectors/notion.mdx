@@ -61,9 +61,8 @@ is attempted before the process exits; no further case starts. The cleanup is no
 
 - A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
   prints its full message as a WARN line (through the case's `ConformanceCleanupReporter`). The run
-  then ends with that error (exit code 1).
-- Only when the run ends as a plain interruption (exit code 130) does the runner repeat the
-  leftover search below.
+  still ends as a plain interruption (exit code 130): the WARN line is the record of the problem.
+- After the interruption, the runner repeats the leftover search below.
 
 One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
 signals within a second count as the same keypress. A signal a second or more later exits at once

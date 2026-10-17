@@ -76,9 +76,9 @@ confirmed:
 
 - A cleanup that fails, or a create whose outcome is unknown, while the case is being interrupted
   prints its full message, with the exact path, as a WARN line (through the case's
-  `ConformanceCleanupReporter`). The run then ends with that error (exit code 1).
-- Only when the run ends as a plain interruption (exit code 130) does the runner list
-  `workFolderPath` again (read-only, bounded as below) and print a WARN line for every
+  `ConformanceCleanupReporter`). The run still ends as a plain interruption (exit code 130): the
+  WARN line is the record of the problem.
+- After the interruption, the runner lists `workFolderPath` again (read-only, bounded as below) and print a WARN line for every
   `yolk-conformance-run-*` folder still present.
 
 One Ctrl-C reaches every process of the foreground group, and the wrappers relay it, so further
