@@ -1055,8 +1055,9 @@ Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. R
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
 requests a text body plus required `internetMessageHeaders` (name/value pairs: `List-Unsubscribe`,
-`References`, and authentication results when the message carries them); list, draft, and mutation
-actions return the base `OutlookMessage` without headers. Read and draft-returning actions request immutable IDs.
+`References`, and authentication results when the message carries them; an empty array when Graph
+returns none, as for Sent Items and drafts); list, draft, and mutation actions return the base
+`OutlookMessage` without headers. Read and draft-returning actions request immutable IDs.
 
 `outlook.update_draft` (`outlookUpdateDraftAction`, `OutlookUpdateDraftInput`, access `write`)
 edits an existing draft with `{ messageId, mailbox?, to?, cc?, bcc?, subject?, body?, contentType? }`.
