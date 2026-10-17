@@ -879,6 +879,7 @@ describe('run-google-conformance printed output redacts the live token', () => {
     it(`prints no trace of a ${label} token when the refusal is raised during an interruption`, async () => {
       const runLines: Array<string> = []
       const cliLines: Array<string> = []
+      const exitCodes: Array<number> = []
 
       let handlers: Array<() => void> = []
 
@@ -907,7 +908,9 @@ describe('run-google-conformance printed output redacts the live token', () => {
         error: message => {
           cliLines.push(message)
         },
-        setExitCode: () => undefined,
+        setExitCode: code => {
+          exitCodes.push(code)
+        },
         forceExit: () => undefined
       }
 
@@ -945,6 +948,7 @@ describe('run-google-conformance printed output redacts the live token', () => {
       expect(cliLines.at(-1)).toBe(
         `Interrupted. Read the WARN lines. ${googleRunner.recoveryAdvice}`
       )
+      expect(exitCodes).toEqual([130])
 
       if (label === 'raw') {
         const warn = runLines.find(line => line.startsWith(`WARN ${labelId}: cleanup refused`))

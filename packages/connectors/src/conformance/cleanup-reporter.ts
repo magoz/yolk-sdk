@@ -3,10 +3,11 @@
  * otherwise hide. Conformance/testing only.
  *
  * A write case raises `...RestoreFailed` (or an unknown-outcome create) inside an uninterruptible
- * region. When the case fiber was interrupted meanwhile, the run produces no conformance report:
- * the failure may survive as the run's exit, but that depends on the Effect runtime, so the exact
- * path or page to check by hand is not guaranteed to reach the operator that way. Before leaving
- * the region, the case therefore also hands the full message to this reporter. The default logs it
+ * region. When the case fiber was interrupted meanwhile, the run produces no conformance report,
+ * and since Effect 4.0.5 the failure does not survive either: Effect drops a typed failure whose
+ * recovery handler the interruption skipped, so the run ends interrupt-only. Before leaving the
+ * region, the case therefore also hands the full message to this reporter, the only record of the
+ * exact path or page to check by hand. The default logs it
  * with `Effect.logWarning`; live runners wire it to stderr, and tests capture it.
  */
 import { Cause, Context, Effect, Exit, Option, Predicate } from 'effect'
