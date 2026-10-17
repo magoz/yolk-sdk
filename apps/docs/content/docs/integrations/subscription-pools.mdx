@@ -30,6 +30,9 @@ Available from `0.1.0-canary.116`. The package is runtime-neutral.
 
 ## Build a pool
 
+This server-side fragment assumes `claudeWork` and `claudePersonal` are `LLMProvider` services you
+built, one per account with its credentials, and `workToken` is that account's fresh OAuth token:
+
 ```ts
 import { Effect, Layer } from 'effect'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
@@ -63,6 +66,16 @@ const program = Effect.gen(function* () {
 Accounts must be interchangeable for the requests the pool serves (same provider, same models).
 The pool never sees tokens: each account's provider carries its own credentials.
 
+| `makePool` option     | Meaning                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `id`                  | pool id; pins are keyed by pool id and route                          |
+| `accounts[].id`       | unique within the store; cooldowns and readings are keyed by it       |
+| `accounts[].priority` | breaks ranking ties and orders fill-first, higher first (default 0)   |
+| `accounts[].provider` | the account's `LLMProvider` service                                   |
+| `store`               | a `PoolStoreApi` (`makeMemoryPoolStore` for one process)              |
+| `maxAgeMs`            | how old a reading may be and still rank accounts (default 30 minutes) |
+| `reservePercent`      | quota left untouched on every window, from 0 to below 100 (default 0) |
+
 Readings come from the usage helpers in
 [Read subscription allowance](./model-providers#read-subscription-allowance). A window with
 `models` limits only those models, and a window without `windowDurationMinutes` (OpenCode Go's
@@ -94,5 +107,6 @@ failures never fail a request: the pool routes fill-first without state and logs
 
 - Credentials: one refresher per OAuth grant (refresh tokens rotate). Separate logins of the same
   account are separate grants.
-- Readings: poll each account's usage on a schedule and call `recordReading`.
+- Readings: poll each account's usage with the subscription usage fetchers on a schedule and call
+  `recordReading`.
 - Which accounts form a pool, labels, alerts, and UI.

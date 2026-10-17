@@ -36,12 +36,14 @@ New, opt-in ([ADR 0011](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/001
 `@yolk-sdk/pool` serves several accounts of one provider as one `LLMProvider`. See
 [Share subscription accounts](./integrations/subscription-pools).
 
-- `ProviderErrorInfo` gains optional `quotaResetsAtMs`: the Claude and Codex providers set it on a
-  `rate_limit` failure when a subscription quota is spent. Hosts that persist provider errors in a
+- `ProviderErrorInfo` gains optional `quotaResetsAtMs`: on a `rate_limit` failure for a spent
+  account-wide subscription quota, Claude and Responses providers (ChatGPT Codex) attach the reset
+  when they can read a trusted one. Hosts that persist provider errors in a
   closed schema should allow it.
 - `ProviderSubscriptionUsageWindow` gains optional `models` (model-scoped limits), and Claude and
   OpenCode Go usage now set `windowDurationMinutes`. Claude snapshots also report model-scoped
-  weekly windows (`seven-day-<model>`): hosts that show every window will show them too.
+  weekly windows (`seven-day-<model>`): hosts that show every window will show them too. The
+  emulators' `/anthropic` usage route reports one, so tests that count its windows see one more.
 - `outlook.get_message` now returns `internetMessageHeaders: []` for Sent Items and drafts, where
   Microsoft Graph omits the headers; it used to fail with `validation_failed`.
 

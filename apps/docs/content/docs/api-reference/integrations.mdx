@@ -449,6 +449,15 @@ import it directly. See [Extract file text](../integrations/file-extraction).
 Capture itself (`FilePart`, `FileStoreApi`, `resolveTools({ files })`) is in `@yolk-sdk/agent`. See
 [Move files between tools](../integrations/files).
 
+## Subscription pools
+
+| Subpath                | Main exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/pool`       | `makePool`, `Pool`, `PoolOptions`, `PoolAccount`, `PoolAccountState`, `PoolState`, `poolFailureCooldown`, `defaultPoolMaxAgeMs`, `poolQuotaRetryAfterFloorMs`, `poolMaxCooldownMs`, `poolAuthCooldownMs`, `rankPool`, `staleQuotaCooldowns`, `isCooldownActive`, `poolReadingFromSnapshot`, `poolRoute`, `PoolDecision`, `PoolCandidate`, `PoolRankInput`, `PoolReading`, `PoolWindow`, `PoolAccountId`, `PoolPin`, `PoolCooldown`, `PoolQuotaCooldown`, `PoolAuthCooldown`, `PoolConfigError`, `PoolStoreError`, `PoolUnknownAccountError` |
+| `@yolk-sdk/pool/store` | `PoolStoreApi`, `PoolStoreSnapshot`, `PoolStoreState`, `PoolStoredReading`, `PoolStoreError`, `makeMemoryPoolStore`, `poolStoreContract`, `PoolStoreContractCase`, `PoolStoreContractViolation`                                                                                                                                                                                                                                                                                                                                             |
+
+See [Share subscription accounts](../integrations/subscription-pools).
+
 ## Connector file APIs
 
 The root also exports `connectorActionFile`, `sniffBase64MimeType` and the action `fileOutput`

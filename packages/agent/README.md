@@ -443,8 +443,9 @@ Provider adapters classify safe failure metadata at the boundary. The loop owns 
 policy and emits protocol-visible retry/error state:
 
 - `ProviderErrorInfo` carries safe provider id, failure kind, HTTP status, provider code, optional
-  `retryAfterMs`, optional `quotaResetsAtMs` (epoch milliseconds when a spent subscription quota
-  resets; Claude and Codex set it on `rate_limit` only), and optional `stream` diagnostics (`ProviderStreamDiagnostics`) on chat
+  `retryAfterMs`, optional `quotaResetsAtMs` (epoch milliseconds when a spent account-wide
+  subscription quota resets; on `rate_limit` only, when Claude or a Responses provider such as
+  ChatGPT Codex reports a trusted reset), and optional `stream` diagnostics (`ProviderStreamDiagnostics`) on chat
   `unexpected_content_type` / `incomplete_stream` failures. Diagnostics contain counters and
   milestones, never transcript content, raw headers, or body fragments. See the
   [stream diagnostics guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/troubleshooting.mdx#diagnose-chat-stream-failures-with-stream-diagnostics).
@@ -472,7 +473,8 @@ typed retry/error state.
 ## Subscription allowance snapshots
 
 The Claude, Codex, and Grok usage adapters read best-effort consumer subscription allowance
-percentages and reset windows. Claude normalizes its aggregate five-hour and seven-day windows;
+percentages and reset windows. Claude normalizes its aggregate five-hour and seven-day windows plus model-scoped weekly limits
+(`seven-day-<model>`);
 Codex normalizes primary and secondary rate-limit windows; Grok normalizes its aggregate shared
 credit allowance. Additional provider-specific buckets are ignored. These private provider
 endpoints may change without notice. Pass a fresh host-owned `OAuthAccessToken` and provide an

@@ -34,6 +34,9 @@ Published package metadata requires Node.js 22+. The package is runtime-neutral.
 
 ## Usage
 
+This server-side fragment assumes `claudeWork` and `claudePersonal` are `LLMProvider` services you
+built, one per account with its credentials, and `workToken` is that account's fresh OAuth token:
+
 ```ts
 import { Effect, Layer } from 'effect'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
@@ -68,6 +71,16 @@ Accounts must be interchangeable for the requests the pool serves (same provider
 Each account's provider is built by the host with that account's credentials; the pool never
 sees tokens.
 
+| `makePool` option     | Meaning                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `id`                  | pool id; pins are keyed by pool id and route                          |
+| `accounts[].id`       | unique within the store; cooldowns and readings are keyed by it       |
+| `accounts[].priority` | breaks ranking ties and orders fill-first, higher first (default 0)   |
+| `accounts[].provider` | the account's `LLMProvider` service                                   |
+| `store`               | a `PoolStoreApi` (`makeMemoryPoolStore` for one process)              |
+| `maxAgeMs`            | how old a reading may be and still rank accounts (default 30 minutes) |
+| `reservePercent`      | quota left untouched on every window, from 0 to below 100 (default 0) |
+
 ## Failover and retries
 
 | Failure before the first event                            | Pool                                                                                           |
@@ -98,7 +111,8 @@ failures never fail a request: the pool routes fill-first without state and logs
 
 - Credentials: one refresher per OAuth grant (refresh tokens rotate). Separate logins of the same
   account are separate grants.
-- Readings: poll each account's usage (`@yolk-sdk/agent/providers/*/usage`) on a schedule and
+- Readings: poll each account's usage (`anthropic/usage`, `openai/codex-usage`, `xai/usage`,
+  `opencode/usage` under `@yolk-sdk/agent/providers/`) on a schedule and
   call `recordReading`. Readings older than `maxAgeMs` (default 30 minutes) are ignored.
 - Which accounts form a pool, labels, alerts, and UI.
 

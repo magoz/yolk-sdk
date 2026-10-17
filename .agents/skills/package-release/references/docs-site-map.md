@@ -91,10 +91,10 @@ The package is also listed in `index.mdx`, `installation.mdx`, `integrations/ind
 
 ## Pool package
 
-| Change                                                         | Docs                                                                                       |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `makePool`, ranking, failover, store port                      | `integrations/subscription-pools.mdx`, `reference/packages.mdx`, `packages/pool/README.md` |
-| agent quota signals (`quotaResetsAtMs`, usage window `models`) | `integrations/model-providers.mdx`, `api-reference/agent.mdx`, `packages/agent/README.md`  |
+| Change                                                         | Docs                                                                                                                         |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `makePool`, ranking, failover, store port                      | `integrations/subscription-pools.mdx`, `api-reference/integrations.mdx`, `reference/packages.mdx`, `packages/pool/README.md` |
+| agent quota signals (`quotaResetsAtMs`, usage window `models`) | `integrations/model-providers.mdx`, `api-reference/agent.mdx`, `packages/agent/README.md`                                    |
 
 The package is also listed in `index.mdx`, `installation.mdx`, `integrations/index.mdx`,
 `reference/architecture.mdx`, `reference/host-responsibilities.mdx`, and the canary.116 section of
