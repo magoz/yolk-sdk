@@ -319,7 +319,7 @@ The Action publishes canaries with npm tag `canary` and stable versions with `la
 
 Trusted publishing can only be configured after a package exists on npm. For a renamed/new `@yolk-sdk/*` package, the first publish is the only approved local publish exception.
 
-Pending first publish: `@yolk-sdk/pool`. Every other public `@yolk-sdk/*` package is published and uses trusted publishing. When a new public package is added, list it here until its trusted publisher is configured.
+Pending first publish: none. All public `@yolk-sdk/*` packages are published and use trusted publishing. When a new public package is added, list it here until its trusted publisher is configured.
 
 Preconditions:
 
