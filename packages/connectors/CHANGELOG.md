@@ -1,5 +1,19 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.116
+
+### Patch Changes
+
+- 02953b4: Upgrade the coordinated Effect runtime and platform dependencies to Effect 4.0.5. Hosts must use the matching Effect version.
+
+  Effect 4.0.5 drops a typed failure when an interruption skipped its recovery handler, so a connector conformance run interrupted while a case's cleanup fails, a write's outcome is unknown, or a cleanup is refused now ends interrupt-only instead of with the case's error. The problem still reaches `ConformanceCleanupReporter`. See the migration guide.
+
+- 43ce99e: Fix `outlook.get_message` failing with `validation_failed` on Sent Items and drafts: Microsoft Graph omits or nulls `internetMessageHeaders` for messages that did not arrive through transport. The connector now returns `internetMessageHeaders: []` for them; malformed headers still fail.
+- Updated dependencies [02953b4]
+- Updated dependencies [995762e]
+  - @yolk-sdk/agent@0.1.0-canary.116
+  - @yolk-sdk/conformance@0.1.0-canary.116
+
 ## 0.1.0-canary.115
 
 ### Patch Changes
