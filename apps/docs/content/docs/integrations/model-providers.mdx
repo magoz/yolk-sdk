@@ -251,7 +251,8 @@ cached messages. Read the outcome from `AgentInputUsage.cacheRead` and `cacheWri
 ## Read subscription allowance
 
 Claude, Codex, Grok, and OpenCode Go subscription connections can expose current allowance percentages and
-reset windows. Claude normalizes aggregate five-hour and seven-day windows; Codex normalizes primary
+reset windows. Claude normalizes aggregate five-hour and seven-day windows plus model-scoped
+weekly limits (`seven-day-<model>`, with `models` naming the model they limit); Codex normalizes primary
 and secondary rate-limit windows; Grok normalizes its aggregate shared credit allowance. Additional
 provider-specific buckets are ignored. The usage adapters use private provider endpoints, so treat
 snapshots as best-effort and keep failures isolated from core agent execution. Each fetcher accepts
@@ -284,10 +285,20 @@ windows, preserving the provider's absolute reset times. Monthly resets are subs
 based, not calendar-month boundaries. Missing/invalid percentages are omitted rather than filled
 with zero. No browser cookies or console scraping are needed.
 
+Claude and Go now set `windowDurationMinutes` on their fixed rolling windows (300 for `five-hour`,
+10080 for `seven-day`), as Codex and Grok already did; Go's `monthly` window has none.
+
 Shared snapshot and safe error schemas live in
 `@yolk-sdk/agent/providers/subscription-usage`. Hosts own polling, credential refresh, labels,
 persistence, stale-data policy, thresholds, notifications, and UI. These snapshots report
 subscription allowance, not protocol `AgentUsage` token accounting.
+
+When an account-wide subscription quota is spent, the provider fails the request as `rate_limit`
+and may attach `ProviderErrorInfo.quotaResetsAtMs` (epoch milliseconds of the reset). Claude reads
+it from its rate-limit headers, and Responses providers from a `usage_limit_reached` error (which
+ChatGPT Codex sends). It is absent for transient rate limits, a Claude model-scoped limit alone, and
+a reset that is missing, in the past, or more than a year ahead. To spread requests over several accounts of one provider and fail over
+when one runs out, see [Share subscription accounts](./subscription-pools).
 
 ## Test provider
 

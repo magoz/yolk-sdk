@@ -19,6 +19,7 @@ Every public package should have `packages/<name>/README.md`:
 - `@yolk-sdk/codemode`
 - `@yolk-sdk/extractors`
 - `@yolk-sdk/files`
+- `@yolk-sdk/pool`
 
 Do not require READMEs for private workspaces unless useful internally.
 

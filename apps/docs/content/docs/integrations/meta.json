@@ -4,6 +4,7 @@
     "index",
     "model-providers",
     "provider-setup",
+    "subscription-pools",
     "connectors",
     "mcp-tools",
     "knowledge-search",

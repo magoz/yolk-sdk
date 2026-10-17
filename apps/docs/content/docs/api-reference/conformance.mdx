@@ -309,7 +309,9 @@ Subscription-usage cases share one shape across vendors: `anthropicClaudeUsageSn
 normalized `ProviderSubscriptionUsageSnapshot`: the vendor provider id, at least one window with
 distinct known ids in vendor order, and, against the raw body read at the case's `HttpClient`
 boundary, exactly one window per reported wire window with the same id, used percentage, and reset
-instant, so no window is fabricated or dropped. The usage cases and fixtures are exported apart
+instant, so no window is fabricated or dropped. The Claude case also accepts model-scoped weekly
+windows (`scopedWindowIdPrefix`, ids such as `seven-day-<model>` with `models`), and its synthetic
+fixture reports one. The usage cases and fixtures are exported apart
 from the model-route suites (`anthropicClaudeUsageConformanceCases`,
 `openAiCodexUsageConformanceCases`, `xAiGrokUsageConformanceCases`, and the matching
 `*UsageConformanceFixtures`). `pnpm conformance:usage --family claude|codex|grok` is a dry-run

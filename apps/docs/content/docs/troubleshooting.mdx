@@ -18,8 +18,8 @@ pnpm list '@yolk-sdk/*'
 Yolk packages release in lockstep. Do not mix canary versions.
 
 Also check that `effect` and the coordinated `@effect/*` runtime packages match the version the
-canary expects (`pnpm list effect`): canary.97 and later use `effect@4.0.0`, which removed the
-`effect/unstable/*` entrypoints, and the next canary moves to `effect@4.0.5`. Import from
+canary expects (`pnpm list effect`): canary.97 to canary.115 use `effect@4.0.0`, which removed the
+`effect/unstable/*` entrypoints, and canary.116 and later use `effect@4.0.5`. Import from
 `effect/http`, `effect/process`, and the other `effect/<area>` paths; see
 [Migration](./migration#canary97-effect-400).
 
