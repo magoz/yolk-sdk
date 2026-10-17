@@ -101,3 +101,10 @@ failures never fail a request: the pool routes fill-first without state and logs
 - Readings: poll each account's usage (`@yolk-sdk/agent/providers/*/usage`) on a schedule and
   call `recordReading`. Readings older than `maxAgeMs` (default 30 minutes) are ignored.
 - Which accounts form a pool, labels, alerts, and UI.
+
+## Boundaries
+
+- Depends only on `@yolk-sdk/agent/{loop,protocol,providers/subscription-usage}` and Effect; no
+  Node builtins. `@yolk-sdk/agent` never imports this package.
+- The pool never sees tokens and never calls usage endpoints; hosts build each account's provider
+  and record its readings.

@@ -89,6 +89,17 @@ The package is also listed in `index.mdx`, `installation.mdx`, `integrations/ind
 `reference/packages.mdx`, `reference/architecture.mdx`, and the canary.114 section of
 `migration.mdx`.
 
+## Pool package
+
+| Change                                                         | Docs                                                                                       |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `makePool`, ranking, failover, store port                      | `integrations/subscription-pools.mdx`, `reference/packages.mdx`, `packages/pool/README.md` |
+| agent quota signals (`quotaResetsAtMs`, usage window `models`) | `integrations/model-providers.mdx`, `api-reference/agent.mdx`, `packages/agent/README.md`  |
+
+The package is also listed in `index.mdx`, `installation.mdx`, `integrations/index.mdx`,
+`reference/architecture.mdx`, `reference/host-responsibilities.mdx`, and the canary.116 section of
+`migration.mdx`.
+
 ## Conformance and emulators packages
 
 | Change                                        | Docs                                                                                              |

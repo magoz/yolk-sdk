@@ -1,0 +1,98 @@
+---
+title: Share subscription accounts
+description: Serve several accounts of one provider as one LLMProvider, spending the quota that resets soonest first and failing over when an account runs out.
+---
+
+A subscription account (for example a Claude Max or ChatGPT plan) has usage windows: a five-hour
+limit, a weekly limit, sometimes per-model limits. With several accounts of one provider,
+`@yolk-sdk/pool` serves them as one `LLMProvider`
+([ADR 0011](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0011-subscription-pools.md)):
+
+- each request goes to the account whose longest usage window (usually the weekly one) resets
+  soonest and still has quota, so quota that would reset unused is spent first (expiring-first);
+- without fresh usage readings, a route stays on the account that served it last (sticky
+  fill-first);
+- when an account runs out of quota or its credentials are rejected before any output, it cools
+  down and the same request moves to the next account.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/pool@canary @yolk-sdk/agent@canary effect@4.0.5
+```
+
+Available from `0.1.0-canary.116`. The package is runtime-neutral.
+
+| Subpath                | Purpose                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `@yolk-sdk/pool`       | `makePool`, the pure ranking (`rankPool`, `staleQuotaCooldowns`), Schemas, and errors   |
+| `@yolk-sdk/pool/store` | `PoolStoreApi` port, `makeMemoryPoolStore`, and the `poolStoreContract` semantics cases |
+
+## Build a pool
+
+```ts
+import { Effect, Layer } from 'effect'
+import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { fetchAnthropicClaudeSubscriptionUsage } from '@yolk-sdk/agent/providers/anthropic/usage'
+import { makePool } from '@yolk-sdk/pool'
+import { makeMemoryPoolStore } from '@yolk-sdk/pool/store'
+
+const program = Effect.gen(function* () {
+  const pool = yield* makePool({
+    id: 'claude',
+    accounts: [
+      // LLMProvider services you build, one per account and its credentials.
+      { id: 'claude-work', priority: 1, provider: claudeWork },
+      { id: 'claude-personal', provider: claudePersonal }
+    ],
+    // Serverless hosts implement PoolStoreApi on their database.
+    store: makeMemoryPoolStore()
+  })
+
+  // The loop's provider: innermost, under your retry or attachment wrappers.
+  const llm = Layer.succeed(LLMProvider, pool.provider)
+
+  // On your own schedule (cron, background job), never per request.
+  yield* pool.recordReading('claude-work', yield* fetchAnthropicClaudeSubscriptionUsage(workToken))
+
+  // For a settings page: pins, active cooldowns, readings.
+  const state = yield* pool.state
+})
+```
+
+Accounts must be interchangeable for the requests the pool serves (same provider, same models).
+The pool never sees tokens: each account's provider carries its own credentials.
+
+Readings come from the usage helpers in
+[Read subscription allowance](./model-providers#read-subscription-allowance). A window with
+`models` limits only those models, and a window without `windowDurationMinutes` (OpenCode Go's
+month) can block a used-up account but never ranks. Readings older than `maxAgeMs` (default 30
+minutes) are ignored.
+
+## Failover and retries
+
+| Failure before the first event                            | Pool                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `rate_limit` with `quotaResetsAtMs` (Claude, Codex quota) | Cooldown until the reset, next account                                                         |
+| `rate_limit` with `retryAfterMs` of 30 minutes or more    | Cooldown for that long, next account                                                           |
+| `auth`                                                    | 30-minute cooldown, next account                                                               |
+| anything else, or any failure after an event              | Unchanged to the caller; the loop retries it only when it is retryable and nothing was emitted |
+| every account out on quota                                | `rate_limit`, `retryable: false`, earliest quota reset                                         |
+| every account out on rejected credentials only            | `auth` (`provider_error`), `retryable: false`                                                  |
+
+The loop's own retry calls the pool again, which picks again; the pool never retries transient
+errors itself, so attempts never multiply. A request without a model id fails `validation_error`.
+
+## Store
+
+`PoolStoreApi` holds pins (per pool and route), one cooldown per account, and the latest reading
+per account. Implementations must be atomic per key (`movePin` is a compare-and-set). Run every
+case of `poolStoreContract` against a fresh store of your implementation in your tests. Store
+failures never fail a request: the pool routes fill-first without state and logs a warning.
+
+## What you own
+
+- Credentials: one refresher per OAuth grant (refresh tokens rotate). Separate logins of the same
+  account are separate grants.
+- Readings: poll each account's usage on a schedule and call `recordReading`.
+- Which accounts form a pool, labels, alerts, and UI.
