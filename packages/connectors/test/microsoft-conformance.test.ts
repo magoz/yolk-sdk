@@ -1402,16 +1402,13 @@ describe('Microsoft conformance run interruption', () => {
 
         expect(sentinelRan).toBe(false)
 
-        // As for Dropbox: the run ends with the case's own RestoreFailed, and no Interrupt in the
-        // cause, so it produces no report and resumes no case.
+        // As for Dropbox: the run ends interrupt-only (the RestoreFailed is dropped), produces no
+        // report, and resumes no case; the reporter's WARN records the failed removal.
         if (Exit.isSuccess(exit)) {
-          return expect.fail('expected the interrupted run to fail')
+          return expect.fail('expected the interrupted run to be interrupted')
         }
 
-        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-        expect(Cause.squash(exit.cause)).toMatchObject({
-          _tag: 'MicrosoftConformanceRestoreFailed'
-        })
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
         expect(warnings).toEqual([message])
       })
     )
@@ -1429,19 +1426,11 @@ describe('Microsoft conformance run interruption', () => {
       expect(sentinelRan).toBe(false)
 
       if (Exit.isSuccess(exit)) {
-        return expect.fail('expected the interrupted run to fail')
+        return expect.fail('expected the interrupted run to be interrupted')
       }
 
-      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-
-      const raised = Cause.squash(exit.cause)
-
-      expect(raised).toMatchObject({
-        _tag: 'MicrosoftConformanceActionFailed',
-        createOutcome: 'unknown'
-      })
-      // The raised error is unchanged; only the report names the case.
-      expect(raised instanceof Error ? raised.message : undefined).toBe(badGatewayCreateMessage)
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      // The report names the case in front of the raised error's message.
       expect(warnings).toEqual([
         `microsoft.calendar.create-returns-event-id: ${badGatewayCreateMessage}`
       ])
@@ -1458,13 +1447,10 @@ describe('Microsoft conformance run interruption', () => {
       expect(sentinelRan).toBe(false)
 
       if (Exit.isSuccess(exit)) {
-        return expect.fail('expected the interrupted run to fail')
+        return expect.fail('expected the interrupted run to be interrupted')
       }
 
-      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-      expect(Cause.squash(exit.cause)).toMatchObject({
-        _tag: 'MicrosoftConformanceRestoreFailed'
-      })
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
       expect(warnings).toEqual([idLessCreateMessage])
     })
   )

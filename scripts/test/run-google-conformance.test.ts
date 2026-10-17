@@ -879,6 +879,7 @@ describe('run-google-conformance printed output redacts the live token', () => {
     it(`prints no trace of a ${label} token when the refusal is raised during an interruption`, async () => {
       const runLines: Array<string> = []
       const cliLines: Array<string> = []
+      const exitCodes: Array<number> = []
 
       let handlers: Array<() => void> = []
 
@@ -907,7 +908,9 @@ describe('run-google-conformance printed output redacts the live token', () => {
         error: message => {
           cliLines.push(message)
         },
-        setExitCode: () => undefined,
+        setExitCode: code => {
+          exitCodes.push(code)
+        },
         forceExit: () => undefined
       }
 
@@ -934,17 +937,23 @@ describe('run-google-conformance printed output redacts the live token', () => {
       const printed = [...runLines, ...cliLines].join('\n')
 
       // The case reported its refusal as a WARN line (withheld whole when the token is folded across
-      // lines), and the run ended with that refusal.
+      // lines); Effect drops the refusal the interruption kept from its handler, so the run ended
+      // interrupt-only.
       expect(
         runLines.some(
           line => line.startsWith(`WARN ${labelId}: cleanup refused`) || line === withheldTokenLine
         )
       ).toBe(true)
       expect(textContainsAccessToken(printed, liveToken)).toBe(false)
+      expect(cliLines.at(-1)).toBe(
+        `Interrupted. Read the WARN lines. ${googleRunner.recoveryAdvice}`
+      )
+      expect(exitCodes).toEqual([130])
 
       if (label === 'raw') {
-        expect(cliLines.at(-1)).toContain(`${labelId}: cleanup refused`)
-        expect(cliLines.at(-1)).toContain(redactedLiveTokenMarker)
+        const warn = runLines.find(line => line.startsWith(`WARN ${labelId}: cleanup refused`))
+
+        expect(warn).toContain(redactedLiveTokenMarker)
       }
     })
   }

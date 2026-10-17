@@ -1284,14 +1284,13 @@ describe('Todoist conformance run interruption', () => {
 
         expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-        // Same shape as the Dropbox drill (effect 4.0.0): the run ends with the case's own
-        // RestoreFailed and no Interrupt in the cause, produces no report, and resumes no case.
+        // Same shape as the Dropbox drill: the run ends interrupt-only (the RestoreFailed is
+        // dropped), produces no report, and resumes no case; the reporter's WARN records it.
         if (Exit.isSuccess(exit)) {
-          return expect.fail('expected the interrupted run to fail')
+          return expect.fail('expected the interrupted run to be interrupted')
         }
 
-        expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: 'TodoistConformanceRestoreFailed' })
+        expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
 
         const reported = yield* Ref.get(warnings)
 

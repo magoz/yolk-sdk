@@ -14,7 +14,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add -D @yolk-sdk/conformance@canary effect@4.0.0
+pnpm add -D @yolk-sdk/conformance@canary effect@4.0.5
 ```
 
 ## Subpaths
@@ -281,7 +281,10 @@ targets, so every case runs there.
   their union.
 - Each case runs under `Effect.exit`: typed failures, layer build failures, a throwing `layer`
   factory, and defects become `failed` results and the run continues. Interruption is not captured:
-  interrupting the run, or a case interrupting itself, interrupts the whole run.
+  interrupting the run, or a case interrupting itself, interrupts the whole run. A typed failure a
+  case raises while the run is being interrupted (for example from an uninterruptible cleanup) is
+  dropped by Effect: the run ends interrupt-only, with no result for it, so report such problems
+  through a side channel.
 - `concurrency` defaults to 1 (live accounts are shared); results keep case order.
 - `now` defaults to the Effect `Clock`; `maxFixtureAgeDays` defaults to 30.
 

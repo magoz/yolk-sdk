@@ -30,6 +30,20 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: Effect 4.0.5
+
+This source upgrade targets `effect@4.0.5`; it is not a claim that an already-published canary uses
+that version. Upgrade matching Yolk packages and Effect together when the corresponding canary is
+available, and move `effect` and the coordinated Effect runtime packages (`@effect/platform-*`,
+`@effect/sql-*`, `@effect/opentelemetry`, `@effect/vitest`) to `4.0.5` together. Yolk APIs are
+unchanged.
+
+- Effect 4.0.5 drops a typed failure when an interruption skipped its recovery handler. If you run
+  connector conformance cases with `runConformance` and interrupt a run while a case's cleanup
+  fails, a write's outcome is unknown, or a cleanup is refused, the run now ends interrupt-only
+  instead of with the case's error (`RestoreFailed`, `ActionFailed`, or `CleanupRefused`). Read cleanup problems from `ConformanceCleanupReporter`, which receives them
+  either way. The repository's conformance runners now exit 130 in that case, not 1.
+
 ### Canary.115: agent status
 
 Breaking for `@yolk-sdk/agent/client` and `@yolk-sdk/agent/react`. The string `AgentRunStatus`

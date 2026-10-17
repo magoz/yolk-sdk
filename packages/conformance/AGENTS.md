@@ -105,7 +105,9 @@ There is no root export or barrel.
   environment stay shared; document that limit wherever isolation is promised.
 - Each case runs under `Effect.exit`; failures, layer build failures, throwing layer factories,
   and defects become `failed` results. Interrupt-only causes re-interrupt the run instead of
-  becoming results.
+  becoming results. Since Effect 4.0.5 a typed failure raised while an interrupt is pending (an
+  uninterruptible cleanup) is dropped because the interruption skips the `Effect.exit` handler, so
+  it never becomes a result; connector cases report it through `ConformanceCleanupReporter`.
 - Reports carry only an identifier-like, non-credential-shaped error `_tag` and a message.
   `ConformanceMismatch` messages keep the case-authored text with credential patterns redacted;
   every other message is sanitized best-effort by `sanitizeConformanceMessage` (credential patterns

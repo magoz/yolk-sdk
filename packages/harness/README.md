@@ -8,7 +8,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/harness@canary effect@4.0.0
+pnpm add @yolk-sdk/harness@canary effect@4.0.5
 ```
 
 ## Subpaths
@@ -61,7 +61,7 @@ Omitting `drain` uses a no-op (`Effect.void`): `driver.run` only claims and rele
 Setup:
 
 ```bash
-pnpm add @yolk-sdk/harness@canary effect@4.0.0
+pnpm add @yolk-sdk/harness@canary effect@4.0.5
 pnpm add -D tsx
 ```
 

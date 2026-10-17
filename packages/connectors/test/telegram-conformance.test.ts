@@ -861,18 +861,19 @@ describe('Telegram conformance run interruption', () => {
 
       expect(yield* Ref.get(sentinelRan)).toBe(false)
 
-      // Same shape as the Dropbox failing-restore drill (effect 4.0.0): the run ends with the
-      // case's own failure and no Interrupt in the cause, produces no report, and resumes no case.
+      // Same shape as the Dropbox failing-restore drill: the run ends interrupt-only (the case's
+      // own failure is dropped), produces no report, and resumes no case; the reporter's WARN
+      // records the unknown send.
       if (Exit.isSuccess(exit)) {
-        return expect.fail('expected the interrupted run to fail')
+        return expect.fail('expected the interrupted run to be interrupted')
       }
 
-      expect(Cause.hasInterrupts(exit.cause)).toBe(false)
-      expect(Cause.squash(exit.cause)).toMatchObject({
-        _tag: 'TelegramConformanceActionFailed',
-        sendOutcome: 'unknown'
-      })
-      expect(yield* Ref.get(warnings)).toHaveLength(1)
+      expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+
+      const reported = yield* Ref.get(warnings)
+
+      expect(reported).toHaveLength(1)
+      expect(reported[0]).toContain('send outcome unknown')
     })
   )
 
