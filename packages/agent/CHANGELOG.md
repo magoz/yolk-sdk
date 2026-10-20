@@ -1,5 +1,13 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.118
+
+### Patch Changes
+
+- f7f6d58: Republish every public package in lockstep after an incomplete `0.1.0-canary.117` publish: npm held `@yolk-sdk/extractors@0.1.0-canary.117`, so `@yolk-sdk/extractors`, `@yolk-sdk/pool`, `@yolk-sdk/sandbox` and `@yolk-sdk/vercel-workflows` were never published at that version. This release contains no implementation changes beyond `0.1.0-canary.117`; install this version (with all `@yolk-sdk/*` packages on it) instead of `0.1.0-canary.117`.
+- Updated dependencies [f7f6d58]
+  - @yolk-sdk/conformance@0.1.0-canary.118
+
 ## 0.1.0-canary.117
 
 ### Minor Changes
