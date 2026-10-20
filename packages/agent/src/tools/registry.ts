@@ -806,7 +806,8 @@ const stagingHandlers = <Context, Params>(
 /**
  * A call's effective access: `read` when its registration's `isReadCall` says the call only reads,
  * the registration's `access` otherwise. Never fails: an `isReadCall` that fails or dies answers
- * "not a read".
+ * "not a read". Classifies the call exactly as given; `resolveTools` first omits strict-mode
+ * `null`s on optional properties (as for every handler), so pass a call normalized the same way.
  */
 export const toolCallAccess = <Context>(
   registration: ToolRegistration<Context>,
@@ -1801,8 +1802,11 @@ export const resolveTools = <Context>(
       Effect.sync(() => omitNullOptionalToolCallArguments(def.parameters, call))
 
     // Classify the call the handler will see: strict-mode `null`s omitted, as execution does.
+    // Background activations carry an execution envelope, not the tool's arguments: never reads.
     const effectiveCallAccess = (registration: ToolRegistration<Context>, call: ToolCall) =>
-      registration.access === 'read' || registration.isReadCall === undefined
+      registration.access === 'read' ||
+      registration.isReadCall === undefined ||
+      activated(registration)
         ? Effect.succeed(registration.access)
         : businessCallFor(registration.def, call).pipe(
             Effect.flatMap(normalized => toolCallAccess(registration, normalized)),

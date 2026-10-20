@@ -60,11 +60,11 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   `interruptedCallsUnavailable: true` instead; never an empty listing. Never re-run a script on
   re-execution; deterministic replay is phase 2 (ADR 0002). Use the protocol's bounded-text
   helpers (`truncateCodePoints`, `boundNestedToolCallArgs`), never local copies.
-- Record every executed nested call with `recordNestedToolCall` over `makeNestedToolCallRecorder({
-maxCalls: limits.maxNestedCalls })` (per-status counts survive dropped entries), with its
-  effective `access` from `nested.access` (hosts audit writes by it); calls still running when the
-  script ends are interrupted (`FiberSet.clear`) and recorded `cancelled`. Never store nested
-  results.
+- Record every executed nested call with `recordNestedToolCall` over
+  `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
+  dropped entries), with its effective `access` from `nested.access` (hosts audit writes by it);
+  calls still running when the script ends are interrupted (`FiberSet.clear`) and recorded
+  `cancelled`. Never store nested results.
 - `afterNestedCall` wraps only `nested.execute` (not `beforeNestedCall` rejections) in `onExit`:
   outcome `success` (no `isError`), `failure` (error result or non-interrupt failure), or
   `interrupted` (interrupts only); the script sees the call settle after the hook. A hook failure
