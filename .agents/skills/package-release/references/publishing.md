@@ -125,7 +125,7 @@ git ls-remote --tags origin 'refs/tags/v<version>'
 
 A version can be published yet held by npm's validation scan (404 to `npm view`). Check each
 package's status endpoint before moving `latest` or pinning the version downstream; see
-troubleshooting.md → Version published but not visible.
+[troubleshooting.md](./troubleshooting.md) → Version published but not visible (npm validation).
 
 Until the first stable release, finish with the owner-approved `latest` move on every public package
 (`npm dist-tag add @yolk-sdk/<name>@<version> latest`, owner OTP), as described in
