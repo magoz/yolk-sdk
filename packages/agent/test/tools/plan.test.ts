@@ -94,6 +94,7 @@ const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
     parameters: Link,
     access: 'write',
     approval: manual,
+    isReadCall: params => options.readResources === true && params.resource.startsWith('read:'),
     ...(options.stageOnly === true ? stageOnlyExposure : defaultExposure),
     changePreview: ({ params, context }) =>
       params.resource === 'unpreviewable'
@@ -206,6 +207,7 @@ type Gate = {
 
 type LinkToolOptions = {
   stageOnly?: boolean
+  readResources?: boolean
   failOn?: string
   dieOn?: string
   prechecks?: PrecheckTracker
@@ -273,6 +275,7 @@ type SetupOptions = {
   readonly settlement?: 'fail'
   readonly outage?: Outage
   readonly unledgered?: boolean
+  readonly readResources?: boolean
   readonly prechecks?: PrecheckTracker
   readonly gate?: Gate
   readonly maxWaitMs?: number
@@ -298,6 +301,8 @@ const setup = (options: SetupOptions = {}) =>
     const linkOptions: LinkToolOptions = {}
 
     if (options.stageOnly === true) linkOptions.stageOnly = true
+
+    if (options.readResources === true) linkOptions.readResources = true
 
     if (options.failOn !== undefined) linkOptions.failOn = options.failOn
 
@@ -924,6 +929,20 @@ describe('plan review', () => {
         ['review_1/3', plan.calls[2]?.argsDigest]
       ])
       expect(textOf(result)).toContain('2 applied, 0 failed, 1 skipped, 0 not run')
+    })
+  )
+
+  it.effect('ledgers applied calls by their tool access, even ones isReadCall calls reads', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, readResources: true })
+      const plan = yield* stagedPlan(env, ['read:r1', 'r2'])
+
+      yield* reviewAndApply(env, plan, ['script_1/s1', 'script_1/s2'])
+
+      const entries = yield* env.ledgerStore.list('review_1')
+
+      expect(env.applied.map(entry => entry.resource)).toEqual(['read:r1', 'r2'])
+      expect(entries.map(entry => entry.key)).toEqual(['review_1/1', 'review_1/2'])
     })
   )
 

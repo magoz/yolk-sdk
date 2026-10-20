@@ -141,6 +141,21 @@ default that is every non-`read` call, including the nested calls of a
 interaction tools are never ledgered: their at-most-once guarantee is your `InteractionHost`
 receipts.
 
+A `write` tool that also reads (one tool with `list` and `update` operations, say) can mark its
+read-only calls with `isReadCall`. Those calls are not ledgered: re-running a read is safe, while a
+ledgered read that crashed before recording its outcome would be refused on every retry as possibly
+applied. Code mode records their access as `read`.
+
+```ts
+makeTool({
+  name: 'tasks',
+  parameters: TasksParams,
+  access: 'write',
+  isReadCall: params => params.operation === 'list' || params.operation === 'get',
+  execute
+})
+```
+
 Fragment: `db`, `modules`, `requestContext`, `runId`, and `stepDeadlineMs` are host-owned.
 
 ```ts
@@ -220,7 +235,7 @@ const resolveStepTools = Effect.gen(function* () {
 | `ledger` option       | Default                                   | Meaning                                         |
 | --------------------- | ----------------------------------------- | ----------------------------------------------- |
 | `store`               | required                                  | host-implemented `ToolLedgerStore`              |
-| `isLedgered`          | `defaultToolLedgerPolicy`                 | which calls are ledgered                        |
+| `isLedgered`          | `defaultToolLedgerPolicy`                 | which calls are ledgered (`readCall` input)     |
 | `leaseMs`             | `defaultToolLedgerLeaseMs` (30 s)         | lease of a running call                         |
 | `heartbeatIntervalMs` | a third of `leaseMs`, at most half        | how often a running call renews its lease       |
 | `pollIntervalMs`      | `defaultToolLedgerPollIntervalMs` (1 s)   | how often a duplicate polls an in-flight call   |

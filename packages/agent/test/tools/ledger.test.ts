@@ -17,6 +17,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   ImagePart,
   inlineBase64AttachmentSource,
+  NestedToolCallAccess,
   NestedToolCallRecord,
   NestedToolCalls,
   TextPart,
@@ -25,9 +26,12 @@ import {
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
+  defaultToolLedgerPolicy,
   makeInMemoryToolLedgerStore,
   makeTool,
   resolveTools,
+  ToolAccess,
+  toolCallAccess,
   toolIdempotencyKey,
   toolLedgerCompleteTimeoutMs,
   ToolLedgerEntry,
@@ -40,16 +44,18 @@ import {
   type ToolLedgerDecisionEvent,
   type ToolLedgerHeartbeatRequest,
   type ToolLedgerOptions,
+  type ToolLedgerPolicyInput,
   type ToolLedgerStore,
   type ToolModule,
   type ToolRegistration
 } from '../../src/tools'
+import type { MakeToolOptions } from '../../src/tools/registry.ts'
 
 type TestContext = { readonly tenant: string }
 
 const context: TestContext = { tenant: 'tenant_1' }
 
-const NoteParams = Schema.Struct({ note: Schema.String })
+const NoteParams = Schema.Struct({ note: Schema.String, tag: Schema.optionalKey(Schema.String) })
 
 type Probe = {
   readonly runs: Array<string>
@@ -58,16 +64,16 @@ type Probe = {
 
 const makeProbe = (): Probe => ({ runs: [], keys: [] })
 
-const noteTool = (
-  probe: Probe,
-  options: {
-    readonly name?: string
-    readonly access?: 'read' | 'write' | 'destructive'
-    readonly sleep?: Duration.Input
-    readonly fail?: boolean
-  } = {}
-): ToolRegistration<TestContext> =>
-  makeTool<TestContext, typeof NoteParams>({
+type NoteToolOptions = {
+  readonly name?: string
+  readonly access?: 'read' | 'write' | 'destructive'
+  readonly sleep?: Duration.Input
+  readonly fail?: boolean
+  readonly isReadCall?: (params: typeof NoteParams.Type) => boolean
+}
+
+const noteOptions = (probe: Probe, options: NoteToolOptions) =>
+  ({
     name: options.name ?? 'append_note',
     description: 'Append a note',
     parameters: NoteParams,
@@ -91,7 +97,15 @@ const noteTool = (
           structuredContent: { run: probe.runs.length }
         })
       })
-  })
+  }) satisfies MakeToolOptions<TestContext, typeof NoteParams>
+
+const noteTool = (probe: Probe, options: NoteToolOptions = {}): ToolRegistration<TestContext> => {
+  const isReadCall = options.isReadCall
+
+  return isReadCall === undefined
+    ? makeTool<TestContext, typeof NoteParams>(noteOptions(probe, options))
+    : makeTool<TestContext, typeof NoteParams>({ ...noteOptions(probe, options), isReadCall })
+}
 
 const modules = (
   tools: ReadonlyArray<ToolRegistration<TestContext>>
@@ -569,6 +583,103 @@ describe('tool ledger', () => {
       yield* execute(tools, noteCall(), ledger)
 
       expect(probe.runs).toEqual(['hot lead'])
+    })
+  )
+
+  it.effect('lets read-only calls of a write tool bypass the ledger (isReadCall)', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore({ scope: 'run_1' })
+      const policyInputs: Array<ToolLedgerPolicyInput> = []
+
+      const tools = [noteTool(probe, { isReadCall: params => params.note.startsWith('read:') })]
+
+      const ledger: ToolLedgerOptions = {
+        store,
+        isLedgered: input => {
+          policyInputs.push(input)
+
+          return defaultToolLedgerPolicy(input)
+        }
+      }
+
+      // A re-executed step re-runs the read (nothing to replay) and replays the write.
+      yield* execute(tools, noteCall('call_1', 'read:list'), ledger)
+      yield* execute(tools, noteCall('call_1', 'read:list'), ledger)
+      yield* execute(tools, noteCall('call_2', 'update'), ledger)
+      yield* execute(tools, noteCall('call_2', 'update'), ledger)
+
+      expect(probe.runs).toEqual(['read:list', 'read:list', 'update'])
+      expect((yield* store.entries).map(entry => entry.key)).toEqual(['call_2'])
+      expect(policyInputs.map(input => [input.call.id, input.access, input.readCall])).toEqual([
+        ['call_1', 'write', true],
+        ['call_1', 'write', true],
+        ['call_2', 'write', false],
+        ['call_2', 'write', false]
+      ])
+      // Not ledgered, still keyed.
+      expect(probe.keys[0]).toBe('run_1:call_1')
+    })
+  )
+
+  it.effect(
+    'classifies the call the handler sees: strict-mode nulls on optional fields omitted',
+    () =>
+      Effect.gen(function* () {
+        const probe = makeProbe()
+        const store = makeInMemoryToolLedgerStore()
+        const tools = [noteTool(probe, { isReadCall: params => params.note.startsWith('read:') })]
+
+        const call = ToolCall.make({
+          id: 'call_1',
+          name: 'append_note',
+          params: { note: 'read:list', tag: null }
+        })
+
+        const result = yield* execute(tools, call, { store })
+
+        expect(result.isError).toBeUndefined()
+        expect(yield* store.entries).toEqual([])
+      })
+  )
+
+  it.effect('ledgers a call whose arguments do not decode or whose isReadCall dies', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore()
+
+      const dying = noteTool(probe, {
+        isReadCall: () => {
+          throw new Error('classifier bug')
+        }
+      })
+
+      const lenient = noteTool(probe, { isReadCall: () => true })
+
+      yield* execute([dying], noteCall('call_1', 'read:list'), { store })
+
+      const invalid = yield* execute(
+        [lenient],
+        ToolCall.make({ id: 'call_2', name: 'append_note', params: { note: 1 } }),
+        { store }
+      )
+
+      expect(invalid.isError).toBe(true)
+      expect((yield* store.entries).map(entry => entry.key)).toEqual(['call_1', 'call_2'])
+    })
+  )
+
+  it.effect('reports a call’s effective access (toolCallAccess)', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const tool = noteTool(probe, { isReadCall: params => params.note.startsWith('read:') })
+
+      expect(yield* toolCallAccess(tool, noteCall('call_1', 'read:list'))).toBe('read')
+      expect(yield* toolCallAccess(tool, noteCall('call_1', 'update'))).toBe('write')
+      expect(yield* toolCallAccess(noteTool(probe), noteCall('call_1', 'read:list'))).toBe('write')
+      expect(yield* toolCallAccess(noteTool(probe, { access: 'read' }), noteCall())).toBe('read')
+      expect(NestedToolCallAccess.literals).toEqual(ToolAccess.literals)
+      expect(probe.runs).toEqual([])
     })
   )
 

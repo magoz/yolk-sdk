@@ -312,6 +312,7 @@ export {
   boundNestedToolCallArgs,
   emptyNestedToolCallRecorder,
   makeNestedToolCallRecorder,
+  NestedToolCallAccess,
   NestedToolCallCounts,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxCalls,

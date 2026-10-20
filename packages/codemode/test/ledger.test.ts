@@ -67,16 +67,23 @@ const NoteParams = Schema.Struct({ note: Schema.String })
 
 type WriteLog = Array<{ readonly note: string; readonly key: string | undefined }>
 
-/** `sales_manage`: a write tool that logs each execution; `block` never finishes, `sleep` waits. */
+/** `sales_manage`: a write tool that logs each execution; `block` never finishes, `sleep` waits.
+ * With `readNotes`, notes starting with `read:` are read-only calls (`isReadCall`).
+ */
 const salesManage = (
   log: WriteLog,
-  options: { readonly block?: string; readonly sleep?: Duration.Input } = {}
+  options: {
+    readonly block?: string
+    readonly sleep?: Duration.Input
+    readonly readNotes?: boolean
+  } = {}
 ): ToolRegistration<TestContext> =>
   makeTool<TestContext, typeof NoteParams>({
     name: 'sales_manage',
     description: 'Append a note to a deal',
     parameters: NoteParams,
     access: 'write',
+    isReadCall: params => options.readNotes === true && params.note.startsWith('read:'),
     execute: ({ call, params, idempotencyKey }) =>
       Effect.gen(function* () {
         log.push({ note: params.note, key: idempotencyKey })
@@ -410,6 +417,59 @@ describe('code mode with a tool ledger', () => {
       expect(log).toHaveLength(1)
       expect(second.isError).toBe(true)
       expect(second.structuredContent).toMatchObject({ details: { state: 'conflict' } })
+    })
+  )
+
+  it.effect('leaves read-only nested calls out of the ledger and records their access', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const { executor } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 'read:deal' })
+        await call('sales_manage', { note: 'update' })
+
+        return { ok: true }
+      })
+
+      const result = yield* runLedgered(
+        codeModeModules(executor, [salesManage(log, { readNotes: true })]),
+        { store }
+      )
+
+      expect(log.map(entry => entry.note)).toEqual(['read:deal', 'update'])
+      expect((yield* store.entries).map(entry => entry.key).sort()).toEqual(['call_1', 'call_1/2'])
+      expect(result.nestedCalls?.calls.map(call => [call.id, call.access])).toEqual([
+        ['call_1/1', 'read'],
+        ['call_1/2', 'write']
+      ])
+    })
+  )
+
+  it.effect('records the access of a nested call the host rejects before execution', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const { executor } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 'read:deal' }).catch(() => undefined)
+        await call('sales_manage', { note: 'update' }).catch(() => undefined)
+
+        return { ok: true }
+      })
+
+      const result = yield* runLedgered(
+        codeModeModules(executor, [salesManage(log, { readNotes: true })], {
+          beforeNestedCall: () => Effect.fail('not allowed here')
+        }),
+        { store }
+      )
+
+      expect(log).toEqual([])
+      expect(result.nestedCalls?.calls.map(call => [call.access, call.status])).toEqual([
+        ['read', 'error'],
+        ['write', 'error']
+      ])
     })
   )
 
