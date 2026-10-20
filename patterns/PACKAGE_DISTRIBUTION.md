@@ -271,8 +271,8 @@ git ls-remote --tags origin "refs/tags/v<version>"
 
 For lockstep canaries, verify every public package has the new `canary` dist-tag and `v<version>` exists locally and on origin.
 
-A dist-tag can point at a version npm still holds in its validation scan (404 to `npm view
-<name>@<version>`, `409 ... previously staged` on a rerun). Before moving `latest` or pinning the
+A package may report its new version as published while npm still holds it in its validation
+scan (404 to `npm view <name>@<version>`, `409 ... previously staged` on a rerun). Before moving `latest` or pinning the
 version downstream, check each package's status endpoint and wait while it reports `validating`
 (`.agents/skills/package-release/references/troubleshooting.md` → Version published but not
 visible).

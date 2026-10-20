@@ -159,12 +159,15 @@ command line, logs and PRs:
 
 ```bash
 # NPM_TOKEN holds the npm user's token (for example exported from ~/.npmrc by the owner).
+: "${NPM_TOKEN:?export NPM_TOKEN first}"
 printf 'Authorization: Bearer %s\n' "$NPM_TOKEN" | curl -s -H @- \
   "https://registry.npmjs.org/-/package/@yolk-sdk%2f<name>/version/<version>/status"
 # {"packageName":"@yolk-sdk/<name>","version":"<version>","status":"validating"}
 ```
 
-`validating` means wait; `published` means it is public (the CDN may lag a few minutes).
+`validating` means wait; `published` means it is public (the CDN may lag a few minutes). First run
+it for a version known to be public: it must return `published`. A 401 (missing or invalid token,
+checked 2026-10-20) or another unexpected response is an authentication problem, not a lost version.
 
 Fix:
 
@@ -175,12 +178,12 @@ Fix:
   are still missing (it skips published tarballs).
 - If a version stays `validating` for many hours, contact npm support
   (https://www.npmjs.com/support) with the package, version and status response.
-- Treat a version as lost only when its status is neither `validating` nor `published` (for example
-  the endpoint returns 404) or npm support confirms it. Then bump all public packages to the next
-  canary: add `.changeset/canary-<n>-lockstep.md` (all public packages, `patch`) saying it
-  republishes the partial version unchanged, land it on `main`, run the usual release prep and
-  dispatch `publish.yml`. Afterwards optionally deprecate the partial version of each package that
-  did publish:
+- An error, an authentication failure or an unknown status is inconclusive: fix the token or retry
+  the check; never bump on it. Treat a version as lost only when npm support confirms it. Then bump
+  all public packages to the next canary: add `.changeset/canary-<n>-lockstep.md` (all public
+  packages, `patch`) saying it republishes the partial version unchanged, land it on `main`, run the
+  usual release prep and dispatch `publish.yml`. Afterwards optionally deprecate the partial version
+  of each package that did publish:
   `npm deprecate @yolk-sdk/<name>@<partial version> "<message pointing to the new version>"`.
   (canary.118 was such a republish of canary.117 before the cause was known; it was not needed.)
 
