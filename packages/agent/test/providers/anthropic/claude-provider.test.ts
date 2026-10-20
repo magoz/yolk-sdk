@@ -1,5 +1,5 @@
 import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
-import type * as Schema from 'effect/Schema'
+import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -10,6 +10,7 @@ import {
   TextPart,
   ToolCall,
   ToolDef,
+  ToolResult,
   ToolResultMessage,
   UserMessage,
   inlineBase64Source,
@@ -17,6 +18,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { makeTool, resolveTools } from '@yolk-sdk/agent/tools'
 import {
   makeAnthropicClaudeProviderLayer,
   streamAnthropicClaudeResponse,
@@ -128,6 +130,62 @@ const collectKeys = (value: Schema.Json): ReadonlyArray<string> => {
 
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
 }
+
+const RecurringSchedule = Schema.TaggedStruct('Recurring', {
+  cron: Schema.String,
+  timezone: Schema.String
+})
+
+// `timezone` is required in Recurring and optional (`anyOf: [string, null]`) here.
+const OneTimeSchedule = Schema.TaggedStruct('OneTime', {
+  runAt: Schema.String,
+  timezone: Schema.optional(Schema.String)
+})
+
+const ScheduleSpec = Schema.Union([RecurringSchedule, OneTimeSchedule])
+
+const mergedScheduleSpec = {
+  type: 'object',
+  properties: {
+    _tag: { type: 'string', enum: ['Recurring', 'OneTime'] },
+    cron: { type: 'string' },
+    timezone: { type: 'string' },
+    runAt: { type: 'string' }
+  },
+  required: ['_tag'],
+  $defs: {},
+  additionalProperties: false
+}
+
+/** A registry-derived tool whose `execute` records the decoded params it received. */
+const schemaTool = <S extends Schema.Schema<unknown> & { readonly DecodingServices: never }>(
+  name: string,
+  parameters: S
+) => {
+  const received: Array<S['Type']> = []
+
+  const tool = makeTool({
+    name,
+    description: `Probe ${name}.`,
+    access: 'read',
+    parameters,
+    execute: ({ call, params }) => {
+      received.push(params)
+
+      return Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+    }
+  })
+
+  return { tool, received }
+}
+
+const claudeInputSchemas = (tools: ReadonlyArray<ToolDef>) =>
+  toAnthropicClaudeRequestBody({
+    model: 'claude-sonnet-4-6',
+    systemPrompt: '',
+    messages: [UserMessage.make({ content: 'hello' })],
+    tools
+  }).pipe(Effect.map(body => (body.tools ?? []).map(tool => tool.input_schema)))
 
 const runMinimalProviderRequest = (
   input: {
@@ -803,7 +861,7 @@ describe('Anthropic Claude provider', () => {
       expect(schema).toMatchObject({
         properties: {
           count: {},
-          nullable: {},
+          nullable: { type: 'string' },
           title: { type: 'string', minLength: 1, maxLength: 80 },
           subject: { type: 'string', maxLength: 160 },
           reversedSubject: { type: 'string', maxLength: 2_000 },
@@ -851,6 +909,154 @@ describe('Anthropic Claude provider', () => {
           tuple: { type: 'array', items: {} }
         }
       })
+    })
+  )
+
+  it.effect('advertises Schema.optional params with their type, not as unconstrained', () =>
+    Effect.gen(function* () {
+      const schemas = yield* claudeInputSchemas(
+        [
+          schemaTool(
+            'optional_primitive',
+            Schema.Struct({
+              note: Schema.optional(Schema.String.annotate({ description: 'Free text.' })),
+              mode: Schema.optional(Schema.Literals(['read', 'write'])).annotate({
+                description: 'Access mode.'
+              })
+            })
+          ),
+          schemaTool(
+            'optional_struct',
+            Schema.Struct({ spec: Schema.optional(RecurringSchedule) })
+          ),
+          schemaTool('optional_union', Schema.Struct({ spec: Schema.optional(ScheduleSpec) })),
+          schemaTool('required_union', Schema.Struct({ spec: ScheduleSpec })),
+          schemaTool(
+            'meaningful_null',
+            Schema.Struct({
+              clearable: Schema.optional(Schema.NullOr(Schema.String)),
+              nullable: Schema.NullOr(Schema.String),
+              items: Schema.Array(Schema.NullOr(Schema.String))
+            })
+          )
+        ].map(({ tool }) => tool.def)
+      )
+
+      for (const schema of schemas) {
+        expect(collectKeys(schema)).not.toContain('anyOf')
+      }
+
+      expect(schemas[0]).toEqual({
+        type: 'object',
+        properties: {
+          note: { type: 'string', description: 'Free text.' },
+          mode: { type: 'string', enum: ['read', 'write'], description: 'Access mode.' }
+        },
+        additionalProperties: false
+      })
+      expect(schemas[1]).toEqual({
+        type: 'object',
+        properties: {
+          spec: {
+            type: 'object',
+            properties: {
+              _tag: { type: 'string', enum: ['Recurring'] },
+              cron: { type: 'string' },
+              timezone: { type: 'string' }
+            },
+            required: ['_tag', 'cron', 'timezone'],
+            additionalProperties: false
+          }
+        },
+        additionalProperties: false
+      })
+      // Optional stays optional: no `required` is added for `spec`.
+      expect(schemas[2]).toEqual({
+        type: 'object',
+        properties: { spec: mergedScheduleSpec },
+        additionalProperties: false
+      })
+      expect(schemas[3]).toEqual({
+        type: 'object',
+        properties: { spec: mergedScheduleSpec },
+        required: ['spec'],
+        additionalProperties: false
+      })
+      // Where `null` means something other than omission it stays widened.
+      expect(schemas[4]).toEqual({
+        type: 'object',
+        properties: { clearable: {}, nullable: {}, items: { type: 'array', items: {} } },
+        required: ['nullable', 'items'],
+        additionalProperties: false
+      })
+    })
+  )
+
+  it.effect('merges root union properties required in one variant and optional in another', () =>
+    Effect.gen(function* () {
+      const [schedule, conflicting] = yield* claudeInputSchemas([
+        schemaTool('schedule', ScheduleSpec).tool.def,
+        schemaTool(
+          'conflicting',
+          Schema.Union([
+            Schema.Struct({ kind: Schema.Literal('text'), value: Schema.String }),
+            Schema.Struct({ kind: Schema.Literal('count'), value: Schema.optional(Schema.Number) })
+          ])
+        ).tool.def
+      ])
+
+      expect(schedule).toEqual(mergedScheduleSpec)
+      // Genuinely different types still widen to an unconstrained schema.
+      expect(conflicting).toEqual({
+        type: 'object',
+        properties: { kind: { type: 'string', enum: ['text', 'count'] }, value: {} },
+        required: ['kind'],
+        $defs: {},
+        additionalProperties: false
+      })
+    })
+  )
+
+  it.effect('decodes null that Claude sends for an optional param as absent', () =>
+    Effect.gen(function* () {
+      const { tool, received } = schemaTool(
+        'schedule',
+        Schema.Struct({ label: Schema.String, spec: Schema.optional(ScheduleSpec) })
+      )
+
+      const [schema] = yield* claudeInputSchemas([tool.def])
+      expect(schema).toMatchObject({ properties: { spec: mergedScheduleSpec } })
+
+      const response = new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'mcp_Schedule',
+              input: { label: 'daily', spec: null }
+            }
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 2, output_tokens: 3 }
+        }),
+        { status: 200 }
+      )
+
+      const events = Array.from(yield* collectProviderEvents(response, []))
+      const toolCall = events[0]
+
+      if (toolCall?._tag !== 'ToolCall') {
+        return expect.fail('Expected a Claude tool call')
+      }
+
+      expect(toolCall.call).toMatchObject({ name: 'schedule', params: { spec: null } })
+
+      const toolSet = yield* resolveTools([{ id: 'test', tools: [tool] }], undefined)
+      const result = yield* toolSet.execute(toolCall.call)
+
+      expect(result.isError).toBeUndefined()
+      expect(received).toEqual([{ label: 'daily' }])
     })
   )
 

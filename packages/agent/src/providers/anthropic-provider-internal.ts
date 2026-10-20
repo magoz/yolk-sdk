@@ -975,10 +975,56 @@ const jsonSchemaMapKeywords = new Set([
 
 const jsonSchemaDataKeywords = new Set(['const', 'default', 'enum', 'examples'])
 
+const nullOnlyJsonSchemaKeys = new Set(['type', 'description', 'title', '$comment'])
+
+// `{ type: 'null' }` with annotations at most: the member Effect's JSON codec
+// adds to every `Schema.optional(X)` (`anyOf: [X, { type: 'null' }]`).
+const isNullOnlyJsonSchema = (schema: Schema.Json): boolean =>
+  isJsonObject(schema) &&
+  jsonObjectField(schema, 'type') === 'null' &&
+  Object.keys(schema).every(key => nullOnlyJsonSchemaKeys.has(key))
+
+// On a property its object does not require, a null-only union member says
+// nothing omission cannot: argument decoding reads `null` there as "not sent"
+// (`decodeToolArguments`, `omitNullOptionalToolArguments`). Dropping it before
+// normalization keeps the other members' type instead of widening to `{}`.
+// Only the outermost union is stripped, so `Schema.optional(Schema.NullOr(X))`
+// (`anyOf: [{ anyOf: [X, null] }, null]`) keeps its meaningful `null` widened.
+const withoutOmittedNullVariants = (schema: Schema.Json): Schema.Json => {
+  if (!isJsonObject(schema)) return schema
+
+  const combinator = topLevelJsonSchemaCombinator(schema)
+
+  if (combinator === undefined || combinator.key === 'allOf') return schema
+
+  const items = combinator.items.filter(item => !isNullOnlyJsonSchema(item))
+
+  if (items.length === 0 || items.length === combinator.items.length) return schema
+
+  return { ...schema, [combinator.key]: items }
+}
+
+const normalizeJsonSchemaProperties = (schema: Schema.JsonObject): Schema.JsonObject => {
+  const required = jsonSchemaRequired(schema)
+
+  return Object.fromEntries(
+    Object.entries(jsonSchemaProperties(schema)).map(([name, propertySchema]) => [
+      name,
+      normalizeAnthropicToolSchema(
+        required.includes(name) ? propertySchema : withoutOmittedNullVariants(propertySchema)
+      )
+    ])
+  )
+}
+
 const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.JsonObject => {
   const normalized = Object.fromEntries(
     Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => {
       if (jsonSchemaDataKeywords.has(key)) return [key, value]
+
+      if (key === 'properties' && isJsonObject(value)) {
+        return [key, normalizeJsonSchemaProperties(schema)]
+      }
 
       if (key === 'dependencies' && isJsonObject(value)) {
         return [
@@ -1123,7 +1169,12 @@ const normalizeJsonSchemaCombinator = (
 
   if (first === undefined) return base
 
-  const merged = objectVariant(variants) ?? commonVariantFields(variants)
+  // A one-member union is that member; rebuilding it as an object variant
+  // would drop its other keywords (description, size bounds).
+  const merged =
+    normalizedItems.length === 1
+      ? first
+      : (objectVariant(variants) ?? commonVariantFields(variants))
 
   return mergeAllOfSchemaObjects([merged, base])
 }
@@ -1195,7 +1246,13 @@ const flattenTopLevelCombinatorToolSchema = (
       ? {}
       : combinator.key === 'allOf'
         ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
-        : mergeUnionJsonSchemaObjects(objectVariants.map(jsonSchemaProperties), objectVariants),
+        : // Each variant's properties are normalized against its own `required`
+          // first, so a property optional in one variant (`anyOf: [X, null]`)
+          // and required in another (`X`) merges to `X`, not `{}`.
+          mergeUnionJsonSchemaObjects(
+            objectVariants.map(normalizeJsonSchemaProperties),
+            objectVariants
+          ),
     required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),
     $defs: mergeJsonSchemaObjects([
       jsonSchemaDefinitions(schema),
