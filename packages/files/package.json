@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/files",
-  "version": "0.1.0-canary.119",
+  "version": "0.1.0-canary.120",
   "description": "File claim check for Yolk agents: an object-storage file store and tools that move captured files (fileId) to upload URLs, download links and the sandbox.",
   "license": "MIT",
   "type": "module",

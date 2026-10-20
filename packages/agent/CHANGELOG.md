@@ -1,5 +1,13 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.120
+
+### Patch Changes
+
+- a9eee1b: Advertise `Schema.optional(X)` tool params to Claude (compatibility mode) as `X` instead of an unconstrained `{}`, including named optional schemas (`$ref` to a definition). `makeTool`/`toolJsonSchemaFromSchema` now mark the `{ type: 'null' }` member that the JSON codec adds for `Schema.optional(X)` with `$comment: toolJsonSchemaOmittedNullComment` (new `@yolk-sdk/agent/protocol` export; stable value `'yolk:null-means-omitted'`). Otherwise the lowering is unchanged: it equals `Schema.toJsonSchemaDocument`, and schema-authored `$comment` annotations are not emitted. Only Claude compatibility uses the marker: on non-required properties it drops only these marked nulls (they decode as "not sent"), and root union properties that are required in one variant and optional in another now merge to their type. OpenAI-compatible chat, Responses (Codex, Grok, OpenCode Go), Anthropic Messages without compatibility, and OpenAI Realtime (including `openAiRealtimeToolParameters`) remove the marker, so their request bodies are unchanged. `outputSchema` keeps it; HITL response schemas (`makeInputTool`, `makeInteractionTool`, plan review) are lowered without it, exactly as before, because user responses decode with the type-side schema. Meaningful nulls keep today's widened `{}`: `Schema.optionalKey(Schema.NullOr(X))`, `Schema.optional(Schema.NullOr(X))`, required `Schema.NullOr(X)`, array items, and third-party raw/MCP `anyOf [X, null]` schemas. Describe what a meaningful `null` does in the tool description. Tools served by `@yolk-sdk/mcp` list the marker in `inputSchema`.
+- Updated dependencies [79595fc]
+  - @yolk-sdk/conformance@0.1.0-canary.120
+
 ## 0.1.0-canary.119
 
 ### Minor Changes
