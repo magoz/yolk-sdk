@@ -1,5 +1,5 @@
 ---
-'@yolk-sdk/agent': patch
+'@yolk-sdk/agent': minor
 '@yolk-sdk/connectors': patch
 ---
 
