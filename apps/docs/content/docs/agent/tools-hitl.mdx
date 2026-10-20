@@ -59,7 +59,9 @@ arguments decode through `Schema.toCodecJson(parameters)`:
   (named optional schemas included); other `null`s keep their meaning. The other providers
   receive the schema without the marker. Tools served by the `@yolk-sdk/mcp` server keep it in
   their listing. Input and interaction response schemas never carry it: user responses decode
-  with the response schema itself, which rejects `null` on `Schema.optional(X)`.
+  with the response schema itself, which rejects `null` on `Schema.optional(X)`, although the
+  descriptor still advertises `anyOf [X, null]` there: UI clients omit an empty optional field
+  rather than send `null`.
 - Required non-nullable fields still reject `null` with a model-visible validation error.
 - Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
 - Unknown keys are rejected at any depth with a model-visible validation error. Parameters are

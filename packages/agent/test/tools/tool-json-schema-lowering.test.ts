@@ -2,7 +2,13 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { toolJsonSchemaOmittedNullComment } from '@yolk-sdk/agent/protocol'
-import { makeInputTool, makeInteractionTool, toolJsonSchemaFromSchema } from '@yolk-sdk/agent/tools'
+import {
+  makeInputTool,
+  makeInteractionTool,
+  makePlanReviewTool,
+  toolJsonSchemaFromSchema,
+  ToolPlanReviewResponse
+} from '@yolk-sdk/agent/tools'
 import { withoutToolJsonSchemaOmittedNullMarker } from '../../src/protocol/tool-json-schema-marker.ts'
 import { toolJsonSchemaFromDocument } from '../../src/tools/registry.ts'
 
@@ -230,6 +236,11 @@ describe('tool JSON Schema lowering', () => {
     expect(interaction.def.interaction?.schema).toEqual(previousLowering(Response))
     expect(JSON.stringify(input.def.input)).not.toContain('$comment')
     expect(JSON.stringify(interaction.def.interaction)).not.toContain('$comment')
+
+    const planReview = makePlanReviewTool()
+
+    expect(planReview.def.interaction?.schema).toEqual(previousLowering(ToolPlanReviewResponse))
+    expect(JSON.stringify(planReview.def.interaction)).not.toContain('$comment')
 
     // Model-produced call params decode through the JSON codec: marked.
     expect(JSON.stringify(input.def.parameters)).toContain(toolJsonSchemaOmittedNullComment)
