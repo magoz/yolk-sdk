@@ -1169,13 +1169,96 @@ describe('Anthropic Claude provider', () => {
         })
       ])
 
-      // Variant `a` requires `note` (its `null` decodes as `undefined`): widened, never
-      // stripped to `string` although the merged `note` is optional.
+      // Variant `a` requires `note` (its `null` decodes as `undefined`): it keeps its
+      // `$ref` to the widened definition, never stripped to `string` although the
+      // merged `note` is optional.
       expect(schema).toEqual({
         type: 'object',
-        properties: { kind: { enum: ['a', 'b'] }, note: {} },
+        properties: { kind: { enum: ['a', 'b'] }, note: { $ref: '#/$defs/Note' } },
         required: ['kind'],
         additionalProperties: false,
+        $defs: { Note: {} }
+      })
+    })
+  )
+
+  it.effect('keeps a nested union property that one variant requires through a named schema', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      // Variant `a` requires `note`; its `null` decodes as `undefined`, so
+      // `{ payload: { kind: 'a', note: null } }` is valid and must stay allowed.
+      const payload: Schema.Json = {
+        anyOf: [
+          {
+            type: 'object',
+            properties: { kind: { enum: ['a'] }, note: { $ref: '#/$defs/Note' } },
+            required: ['kind', 'note'],
+            additionalProperties: false
+          },
+          {
+            type: 'object',
+            properties: { kind: { enum: ['b'] } },
+            required: ['kind'],
+            additionalProperties: false
+          }
+        ]
+      }
+
+      const [underRootUnion, underRootObject] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'nested_under_union',
+          description: 'Nested union below a root union.',
+          parameters: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: { op: { enum: ['x'] }, payload },
+                required: ['op', 'payload'],
+                additionalProperties: false
+              },
+              {
+                type: 'object',
+                properties: { op: { enum: ['y'] } },
+                required: ['op'],
+                additionalProperties: false
+              }
+            ],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        }),
+        ToolDef.make({
+          name: 'nested_under_object',
+          description: 'Nested union below a root object.',
+          parameters: {
+            type: 'object',
+            properties: { payload },
+            required: ['payload'],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Merged once: `note` keeps its `$ref` to the (widened) shared definition.
+      const mergedPayload = {
+        type: 'object',
+        properties: { kind: { enum: ['a', 'b'] }, note: { $ref: '#/$defs/Note' } },
+        required: ['kind'],
+        $defs: {},
+        additionalProperties: false
+      }
+
+      expect(underRootUnion).toEqual({
+        type: 'object',
+        properties: { op: { enum: ['x', 'y'] }, payload: mergedPayload },
+        required: ['op'],
+        additionalProperties: false,
+        $defs: { Note: {} }
+      })
+      expect(underRootObject).toEqual({
+        type: 'object',
+        properties: { payload: mergedPayload },
+        required: ['payload'],
         $defs: { Note: {} }
       })
     })

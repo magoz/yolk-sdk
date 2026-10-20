@@ -1,10 +1,7 @@
 import { Array as Arr, Match, Predicate, SchemaAST, type SchemaRepresentation } from 'effect'
 import type * as Schema from 'effect/Schema'
 import { toolJsonSchemaOmittedNullComment, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
-import {
-  isToolJsonSchemaObjectValue as isToolJsonSchemaObject,
-  mapToolJsonSchemaObjects
-} from '../protocol/tool-json-schema-marker.ts'
+import { isJsonObjectValue, mapToolJsonSchemaObjects } from '../protocol/tool-json-schema-marker.ts'
 
 // `Schema.toCodecJson` encodes `undefined` as JSON `null`, so `Schema.optional(X)` is advertised
 // as `anyOf: [X, { type: 'null' }]`, the same JSON as `Schema.optionalKey(Schema.NullOr(X))`.
@@ -189,7 +186,7 @@ export const withOmittedNullMarkers = (schema: ToolJsonSchema): ToolJsonSchema =
 
   const marked = mapToolJsonSchemaObjects(schema, withOmittedNullMarker)
 
-  return isToolJsonSchemaObject(marked) ? marked : schema
+  return isJsonObjectValue(marked) ? marked : schema
 }
 
 /** `withOmittedNullMarkers` for every schema of a definitions map. */

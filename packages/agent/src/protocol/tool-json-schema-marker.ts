@@ -9,20 +9,22 @@ import { toolJsonSchemaOmittedNullComment } from './tool.ts'
 // Values under these keywords are literal data, never schemas.
 const dataKeywords = new Set(['const', 'default', 'enum', 'examples'])
 
-// Values under these keywords are maps from names (or patterns) to schemas.
+// Values under these keywords are maps from names (or patterns) to schemas. Their entries are
+// named by the schema author, so a name such as `enum` or `default` is never read as a keyword.
+// Legacy `dependencies` entries are schemas or property-name arrays; arrays of strings pass
+// through unchanged.
 const schemaMapKeywords = new Set([
   'properties',
   'patternProperties',
   '$defs',
   'definitions',
-  'dependentSchemas'
+  'dependentSchemas',
+  'dependencies'
 ])
 
-const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+/** Whether a JSON value is a JSON object (not an array or a primitive). */
+export const isJsonObjectValue = (value: Schema.Json): value is Schema.JsonObject =>
   Predicate.isObjectOrArray(value) && !Array.isArray(value)
-
-/** Whether a JSON value is a JSON object (not an array). */
-export const isToolJsonSchemaObjectValue = isJsonObject
 
 const mapEntries = (
   object: Schema.JsonObject,
@@ -62,12 +64,12 @@ export const mapToolJsonSchemaObjects = (
     return mapArray(schema, item => mapToolJsonSchemaObjects(item, f))
   }
 
-  if (!isJsonObject(schema)) return schema
+  if (!isJsonObjectValue(schema)) return schema
 
   const children = mapEntries(schema, (key, value) => {
     if (dataKeywords.has(key)) return value
 
-    if (schemaMapKeywords.has(key) && isJsonObject(value)) {
+    if (schemaMapKeywords.has(key) && isJsonObjectValue(value)) {
       return mapEntries(value, (_, child) => mapToolJsonSchemaObjects(child, f))
     }
 

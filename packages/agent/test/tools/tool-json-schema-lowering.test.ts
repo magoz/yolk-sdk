@@ -1,7 +1,8 @@
+import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { toolJsonSchemaOmittedNullComment } from '@yolk-sdk/agent/protocol'
-import { toolJsonSchemaFromSchema } from '@yolk-sdk/agent/tools'
+import { makeInputTool, makeInteractionTool, toolJsonSchemaFromSchema } from '@yolk-sdk/agent/tools'
 import { withoutToolJsonSchemaOmittedNullMarker } from '../../src/protocol/tool-json-schema-marker.ts'
 import { toolJsonSchemaFromDocument } from '../../src/tools/registry.ts'
 
@@ -196,5 +197,42 @@ describe('tool JSON Schema lowering', () => {
 
     expect(requiredFirst).toMatchObject({ $defs: { Shared: shared } })
     expect(optionalFirst).toMatchObject({ $defs: { Shared: shared } })
+  })
+
+  it('keeps the marker out of HITL response schemas, which decode type-side', () => {
+    const Response = Schema.Struct({ title: Schema.String, note: Schema.optional(Schema.String) })
+    const Call = Schema.Struct({ folder: Schema.optional(Schema.String) })
+
+    const input = makeInputTool({
+      name: 'draft',
+      description: 'Collect a draft.',
+      callParameters: Call,
+      response: Response
+    })
+
+    const interaction = makeInteractionTool({
+      name: 'publish',
+      description: 'Publish a draft.',
+      access: 'write',
+      callParameters: Call,
+      response: Response,
+      actions: {
+        publish: {
+          label: 'Publish',
+          execute: () => Effect.succeed({ outcome: 'completed' as const, content: 'Published.' })
+        }
+      }
+    })
+
+    // A user's `null` on `note` is rejected, not read as "not sent": no marker, exactly
+    // the lowering these descriptors had before the marker existed.
+    expect(input.def.input?.schema).toEqual(previousLowering(Response))
+    expect(interaction.def.interaction?.schema).toEqual(previousLowering(Response))
+    expect(JSON.stringify(input.def.input)).not.toContain('$comment')
+    expect(JSON.stringify(interaction.def.interaction)).not.toContain('$comment')
+
+    // Model-produced call params decode through the JSON codec: marked.
+    expect(JSON.stringify(input.def.parameters)).toContain(toolJsonSchemaOmittedNullComment)
+    expect(JSON.stringify(interaction.def.parameters)).toContain(toolJsonSchemaOmittedNullComment)
   })
 })

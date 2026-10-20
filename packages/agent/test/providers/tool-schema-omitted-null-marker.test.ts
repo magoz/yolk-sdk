@@ -7,8 +7,12 @@ import { toAnthropicRequestBody } from '../../src/providers/anthropic-provider-i
 import { toAnthropicClaudeRequestBody } from '../../src/providers/anthropic/claude-provider.ts'
 import { toOpenAiCodexRequestBody } from '../../src/providers/openai/codex-provider.ts'
 import { toOpenAiRequestBody } from '../../src/providers/openai/provider.ts'
-import { toOpenAiRealtimeTool } from '../../src/providers/openai/realtime/session-config.ts'
+import {
+  openAiRealtimeToolParameters,
+  toOpenAiRealtimeTool
+} from '../../src/providers/openai/realtime/session-config.ts'
 import { toXAiGrokRequestBody } from '../../src/providers/xai/grok-provider.ts'
+import { withoutToolJsonSchemaOmittedNullMarker } from '../../src/protocol/tool-json-schema-marker.ts'
 import { toolJsonSchemaFromDocument } from '../../src/tools/registry.ts'
 
 const Shared = Schema.Struct({
@@ -44,12 +48,16 @@ const request = {
   tools: [search.def]
 }
 
-const expectNoMarker = (body: unknown) => {
+const expectNoMarker = (body: unknown, description = 'Search.') => {
   const wire = JSON.stringify(body)
 
-  expect(wire).toContain('Search.')
+  expect(wire).toContain(description)
   expect(wire).not.toContain(toolJsonSchemaOmittedNullComment)
-  expect(wire).not.toContain('$comment')
+
+  // `Params` has no property named `$comment`, so no `$comment` key may remain.
+  if (description === 'Search.') {
+    expect(wire).not.toContain('$comment')
+  }
 }
 
 describe('omitted-null marker at provider boundaries', () => {
@@ -85,6 +93,94 @@ describe('omitted-null marker at provider boundaries', () => {
       expect(JSON.stringify(openAi.tools?.[0]?.function.parameters)).toBe(previous)
       expect(JSON.stringify(codex.tools?.[0]?.parameters)).toBe(previous)
       expect(JSON.stringify(anthropic.tools?.[0]?.input_schema)).toBe(previous)
+    })
+  )
+
+  it('strips the marker from host-built OpenAI Realtime parameters', () => {
+    const rootUnion = makeTool({
+      name: 'schedule',
+      description: 'Schedule.',
+      parameters: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal('a'), note: Schema.optional(Schema.String) }),
+        Schema.Struct({ kind: Schema.Literal('b') })
+      ]),
+      access: 'read',
+      execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+    })
+
+    for (const parameters of [search.def.parameters, rootUnion.def.parameters]) {
+      expect(JSON.stringify(parameters)).toContain(toolJsonSchemaOmittedNullComment)
+      expect(JSON.stringify(openAiRealtimeToolParameters(parameters))).not.toContain('$comment')
+    }
+  })
+
+  it.effect('treats author-chosen names as names, never as keywords', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+      const optionalNote = { anyOf: [{ type: 'string' }, marked] }
+
+      // Every map whose keys the author names, with keyword-looking names.
+      const reserved = Schema.Struct({
+        enum: Schema.optional(Schema.String),
+        default: Schema.optional(Schema.Number),
+        const: Schema.optional(Schema.Boolean),
+        examples: Schema.optional(Schema.String),
+        $comment: Schema.optional(Schema.String)
+      })
+
+      const reservedTool = makeTool({
+        name: 'reserved',
+        description: 'Reserved names.',
+        parameters: reserved,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+
+      const markers = JSON.stringify(reservedTool.def.parameters).split(
+        toolJsonSchemaOmittedNullComment
+      )
+
+      // Lowering marks all five properties.
+      expect(markers).toHaveLength(6)
+
+      const raw = {
+        type: 'object',
+        properties: { enum: optionalNote },
+        patternProperties: { '^default$': optionalNote },
+        dependencies: {
+          enum: { properties: { const: optionalNote } },
+          default: ['enum', 'examples']
+        },
+        dependentSchemas: { examples: { properties: { enum: optionalNote } } },
+        $defs: { const: optionalNote }
+      }
+
+      const stripped = withoutToolJsonSchemaOmittedNullMarker(raw)
+      expect(JSON.stringify(stripped)).not.toContain('$comment')
+      // Property-dependency arrays are data and stay as they are.
+      expect(stripped).toMatchObject({ dependencies: { default: ['enum', 'examples'] } })
+
+      const rawTool = { ...reservedTool.def, name: 'raw', parameters: raw }
+
+      for (const tool of [reservedTool.def, rawTool]) {
+        const toolRequest = { ...request, tools: [tool] }
+        const description = 'Reserved names.'
+
+        expectNoMarker(
+          yield* toOpenAiRequestBody(toolRequest, { maxCompletionTokens: 64 }),
+          description
+        )
+        expectNoMarker(yield* toOpenAiCodexRequestBody(toolRequest, {}), description)
+        expectNoMarker(
+          yield* toAnthropicClaudeRequestBody(toolRequest, { maxTokens: 64 }),
+          description
+        )
+        expectNoMarker(
+          yield* toAnthropicRequestBody(toolRequest, { maxTokens: 64, claudeCompatibility: false }),
+          description
+        )
+      }
     })
   )
 })

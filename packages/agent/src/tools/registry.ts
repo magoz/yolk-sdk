@@ -770,6 +770,18 @@ export const toolJsonSchemaFromDocument = (
 export const toolJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
   toolJsonSchemaFromDocument(schema, toToolJsonSchemaDocument(schema))
 
+/** `toolJsonSchemaFromSchema` without the omitted-null marker, for HITL response schemas
+ * (`makeInputTool`, `makeInteractionTool`, plan review). Those responses are user-submitted and
+ * decode with the type-side schema, which rejects `null` on `Schema.optional(X)`, so "this
+ * `null` means not sent" would be false there; their descriptors reach UI clients, not models.
+ * Internal: not exported from `@yolk-sdk/agent/tools`.
+ */
+export const responseJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
+  toolJsonSchemaFromDocument(
+    schema,
+    Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
+  )
+
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
 class InvalidToolParamsError extends ToolError {}
 

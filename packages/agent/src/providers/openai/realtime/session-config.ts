@@ -206,10 +206,16 @@ const openAiRealtimeLoweredObjectParameters = (
  * every variant. This widens what the model may produce; hosts still validate
  * real arguments against the original tool schema at execution time.
  *
+ * Yolk's omitted-null marker (`toolJsonSchemaOmittedNullComment`) is removed:
+ * OpenAI Realtime does not use it, so host-built payloads stay unchanged.
+ *
  * Callers must admit `Schema.Json` before this helper; non-JSON documents fail
  * at the advertisement boundary rather than being lowered here.
  */
-export const openAiRealtimeToolParameters = (parameters: Schema.Json): Schema.Json => {
+export const openAiRealtimeToolParameters = (parameters: Schema.Json): Schema.Json =>
+  lowerUnionParameters(withoutToolJsonSchemaOmittedNullMarker(parameters))
+
+const lowerUnionParameters = (parameters: Schema.Json): Schema.Json => {
   if (!isJsonObject(parameters)) {
     return parameters
   }
@@ -273,7 +279,7 @@ const realtimeToolResult = (
         type: 'function',
         name: tool.name,
         description: tool.description,
-        parameters: openAiRealtimeToolParameters(withoutToolJsonSchemaOmittedNullMarker(parameters))
+        parameters: openAiRealtimeToolParameters(parameters)
       })
   })
 }

@@ -21,7 +21,6 @@ import {
   prependMessageContextToContent,
   RedactedReasoningReplay,
   SignedReasoningReplay,
-  toolJsonSchemaOmittedNullComment,
   type AgentMessage,
   type AssistantAgentMessage,
   type AssistantPart,
@@ -56,7 +55,10 @@ import {
   providerFailureRetryable
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
-import { withoutToolJsonSchemaOmittedNullMarker } from '../protocol/tool-json-schema-marker.ts'
+import {
+  isToolJsonSchemaOmittedNull,
+  withoutToolJsonSchemaOmittedNullMarker
+} from '../protocol/tool-json-schema-marker.ts'
 import { anthropicClaudeQuotaResetsAtMs } from './quota-reset-internal.ts'
 
 /**
@@ -981,12 +983,13 @@ const omittedNullJsonSchemaKeys = new Set(['type', 'description', 'title', '$com
 
 // The `{ type: 'null' }` member `makeTool` advertises for `Schema.optional(X)`:
 // only that codec-added null carries the `toolJsonSchemaOmittedNullComment`
-// marker, and it decodes as "not sent". `Schema.NullOr` nulls and raw/MCP
-// `anyOf: [X, null]` schemas are unmarked: their `null` may mean "clear".
+// marker (`isToolJsonSchemaOmittedNull`), and it decodes as "not sent".
+// `Schema.NullOr` nulls and third-party raw/MCP `anyOf: [X, null]` schemas are
+// unmarked: their `null` may mean "clear". A marked member with other keywords
+// is not a plain null and is kept.
 const isOmittedNullJsonSchema = (schema: Schema.Json): boolean =>
   isJsonObject(schema) &&
-  jsonObjectField(schema, 'type') === 'null' &&
-  jsonObjectField(schema, '$comment') === toolJsonSchemaOmittedNullComment &&
+  isToolJsonSchemaOmittedNull(schema) &&
   Object.keys(schema).every(key => omittedNullJsonSchemaKeys.has(key))
 
 // On a property its object does not require, a marked null member says nothing
@@ -1085,6 +1088,11 @@ const normalizeOptionalPropertySchema = (
   )
 }
 
+// Every property is normalized exactly once, against the `required` of the
+// object that declares it. Union merges (`objectVariant`, root flattening) can
+// make a property optional that a variant requires; reading an already merged
+// property again as optional would strip a marked null that variant needs, so
+// merged results are never normalized a second time.
 const normalizeJsonSchemaProperties = (
   properties: Schema.JsonObject,
   required: ReadonlyArray<string>,
@@ -1099,26 +1107,21 @@ const normalizeJsonSchemaProperties = (
     ])
   )
 
-// The marker guides this projection only; the model never needs it.
-const withoutOmittedNullMarker = (schema: Schema.JsonObject): Schema.JsonObject =>
-  Object.fromEntries(
-    Object.entries(schema).filter(
-      ([key, value]) => key !== '$comment' || value !== toolJsonSchemaOmittedNullComment
-    )
-  )
-
 const normalizeJsonSchemaObjectFields = (
   schema: Schema.JsonObject,
-  context: AnthropicToolSchemaContext
+  context: AnthropicToolSchemaContext,
+  options: { readonly propertiesNormalized: boolean } = { propertiesNormalized: false }
 ): Schema.JsonObject => {
-  const fields = withoutOmittedNullMarker(withoutJsonSchemaCombinatorsAndTupleHints(schema))
+  const fields = withoutJsonSchemaCombinatorsAndTupleHints(schema)
 
   const normalized = Object.fromEntries(
     Object.entries(fields).map(([key, value]) => {
       if (jsonSchemaDataKeywords.has(key)) return [key, value]
 
       if (key === 'properties' && isJsonObject(value)) {
-        return [key, normalizeJsonSchemaProperties(value, jsonSchemaRequired(schema), context)]
+        return options.propertiesNormalized
+          ? [key, value]
+          : [key, normalizeJsonSchemaProperties(value, jsonSchemaRequired(schema), context)]
       }
 
       if (key === 'dependencies' && isJsonObject(value)) {
@@ -1327,34 +1330,6 @@ const mergeAdditionalProperties = (objects: ReadonlyArray<Schema.JsonObject>) =>
 
 // Anthropic rejects root combinators. This widens provider-facing guidance only;
 // tool execution still validates calls against the original registry schema.
-// Root union variant properties, normalized against the variant's own
-// `required`. A required `$ref` to a marked union is resolved here, unstripped:
-// the merged property may end up optional (another variant lacks it), and the
-// caller's second pass must not strip a property this variant requires.
-const normalizeUnionVariantProperties = (
-  variant: Schema.JsonObject,
-  context: AnthropicToolSchemaContext
-): Schema.JsonObject => {
-  const required = jsonSchemaRequired(variant)
-
-  return Object.fromEntries(
-    Object.entries(jsonSchemaProperties(variant)).map(([name, propertySchema]) => {
-      if (!required.includes(name)) {
-        return [name, normalizeOptionalPropertySchema(propertySchema, context)]
-      }
-
-      const inlined = inlinedOmittedNullReference(propertySchema, context)
-
-      return [
-        name,
-        inlined === undefined
-          ? normalizeAnthropicToolSchema(propertySchema, context)
-          : normalizeAnthropicToolSchema(inlined.schema, withInlining(context, inlined.name))
-      ]
-    })
-  )
-}
-
 const flattenTopLevelCombinatorToolSchema = (
   schema: Schema.JsonObject,
   combinator: TopLevelJsonSchemaCombinator
@@ -1375,23 +1350,36 @@ const flattenTopLevelCombinatorToolSchema = (
 
   const additionalProperties = mergeAdditionalProperties(objectVariants)
 
+  const required = hasUnconstrainedUnion
+    ? []
+    : mergeJsonSchemaRequired(combinator.key, objectVariants)
+
   const flattened = {
     ...base,
     type: 'object',
     properties: hasUnconstrainedUnion
       ? {}
       : combinator.key === 'allOf'
-        ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
-        : // Each variant's properties are normalized first, so a property
-          // optional in one variant (`Schema.optional(X)`, `anyOf: [X, marked
-          // null]`) and required in another (`X`) merges to `X`, not `{}`. The
-          // merged properties then hold no combinator or marked-union `$ref`,
-          // so the caller's second normalization pass leaves them unchanged.
+        ? normalizeJsonSchemaProperties(
+            mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties)),
+            required,
+            context
+          )
+        : // Each variant's properties are normalized against its own
+          // `required` before merging, so a property optional in one variant
+          // (`Schema.optional(X)`, `anyOf: [X, marked null]`) and required in
+          // another (`X`) merges to `X`, not `{}`.
           mergeUnionJsonSchemaObjects(
-            objectVariants.map(variant => normalizeUnionVariantProperties(variant, context)),
+            objectVariants.map(variant =>
+              normalizeJsonSchemaProperties(
+                jsonSchemaProperties(variant),
+                jsonSchemaRequired(variant),
+                context
+              )
+            ),
             objectVariants
           ),
-    required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),
+    required,
     $defs: definitions
   }
 
@@ -1419,7 +1407,11 @@ const anthropicToolInputSchema = (schema: Schema.Json): Schema.Json => {
   if (combinator !== undefined) {
     const flattened = flattenTopLevelCombinatorToolSchema(schema, combinator)
 
-    return normalizeAnthropicToolSchema(flattened, anthropicToolSchemaContext(flattened))
+    // Its properties are already normalized: normalizing them again would read
+    // them against the merged `required` instead of their own variant's.
+    return normalizeJsonSchemaObjectFields(flattened, anthropicToolSchemaContext(flattened), {
+      propertiesNormalized: true
+    })
   }
 
   const context = anthropicToolSchemaContext(schema)
@@ -1584,9 +1576,10 @@ const toAnthropicTool = (
     Effect.map(parameters => ({
       name: claudeCompatibility ? prefixClaudeToolName(tool.name) : tool.name,
       description: tool.description,
-      input_schema: claudeCompatibility
-        ? anthropicToolInputSchema(parameters)
-        : withoutToolJsonSchemaOmittedNullMarker(parameters)
+      // Claude compatibility consumes the omitted-null marker; neither path sends it.
+      input_schema: withoutToolJsonSchemaOmittedNullMarker(
+        claudeCompatibility ? anthropicToolInputSchema(parameters) : parameters
+      )
     }))
   )
 

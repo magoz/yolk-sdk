@@ -58,7 +58,8 @@ arguments decode through `Schema.toCodecJson(parameters)`:
   third-party MCP schema. The Claude provider uses it to show such fields to the model as `X`
   (named optional schemas included); other `null`s keep their meaning. The other providers
   receive the schema without the marker. Tools served by the `@yolk-sdk/mcp` server keep it in
-  their listing.
+  their listing. Input and interaction response schemas never carry it: user responses decode
+  with the response schema itself, which rejects `null` on `Schema.optional(X)`.
 - Required non-nullable fields still reject `null` with a model-visible validation error.
 - Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
 - Unknown keys are rejected at any depth with a model-visible validation error. Parameters are

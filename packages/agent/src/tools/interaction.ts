@@ -4,6 +4,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import { decodeToolArguments, hasPlainPrototype, omitUndefinedKeys } from './arguments.ts'
 import {
   EmptyToolParams,
+  responseJsonSchemaFromSchema,
   toolJsonSchemaFromSchema,
   type InteractionActionHandler,
   type ModelVisibleToolError,
@@ -259,7 +260,7 @@ export const makeInteractionTool = <
     renderer: options.renderer,
     title: options.title,
     interactionDescription: options.interactionDescription,
-    schema: toolJsonSchemaFromSchema(options.response),
+    schema: responseJsonSchemaFromSchema(options.response),
     actions: [firstDescriptor, ...descriptors.slice(1)]
   })
 
