@@ -478,9 +478,9 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       { attachmentStandardBase64: true },
       {
         id: 'google.gmail.attachment-base64url',
-        tag: 'ConnectorError',
-        // The connector refuses standard-base64 data when decoding the answer.
-        message: 'Invalid response shape'
+        tag: 'ConformanceMismatch',
+        // The case checks the wire alphabet; the connector leaves base64 to the decoder.
+        message: 'expected the attachment data in the base64url alphabet'
       }
     ],
     [

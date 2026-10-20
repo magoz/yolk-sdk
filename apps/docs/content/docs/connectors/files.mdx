@@ -234,7 +234,8 @@ page/block/property after expiry. `file_upload.id` is an upload reference, not d
 ### Mail, Telegram and Todoist
 
 Gmail and Outlook inputs are `{ messageId, attachmentId }`; Outlook optionally accepts `mailbox`.
-Gmail validates canonical base64url pad bits, decoded byte count and `size`, including empty files.
+Gmail validates the base64url alphabet, padding, decoded byte count and `size`, including empty
+files; unused pad bits are accepted.
 Inline Gmail parts without `attachmentId` remain outside this focused helper. Outlook checks the
 file discriminator before fetching `/$value`; item MIME/reference attachments are rejected.
 Graph's attachment metadata size is not treated as exact raw-byte length. Existing shared-mailbox,

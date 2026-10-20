@@ -237,22 +237,22 @@ describe('generic email connector', () => {
     })
   })
 
-  it.effect('rejects malformed base64 and invalid decoded-byte sizes', () =>
+  it.effect('rejects invalid decoded-byte sizes and leaves base64 to the decoder', () =>
     Effect.gen(function* () {
-      const malformedBase64 = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
-        id: 'mime-part-2',
-        size: 4,
-        contentBase64: 'not-base64'
-      }).pipe(Effect.result)
-
       const invalidSize = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
         id: 'mime-part-2',
         size: -1,
         contentBase64: 'JVBERg=='
       }).pipe(Effect.result)
 
-      expect(malformedBase64._tag).toBe('Failure')
+      // A full-string base64 regex overflowed V8's regexp stack on multi-megabyte attachments.
+      const large = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
+        id: 'mime-part-2',
+        contentBase64: Buffer.alloc(8 * 1024 * 1024).toString('base64')
+      }).pipe(Effect.result)
+
       expect(invalidSize._tag).toBe('Failure')
+      expect(large._tag).toBe('Success')
     })
   )
 

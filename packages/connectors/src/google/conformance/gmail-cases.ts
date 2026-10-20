@@ -368,8 +368,8 @@ export const gmailAttachmentCase: GoogleConformanceCase = defineConformanceCase(
   id: 'google.gmail.attachment-base64url',
   title: 'A listed attachment answers base64url data of exactly its size',
   safety: 'read',
-  docs: '`gmail.list_attachments` sends GET .../messages/{id}?format=full and walks the payload `parts` for attachment metadata (`partId`, `filename`, `mimeType`, `body.size`, `body.attachmentId`), never content; `gmail.get_attachment` sends GET .../messages/{id}/attachments/{attachmentId}, requires `size` (a non-negative integer) and `data` in the base64url alphabet (no `+` or `/`), keeps `data`, and adds standard-base64 `contentBase64`.',
-  wire: 'For the seeded attachment message, `gmail.list_attachments` lists at least one part with an `attachmentId` and a `size`; `gmail.get_attachment` of it answers `data` in the base64url alphabet (a standard-base64 answer fails the connector decoding) that decodes to exactly `size` bytes. The listed part `size` is not compared: the connector never relies on it matching.',
+  docs: '`gmail.list_attachments` sends GET .../messages/{id}?format=full and walks the payload `parts` for attachment metadata (`partId`, `filename`, `mimeType`, `body.size`, `body.attachmentId`), never content; `gmail.get_attachment` sends GET .../messages/{id}/attachments/{attachmentId}, requires `size` (a non-negative integer) and a string `data` (not pattern-checked: whoever decodes it validates it), keeps `data`, and adds standard-base64 `contentBase64`.',
+  wire: 'For the seeded attachment message, `gmail.list_attachments` lists at least one part with an `attachmentId` and a `size`; `gmail.get_attachment` of it answers `data` in the base64url alphabet (no `+` or `/`) that decodes to exactly `size` bytes. The listed part `size` is not compared: the connector never relies on it matching.',
   fixtures: [gmailAttachmentFixture.id],
   run: Effect.gen(function* () {
     const messageId = yield* requireSeed('attachmentMessageId')
@@ -392,6 +392,13 @@ export const gmailAttachmentCase: GoogleConformanceCase = defineConformanceCase(
         input: GmailGetAttachmentInput.make({ messageId, attachmentId: attachment.attachmentId })
       })
       .pipe(Effect.flatMap(successValue(gmailGetAttachmentAction.id)))
+
+    // A plain character-class scan: a grouped base64 regex overflows V8 on large attachments.
+    if (!/^[A-Za-z0-9_-]*={0,2}$/.test(fetched.data)) {
+      return yield* new ConformanceMismatch({
+        message: 'expected the attachment data in the base64url alphabet'
+      })
+    }
 
     yield* expectEqual(
       base64UrlByteLength(fetched.data) ?? null,

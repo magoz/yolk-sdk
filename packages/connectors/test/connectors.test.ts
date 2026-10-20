@@ -2526,7 +2526,52 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
-  it.effect('rejects non-file Outlook attachments and missing or malformed content', () =>
+  it.effect('returns multi-megabyte Outlook attachments (no full-string base64 regex)', () =>
+    Effect.gen(function* () {
+      const contentBytes = Buffer.alloc(5_772_984, 7).toString('base64')
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(
+            JSON.stringify({
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              id: 'file_1',
+              name: 'factsheet.docx',
+              contentBytes
+            })
+          )
+        ]
+      )
+
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+
+      const result = yield* outlookGetAttachmentAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message_1', attachmentId: 'file_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject(
+        ActionResult.success({ attachment: { id: 'file_1', contentBase64: contentBytes } })
+      )
+    })
+  )
+
+  it.effect('rejects non-file Outlook attachments and missing content', () =>
     Effect.gen(function* () {
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(
         [],
@@ -2543,14 +2588,6 @@ describe('@yolk-sdk/connectors', () => {
               '@odata.type': '#microsoft.graph.fileAttachment',
               id: 'file_1',
               name: 'empty.pdf'
-            })
-          ),
-          jsonHttpResponse(
-            JSON.stringify({
-              '@odata.type': '#microsoft.graph.fileAttachment',
-              id: 'file_2',
-              name: 'invalid.pdf',
-              contentBytes: 'not-base64'
             })
           )
         ]
@@ -2572,7 +2609,9 @@ describe('@yolk-sdk/connectors', () => {
 
       const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
 
-      const results = yield* Effect.forEach(['item_1', 'file_1', 'file_2'], attachmentId =>
+      // contentBytes is not pattern-checked (a full-string base64 regex overflowed V8's regexp
+      // stack on multi-megabyte attachments): whoever decodes the bytes validates them.
+      const results = yield* Effect.forEach(['item_1', 'file_1'], attachmentId =>
         outlookGetAttachmentAction
           .execute({
             integration: microsoftIntegration,
@@ -2581,7 +2620,7 @@ describe('@yolk-sdk/connectors', () => {
           .pipe(Effect.provide(TestLayer), Effect.result)
       )
 
-      expect(results).toHaveLength(3)
+      expect(results).toHaveLength(2)
 
       for (const result of results) {
         expect(Result.isFailure(result)).toBe(true)
@@ -4086,14 +4125,40 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
-  it.effect('maps Gmail attachment failures and rejects malformed content responses', () =>
+  it.effect('returns multi-megabyte Gmail attachments (no full-string base64 regex)', () =>
+    Effect.gen(function* () {
+      // ~7.7M base64url characters: the old pattern check overflowed V8's regexp stack.
+      const bytes = new Uint8Array(5_772_984).map((_, index) => index & 255)
+      const data = Buffer.from(bytes).toString('base64url')
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse(JSON.stringify({ size: bytes.byteLength, data }))]
+      )
+
+      const result = yield* gmailGetAttachmentAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject(
+        ActionResult.success({
+          size: bytes.byteLength,
+          contentBase64: Buffer.from(bytes).toString('base64')
+        })
+      )
+    })
+  )
+
+  it.effect('maps Gmail attachment failures and rejects malformed size responses', () =>
     Effect.gen(function* () {
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(
         [],
         [
           jsonStatusHttpResponse(403, '{"error":{"message":"Attachment access denied"}}'),
-          jsonHttpResponse('{"size":-1,"data":"Zg"}'),
-          jsonHttpResponse('{"size":1,"data":"***"}')
+          jsonHttpResponse('{"size":-1,"data":"Zg"}')
         ]
       )
 
@@ -4105,16 +4170,6 @@ describe('@yolk-sdk/connectors', () => {
         .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
 
       const invalidSizeResult = yield* gmailGetAttachmentAction
-        .execute({
-          integration: googleIntegration,
-          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
-        })
-        .pipe(
-          Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)),
-          Effect.result
-        )
-
-      const invalidDataResult = yield* gmailGetAttachmentAction
         .execute({
           integration: googleIntegration,
           input: { messageId: 'message_1', attachmentId: 'attachment_1' }
@@ -4137,13 +4192,6 @@ describe('@yolk-sdk/connectors', () => {
       if (Result.isFailure(invalidSizeResult)) {
         expect(Predicate.isTagged(invalidSizeResult.failure, 'ConnectorError')).toBe(true)
         expect(invalidSizeResult.failure).toMatchObject({ cause: 'validation_failed' })
-      }
-
-      expect(Result.isFailure(invalidDataResult)).toBe(true)
-
-      if (Result.isFailure(invalidDataResult)) {
-        expect(Predicate.isTagged(invalidDataResult.failure, 'ConnectorError')).toBe(true)
-        expect(invalidDataResult.failure).toMatchObject({ cause: 'validation_failed' })
       }
     })
   )

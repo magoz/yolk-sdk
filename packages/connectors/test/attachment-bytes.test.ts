@@ -105,11 +105,13 @@ describe('host-only mail bytes', () => {
     expect(() => json({ n: Infinity })).toThrow('JSON fixture requires a finite JSON value')
   })
 
-  it.effect('Gmail decodes canonical padded/unpadded base64url, including empty files', () =>
+  it.effect('Gmail decodes padded/unpadded base64url, including empty files', () =>
     Effect.gen(function* () {
       for (const [data, size, expected] of [
         ['AID_', 3, bytes],
         ['AA==', 1, new Uint8Array([0])],
+        // Unused pad bits carry no data: the size check, not canonical form, guards the bytes.
+        ['AB', 1, new Uint8Array([0])],
         ['', 0, new Uint8Array()]
       ] as const) {
         const h = host([json({ data, size })])
@@ -131,11 +133,30 @@ describe('host-only mail bytes', () => {
       }
     })
   )
-  it.effect('Gmail rejects noncanonical pad bits, wrong lengths, whitespace and size lies', () =>
+  it.effect('Gmail decodes an 8 MiB attachment byte for byte', () =>
+    Effect.gen(function* () {
+      const large = new Uint8Array(8 * 1024 * 1024).map((_, index) => index & 255)
+      const data = Buffer.from(large).toString('base64url')
+      const h = host([json({ data, size: large.byteLength })])
+
+      const result = yield* downloadGmailAttachment(
+        integration('google'),
+        { messageId: 'message', attachmentId: 'attachment' },
+        { maxBytes: large.byteLength, maxMetadataBytes: data.length + 1024, maxErrorBodyBytes: 64 }
+      ).pipe(Effect.provide(h.layer))
+
+      expect(result.byteLength).toBe(large.byteLength)
+      expect(Buffer.from(result.bytes).equals(Buffer.from(large))).toBe(true)
+    })
+  )
+  it.effect('Gmail rejects wrong lengths, bad padding, whitespace and size lies', () =>
     Effect.gen(function* () {
       for (const body of [
-        { data: 'AB', size: 1 },
         { data: 'AA=', size: 1 },
+        { data: 'AA===', size: 1 },
+        { data: 'AAAA=', size: 3 },
+        { data: '=', size: 0 },
+        { data: 'A=A=', size: 1 },
         { data: 'A', size: 1 },
         { data: 'AA\n', size: 1 },
         { data: 'AA', size: 2 },

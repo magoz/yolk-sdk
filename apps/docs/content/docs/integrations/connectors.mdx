@@ -819,7 +819,8 @@ attachment when you need `cid:` mapping.
 It accepts `top` and
 returns an opaque `nextLink`; pass that link back unchanged with the same `messageId` and `mailbox`.
 Use `outlook.get_attachment` with a returned file attachment ID. It requires a Graph file attachment
-with valid base64 `contentBytes` and returns required `contentBase64`. Item and reference attachments
+with string `contentBytes` (not checked as base64: whoever decodes it validates it) and returns
+required `contentBase64`. Item and reference attachments
 remain available only as list metadata and are rejected by this action. Hosts own base64 decoding, size limits,
 durable storage, and content scanning.
 

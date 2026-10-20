@@ -2,6 +2,7 @@ import { Effect, Predicate, Result } from 'effect'
 import type { Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  base64ToBytes,
   FilePart,
   fileLabel,
   fileNotCapturedLabel,
@@ -69,7 +70,7 @@ const base64DecodedBytes = (data: string) => {
 
 const decodeBase64 = (data: string) =>
   Effect.try({
-    try: () => Uint8Array.from(globalThis.atob(data), character => character.charCodeAt(0)),
+    try: () => base64ToBytes(data),
     catch: () => 'invalid base64'
   })
 

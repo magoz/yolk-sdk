@@ -309,9 +309,9 @@ export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
 
 const OutlookAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
-const OutlookAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
-)
+// Unchecked: whoever decodes the bytes validates them (a full-string base64 regex overflows V8 on
+// large attachments; see connectors AGENTS.md).
+const OutlookAttachmentBase64 = Schema.String
 
 export class OutlookAttachmentMetadata extends Schema.Class<OutlookAttachmentMetadata>(
   'OutlookAttachmentMetadata'
