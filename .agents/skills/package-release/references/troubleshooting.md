@@ -114,7 +114,7 @@ Fix:
 
 - If the package does not exist yet, first publish only that package locally from a packed tarball with interactive npm auth/OTP.
 - Then configure trusted publishing: `npm trust github @yolk-sdk/<name> --repo magoz/yolk-sdk --file publish.yml --allow-publish`.
-- Treat earlier `+ @yolk-sdk/*@version` lines as published; do not rerun the same version outside the workflow retry.
+- Treat earlier `+ @yolk-sdk/*@version` lines as published (confirm with `npm view <pkg>@<version>`); do not rerun the same version outside the workflow retry.
 - Rerun the same workflow; it skips already-published tarballs and creates the missing tag.
 - If retry guard is unavailable, bump all public packages to the next canary first.
 
@@ -148,7 +148,8 @@ Cannot publish over previously staged version "<version>"`, although that versio
 registry and absent from `npm stage list`. Seen with `@yolk-sdk/extractors@0.1.0-canary.117`,
 whose first attempt printed `+ @yolk-sdk/extractors@0.1.0-canary.117` but never appeared.
 
-Cause: npm holds the version server-side; retries of the same version cannot clear it.
+Observed: retries of the same version keep failing; the root cause (npm holding the version
+server-side) is not established.
 
 Fix:
 
