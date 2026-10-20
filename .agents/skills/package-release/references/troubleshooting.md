@@ -141,6 +141,27 @@ npm trust github @yolk-sdk/<name> \
 - Rerun the same workflow; already-published tarballs are skipped.
 - Verify all dist-tags and `v<version>` after rerun.
 
+## Version stuck as "previously staged"
+
+Symptom: the workflow publishes some packages, then a rerun fails with `npm error 409 Conflict ...
+Cannot publish over previously staged version "<version>"`, although that version is 404 on the
+registry and absent from `npm stage list`. Seen with `@yolk-sdk/extractors@0.1.0-canary.117`,
+whose first attempt printed `+ @yolk-sdk/extractors@0.1.0-canary.117` but never appeared.
+
+Cause: npm holds the version server-side; retries of the same version cannot clear it.
+
+Fix:
+
+- Do not keep rerunning the same version (the retry guidance above does not apply).
+- Bump all public packages to the next canary: add `.changeset/canary-<n>-lockstep.md` (all public
+  packages, `patch`) saying it republishes the partial version unchanged, land it on `main`, then
+  run the usual release prep and dispatch `publish.yml`.
+- After the new version is verified, move `latest` to it and optionally
+  `npm deprecate @yolk-sdk/<name>@<partial version> "<message pointing to the new version>"` for
+  each package that did publish at the partial version.
+- If the new version gets stuck the same way, stop and check the package's settings and the npm
+  account's email before bumping again.
+
 ## Release prep includes unrelated files
 
 Cause: working tree had feature, env, generated, or local-only changes before release prep.
