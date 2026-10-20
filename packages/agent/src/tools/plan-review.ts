@@ -21,6 +21,7 @@ import {
   type ToolPlanPreviewPage
 } from './plan.ts'
 import {
+  responseJsonSchemaFromSchema,
   toolJsonSchemaFromSchema,
   type InteractionActionResult,
   type ResolvedToolSet,
@@ -112,7 +113,7 @@ export const makePlanReviewTool = <Context>(
 
   const descriptor: DescriptorFields = {
     kind: options.renderer ?? toolPlanReviewRenderer,
-    schema: toolJsonSchemaFromSchema(ToolPlanReviewResponse),
+    schema: responseJsonSchemaFromSchema(ToolPlanReviewResponse),
     actions: [InteractionActionDescriptor.make({ id: toolPlanReviewActionId, label })]
   }
 

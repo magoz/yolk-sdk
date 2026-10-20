@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { compactWindowMessages } from '@yolk-sdk/agent/compaction'
 import { instructionMessages } from '@yolk-sdk/agent/loop'
@@ -6,12 +7,15 @@ import {
   isInstructionMessage,
   ToolApprovalPolicy,
   ToolDef,
+  toolJsonSchemaOmittedNullComment,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { resolveTools, type NestedTool } from '@yolk-sdk/agent/tools'
+import { resolveTools, toolJsonSchemaFromSchema, type NestedTool } from '@yolk-sdk/agent/tools'
 import {
   codeModeCatalog,
   codeModeCatalogInstructionKey,
+  codeModeToolSignature,
+  describeCodeModeTool,
   makeCodeModeTool,
   maxCodeModeSearchSignatureChars,
   renderCodeModeDescription,
@@ -75,6 +79,46 @@ describe('code mode catalog', () => {
       ['docs_search', 'all', false]
     ])
     expect(catalog[0]?.outputSchema).toEqual({ type: 'string' })
+  })
+
+  it('renders Schema.optional params without the omitted-null marker', () => {
+    const Params = Schema.Struct({
+      query: Schema.String,
+      limit: Schema.optional(Schema.Number),
+      spec: Schema.optional(Schema.Struct({ cron: Schema.String }))
+    })
+
+    const Output = Schema.Struct({ next: Schema.optional(Schema.String) })
+    const parameters = toolJsonSchemaFromSchema(Params)
+    const outputSchema = toolJsonSchemaFromSchema(Output)
+
+    // The advertised schemas carry the marker; rendered declarations never show it.
+    expect(JSON.stringify(parameters)).toContain(toolJsonSchemaOmittedNullComment)
+    expect(JSON.stringify(outputSchema)).toContain(toolJsonSchemaOmittedNullComment)
+
+    const tool = nestedTool('crm', 'crm_list', {
+      description: 'List deals',
+      parameters,
+      outputSchema
+    })
+
+    const [entry] = codeModeCatalog([tool])
+
+    if (entry === undefined) {
+      return expect.fail('Expected a catalog entry')
+    }
+
+    const rendered = [
+      renderCodeModeDescription({ tools: [tool] }),
+      codeModeToolSignature(entry),
+      describeCodeModeTool(entry)
+    ]
+
+    for (const text of rendered) {
+      expect(text).toContain('crm_list')
+      expect(text).not.toContain(toolJsonSchemaOmittedNullComment)
+      expect(text).not.toContain('$comment')
+    }
   })
 
   it('labels each tool the way scripts reach it: first identifier wins, then the raw name', () => {

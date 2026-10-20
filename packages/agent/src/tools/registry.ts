@@ -7,6 +7,7 @@ import {
   Option,
   Predicate,
   Result,
+  SchemaRepresentation,
   type JsonSchema
 } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -59,6 +60,12 @@ import {
   omitNullOptionalToolArguments,
   omitNullOptionalToolCallArguments
 } from './arguments.ts'
+import {
+  markOmittedNulls,
+  omittedNullAnnotationKey,
+  withOmittedNullMarkerDefinitions,
+  withOmittedNullMarkers
+} from './omitted-null.ts'
 import {
   backgroundToolDef,
   executeBackgroundTool,
@@ -691,16 +698,42 @@ const stampObjectCombinatorRoot = (
   return { ...root, type: 'object' }
 }
 
-const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
-  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
-  const documentSchema = requireToolJsonSchema(document.schema)
+// `Schema.toJsonSchemaDocument` split into its public steps (JSON codec AST, representation,
+// compilation) so codec-added nulls can be annotated in between (`markOmittedNulls`). The
+// private annotation is the only extra key the compiler emits, and `withOmittedNullMarkers`
+// turns it into the `$comment` marker (`toolJsonSchemaFromDocument`): the result is
+// `Schema.toJsonSchemaDocument` plus markers.
+const toToolJsonSchemaDocument = (schema: Schema.Top): ToolJsonSchemaDocument => {
+  const ast = Schema.toCodecJson(schema).ast
+
+  return SchemaRepresentation.toJsonSchemaDocument(
+    markOmittedNulls(SchemaRepresentation.toRepresentation(ast), ast),
+    {
+      onExcessProperty: 'error',
+      includeAnnotationKey: key => key === omittedNullAnnotationKey
+    }
+  )
+}
+
+/** Root post-processing shared by `toolJsonSchemaFromSchema`: inlines a root `$ref`, keeps
+ * the remaining definitions under `$defs`, and stamps object unions with `type: 'object'`.
+ * Exported (not public) so tests can lower `Schema.toJsonSchemaDocument` the same way.
+ */
+export const toolJsonSchemaFromDocument = (
+  schema: Schema.Top,
+  document: ToolJsonSchemaDocument
+): typeof ToolJsonSchema.Type => {
+  const documentSchema = withOmittedNullMarkers(requireToolJsonSchema(document.schema))
 
   const rootRef = isToolJsonSchemaObject(documentSchema)
     ? jsonField(documentSchema, '$ref')
     : undefined
 
   const definitionName = Predicate.isString(rootRef) ? localDefinitionName(rootRef) : undefined
-  const definitions = requireToolJsonSchemaObject(document.definitions)
+
+  const definitions = withOmittedNullMarkerDefinitions(
+    requireToolJsonSchemaObject(document.definitions)
+  )
 
   const localDefinition =
     definitionName === undefined ? undefined : jsonField(definitions, definitionName)
@@ -731,10 +764,23 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
 /** JSON Schema lowering of an Effect Schema for model guidance and display hints.
  * It describes the schema's canonical JSON codec (`Schema.toCodecJson`), which is what tool
  * argument validation decodes with; e.g. `Schema.optional(X)` is advertised and accepted as
- * `X | null`.
+ * `X | null`, its codec-added `null` member marked with `$comment:
+ * toolJsonSchemaOmittedNullComment` ("not sent", unlike a `Schema.NullOr` null).
  */
 export const toolJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
-  jsonSchemaFromSchema(schema)
+  toolJsonSchemaFromDocument(schema, toToolJsonSchemaDocument(schema))
+
+/** `toolJsonSchemaFromSchema` without the omitted-null marker, for HITL response schemas
+ * (`makeInputTool`, `makeInteractionTool`, plan review). Those responses are user-submitted and
+ * decode with the type-side schema, which rejects `null` on `Schema.optional(X)`, so "this
+ * `null` means not sent" would be false there; their descriptors reach UI clients, not models.
+ * Internal: not exported from `@yolk-sdk/agent/tools`.
+ */
+export const responseJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
+  toolJsonSchemaFromDocument(
+    schema,
+    Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
+  )
 
 // Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
 class InvalidToolParamsError extends ToolError {}
@@ -764,8 +810,8 @@ type MakeToolRegistrationFields<Context> = {
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
   name: string
   description: string
-  parameters: ReturnType<typeof jsonSchemaFromSchema>
-  outputSchema?: ReturnType<typeof jsonSchemaFromSchema>
+  parameters: ReturnType<typeof toolJsonSchemaFromSchema>
+  outputSchema?: ReturnType<typeof toolJsonSchemaFromSchema>
   callableBy?: ToolDef['callableBy']
   discovery?: ToolDef['discovery']
   loading?: ToolDef['loading']
@@ -837,12 +883,12 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
         const fields: MakeToolDefFields<Context, ParamsSchema> = {
           name: options.name,
           description: options.description,
-          parameters: jsonSchemaFromSchema(options.parameters),
+          parameters: toolJsonSchemaFromSchema(options.parameters),
           approval: options.approval
         }
 
         if (options.output !== undefined) {
-          fields.outputSchema = jsonSchemaFromSchema(options.output)
+          fields.outputSchema = toolJsonSchemaFromSchema(options.output)
         }
 
         if (options.callableBy !== undefined) {

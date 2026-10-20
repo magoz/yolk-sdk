@@ -281,6 +281,7 @@ export {
   toolDiscovery,
   ToolJsonSchema,
   ToolJsonSchemaObject,
+  toolJsonSchemaOmittedNullComment,
   ToolResult,
   validateInteractionSubmission
 } from './tool.ts'

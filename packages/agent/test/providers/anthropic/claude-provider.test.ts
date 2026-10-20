@@ -1,5 +1,5 @@
 import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
-import type * as Schema from 'effect/Schema'
+import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -10,13 +10,16 @@ import {
   TextPart,
   ToolCall,
   ToolDef,
+  ToolResult,
   ToolResultMessage,
+  toolJsonSchemaOmittedNullComment,
   UserMessage,
   inlineBase64Source,
   urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { makeTool, resolveTools } from '@yolk-sdk/agent/tools'
 import {
   makeAnthropicClaudeProviderLayer,
   streamAnthropicClaudeResponse,
@@ -128,6 +131,62 @@ const collectKeys = (value: Schema.Json): ReadonlyArray<string> => {
 
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
 }
+
+const RecurringSchedule = Schema.TaggedStruct('Recurring', {
+  cron: Schema.String,
+  timezone: Schema.String
+})
+
+// `timezone` is required in Recurring and optional (`anyOf: [string, null]`) here.
+const OneTimeSchedule = Schema.TaggedStruct('OneTime', {
+  runAt: Schema.String,
+  timezone: Schema.optional(Schema.String)
+})
+
+const ScheduleSpec = Schema.Union([RecurringSchedule, OneTimeSchedule])
+
+const mergedScheduleSpec = {
+  type: 'object',
+  properties: {
+    _tag: { type: 'string', enum: ['Recurring', 'OneTime'] },
+    cron: { type: 'string' },
+    timezone: { type: 'string' },
+    runAt: { type: 'string' }
+  },
+  required: ['_tag'],
+  $defs: {},
+  additionalProperties: false
+}
+
+/** A registry-derived tool whose `execute` records the decoded params it received. */
+const schemaTool = <S extends Schema.Schema<unknown> & { readonly DecodingServices: never }>(
+  name: string,
+  parameters: S
+) => {
+  const received: Array<S['Type']> = []
+
+  const tool = makeTool({
+    name,
+    description: `Probe ${name}.`,
+    access: 'read',
+    parameters,
+    execute: ({ call, params }) => {
+      received.push(params)
+
+      return Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+    }
+  })
+
+  return { tool, received }
+}
+
+const claudeInputSchemas = (tools: ReadonlyArray<ToolDef>) =>
+  toAnthropicClaudeRequestBody({
+    model: 'claude-sonnet-4-6',
+    systemPrompt: '',
+    messages: [UserMessage.make({ content: 'hello' })],
+    tools
+  }).pipe(Effect.map(body => (body.tools ?? []).map(tool => tool.input_schema)))
 
 const runMinimalProviderRequest = (
   input: {
@@ -851,6 +910,472 @@ describe('Anthropic Claude provider', () => {
           tuple: { type: 'array', items: {} }
         }
       })
+    })
+  )
+
+  it.effect('advertises Schema.optional params with their type, not as unconstrained', () =>
+    Effect.gen(function* () {
+      const schemas = yield* claudeInputSchemas(
+        [
+          schemaTool(
+            'optional_primitive',
+            Schema.Struct({
+              note: Schema.optional(Schema.String.annotate({ description: 'Free text.' })),
+              mode: Schema.optional(Schema.Literals(['read', 'write'])).annotate({
+                description: 'Access mode.'
+              })
+            })
+          ),
+          schemaTool(
+            'optional_struct',
+            Schema.Struct({ spec: Schema.optional(RecurringSchedule) })
+          ),
+          schemaTool('optional_union', Schema.Struct({ spec: Schema.optional(ScheduleSpec) })),
+          schemaTool('required_union', Schema.Struct({ spec: ScheduleSpec })),
+          schemaTool(
+            'meaningful_null',
+            Schema.Struct({
+              clearable: Schema.optional(Schema.NullOr(Schema.String)),
+              // Same JSON as `Schema.optional(Schema.String)`, but `null` means "clear".
+              cleared: Schema.optionalKey(Schema.NullOr(Schema.String)),
+              nullable: Schema.NullOr(Schema.String),
+              items: Schema.Array(Schema.NullOr(Schema.String))
+            })
+          )
+        ].map(({ tool }) => tool.def)
+      )
+
+      for (const schema of schemas) {
+        expect(collectKeys(schema)).not.toContain('anyOf')
+        expect(collectKeys(schema)).not.toContain('$comment')
+      }
+
+      expect(schemas[0]).toEqual({
+        type: 'object',
+        properties: {
+          note: { type: 'string', description: 'Free text.' },
+          mode: { type: 'string', enum: ['read', 'write'], description: 'Access mode.' }
+        },
+        additionalProperties: false
+      })
+      expect(schemas[1]).toEqual({
+        type: 'object',
+        properties: {
+          spec: {
+            type: 'object',
+            properties: {
+              _tag: { type: 'string', enum: ['Recurring'] },
+              cron: { type: 'string' },
+              timezone: { type: 'string' }
+            },
+            required: ['_tag', 'cron', 'timezone'],
+            additionalProperties: false
+          }
+        },
+        additionalProperties: false
+      })
+      // Optional stays optional: no `required` is added for `spec`.
+      expect(schemas[2]).toEqual({
+        type: 'object',
+        properties: { spec: mergedScheduleSpec },
+        additionalProperties: false
+      })
+      expect(schemas[3]).toEqual({
+        type: 'object',
+        properties: { spec: mergedScheduleSpec },
+        required: ['spec'],
+        additionalProperties: false
+      })
+      // Where `null` means something other than omission it stays widened.
+      expect(schemas[4]).toEqual({
+        type: 'object',
+        properties: {
+          clearable: {},
+          cleared: {},
+          nullable: {},
+          items: { type: 'array', items: {} }
+        },
+        required: ['nullable', 'items'],
+        additionalProperties: false
+      })
+    })
+  )
+
+  it.effect(
+    'keeps raw anyOf [X, null] optional params widened, as remote MCP tools send them',
+    () =>
+      Effect.gen(function* () {
+        // e.g. Pydantic `Optional[X] = None`: the server may read `null` as "clear".
+        const [schema] = yield* claudeInputSchemas([
+          ToolDef.make({
+            name: 'remote_update',
+            description: 'Remote MCP-like tool.',
+            parameters: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                note: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
+                spec: {
+                  anyOf: [
+                    { type: 'object', properties: { cron: { type: 'string' } } },
+                    { type: 'null' }
+                  ]
+                },
+                // Another tool's `$comment` is not Yolk's marker.
+                tagged: { anyOf: [{ type: 'string' }, { type: 'null', $comment: 'nullable' }] }
+              },
+              required: ['id']
+            }
+          })
+        ])
+
+        expect(schema).toEqual({
+          type: 'object',
+          properties: { id: { type: 'string' }, note: { default: null }, spec: {}, tagged: {} },
+          required: ['id']
+        })
+      })
+  )
+
+  it.effect('advertises named Schema.optional params with their type', () =>
+    Effect.gen(function* () {
+      const OptionalNote = Schema.optional(Schema.String).annotate({ identifier: 'OptionalNote' })
+
+      const [schema] = yield* claudeInputSchemas([
+        schemaTool('named_optional', Schema.Struct({ note: OptionalNote })).tool.def
+      ])
+
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { note: { type: 'string' } },
+        additionalProperties: false,
+        // The shared definition is not edited; on its own it stays widened.
+        $defs: { OptionalNote: {} }
+      })
+    })
+  )
+
+  it.effect('strips a shared marked definition only where the property is optional', () =>
+    Effect.gen(function* () {
+      const Note = Schema.UndefinedOr(Schema.String).annotate({ identifier: 'Note' })
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [effectSchema, sharedSchema] = yield* claudeInputSchemas([
+        schemaTool('effect_named', Schema.Struct({ a: Note, b: Schema.optionalKey(Note) })).tool
+          .def,
+        // One definition referenced from a required and an optional property.
+        ToolDef.make({
+          name: 'shared_named',
+          description: 'Shared definition.',
+          parameters: {
+            type: 'object',
+            properties: {
+              a: { $ref: '#/$defs/Note' },
+              b: { $ref: '#/$defs/Note', description: 'Optional note.' }
+            },
+            required: ['a'],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Required context untouched: still the `$ref`, to the definition widened as before.
+      expect(effectSchema).toEqual({
+        type: 'object',
+        properties: { a: { $ref: '#/$defs/Note' }, b: { type: 'string' } },
+        required: ['a'],
+        additionalProperties: false,
+        $defs: { Note: {}, Note_1: {} }
+      })
+      expect(sharedSchema).toEqual({
+        type: 'object',
+        properties: {
+          a: { $ref: '#/$defs/Note' },
+          b: { type: 'string', description: 'Optional note.' }
+        },
+        required: ['a'],
+        $defs: { Note: {} }
+      })
+    })
+  )
+
+  it.effect('inlines a recursive marked definition once per path', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [schema] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'linked',
+          description: 'Recursive optional definition.',
+          parameters: {
+            type: 'object',
+            properties: { head: { $ref: '#/$defs/Link' } },
+            $defs: {
+              Link: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: { value: { type: 'string' }, next: { $ref: '#/$defs/Link' } },
+                    required: ['value']
+                  },
+                  marked
+                ]
+              }
+            }
+          }
+        })
+      ])
+
+      expect(schema).toEqual({
+        type: 'object',
+        properties: {
+          head: {
+            type: 'object',
+            properties: { value: { type: 'string' }, next: { $ref: '#/$defs/Link' } },
+            required: ['value']
+          }
+        },
+        // The shared definition is not edited.
+        $defs: { Link: {} }
+      })
+    })
+  )
+
+  it.effect('keeps a root union property that one variant requires through a named schema', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [schema] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'variant_named',
+          description: 'Root union with a required named property.',
+          parameters: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: { kind: { enum: ['a'] }, note: { $ref: '#/$defs/Note' } },
+                required: ['kind', 'note'],
+                additionalProperties: false
+              },
+              {
+                type: 'object',
+                properties: { kind: { enum: ['b'] } },
+                required: ['kind'],
+                additionalProperties: false
+              }
+            ],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Variant `a` requires `note` (its `null` decodes as `undefined`): it keeps its
+      // `$ref` to the widened definition, never stripped to `string` although the
+      // merged `note` is optional.
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { kind: { enum: ['a', 'b'] }, note: { $ref: '#/$defs/Note' } },
+        required: ['kind'],
+        additionalProperties: false,
+        $defs: { Note: {} }
+      })
+    })
+  )
+
+  it.effect('keeps a nested union property that one variant requires through a named schema', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      // Variant `a` requires `note`; its `null` decodes as `undefined`, so
+      // `{ payload: { kind: 'a', note: null } }` is valid and must stay allowed.
+      const payload: Schema.Json = {
+        anyOf: [
+          {
+            type: 'object',
+            properties: { kind: { enum: ['a'] }, note: { $ref: '#/$defs/Note' } },
+            required: ['kind', 'note'],
+            additionalProperties: false
+          },
+          {
+            type: 'object',
+            properties: { kind: { enum: ['b'] } },
+            required: ['kind'],
+            additionalProperties: false
+          }
+        ]
+      }
+
+      const [underRootUnion, underRootObject] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'nested_under_union',
+          description: 'Nested union below a root union.',
+          parameters: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: { op: { enum: ['x'] }, payload },
+                required: ['op', 'payload'],
+                additionalProperties: false
+              },
+              {
+                type: 'object',
+                properties: { op: { enum: ['y'] } },
+                required: ['op'],
+                additionalProperties: false
+              }
+            ],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        }),
+        ToolDef.make({
+          name: 'nested_under_object',
+          description: 'Nested union below a root object.',
+          parameters: {
+            type: 'object',
+            properties: { payload },
+            required: ['payload'],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Merged once: `note` keeps its `$ref` to the (widened) shared definition.
+      const mergedPayload = {
+        type: 'object',
+        properties: { kind: { enum: ['a', 'b'] }, note: { $ref: '#/$defs/Note' } },
+        required: ['kind'],
+        $defs: {},
+        additionalProperties: false
+      }
+
+      expect(underRootUnion).toEqual({
+        type: 'object',
+        properties: { op: { enum: ['x', 'y'] }, payload: mergedPayload },
+        required: ['op'],
+        additionalProperties: false,
+        $defs: { Note: {} }
+      })
+      expect(underRootObject).toEqual({
+        type: 'object',
+        properties: { payload: mergedPayload },
+        required: ['payload'],
+        $defs: { Note: {} }
+      })
+    })
+  )
+
+  it.effect('passes null for Schema.optionalKey(Schema.NullOr(X)) through to the tool', () =>
+    Effect.gen(function* () {
+      const { tool, received } = schemaTool(
+        'clear_note',
+        Schema.Struct({ id: Schema.String, note: Schema.optionalKey(Schema.NullOr(Schema.String)) })
+      )
+
+      const [schema] = yield* claudeInputSchemas([tool.def])
+      // Unchanged: `null` stays sendable (widened), never narrowed to `string`.
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { id: { type: 'string' }, note: {} },
+        required: ['id'],
+        additionalProperties: false
+      })
+
+      const response = new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'mcp_Clear_note',
+              input: { id: 'n1', note: null }
+            }
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 2, output_tokens: 3 }
+        }),
+        { status: 200 }
+      )
+
+      const events = Array.from(yield* collectProviderEvents(response, []))
+      const toolCall = events[0]
+
+      if (toolCall?._tag !== 'ToolCall') {
+        return expect.fail('Expected a Claude tool call')
+      }
+
+      const toolSet = yield* resolveTools([{ id: 'test', tools: [tool] }], undefined)
+      const result = yield* toolSet.execute(toolCall.call)
+
+      expect(result.isError).toBeUndefined()
+      expect(received).toEqual([{ id: 'n1', note: null }])
+    })
+  )
+
+  it.effect('merges root union properties required in one variant and optional in another', () =>
+    Effect.gen(function* () {
+      const [schedule, conflicting] = yield* claudeInputSchemas([
+        schemaTool('schedule', ScheduleSpec).tool.def,
+        schemaTool(
+          'conflicting',
+          Schema.Union([
+            Schema.Struct({ kind: Schema.Literal('text'), value: Schema.String }),
+            Schema.Struct({ kind: Schema.Literal('count'), value: Schema.optional(Schema.Number) })
+          ])
+        ).tool.def
+      ])
+
+      expect(schedule).toEqual(mergedScheduleSpec)
+      // Genuinely different types still widen to an unconstrained schema.
+      expect(conflicting).toEqual({
+        type: 'object',
+        properties: { kind: { type: 'string', enum: ['text', 'count'] }, value: {} },
+        required: ['kind'],
+        $defs: {},
+        additionalProperties: false
+      })
+    })
+  )
+
+  it.effect('decodes null that Claude sends for an optional param as absent', () =>
+    Effect.gen(function* () {
+      const { tool, received } = schemaTool(
+        'schedule',
+        Schema.Struct({ label: Schema.String, spec: Schema.optional(ScheduleSpec) })
+      )
+
+      const [schema] = yield* claudeInputSchemas([tool.def])
+      expect(schema).toMatchObject({ properties: { spec: mergedScheduleSpec } })
+
+      const response = new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'mcp_Schedule',
+              input: { label: 'daily', spec: null }
+            }
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 2, output_tokens: 3 }
+        }),
+        { status: 200 }
+      )
+
+      const events = Array.from(yield* collectProviderEvents(response, []))
+      const toolCall = events[0]
+
+      if (toolCall?._tag !== 'ToolCall') {
+        return expect.fail('Expected a Claude tool call')
+      }
+
+      expect(toolCall.call).toMatchObject({ name: 'schedule', params: { spec: null } })
+
+      const toolSet = yield* resolveTools([{ id: 'test', tools: [tool] }], undefined)
+      const result = yield* toolSet.execute(toolCall.call)
+
+      expect(result.isError).toBeUndefined()
+      expect(received).toEqual([{ label: 'daily' }])
     })
   )
 

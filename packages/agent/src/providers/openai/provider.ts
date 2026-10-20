@@ -61,6 +61,7 @@ import {
 } from '../provider-error.ts'
 import { validateProviderTranscript } from '../transcript.ts'
 import { requestCacheKeyHeaders } from '../cache-key-headers.ts'
+import { withoutToolJsonSchemaOmittedNullMarker } from '../../protocol/tool-json-schema-marker.ts'
 
 type OpenAiProviderIdentity = {
   readonly id: string
@@ -970,7 +971,7 @@ const toOpenAiTool = (tool: ToolDef, providerName: string): Effect.Effect<OpenAi
       function: {
         name: tool.name,
         description: tool.description,
-        parameters
+        parameters: withoutToolJsonSchemaOmittedNullMarker(parameters)
       }
     }))
   )

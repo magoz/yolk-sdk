@@ -4,6 +4,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import { decodeToolArguments } from './arguments.ts'
 import {
   EmptyToolParams,
+  responseJsonSchemaFromSchema,
   toolJsonSchemaFromSchema,
   type ToolModule,
   type ToolRegistration
@@ -129,7 +130,7 @@ export const makeInputTool = <Context, ResponseSchema extends SyncSchema>(
     renderer: options.renderer,
     title: options.title,
     inputDescription: options.inputDescription,
-    schema: toolJsonSchemaFromSchema(options.response)
+    schema: responseJsonSchemaFromSchema(options.response)
   })
 
   const def = ToolDef.make(

@@ -55,6 +55,10 @@ import {
   providerFailureRetryable
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
+import {
+  isToolJsonSchemaOmittedNull,
+  withoutToolJsonSchemaOmittedNullMarker
+} from '../protocol/tool-json-schema-marker.ts'
 import { anthropicClaudeQuotaResetsAtMs } from './quota-reset-internal.ts'
 
 /**
@@ -975,10 +979,150 @@ const jsonSchemaMapKeywords = new Set([
 
 const jsonSchemaDataKeywords = new Set(['const', 'default', 'enum', 'examples'])
 
-const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.JsonObject => {
+const omittedNullJsonSchemaKeys = new Set(['type', 'description', 'title', '$comment'])
+
+// The `{ type: 'null' }` member `makeTool` advertises for `Schema.optional(X)`:
+// only that codec-added null carries the `toolJsonSchemaOmittedNullComment`
+// marker (`isToolJsonSchemaOmittedNull`), and it decodes as "not sent".
+// `Schema.NullOr` nulls and third-party raw/MCP `anyOf: [X, null]` schemas are
+// unmarked: their `null` may mean "clear". A marked member with other keywords
+// is not a plain null and is kept.
+const isOmittedNullJsonSchema = (schema: Schema.Json): boolean =>
+  isJsonObject(schema) &&
+  isToolJsonSchemaOmittedNull(schema) &&
+  Object.keys(schema).every(key => omittedNullJsonSchemaKeys.has(key))
+
+// On a property its object does not require, a marked null member says nothing
+// omission cannot (`decodeToolArguments` reads that `null` as absent). Dropping
+// it before normalization keeps the other members' type instead of widening to
+// `{}`. Unmarked nulls (`optionalKey(NullOr(X))`, the inner one of
+// `optional(NullOr(X))`, required `NullOr(X)`, raw/MCP schemas) stay and widen
+// as before.
+const withoutOmittedNullVariants = (schema: Schema.Json): Schema.Json => {
+  if (!isJsonObject(schema)) return schema
+
+  const combinator = topLevelJsonSchemaCombinator(schema)
+
+  if (combinator === undefined || combinator.key === 'allOf') return schema
+
+  const items = combinator.items.filter(item => !isOmittedNullJsonSchema(item))
+
+  if (items.length === 0 || items.length === combinator.items.length) return schema
+
+  return { ...schema, [combinator.key]: items }
+}
+
+/** The tool schema's root `$defs`, and the definitions inlined on the current path. */
+type AnthropicToolSchemaContext = {
+  readonly definitions: Schema.JsonObject
+  readonly inlining: ReadonlySet<string>
+}
+
+const anthropicToolSchemaContext = (schema: Schema.JsonObject): AnthropicToolSchemaContext => ({
+  definitions: jsonSchemaDefinitions(schema),
+  inlining: new Set()
+})
+
+const localDefinitionPrefix = '#/$defs/'
+
+// A named optional schema (`Schema.optional(X).annotate({ identifier })`) is a
+// `$ref` to a root definition holding `anyOf: [X, marked null]`. That definition
+// is shared, possibly with properties that require it, so it is never edited:
+// an optional property gets its own copy (keywords beside the `$ref` on top),
+// stripped like an inline union. Only a single-token local `$ref` is followed,
+// once per path, so recursive definitions terminate.
+const inlinedOmittedNullReference = (
+  schema: Schema.Json,
+  context: AnthropicToolSchemaContext
+): { readonly name: string; readonly schema: Schema.JsonObject } | undefined => {
+  if (!isJsonObject(schema)) return undefined
+
+  const ref = jsonObjectField(schema, '$ref')
+
+  if (!Predicate.isString(ref) || !ref.startsWith(localDefinitionPrefix)) return undefined
+
+  const name = ref.slice(localDefinitionPrefix.length)
+
+  if (/[/~%]/u.test(name) || context.inlining.has(name)) return undefined
+
+  const definition = jsonObjectField(context.definitions, name)
+
+  if (!isJsonObject(definition)) return undefined
+
+  const combinator = topLevelJsonSchemaCombinator(definition)
+
+  if (
+    combinator === undefined ||
+    combinator.key === 'allOf' ||
+    !combinator.items.some(isOmittedNullJsonSchema)
+  ) {
+    return undefined
+  }
+
+  const siblings = Object.entries(schema).filter(([key]) => key !== '$ref')
+
+  return { name, schema: { ...definition, ...Object.fromEntries(siblings) } }
+}
+
+const withInlining = (
+  context: AnthropicToolSchemaContext,
+  name: string
+): AnthropicToolSchemaContext => ({
+  definitions: context.definitions,
+  inlining: new Set([...context.inlining, name])
+})
+
+const normalizeOptionalPropertySchema = (
+  schema: Schema.Json,
+  context: AnthropicToolSchemaContext
+): Schema.Json => {
+  const inlined = inlinedOmittedNullReference(schema, context)
+
+  if (inlined === undefined) {
+    return normalizeAnthropicToolSchema(withoutOmittedNullVariants(schema), context)
+  }
+
+  return normalizeAnthropicToolSchema(
+    withoutOmittedNullVariants(inlined.schema),
+    withInlining(context, inlined.name)
+  )
+}
+
+// Every property is normalized exactly once, against the `required` of the
+// object that declares it. Union merges (`objectVariant`, root flattening) can
+// make a property optional that a variant requires; reading an already merged
+// property again as optional would strip a marked null that variant needs, so
+// merged results are never normalized a second time.
+const normalizeJsonSchemaProperties = (
+  properties: Schema.JsonObject,
+  required: ReadonlyArray<string>,
+  context: AnthropicToolSchemaContext
+): Schema.JsonObject =>
+  Object.fromEntries(
+    Object.entries(properties).map(([name, propertySchema]) => [
+      name,
+      required.includes(name)
+        ? normalizeAnthropicToolSchema(propertySchema, context)
+        : normalizeOptionalPropertySchema(propertySchema, context)
+    ])
+  )
+
+const normalizeJsonSchemaObjectFields = (
+  schema: Schema.JsonObject,
+  context: AnthropicToolSchemaContext,
+  options: { readonly propertiesNormalized: boolean } = { propertiesNormalized: false }
+): Schema.JsonObject => {
+  const fields = withoutJsonSchemaCombinatorsAndTupleHints(schema)
+
   const normalized = Object.fromEntries(
-    Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => {
+    Object.entries(fields).map(([key, value]) => {
       if (jsonSchemaDataKeywords.has(key)) return [key, value]
+
+      if (key === 'properties' && isJsonObject(value)) {
+        return options.propertiesNormalized
+          ? [key, value]
+          : [key, normalizeJsonSchemaProperties(value, jsonSchemaRequired(schema), context)]
+      }
 
       if (key === 'dependencies' && isJsonObject(value)) {
         return [
@@ -986,7 +1130,9 @@ const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.Json
           Object.fromEntries(
             Object.entries(value).map(([name, dependency]) => [
               name,
-              Array.isArray(dependency) ? dependency : normalizeAnthropicToolSchema(dependency)
+              Array.isArray(dependency)
+                ? dependency
+                : normalizeAnthropicToolSchema(dependency, context)
             ])
           )
         ]
@@ -998,13 +1144,13 @@ const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.Json
           Object.fromEntries(
             Object.entries(value).map(([name, childSchema]) => [
               name,
-              normalizeAnthropicToolSchema(childSchema)
+              normalizeAnthropicToolSchema(childSchema, context)
             ])
           )
         ]
       }
 
-      return [key, normalizeAnthropicToolSchema(value)]
+      return [key, normalizeAnthropicToolSchema(value, context)]
     })
   )
 
@@ -1108,10 +1254,11 @@ const objectVariant = (
 
 const normalizeJsonSchemaCombinator = (
   schema: Schema.JsonObject,
-  combinator: TopLevelJsonSchemaCombinator
+  combinator: TopLevelJsonSchemaCombinator,
+  context: AnthropicToolSchemaContext
 ): Schema.JsonObject => {
-  const base = normalizeJsonSchemaObjectFields(schema)
-  const normalizedItems = combinator.items.map(normalizeAnthropicToolSchema)
+  const base = normalizeJsonSchemaObjectFields(schema, context)
+  const normalizedItems = combinator.items.map(item => normalizeAnthropicToolSchema(item, context))
   const variants = normalizedItems.filter(isJsonObject)
   const first = firstJsonObject(variants)
 
@@ -1123,21 +1270,29 @@ const normalizeJsonSchemaCombinator = (
 
   if (first === undefined) return base
 
-  const merged = objectVariant(variants) ?? commonVariantFields(variants)
+  // A one-member union is that member; rebuilding it as an object variant
+  // would drop its other keywords (description, size bounds).
+  const merged =
+    normalizedItems.length === 1
+      ? first
+      : (objectVariant(variants) ?? commonVariantFields(variants))
 
   return mergeAllOfSchemaObjects([merged, base])
 }
 
-function normalizeAnthropicToolSchema(value: Schema.Json): Schema.Json {
-  if (Array.isArray(value)) return value.map(normalizeAnthropicToolSchema)
+function normalizeAnthropicToolSchema(
+  value: Schema.Json,
+  context: AnthropicToolSchemaContext
+): Schema.Json {
+  if (Array.isArray(value)) return value.map(item => normalizeAnthropicToolSchema(item, context))
 
   if (!isJsonObject(value)) return value
 
   const combinator = topLevelJsonSchemaCombinator(value)
 
-  if (combinator !== undefined) return normalizeJsonSchemaCombinator(value, combinator)
+  if (combinator !== undefined) return normalizeJsonSchemaCombinator(value, combinator, context)
 
-  return normalizeJsonSchemaObjectFields(value)
+  return normalizeJsonSchemaObjectFields(value, context)
 }
 
 const mergeJsonSchemaRequired = (
@@ -1182,11 +1337,22 @@ const flattenTopLevelCombinatorToolSchema = (
   const base = withoutTopLevelJsonSchemaCombinators(schema)
   const objectVariants = combinator.items.filter(isJsonObject)
 
+  const definitions = mergeJsonSchemaObjects([
+    jsonSchemaDefinitions(schema),
+    ...objectVariants.map(jsonSchemaDefinitions)
+  ])
+
+  const context: AnthropicToolSchemaContext = { definitions, inlining: new Set() }
+
   const hasUnconstrainedUnion =
     combinator.key !== 'allOf' &&
     combinator.items.some(item => item === true || !isJsonObject(item))
 
   const additionalProperties = mergeAdditionalProperties(objectVariants)
+
+  const required = hasUnconstrainedUnion
+    ? []
+    : mergeJsonSchemaRequired(combinator.key, objectVariants)
 
   const flattened = {
     ...base,
@@ -1194,13 +1360,27 @@ const flattenTopLevelCombinatorToolSchema = (
     properties: hasUnconstrainedUnion
       ? {}
       : combinator.key === 'allOf'
-        ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
-        : mergeUnionJsonSchemaObjects(objectVariants.map(jsonSchemaProperties), objectVariants),
-    required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),
-    $defs: mergeJsonSchemaObjects([
-      jsonSchemaDefinitions(schema),
-      ...objectVariants.map(jsonSchemaDefinitions)
-    ])
+        ? normalizeJsonSchemaProperties(
+            mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties)),
+            required,
+            context
+          )
+        : // Each variant's properties are normalized against its own
+          // `required` before merging, so a property optional in one variant
+          // (`Schema.optional(X)`, `anyOf: [X, marked null]`) and required in
+          // another (`X`) merges to `X`, not `{}`.
+          mergeUnionJsonSchemaObjects(
+            objectVariants.map(variant =>
+              normalizeJsonSchemaProperties(
+                jsonSchemaProperties(variant),
+                jsonSchemaRequired(variant),
+                context
+              )
+            ),
+            objectVariants
+          ),
+    required,
+    $defs: definitions
   }
 
   if (hasUnconstrainedUnion || additionalProperties === undefined) {
@@ -1225,14 +1405,22 @@ const anthropicToolInputSchema = (schema: Schema.Json): Schema.Json => {
   const combinator = topLevelJsonSchemaCombinator(schema)
 
   if (combinator !== undefined) {
-    return normalizeAnthropicToolSchema(flattenTopLevelCombinatorToolSchema(schema, combinator))
+    const flattened = flattenTopLevelCombinatorToolSchema(schema, combinator)
+
+    // Its properties are already normalized: normalizing them again would read
+    // them against the merged `required` instead of their own variant's.
+    return normalizeJsonSchemaObjectFields(flattened, anthropicToolSchemaContext(flattened), {
+      propertiesNormalized: true
+    })
   }
+
+  const context = anthropicToolSchemaContext(schema)
 
   if (jsonObjectField(schema, 'type') !== undefined) {
-    return normalizeAnthropicToolSchema(schema)
+    return normalizeAnthropicToolSchema(schema, context)
   }
 
-  return normalizeAnthropicToolSchema({ ...schema, type: 'object' })
+  return normalizeAnthropicToolSchema({ ...schema, type: 'object' }, context)
 }
 
 /** The block that replays a reasoning part, when `reasoningReplayProvider` produced it. */
@@ -1388,7 +1576,10 @@ const toAnthropicTool = (
     Effect.map(parameters => ({
       name: claudeCompatibility ? prefixClaudeToolName(tool.name) : tool.name,
       description: tool.description,
-      input_schema: claudeCompatibility ? anthropicToolInputSchema(parameters) : parameters
+      // Claude compatibility consumes the omitted-null marker; neither path sends it.
+      input_schema: withoutToolJsonSchemaOmittedNullMarker(
+        claudeCompatibility ? anthropicToolInputSchema(parameters) : parameters
+      )
     }))
   )
 
