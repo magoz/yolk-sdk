@@ -12,6 +12,7 @@ import {
   ToolDef,
   ToolResult,
   ToolResultMessage,
+  toolJsonSchemaOmittedNullComment,
   UserMessage,
   inlineBase64Source,
   urlAttachmentSource
@@ -1034,6 +1035,150 @@ describe('Anthropic Claude provider', () => {
           required: ['id']
         })
       })
+  )
+
+  it.effect('advertises named Schema.optional params with their type', () =>
+    Effect.gen(function* () {
+      const OptionalNote = Schema.optional(Schema.String).annotate({ identifier: 'OptionalNote' })
+
+      const [schema] = yield* claudeInputSchemas([
+        schemaTool('named_optional', Schema.Struct({ note: OptionalNote })).tool.def
+      ])
+
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { note: { type: 'string' } },
+        additionalProperties: false,
+        // The shared definition is not edited; on its own it stays widened.
+        $defs: { OptionalNote: {} }
+      })
+    })
+  )
+
+  it.effect('strips a shared marked definition only where the property is optional', () =>
+    Effect.gen(function* () {
+      const Note = Schema.UndefinedOr(Schema.String).annotate({ identifier: 'Note' })
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [effectSchema, sharedSchema] = yield* claudeInputSchemas([
+        schemaTool('effect_named', Schema.Struct({ a: Note, b: Schema.optionalKey(Note) })).tool
+          .def,
+        // One definition referenced from a required and an optional property.
+        ToolDef.make({
+          name: 'shared_named',
+          description: 'Shared definition.',
+          parameters: {
+            type: 'object',
+            properties: {
+              a: { $ref: '#/$defs/Note' },
+              b: { $ref: '#/$defs/Note', description: 'Optional note.' }
+            },
+            required: ['a'],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Required context untouched: still the `$ref`, to the definition widened as before.
+      expect(effectSchema).toEqual({
+        type: 'object',
+        properties: { a: { $ref: '#/$defs/Note' }, b: { type: 'string' } },
+        required: ['a'],
+        additionalProperties: false,
+        $defs: { Note: {}, Note_1: {} }
+      })
+      expect(sharedSchema).toEqual({
+        type: 'object',
+        properties: {
+          a: { $ref: '#/$defs/Note' },
+          b: { type: 'string', description: 'Optional note.' }
+        },
+        required: ['a'],
+        $defs: { Note: {} }
+      })
+    })
+  )
+
+  it.effect('inlines a recursive marked definition once per path', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [schema] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'linked',
+          description: 'Recursive optional definition.',
+          parameters: {
+            type: 'object',
+            properties: { head: { $ref: '#/$defs/Link' } },
+            $defs: {
+              Link: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: { value: { type: 'string' }, next: { $ref: '#/$defs/Link' } },
+                    required: ['value']
+                  },
+                  marked
+                ]
+              }
+            }
+          }
+        })
+      ])
+
+      expect(schema).toEqual({
+        type: 'object',
+        properties: {
+          head: {
+            type: 'object',
+            properties: { value: { type: 'string' }, next: { $ref: '#/$defs/Link' } },
+            required: ['value']
+          }
+        },
+        // The shared definition is not edited.
+        $defs: { Link: {} }
+      })
+    })
+  )
+
+  it.effect('keeps a root union property that one variant requires through a named schema', () =>
+    Effect.gen(function* () {
+      const marked = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+      const [schema] = yield* claudeInputSchemas([
+        ToolDef.make({
+          name: 'variant_named',
+          description: 'Root union with a required named property.',
+          parameters: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: { kind: { enum: ['a'] }, note: { $ref: '#/$defs/Note' } },
+                required: ['kind', 'note'],
+                additionalProperties: false
+              },
+              {
+                type: 'object',
+                properties: { kind: { enum: ['b'] } },
+                required: ['kind'],
+                additionalProperties: false
+              }
+            ],
+            $defs: { Note: { anyOf: [{ type: 'string' }, marked] } }
+          }
+        })
+      ])
+
+      // Variant `a` requires `note` (its `null` decodes as `undefined`): widened, never
+      // stripped to `string` although the merged `note` is optional.
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { kind: { enum: ['a', 'b'] }, note: {} },
+        required: ['kind'],
+        additionalProperties: false,
+        $defs: { Note: {} }
+      })
+    })
   )
 
   it.effect('passes null for Schema.optionalKey(Schema.NullOr(X)) through to the tool', () =>

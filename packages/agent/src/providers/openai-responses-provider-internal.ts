@@ -60,6 +60,7 @@ import {
 import { openAiCodexQuotaResetsAtMs } from './quota-reset-internal.ts'
 import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import { validateProviderTranscript } from './transcript.ts'
+import { withoutToolJsonSchemaOmittedNullMarker } from '../protocol/tool-json-schema-marker.ts'
 
 type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
 
@@ -619,7 +620,7 @@ const toOpenAiResponsesTool = (tool: ToolDef): Effect.Effect<OpenAiResponsesTool
       type: 'function',
       name: tool.name,
       description: tool.description,
-      parameters
+      parameters: withoutToolJsonSchemaOmittedNullMarker(parameters)
     }))
   )
 

@@ -371,8 +371,9 @@ add `u` to keep model-visible `pattern` hints.
 Tool arguments are accepted exactly as advertised: unambiguous `null`s are normalized, and keys
 that would be silently lost are rejected. `ToolDef.parameters` describes the schema's canonical JSON codec, so `Schema.optional(X)` is
 advertised as `X | null`; that codec-added `null` member carries
-`$comment: toolJsonSchemaOmittedNullComment`, which Claude compatibility uses to advertise such
-fields as `X` while unmarked (meaningful) nulls stay as they are. `makeTool` (validate and execute), `makeInputTool`/`makeInteractionTool`
+`$comment: toolJsonSchemaOmittedNullComment` (stable value), which Claude compatibility uses to
+advertise such fields as `X` while unmarked (meaningful) nulls stay as they are; other provider
+adapters remove the marker before sending. `makeTool` (validate and execute), `makeInputTool`/`makeInteractionTool`
 call params, and the loop `question` decode model arguments with `Schema.toCodecJson(parameters)`:
 `null` on `Schema.optional(X)` decodes as absent and `withDecodingDefault` still applies,
 `Schema.optional(Schema.NullOr(X))` keeps `null`, and required non-nullable fields still reject it.

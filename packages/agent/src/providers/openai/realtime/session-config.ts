@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { providerToolDefs, type ToolDef } from '@yolk-sdk/agent/protocol'
 import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
 import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
+import { withoutToolJsonSchemaOmittedNullMarker } from '../../../protocol/tool-json-schema-marker.ts'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
 
@@ -272,7 +273,7 @@ const realtimeToolResult = (
         type: 'function',
         name: tool.name,
         description: tool.description,
-        parameters: openAiRealtimeToolParameters(parameters)
+        parameters: openAiRealtimeToolParameters(withoutToolJsonSchemaOmittedNullMarker(parameters))
       })
   })
 }

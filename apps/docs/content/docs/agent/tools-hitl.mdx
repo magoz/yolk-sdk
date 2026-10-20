@@ -52,10 +52,13 @@ arguments decode through `Schema.toCodecJson(parameters)`:
 - `Schema.optional(Schema.NullOr(X))` keeps `null`; use it only when `null` means something
   different from omission, such as clearing a value.
 - The `null` member advertised for `Schema.optional(X)` carries
-  `$comment: toolJsonSchemaOmittedNullComment` (from `@yolk-sdk/agent/protocol`), a standard
-  annotation validators ignore. It tells providers that this `null` means "not sent", unlike the
-  identical-looking `null` of `Schema.optionalKey(Schema.NullOr(X))` or a raw MCP schema. The Claude
-  provider uses it to show such fields to the model as `X`; other `null`s keep their meaning.
+  `$comment: toolJsonSchemaOmittedNullComment` (`'yolk:null-means-omitted'`, a stable value from
+  `@yolk-sdk/agent/protocol`), a standard annotation validators ignore. It marks this `null` as
+  "not sent", unlike the identical-looking `null` of `Schema.optionalKey(Schema.NullOr(X))` or a
+  third-party MCP schema. The Claude provider uses it to show such fields to the model as `X`
+  (named optional schemas included); other `null`s keep their meaning. The other providers
+  receive the schema without the marker. Tools served by the `@yolk-sdk/mcp` server keep it in
+  their listing.
 - Required non-nullable fields still reject `null` with a model-visible validation error.
 - Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected.
 - Unknown keys are rejected at any depth with a model-visible validation error. Parameters are
