@@ -182,6 +182,9 @@ interface NestedToolExecutor {
   readonly tools: ReadonlyArray<{ readonly def: ToolDef; readonly moduleId: string }>
   /** Runs through ResolvedToolSet.execute with the same host context. */
   readonly execute: (call: ToolCall) => Effect<ToolResult>
+  /** A call's effective access (`read` for a read-only call of a `write` tool, `isReadCall`);
+   * `undefined` for tools `execute` would refuse. Recorded on `NestedToolCallRecord.access`. */
+  readonly access: (call: ToolCall) => Effect<ToolAccess | undefined>
 }
 ```
 
@@ -300,8 +303,9 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   registration path, so neither can bypass it. Interaction and input tools keep their own HITL
   receipts. Keys are `call.id` and, for nested calls, `<parentCallId>/<seq>` with the parent as
   `parentKey`. Default policy: every non-`read` tool plus the built-in `subagent` tool (`read`,
-  but its child run would repeat its writes and its child calls get fresh ids); hosts override it
-  with `isLedgered` and must add their own delegation tools there.
+  but its child run would repeat its writes and its child calls get fresh ids), except calls a
+  registration's `isReadCall` marks as read-only (a crashed read stays retryable; policy input
+  `readCall`); hosts override it with `isLedgered` and must add their own delegation tools there.
 - **Semantics**: `Fresh` runs the call, heartbeats the lease, and completes with the outcome.
   `Completed` returns the stored result (or fails with the stored `ToolError`) without executing.
   `InFlight` waits (Effect `Clock`) until completed or abandoned, or until `maxWaitMs`/`deadline`,

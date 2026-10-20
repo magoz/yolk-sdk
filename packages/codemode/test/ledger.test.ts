@@ -446,6 +446,33 @@ describe('code mode with a tool ledger', () => {
     })
   )
 
+  it.effect('records the access of a nested call the host rejects before execution', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const { executor } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 'read:deal' }).catch(() => undefined)
+        await call('sales_manage', { note: 'update' }).catch(() => undefined)
+
+        return { ok: true }
+      })
+
+      const result = yield* runLedgered(
+        codeModeModules(executor, [salesManage(log, { readNotes: true })], {
+          beforeNestedCall: () => Effect.fail('not allowed here')
+        }),
+        { store }
+      )
+
+      expect(log).toEqual([])
+      expect(result.nestedCalls?.calls.map(call => [call.access, call.status])).toEqual([
+        ['read', 'error'],
+        ['write', 'error']
+      ])
+    })
+  )
+
   it.effect('returns the stored result of a completed script without running it', () =>
     Effect.gen(function* () {
       const log: WriteLog = []

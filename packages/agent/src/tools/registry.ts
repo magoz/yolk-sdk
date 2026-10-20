@@ -353,8 +353,11 @@ export type ToolRegistration<Context> = {
   /** For a tool whose `access` is not `read` but that also has read-only calls (for example one
    * tool with list and update operations): whether this call only reads, so re-running it is
    * safe. The call's effective access is then `read`: `defaultToolLedgerPolicy` does not ledger it
-   * and code mode records it as `read`. Sees the raw call (arguments not yet validated); must not
-   * fail, and answers `false` when unsure. `makeTool` builds it from its typed `isReadCall`.
+   * and code mode records it as `read`. Sees the call as the handler would (strict-mode `null`s on
+   * optional properties omitted, arguments not yet validated); must be pure and deterministic, must
+   * not fail, and answers `false` when unsure. Applied plan calls and background activations (an
+   * execution envelope, not the tool's arguments) keep the registration's access. `makeTool`
+   * builds it from its typed `isReadCall`.
    */
   readonly isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
 }
@@ -1797,6 +1800,15 @@ export const resolveTools = <Context>(
     const businessCallFor = (def: ToolDef, call: ToolCall) =>
       Effect.sync(() => omitNullOptionalToolCallArguments(def.parameters, call))
 
+    // Classify the call the handler will see: strict-mode `null`s omitted, as execution does.
+    const effectiveCallAccess = (registration: ToolRegistration<Context>, call: ToolCall) =>
+      registration.access === 'read' || registration.isReadCall === undefined
+        ? Effect.succeed(registration.access)
+        : businessCallFor(registration.def, call).pipe(
+            Effect.flatMap(normalized => toolCallAccess(registration, normalized)),
+            Effect.catchDefect(() => Effect.succeed(registration.access))
+          )
+
     const inputs: Record<string, ResolvedInputTool> = Object.fromEntries(
       resolved.flatMap(({ tool }) =>
         tool.def.input !== undefined && tool.input !== undefined
@@ -1907,7 +1919,9 @@ export const resolveTools = <Context>(
                 Arr.findFirst(stageableRegistrations, item => item.tool === registration),
                 {
                   onNone: () => Effect.fail(missingToolError(call.name)),
-                  onSome: match => executeRegistration(match, call, undefined, parentCallId)
+                  // Applied plan calls are reviewed writes: they keep their tool's access.
+                  onSome: match =>
+                    executeRegistration(match, call, undefined, parentCallId, { staged: true })
                 }
               ),
             ledgered:
@@ -2045,7 +2059,8 @@ export const resolveTools = <Context>(
       match: ResolvedRegistration<Context>,
       call: ToolCall,
       executionOptions?: ToolExecutionOptions,
-      parentCallId?: string
+      parentCallId?: string,
+      dispatch: { readonly staged?: true } = {}
     ): Effect.Effect<ToolResult, ToolError> => {
       if (match.tool.def.input !== undefined) {
         return Effect.fail(
@@ -2073,7 +2088,12 @@ export const resolveTools = <Context>(
 
       const idempotencyKey = toolIdempotencyKey(ledger.store.scope, call.id)
 
-      return Effect.flatMap(toolCallAccess(match.tool, call), callAccess => {
+      const access =
+        dispatch.staged === true
+          ? Effect.succeed(match.tool.access)
+          : effectiveCallAccess(match.tool, call)
+
+      return Effect.flatMap(access, callAccess => {
         const policyInput: ToolLedgerPolicyInputFields = {
           call,
           moduleId: match.moduleId,
@@ -2183,7 +2203,7 @@ export const resolveTools = <Context>(
             Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
             {
               onNone: () => Effect.succeed(undefined),
-              onSome: match => toolCallAccess(match.tool, call)
+              onSome: match => effectiveCallAccess(match.tool, call)
             }
           )
       }

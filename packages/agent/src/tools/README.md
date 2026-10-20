@@ -190,7 +190,9 @@ const resolveStepTools = Effect.gen(function* () {
   do not decode are not reads). Those calls have effective access `read` (`toolCallAccess`): the
   policy input carries `readCall: true`, `defaultToolLedgerPolicy` does not ledger them (a crashed
   read stays retryable instead of being refused as possibly applied), and code mode records their
-  `NestedToolCallRecord.access` as `read`. Staged plan calls keep their tool's access.
+  `NestedToolCallRecord.access` as `read`. It sees the call as the handler does (strict-mode
+  `null`s on optional fields omitted) and must be pure. Applied plan calls and background
+  activations keep their tool's access.
 - Override the policy with `isLedgered` (add your own delegation tools, for example
   `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing with
   `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin, not a

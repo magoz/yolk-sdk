@@ -17,6 +17,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   ImagePart,
   inlineBase64AttachmentSource,
+  NestedToolCallAccess,
   NestedToolCallRecord,
   NestedToolCalls,
   TextPart,
@@ -29,6 +30,7 @@ import {
   makeInMemoryToolLedgerStore,
   makeTool,
   resolveTools,
+  ToolAccess,
   toolCallAccess,
   toolIdempotencyKey,
   toolLedgerCompleteTimeoutMs,
@@ -47,12 +49,13 @@ import {
   type ToolModule,
   type ToolRegistration
 } from '../../src/tools'
+import type { MakeToolOptions } from '../../src/tools/registry.ts'
 
 type TestContext = { readonly tenant: string }
 
 const context: TestContext = { tenant: 'tenant_1' }
 
-const NoteParams = Schema.Struct({ note: Schema.String })
+const NoteParams = Schema.Struct({ note: Schema.String, tag: Schema.optionalKey(Schema.String) })
 
 type Probe = {
   readonly runs: Array<string>
@@ -61,22 +64,20 @@ type Probe = {
 
 const makeProbe = (): Probe => ({ runs: [], keys: [] })
 
-const noteTool = (
-  probe: Probe,
-  options: {
-    readonly name?: string
-    readonly access?: 'read' | 'write' | 'destructive'
-    readonly sleep?: Duration.Input
-    readonly fail?: boolean
-    readonly isReadCall?: (params: typeof NoteParams.Type) => boolean
-  } = {}
-): ToolRegistration<TestContext> =>
-  makeTool<TestContext, typeof NoteParams>({
+type NoteToolOptions = {
+  readonly name?: string
+  readonly access?: 'read' | 'write' | 'destructive'
+  readonly sleep?: Duration.Input
+  readonly fail?: boolean
+  readonly isReadCall?: (params: typeof NoteParams.Type) => boolean
+}
+
+const noteOptions = (probe: Probe, options: NoteToolOptions) =>
+  ({
     name: options.name ?? 'append_note',
     description: 'Append a note',
     parameters: NoteParams,
     access: options.access ?? 'write',
-    isReadCall: params => options.isReadCall?.(params) ?? false,
     execute: ({ call, params, idempotencyKey }) =>
       Effect.gen(function* () {
         probe.runs.push(params.note)
@@ -96,7 +97,15 @@ const noteTool = (
           structuredContent: { run: probe.runs.length }
         })
       })
-  })
+  }) satisfies MakeToolOptions<TestContext, typeof NoteParams>
+
+const noteTool = (probe: Probe, options: NoteToolOptions = {}): ToolRegistration<TestContext> => {
+  const isReadCall = options.isReadCall
+
+  return isReadCall === undefined
+    ? makeTool<TestContext, typeof NoteParams>(noteOptions(probe, options))
+    : makeTool<TestContext, typeof NoteParams>({ ...noteOptions(probe, options), isReadCall })
+}
 
 const modules = (
   tools: ReadonlyArray<ToolRegistration<TestContext>>
@@ -613,6 +622,27 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect(
+    'classifies the call the handler sees: strict-mode nulls on optional fields omitted',
+    () =>
+      Effect.gen(function* () {
+        const probe = makeProbe()
+        const store = makeInMemoryToolLedgerStore()
+        const tools = [noteTool(probe, { isReadCall: params => params.note.startsWith('read:') })]
+
+        const call = ToolCall.make({
+          id: 'call_1',
+          name: 'append_note',
+          params: { note: 'read:list', tag: null }
+        })
+
+        const result = yield* execute(tools, call, { store })
+
+        expect(result.isError).toBeUndefined()
+        expect(yield* store.entries).toEqual([])
+      })
+  )
+
   it.effect('ledgers a call whose arguments do not decode or whose isReadCall dies', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
@@ -648,6 +678,7 @@ describe('tool ledger', () => {
       expect(yield* toolCallAccess(tool, noteCall('call_1', 'update'))).toBe('write')
       expect(yield* toolCallAccess(noteTool(probe), noteCall('call_1', 'read:list'))).toBe('write')
       expect(yield* toolCallAccess(noteTool(probe, { access: 'read' }), noteCall())).toBe('read')
+      expect(NestedToolCallAccess.literals).toEqual(ToolAccess.literals)
       expect(probe.runs).toEqual([])
     })
   )
