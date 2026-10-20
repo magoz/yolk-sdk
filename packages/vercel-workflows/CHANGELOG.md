@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.117
+
+### Patch Changes
+
+- 47827d8: Advance unchanged public packages in lockstep with the `@yolk-sdk/connectors` fix for email attachments above ~3 MB (the attachment base64 is no longer pattern-checked) and the one-copy byte decoding and new `base64ToBytes` in `@yolk-sdk/agent`. These packages have no direct implementation changes in this release; keep all `@yolk-sdk/*` dependencies on the same canary version.
+
 ## 0.1.0-canary.116
 
 ### Patch Changes
