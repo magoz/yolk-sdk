@@ -1110,8 +1110,8 @@ Use `outlook.list_attachments` with a message ID to return an Effect `Chunk` of 
 item, reference, and inline attachments. It accepts `top` and returns an opaque `nextLink`; pass that link back unchanged
 with the same `messageId` and `mailbox`. Listing selects base attachment properties only, so do not
 expect `contentId` there; fetch the individual file attachment for `cid:` mapping. Pass a returned file attachment ID to
-`outlook.get_attachment`; it requires a Graph file attachment with valid base64 `contentBytes` and
-returns those bytes as required `contentBase64`. Item and reference attachments remain available only
+`outlook.get_attachment`; it requires a Graph file attachment with string `contentBytes` (not checked as base64: whoever
+decodes it validates it) and returns those bytes as required `contentBase64`. Item and reference attachments remain available only
 as list metadata and are rejected by this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning. As an agent tool `outlook.get_attachment`
@@ -1776,7 +1776,7 @@ state rather than dropping conditions or silently changing modes.
   `NotionFileDownloadPolicy` requires `allowHostedUrl`; external files additionally require
   `allowExternalUrl`. Never forward Notion credentials. Refresh expired grants by rereading the owning
   object; `file_upload.id` is not a download URL. No arbitrary authenticated URL-fetch API is added.
-- Gmail `{ messageId, attachmentId }` decodes canonical base64url internally, validates decoded size
+- Gmail `{ messageId, attachmentId }` decodes base64url internally, validates decoded size
   and budgets (including JSON expansion). Inline parts without attachment IDs are not modeled.
   Outlook adds optional `mailbox`, checks the file discriminator and uses raw `/$value`; item/reference
   attachments fail. Existing shared/application-mailbox and immutable-ID guards remain. Graph's

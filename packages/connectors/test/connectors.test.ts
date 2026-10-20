@@ -4127,7 +4127,7 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('returns multi-megabyte Gmail attachments (no full-string base64 regex)', () =>
     Effect.gen(function* () {
-      // ~7.7M base64url characters: the old pattern check threw RangeError (~3.7–4.4M and up).
+      // ~7.7M base64url characters: the old pattern check overflowed V8's regexp stack.
       const bytes = new Uint8Array(5_772_984).map((_, index) => index & 255)
       const data = Buffer.from(bytes).toString('base64url')
 
