@@ -114,7 +114,7 @@ Fix:
 
 - If the package does not exist yet, first publish only that package locally from a packed tarball with interactive npm auth/OTP.
 - Then configure trusted publishing: `npm trust github @yolk-sdk/<name> --repo magoz/yolk-sdk --file publish.yml --allow-publish`.
-- Treat earlier `+ @yolk-sdk/*@version` lines as published; do not rerun the same version outside the workflow retry.
+- Treat earlier `+ @yolk-sdk/*@version` lines as published (confirm with `npm view <pkg>@<version>`); do not rerun the same version outside the workflow retry.
 - Rerun the same workflow; it skips already-published tarballs and creates the missing tag.
 - If retry guard is unavailable, bump all public packages to the next canary first.
 
@@ -140,6 +140,28 @@ npm trust github @yolk-sdk/<name> \
 - Example: `npm trust github @yolk-sdk/sandbox --repo magoz/yolk-sdk --file publish.yml --allow-publish --yes`.
 - Rerun the same workflow; already-published tarballs are skipped.
 - Verify all dist-tags and `v<version>` after rerun.
+
+## Version stuck as "previously staged"
+
+Symptom: the workflow publishes some packages, then a rerun fails with `npm error 409 Conflict ...
+Cannot publish over previously staged version "<version>"`, although that version is 404 on the
+registry and absent from `npm stage list`. Seen with `@yolk-sdk/extractors@0.1.0-canary.117`,
+whose first attempt printed `+ @yolk-sdk/extractors@0.1.0-canary.117` but never appeared.
+
+Observed: retries of the same version keep failing; the root cause (npm holding the version
+server-side) is not established.
+
+Fix:
+
+- Do not keep rerunning the same version (the retry guidance above does not apply).
+- Bump all public packages to the next canary: add `.changeset/canary-<n>-lockstep.md` (all public
+  packages, `patch`) saying it republishes the partial version unchanged, land it on `main`, then
+  run the usual release prep and dispatch `publish.yml`.
+- After the new version is verified, move `latest` to it and optionally
+  `npm deprecate @yolk-sdk/<name>@<partial version> "<message pointing to the new version>"` for
+  each package that did publish at the partial version.
+- If the new version gets stuck the same way, stop and check the package's settings and the npm
+  account's email before bumping again.
 
 ## Release prep includes unrelated files
 
