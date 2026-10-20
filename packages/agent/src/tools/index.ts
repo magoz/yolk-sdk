@@ -12,6 +12,7 @@ export {
   ModelVisibleToolErrorStructuredContentSchema,
   resolveTools,
   ToolAccess,
+  toolCallAccess,
   ToolRegistryError,
   toolJsonSchemaFromSchema
 } from './registry.ts'

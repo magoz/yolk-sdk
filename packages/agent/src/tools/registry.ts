@@ -75,7 +75,8 @@ import {
   resolveToolLedgerOptions,
   toolIdempotencyKey,
   type ToolLedgerAbandonedInput,
-  type ToolLedgerOptions
+  type ToolLedgerOptions,
+  type ToolLedgerPolicyInputFields
 } from './ledger.ts'
 import {
   defaultToolPlanMaxArgsBytes,
@@ -227,6 +228,11 @@ export type NestedToolExecutor = {
    * `ResolvedToolSet.execute` (for example a wrapped ToolExecutor) do not see nested calls.
    */
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult>
+  /** A nested call's effective access (`toolCallAccess`): `read` for a read-only call of a
+   * non-`read` tool. `undefined` for tools `execute` would refuse (unknown or not code mode
+   * callable). Never fails; callers record it (code mode's `NestedToolCallRecord.access`).
+   */
+  readonly access: (call: ToolCall) => Effect.Effect<ToolAccess | undefined>
   /** Staged tool plans (ADR 0005), bound to this call: present only when the resolution has
    * `plans`, an `interactionHost`, and one plan review registration.
    */
@@ -242,6 +248,7 @@ export type NestedToolStagingDescription = {
 type NestedToolExecutorFields = {
   tools: NestedToolExecutor['tools']
   execute: NestedToolExecutor['execute']
+  access: NestedToolExecutor['access']
   staging?: ToolPlanStaging
 }
 
@@ -343,6 +350,13 @@ export type ToolRegistration<Context> = {
    * ledger entries. The call is never executed again either way.
    */
   readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
+  /** For a tool whose `access` is not `read` but that also has read-only calls (for example one
+   * tool with list and update operations): whether this call only reads, so re-running it is
+   * safe. The call's effective access is then `read`: `defaultToolLedgerPolicy` does not ledger it
+   * and code mode records it as `read`. Sees the raw call (arguments not yet validated); must not
+   * fail, and answers `false` when unsure. `makeTool` builds it from its typed `isReadCall`.
+   */
+  readonly isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
 }
 
 /** Server-owned per-action handlers for one interaction registration. `validate`
@@ -452,6 +466,10 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly instruct?: NestedToolInstructor
   /** See `ToolRegistration.abandonedResult`. */
   readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
+  /** For a non-`read` tool, whether a call only reads (see `ToolRegistration.isReadCall`), over
+   * the decoded arguments. Arguments that do not decode are not a read.
+   */
+  readonly isReadCall?: (params: ParamsSchema['Type']) => boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
   readonly execute: (
@@ -735,6 +753,7 @@ type MakeToolRegistrationFields<Context> = {
   describe?: NestedToolDescriber
   instruct?: NestedToolInstructor
   abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
+  isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
   staging?: ToolStagingHandlers<Context>
   changePreview?: ToolChangePreviewHandler<Context>
 }
@@ -779,6 +798,27 @@ const stagingHandlers = <Context, Params>(
   }
 
   return handlers
+}
+
+/**
+ * A call's effective access: `read` when its registration's `isReadCall` says the call only reads,
+ * the registration's `access` otherwise. Never fails: an `isReadCall` that fails or dies answers
+ * "not a read".
+ */
+export const toolCallAccess = <Context>(
+  registration: ToolRegistration<Context>,
+  call: ToolCall
+): Effect.Effect<ToolAccess> => {
+  const isReadCall = registration.isReadCall
+
+  if (registration.access === 'read' || isReadCall === undefined) {
+    return Effect.succeed(registration.access)
+  }
+
+  return Effect.suspend(() => isReadCall(call)).pipe(
+    Effect.catchDefect(() => Effect.succeed(false)),
+    Effect.map((read): ToolAccess => (read ? 'read' : registration.access))
+  )
 }
 
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
@@ -865,6 +905,16 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
 
   if (options.abandonedResult !== undefined) {
     registration.abandonedResult = options.abandonedResult
+  }
+
+  const isReadCall = options.isReadCall
+
+  if (isReadCall !== undefined) {
+    registration.isReadCall = call =>
+      decodeParams(call.params).pipe(
+        Effect.map(params => isReadCall(params)),
+        Effect.orElseSucceed(() => false)
+      )
   }
 
   const tails: Pick<
@@ -2023,20 +2073,28 @@ export const resolveTools = <Context>(
 
       const idempotencyKey = toolIdempotencyKey(ledger.store.scope, call.id)
 
-      const policyInput =
-        parentCallId === undefined
-          ? { call, moduleId: match.moduleId, access: match.tool.access }
-          : { call, moduleId: match.moduleId, access: match.tool.access, parentCallId }
+      return Effect.flatMap(toolCallAccess(match.tool, call), callAccess => {
+        const policyInput: ToolLedgerPolicyInputFields = {
+          call,
+          moduleId: match.moduleId,
+          access: match.tool.access,
+          readCall: callAccess === 'read'
+        }
 
-      return ledger.isLedgered(policyInput)
-        ? executeLedgered({
-            options: ledger,
-            call,
-            parentKey: parentCallId,
-            execute: runRegistration(match, call, idempotencyKey),
-            abandonedResult: match.tool.abandonedResult
-          })
-        : runRegistration(match, call, idempotencyKey)
+        if (parentCallId !== undefined) {
+          policyInput.parentCallId = parentCallId
+        }
+
+        return ledger.isLedgered(policyInput)
+          ? executeLedgered({
+              options: ledger,
+              call,
+              parentKey: parentCallId,
+              execute: runRegistration(match, call, idempotencyKey),
+              abandonedResult: match.tool.abandonedResult
+            })
+          : runRegistration(match, call, idempotencyKey)
+      })
     }
 
     // Every registration result passes file capture before the ledger, transcript or scripts.
@@ -2119,7 +2177,15 @@ export const resolveTools = <Context>(
     const nestedFor = (parent: ToolCall): NestedToolExecutor => {
       const executor: NestedToolExecutorFields = {
         tools: nestedTools,
-        execute: nestedExecute(parent)
+        execute: nestedExecute(parent),
+        access: call =>
+          Option.match(
+            Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
+            {
+              onNone: () => Effect.succeed(undefined),
+              onSome: match => toolCallAccess(match.tool, call)
+            }
+          )
       }
 
       if (planResolution !== undefined)

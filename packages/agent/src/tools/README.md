@@ -185,6 +185,12 @@ const resolveStepTools = Effect.gen(function* () {
 - One clock per store: `claim` and `heartbeat` get the lease length `leaseMs` (stores on their own
   clock, such as a database `now()`, which avoids skew between instances) and the caller's
   `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
+- A non-`read` tool with read-only calls (for example list operations of a `write` tool) declares
+  them with `makeTool({ isReadCall: params => ... })` over the decoded arguments (arguments that
+  do not decode are not reads). Those calls have effective access `read` (`toolCallAccess`): the
+  policy input carries `readCall: true`, `defaultToolLedgerPolicy` does not ledger them (a crashed
+  read stays retryable instead of being refused as possibly applied), and code mode records their
+  `NestedToolCallRecord.access` as `read`. Staged plan calls keep their tool's access.
 - Override the policy with `isLedgered` (add your own delegation tools, for example
   `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing with
   `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin, not a

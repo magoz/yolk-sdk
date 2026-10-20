@@ -188,19 +188,36 @@ export const classifyToolLedgerEntry = (entry: ToolLedgerEntry, nowMs: number): 
 export type ToolLedgerPolicyInput = {
   readonly call: ToolCall
   readonly moduleId: string
+  /** The registration's access. */
   readonly access: ToolAccess
+  /** Whether this call only reads: its effective access (`toolCallAccess`) is `read`, for
+   * example a list operation of a `write` tool with `isReadCall`. Set by `resolveTools`; absent
+   * means not known to be a read.
+   */
+  readonly readCall?: boolean
   readonly parentCallId?: string
 }
 
+/** Mutable construction fields of `ToolLedgerPolicyInput`. */
+export type ToolLedgerPolicyInputFields = {
+  call: ToolCall
+  moduleId: string
+  access: ToolAccess
+  readCall?: boolean
+  parentCallId?: string
+}
+
 /**
- * Default policy: every tool whose access is not `read`, plus the built-in `subagent` tool. A
- * subagent call is `read` but runs a whole child run whose tool calls get fresh ids, so only
- * ledgering the call itself keeps a re-executed step from running the child (and its writes)
- * again. Hosts with their own delegation tools add them through `isLedgered`, for example
- * `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`.
+ * Default policy: every call that does not only read (its tool's access is not `read` and it is
+ * not a `readCall`), plus the built-in `subagent` tool. A read-only call is safe to re-run, while a
+ * ledgered one that crashed before recording its outcome would be refused on every retry as
+ * possibly applied. A subagent call is `read` but runs a whole child run whose tool calls get
+ * fresh ids, so only ledgering the call itself keeps a re-executed step from running the child
+ * (and its writes) again. Hosts with their own delegation tools add them through `isLedgered`,
+ * for example `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`.
  */
 export const defaultToolLedgerPolicy = (input: ToolLedgerPolicyInput) =>
-  input.access !== 'read' || input.call.name === subagentToolName
+  (input.access !== 'read' && input.readCall !== true) || input.call.name === subagentToolName
 
 /** What an abandoned call's registration sees to build its result (see `abandonedResult`). */
 export type ToolLedgerAbandonedInput = {

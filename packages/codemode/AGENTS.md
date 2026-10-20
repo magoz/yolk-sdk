@@ -62,7 +62,7 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
   helpers (`truncateCodePoints`, `boundNestedToolCallArgs`), never local copies.
 - Record every executed nested call with `recordNestedToolCall` over
   `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
-  dropped entries); calls still running when the script ends are interrupted (`FiberSet.clear`) and
+  dropped entries), with its effective `access` from `nested.access` (hosts audit writes by it); calls still running when the script ends are interrupted (`FiberSet.clear`) and
   recorded `cancelled`. Never store nested results.
 - `afterNestedCall` wraps only `nested.execute` (not `beforeNestedCall` rejections) in `onExit`:
   outcome `success` (no `isError`), `failure` (error result or non-interrupt failure), or

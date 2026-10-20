@@ -39,9 +39,16 @@ export const NestedToolCallStatus = Schema.Literals(['ok', 'error', 'cancelled']
 
 export type NestedToolCallStatus = typeof NestedToolCallStatus.Type
 
+/** A nested call's effective access, the `ToolAccess` literals (`toolCallAccess`). */
+export const NestedToolCallAccess = Schema.Literals(['read', 'write', 'destructive'])
+
+export type NestedToolCallAccess = typeof NestedToolCallAccess.Type
+
 /** One nested tool call made by a tool on behalf of the model (for example a code mode script).
  * Host/UI audit data only: never model-visible and never the nested result itself.
  * `args` is compact JSON, cut to the byte bounds with a trailing `…` (then no longer JSON).
+ * `access` is the call's effective access (`read` for a read-only call of a `write` tool); absent
+ * on records written before it existed and for tools the caller could not resolve.
  */
 export class NestedToolCallRecord extends Schema.Class<NestedToolCallRecord>(
   'NestedToolCallRecord'
@@ -50,6 +57,7 @@ export class NestedToolCallRecord extends Schema.Class<NestedToolCallRecord>(
   name: NonEmptyTrimmedString,
   args: Schema.String,
   status: NestedToolCallStatus,
+  access: Schema.optional(NestedToolCallAccess),
   durationMs: Schema.optional(Schema.Number),
   error: Schema.optional(Schema.String),
   usage: Schema.optional(AgentUsage)
@@ -81,6 +89,8 @@ export type NestedToolCallInput = {
   /** Raw call arguments; recorded as compact JSON within the byte bounds. */
   readonly args: unknown
   readonly status: NestedToolCallStatus
+  /** The call's effective access (`NestedToolExecutor.access`); omit when unknown. */
+  readonly access?: NestedToolCallAccess
   readonly durationMs?: number
   readonly error?: string
   readonly usage?: AgentUsage
@@ -155,6 +165,7 @@ type NestedToolCallRecordFields = {
   name: string
   args: string
   status: NestedToolCallStatus
+  access?: NestedToolCallAccess
   durationMs?: number
   error?: string
   usage?: AgentUsage
@@ -219,6 +230,10 @@ export const recordNestedToolCall = (
     name: input.name,
     args,
     status: input.status
+  }
+
+  if (input.access !== undefined) {
+    fields.access = input.access
   }
 
   if (input.durationMs !== undefined) {

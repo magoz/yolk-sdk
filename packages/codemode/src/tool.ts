@@ -27,6 +27,7 @@ import {
   ToolResult,
   type AgentUsage,
   type Content,
+  type NestedToolCallAccess,
   type NestedToolCallInput,
   type NestedToolCallStatus
 } from '@yolk-sdk/agent/protocol'
@@ -256,10 +257,22 @@ type CallOutcome = {
   usage?: AgentUsage
 }
 
+type RecordedCallFields = {
+  id: string
+  name: string
+  args: unknown
+  status: NestedToolCallStatus
+  access?: NestedToolCallAccess
+  durationMs?: number
+  error?: string
+  usage?: AgentUsage
+}
+
 type CallRecord = {
   readonly name: string
   readonly args: unknown
   readonly id: string
+  access?: NestedToolCallAccess
   outcome?: CallOutcome
 }
 
@@ -618,6 +631,10 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     )
 
               const execution = Effect.gen(function* () {
+                const access = yield* nested.access(nestedCall)
+
+                if (access !== undefined) record.access = access
+
                 const started = yield* Clock.currentTimeMillis
 
                 return yield* admitted.pipe(
@@ -757,13 +774,19 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     ? undefined
                     : planNotice(savedPlan)
 
-          const recorded = records.map((record): NestedToolCallInput => ({
-            id: record.id,
-            name: record.name,
-            args: record.args,
-            // A call interrupted before it started has no outcome.
-            ...(record.outcome ?? { status: 'cancelled' })
-          }))
+          const recorded = records.map((record): NestedToolCallInput => {
+            const fields: RecordedCallFields = {
+              id: record.id,
+              name: record.name,
+              args: record.args,
+              // A call interrupted before it started has no outcome.
+              ...(record.outcome ?? { status: 'cancelled' })
+            }
+
+            if (record.access !== undefined) fields.access = record.access
+
+            return fields
+          })
 
           const recorder = recorded.reduce(
             recordNestedToolCall,
