@@ -133,7 +133,7 @@ describe('host-only mail bytes', () => {
       }
     })
   )
-  it.effect('Gmail decodes a multi-megabyte attachment without a regex or per-byte list', () =>
+  it.effect('Gmail decodes an 8 MiB attachment byte for byte', () =>
     Effect.gen(function* () {
       const large = new Uint8Array(8 * 1024 * 1024).map((_, index) => index & 255)
       const data = Buffer.from(large).toString('base64url')
@@ -153,6 +153,10 @@ describe('host-only mail bytes', () => {
     Effect.gen(function* () {
       for (const body of [
         { data: 'AA=', size: 1 },
+        { data: 'AA===', size: 1 },
+        { data: 'AAAA=', size: 3 },
+        { data: '=', size: 0 },
+        { data: 'A=A=', size: 1 },
         { data: 'A', size: 1 },
         { data: 'AA\n', size: 1 },
         { data: 'AA', size: 2 },

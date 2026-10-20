@@ -61,7 +61,7 @@ export const downloadGmailAttachment = (
     if (body.size > limits.maxBytes || decodedLength > limits.maxBytes)
       return yield* failTransfer('response_too_large')
 
-    // Gmail's reported size is the integrity check; atob rejects anything not base64.
+    // The reported size must match the decoded length; atob rejects anything not base64.
     if (decodedLength !== body.size) return yield* failTransfer('invalid_metadata')
 
     const binary = yield* Effect.try({

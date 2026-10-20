@@ -134,7 +134,7 @@ export class EmailAttachmentMetadata extends Schema.Class<EmailAttachmentMetadat
 
 /**
  * Attachment bytes as standard base64, unchecked: whoever decodes them validates them (a
- * full-string base64 regex overflows V8's regexp stack past ~4.4M characters, ~3.3 MB decoded).
+ * full-string base64 regex overflows V8 on large attachments; see connectors AGENTS.md).
  */
 export const EmailAttachmentBase64 = Schema.String
 

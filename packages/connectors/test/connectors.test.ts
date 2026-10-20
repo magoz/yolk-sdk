@@ -2526,6 +2526,51 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
+  it.effect('returns multi-megabyte Outlook attachments (no full-string base64 regex)', () =>
+    Effect.gen(function* () {
+      const contentBytes = Buffer.alloc(5_772_984, 7).toString('base64')
+
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(
+            JSON.stringify({
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              id: 'file_1',
+              name: 'factsheet.docx',
+              contentBytes
+            })
+          )
+        ]
+      )
+
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+
+      const result = yield* outlookGetAttachmentAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message_1', attachmentId: 'file_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject(
+        ActionResult.success({ attachment: { id: 'file_1', contentBase64: contentBytes } })
+      )
+    })
+  )
+
   it.effect('rejects non-file Outlook attachments and missing content', () =>
     Effect.gen(function* () {
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(
@@ -4082,7 +4127,7 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('returns multi-megabyte Gmail attachments (no full-string base64 regex)', () =>
     Effect.gen(function* () {
-      // ~7.7M base64url characters: the old pattern check threw RangeError past ~4.4M.
+      // ~7.7M base64url characters: the old pattern check threw RangeError (~3.7–4.4M and up).
       const bytes = new Uint8Array(5_772_984).map((_, index) => index & 255)
       const data = Buffer.from(bytes).toString('base64url')
 

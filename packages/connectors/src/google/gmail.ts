@@ -686,7 +686,7 @@ export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachment
 
 /**
  * Gmail's attachment bytes as base64url, unchecked: whoever decodes them validates them (a
- * full-string base64 regex overflows V8's regexp stack past ~4.4M characters, ~3.3 MB decoded).
+ * full-string base64 regex overflows V8 on large attachments; see connectors AGENTS.md).
  */
 export const GmailAttachmentBase64Url = Schema.String
 
