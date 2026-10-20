@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.120
+
+### Patch Changes
+
+- 79595fc: Advance in lockstep with `@yolk-sdk/agent`, which now shows Claude (compatibility mode) the real type of `Schema.optional` tool params instead of an unconstrained value. These packages have no direct changes in this release.
+- Updated dependencies [a9eee1b]
+- Updated dependencies [79595fc]
+  - @yolk-sdk/agent@0.1.0-canary.120
+  - @yolk-sdk/conformance@0.1.0-canary.120
+
 ## 0.1.0-canary.119
 
 ### Patch Changes
