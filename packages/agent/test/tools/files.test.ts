@@ -161,6 +161,32 @@ describe('tool result file capture', () => {
     })
   )
 
+  it.effect('stores a 20 MiB file byte for byte', () =>
+    Effect.gen(function* () {
+      const bytes = new Uint8Array(20 * 1024 * 1024).map((_, index) => index & 255)
+      const stored: Array<Uint8Array> = []
+
+      const store: FileStoreApi = {
+        ...memoryStore(),
+        put: ({ bytes: put, name, mimeType }) => {
+          stored.push(put)
+
+          return Effect.succeed(
+            FileDescriptor.make({ fileId: 'file_large', name, mimeType, size: put.byteLength })
+          )
+        }
+      }
+
+      const result = yield* run(
+        [filePartFromBytes({ bytes, mimeType: 'application/octet-stream', filename: 'big.bin' })],
+        { store }
+      )
+
+      expect(result.files?.[0]?.size).toBe(bytes.byteLength)
+      expect(Buffer.from(stored[0] ?? []).equals(Buffer.from(bytes))).toBe(true)
+    })
+  )
+
   it.effect('keeps viewable images for the model and adds their stored copy', () =>
     Effect.gen(function* () {
       const store = memoryStore()

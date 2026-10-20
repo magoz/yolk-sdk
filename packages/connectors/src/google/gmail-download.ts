@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
+import { binaryStringToBytes, splitBase64Padding } from '../base64-internal.ts'
 import { ConnectorFileTransferError } from '../file-transfer.ts'
 import type { ConnectorFileTransferBudget } from '../file-transfer.ts'
 import type { ConnectorIntegration } from '../integration.ts'
@@ -46,13 +47,13 @@ export const downloadGmailAttachment = (
     // maxMetadataBytes is the host's separate JSON/base64 expansion budget.
     const response = yield* readBytes(url, { authorization: `Bearer ${token}` }, limits, true)
     const body = yield* decodeMetadata(Body, response.bytes)
-    const unpadded = body.data.replace(/=+$/, '')
+    const { unpadded, padding } = splitBase64Padding(body.data)
     const expectedPadding = (4 - (unpadded.length % 4)) % 4
 
     if (
-      !/^[A-Za-z0-9_-]*={0,2}$/.test(body.data) ||
+      !/^[A-Za-z0-9_-]*$/.test(unpadded) ||
       unpadded.length % 4 === 1 ||
-      (body.data.includes('=') && body.data.length !== unpadded.length + expectedPadding)
+      (padding !== 0 && padding !== expectedPadding)
     )
       return yield* failTransfer('invalid_metadata')
     const decodedLength = Math.floor((unpadded.length * 3) / 4)
@@ -60,6 +61,7 @@ export const downloadGmailAttachment = (
     if (body.size > limits.maxBytes || decodedLength > limits.maxBytes)
       return yield* failTransfer('response_too_large')
 
+    // Gmail's reported size is the integrity check; atob rejects anything not base64.
     if (decodedLength !== body.size) return yield* failTransfer('invalid_metadata')
 
     const binary = yield* Effect.try({
@@ -68,11 +70,5 @@ export const downloadGmailAttachment = (
       catch: () => new ConnectorFileTransferError({ code: 'invalid_metadata' })
     })
 
-    if (btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '') !== unpadded)
-      return yield* failTransfer('invalid_metadata')
-    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
-
-    if (bytes.byteLength !== body.size) return yield* failTransfer('invalid_metadata')
-
-    return { ...fileBytes(bytes), source: target }
+    return { ...fileBytes(binaryStringToBytes(binary)), source: target }
   })

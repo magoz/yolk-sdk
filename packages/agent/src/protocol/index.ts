@@ -17,6 +17,7 @@ export {
   type AttachmentSourceResolver,
   attachmentSourcePreview,
   AudioPart,
+  base64ToBytes,
   bytesToBase64,
   Content,
   ContentPart,

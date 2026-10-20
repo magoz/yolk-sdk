@@ -132,9 +132,11 @@ export class EmailAttachmentMetadata extends Schema.Class<EmailAttachmentMetadat
   contentId: Schema.optional(Schema.String)
 }) {}
 
-export const EmailAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
-)
+/**
+ * Attachment bytes as standard base64, unchecked: whoever decodes them validates them (a
+ * full-string base64 regex overflows V8's regexp stack past ~4.4M characters, ~3.3 MB decoded).
+ */
+export const EmailAttachmentBase64 = Schema.String
 
 export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
 

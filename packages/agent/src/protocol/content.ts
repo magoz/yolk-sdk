@@ -256,6 +256,20 @@ export const bytesToBase64 = (bytes: Uint8Array) => {
   return globalThis.btoa(binary)
 }
 
+/**
+ * Bytes of standard base64 (throws on invalid input, like `atob`). Copies into one preallocated
+ * array: `Uint8Array.from(binary, mapFn)` first collects every character into a list, which
+ * costs tens of bytes per decoded byte (~0.7 GB for 20 MiB).
+ */
+export const base64ToBytes = (data: string) => {
+  const binary = globalThis.atob(data)
+  const bytes = new Uint8Array(binary.length)
+
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+
+  return bytes
+}
+
 /** A `FilePart` carrying `bytes` inline, for tools that yield files (ADR 0009). */
 export const filePartFromBytes = (input: {
   readonly bytes: Uint8Array
@@ -414,12 +428,8 @@ export const documentPartFromText = (input: {
     : DocumentPart.make({ ...base, title: input.title })
 }
 
-const decodeBase64Utf8 = (data: string) => {
-  const binary = globalThis.atob(data)
-  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
-
-  return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-}
+const decodeBase64Utf8 = (data: string) =>
+  new TextDecoder('utf-8', { fatal: true }).decode(base64ToBytes(data))
 
 export const attachmentSourceText = (source: AttachmentSource) =>
   Match.value(source).pipe(

@@ -7,6 +7,7 @@ import {
   type EmailBatchResultCode
 } from '../email-batch.ts'
 import { defineAction } from '../action.ts'
+import { binaryStringToBytes, splitBase64Padding } from '../base64-internal.ts'
 import { connectorActionFile } from '../file-output.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
@@ -154,16 +155,6 @@ export class GmailListThreadsOutput extends Schema.Class<GmailListThreadsOutput>
 
 const gmailRawMessagePattern =
   '^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw](?:==)?|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048]=?)?$'
-
-// Count trailing '=' with one backward scan: an unanchored /=+$/ retries from every position
-// of a long '=' run and is quadratic on untrusted multi-megabyte input.
-const splitBase64Padding = (value: string) => {
-  let end = value.length
-
-  while (end > 0 && value.charCodeAt(end - 1) === 61) end -= 1
-
-  return { unpadded: value.slice(0, end), padding: value.length - end }
-}
 
 // Linear equivalent of gmailRawMessagePattern: V8 recurses on the repeated group and
 // overflows its stack for multi-megabyte messages, so it is only published as JSON Schema.
@@ -693,15 +684,16 @@ export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachment
   attachments: Schema.Chunk(GmailThreadAttachment)
 }) {}
 
-export const GmailAttachmentBase64Url = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/u)
-)
+/**
+ * Gmail's attachment bytes as base64url, unchecked: whoever decodes them validates them (a
+ * full-string base64 regex overflows V8's regexp stack past ~4.4M characters, ~3.3 MB decoded).
+ */
+export const GmailAttachmentBase64Url = Schema.String
 
 export type GmailAttachmentBase64Url = typeof GmailAttachmentBase64Url.Type
 
-export const GmailAttachmentBase64 = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u)
-)
+/** `GmailAttachmentBase64Url` converted to padded standard base64, unchecked for the same reason. */
+export const GmailAttachmentBase64 = Schema.String
 
 export type GmailAttachmentBase64 = typeof GmailAttachmentBase64.Type
 
@@ -841,20 +833,11 @@ const decodeBase64Url = (value: string) => {
     return undefined
   }
 
-  const unpadded = normalized.replaceAll(/=+$/g, '')
+  const { unpadded } = splitBase64Padding(normalized)
   const padded = `${unpadded}${'='.repeat((4 - (unpadded.length % 4)) % 4)}`
   const decoded = Result.try(() => atob(padded))
 
-  if (Result.isFailure(decoded)) return undefined
-
-  const binary = decoded.success
-  const bytes = new Uint8Array(binary.length)
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-
-  return bytes
+  return Result.isFailure(decoded) ? undefined : binaryStringToBytes(decoded.success)
 }
 
 /**
@@ -1107,8 +1090,7 @@ const normalizeGmailThread = (
 }
 
 const base64UrlToBase64 = (value: string) => {
-  const withoutPadding = value.replace(/=+$/, '')
-  const base64 = withoutPadding.replaceAll('-', '+').replaceAll('_', '/')
+  const base64 = splitBase64Padding(value).unpadded.replaceAll('-', '+').replaceAll('_', '/')
 
   return `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
 }

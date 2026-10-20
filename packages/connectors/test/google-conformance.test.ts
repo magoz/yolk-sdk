@@ -740,7 +740,7 @@ describe('Google conformance drills (one per case)', () => {
     )
   }
 
-  it.effect('a standard-base64 attachment answer fails the connector decoding', () =>
+  it.effect('a standard-base64 attachment answer fails the attachment case', () =>
     Effect.gen(function* () {
       const standard = replaceResponse(gmailAttachmentFixture, 1, () =>
         json(200, { size: 6, data: '+/+/Pj/+' })
@@ -749,7 +749,7 @@ describe('Google conformance drills (one per case)', () => {
       expect(yield* suiteFailures(withReplaced(standard))).toEqual([
         {
           id: 'google.gmail.attachment-base64url',
-          failure: { kind: 'failure', tag: 'ConnectorError', message: 'Invalid response shape' }
+          failure: mismatch('expected the attachment data in the base64url alphabet')
         }
       ])
     })
