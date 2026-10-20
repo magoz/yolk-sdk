@@ -7,6 +7,7 @@ import {
   Option,
   Predicate,
   Result,
+  SchemaRepresentation,
   type JsonSchema
 } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -59,6 +60,7 @@ import {
   omitNullOptionalToolArguments,
   omitNullOptionalToolCallArguments
 } from './arguments.ts'
+import { markOmittedNulls } from './omitted-null.ts'
 import {
   backgroundToolDef,
   executeBackgroundTool,
@@ -691,8 +693,21 @@ const stampObjectCombinatorRoot = (
   return { ...root, type: 'object' }
 }
 
+// `Schema.toJsonSchemaDocument` split into its public steps (JSON codec AST, representation,
+// compilation) so codec-added nulls can be marked in between (`markOmittedNulls`). Emitting
+// `$comment` annotations is what carries the marker; it also passes through `$comment`
+// annotations a schema sets itself, a standard keyword validators ignore.
+const toToolJsonSchemaDocument = (schema: Schema.Top) => {
+  const ast = Schema.toCodecJson(schema).ast
+
+  return SchemaRepresentation.toJsonSchemaDocument(
+    markOmittedNulls(SchemaRepresentation.toRepresentation(ast), ast),
+    { onExcessProperty: 'error', includeAnnotationKey: key => key === '$comment' }
+  )
+}
+
 const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type => {
-  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: 'error' })
+  const document = toToolJsonSchemaDocument(schema)
   const documentSchema = requireToolJsonSchema(document.schema)
 
   const rootRef = isToolJsonSchemaObject(documentSchema)
@@ -731,7 +746,8 @@ const jsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
 /** JSON Schema lowering of an Effect Schema for model guidance and display hints.
  * It describes the schema's canonical JSON codec (`Schema.toCodecJson`), which is what tool
  * argument validation decodes with; e.g. `Schema.optional(X)` is advertised and accepted as
- * `X | null`.
+ * `X | null`, its codec-added `null` member marked with `$comment:
+ * toolJsonSchemaOmittedNullComment` ("not sent", unlike a `Schema.NullOr` null).
  */
 export const toolJsonSchemaFromSchema = (schema: Schema.Top): typeof ToolJsonSchema.Type =>
   jsonSchemaFromSchema(schema)

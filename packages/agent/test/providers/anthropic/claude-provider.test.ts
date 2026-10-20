@@ -861,7 +861,7 @@ describe('Anthropic Claude provider', () => {
       expect(schema).toMatchObject({
         properties: {
           count: {},
-          nullable: { type: 'string' },
+          nullable: {},
           title: { type: 'string', minLength: 1, maxLength: 80 },
           subject: { type: 'string', maxLength: 160 },
           reversedSubject: { type: 'string', maxLength: 2_000 },
@@ -935,6 +935,8 @@ describe('Anthropic Claude provider', () => {
             'meaningful_null',
             Schema.Struct({
               clearable: Schema.optional(Schema.NullOr(Schema.String)),
+              // Same JSON as `Schema.optional(Schema.String)`, but `null` means "clear".
+              cleared: Schema.optionalKey(Schema.NullOr(Schema.String)),
               nullable: Schema.NullOr(Schema.String),
               items: Schema.Array(Schema.NullOr(Schema.String))
             })
@@ -944,6 +946,7 @@ describe('Anthropic Claude provider', () => {
 
       for (const schema of schemas) {
         expect(collectKeys(schema)).not.toContain('anyOf')
+        expect(collectKeys(schema)).not.toContain('$comment')
       }
 
       expect(schemas[0]).toEqual({
@@ -985,10 +988,98 @@ describe('Anthropic Claude provider', () => {
       // Where `null` means something other than omission it stays widened.
       expect(schemas[4]).toEqual({
         type: 'object',
-        properties: { clearable: {}, nullable: {}, items: { type: 'array', items: {} } },
+        properties: {
+          clearable: {},
+          cleared: {},
+          nullable: {},
+          items: { type: 'array', items: {} }
+        },
         required: ['nullable', 'items'],
         additionalProperties: false
       })
+    })
+  )
+
+  it.effect(
+    'keeps raw anyOf [X, null] optional params widened, as remote MCP tools send them',
+    () =>
+      Effect.gen(function* () {
+        // e.g. Pydantic `Optional[X] = None`: the server may read `null` as "clear".
+        const [schema] = yield* claudeInputSchemas([
+          ToolDef.make({
+            name: 'remote_update',
+            description: 'Remote MCP-like tool.',
+            parameters: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                note: { anyOf: [{ type: 'string' }, { type: 'null' }], default: null },
+                spec: {
+                  anyOf: [
+                    { type: 'object', properties: { cron: { type: 'string' } } },
+                    { type: 'null' }
+                  ]
+                },
+                // Another tool's `$comment` is not Yolk's marker.
+                tagged: { anyOf: [{ type: 'string' }, { type: 'null', $comment: 'nullable' }] }
+              },
+              required: ['id']
+            }
+          })
+        ])
+
+        expect(schema).toEqual({
+          type: 'object',
+          properties: { id: { type: 'string' }, note: { default: null }, spec: {}, tagged: {} },
+          required: ['id']
+        })
+      })
+  )
+
+  it.effect('passes null for Schema.optionalKey(Schema.NullOr(X)) through to the tool', () =>
+    Effect.gen(function* () {
+      const { tool, received } = schemaTool(
+        'clear_note',
+        Schema.Struct({ id: Schema.String, note: Schema.optionalKey(Schema.NullOr(Schema.String)) })
+      )
+
+      const [schema] = yield* claudeInputSchemas([tool.def])
+      // Unchanged: `null` stays sendable (widened), never narrowed to `string`.
+      expect(schema).toEqual({
+        type: 'object',
+        properties: { id: { type: 'string' }, note: {} },
+        required: ['id'],
+        additionalProperties: false
+      })
+
+      const response = new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'mcp_Clear_note',
+              input: { id: 'n1', note: null }
+            }
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 2, output_tokens: 3 }
+        }),
+        { status: 200 }
+      )
+
+      const events = Array.from(yield* collectProviderEvents(response, []))
+      const toolCall = events[0]
+
+      if (toolCall?._tag !== 'ToolCall') {
+        return expect.fail('Expected a Claude tool call')
+      }
+
+      const toolSet = yield* resolveTools([{ id: 'test', tools: [tool] }], undefined)
+      const result = yield* toolSet.execute(toolCall.call)
+
+      expect(result.isError).toBeUndefined()
+      expect(received).toEqual([{ id: 'n1', note: null }])
     })
   )
 

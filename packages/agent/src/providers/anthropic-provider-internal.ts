@@ -21,6 +21,7 @@ import {
   prependMessageContextToContent,
   RedactedReasoningReplay,
   SignedReasoningReplay,
+  toolJsonSchemaOmittedNullComment,
   type AgentMessage,
   type AssistantAgentMessage,
   type AssistantPart,
@@ -975,21 +976,24 @@ const jsonSchemaMapKeywords = new Set([
 
 const jsonSchemaDataKeywords = new Set(['const', 'default', 'enum', 'examples'])
 
-const nullOnlyJsonSchemaKeys = new Set(['type', 'description', 'title', '$comment'])
+const omittedNullJsonSchemaKeys = new Set(['type', 'description', 'title', '$comment'])
 
-// `{ type: 'null' }` with annotations at most: the member Effect's JSON codec
-// adds to every `Schema.optional(X)` (`anyOf: [X, { type: 'null' }]`).
-const isNullOnlyJsonSchema = (schema: Schema.Json): boolean =>
+// The `{ type: 'null' }` member `makeTool` advertises for `Schema.optional(X)`:
+// only that codec-added null carries the `toolJsonSchemaOmittedNullComment`
+// marker, and it decodes as "not sent". `Schema.NullOr` nulls and raw/MCP
+// `anyOf: [X, null]` schemas are unmarked: their `null` may mean "clear".
+const isOmittedNullJsonSchema = (schema: Schema.Json): boolean =>
   isJsonObject(schema) &&
   jsonObjectField(schema, 'type') === 'null' &&
-  Object.keys(schema).every(key => nullOnlyJsonSchemaKeys.has(key))
+  jsonObjectField(schema, '$comment') === toolJsonSchemaOmittedNullComment &&
+  Object.keys(schema).every(key => omittedNullJsonSchemaKeys.has(key))
 
-// On a property its object does not require, a null-only union member says
-// nothing omission cannot: argument decoding reads `null` there as "not sent"
-// (`decodeToolArguments`, `omitNullOptionalToolArguments`). Dropping it before
-// normalization keeps the other members' type instead of widening to `{}`.
-// Only the outermost union is stripped, so `Schema.optional(Schema.NullOr(X))`
-// (`anyOf: [{ anyOf: [X, null] }, null]`) keeps its meaningful `null` widened.
+// On a property its object does not require, a marked null member says nothing
+// omission cannot (`decodeToolArguments` reads that `null` as absent). Dropping
+// it before normalization keeps the other members' type instead of widening to
+// `{}`. Unmarked nulls (`optionalKey(NullOr(X))`, the inner one of
+// `optional(NullOr(X))`, required `NullOr(X)`, raw/MCP schemas) stay and widen
+// as before.
 const withoutOmittedNullVariants = (schema: Schema.Json): Schema.Json => {
   if (!isJsonObject(schema)) return schema
 
@@ -997,33 +1001,43 @@ const withoutOmittedNullVariants = (schema: Schema.Json): Schema.Json => {
 
   if (combinator === undefined || combinator.key === 'allOf') return schema
 
-  const items = combinator.items.filter(item => !isNullOnlyJsonSchema(item))
+  const items = combinator.items.filter(item => !isOmittedNullJsonSchema(item))
 
   if (items.length === 0 || items.length === combinator.items.length) return schema
 
   return { ...schema, [combinator.key]: items }
 }
 
-const normalizeJsonSchemaProperties = (schema: Schema.JsonObject): Schema.JsonObject => {
-  const required = jsonSchemaRequired(schema)
-
-  return Object.fromEntries(
-    Object.entries(jsonSchemaProperties(schema)).map(([name, propertySchema]) => [
+const normalizeJsonSchemaProperties = (
+  properties: Schema.JsonObject,
+  required: ReadonlyArray<string>
+): Schema.JsonObject =>
+  Object.fromEntries(
+    Object.entries(properties).map(([name, propertySchema]) => [
       name,
       normalizeAnthropicToolSchema(
         required.includes(name) ? propertySchema : withoutOmittedNullVariants(propertySchema)
       )
     ])
   )
-}
+
+// The marker guides this projection only; the model never needs it.
+const withoutOmittedNullMarker = (schema: Schema.JsonObject): Schema.JsonObject =>
+  Object.fromEntries(
+    Object.entries(schema).filter(
+      ([key, value]) => key !== '$comment' || value !== toolJsonSchemaOmittedNullComment
+    )
+  )
 
 const normalizeJsonSchemaObjectFields = (schema: Schema.JsonObject): Schema.JsonObject => {
+  const fields = withoutOmittedNullMarker(withoutJsonSchemaCombinatorsAndTupleHints(schema))
+
   const normalized = Object.fromEntries(
-    Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => {
+    Object.entries(fields).map(([key, value]) => {
       if (jsonSchemaDataKeywords.has(key)) return [key, value]
 
       if (key === 'properties' && isJsonObject(value)) {
-        return [key, normalizeJsonSchemaProperties(schema)]
+        return [key, normalizeJsonSchemaProperties(value, jsonSchemaRequired(schema))]
       }
 
       if (key === 'dependencies' && isJsonObject(value)) {
@@ -1247,10 +1261,17 @@ const flattenTopLevelCombinatorToolSchema = (
       : combinator.key === 'allOf'
         ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
         : // Each variant's properties are normalized against its own `required`
-          // first, so a property optional in one variant (`anyOf: [X, null]`)
-          // and required in another (`X`) merges to `X`, not `{}`.
+          // first, so a property optional in one variant (`Schema.optional(X)`,
+          // `anyOf: [X, marked null]`) and required in another (`X`) merges to
+          // `X`, not `{}`. The merged properties are then combinator-free, so
+          // the caller's second normalization pass leaves them unchanged.
           mergeUnionJsonSchemaObjects(
-            objectVariants.map(normalizeJsonSchemaProperties),
+            objectVariants.map(variant =>
+              normalizeJsonSchemaProperties(
+                jsonSchemaProperties(variant),
+                jsonSchemaRequired(variant)
+              )
+            ),
             objectVariants
           ),
     required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),

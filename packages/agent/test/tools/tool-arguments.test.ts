@@ -7,6 +7,7 @@ import {
   ToolCall,
   ToolDef,
   ToolResult,
+  toolJsonSchemaOmittedNullComment,
   type ToolJsonSchema
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -76,6 +77,52 @@ describe('tool argument decoding', () => {
     expect(tool.def.parameters).toMatchObject({
       properties: { query: { anyOf: [{ type: 'string' }, { type: 'null' }] } }
     })
+  })
+
+  it('marks only the nulls the JSON codec adds for Schema.optional', () => {
+    const omitted = { type: 'null', $comment: toolJsonSchemaOmittedNullComment }
+
+    const Spec = Schema.Struct({ cron: Schema.String, note: Schema.optional(Schema.String) })
+
+    const Marked = Schema.Struct({
+      optional: Schema.optional(Schema.String),
+      optionalSpec: Schema.optional(Spec.annotate({ identifier: 'Spec' })),
+      clearable: Schema.optional(Schema.NullOr(Schema.String)),
+      cleared: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      nullable: Schema.NullOr(Schema.String),
+      items: Schema.Array(Schema.NullOr(Schema.String))
+    })
+
+    expect(toolJsonSchemaFromSchema(Marked)).toEqual({
+      type: 'object',
+      properties: {
+        optional: { anyOf: [{ type: 'string' }, omitted] },
+        optionalSpec: { anyOf: [{ $ref: '#/$defs/Spec' }, omitted] },
+        // The inner null is `NullOr`'s and means "clear"; only the outer one is "not sent".
+        clearable: { anyOf: [{ anyOf: [{ type: 'string' }, { type: 'null' }] }, omitted] },
+        cleared: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        nullable: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        items: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'null' }] } }
+      },
+      required: ['nullable', 'items'],
+      additionalProperties: false,
+      $defs: {
+        Spec: {
+          type: 'object',
+          properties: { cron: { type: 'string' }, note: { anyOf: [{ type: 'string' }, omitted] } },
+          required: ['cron'],
+          additionalProperties: false
+        }
+      }
+    })
+    // The marker is an annotation: what the advertised schema admits is unchanged.
+    expect(
+      omitNullOptionalToolArguments(toolJsonSchemaFromSchema(Marked), {
+        optional: null,
+        cleared: null,
+        items: []
+      })
+    ).toEqual({ optional: null, cleared: null, items: [] })
   })
 
   it.effect('decodes null on optional fields as absent and applies decoding defaults', () =>

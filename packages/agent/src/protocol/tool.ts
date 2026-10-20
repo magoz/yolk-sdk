@@ -192,6 +192,14 @@ export const decodeToolJsonSchemaObject = Schema.decodeUnknownOption(ToolJsonSch
 export const isToolJsonSchemaObject = (schema: ToolJsonSchema): schema is ToolJsonSchemaObject =>
   !Predicate.isBoolean(schema)
 
+/** `$comment` on the `{ type: 'null' }` member `makeTool`/`toolJsonSchemaFromSchema` advertise for
+ * `Schema.optional(X)` (and any other `undefined` the JSON codec encodes as `null`): that `null`
+ * decodes as `undefined` ("not sent"). Other nulls (`Schema.NullOr`, raw/MCP schemas) never carry
+ * it. `$comment` is a standard annotation keyword, so validators ignore it; provider adapters may
+ * use it as guidance (Claude compatibility drops these members from optional properties).
+ */
+export const toolJsonSchemaOmittedNullComment = 'yolk:null-means-omitted'
+
 export const HitlResponseSource = Schema.Literals(['user', 'policy', 'replay'])
 
 export type HitlResponseSource = typeof HitlResponseSource.Type
