@@ -141,27 +141,42 @@ npm trust github @yolk-sdk/<name> \
 - Rerun the same workflow; already-published tarballs are skipped.
 - Verify all dist-tags and `v<version>` after rerun.
 
-## Version stuck as "previously staged"
+## Version published but not visible (npm validation)
 
-Symptom: the workflow publishes some packages, then a rerun fails with `npm error 409 Conflict ...
-Cannot publish over previously staged version "<version>"`, although that version is 404 on the
-registry and absent from `npm stage list`. Seen with `@yolk-sdk/extractors@0.1.0-canary.117`,
-whose first attempt printed `+ @yolk-sdk/extractors@0.1.0-canary.117` but never appeared.
+Symptom: the workflow (or `npm publish`) reports success, yet `npm view @yolk-sdk/<name>@<version>`
+is 404 and consumers' installs fail to resolve it. A rerun of the same version fails with
+`npm error 409 Conflict ... Cannot publish over previously staged version "<version>"`, although
+the version is absent from `npm stage list`.
 
-Observed: retries of the same version keep failing; the root cause (npm holding the version
-server-side) is not established.
+Cause: npm holds each new version in a validation scan before it becomes public; the 409 means the
+version is still being validated, not that it is lost. Usually minutes, sometimes hours, and only
+some packages of one release may be held: canary.117 `extractors` took about 20 minutes, canary.118
+`extractors` about 4 hours, canary.119 `extractors`, `mcp`, `sandbox` and `vercel-workflows` a few
+minutes each.
+
+Check (authenticated; the token is the npm user's, never printed):
+
+```bash
+curl -s -H "Authorization: Bearer <npm token>" \
+  "https://registry.npmjs.org/-/package/@yolk-sdk%2f<name>/version/<version>/status"
+# {"packageName":"@yolk-sdk/<name>","version":"<version>","status":"validating"}
+```
+
+`validating` means wait; `published` means it is public (the CDN may lag a few minutes).
 
 Fix:
 
-- Do not keep rerunning the same version (the retry guidance above does not apply).
-- Bump all public packages to the next canary: add `.changeset/canary-<n>-lockstep.md` (all public
-  packages, `patch`) saying it republishes the partial version unchanged, land it on `main`, then
-  run the usual release prep and dispatch `publish.yml`.
-- After the new version is verified, move `latest` to it and optionally
-  `npm deprecate @yolk-sdk/<name>@<partial version> "<message pointing to the new version>"` for
-  each package that did publish at the partial version.
-- If the new version gets stuck the same way, stop and check the package's settings and the npm
-  account's email before bumping again.
+- Do not rerun the same version and do not bump to a new one while it is `validating`: wait, and
+  check the status endpoint for every package of the release before moving `latest` or pinning the
+  version downstream.
+- If a version stays `validating` for many hours, contact npm support
+  (https://www.npmjs.com/support) with the package, version and status response.
+- Only when a version is truly lost (not `validating`, never `published`) bump all public packages
+  to the next canary: add `.changeset/canary-<n>-lockstep.md` (all public packages, `patch`) saying
+  it republishes the partial version unchanged, land it on `main`, run the usual release prep and
+  dispatch `publish.yml`. Afterwards optionally
+  `npm deprecate @yolk-sdk/<name>@<partial version> "<message pointing to the new version>"`.
+  (canary.118 was such a republish of canary.117 before the cause was known; it was not needed.)
 
 ## Release prep includes unrelated files
 
