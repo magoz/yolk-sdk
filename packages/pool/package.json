@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/pool",
-  "version": "0.1.0-canary.118",
+  "version": "0.1.0-canary.119",
   "description": "Subscription account pools for Yolk agents: expiring-first routing and failover across several accounts of one provider behind one LLMProvider.",
   "license": "MIT",
   "type": "module",

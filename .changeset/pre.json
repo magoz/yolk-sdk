@@ -30,6 +30,7 @@
     "agent-loop-composition",
     "agent-model-turn-collection",
     "agent-openai-chat-streaming",
+    "agent-read-calls",
     "agent-status",
     "agent-steering",
     "agent-tool-schema-object-root",
