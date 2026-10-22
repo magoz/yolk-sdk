@@ -25,13 +25,12 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 
 ### Input numbers
 
-Number inputs are integers or finite numbers, so tool schemas never offer the non-finite values
-that [tool arguments reject](../agent/tools-hitl#optional-arguments-null-and-unknown-keys). Counts
-and page sizes are at least 1: Gmail and
-Google Calendar `maxResults` and LinkedIn search `numResults` have no upper bound (Gmail and
-Calendar clamp larger values); Notion `pageSize` is at most 100 and Todoist `limit` at most 200,
-which those APIs enforce. Todoist `priority` is 1 to 4 and `duration` at least 1. A value outside
-these bounds fails as a validation error before any request.
+Number inputs are integers or finite numbers, so tool schemas never offer the non-finite values that
+[tool arguments reject](../agent/tools-hitl#optional-arguments-null-and-unknown-keys). Counts and
+page sizes are at least 1: Gmail and Google Calendar `maxResults` and LinkedIn search `numResults`
+have no upper bound (Gmail and Calendar clamp larger values); Notion `pageSize` is at most 100 and
+Todoist `limit` at most 200, which those APIs enforce. Todoist `priority` is 1 to 4 and `duration`
+at least 1. A value outside these bounds fails as a validation error before any request.
 
 ## Afloat
 
