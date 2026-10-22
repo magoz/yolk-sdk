@@ -247,10 +247,14 @@ const waitingServer = (started: Deferred.Deferred<void>, finalized: Deferred.Def
   })
 
 /**
- * Cancels a running tool call by aborting its request. The tool must be interrupted, and its
- * finalizer must finish before `handleHttpRequest` returns, while the caller's scope is open.
+ * Cancels a running tool call, by the client aborting its request or by the host interrupting
+ * `handleHttpRequest`. The tool must be interrupted, and its finalizer must finish before
+ * `handleHttpRequest` ends, while the caller's scope is open.
  */
-const expectCancelledToolInterrupted = (request: (signal: AbortSignal) => Request) =>
+const expectCancelledToolInterrupted = (
+  request: (signal: AbortSignal) => Request,
+  cancelledBy: 'client' | 'host' = 'client'
+) =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>()
     const finalized = yield* Deferred.make<boolean>()
@@ -263,8 +267,13 @@ const expectCancelledToolInterrupted = (request: (signal: AbortSignal) => Reques
     )
 
     yield* Deferred.await(started).pipe(Effect.timeout('1 second'))
-    controller.abort()
-    yield* Fiber.join(exchange).pipe(Effect.timeout('1 second'))
+
+    if (cancelledBy === 'client') {
+      controller.abort()
+      yield* Fiber.join(exchange).pipe(Effect.timeout('1 second'))
+    } else {
+      yield* Fiber.interrupt(exchange).pipe(Effect.timeout('1 second'))
+    }
 
     expect(yield* Deferred.isDone(finalized)).toBe(true)
     expect(yield* Deferred.await(finalized)).toBe(true)
@@ -564,6 +573,17 @@ describe('MCP tool server', () => {
         { jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'wait', arguments: {} } },
         { signal }
       )
+    )
+  )
+
+  it.live('stops a streamed tool call when the host interrupts the request', () =>
+    expectCancelledToolInterrupted(
+      signal =>
+        legacyStreamableHttpRequest(
+          { jsonrpc: '2.0', id: 14, method: 'tools/call', params: { name: 'wait', arguments: {} } },
+          { signal }
+        ),
+      'host'
     )
   )
 

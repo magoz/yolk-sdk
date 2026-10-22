@@ -309,7 +309,7 @@ const isEventStream = (response: Response) =>
  * `subscriptions/listen` runs no tool, and its stream ends only when the per-request handler
  * closes, after this returns. The SDK checks `Mcp-Method` against the body only on requests it
  * routes as modern; a legacy one may carry any `Mcp-Method`, so the SDK's own era routing
- * (`isLegacyRequest`, on a body clone) decides. When it cannot tell, the stream is read.
+ * (`isLegacyRequest`, on a body clone) decides. If classifying fails, the stream is read.
  */
 const isListenRequest = (request: Request) =>
   request.headers.get('mcp-method') === 'subscriptions/listen'
