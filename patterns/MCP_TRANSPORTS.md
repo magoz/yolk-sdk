@@ -34,6 +34,7 @@ Rules:
 - MCP `2026-07-28` requests are stateless and carry version, client identity, and capabilities per request.
 - Modern HTTP requests carry `MCP-Protocol-Version`, `Mcp-Method`, and applicable `Mcp-Name` / `Mcp-Param-*` headers.
 - Dual-era servers use `createMcpHandler`; modern stdio servers use `serveStdio`.
+- An Effect HTTP entrypoint that runs tools with its caller's context lets no tool outlive it: a streamed `Response` filled later would run them after the caller's scope closed. Read such streams to their end before returning, and run tool calls as request-scoped fibers; only a stream that runs no tool and ends only on handler close (`subscriptions/listen`) returns unread (`makeMcpToolServer`, `packages/mcp/AGENTS.md`).
 - Legacy `initialize` support remains available for `2025-11-25` and earlier peers.
 - Modern results use `resultType`; cacheable operations preserve `ttlMs` and `cacheScope`.
 
