@@ -356,7 +356,7 @@ export const linkedInSearchPeopleResultsCase: LinkedInSearchConformanceCase = de
     id: 'linkedin-search.search.people-results',
     title: 'an Exa people search answers 1 to 10 results whose fields are strings, never null',
     safety: 'read',
-    docs: '`linkedin_search.search` sends POST https://api.exa.ai/search with `Authorization: Bearer <key>` and the JSON body `{ query, category: "people", numResults, type: "auto", contents: { text: true } }` (`numResults` defaults to 10, passed through without a cap), then decodes `{ results: [{ title?, url?, text?, publishedDate?, author? }], totalResults? }` into its output and drops every other field. A field answered as `null` fails decoding (`validation_failed`). There is no paging: one request answers every result.',
+    docs: '`linkedin_search.search` sends POST https://api.exa.ai/search with `Authorization: Bearer <key>` and the JSON body `{ query, category: "people", numResults, type: "auto", contents: { text: true } }` (`numResults` defaults to 10, a validated positive integer passed through without a cap), then decodes `{ results: [{ title?, url?, text?, publishedDate?, author? }], totalResults? }` into its output and drops every other field. A field answered as `null` fails decoding (`validation_failed`). There is no paging: one request answers every result.',
     wire: 'For the seeded query, Exa accepts the bearer `Authorization` header (unverified: Exa documents `x-api-key`; the connector sends a bearer token) and answers a 2xx with a `results` array of 1 to 10 entries (at most the default `numResults` the connector sends), every entry carrying a string `url` (a usefulness expectation, not something the connector decodes: its `url` is optional, but a result without one cannot be handed to `linkedin_search.profile`), and every `title`, `url`, `text`, `publishedDate`, and `author` a string or absent, never `null` (unverified: Exa omits a missing author or date rather than answering null, which the connector would fail to decode); at least one entry carries `text`, which the connector requests.',
     fixtures: [linkedInSearchPeopleResultsFixture.id],
     run: Effect.gen(function* () {
@@ -411,7 +411,7 @@ export const linkedInSearchNumResultsLimitCase: LinkedInSearchConformanceCase =
     id: 'linkedin-search.search.num-results-limit',
     title: 'Exa answers at most numResults results for a query that matches more',
     safety: 'read',
-    docs: '`linkedin_search.search` passes `numResults` to Exa unchanged (it neither caps nor validates it) and never pages, so the answer to its single request is everything it returns.',
+    docs: '`linkedin_search.search` passes `numResults` to Exa unchanged (it validates a positive integer but sets no cap) and never pages, so the answer to its single request is everything it returns.',
     wire: 'The case sends two POST /search requests for the seeded query through `linkedin_search.search`. First a control with `numResults: 3`, which must answer more than 2 people (a `precondition:` otherwise: only then could an ignored limit show). Then the same query with `numResults: 2`; the two bodies carry `numResults: 3` and `numResults: 2`, and Exa answers a 2xx with 1 or 2 results: the limit is honoured, not ignored.',
     fixtures: [linkedInSearchNumResultsLimitFixture.id],
     run: Effect.gen(function* () {

@@ -77,10 +77,16 @@ export class GoogleCalendarRef extends Schema.Class<GoogleCalendarRef>('GoogleCa
   primary: Schema.optional(Schema.Boolean)
 }) {}
 
+/**
+ * Calendar page sizes: a positive integer. Google answers larger values with at most its page
+ * maximum (250 calendars, 2500 events) instead of failing, so no upper bound.
+ */
+const GoogleCalendarMaxResults = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
 export class GoogleCalendarListCalendarsInput extends Schema.Class<GoogleCalendarListCalendarsInput>(
   'GoogleCalendarListCalendarsInput'
 )({
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GoogleCalendarMaxResults),
   pageToken: Schema.optional(Schema.String)
 }) {}
 
@@ -98,7 +104,7 @@ export class GoogleCalendarListEventsInput extends Schema.Class<GoogleCalendarLi
   timeMin: Schema.optional(Schema.String),
   timeMax: Schema.optional(Schema.String),
   query: Schema.optional(Schema.String),
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GoogleCalendarMaxResults),
   pageToken: Schema.optional(Schema.String),
   singleEvents: Schema.optional(Schema.Boolean),
   orderBy: Schema.optional(Schema.Literals(['startTime', 'updated']))

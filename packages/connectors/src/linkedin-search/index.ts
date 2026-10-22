@@ -64,9 +64,11 @@ const linkedInProviderFailure = (input: {
     })
   )
 
+const LinkedInSearchNumResults = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
 export class LinkedInSearchInput extends Schema.Class<LinkedInSearchInput>('LinkedInSearchInput')({
   query: Schema.String,
-  numResults: Schema.optional(Schema.Number)
+  numResults: Schema.optional(LinkedInSearchNumResults)
 }) {}
 
 export const LinkedInSearchResult = Schema.Struct({

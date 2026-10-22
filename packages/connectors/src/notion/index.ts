@@ -123,10 +123,13 @@ export class NotionPage extends Schema.Class<NotionPage>('NotionPage')({
   properties: Schema.optional(NotionProperties)
 }) {}
 
+/** Notion page sizes: 1 to 100. Notion rejects a `page_size` above 100. */
+const NotionPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+
 export class NotionSearchInput extends Schema.Class<NotionSearchInput>('NotionSearchInput')({
   query: Schema.optional(Schema.String),
   filter: Schema.optional(Schema.Unknown),
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -165,7 +168,7 @@ export class NotionPageIdInput extends Schema.Class<NotionPageIdInput>('NotionPa
 
 export class NotionBlockIdInput extends Schema.Class<NotionBlockIdInput>('NotionBlockIdInput')({
   blockId: Schema.String,
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -198,7 +201,7 @@ export class NotionQueryDatabaseInput extends Schema.Class<NotionQueryDatabaseIn
   databaseId: Schema.String,
   filter: Schema.optional(Schema.Unknown),
   sorts: Schema.optional(Schema.Array(Schema.Unknown)),
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -244,7 +247,7 @@ export class NotionQueryDataSourceInput extends Schema.Class<NotionQueryDataSour
   data_source_id: Schema.optional(Schema.String),
   filter: Schema.optional(Schema.Unknown),
   sorts: Schema.optional(Schema.Array(Schema.Unknown)),
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -271,7 +274,7 @@ export class NotionGetPagePropertyInput extends Schema.Class<NotionGetPageProper
 )({
   pageId: Schema.String,
   propertyId: Schema.String,
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -282,7 +285,7 @@ export class NotionUserIdInput extends Schema.Class<NotionUserIdInput>('NotionUs
 export class NotionPaginationInput extends Schema.Class<NotionPaginationInput>(
   'NotionPaginationInput'
 )({
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
@@ -300,7 +303,7 @@ export class NotionListCommentsInput extends Schema.Class<NotionListCommentsInpu
   'NotionListCommentsInput'
 )({
   blockId: Schema.String,
-  pageSize: Schema.optional(Schema.Number),
+  pageSize: Schema.optional(NotionPageSize),
   startCursor: Schema.optional(Schema.String)
 }) {}
 
