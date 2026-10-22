@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Match, Option, Predicate, Result } from 'effect'
+import { Array as Arr, Effect, Match, Option, Predicate, Result, Stream } from 'effect'
 import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -289,6 +289,60 @@ const badRequestBody = (message: string) =>
     )
   )
 
+const internalErrorBody = (error: McpServerError) =>
+  encodeJson(protocolErrorResponse(null, error)).pipe(
+    Effect.orElseSucceed(
+      () => '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}'
+    )
+  )
+
+const isEventStream = (response: Response) =>
+  response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
+
+/**
+ * `subscriptions/listen` is the one long-lived stream; it runs no tool. The SDK rejects a modern
+ * request whose `Mcp-Method` header is missing or differs from the body, and 2025-era requests
+ * have no listen method, so the header identifies it.
+ */
+const isListenRequest = (request: Request) =>
+  request.headers.get('mcp-method') === 'subscriptions/listen'
+
+/**
+ * The SDK may answer a request with an SSE stream that it fills after returning the `Response`
+ * (always for 2025-era requests; for 2026-07-28 once a handler sends a related message). Tools run
+ * with the caller's context, whose scope closes as soon as this Effect returns, so the exchange is
+ * read to its end here and answered with the same status, headers and events: still a valid
+ * request-scoped stream. Interruption cancels the stream, which the SDK treats as cancellation.
+ */
+const completedExchange = (request: Request, response: Response) => {
+  const body = response.body
+
+  if (body === null || isListenRequest(request) || !isEventStream(response)) {
+    return Effect.succeed(response)
+  }
+
+  return Stream.fromReadableStream({
+    evaluate: () => body,
+    onError: error =>
+      new McpServerError({
+        message: `Could not read MCP response stream: ${unknownToMessage(error)}`,
+        cause: 'protocol'
+      })
+  }).pipe(
+    // SSE is always UTF-8 text.
+    Stream.decodeText(),
+    Stream.mkString,
+    Effect.map(
+      text =>
+        new Response(text, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers
+        })
+    )
+  )
+}
+
 export const makeMcpToolServer = <R>(input: {
   readonly name: string
   readonly version: string
@@ -323,6 +377,8 @@ export const makeMcpToolServer = <R>(input: {
           inputSchema: fromJsonSchema(schema)
         },
         async (args, sdkContext) => {
+          // The SDK aborts this signal when the client cancels the request (on Streamable HTTP,
+          // by closing its response stream), so the tool stops instead of running unobserved.
           const result = await Effect.runPromiseWith(context)(
             tool
               .execute(
@@ -336,7 +392,8 @@ export const makeMcpToolServer = <R>(input: {
                 Effect.catch(error =>
                   Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
                 )
-              )
+              ),
+            { signal: sdkContext.mcpReq.signal }
           )
 
           return mcpResultFromExecutionResult(result)
@@ -480,11 +537,20 @@ export const makeMcpToolServer = <R>(input: {
         Effect.succeed(handler),
         current =>
           Effect.tryPromise(() => current.fetch(request)).pipe(
-            Effect.catch(error =>
-              badRequestBody(unknownToMessage(error)).pipe(
-                Effect.map(body => jsonResponse(body, { status: 400 }))
-              )
-            )
+            Effect.matchEffect({
+              onFailure: error =>
+                badRequestBody(unknownToMessage(error)).pipe(
+                  Effect.map(body => jsonResponse(body, { status: 400 }))
+                ),
+              onSuccess: response =>
+                completedExchange(request, response).pipe(
+                  Effect.catch(error =>
+                    internalErrorBody(error).pipe(
+                      Effect.map(body => jsonResponse(body, { status: 500 }))
+                    )
+                  )
+                )
+            })
           ),
         current => Effect.promise(() => current.close()).pipe(Effect.catch(() => Effect.void))
       )

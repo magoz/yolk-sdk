@@ -1,4 +1,4 @@
-import { Effect, Option, Predicate, Result } from 'effect'
+import { Context, Deferred, Effect, Fiber, Layer, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -125,6 +125,7 @@ const modernHttpRequest = (input: {
   readonly id?: string | number
   readonly params?: Schema.JsonObject
   readonly headers?: Readonly<Record<string, string>>
+  readonly signal?: AbortSignal
 }) => {
   const params = Option.getOrThrowWith(
     Option.filter(Schema.decodeUnknownOption(Schema.Json)(input.params ?? {}), isJsonObject),
@@ -145,9 +146,108 @@ const modernHttpRequest = (input: {
       id: input.id ?? 1,
       method: input.method,
       params: { ...params, _meta: modernMeta }
-    })
+    }),
+    signal: input.signal ?? null
   })
 }
+
+/** A 2025-era Streamable HTTP POST without a session: the SDK answers it with an SSE stream. */
+const legacyStreamableHttpRequest = (body: Schema.Json, signal?: AbortSignal) =>
+  new Request('https://example.com/mcp', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      'mcp-protocol-version': '2025-06-18'
+    },
+    body: requestLine(body),
+    signal: signal ?? null
+  })
+
+const sseMessages = (body: string) =>
+  Effect.forEach(
+    body.split('\n').flatMap(line => (line.startsWith('data: ') ? [line.slice(6)] : [])),
+    data => decodeJson(data)
+  )
+
+/** A host resource that only lives as long as the scope that provides it, like an HTTP agent. */
+class ScopedResource extends Context.Service<ScopedResource, { readonly isOpen: () => boolean }>()(
+  'test/ScopedResource'
+) {}
+
+const ScopedResourceLive = Layer.effect(
+  ScopedResource,
+  Effect.gen(function* () {
+    const state = { open: true }
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        state.open = false
+      })
+    )
+
+    return ScopedResource.of({ isOpen: () => state.open })
+  })
+)
+
+const scopedResourceServer = makeMcpToolServer({
+  name: 'test-server',
+  version: '0',
+  tools: [
+    {
+      def: ToolDef.make({ name: 'scoped', description: 'Scoped', parameters: { type: 'object' } }),
+      execute: call =>
+        Effect.gen(function* () {
+          const resource = yield* ScopedResource
+
+          // Real async work, so the tool is still running when the HTTP response is produced.
+          yield* Effect.sleep('10 millis')
+
+          return ToolResult.make({
+            toolCallId: call.id,
+            content: resource.isOpen() ? 'resource open' : 'resource released'
+          })
+        })
+    }
+  ]
+})
+
+/** A server whose one tool waits until interrupted, reporting when it starts and stops. */
+const waitingServer = (started: Deferred.Deferred<void>, interrupted: Deferred.Deferred<void>) =>
+  makeMcpToolServer({
+    name: 'test-server',
+    version: '0',
+    tools: [
+      {
+        def: ToolDef.make({ name: 'wait', description: 'Wait', parameters: { type: 'object' } }),
+        execute: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined))
+          )
+      }
+    ]
+  })
+
+const expectCancelledToolInterrupted = (request: (signal: AbortSignal) => Request) =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const interrupted = yield* Deferred.make<void>()
+    const controller = new AbortController()
+
+    const exchange = yield* Effect.forkChild(
+      waitingServer(started, interrupted).handleHttpRequest(request(controller.signal))
+    )
+
+    yield* Deferred.await(started)
+    controller.abort()
+
+    const stopped = yield* Deferred.await(interrupted).pipe(Effect.timeoutOption('1 second'))
+
+    expect(Option.isSome(stopped)).toBe(true)
+
+    yield* Fiber.join(exchange).pipe(Effect.timeout('1 second'))
+  })
 
 describe('MCP tool server', () => {
   it.effect('handles initialize', () =>
@@ -350,6 +450,79 @@ describe('MCP tool server', () => {
         }
       })
     })
+  )
+
+  // The host's scope (here `Effect.scoped`, in a route its request layer) closes when the Effect
+  // returns, so a tool still running on a streamed body would see released resources.
+  it.live('runs streamed tool calls inside the caller scope', () =>
+    Effect.gen(function* () {
+      const response = yield* scopedResourceServer
+        .handleHttpRequest(
+          legacyStreamableHttpRequest({
+            jsonrpc: '2.0',
+            id: 11,
+            method: 'tools/call',
+            params: { name: 'scoped', arguments: {} }
+          })
+        )
+        .pipe(Effect.provide(ScopedResourceLive), Effect.scoped)
+
+      const messages = yield* Effect.promise(() => response.text()).pipe(
+        Effect.flatMap(sseMessages)
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toBe('text/event-stream')
+      expect(messages).toMatchObject([
+        { jsonrpc: '2.0', id: 11, result: { content: [{ type: 'text', text: 'resource open' }] } }
+      ])
+    })
+  )
+
+  // A listen stream is long-lived and runs no tool: it is never read to its end before returning.
+  it.live('answers subscriptions/listen without waiting for the stream to end', () =>
+    Effect.gen(function* () {
+      const response = yield* server
+        .handleHttpRequest(
+          modernHttpRequest({
+            method: 'subscriptions/listen',
+            id: 13,
+            params: { notifications: {} }
+          })
+        )
+        .pipe(Effect.timeout('1 second'))
+
+      const messages = yield* Effect.promise(() => response.text()).pipe(
+        Effect.timeout('1 second'),
+        Effect.flatMap(sseMessages)
+      )
+
+      expect(response.headers.get('content-type')).toBe('text/event-stream')
+      expect(messages).toMatchObject([
+        { method: 'notifications/subscriptions/acknowledged' },
+        { id: 13, result: { resultType: 'complete' } }
+      ])
+    })
+  )
+
+  it.live('stops a 2026-07-28 tool call when the client cancels the request', () =>
+    expectCancelledToolInterrupted(signal =>
+      modernHttpRequest({
+        method: 'tools/call',
+        params: { name: 'wait', arguments: {} },
+        headers: { 'mcp-name': 'wait' },
+        signal
+      })
+    )
+  )
+
+  it.live('stops a 2025-era streamed tool call when the client cancels the request', () =>
+    expectCancelledToolInterrupted(signal =>
+      legacyStreamableHttpRequest(
+        { jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'wait', arguments: {} } },
+        signal
+      )
+    )
   )
 
   it.effect('rejects mismatched modern HTTP routing headers', () =>
