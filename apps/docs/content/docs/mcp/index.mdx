@@ -204,7 +204,7 @@ export default { fetch: handler.fetch }
 
 Use `makeMcpToolServer` from `@yolk-sdk/mcp/server` to expose a tool-only Yolk adapter. Its HTTP entrypoint accepts both modern and legacy requests. Use the official `McpServer` surface when you need other core capabilities.
 
-No tool call outlives `handleHttpRequest`'s Effect, so you can provide its requirements from a scoped request layer. When an answer is an SSE stream (always for 2025-era requests), it is read to its end first and returned with the same status, headers and events, and a tool still running when the Effect ends is interrupted and awaited. A `subscriptions/listen` request is answered with its acknowledgement and a `complete` result: this server has no change notifications to stream. For requests that carry `MCP-Protocol-Version`, a client cancellation (on Streamable HTTP, closing the response stream) interrupts the tool's Effect.
+No tool call outlives `handleHttpRequest`'s Effect, so you can provide its requirements from a scoped request layer. When an answer other than `subscriptions/listen` is an SSE stream (always for 2025-era requests), it is read to its end first and returned with the same status, headers and events (a read failure answers 500 with `-32603`), and a tool still running when the Effect ends is interrupted and awaited. A `subscriptions/listen` request is answered with its acknowledgement and a `complete` result: this server has no change notifications to stream. For requests that carry `MCP-Protocol-Version`, a client cancellation (on Streamable HTTP, closing the response stream) interrupts the tool's Effect.
 
 ## Conformance cases
 
