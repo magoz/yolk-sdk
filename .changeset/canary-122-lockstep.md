@@ -13,4 +13,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Advance in lockstep with `@yolk-sdk/connectors`, whose action inputs now advertise only finite numbers (bounded integer counts and page sizes, finite GitHub issue-field numbers and Fortnox nullable amounts). These packages have no direct changes in this release.
+Advance in lockstep with `@yolk-sdk/connectors`, whose action inputs now advertise only finite numbers (integer counts and page sizes of at least 1, some with upper bounds, and finite GitHub issue-field numbers and Fortnox nullable amounts). These packages have no direct changes in this release.
