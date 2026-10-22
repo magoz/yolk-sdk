@@ -1,5 +1,13 @@
 # @yolk-sdk/extractors
 
+## 0.1.0-canary.122
+
+### Patch Changes
+
+- 6d9787f: Advance in lockstep with `@yolk-sdk/connectors`, whose action inputs now advertise only finite numbers (integer counts and page sizes of at least 1, some with upper bounds, and finite GitHub issue-field numbers and Fortnox nullable amounts). These packages have no direct changes in this release.
+- Updated dependencies [6d9787f]
+  - @yolk-sdk/knowledge@0.1.0-canary.122
+
 ## 0.1.0-canary.121
 
 ### Patch Changes
