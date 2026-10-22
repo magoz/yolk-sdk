@@ -4,6 +4,7 @@ import {
   McpServer as SdkMcpServer,
   createMcpHandler,
   fromJsonSchema,
+  isLegacyRequest,
   originValidationResponse,
   type CallToolResult as SdkCallToolResult,
   type ContentBlock as SdkContentBlock
@@ -18,7 +19,7 @@ import {
   type ContentPart,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
-import { latestMcpProtocolVersion, legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
+import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {
@@ -305,14 +306,18 @@ const isEventStream = (response: Response) =>
   response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
 
 /**
- * `subscriptions/listen` runs no tool, and its stream ends only when the handler closes. The SDK
- * checks `Mcp-Method` against the body only for modern requests, and a modern
- * `MCP-Protocol-Version` header makes it require a matching body envelope; a 2025-era request may
- * carry any `Mcp-Method`, so the header alone would let a tool call skip the read.
+ * `subscriptions/listen` runs no tool, and its stream ends only when the per-request handler
+ * closes, after this returns. The SDK checks `Mcp-Method` against the body only on requests it
+ * routes as modern; a legacy one may carry any `Mcp-Method`, so the SDK's own era routing
+ * (`isLegacyRequest`, on a body clone) decides. When it cannot tell, the stream is read.
  */
 const isListenRequest = (request: Request) =>
-  request.headers.get('mcp-protocol-version') === latestMcpProtocolVersion &&
   request.headers.get('mcp-method') === 'subscriptions/listen'
+    ? Effect.tryPromise(() => isLegacyRequest(request)).pipe(
+        Effect.map(legacy => !legacy),
+        Effect.orElseSucceed(() => false)
+      )
+    : Effect.succeed(false)
 
 /**
  * The SDK may answer a request with an SSE stream that it fills after returning the `Response`
@@ -321,10 +326,10 @@ const isListenRequest = (request: Request) =>
  * read to its end here and answered with the same status, headers and events: still a valid
  * request-scoped stream. Interruption cancels the stream, which the SDK treats as cancellation.
  */
-const completedExchange = (request: Request, response: Response) => {
+const completedExchange = (response: Response, listen: boolean) => {
   const body = response.body
 
-  if (body === null || isListenRequest(request) || !isEventStream(response)) {
+  if (body === null || listen || !isEventStream(response)) {
     return Effect.succeed(response)
   }
 
@@ -537,6 +542,14 @@ export const makeMcpToolServer = <R>(input: {
         return jsonResponse(responseBody)
       }
 
+      return yield* handleSdkHttpRequest(request)
+    })
+
+  const handleSdkHttpRequest = (request: Request) =>
+    Effect.gen(function* () {
+      // Read before `fetch` consumes the body.
+      const listen = yield* isListenRequest(request)
+
       // Tool calls run as fibers of this request: closing the scope below interrupts and awaits any
       // still running (a cancelled call's finalizers), so no tool outlives the caller's scope.
       const toolFibers = yield* FiberSet.make()
@@ -553,7 +566,7 @@ export const makeMcpToolServer = <R>(input: {
                   Effect.map(body => jsonResponse(body, { status: 400 }))
                 ),
               onSuccess: response =>
-                completedExchange(request, response).pipe(
+                completedExchange(response, listen).pipe(
                   Effect.catch(error =>
                     internalErrorBody(error).pipe(
                       Effect.map(body => jsonResponse(body, { status: 500 }))
