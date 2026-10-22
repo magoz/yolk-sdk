@@ -1,5 +1,4 @@
-import { Array as Arr, Effect, Match, Option, Predicate, Result, Stream } from 'effect'
-import type { Context } from 'effect'
+import { Array as Arr, Effect, FiberSet, Match, Option, Predicate, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   McpServer as SdkMcpServer,
@@ -19,7 +18,7 @@ import {
   type ContentPart,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
-import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
+import { latestMcpProtocolVersion, legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {
@@ -260,6 +259,12 @@ export type McpServerTool<R = never> = {
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, McpServerError, R>
 }
 
+/** Runs one tool call's Effect as a fiber of the current HTTP request. */
+type ToolRunner<R> = (
+  effect: Effect.Effect<ToolResult | SdkCallToolResult, never, R>,
+  options: Effect.RunOptions
+) => Promise<ToolResult | SdkCallToolResult>
+
 export type McpToolServer<R = never> = {
   readonly handleLine: (line: string) => Effect.Effect<Option.Option<string>, McpServerError, R>
   readonly handleJson: (body: string) => Effect.Effect<string, McpServerError, R>
@@ -300,11 +305,13 @@ const isEventStream = (response: Response) =>
   response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
 
 /**
- * `subscriptions/listen` is the one long-lived stream; it runs no tool. The SDK rejects a modern
- * request whose `Mcp-Method` header is missing or differs from the body, and 2025-era requests
- * have no listen method, so the header identifies it.
+ * `subscriptions/listen` runs no tool, and its stream ends only when the handler closes. The SDK
+ * checks `Mcp-Method` against the body only for modern requests, and a modern
+ * `MCP-Protocol-Version` header makes it require a matching body envelope; a 2025-era request may
+ * carry any `Mcp-Method`, so the header alone would let a tool call skip the read.
  */
 const isListenRequest = (request: Request) =>
+  request.headers.get('mcp-protocol-version') === latestMcpProtocolVersion &&
   request.headers.get('mcp-method') === 'subscriptions/listen'
 
 /**
@@ -358,7 +365,7 @@ export const makeMcpToolServer = <R>(input: {
     ).pipe(Option.getOrElse(() => ({ type: 'object', additionalProperties: true })))
   }))
 
-  const makeSdkServer = (context: Context.Context<R>) => {
+  const makeSdkServer = (runTool: ToolRunner<R>) => {
     const server = new SdkMcpServer(
       { name: input.name, version: input.version },
       {
@@ -379,7 +386,7 @@ export const makeMcpToolServer = <R>(input: {
         async (args, sdkContext) => {
           // The SDK aborts this signal when the client cancels the request (on Streamable HTTP,
           // by closing its response stream), so the tool stops instead of running unobserved.
-          const result = await Effect.runPromiseWith(context)(
+          const result = await runTool(
             tool
               .execute(
                 ToolCall.make({
@@ -530,8 +537,11 @@ export const makeMcpToolServer = <R>(input: {
         return jsonResponse(responseBody)
       }
 
-      const context = yield* Effect.context<R>()
-      const handler = createMcpHandler(() => makeSdkServer(context))
+      // Tool calls run as fibers of this request: closing the scope below interrupts and awaits any
+      // still running (a cancelled call's finalizers), so no tool outlives the caller's scope.
+      const toolFibers = yield* FiberSet.make()
+      const runTool = yield* FiberSet.runtimePromise(toolFibers)<R>()
+      const handler = createMcpHandler(() => makeSdkServer(runTool))
 
       return yield* Effect.acquireUseRelease(
         Effect.succeed(handler),
@@ -554,7 +564,7 @@ export const makeMcpToolServer = <R>(input: {
           ),
         current => Effect.promise(() => current.close()).pipe(Effect.catch(() => Effect.void))
       )
-    })
+    }).pipe(Effect.scoped)
 
   return { handleLine, handleJson, handleHttpRequest }
 }
