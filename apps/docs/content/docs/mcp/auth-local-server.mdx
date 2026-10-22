@@ -99,7 +99,7 @@ const server = makeMcpToolServer({
 })
 ```
 
-The adapter serves stateless MCP `2026-07-28` and initialize-based legacy HTTP clients for `tools/list` and `tools/call`; `subscriptions/listen` answers its acknowledgement and `complete`. No tool call outlives `handleHttpRequest` (see [Expose Yolk tools through MCP](./index#expose-yolk-tools-through-mcp)). It does not own routes, auth, resources, prompts, or deployment. Use the official `McpServer` exports for the full core protocol.
+The adapter serves stateless MCP `2026-07-28` and initialize-based legacy HTTP clients for `tools/list` and `tools/call`; a `2026-07-28` `subscriptions/listen` answers its acknowledgement and `complete`. No tool call outlives `handleHttpRequest` (see [Expose Yolk tools through MCP](./index#expose-yolk-tools-through-mcp)). It does not own routes, auth, resources, prompts, or deployment. Use the official `McpServer` exports for the full core protocol.
 
 ## Policy checklist
 
