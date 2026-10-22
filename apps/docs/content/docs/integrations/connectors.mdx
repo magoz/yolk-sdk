@@ -23,6 +23,17 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                                                                                                             |
 | Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions                                                                                                 |
 
+### Input numbers
+
+Number inputs are integers or finite numbers, so tool schemas never offer the non-finite values that
+[tool arguments reject](../agent/tools-hitl#optional-arguments-null-and-unknown-keys). Counts and
+page sizes are integers of at least 1, and some have upper bounds. For example, Gmail and Google
+Calendar `maxResults` and LinkedIn search `numResults` have none (Gmail and Calendar clamp larger
+values), Notion `pageSize` is at most 100, which Notion enforces, and Todoist `limit` is at most
+200, like its comment list. Todoist `priority` is an integer from 1 to 4 and `duration` an integer
+of at least 1. Google Drive, Dropbox, generic email and Fortnox page sizes keep their existing
+bounds. A value outside an input's bounds fails as a validation error before any request.
+
 ## Afloat
 
 Use Afloat when you want to turn a host-owned Afloat API key into remote MCP connection data.

@@ -30,6 +30,22 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.122: connector input numbers
+
+Connector action inputs advertise only finite numbers (bare `Schema.Number` offered models
+`"NaN"`/`"Infinity"`, which argument decoding then rejected). Validation is stricter, for tool calls
+and in-process `invoke` alike: an input outside the following constraints now fails validation
+instead of reaching the provider.
+
+- Gmail and Google Calendar `maxResults`, LinkedIn search `numResults`: integers of at least 1.
+- Notion `pageSize`: an integer from 1 to 100. Todoist `limit`, `priority` and `duration`: integers
+  from 1 to 200, from 1 to 4, and of at least 1.
+- GitHub issue field `number` inputs and Fortnox nullable amounts: finite numbers.
+
+Hosts that list these tools over MCP serve changed tool schemas once (these inputs, and the declared
+outputs of Fortnox tools whose results carry nullable amounts), so grants keyed on a tool snapshot
+digest return to their default for the affected tools.
+
 ### Canary.116: subscription pools and quota signals
 
 New, opt-in ([ADR 0011](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0011-subscription-pools.md)):
