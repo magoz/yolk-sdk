@@ -57,7 +57,7 @@ The quirks the cases protect:
   one of the two fields and checks the connector's own result: its `status` must never be
   `unknown`, whether it falls back to it or Enrich Layer answered it.
 - `linkedin_search.search` sends `category: "people"`, `type: "auto"`, `contents: { text: true }`,
-  and `numResults` (default 10, passed through without a cap). There is no paging: one request
+  and `numResults` (default 10, a positive integer passed through without a cap). There is no paging: one request
   answers every result. The limit case sends two searches for the seeded query: a control with
   `numResults: 3` (one more than the limit, the smallest paid control), which must answer more than
   2 people (a `precondition:` mismatch otherwise, since only then can an ignored limit show), and

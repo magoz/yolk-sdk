@@ -411,7 +411,7 @@ export const linkedInSearchNumResultsLimitCase: LinkedInSearchConformanceCase =
     id: 'linkedin-search.search.num-results-limit',
     title: 'Exa answers at most numResults results for a query that matches more',
     safety: 'read',
-    docs: '`linkedin_search.search` passes `numResults` to Exa unchanged (it neither caps nor validates it) and never pages, so the answer to its single request is everything it returns.',
+    docs: '`linkedin_search.search` passes `numResults` to Exa unchanged (it validates a positive integer but sets no cap) and never pages, so the answer to its single request is everything it returns.',
     wire: 'The case sends two POST /search requests for the seeded query through `linkedin_search.search`. First a control with `numResults: 3`, which must answer more than 2 people (a `precondition:` otherwise: only then could an ignored limit show). Then the same query with `numResults: 2`; the two bodies carry `numResults: 3` and `numResults: 2`, and Exa answers a 2xx with 1 or 2 results: the limit is honoured, not ignored.',
     fixtures: [linkedInSearchNumResultsLimitFixture.id],
     run: Effect.gen(function* () {

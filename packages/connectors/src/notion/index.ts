@@ -123,8 +123,8 @@ export class NotionPage extends Schema.Class<NotionPage>('NotionPage')({
   properties: Schema.optional(NotionProperties)
 }) {}
 
-/** Notion page sizes: a positive integer (Notion caps it server-side). */
-const NotionPageSize = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+/** Notion page sizes: 1 to 100. Notion rejects a `page_size` above 100. */
+const NotionPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
 
 export class NotionSearchInput extends Schema.Class<NotionSearchInput>('NotionSearchInput')({
   query: Schema.optional(Schema.String),

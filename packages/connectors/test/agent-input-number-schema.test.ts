@@ -83,16 +83,19 @@ const isJsonRecord = Schema.is(Schema.Record(Schema.String, Schema.Json))
 
 const nonFiniteLiterals = ['NaN', 'Infinity', '-Infinity']
 
-/** JSON Pointers of every schema that lists a non-finite number literal in its `enum`. */
+/** JSON Pointers of every schema whose `enum` or `const` holds a non-finite number literal. */
 const nonFiniteEnums = (node: Schema.Json, path: string): ReadonlyArray<string> => {
   if (isJsonArray(node))
     return node.flatMap((child, index) => nonFiniteEnums(child, `${path}/${index}`))
 
   if (!isJsonRecord(node)) return []
 
+  const isNonFinite = (value: Schema.Json) =>
+    Predicate.isString(value) && nonFiniteLiterals.includes(value)
+
   const own =
-    isJsonArray(node.enum) &&
-    node.enum.some(value => Predicate.isString(value) && nonFiniteLiterals.includes(value))
+    (isJsonArray(node.enum) && node.enum.some(isNonFinite)) ||
+    (node.const !== undefined && isNonFinite(node.const))
       ? [path]
       : []
 
@@ -136,6 +139,70 @@ describe('connector tool input numbers', () => {
       )
 
       expect(offenders.flat()).toEqual([])
+    })
+  )
+
+  it.effect('detects a non-finite literal in an enum or a const', () =>
+    Effect.sync(() => {
+      expect(
+        nonFiniteEnums({ anyOf: [{ type: 'number' }, { enum: ['NaN', 'Infinity'] }] }, '')
+      ).toEqual(['/anyOf/1'])
+      expect(nonFiniteEnums({ properties: { n: { const: '-Infinity' } } }, '')).toEqual([
+        '/properties/n'
+      ])
+      expect(nonFiniteEnums({ properties: { n: { type: 'integer', minimum: 1 } } }, '')).toEqual([])
+    })
+  )
+
+  // The schemas decode tool arguments and in-process calls alike (`defineAction` runs them).
+  const decodes = <Env, E>(connector: Connector<Env, E>, actionId: string, input: Schema.Json) => {
+    const action = connector.actions.find(item => item.id === actionId)
+
+    if (action === undefined) return Effect.die(new Error(`No action ${actionId}`))
+
+    return Schema.decodeUnknownEffect(action.inputSchema)(input).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false)
+    )
+  }
+
+  it.effect('accepts counts only inside their bounds', () =>
+    Effect.gen(function* () {
+      for (const maxResults of [0, -1, 2.5]) {
+        expect(yield* decodes(GoogleConnector, 'gmail.list', { maxResults })).toBe(false)
+      }
+
+      expect(yield* decodes(GoogleConnector, 'gmail.list', { maxResults: 1 })).toBe(true)
+      expect(yield* decodes(GoogleConnector, 'gmail.list', { maxResults: 900 })).toBe(true)
+      expect(yield* decodes(NotionConnector, 'notion.search', { pageSize: 100 })).toBe(true)
+      expect(yield* decodes(NotionConnector, 'notion.search', { pageSize: 101 })).toBe(false)
+      expect(yield* decodes(TodoistConnector, 'todoist.list_tasks', { limit: 200 })).toBe(true)
+      expect(yield* decodes(TodoistConnector, 'todoist.list_tasks', { limit: 201 })).toBe(false)
+    })
+  )
+
+  it.effect('accepts Todoist priorities 1 to 4 and positive whole durations', () =>
+    Effect.gen(function* () {
+      const task = (fields: Schema.JsonObject) => ({ content: 'Task', ...fields })
+
+      for (const priority of [1, 4]) {
+        expect(yield* decodes(TodoistConnector, 'todoist.create_task', task({ priority }))).toBe(
+          true
+        )
+      }
+
+      for (const priority of [0, 5, 2.5]) {
+        expect(yield* decodes(TodoistConnector, 'todoist.create_task', task({ priority }))).toBe(
+          false
+        )
+      }
+
+      expect(yield* decodes(TodoistConnector, 'todoist.create_task', task({ duration: 30 }))).toBe(
+        true
+      )
+      expect(yield* decodes(TodoistConnector, 'todoist.create_task', task({ duration: 0 }))).toBe(
+        false
+      )
     })
   )
 })

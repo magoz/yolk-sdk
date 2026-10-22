@@ -49,7 +49,7 @@ export class GmailMessageRef extends Schema.Class<GmailMessageRef>('GmailMessage
   threadId: Schema.optional(Schema.String)
 }) {}
 
-/** Gmail page sizes: a positive integer (Gmail caps it server-side). */
+/** Gmail page sizes: a positive integer. Gmail clamps larger values to 500, so no upper bound. */
 const GmailMaxResults = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 export class GmailSearchInput extends Schema.Class<GmailSearchInput>('GmailSearchInput')({

@@ -105,8 +105,8 @@ const TodoistPriority = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum:
 /** A task duration in `durationUnit`s: a positive integer. */
 const TodoistDuration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
-/** Todoist page sizes: a positive integer (Todoist caps it server-side). */
-const TodoistLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+/** Todoist page sizes: 1 to 200, as the comment list (`files.ts`) bounds the same API's `limit`. */
+const TodoistLimit = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))
 
 export class TodoistTask extends Schema.Class<TodoistTask>('TodoistTask')({
   id: Schema.String,
