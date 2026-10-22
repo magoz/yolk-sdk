@@ -251,7 +251,7 @@ policy.
 import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 ```
 
-`makeMcpToolServer` exposes approved Yolk tools. Its HTTP handler accepts both stateless v2 and legacy requests, validates browser origins against the endpoint hostname by default, and preserves MCP content and structured results. No tool call outlives `handleHttpRequest` (an SSE answer is read to its end; a call still running is interrupted and awaited), so its requirements may come from a scoped request layer; a cancelled request that carries `MCP-Protocol-Version` interrupts the tool. `runStdioMcpServer` remains the Effect-native minimal stdio adapter; use `serveStdio` for the full modern stdio surface.
+`makeMcpToolServer` exposes approved Yolk tools. Its HTTP handler accepts both stateless v2 and legacy requests, validates browser origins against the endpoint hostname by default, and preserves MCP content and structured results. No tool call outlives `handleHttpRequest` (an SSE answer is read to its end, and a read failure answers 500 with `-32603`; a call still running is interrupted and awaited), so its requirements may come from a scoped request layer; a cancelled request that carries `MCP-Protocol-Version` interrupts the tool. `subscriptions/listen` answers its acknowledgement plus a `complete` result: this tool-only server has no change notifications. `runStdioMcpServer` remains the Effect-native minimal stdio adapter; use `serveStdio` for the full modern stdio surface.
 
 For legacy HTTP requests, an unreadable or already consumed body produces a JSON-RPC
 invalid-request error (`-32600`) rather than an Effect defect. Malformed JSON remains a parse error
