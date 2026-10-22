@@ -1,5 +1,14 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.122
+
+### Patch Changes
+
+- 5f1b4d8: Connector action inputs no longer advertise non-finite numbers. A bare `Schema.Number` lowers to `number | "NaN" | "Infinity" | "-Infinity"`, which the tool argument decoder then rejects, and providers that flatten the union lost the field description. Count and page-size inputs are now integers: Gmail `maxResults` (search, list, list_threads, list_drafts), Google Calendar `maxResults` (list_calendars, list_events) and LinkedIn search `numResults` are at least 1 (Gmail and Calendar clamp larger values); Notion `pageSize` is 1 to 100, which Notion enforces; Todoist `limit` (list_tasks and the paginated lists) is 1 to 200, like the comment list's; Todoist `duration` (create_task, update_task) is at least 1 and `priority` is 1 to 4. GitHub issue field `number` inputs and Fortnox nullable amounts (`NullableNumber`, including invoice row prices and totals) are finite numbers. Validation is stricter: a zero, negative, fractional or over-limit count, or a priority outside 1–4, now fails with a validation error instead of reaching the provider. Hosts whose MCP servers list these tools see changed tool schemas once (the inputs above, and the declared outputs of Fortnox tools whose results carry nullable amounts), so grants keyed on a tool snapshot digest return to their default for those tools.
+- Updated dependencies [6d9787f]
+  - @yolk-sdk/agent@0.1.0-canary.122
+  - @yolk-sdk/conformance@0.1.0-canary.122
+
 ## 0.1.0-canary.121
 
 ### Patch Changes
