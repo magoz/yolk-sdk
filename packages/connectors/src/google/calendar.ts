@@ -77,10 +77,13 @@ export class GoogleCalendarRef extends Schema.Class<GoogleCalendarRef>('GoogleCa
   primary: Schema.optional(Schema.Boolean)
 }) {}
 
+/** Calendar page sizes: a positive integer (Google caps it server-side). */
+const GoogleCalendarMaxResults = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
 export class GoogleCalendarListCalendarsInput extends Schema.Class<GoogleCalendarListCalendarsInput>(
   'GoogleCalendarListCalendarsInput'
 )({
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GoogleCalendarMaxResults),
   pageToken: Schema.optional(Schema.String)
 }) {}
 
@@ -98,7 +101,7 @@ export class GoogleCalendarListEventsInput extends Schema.Class<GoogleCalendarLi
   timeMin: Schema.optional(Schema.String),
   timeMax: Schema.optional(Schema.String),
   query: Schema.optional(Schema.String),
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GoogleCalendarMaxResults),
   pageToken: Schema.optional(Schema.String),
   singleEvents: Schema.optional(Schema.Boolean),
   orderBy: Schema.optional(Schema.Literals(['startTime', 'updated']))

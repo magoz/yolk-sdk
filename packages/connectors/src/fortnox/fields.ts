@@ -27,7 +27,7 @@ export const OptionalInt = Schema.optional(Schema.Int)
 // Fortnox uses JSON null for unset response fields. Preserve null; do not require omission.
 export const NullableString = Schema.optional(Schema.NullOr(Schema.String))
 
-export const NullableNumber = Schema.optional(Schema.NullOr(Schema.Number))
+export const NullableNumber = Schema.optional(Schema.NullOr(Schema.Finite))
 
 export const NullableBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
 

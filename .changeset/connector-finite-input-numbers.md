@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/connectors': patch
+---
+
+Connector action inputs no longer advertise non-finite numbers. A bare `Schema.Number` lowers to `number | "NaN" | "Infinity" | "-Infinity"`, which the tool argument decoder then rejects, and providers that flatten the union lost the field description. Count and page-size inputs are now positive integers (`Schema.Int`, at least 1): Gmail `maxResults` (search, list, list_threads, list_drafts), Google Calendar `maxResults` (list_calendars, list_events), LinkedIn search `numResults`, Notion `pageSize`, Todoist `limit` (list_tasks and the paginated lists) and `duration` (create_task, update_task). Todoist `priority` is an integer from 1 to 4. GitHub issue field `number` values and Fortnox nullable amounts (`NullableNumber`, including invoice row prices and totals) are finite numbers. Validation is stricter: a zero, negative or fractional count, or a priority outside 1–4, now fails with a validation error instead of reaching the provider. Hosts whose MCP servers list these tools see changed tool schemas once, so grants keyed on a tool snapshot digest return to their default for the affected tools.

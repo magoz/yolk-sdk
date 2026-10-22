@@ -49,9 +49,12 @@ export class GmailMessageRef extends Schema.Class<GmailMessageRef>('GmailMessage
   threadId: Schema.optional(Schema.String)
 }) {}
 
+/** Gmail page sizes: a positive integer (Gmail caps it server-side). */
+const GmailMaxResults = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
 export class GmailSearchInput extends Schema.Class<GmailSearchInput>('GmailSearchInput')({
   query: Schema.optional(Schema.String),
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GmailMaxResults),
   isRead: Schema.optional(Schema.Boolean),
   isFlagged: Schema.optional(Schema.Boolean)
 }) {}
@@ -128,7 +131,7 @@ export class GmailDraftIdInput extends Schema.Class<GmailDraftIdInput>('GmailDra
 export class GmailListInput extends Schema.Class<GmailListInput>('GmailListInput')({
   query: Schema.optional(Schema.String),
   labelId: Schema.optional(Schema.String),
-  maxResults: Schema.optional(Schema.Number),
+  maxResults: Schema.optional(GmailMaxResults),
   pageToken: Schema.optional(Schema.String),
   isRead: Schema.optional(Schema.Boolean),
   isFlagged: Schema.optional(Schema.Boolean)

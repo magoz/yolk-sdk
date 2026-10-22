@@ -99,6 +99,15 @@ const todoistProviderFailure = (input: {
     )
   )
 
+/** Todoist priority: 1 (normal) to 4 (urgent). */
+const TodoistPriority = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 4 }))
+
+/** A task duration in `durationUnit`s: a positive integer. */
+const TodoistDuration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
+/** Todoist page sizes: a positive integer (Todoist caps it server-side). */
+const TodoistLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
 export class TodoistTask extends Schema.Class<TodoistTask>('TodoistTask')({
   id: Schema.String,
   content: Schema.String,
@@ -130,7 +139,7 @@ export class TodoistListTasksInput extends Schema.Class<TodoistListTasksInput>(
   filterLang: Schema.optional(Schema.String),
   filter_lang: Schema.optional(Schema.String),
   cursor: Schema.optional(Schema.String),
-  limit: Schema.optional(Schema.Number)
+  limit: Schema.optional(TodoistLimit)
 }) {}
 
 export class TodoistListTasksOutput extends Schema.Class<TodoistListTasksOutput>(
@@ -157,7 +166,7 @@ export class TodoistCreateTaskInput extends Schema.Class<TodoistCreateTaskInput>
   parentId: Schema.optional(Schema.String),
   parent_id: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
-  priority: Schema.optional(Schema.Number),
+  priority: Schema.optional(TodoistPriority),
   dueString: Schema.optional(Schema.String),
   due_string: Schema.optional(Schema.String),
   dueDate: Schema.optional(Schema.String),
@@ -168,7 +177,7 @@ export class TodoistCreateTaskInput extends Schema.Class<TodoistCreateTaskInput>
   due_lang: Schema.optional(Schema.String),
   assigneeId: Schema.optional(Schema.String),
   assignee_id: Schema.optional(Schema.String),
-  duration: Schema.optional(Schema.Number),
+  duration: Schema.optional(TodoistDuration),
   durationUnit: Schema.optional(Schema.String),
   duration_unit: Schema.optional(Schema.String),
   deadlineDate: Schema.optional(Schema.String),
@@ -194,7 +203,7 @@ export class TodoistPaginationInput extends Schema.Class<TodoistPaginationInput>
   'TodoistPaginationInput'
 )({
   cursor: Schema.optional(Schema.String),
-  limit: Schema.optional(Schema.Number)
+  limit: Schema.optional(TodoistLimit)
 }) {}
 
 export class TodoistProject extends Schema.Class<TodoistProject>('TodoistProject')({
@@ -294,7 +303,7 @@ export class TodoistUpdateTaskInput extends Schema.Class<TodoistUpdateTaskInput>
   content: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
-  priority: Schema.optional(Schema.Number),
+  priority: Schema.optional(TodoistPriority),
   dueString: Schema.optional(Schema.String),
   due_string: Schema.optional(Schema.String),
   dueDate: Schema.optional(Schema.String),
@@ -305,7 +314,7 @@ export class TodoistUpdateTaskInput extends Schema.Class<TodoistUpdateTaskInput>
   due_lang: Schema.optional(Schema.String),
   assigneeId: Schema.optional(Schema.String),
   assignee_id: Schema.optional(Schema.String),
-  duration: Schema.optional(Schema.Number),
+  duration: Schema.optional(TodoistDuration),
   durationUnit: Schema.optional(Schema.String),
   duration_unit: Schema.optional(Schema.String),
   deadlineDate: Schema.optional(Schema.String),

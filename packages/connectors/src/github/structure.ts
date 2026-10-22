@@ -502,7 +502,7 @@ export const githubListIssueFieldsAction = defineAction({
 export const GithubIssueFieldValueInput = Schema.Struct({
   fieldId: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1))),
   text: Schema.optional(Schema.String),
-  number: Schema.optional(Schema.Number),
+  number: Schema.optional(Schema.Finite),
   date: Schema.optional(Schema.String),
   option: Schema.optional(Schema.String),
   options: Schema.optional(Schema.Array(Schema.String))
