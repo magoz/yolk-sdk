@@ -39,6 +39,7 @@ import {
   type AgentReasoningEffort,
   type Content,
   type ContentPart,
+  type ProviderStreamInvalidField,
   type ProviderStreamResponseFormat,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
@@ -61,6 +62,7 @@ import {
 } from '../provider-error.ts'
 import { validateProviderTranscript } from '../transcript.ts'
 import { requestCacheKeyHeaders } from '../cache-key-headers.ts'
+import { invalidFieldOf } from '../invalid-field-internal.ts'
 import { withoutToolJsonSchemaOmittedNullMarker } from '../../protocol/tool-json-schema-marker.ts'
 
 type OpenAiProviderIdentity = {
@@ -369,7 +371,7 @@ class OpenAiMessageResponse extends Schema.Class<OpenAiMessageResponse>('OpenAiM
   reasoning_content: Schema.optional(Schema.Unknown),
   // See OpenAiChatDelta: normalized `reasoning` alias for thinking output.
   reasoning: Schema.optional(Schema.Unknown),
-  tool_calls: Schema.optional(Schema.Array(OpenAiToolCallResponse))
+  tool_calls: Schema.optional(Schema.NullOr(Schema.Array(OpenAiToolCallResponse)))
 }) {}
 
 class OpenAiChoiceResponse extends Schema.Class<OpenAiChoiceResponse>('OpenAiChoiceResponse')({
@@ -380,42 +382,42 @@ class OpenAiChoiceResponse extends Schema.Class<OpenAiChoiceResponse>('OpenAiCho
 class OpenAiPromptTokensDetails extends Schema.Class<OpenAiPromptTokensDetails>(
   'OpenAiPromptTokensDetails'
 )({
-  cached_tokens: Schema.optional(Schema.Number)
+  cached_tokens: Schema.optional(Schema.NullOr(Schema.Number))
 }) {}
 
 class OpenAiCompletionTokensDetails extends Schema.Class<OpenAiCompletionTokensDetails>(
   'OpenAiCompletionTokensDetails'
 )({
-  reasoning_tokens: Schema.optional(Schema.Number)
+  reasoning_tokens: Schema.optional(Schema.NullOr(Schema.Number))
 }) {}
 
 class OpenAiUsageResponse extends Schema.Class<OpenAiUsageResponse>('OpenAiUsageResponse')({
   prompt_tokens: Schema.Number,
   completion_tokens: Schema.Number,
-  prompt_tokens_details: Schema.optional(OpenAiPromptTokensDetails),
-  completion_tokens_details: Schema.optional(OpenAiCompletionTokensDetails)
+  prompt_tokens_details: Schema.optional(Schema.NullOr(OpenAiPromptTokensDetails)),
+  completion_tokens_details: Schema.optional(Schema.NullOr(OpenAiCompletionTokensDetails))
 }) {}
 
 class OpenAiChatCompletionResponse extends Schema.Class<OpenAiChatCompletionResponse>(
   'OpenAiChatCompletionResponse'
 )({
   choices: Schema.Array(OpenAiChoiceResponse),
-  usage: Schema.optional(OpenAiUsageResponse)
+  usage: Schema.optional(Schema.NullOr(OpenAiUsageResponse))
 }) {}
 
 class OpenAiChatDeltaFunction extends Schema.Class<OpenAiChatDeltaFunction>(
   'OpenAiChatDeltaFunction'
 )({
-  name: Schema.optional(Schema.String),
-  arguments: Schema.optional(Schema.String)
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  arguments: Schema.optional(Schema.NullOr(Schema.String))
 }) {}
 
 class OpenAiChatDeltaToolCall extends Schema.Class<OpenAiChatDeltaToolCall>(
   'OpenAiChatDeltaToolCall'
 )({
-  index: Schema.optional(Schema.Number),
-  id: Schema.optional(Schema.String),
-  function: Schema.optional(OpenAiChatDeltaFunction)
+  index: Schema.optional(Schema.NullOr(Schema.Number)),
+  id: Schema.optional(Schema.NullOr(Schema.String)),
+  function: Schema.optional(Schema.NullOr(OpenAiChatDeltaFunction))
 }) {}
 
 class OpenAiChatDelta extends Schema.Class<OpenAiChatDelta>('OpenAiChatDelta')({
@@ -424,17 +426,21 @@ class OpenAiChatDelta extends Schema.Class<OpenAiChatDelta>('OpenAiChatDelta')({
   // Some OpenAI-compatible hosts (e.g. Vercel AI Gateway normalizing
   // DeepSeek output) stream thinking under `reasoning` instead.
   reasoning: Schema.optional(Schema.Unknown),
-  tool_calls: Schema.optional(Schema.Array(OpenAiChatDeltaToolCall))
+  tool_calls: Schema.optional(Schema.NullOr(Schema.Array(OpenAiChatDeltaToolCall)))
 }) {}
 
 class OpenAiChatStreamChoice extends Schema.Class<OpenAiChatStreamChoice>('OpenAiChatStreamChoice')(
   {
-    delta: Schema.optional(OpenAiChatDelta),
+    delta: Schema.optional(Schema.NullOr(OpenAiChatDelta)),
     finish_reason: Schema.optional(Schema.NullOr(Schema.String)),
     usage: Schema.optional(Schema.Unknown)
   }
 ) {}
 
+// OpenAI-compatible hosts send `null` for optional fields they leave unset (tool call ids and
+// names on continuation deltas, `tool_calls`, `delta`, usage details), so every optional field
+// reads `null` as absent. `choices` stays non-nullable: a chunk with `choices: null` is no chat
+// chunk (often an error in another shape) and must not decode as an empty one.
 class OpenAiChatStreamChunk extends Schema.Class<OpenAiChatStreamChunk>('OpenAiChatStreamChunk')({
   choices: Schema.optional(Schema.Array(OpenAiChatStreamChoice)),
   usage: Schema.optional(Schema.Unknown)
@@ -1169,19 +1175,23 @@ const toLlmEvents = (
     return [...textEvents, LLMDone.make({ stopReason: 'stop' })]
   })
 
-const toAgentUsage = (usage: OpenAiUsageResponse) =>
-  AgentUsage.make({
+const toAgentUsage = (usage: OpenAiUsageResponse) => {
+  const cacheRead = usage.prompt_tokens_details?.cached_tokens ?? undefined
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens ?? undefined
+
+  return AgentUsage.make({
     input: AgentInputUsage.make({
       total: usage.prompt_tokens,
-      uncached: usage.prompt_tokens - (usage.prompt_tokens_details?.cached_tokens ?? 0),
-      cacheRead: usage.prompt_tokens_details?.cached_tokens
+      uncached: usage.prompt_tokens - (cacheRead ?? 0),
+      cacheRead
     }),
     output: AgentOutputUsage.make({
       total: usage.completion_tokens,
-      reasoning: usage.completion_tokens_details?.reasoning_tokens,
-      text: usage.completion_tokens - (usage.completion_tokens_details?.reasoning_tokens ?? 0)
+      reasoning,
+      text: usage.completion_tokens - (reasoning ?? 0)
     })
   })
+}
 
 type OpenAiChatStreamToolCall = {
   readonly index: number
@@ -1317,13 +1327,14 @@ const chatSchemaIssueError =
 const invalidChatStreamEvent = (
   context: ChatStreamContext,
   issue: OpenAiChatResponseIssue,
-  state: OpenAiChatStreamState
+  state: OpenAiChatStreamState,
+  invalidField?: ProviderStreamInvalidField
 ) =>
   chatResponseIssueError({
     providerIdentity: context.providerIdentity,
     issue,
     message: `Invalid ${context.providerIdentity.name} stream event`,
-    stream: chatStreamDiagnostics(context.responseFormat, state)
+    stream: chatStreamDiagnostics(context.responseFormat, state, invalidField)
   })
 
 const chatStreamError = (
@@ -1398,7 +1409,14 @@ const processChatStreamPayload = (
     }
 
     const chunk = yield* Schema.decodeUnknownEffect(OpenAiChatStreamChunk)(parsed).pipe(
-      Effect.mapError(() => invalidChatStreamEvent(context, 'invalid_stream_chunk', state))
+      Effect.mapError(error =>
+        invalidChatStreamEvent(
+          context,
+          'invalid_stream_chunk',
+          state,
+          invalidFieldOf(parsed, error)
+        )
+      )
     )
 
     const events: Array<LLMEvent> = []
@@ -1436,10 +1454,11 @@ const processChatStreamPayload = (
         finishReason = choice.finish_reason
       }
 
-      if (choice.usage !== undefined) usage = choice.usage
+      if (choice.usage != null) usage = choice.usage
     }
 
-    if (chunk.usage !== undefined) usage = chunk.usage
+    // `usage: null` rides on every chunk before the usage chunk with `include_usage`.
+    if (chunk.usage != null) usage = chunk.usage
 
     return {
       state: {
@@ -1477,16 +1496,22 @@ const processChatStreamBlock = (
 
 const chatStreamDiagnostics = (
   responseFormat: ProviderStreamResponseFormat,
-  state: OpenAiChatStreamState
-) =>
-  ProviderStreamDiagnostics.make({
+  state: OpenAiChatStreamState,
+  invalidField?: ProviderStreamInvalidField
+) => {
+  const diagnostics = {
     protocol: 'chat-completions',
     responseFormat,
     receivedBytes: state.receivedBytes,
     bufferedChars: state.buffer.length,
     outputStarted: state.outputStarted,
     terminalSeen: state.hasTerminal
-  })
+  } as const
+
+  if (invalidField === undefined) return ProviderStreamDiagnostics.make(diagnostics)
+
+  return ProviderStreamDiagnostics.make({ ...diagnostics, invalidField })
+}
 
 const processChatStreamText = (
   context: ChatStreamContext,
@@ -1958,7 +1983,7 @@ const sendOpenAiRequest = (
 
     const events = yield* toLlmEvents(choice, providerIdentity, config.reasoningContent ?? false)
 
-    if (parsed.usage === undefined) {
+    if (parsed.usage === undefined || parsed.usage === null) {
       return events
     }
 
