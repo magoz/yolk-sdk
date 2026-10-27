@@ -1440,6 +1440,23 @@ describe('OpenAI provider streaming', () => {
     })
   )
 
+  it.effect('names a rejected nullable field through its union', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([chatChunk({ tool_calls: [{ index: 0, id: 5 }] })])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        provider: {
+          providerCode: 'invalid_stream_chunk',
+          stream: {
+            invalidField: { path: '$.choices[].delta.tool_calls[].id', received: 'number' }
+          }
+        }
+      })
+    })
+  )
+
   it.effect('reads null optional chunk fields as absent', () =>
     Effect.gen(function* () {
       const events = yield* collectStreamEvents(

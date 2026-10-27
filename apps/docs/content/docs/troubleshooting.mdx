@@ -97,7 +97,8 @@ explicit non-SSE `Content-Type` (JSON or HTML), the provider fails before consum
 `invalid_response` and `providerCode: 'unexpected_content_type'` (non-retryable, safe numeric status
 attached). A missing `Content-Type` keeps the existing lenient SSE parsing.
 
-Two chat failure codes carry optional `provider.stream` diagnostics
+Chat stream failures (`unexpected_content_type`, `incomplete_stream`, and streamed
+`openAiChatResponseIssues` parser rejections) carry optional `provider.stream` diagnostics
 (`ProviderStreamDiagnostics`) that survive provider sanitization and wire serialization:
 
 | Field            | Meaning                                                                        |
@@ -115,7 +116,8 @@ example `$.choices[].delta.tool_calls[].id`), and `received` is the JSON type fo
 (`missing`, `null`, `boolean`, `number`, `string`, `array`, or `object`), never the value. The chat
 parser already reads `null` in every optional chunk field as absent (OpenAI-compatible hosts send
 `"tool_calls": null` or `"id": null` on continuation deltas), so an `invalidField` names a real shape
-mismatch. `choices: null` stays a rejection: a payload without choices is not a chat chunk.
+mismatch. An omitted `choices` is accepted (usage-only chunks), but `choices: null` stays a
+rejection: it is not a chat chunk (often an error in another shape) and must not read as an empty one.
 
 Diagnostics carry counters and milestones only: no transcript bytes, raw header values, or body
 fragments are retained. Streams that end without a terminal frame fail `incomplete_stream`

@@ -3,8 +3,9 @@ import type * as Schema from 'effect/Schema'
 import type * as SchemaIssue from 'effect/SchemaIssue'
 import { ProviderStreamInvalidField, type ProviderStreamFieldType } from '@yolk-sdk/agent/protocol'
 
-// Only identifier-shaped segments are named; anything else (never expected from a provider
-// schema's own fields) is masked so a path can never carry upstream text.
+// Paths name only the schema's declared fields because the provider schemas have no `Record`
+// fields and no excess-key checks (`onExcessProperty: 'error'`), the only issue paths that carry
+// upstream keys; keep it so. Non-identifier segments are masked as a second guard.
 const fieldNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
 
 const maxPathSegments = 16
