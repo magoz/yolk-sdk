@@ -24,6 +24,7 @@
     "afloat-connector",
     "afloat-mcp-conformance",
     "agent-anthropic-tool-result-is-error",
+    "agent-chat-null-optional-fields",
     "agent-chat-response-issue-codes",
     "agent-claude-optional-tool-params",
     "agent-claude-thinking-replay",
