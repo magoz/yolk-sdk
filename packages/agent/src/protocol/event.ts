@@ -81,6 +81,31 @@ export const ProviderStreamResponseFormat = Schema.Literals(['sse', 'json', 'oth
 
 export type ProviderStreamResponseFormat = typeof ProviderStreamResponseFormat.Type
 
+/** JSON type of the value found at a rejected field; `missing` when the key is absent. */
+export const ProviderStreamFieldType = Schema.Literals([
+  'missing',
+  'null',
+  'boolean',
+  'number',
+  'string',
+  'array',
+  'object'
+])
+
+export type ProviderStreamFieldType = typeof ProviderStreamFieldType.Type
+
+/**
+ * The first field of a stream payload that failed the provider's schema. `path` names only the
+ * schema's own field names (`$.choices[].delta.tool_calls[].id`; `[]` for any array item), never
+ * upstream keys or values.
+ */
+export class ProviderStreamInvalidField extends Schema.Class<ProviderStreamInvalidField>(
+  'ProviderStreamInvalidField'
+)({
+  path: Schema.String,
+  received: ProviderStreamFieldType
+}) {}
+
 /** Stream failure metadata; never retain transcript content, raw headers, or body fragments. */
 export class ProviderStreamDiagnostics extends Schema.Class<ProviderStreamDiagnostics>(
   'ProviderStreamDiagnostics'
@@ -94,7 +119,9 @@ export class ProviderStreamDiagnostics extends Schema.Class<ProviderStreamDiagno
   /** Whether text or reasoning output was actually emitted to the consumer. */
   outputStarted: Schema.Boolean,
   /** Whether a terminal SSE frame ([DONE] or a processed finish reason) was seen. */
-  terminalSeen: Schema.Boolean
+  terminalSeen: Schema.Boolean,
+  /** Set when a payload was valid JSON of the wrong shape (`invalid_stream_chunk`). */
+  invalidField: Schema.optional(ProviderStreamInvalidField)
 }) {}
 
 export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('ProviderErrorInfo')({

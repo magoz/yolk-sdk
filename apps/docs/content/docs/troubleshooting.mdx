@@ -97,7 +97,8 @@ explicit non-SSE `Content-Type` (JSON or HTML), the provider fails before consum
 `invalid_response` and `providerCode: 'unexpected_content_type'` (non-retryable, safe numeric status
 attached). A missing `Content-Type` keeps the existing lenient SSE parsing.
 
-Two chat failure codes carry optional `provider.stream` diagnostics
+Chat stream failures (`unexpected_content_type`, `incomplete_stream`, and streamed
+`openAiChatResponseIssues` parser rejections) carry optional `provider.stream` diagnostics
 (`ProviderStreamDiagnostics`) that survive provider sanitization and wire serialization:
 
 | Field            | Meaning                                                                        |
@@ -108,6 +109,15 @@ Two chat failure codes carry optional `provider.stream` diagnostics
 | `bufferedChars`  | Undelivered SSE tail characters, counted in UTF-16 code units                  |
 | `outputStarted`  | Whether text or reasoning output was actually emitted to the consumer          |
 | `terminalSeen`   | Whether a terminal frame (`[DONE]` or a processed finish reason) was observed  |
+| `invalidField`   | On `invalid_stream_chunk`: first rejected field `path` and its JSON `received` |
+
+`invalidField.path` uses the provider schema's own field names with `[]` for any array item (for
+example `$.choices[].delta.tool_calls[].id`), and `received` is the JSON type found there
+(`missing`, `null`, `boolean`, `number`, `string`, `array`, or `object`), never the value. The chat
+parser already reads `null` in every optional chunk field as absent (OpenAI-compatible hosts send
+`"tool_calls": null` or `"id": null` on continuation deltas), so an `invalidField` names a real shape
+mismatch. An omitted `choices` is accepted (usage-only chunks), but `choices: null` stays a
+rejection: it is not a chat chunk (often an error in another shape) and must not read as an empty one.
 
 Diagnostics carry counters and milestones only: no transcript bytes, raw header values, or body
 fragments are retained. Streams that end without a terminal frame fail `incomplete_stream`

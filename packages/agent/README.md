@@ -449,8 +449,10 @@ policy and emits protocol-visible retry/error state:
   `retryAfterMs`, optional `quotaResetsAtMs` (epoch milliseconds when a spent account-wide
   subscription quota resets; on `rate_limit` only, when Claude or a Responses provider such as
   ChatGPT Codex reports a trusted reset), and optional `stream` diagnostics (`ProviderStreamDiagnostics`) on chat
-  `unexpected_content_type` / `incomplete_stream` failures. Diagnostics contain counters and
-  milestones, never transcript content, raw headers, or body fragments. See the
+  `unexpected_content_type` / `incomplete_stream` failures and streamed parser rejections.
+  Diagnostics contain counters and milestones, never transcript content, raw headers, or body
+  fragments; `invalid_stream_chunk` adds `invalidField` (the first rejected field path in schema
+  field names and the JSON type found there, never the value). See the
   [stream diagnostics guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/troubleshooting.mdx#diagnose-chat-stream-failures-with-stream-diagnostics).
 - Chat Completions and Responses HTTP failures copy the envelope string `code` (falling back to
   `type`) into `provider.providerCode`; free-text upstream bodies stay out of `LLMError`.

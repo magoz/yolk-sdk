@@ -1060,6 +1060,40 @@ describe('OpenAI provider streaming', () => {
     })
   )
 
+  it.effect('reads null tool calls and usage in single-shot completions as absent', () =>
+    Effect.gen(function* () {
+      const provider = yield* LLMProvider
+
+      const events = yield* provider
+        .stream({
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: [],
+          model: 'gpt-test',
+          systemPrompt: 'Be brief.'
+        })
+        .pipe(Stream.runCollect)
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'TextDelta', text: 'ok' },
+        { _tag: 'Done', stopReason: 'stop' }
+      ])
+    }).pipe(
+      Effect.provide(
+        makeProviderLayer(
+          makeHttpClientLayer(
+            new Response(
+              JSON.stringify({
+                choices: [{ message: { content: 'ok', tool_calls: null }, finish_reason: 'stop' }],
+                usage: null
+              })
+            ),
+            []
+          )
+        )
+      )
+    )
+  )
+
   it.effect('prefers canonical reasoning in single-shot completions', () =>
     Effect.gen(function* () {
       const events = yield* collectSingleShotEvents(
@@ -1374,7 +1408,118 @@ describe('OpenAI provider streaming', () => {
 
       expect(error).toMatchObject({
         cause: 'invalid_response',
-        provider: { kind: 'invalid_response', providerCode: 'invalid_stream_chunk' }
+        provider: {
+          kind: 'invalid_response',
+          providerCode: 'invalid_stream_chunk',
+          stream: { invalidField: { path: '$.choices', received: 'null' } }
+        }
+      })
+    })
+  )
+
+  it.effect('names the rejected chunk field without leaking its value', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({ content: 'Hi' }),
+          chatChunk({ tool_calls: [{ index: 0, id: 'call_1', function: 'private detail' }] })
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: {
+          providerCode: 'invalid_stream_chunk',
+          stream: {
+            outputStarted: true,
+            invalidField: { path: '$.choices[].delta.tool_calls[].function', received: 'string' }
+          }
+        }
+      })
+      expect(JSON.stringify(error)).not.toContain('private detail')
+    })
+  )
+
+  it.effect('names a rejected nullable field through its union', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([chatChunk({ tool_calls: [{ index: 0, id: 5 }] })])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        provider: {
+          providerCode: 'invalid_stream_chunk',
+          stream: {
+            invalidField: { path: '$.choices[].delta.tool_calls[].id', received: 'number' }
+          }
+        }
+      })
+    })
+  )
+
+  it.effect('reads null optional chunk fields as absent', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          { ...chatChunk({ role: 'assistant', content: null, tool_calls: null }), usage: null },
+          chatChunk({
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'lookup', arguments: null }
+              }
+            ]
+          }),
+          chatChunk({
+            tool_calls: [{ index: null, id: null, function: { name: null, arguments: '{"q":1}' } }]
+          }),
+          chatChunk({ tool_calls: [{ index: 0, function: null }] }),
+          { choices: [{ delta: null, finish_reason: 'tool_calls' }], usage: null },
+          {
+            choices: [],
+            usage: {
+              prompt_tokens: 7,
+              completion_tokens: 3,
+              prompt_tokens_details: null,
+              completion_tokens_details: { reasoning_tokens: null }
+            }
+          },
+          { choices: [], usage: null }
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'ToolCall', call: { id: 'call_1', name: 'lookup', params: { q: 1 } } },
+        { _tag: 'Done', stopReason: 'tool_use' },
+        {
+          _tag: 'Usage',
+          usage: { input: { total: 7, uncached: 7 }, output: { total: 3, text: 3 } }
+        }
+      ])
+
+      const usage = Array.from(events).find(event => Predicate.isTagged(event, 'Usage'))
+
+      expect(usage?.usage.input.cacheRead).toBeUndefined()
+      expect(usage?.usage.output.reasoning).toBeUndefined()
+    })
+  )
+
+  it.effect('still fails streamed tool calls whose id only ever arrives as null', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({
+            tool_calls: [{ index: 0, id: null, function: { name: 'lookup', arguments: '{}' } }]
+          }),
+          chatChunk({}, 'tool_calls')
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        provider: { providerCode: 'invalid_tool_call' }
       })
     })
   )

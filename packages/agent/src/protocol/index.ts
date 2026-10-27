@@ -81,6 +81,8 @@ export {
   ProviderErrorInfo,
   ProviderFailureKind,
   ProviderStreamDiagnostics,
+  ProviderStreamFieldType,
+  ProviderStreamInvalidField,
   ProviderStreamProtocol,
   ProviderStreamResponseFormat,
   ProviderToolResult,
