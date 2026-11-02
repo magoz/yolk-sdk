@@ -140,10 +140,7 @@ const keepLastSnapshots = (lifecycle: SandboxLifecycle) =>
 
 const previewUrls = (handle: VercelSandboxHandle, ports: ReadonlyArray<number>) =>
   Effect.forEach(ports, port =>
-    Effect.try({
-      try: () => handle.domain(port),
-      catch: error => error
-    }).pipe(
+    Effect.try(() => handle.domain(port)).pipe(
       Effect.match({
         onFailure: () => Option.none<SandboxPreviewUrl>(),
         onSuccess: url => Option.some(SandboxPreviewUrl.make({ port, url }))

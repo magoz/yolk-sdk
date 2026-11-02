@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   InteractionClaim,
@@ -90,11 +90,15 @@ export const makeFakeInteractionHost = (
 
           if (stored.outcome !== undefined) return yield* snapshotOutcome(stored.outcome)
 
+          const settledReceipt = InteractionReceipt.makeOption({
+            ...stored.receipt,
+            status: 'settled',
+            result: outcome.result
+          })
+
           if (
-            !validInteractionReceipt(
-              { ...stored.receipt, status: 'settled', result: outcome.result },
-              stored.receipt.call
-            ) ||
+            Option.isNone(settledReceipt) ||
+            !validInteractionReceipt(settledReceipt.value, stored.receipt.call) ||
             !Schema.is(Schema.Record(Schema.String, Schema.Unknown))(
               outcome.result.structuredContent
             ) ||

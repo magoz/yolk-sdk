@@ -2,6 +2,7 @@ import { Chunk, Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
@@ -1257,11 +1258,13 @@ describe('@yolk-sdk/connectors', () => {
         {}
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'test.echo',
-        params: { text: 'hi' }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'test.echo',
+          params: { text: 'hi' }
+        })
+      )
 
       expect(toolSet.metadata).toContainEqual({
         moduleId: 'test',
@@ -1289,7 +1292,10 @@ describe('@yolk-sdk/connectors', () => {
       })
 
       const toolSet = yield* resolveTools([toolModule], {})
-      const result = yield* toolSet.execute({ id: 'call_1', name: 'test.fail', params: {} })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'test.fail', params: {} })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',

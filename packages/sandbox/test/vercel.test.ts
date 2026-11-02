@@ -4,6 +4,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   PersistentSandboxLifecycle,
   Sandbox,
+  SandboxCommandInput,
   VercelSandboxState,
   makeVercelSandboxName
 } from '../src/index.ts'
@@ -149,7 +150,9 @@ describe('vercel sandbox layer', () => {
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd', cwd: 'packages/sandbox' })
+        return yield* sandbox.run(
+          SandboxCommandInput.make({ command: 'pwd', cwd: 'packages/sandbox' })
+        )
       }).pipe(Effect.provide(layer))
 
       expect(result.exitCode).toBe(0)
@@ -190,7 +193,7 @@ describe('vercel sandbox layer', () => {
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' })
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' }))
       }).pipe(Effect.provide(layer))
 
       expect(createCount).toBe(0)
@@ -235,7 +238,7 @@ describe('vercel sandbox layer', () => {
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' })
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' }))
       }).pipe(Effect.provide(layer))
 
       expect(result.workspaceReset).toBe(true)
@@ -285,7 +288,7 @@ describe('vercel sandbox layer', () => {
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' })
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' }))
       }).pipe(Effect.provide(layer))
 
       expect(result.workspaceReset).toBe(false)
@@ -337,7 +340,7 @@ describe('vercel sandbox layer', () => {
       const result = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' })
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' }))
       }).pipe(Effect.provide(layer))
 
       expect(result.workspaceReset).toBe(true)
@@ -370,7 +373,9 @@ describe('vercel sandbox layer', () => {
       const fiber = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pnpm dev', background: true })
+        return yield* sandbox.run(
+          SandboxCommandInput.make({ command: 'pnpm dev', background: true })
+        )
       }).pipe(Effect.provide(layer), Effect.forkChild)
 
       yield* TestClock.adjust(Duration.millis(2_100))

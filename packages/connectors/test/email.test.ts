@@ -14,6 +14,7 @@ import {
 } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import {
+  EmailAddress,
   EmailAttachmentContent,
   EmailClient,
   EmailConnector,
@@ -21,6 +22,8 @@ import {
   EmailDraftId,
   EmailFolderName,
   EmailIncomingCredentialSlot,
+  EmailListMessagesOutput,
+  EmailMessageSummary,
   type EmailSecurity,
   EmailSendMessageOutput,
   EmailSmtpCredentialSlot,
@@ -34,7 +37,6 @@ import {
   type EmailGetMessageOutput,
   type EmailGetAttachmentRequest,
   type EmailGetMessageRequest,
-  type EmailListMessagesOutput,
   type EmailListMessagesRequest,
   type EmailSendMessageRequest
 } from '@yolk-sdk/connectors/email'
@@ -92,16 +94,18 @@ const makeEmailClientLayer = (input?: {
 
           return (
             input?.listResult ??
-            ActionResult.success<EmailListMessagesOutput>({
-              messages: [
-                {
-                  id: 'message-1',
-                  from: [{ address: 'sender@example.com' }],
-                  to: [{ address: 'alice@example.com' }],
-                  hasAttachments: false
-                }
-              ]
-            })
+            ActionResult.success(
+              EmailListMessagesOutput.make({
+                messages: [
+                  EmailMessageSummary.make({
+                    id: 'message-1',
+                    from: [EmailAddress.make({ address: 'sender@example.com' })],
+                    to: [EmailAddress.make({ address: 'alice@example.com' })],
+                    hasAttachments: false
+                  })
+                ]
+              })
+            )
           )
         }),
       getMessage: request =>
@@ -263,7 +267,10 @@ describe('generic email connector', () => {
       credentialBindings: [incomingBinding]
     })
 
+    // Plain literals on purpose: `make` would reject this deliberately malformed host output.
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- malformed host output under test
     const attachmentResult = ActionResult.success<EmailGetAttachmentOutput>({
+      // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- malformed host output under test
       attachment: {
         id: 'mime-part-2',
         size: -1,

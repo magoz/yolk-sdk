@@ -83,7 +83,7 @@ const reviewedInput = {
   bcc: [],
   subject: '  Reviewed subject  ',
   body: '  Complete reviewed body\nNo hidden quoted history.  '
-} satisfies OutlookReplyInput
+} satisfies typeof OutlookReplyInput.Encoded
 
 describe('Outlook direct reply', () => {
   it.effect('revalidates all typed reply fields before credentials or HTTP', () =>

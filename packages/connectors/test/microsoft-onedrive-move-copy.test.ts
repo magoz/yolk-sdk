@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer, Result } from 'effect'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ConnectorError,
@@ -448,11 +449,13 @@ describe('Microsoft OneDrive move and copy', () => {
         {}
       )
 
-      const agentResult = yield* tools.execute({
-        id: 'copy-status-call',
-        name: 'onedrive.get_copy_status',
-        params: { monitorUrl }
-      })
+      const agentResult = yield* tools.execute(
+        ToolCall.make({
+          id: 'copy-status-call',
+          name: 'onedrive.get_copy_status',
+          params: { monitorUrl }
+        })
+      )
 
       expect(agentResult).toMatchObject({
         isError: true,

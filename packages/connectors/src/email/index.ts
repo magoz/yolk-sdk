@@ -1255,7 +1255,7 @@ const resolveSentCopyRequest = (
 
     if (credential === undefined) return undefined
 
-    let request: EmailSentCopyRequest = {
+    let request: ConstructorParameters<typeof EmailSentCopyRequest>[0] = {
       connection: EmailImapConnection.make({
         protocol: 'imap',
         host: incoming.host,
@@ -1286,7 +1286,11 @@ export const emailSendMessageAction = defineAction({
       const credential = yield* usableCredential(integration, resolved, EmailSmtpCredentialSlot)
       const client = yield* EmailClient
 
-      let request: EmailSendMessageRequest = { connection, credential, message: input.message }
+      let request: ConstructorParameters<typeof EmailSendMessageRequest>[0] = {
+        connection,
+        credential,
+        message: input.message
+      }
 
       if (sentCopy !== undefined) request = { ...request, sentCopy }
 
@@ -1302,7 +1306,7 @@ export const emailSendMessageAction = defineAction({
 
       const output = yield* Schema.decodeUnknownEffect(EmailSendMessageOutput)(result.value).pipe(
         Effect.catch(() => {
-          let unverified: EmailSendMessageOutput = {
+          let unverified: ConstructorParameters<typeof EmailSendMessageOutput>[0] = {
             accepted: true,
             sentCopy: EmailSentCopyOutput.make({ status: 'failed' }),
             warning: unverifiedSentCopyWarning
@@ -1320,7 +1324,7 @@ export const emailSendMessageAction = defineAction({
 
       // Legacy hosts omit sentCopy: synthesize the honest non-saved status. Saving
       // requested means storage was unavailable; disabled means it was skipped.
-      let legacy: EmailSendMessageOutput = {
+      let legacy: ConstructorParameters<typeof EmailSendMessageOutput>[0] = {
         accepted: true,
         sentCopy: EmailSentCopyOutput.make({
           status: input.saveToSentItems === false ? 'skipped' : 'unsupported'

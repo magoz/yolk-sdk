@@ -1,10 +1,21 @@
 import { Effect, Predicate, Result } from 'effect'
+import * as Schema from 'effect/Schema'
 import { documentPartFromText, inferTextDocumentMimeType } from '@yolk-sdk/agent/protocol'
 
-const couldNotReadTextError = () => new Error('Could not read text')
+/** A `Blob`/`File` could not be read as text. */
+export class BlobTextReadError extends Schema.TaggedError<BlobTextReadError>()(
+  'BlobTextReadError',
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+const couldNotReadTextError = (cause?: unknown) =>
+  new BlobTextReadError({ message: 'Could not read text', cause })
 
 const textFromFileReaderEffect = (blob: Blob) =>
-  Effect.callback<string, Error>(resume => {
+  Effect.callback<string, BlobTextReadError>(resume => {
     if (typeof FileReader === 'undefined') {
       resume(Effect.fail(couldNotReadTextError()))
 

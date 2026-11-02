@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import { resolveTools, toolJsonSchemaFromSchema } from '@yolk-sdk/agent/tools'
 import {
   SandboxCommandResult,
@@ -79,17 +79,19 @@ describe('sandbox agent tool', () => {
 
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: sandboxToolName,
-        params: {
-          command: 'pwd',
-          cwd: null,
-          stdin: null,
-          timeoutSeconds: null,
-          background: null
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: sandboxToolName,
+          params: {
+            command: 'pwd',
+            cwd: null,
+            stdin: null,
+            timeoutSeconds: null,
+            background: null
+          }
+        })
+      )
 
       expect(result.content).toContain('exit_code: 0')
       expect(result.content).toContain('pwd:.:none:120000:false')
@@ -187,11 +189,13 @@ describe('sandbox agent tool', () => {
 
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: sandboxToolName,
-        params: { command: 'pwd' }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: sandboxToolName,
+          params: { command: 'pwd' }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',

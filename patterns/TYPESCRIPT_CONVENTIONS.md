@@ -378,3 +378,22 @@ const handleStatus = Match.type<Status>().pipe(
 ```
 
 ---
+
+## TypeScript 7 type check and Effect diagnostics
+
+- Every type check (`pnpm tsc`, each workspace's `check`) runs `effect-tsgo tsrs`: the TypeScript 7
+  compiler (Rust port) that `@effect/tsgo` bundles, with the Effect language service. Effect
+  warnings and errors fail it; suggestions are not printed. See
+  [ADR 0012](../docs/adr/0012-typescript-7-type-check.md).
+- The installed `typescript` package stays 5.9 for tools that use its JS API (Next.js 16.1
+  transpiling `next.config.ts`, tsdown declarations, knip, `scripts/check-package-boundaries.ts`).
+  Do not call bare `tsc` in scripts.
+- The Effect plugin options live once, in the root `tsconfig.json` (`@effect/language-service`
+  entry). Allow a deliberately used `@stability unstable` Effect module in `allowedUnstableApis`
+  there; suppress one line with `// @effect-diagnostics-next-line <rule>:off -- <reason>` only when
+  the flagged pattern is what the code is about (a test of an untagged or malformed value).
+- TypeScript 7 defaults differ from 5.9: `types` no longer includes every `@types/*` package
+  (`packages/tsconfig.base.json` lists `node`), and side-effect imports are checked (the Next apps
+  declare `*.css` in `app/css.d.ts`).
+- Editors: use the Effect language server (`effect-tsgo get-exe-path`, then `--lsp --stdio`), not
+  tsserver with TypeScript 5.9, so the editor shows what `pnpm tsc` checks.

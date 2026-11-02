@@ -30,7 +30,10 @@ type SpeechAudio = {
   readonly contentType: string
 }
 
-class HoldToSpeakError extends Error {}
+class HoldToSpeakError extends Data.TaggedError('HoldToSpeakError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
 type SpeechRequestOutcome =
   | {
@@ -58,11 +61,11 @@ const holdToSpeakFromRejection = (error: unknown, prefix?: string): HoldToSpeakE
   const detail = error instanceof Error ? error.message : String(error)
   const message = prefix === undefined ? detail : `${prefix}: ${detail}`
 
-  return new HoldToSpeakError(message, { cause: error })
+  return new HoldToSpeakError({ message, cause: error })
 }
 
 const toRequestError = (message: string) => (error: HttpClientError.HttpClientError) =>
-  new HoldToSpeakError(`${message}: ${error.message}`)
+  new HoldToSpeakError({ message: `${message}: ${error.message}` })
 
 const decodeErrorBody = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ error: Schema.String }))
@@ -88,7 +91,7 @@ const ensureOkResponse = (response: HttpClientResponse.HttpClientResponse) => {
   return response.text.pipe(
     Effect.mapError(toRequestError('Could not read response body')),
     Effect.flatMap(body =>
-      Effect.fail(new HoldToSpeakError(errorBodyMessage(body, response.status)))
+      Effect.fail(new HoldToSpeakError({ message: errorBodyMessage(body, response.status) }))
     )
   )
 }
@@ -115,7 +118,9 @@ const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
     )
 
     return yield* decodeTranscription(payload).pipe(
-      Effect.mapError(() => new HoldToSpeakError('Transcription response had an unexpected shape'))
+      Effect.mapError(
+        () => new HoldToSpeakError({ message: 'Transcription response had an unexpected shape' })
+      )
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
@@ -126,7 +131,7 @@ const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakErro
     const client = yield* HttpClient.HttpClient
 
     const body = yield* encodeSpeakBody({ text }).pipe(
-      Effect.mapError(() => new HoldToSpeakError('Could not encode speech request'))
+      Effect.mapError(() => new HoldToSpeakError({ message: 'Could not encode speech request' }))
     )
 
     const request = HttpClientRequest.post('/api/agent/voice/speak').pipe(
@@ -289,7 +294,7 @@ export const useHoldToSpeak = ({
         objectUrlRef.current = url
         element.src = url
         element.onended = () => settle(null)
-        element.onerror = () => settle(new HoldToSpeakError('Audio playback failed'))
+        element.onerror = () => settle(new HoldToSpeakError({ message: 'Audio playback failed' }))
 
         void element.play().catch((error: unknown) => {
           settle(holdToSpeakFromRejection(error, 'Audio playback failed'))

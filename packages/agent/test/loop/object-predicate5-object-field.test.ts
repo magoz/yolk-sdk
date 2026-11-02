@@ -91,8 +91,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       const tags = Array.from(eventsChunk).map(event => event._tag)
@@ -136,8 +135,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       const tags = Array.from(eventsChunk).map(event => event._tag)
@@ -171,8 +169,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('SubagentCompleted')
@@ -207,8 +204,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -253,8 +249,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -294,8 +289,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -333,8 +327,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -370,8 +363,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -403,8 +395,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       const events = Array.from(eventsChunk)
@@ -428,8 +419,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const paddedExit = yield* runToolBatch({ calls: [paddedCall], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer),
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer)),
         Effect.exit
       )
 
@@ -486,8 +476,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
@@ -545,8 +534,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
         model: 'gpt-test'
       }).pipe(
         Stream.runCollect,
-        Effect.provide(acceptedExecutor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(acceptedExecutor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(acceptedEvents).map(event => event._tag)).toEqual([
@@ -594,8 +582,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
         model: 'gpt-test'
       }).pipe(
         Stream.runCollect,
-        Effect.provide(observationExecutor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(observationExecutor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(observationEvents).map(event => event._tag)).toEqual([
@@ -671,8 +658,7 @@ describe('run objectField getOwnPropertyDescriptor path', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executor, LoopConfig.defaultLayer))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([

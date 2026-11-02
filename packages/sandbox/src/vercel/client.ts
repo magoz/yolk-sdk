@@ -101,7 +101,10 @@ export const isVercelMissingSandboxError = (
   readonly response: Response & { readonly status: 404 | 410 }
 } => error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
 
+// The client contract passes raw SDK rejections through unchanged (`unknown`): the layer and
+// hosts inspect them (`isVercelMissingSandboxError`, `VercelSandboxFileTooLargeError`, messages).
 const tryVercelPromise = <A>(body: () => Promise<A>) =>
+  // @effect-diagnostics-next-line unknownInEffectCatch:off -- raw SDK error is the client contract
   Effect.tryPromise({
     try: body,
     catch: error => error

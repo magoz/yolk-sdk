@@ -641,9 +641,14 @@ export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedTo
   }
 }
 
-const decisionHookFailed = (key: string, error: unknown) =>
+/** The host `onLedgerDecision` hook threw or rejected; only ever logged. */
+class ToolLedgerDecisionHookError extends Data.TaggedError('ToolLedgerDecisionHookError')<{
+  readonly cause: unknown
+}> {}
+
+const decisionHookFailed = (key: string, { cause }: ToolLedgerDecisionHookError) =>
   Effect.logWarning(
-    `Tool ledger onLedgerDecision failed for ${key}; ignored: ${error instanceof Error ? error.message : String(error)}`
+    `Tool ledger onLedgerDecision failed for ${key}; ignored: ${cause instanceof Error ? cause.message : String(cause)}`
   )
 
 // Never fails and never waits for the hook: a throw or a rejected promise is only logged.
@@ -653,12 +658,15 @@ const reportDecision = (
 ): Effect.Effect<void> =>
   hook === undefined
     ? Effect.void
-    : Effect.try({ try: (): unknown => hook(event), catch: error => error }).pipe(
+    : Effect.try({
+        try: (): unknown => hook(event),
+        catch: cause => new ToolLedgerDecisionHookError({ cause })
+      }).pipe(
         Effect.flatMap(returned =>
           Predicate.isPromiseLike(returned)
             ? Effect.tryPromise({
                 try: () => Promise.resolve(returned),
-                catch: error => error
+                catch: cause => new ToolLedgerDecisionHookError({ cause })
               }).pipe(
                 Effect.catch(error => decisionHookFailed(event.key, error)),
                 Effect.forkDetach({ startImmediately: true }),

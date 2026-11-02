@@ -1,4 +1,4 @@
-import { Context, Deferred, Effect, Fiber, Layer, Option, Predicate, Result } from 'effect'
+import { Context, Data, Deferred, Effect, Fiber, Layer, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -15,6 +15,14 @@ import {
 import { McpServerError, makeMcpToolServer } from '../../src/server'
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+
+class MissingMcpResponse extends Data.TaggedError('MissingMcpResponse')<{
+  readonly message: string
+}> {}
+
+class NonFiniteJsonAdmitted extends Data.TaggedError('NonFiniteJsonAdmitted')<{
+  readonly message: string
+}> {}
 
 const server = makeMcpToolServer({
   name: 'test-server',
@@ -95,7 +103,7 @@ const handleJson = (value: Schema.Json) =>
     const response = yield* server.handleLine(JSON.stringify(json))
 
     if (Option.isNone(response)) {
-      return yield* Effect.fail(new Error('Expected MCP response'))
+      return yield* Effect.fail(new MissingMcpResponse({ message: 'Expected MCP response' }))
     }
 
     return yield* decodeJson(response.value)
@@ -372,7 +380,7 @@ describe('MCP tool server', () => {
       const responseOption = yield* server.handleLine('{')
 
       if (Option.isNone(responseOption)) {
-        return yield* Effect.fail(new Error('Expected MCP response'))
+        return yield* Effect.fail(new MissingMcpResponse({ message: 'Expected MCP response' }))
       }
 
       const response = yield* decodeJson(responseOption.value)
@@ -392,7 +400,7 @@ describe('MCP tool server', () => {
       )
 
       if (Option.isNone(responseOption)) {
-        return yield* Effect.fail(new Error('Expected MCP response'))
+        return yield* Effect.fail(new MissingMcpResponse({ message: 'Expected MCP response' }))
       }
 
       const response = yield* decodeJson(responseOption.value)
@@ -412,7 +420,7 @@ describe('MCP tool server', () => {
       )
 
       if (Option.isNone(responseOption)) {
-        return yield* Effect.fail(new Error('Expected MCP response'))
+        return yield* Effect.fail(new MissingMcpResponse({ message: 'Expected MCP response' }))
       }
 
       const response = yield* decodeJson(responseOption.value)
@@ -672,7 +680,11 @@ describe('MCP tool server', () => {
         !Result.isFailure(rootHttp) ||
         !Result.isFailure(nestedHttp)
       ) {
-        return yield* Effect.fail(new Error('expected non-finite JSON fixtures to fail admission'))
+        return yield* Effect.fail(
+          new NonFiniteJsonAdmitted({
+            message: 'expected non-finite JSON fixtures to fail admission'
+          })
+        )
       }
 
       expect(Schema.isSchemaError(rootLine.failure)).toBe(true)

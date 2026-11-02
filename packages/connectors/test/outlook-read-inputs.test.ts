@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Layer, Schema } from 'effect'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ConnectorHttpClient,
@@ -85,7 +86,9 @@ const execute = (name: OutlookReadToolName, params: OutlookReadExecuteParams, ho
       {}
     )
 
-    const result = yield* tools.execute({ id: 'call-1', name, params: toolParams(name, params) })
+    const result = yield* tools.execute(
+      ToolCall.make({ id: 'call-1', name, params: toolParams(name, params) })
+    )
 
     return { result, requests: host.requests }
   })
@@ -311,11 +314,13 @@ describe('Outlook read input compatibility', () => {
         {}
       )
 
-      const result = yield* tools.execute({
-        id: 'call-1',
-        name: 'outlook.list_messages',
-        params: { query: 'car offer' }
-      })
+      const result = yield* tools.execute(
+        ToolCall.make({
+          id: 'call-1',
+          name: 'outlook.list_messages',
+          params: { query: 'car offer' }
+        })
+      )
 
       expect(result.isError).toBe(true)
       expect(result.structuredContent).toMatchObject({

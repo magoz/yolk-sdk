@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -31,8 +31,7 @@ export const createTextStorageObjectAction = async (input: {
       })
     }).pipe(
       Effect.withSpan('action.storage.createText'),
-      Effect.provide(AppKnowledgeSearchLayer),
-      Effect.provide(AppLayer),
+      Effect.provide(AppKnowledgeSearchLayer.pipe(Layer.provideMerge(AppLayer))),
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error =>

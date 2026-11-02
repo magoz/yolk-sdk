@@ -126,6 +126,7 @@ describe('instructions in the loop', () => {
       const requests: Array<LLMRequest> = []
       const recorded = instructionMessages([user], [catalog({ tools: 2 })])
 
+      // @effect-diagnostics-next-line floatingEffect:off -- type-only check that the config rejects `instructions`
       runModelTurn({
         messages: [user],
         systemPrompt: 'Be brief.',

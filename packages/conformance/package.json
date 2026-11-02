@@ -88,7 +88,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "effect-tsgo tsrs -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"
   },

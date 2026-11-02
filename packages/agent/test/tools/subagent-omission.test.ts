@@ -83,11 +83,13 @@ describe('subagent omission contract', () => {
         subagent_type: ' explore '
       })
 
-      yield* toolSet.execute({
-        id: 'call_omitted',
-        name: subagentToolName,
-        params: omittedParams
-      })
+      yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_omitted',
+          name: subagentToolName,
+          params: omittedParams
+        })
+      )
 
       const presentParams = Object.freeze({
         description: 'Find auth',
@@ -98,11 +100,13 @@ describe('subagent omission contract', () => {
         reasoning_effort: 'low'
       } satisfies SubagentToolParams)
 
-      yield* toolSet.execute({
-        id: 'call_present',
-        name: subagentToolName,
-        params: presentParams
-      })
+      yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_present',
+          name: subagentToolName,
+          params: presentParams
+        })
+      )
 
       expect(captured).toHaveLength(2)
 

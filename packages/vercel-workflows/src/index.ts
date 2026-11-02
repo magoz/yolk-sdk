@@ -1,5 +1,6 @@
 export {
   commitThenWriteTerminalEvent,
+  DurableAgentEventWriteError,
   durableAgentEventId,
   defaultMaxWorkflowTurns,
   makeDurableAgentEventSequencerState,

@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "pnpm --filter @yolk-sdk/extractors build && next build",
     "start": "next start",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "effect-tsgo tsrs -p tsconfig.json --noEmit",
     "test:db:push": "NODE_ENV=test tsx scripts/push-test-db.ts",
     "test:e2e": "NODE_ENV=test pnpm test:db:push && NODE_ENV=test playwright test --config playwright.config.ts",
     "test:e2e:ui": "NODE_ENV=test pnpm test:db:push && NODE_ENV=test playwright test --config playwright.config.ts --ui",

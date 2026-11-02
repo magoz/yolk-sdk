@@ -196,7 +196,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.fail(commitError)
+
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -270,7 +271,7 @@ describe('durable workflow agent events', () => {
             operations.push('commit')
           })
 
-          yield* Effect.fail(commitError)
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -311,7 +312,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.fail(commitError)
+
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -356,7 +358,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.die(defect)
+
+          return yield* Effect.die(defect)
         }),
         write: event =>
           Effect.sync(() => {

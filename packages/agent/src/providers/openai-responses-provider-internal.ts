@@ -1200,12 +1200,13 @@ const eventsFromOutputItem = (
 const responseWithoutReplayedToolCalls = (
   response: OpenAiResponsesResponse,
   emittedCallIds: ReadonlySet<string>
-): OpenAiResponsesResponse => ({
-  ...response,
-  output: response.output.filter(
-    item => item.type !== 'function_call' || !emittedCallIds.has(item.call_id)
-  )
-})
+): OpenAiResponsesResponse =>
+  OpenAiResponsesResponse.make({
+    ...response,
+    output: response.output.filter(
+      item => item.type !== 'function_call' || !emittedCallIds.has(item.call_id)
+    )
+  })
 
 const finalResponseToEvents = (
   parsedFinal: OpenAiResponsesResponse,

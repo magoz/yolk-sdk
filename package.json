@@ -21,7 +21,7 @@
     "start:docs": "pnpm --filter @yolk-docs/site start",
     "docs:typegen": "pnpm --filter @yolk-docs/site typegen",
     "docs:check": "pnpm --filter @yolk-docs/site check",
-    "tsc": "pnpm docs:check && tsc --noEmit",
+    "tsc": "pnpm docs:check && effect-tsgo tsrs -p tsconfig.json --noEmit",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
     "test:anti-slop": "vitest run --config tools/oxlint/vitest.config.ts",
@@ -89,7 +89,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "@effect/language-service": "catalog:",
+    "@effect/tsgo": "0.63.0",
     "@effect/vitest": "catalog:",
     "@oxlint/plugins": "1.78.0",
     "@types/node": "^25.0.9",

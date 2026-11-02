@@ -81,8 +81,9 @@ describe('OpenAI knowledge embeddings', () => {
         '{"model":"text-embedding-3-small","input":["first","second"]}'
       ])
     }).pipe(
-      Effect.provide(makeOpenAiKnowledgeEmbedderLayer(httpLayer)),
-      Effect.provide(configLayer)
+      Effect.provide(
+        makeOpenAiKnowledgeEmbedderLayer(httpLayer).pipe(Layer.provideMerge(configLayer))
+      )
     )
   })
 
@@ -110,9 +111,8 @@ describe('OpenAI knowledge embeddings', () => {
             () => {
               texts.push('later')
             }
-          )
-        ),
-        Effect.provide(configLayer)
+          ).pipe(Layer.provideMerge(configLayer))
+        )
       )
     }
   )
@@ -130,9 +130,8 @@ describe('OpenAI knowledge embeddings', () => {
       Effect.provide(
         responseLayer('{"data":[]}', () => {
           requests += 1
-        })
-      ),
-      Effect.provide(configLayer)
+        }).pipe(Layer.provideMerge(configLayer))
+      )
     )
   })
 
@@ -223,7 +222,7 @@ describe('OpenAI knowledge embeddings', () => {
       expect(result.failure.message).toBe(
         'OpenAI embeddings response count does not match input count'
       )
-    }).pipe(Effect.provide(responseLayer('{"data":[]}')), Effect.provide(configLayer))
+    }).pipe(Effect.provide(responseLayer('{"data":[]}').pipe(Layer.provideMerge(configLayer))))
   )
 
   it.effect('matches vectors to input texts by response index rather than response order', () => {
@@ -244,9 +243,8 @@ describe('OpenAI knowledge embeddings', () => {
               { index: 0, embedding: first }
             ]
           })
-        )
-      ),
-      Effect.provide(configLayer)
+        ).pipe(Layer.provideMerge(configLayer))
+      )
     )
   })
 })

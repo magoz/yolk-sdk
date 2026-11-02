@@ -119,30 +119,30 @@ describeWithDb('createFileKnowledgeDocument', () => {
       }).pipe(
         Effect.ensuring(cleanup),
         Effect.provide(
-          Layer.succeed(KnowledgeFileBlobStore, {
-            putFile: input =>
-              Effect.sync(() => {
-                puts.push(input)
-              }),
-            getFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
-              ),
-            deleteFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` })
-              )
-          })
+          Layer.mergeAll(
+            Layer.succeed(KnowledgeFileBlobStore, {
+              putFile: input =>
+                Effect.sync(() => {
+                  puts.push(input)
+                }),
+              getFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
+                ),
+              deleteFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` })
+                )
+            }),
+            Layer.succeed(KnowledgeEmbedder, {
+              embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
+              embedQuery: () => Effect.succeed(embedding(0))
+            }),
+            DefaultKnowledgeChunkerLive(),
+            FileExtractorLayer,
+            Db.layer
+          )
         ),
-        Effect.provide(
-          Layer.succeed(KnowledgeEmbedder, {
-            embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
-            embedQuery: () => Effect.succeed(embedding(0))
-          })
-        ),
-        Effect.provide(DefaultKnowledgeChunkerLive()),
-        Effect.provide(FileExtractorLayer),
-        Effect.provide(Db.layer),
         Effect.scoped
       )
     },
@@ -191,49 +191,47 @@ describeWithDb('createFileKnowledgeDocument', () => {
       }).pipe(
         Effect.ensuring(cleanup),
         Effect.provide(
-          Layer.succeed(KnowledgeFileBlobStore, {
-            putFile: input =>
-              Effect.sync(() => {
-                puts.push(input)
-              }),
-            getFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
-              ),
-            deleteFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` })
-              )
-          })
-        ),
-        Effect.provide(
-          Layer.succeed(FileExtractor, {
-            extract: input =>
-              Effect.sync(() => {
-                if (input.bytes.buffer instanceof ArrayBuffer) {
-                  structuredClone(input.bytes.buffer, { transfer: [input.bytes.buffer] })
+          Layer.mergeAll(
+            Layer.succeed(KnowledgeFileBlobStore, {
+              putFile: input =>
+                Effect.sync(() => {
+                  puts.push(input)
+                }),
+              getFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
+                ),
+              deleteFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` })
+                )
+            }),
+            Layer.succeed(FileExtractor, {
+              extract: input =>
+                Effect.sync(() => {
+                  if (input.bytes.buffer instanceof ArrayBuffer) {
+                    structuredClone(input.bytes.buffer, { transfer: [input.bytes.buffer] })
 
-                  return {
-                    content: 'Detached PDF text.',
-                    metadata: { format: 'pdf', title: input.filename }
+                    return {
+                      content: 'Detached PDF text.',
+                      metadata: { format: 'pdf', title: input.filename }
+                    }
                   }
-                }
 
-                throw new FileExtractionError({
-                  message: 'Expected ArrayBuffer input',
-                  format: 'pdf'
+                  throw new FileExtractionError({
+                    message: 'Expected ArrayBuffer input',
+                    format: 'pdf'
+                  })
                 })
-              })
-          })
+            }),
+            Layer.succeed(KnowledgeEmbedder, {
+              embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
+              embedQuery: () => Effect.succeed(embedding(0))
+            }),
+            DefaultKnowledgeChunkerLive(),
+            Db.layer
+          )
         ),
-        Effect.provide(
-          Layer.succeed(KnowledgeEmbedder, {
-            embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
-            embedQuery: () => Effect.succeed(embedding(0))
-          })
-        ),
-        Effect.provide(DefaultKnowledgeChunkerLive()),
-        Effect.provide(Db.layer),
         Effect.scoped
       )
     },
@@ -302,22 +300,24 @@ describeWithDb('createFileKnowledgeDocument', () => {
       }).pipe(
         Effect.ensuring(cleanup),
         Effect.provide(
-          Layer.succeed(KnowledgeFileBlobStore, {
-            putFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected putFile ${input.storageKey}` })
-              ),
-            getFile: input =>
-              Effect.fail(
-                new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
-              ),
-            deleteFile: input =>
-              Effect.sync(() => {
-                deleted.push(input.storageKey)
-              })
-          })
+          Layer.mergeAll(
+            Layer.succeed(KnowledgeFileBlobStore, {
+              putFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected putFile ${input.storageKey}` })
+                ),
+              getFile: input =>
+                Effect.fail(
+                  new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })
+                ),
+              deleteFile: input =>
+                Effect.sync(() => {
+                  deleted.push(input.storageKey)
+                })
+            }),
+            Db.layer
+          )
         ),
-        Effect.provide(Db.layer),
         Effect.scoped
       )
     },

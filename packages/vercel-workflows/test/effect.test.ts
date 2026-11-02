@@ -101,8 +101,11 @@ const runWithSdk = <A, E>(
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(VercelWorkflows.layerFromSdk),
-      Effect.provide(Layer.succeed(VercelWorkflowsSdk, sdk))
+      Effect.provide(
+        VercelWorkflows.layerFromSdk.pipe(
+          Layer.provideMerge(Layer.succeed(VercelWorkflowsSdk, sdk))
+        )
+      )
     )
   )
 

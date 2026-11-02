@@ -63,8 +63,9 @@ const batch = (config: Omit<Parameters<typeof runToolBatch>[0], 'calls'>) =>
   runToolBatch({ calls: [call], ...config }).pipe(
     Stream.runCollect,
     Effect.map(chunk => Array.from(chunk)),
-    Effect.provide(TestToolExecutor.layer({ delete_file: 'deleted' })),
-    Effect.provide(LoopConfig.defaultLayer)
+    Effect.provide(
+      Layer.mergeAll(TestToolExecutor.layer({ delete_file: 'deleted' }), LoopConfig.defaultLayer)
+    )
   )
 
 /** The first tool step: the gated call pauses for approval. */
@@ -130,8 +131,12 @@ describe('approval binds the call across a policy change', () => {
       const first = yield* runToolBatch({ calls: [call, sibling], tools: [gated] }).pipe(
         Stream.runCollect,
         Effect.map(chunk => awaitingRequestsOf(Array.from(chunk))),
-        Effect.provide(TestToolExecutor.layer({ delete_file: 'deleted' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(
+            TestToolExecutor.layer({ delete_file: 'deleted' }),
+            LoopConfig.defaultLayer
+          )
+        )
       )
 
       const events = yield* runToolBatch({
@@ -142,8 +147,12 @@ describe('approval binds the call across a policy change', () => {
       }).pipe(
         Stream.runCollect,
         Effect.map(chunk => Array.from(chunk)),
-        Effect.provide(TestToolExecutor.layer({ delete_file: 'deleted' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(
+            TestToolExecutor.layer({ delete_file: 'deleted' }),
+            LoopConfig.defaultLayer
+          )
+        )
       )
 
       expect(started(events)).toEqual([])

@@ -431,12 +431,22 @@ export const documentPartFromText = (input: {
 const decodeBase64Utf8 = (data: string) =>
   new TextDecoder('utf-8', { fatal: true }).decode(base64ToBytes(data))
 
+/** Inline attachment data is not valid base64 or not valid UTF-8 text. */
+export class AttachmentTextDecodeError extends Schema.TaggedError<AttachmentTextDecodeError>()(
+  'AttachmentTextDecodeError',
+  {
+    message: Schema.String,
+    cause: Schema.Unknown
+  }
+) {}
+
 export const attachmentSourceText = (source: AttachmentSource) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', current =>
       Effect.try({
         try: () => Option.some(decodeBase64Utf8(current.data)),
-        catch: error => error
+        catch: cause =>
+          new AttachmentTextDecodeError({ message: 'Could not decode attachment text', cause })
       })
     ),
     Match.tag('Url', 'Ref', () => Effect.succeed(Option.none<string>())),

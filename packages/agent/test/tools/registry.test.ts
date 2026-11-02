@@ -1,4 +1,4 @@
-import { Effect, Predicate, Result } from 'effect'
+import { Data, Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { describe, expect, it } from '@effect/vitest'
@@ -25,6 +25,10 @@ import {
 type TestContext = {
   readonly enabled: boolean
 }
+
+class UnexpectedTestState extends Data.TaggedError('UnexpectedTestState')<{
+  readonly message: string
+}> {}
 
 const makeToolDef = (name: string) =>
   ToolDef.make({
@@ -84,7 +88,7 @@ describe('resolveTools', () => {
         Effect.gen(function* () {
           const service = yield* ToolExecutor
 
-          return yield* service.execute({ id: 'call_1', name: 'echo', params: {} })
+          return yield* service.execute(ToolCall.make({ id: 'call_1', name: 'echo', params: {} }))
         }),
         makeToolExecutorLayer(toolSet)
       )
@@ -101,7 +105,9 @@ describe('resolveTools', () => {
         Effect.gen(function* () {
           const service = yield* ToolExecutor
 
-          return yield* service.execute({ id: 'call_1', name: 'missing', params: {} })
+          return yield* service.execute(
+            ToolCall.make({ id: 'call_1', name: 'missing', params: {} })
+          )
         }),
         makeToolExecutorLayer(toolSet)
       ).pipe(Effect.result)
@@ -151,11 +157,13 @@ describe('resolveTools', () => {
 
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'schema_echo',
-        params: { text: 'hi' }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'schema_echo',
+          params: { text: 'hi' }
+        })
+      )
 
       expect(result.content).toBe('hi')
       expect(toolSet.tools[0]?.parameters).toMatchObject({
@@ -188,11 +196,13 @@ describe('resolveTools', () => {
 
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'union_probe',
-        params: { operation: 'delete', slug: 'note' }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'union_probe',
+          params: { operation: 'delete', slug: 'note' }
+        })
+      )
 
       expect(result.content).toBe('delete')
     })
@@ -232,7 +242,9 @@ describe('resolveTools', () => {
         enabled: true
       })
 
-      const result = yield* toolSet.execute({ id: 'call_1', name: 'number_probe', params: 5 })
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'number_probe', params: 5 })
+      )
 
       expect(result.content).toBe('5')
     })
@@ -278,11 +290,13 @@ describe('resolveTools', () => {
 
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'filter_probe',
-        params: { op: 'branch', kids: [{ op: 'leaf', value: 'x' }] }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'filter_probe',
+          params: { op: 'branch', kids: [{ op: 'leaf', value: 'x' }] }
+        })
+      )
 
       expect(result.content).toBe('branch')
     })
@@ -381,11 +395,13 @@ describe('resolveTools', () => {
 
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'empty_params',
-        params: { extra: true }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'empty_params',
+          params: { extra: true }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
@@ -428,7 +444,11 @@ describe('resolveTools', () => {
       const validateParams = tool.validate
 
       if (validateParams === undefined) {
-        return yield* Effect.fail(new Error('makeTool empty_params registration omitted validate'))
+        return yield* Effect.fail(
+          new UnexpectedTestState({
+            message: 'makeTool empty_params registration omitted validate'
+          })
+        )
       }
 
       const validated = yield* validateParams(call).pipe(Effect.result)
@@ -437,14 +457,18 @@ describe('resolveTools', () => {
 
       if (!Result.isFailure(validated)) {
         return yield* Effect.fail(
-          new Error('expected makeTool validate to fail Schema.SchemaError')
+          new UnexpectedTestState({
+            message: 'expected makeTool validate to fail Schema.SchemaError'
+          })
         )
       }
 
       const validateError = captured[0]
 
       if (validateError === undefined) {
-        return yield* Effect.fail(new Error('expected validate to capture Schema.SchemaError'))
+        return yield* Effect.fail(
+          new UnexpectedTestState({ message: 'expected validate to capture Schema.SchemaError' })
+        )
       }
 
       expect(validated.failure.message).toBe(`typed:${String(validateError)}`)
@@ -458,7 +482,9 @@ describe('resolveTools', () => {
       expect(captured).toHaveLength(2)
 
       if (executeError === undefined) {
-        return yield* Effect.fail(new Error('expected execute to capture Schema.SchemaError'))
+        return yield* Effect.fail(
+          new UnexpectedTestState({ message: 'expected execute to capture Schema.SchemaError' })
+        )
       }
 
       expect(executed).toMatchObject({
@@ -498,11 +524,13 @@ describe('resolveTools', () => {
 
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'visible_error',
-        params: {}
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'visible_error',
+          params: {}
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',

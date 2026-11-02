@@ -96,8 +96,11 @@ const runClassify = (
 
     return yield* model.classify(request)
   }).pipe(
-    Effect.provide(makeVercelAiGatewayClassifierLayer(classifierConfig)),
-    Effect.provide(answering(answer, captured))
+    Effect.provide(
+      makeVercelAiGatewayClassifierLayer(classifierConfig).pipe(
+        Layer.provideMerge(answering(answer, captured))
+      )
+    )
   )
 
 const sentBody = (captured: ReadonlyArray<Captured>): unknown => {
@@ -529,8 +532,11 @@ describe('Vercel AI Gateway classifier errors', () => {
 
           return yield* model.classify({ state: 'Synthetic.', questions: approvalQuestions })
         }).pipe(
-          Effect.provide(makeVercelAiGatewayClassifierLayer({ ...config, maxRetries: 0 })),
-          Effect.provide(failing)
+          Effect.provide(
+            makeVercelAiGatewayClassifierLayer({ ...config, maxRetries: 0 }).pipe(
+              Layer.provideMerge(failing)
+            )
+          )
         )
       )
 
@@ -591,8 +597,11 @@ describe('Vercel AI Gateway classifier retries', () => {
 
       return yield* model.classify({ state: 'Synthetic.', questions: approvalQuestions })
     }).pipe(
-      Effect.provide(makeVercelAiGatewayClassifierLayer(classifierConfig)),
-      Effect.provide(scripted(steps, sent))
+      Effect.provide(
+        makeVercelAiGatewayClassifierLayer(classifierConfig).pipe(
+          Layer.provideMerge(scripted(steps, sent))
+        )
+      )
     )
 
   const rateLimited = (headers: Readonly<Record<string, string>>): Answer => ({
@@ -781,8 +790,11 @@ describe('Vercel AI Gateway classifier environment layer', () => {
     Effect.gen(function* () {
       return yield* ClassifierModel
     }).pipe(
-      Effect.provide(VercelAiGatewayClassifierLayer),
-      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env)))
+      Effect.provide(
+        VercelAiGatewayClassifierLayer.pipe(
+          Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env)))
+        )
+      )
     )
 
   it.effect('reads AI_GATEWAY_API_KEY, falling back to VERCEL_OIDC_TOKEN', () =>

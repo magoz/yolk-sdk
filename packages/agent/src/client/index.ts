@@ -1,4 +1,4 @@
-export { documentPartFromTextFile, textFromBlob } from './attachments.ts'
+export { BlobTextReadError, documentPartFromTextFile, textFromBlob } from './attachments.ts'
 
 export {
   appendAgentMessage,

@@ -103,15 +103,11 @@ const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
 
       return parsed.toString()
     },
-    catch: error => error
-  }).pipe(
-    Effect.mapError(
-      error =>
-        new CloudflareAgentUnavailableError({
-          message: error instanceof Error ? error.message : 'Invalid Cloudflare agent URL'
-        })
-    )
-  )
+    catch: error =>
+      new CloudflareAgentUnavailableError({
+        message: error instanceof Error ? error.message : 'Invalid Cloudflare agent URL'
+      })
+  })
 
 const requireConfigOption = (name: string, option: Option.Option<string>) =>
   Option.match(option, {

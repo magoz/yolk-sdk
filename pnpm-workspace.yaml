@@ -4,7 +4,6 @@ packages:
   - 'examples/*'
   - 'cloudflare/*'
 catalog:
-  '@effect/language-service': ^0.87.4
   '@effect/opentelemetry': 4.0.5
   '@effect/platform-bun': 4.0.5
   '@effect/platform-node': 4.0.5

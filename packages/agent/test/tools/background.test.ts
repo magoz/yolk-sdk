@@ -320,6 +320,7 @@ describe('native background tools', () => {
       expect(launches).toBe(1)
 
       const invalid = yield* resolve(registration(inline), {
+        // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- malformed host receipt under test; make would reject it
         accept: () => Effect.succeed<BackgroundToolAccepted>({ version: 1, executionId: '' })
       })
 
