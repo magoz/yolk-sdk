@@ -815,3 +815,11 @@ export class NotificationService extends Context.Service<NotificationService>()(
 // Provide dependencies externally with Layer.provide
 export const AppLayer = Layer.mergeAll(AccountService.layer, NotificationService.layer, Db.layer)
 ```
+
+**One provide per effect.** Chained `Effect.provide(A), Effect.provide(B)` fails `pnpm tsc`
+(`multipleEffectProvide`). Combine the layers and provide once:
+
+- `A.pipe(Layer.provideMerge(B))` when B feeds A's requirements: B's outputs stay visible, and A's
+  own outputs win on a duplicate service, as the inner provide did in the chain.
+- `Layer.mergeAll(A, B)` only for independent layers: siblings do not feed each other (services or
+  References such as `ConfigProvider`), and the later layer wins on a duplicate.

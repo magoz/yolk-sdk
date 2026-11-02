@@ -1,9 +1,27 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { DocumentPart, inlineBase64AttachmentSource } from '@yolk-sdk/agent/protocol'
-import { documentPartFromTextFile, textFromBlob } from '../../src/client'
+import { BlobTextReadError, documentPartFromTextFile, textFromBlob } from '../../src/client'
 
 describe('client attachment helpers', () => {
+  it.effect('fails with BlobTextReadError keeping the read failure as cause', () =>
+    Effect.gen(function* () {
+      const failure = new Error('disk unavailable')
+
+      class FailingBlob extends Blob {
+        override text() {
+          return Promise.reject(failure)
+        }
+      }
+
+      const error = yield* textFromBlob(new FailingBlob(['hello'])).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(BlobTextReadError)
+      expect(error.message).toBe('Could not read text')
+      expect(error.cause).toBe(failure)
+    })
+  )
+
   it('builds document parts from text files without browser mime type', async () => {
     const file = new File(['# Identity'], 'company.identity.md', { type: '' })
 

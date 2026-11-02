@@ -446,7 +446,10 @@ export const attachmentSourceText = (source: AttachmentSource) =>
       Effect.try({
         try: () => Option.some(decodeBase64Utf8(current.data)),
         catch: cause =>
-          new AttachmentTextDecodeError({ message: 'Could not decode attachment text', cause })
+          new AttachmentTextDecodeError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause
+          })
       })
     ),
     Match.tag('Url', 'Ref', () => Effect.succeed(Option.none<string>())),

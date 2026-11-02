@@ -382,8 +382,10 @@ const handleStatus = Match.type<Status>().pipe(
 ## TypeScript 7 type check and Effect diagnostics
 
 - Every type check (`pnpm tsc`, each workspace's `check`) runs `effect-tsgo tsrs`: the TypeScript 7
-  compiler (Rust port) that `@effect/tsgo` bundles, with the Effect language service. Effect
-  warnings and errors fail it; suggestions are not printed. See
+  compiler (Rust port) that `@effect/tsgo` bundles. Effect diagnostics gate only the root
+  `pnpm tsc`, whose `tsconfig.json` carries the Effect plugin and covers every workspace except
+  `apps/docs` (no Effect code); workspace `check` scripts are compile-only. Effect warnings and
+  errors fail `pnpm tsc`; suggestions are not printed. See
   [ADR 0012](../docs/adr/0012-typescript-7-type-check.md).
 - The installed `typescript` is 7 (Go `tsc`, no classic JS API). Scripts that need the classic
   compiler API import `@typescript/typescript6` (as `scripts/check-package-boundaries.ts` does).
@@ -391,7 +393,9 @@ const handleStatus = Match.type<Status>().pipe(
 - The Effect plugin options live once, in the root `tsconfig.json` (`@effect/language-service`
   entry). Allow a deliberately used `@stability unstable` Effect module in `allowedUnstableApis`
   there; suppress one line with `// @effect-diagnostics-next-line <rule>:off -- <reason>` only when
-  the flagged pattern is what the code is about (a test of an untagged or malformed value).
+  the flagged pattern is what the code is about: a test of an untagged or malformed value, or a
+  public contract that deliberately passes a raw third-party error through and has a test pinning
+  it (`packages/sandbox/src/vercel/client.ts`).
 - TypeScript 7 defaults differ from 5.9: `types` no longer includes every `@types/*` package
   (`packages/tsconfig.base.json` lists `node`), and side-effect imports are checked.
 - Editors: use the Effect language server (`effect-tsgo get-exe-path`, then `--lsp --stdio`), not

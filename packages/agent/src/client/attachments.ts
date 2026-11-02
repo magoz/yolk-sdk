@@ -30,9 +30,9 @@ const textFromFileReaderEffect = (blob: Blob) =>
       reader.removeEventListener('abort', handleError)
     }
 
-    const fail = () => {
+    const fail = (cause?: unknown) => {
       removeListeners()
-      resume(Effect.fail(couldNotReadTextError()))
+      resume(Effect.fail(couldNotReadTextError(cause)))
     }
 
     const handleLoad = () => {
@@ -47,14 +47,16 @@ const textFromFileReaderEffect = (blob: Blob) =>
       resume(Effect.fail(couldNotReadTextError()))
     }
 
-    const handleError = () => fail()
+    const handleError = () => fail(reader.error ?? undefined)
 
     reader.addEventListener('load', handleLoad)
     reader.addEventListener('error', handleError)
     reader.addEventListener('abort', handleError)
 
-    if (Result.isFailure(Result.try(() => reader.readAsText(blob)))) {
-      fail()
+    const started = Result.try(() => reader.readAsText(blob))
+
+    if (Result.isFailure(started)) {
+      fail(started.failure)
     }
 
     return Effect.sync(removeListeners)

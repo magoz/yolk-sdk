@@ -18,9 +18,11 @@ package-boundary script parsed with it, and tsdown 0.22 emitted declarations wit
   the classic API: Next.js 16.4 (type-checks through the `tsc` CLI), knip 6 (oxc parser) and
   tsdown 0.23 (declarations through TypeScript 7's experimental API). The package-boundary script
   imports the classic API from `@typescript/typescript6`, Microsoft's compatibility package.
-- Effect diagnostics gate the check: warnings and errors fail it, suggestions are hidden
-  (`includeSuggestionsInTsc: false`). The root `tsconfig.json` holds the plugin options, including
-  `allowedUnstableApis` for the `@stability unstable` Effect modules Yolk depends on deliberately.
+- Effect diagnostics gate the root `pnpm tsc`: warnings and errors fail it, suggestions are hidden
+  (`includeSuggestionsInTsc: false`). Only the root `tsconfig.json` holds the plugin and its options
+  (including `allowedUnstableApis` for the `@stability unstable` Effect modules Yolk depends on
+  deliberately); it covers every workspace except `apps/docs`, which has no Effect code. Workspace
+  `check` scripts stay compile-only rather than repeat the plugin options in each config.
 - `@effect/language-service` is removed; editors use the Effect language server from
   `@effect/tsgo`.
 
