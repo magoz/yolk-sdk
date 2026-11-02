@@ -68,6 +68,7 @@ for the subagent result marker.
 | `durableAgentEventId`                 | build `${streamId}:${turn}:${eventSequence}`       |
 | `sequenceDurableAgentEvent`           | add deterministic `eventId` without writing        |
 | `writeDurableAgentEvent`              | write sequenced NDJSON to a writer                 |
+| `DurableAgentEventWriteError`         | writer rejection, kept as `cause`                  |
 | `commitThenWriteTerminalEvent`        | commit durable state before writing terminal event |
 
 ## Effect API exports
