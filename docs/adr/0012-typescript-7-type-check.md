@@ -21,8 +21,9 @@ package-boundary script parsed with it, and tsdown 0.22 emitted declarations wit
 - Effect diagnostics gate the root `pnpm tsc`: warnings and errors fail it, suggestions are hidden
   (`includeSuggestionsInTsc: false`). Only the root `tsconfig.json` holds the plugin and its options
   (including `allowedUnstableApis` for the `@stability unstable` Effect modules Yolk depends on
-  deliberately); it covers every workspace except `apps/docs`, which has no Effect code. Workspace
-  `check` scripts stay compile-only rather than repeat the plugin options in each config.
+  deliberately); it covers every workspace except `apps/docs`, which has no Effect code.
+  `examples/next` extends it and inherits the plugin; the `packages/*`, `cloudflare/*` and
+  `apps/docs` checks stay compile-only rather than repeat the plugin options in each config.
 - `@effect/language-service` is removed; editors use the Effect language server from
   `@effect/tsgo`.
 

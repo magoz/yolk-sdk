@@ -382,10 +382,11 @@ const handleStatus = Match.type<Status>().pipe(
 ## TypeScript 7 type check and Effect diagnostics
 
 - Every type check (`pnpm tsc`, each workspace's `check`) runs `effect-tsgo tsrs`: the TypeScript 7
-  compiler (Rust port) that `@effect/tsgo` bundles. Effect diagnostics gate only the root
-  `pnpm tsc`, whose `tsconfig.json` carries the Effect plugin and covers every workspace except
-  `apps/docs` (no Effect code); workspace `check` scripts are compile-only. Effect warnings and
-  errors fail `pnpm tsc`; suggestions are not printed. See
+  compiler (Rust port) that `@effect/tsgo` bundles. The root `pnpm tsc` is the Effect gate: its
+  `tsconfig.json` carries the Effect plugin and covers every workspace except `apps/docs` (no
+  Effect code). `examples/next` extends it and inherits the plugin; the `packages/*`,
+  `cloudflare/*` and `apps/docs` checks are compile-only. Effect warnings and errors fail the
+  check; suggestions are not printed. See
   [ADR 0012](../docs/adr/0012-typescript-7-type-check.md).
 - The installed `typescript` is 7 (Go `tsc`, no classic JS API). Scripts that need the classic
   compiler API import `@typescript/typescript6` (as `scripts/check-package-boundaries.ts` does).
