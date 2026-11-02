@@ -8,7 +8,7 @@ Reusable agent stack. Domain-free below the app layer.
 | --------- | ---------------------------------------- |
 | Example   | Next.js 16 App Router                    |
 | Docs      | Fumadocs + Next.js                       |
-| Language  | TypeScript 7 check (tsrs), 5.9 tooling   |
+| Language  | TypeScript 7                             |
 | Effects   | Effect-TS                                |
 | Database  | PostgreSQL via Drizzle ORM + @effect/sql |
 | Auth      | better-auth email OTP                    |

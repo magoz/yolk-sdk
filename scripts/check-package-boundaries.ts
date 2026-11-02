@@ -3,7 +3,7 @@ import { isBuiltin } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
-import * as ts from 'typescript'
+import * as ts from '@typescript/typescript6'
 
 type BoundaryRule = {
   readonly packageDir: string

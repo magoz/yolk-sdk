@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/docs": {
+      // Loading next.config.ts runs fumadocs-mdx's createMDX, whose esbuild bundle of
+      // source.config.ts fails under knip 6's loader; keep the Next.js entries without loading it.
+      "next": { "config": [] },
+      "ignore": ["next.config.ts"]
+    }
+  }
+}
