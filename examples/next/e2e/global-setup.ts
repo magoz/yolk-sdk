@@ -1,5 +1,5 @@
 import '@/lib/dotenv'
-import { Config, Effect } from 'effect'
+import { Config, Data, Effect } from 'effect'
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 import { reset } from 'drizzle-seed'
@@ -10,6 +10,11 @@ import { createTestAuthSession } from './utils/create-test-auth-session'
 import { ensureTestEnv } from './utils/ensure-test-env'
 import { TestDbLayer } from './utils/test-db'
 import { TEST_USER_ID } from './test-ids'
+
+class DatabaseResetError extends Data.TaggedError('DatabaseResetError')<{
+  readonly message: string
+  readonly cause: unknown
+}> {}
 
 /**
  * Global setup runs once before all Playwright tests.
@@ -29,7 +34,7 @@ const globalSetup = async () => {
 
     yield* Effect.tryPromise({
       try: () => reset(resetDb, schema),
-      catch: cause => new Error('Failed to reset database', { cause })
+      catch: cause => new DatabaseResetError({ message: 'Failed to reset database', cause })
     })
     yield* Effect.log('Database reset complete')
 

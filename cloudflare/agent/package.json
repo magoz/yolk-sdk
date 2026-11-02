@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && node --experimental-strip-types scripts/alchemy-compat.ts",
+    "check": "effect-tsgo tsrs -p tsconfig.json --noEmit && effect-tsgo tsrs -p tsconfig.scripts.json --noEmit && node --experimental-strip-types scripts/alchemy-compat.ts",
     "compat": "node --experimental-strip-types scripts/alchemy-compat.ts",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",

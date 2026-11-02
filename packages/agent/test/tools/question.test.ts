@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeQuestionToolModule, questionToolName, resolveTools } from '../../src/tools'
 
 type TestContext = {
@@ -25,20 +25,22 @@ describe('question tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: questionToolName,
-        params: {
-          questions: [
-            {
-              id: 'choice',
-              prompt: 'Pick one',
-              options: [{ id: 'a', label: 'A' }],
-              allowCustom: true
-            }
-          ]
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: questionToolName,
+          params: {
+            questions: [
+              {
+                id: 'choice',
+                prompt: 'Pick one',
+                options: [{ id: 'a', label: 'A' }],
+                allowCustom: true
+              }
+            ]
+          }
+        })
+      )
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([questionToolName])
       expect(toolSet.tools[0]?.description).toContain('Ask the user')
@@ -59,11 +61,13 @@ describe('question tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: questionToolName,
-        params: { questions: [] }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: questionToolName,
+          params: { questions: [] }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',

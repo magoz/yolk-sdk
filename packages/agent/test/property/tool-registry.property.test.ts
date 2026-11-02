@@ -1,7 +1,7 @@
 import { Arbitrary, Effect, Predicate, Result, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
-import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import { ToolCall, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   makeToolExecutorLayer,
   resolveTools,
@@ -142,7 +142,9 @@ describe('tool registry property tests', () => {
           Effect.gen(function* () {
             const executor = yield* ToolExecutor
 
-            return yield* executor.execute({ id: 'call_1', name: input.executeName, params: {} })
+            return yield* executor.execute(
+              ToolCall.make({ id: 'call_1', name: input.executeName, params: {} })
+            )
           }),
           makeToolExecutorLayer(toolSet)
         ).pipe(Effect.result)

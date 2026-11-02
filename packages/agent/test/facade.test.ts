@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { initialAgentClientState } from '@yolk-sdk/agent/client'
@@ -50,14 +50,16 @@ describe('@yolk-sdk/agent subpaths', () => {
       expect(store).toBeDefined()
     }).pipe(
       Effect.provide(
-        LoopConfig.layer({
-          maxTurns: 10,
-          maxRetries: 1,
-          retryBaseDelayMs: 10,
-          toolConcurrency: 2
-        })
-      ),
-      Effect.provide(makeInMemorySessionEventStoreLayer())
+        Layer.mergeAll(
+          LoopConfig.layer({
+            maxTurns: 10,
+            maxRetries: 1,
+            retryBaseDelayMs: 10,
+            toolConcurrency: 2
+          }),
+          makeInMemorySessionEventStoreLayer()
+        )
+      )
     )
   )
 })

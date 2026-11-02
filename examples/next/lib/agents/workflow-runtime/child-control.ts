@@ -1,6 +1,6 @@
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { readWorkflowChild, type WorkflowChildRead } from '@/lib/services/agent-workflow/read-child'
-import { Data, Effect, Predicate } from 'effect'
+import { Data, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolExecutor, ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -153,8 +153,10 @@ export const assertChildAdmission = (context: WorkflowAgentContext, physicalRunI
     }
   })
 
+const childControlLayer = Layer.merge(AgentWorkflowStore.layer, ChildWorkflowIdentityLive)
+
 const runChildControl = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.provide(AgentWorkflowStore.layer), Effect.provide(ChildWorkflowIdentityLive))
+  effect.pipe(Effect.provide(childControlLayer))
 
 export async function registerWorkflowStep(userId: string) {
   await Effect.runPromise(
@@ -420,8 +422,7 @@ export async function planWorkflowCallStep(input: {
   return await Effect.runPromise(
     planWorkflowCall(input).pipe(
       runChildControl,
-      Effect.provide(AgentTextRuntimeFactoryLive),
-      Effect.provide(AppLayer),
+      Effect.provide(AgentTextRuntimeFactoryLive.pipe(Layer.provideMerge(AppLayer))),
       Effect.scoped
     )
   )

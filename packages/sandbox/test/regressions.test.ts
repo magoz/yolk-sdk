@@ -6,6 +6,7 @@ import {
   GitSandboxBasicAuth,
   GitSandboxInitialSource,
   Sandbox,
+  SandboxCommandInput,
   SandboxCommandResult,
   SandboxProviderError,
   SandboxResources,
@@ -315,6 +316,7 @@ describe('sandbox anti-slop regressions', () => {
   it('reads getter _tag twice then remaining state fields through public makeSandboxToolResult', () => {
     const reads: Array<string> = []
 
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- getter read order under test
     const getterState: VercelSandboxState = {
       get _tag(): 'Vercel' {
         reads.push('_tag')
@@ -348,6 +350,7 @@ describe('sandbox anti-slop regressions', () => {
       }
     }
 
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- make() reads getters early
     const result: SandboxCommandResult = {
       exitCode: 0,
       stdout: 'ok',
@@ -471,7 +474,7 @@ describe('sandbox anti-slop regressions', () => {
       yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' })
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' }))
       }).pipe(Effect.provide(layer))
 
       expect(created).toHaveLength(1)
@@ -503,7 +506,7 @@ describe('sandbox anti-slop regressions', () => {
       const error = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'pwd' }).pipe(Effect.flip)
+        return yield* sandbox.run(SandboxCommandInput.make({ command: 'pwd' })).pipe(Effect.flip)
       }).pipe(Effect.provide(layer))
 
       expect(error).toBeInstanceOf(SandboxProviderError)
@@ -550,7 +553,9 @@ describe('sandbox anti-slop regressions', () => {
       const fiber = yield* Effect.gen(function* () {
         const sandbox = yield* Sandbox
 
-        return yield* sandbox.run({ command: 'sleep 30', timeoutMs: 1_000 })
+        return yield* sandbox.run(
+          SandboxCommandInput.make({ command: 'sleep 30', timeoutMs: 1_000 })
+        )
       }).pipe(Effect.provide(layer), Effect.forkChild)
 
       yield* TestClock.adjust(Duration.millis(1_100))
@@ -663,6 +668,7 @@ describe('sandbox anti-slop regressions', () => {
   it('Create name_mismatch getter state is read only for name', () => {
     const reads: Array<string> = []
 
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- getter read order under test
     const getterState: VercelSandboxState = {
       get _tag(): 'Vercel' {
         reads.push('_tag')
@@ -712,6 +718,7 @@ describe('sandbox anti-slop regressions', () => {
   it('Create max_expired getter state is read for name then maxExpiresAtMs', () => {
     const reads: Array<string> = []
 
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- getter read order under test
     const getterState: VercelSandboxState = {
       get _tag(): 'Vercel' {
         reads.push('_tag')
@@ -761,6 +768,7 @@ describe('sandbox anti-slop regressions', () => {
   it('Create idle_expired getter state is read for name, maxExpiresAtMs, expiresAtMs', () => {
     const reads: Array<string> = []
 
+    // @effect-diagnostics-next-line schemaClassObjectLiteral:off -- getter read order under test
     const getterState: VercelSandboxState = {
       get _tag(): 'Vercel' {
         reads.push('_tag')

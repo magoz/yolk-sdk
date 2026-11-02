@@ -4,14 +4,13 @@ packages:
   - 'examples/*'
   - 'cloudflare/*'
 catalog:
-  '@effect/language-service': ^0.87.4
   '@effect/opentelemetry': 4.0.5
   '@effect/platform-bun': 4.0.5
   '@effect/platform-node': 4.0.5
   '@effect/sql-pg': 4.0.5
   '@effect/vitest': 4.0.5
   effect: 4.0.5
-  typescript: ^5.9.3
+  typescript: ^7.0.2
   vitest: ^5.0.1
 allowBuilds:
   '@mongodb-js/zstd': false

@@ -20,7 +20,7 @@ class FakeWebSocket implements WebSocket {
   readonly bufferedAmount = 0
   readonly extensions = ''
   readonly protocol = ''
-  readyState = 0
+  readyState: WebSocket['readyState'] = 0
   readonly url: string
   onclose: ((this: WebSocket, ev: CloseEvent) => void) | null = null
   onerror: ((this: WebSocket, ev: Event) => void) | null = null

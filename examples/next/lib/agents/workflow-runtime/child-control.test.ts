@@ -71,9 +71,7 @@ const runControl = <A, E>(
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(storeLayer),
-      Effect.provide(identityLayer),
-      Effect.provide(unusedRuntimeFactoryLayer)
+      Effect.provide(Layer.mergeAll(storeLayer, identityLayer, unusedRuntimeFactoryLayer))
     )
   )
 
@@ -541,9 +539,7 @@ describe('Next child control steps without DB', () => {
 
     const plan = await Effect.runPromise(
       planWorkflowCall({ context, request, call }).pipe(
-        Effect.provide(storeLayer),
-        Effect.provide(identityLayer),
-        Effect.provide(capturingRuntimeFactoryLayer)
+        Effect.provide(Layer.mergeAll(storeLayer, identityLayer, capturingRuntimeFactoryLayer))
       )
     )
 

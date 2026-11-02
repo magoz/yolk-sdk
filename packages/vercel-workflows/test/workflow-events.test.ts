@@ -7,7 +7,10 @@ import {
   sequenceDurableAgentEvent,
   writeDurableAgentEvent
 } from '../src/workflow.ts'
-import { CommitThenWriteTerminalEventResult } from '../src/workflow-events.ts'
+import {
+  CommitThenWriteTerminalEventResult,
+  DurableAgentEventWriteError
+} from '../src/workflow-events.ts'
 
 describe('durable workflow agent events', () => {
   it('builds stable event ids from stream, turn, and sequence', () => {
@@ -112,6 +115,31 @@ describe('durable workflow agent events', () => {
     expect(result.nextState).toEqual({ eventSequence: 1 })
   })
 
+  it('fails with DurableAgentEventWriteError keeping the writer rejection as cause', async () => {
+    const writeWith = (rejection: unknown) =>
+      Effect.runPromise(
+        writeDurableAgentEvent({
+          writer: new WritableStream<Uint8Array>({
+            write: () => Promise.reject(rejection)
+          }).getWriter(),
+          state: makeDurableAgentEventSequencerState(),
+          streamId: 'workflow:run-1',
+          turn: 1,
+          event: { _tag: 'LLMTextDelta', text: 'hej' }
+        }).pipe(Effect.flip)
+      )
+
+    const failure = new Error('stream closed')
+    const fromError = await writeWith(failure)
+    const fromString = await writeWith('disk full')
+
+    expect(fromError).toBeInstanceOf(DurableAgentEventWriteError)
+    expect(fromError.message).toBe('stream closed')
+    expect(fromError.cause).toBe(failure)
+    expect(fromString.message).toBe('disk full')
+    expect(fromString.cause).toBe('disk full')
+  })
+
   it('writes sequenced NDJSON', async () => {
     const chunks: Array<Uint8Array> = []
 
@@ -196,7 +224,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.fail(commitError)
+
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -270,7 +299,7 @@ describe('durable workflow agent events', () => {
             operations.push('commit')
           })
 
-          yield* Effect.fail(commitError)
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -311,7 +340,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.fail(commitError)
+
+          return yield* Effect.fail(commitError)
         }),
         write: event =>
           Effect.sync(() => {
@@ -356,7 +386,8 @@ describe('durable workflow agent events', () => {
           yield* Effect.sync(() => {
             operations.push('commit')
           })
-          yield* Effect.die(defect)
+
+          return yield* Effect.die(defect)
         }),
         write: event =>
           Effect.sync(() => {

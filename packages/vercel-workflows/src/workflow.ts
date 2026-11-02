@@ -10,6 +10,7 @@ export {
 
 export {
   commitThenWriteTerminalEvent,
+  DurableAgentEventWriteError,
   durableAgentEventId,
   makeDurableAgentEventSequencerState,
   sequenceDurableAgentEvent,

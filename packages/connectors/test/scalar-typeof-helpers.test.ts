@@ -1,6 +1,7 @@
 import { Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
@@ -130,13 +131,17 @@ describe('connector agent scalar success and resolver discriminants', () => {
         {}
       )
 
-      const objectResult = yield* toolSet.execute({
-        id: 'call_1',
-        name: 'test.echo',
-        params: { text: 'hi' }
-      })
+      const objectResult = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'test.echo',
+          params: { text: 'hi' }
+        })
+      )
 
-      const stringResult = yield* toolSet.execute({ id: 'call_2', name: 'test.text', params: {} })
+      const stringResult = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_2', name: 'test.text', params: {} })
+      )
 
       expect(objectResult).toMatchObject({
         toolCallId: 'call_1',
@@ -164,11 +169,13 @@ describe('connector agent scalar success and resolver discriminants', () => {
         {}
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_3',
-        name: 'test.echo',
-        params: { text: 'fn' }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_3',
+          name: 'test.echo',
+          params: { text: 'fn' }
+        })
+      )
 
       expect(toolSet.metadata).toContainEqual({
         moduleId: 'test',

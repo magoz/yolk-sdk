@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Deferred, Effect, Result } from 'effect'
+import { Data, Deferred, Effect, Result } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   isWireBase64BodyResponse,
@@ -1026,10 +1026,18 @@ describe('connector conformance live runs are interruptible', () => {
   })
 
   it('reports a failed run with exit code 1 and no signal handlers left behind', async () => {
+    class SyntheticLiveFailure extends Data.TaggedError('SyntheticLiveFailure')<{
+      readonly message: string
+    }> {}
+
     const signals = fakeSignals()
     const { io, errors, exitCodes } = fakeIo()
 
-    await runInterruptibly(Effect.fail(new Error('synthetic live failure')), signals.source, io)
+    await runInterruptibly(
+      Effect.fail(new SyntheticLiveFailure({ message: 'synthetic live failure' })),
+      signals.source,
+      io
+    )
 
     expect(errors).toEqual(['synthetic live failure'])
     expect(exitCodes).toEqual([1])

@@ -307,8 +307,7 @@ export async function runAgentWorkflowModelStep(input: {
       }
     }).pipe(
       Effect.ensuring(releaseWorkflowWriter(writer)),
-      Effect.provide(AgentWorkflowStore.layer),
-      Effect.provide(AppLayer),
+      Effect.provide(AgentWorkflowStore.layer.pipe(Layer.provideMerge(AppLayer))),
       Effect.scoped
     )
   )
@@ -559,8 +558,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       }
     }).pipe(
       Effect.ensuring(releaseWorkflowWriter(writer)),
-      Effect.provide(AgentWorkflowStore.layer),
-      Effect.provide(AppLayer),
+      Effect.provide(AgentWorkflowStore.layer.pipe(Layer.provideMerge(AppLayer))),
       Effect.scoped
     )
   )

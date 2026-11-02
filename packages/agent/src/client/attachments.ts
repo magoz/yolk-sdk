@@ -1,10 +1,21 @@
 import { Effect, Predicate, Result } from 'effect'
+import * as Schema from 'effect/Schema'
 import { documentPartFromText, inferTextDocumentMimeType } from '@yolk-sdk/agent/protocol'
 
-const couldNotReadTextError = () => new Error('Could not read text')
+/** A `Blob`/`File` could not be read as text. */
+export class BlobTextReadError extends Schema.TaggedError<BlobTextReadError>()(
+  'BlobTextReadError',
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+const couldNotReadTextError = (cause?: unknown) =>
+  new BlobTextReadError({ message: 'Could not read text', cause })
 
 const textFromFileReaderEffect = (blob: Blob) =>
-  Effect.callback<string, Error>(resume => {
+  Effect.callback<string, BlobTextReadError>(resume => {
     if (typeof FileReader === 'undefined') {
       resume(Effect.fail(couldNotReadTextError()))
 
@@ -19,9 +30,9 @@ const textFromFileReaderEffect = (blob: Blob) =>
       reader.removeEventListener('abort', handleError)
     }
 
-    const fail = () => {
+    const fail = (cause?: unknown) => {
       removeListeners()
-      resume(Effect.fail(couldNotReadTextError()))
+      resume(Effect.fail(couldNotReadTextError(cause)))
     }
 
     const handleLoad = () => {
@@ -36,14 +47,16 @@ const textFromFileReaderEffect = (blob: Blob) =>
       resume(Effect.fail(couldNotReadTextError()))
     }
 
-    const handleError = () => fail()
+    const handleError = () => fail(reader.error ?? undefined)
 
     reader.addEventListener('load', handleLoad)
     reader.addEventListener('error', handleError)
     reader.addEventListener('abort', handleError)
 
-    if (Result.isFailure(Result.try(() => reader.readAsText(blob)))) {
-      fail()
+    const started = Result.try(() => reader.readAsText(blob))
+
+    if (Result.isFailure(started)) {
+      fail(started.failure)
     }
 
     return Effect.sync(removeListeners)

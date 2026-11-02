@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Arbitrary, Effect, Layer, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ConnectorError,
@@ -387,17 +388,21 @@ describe('Gmail metadataHeaders', () => {
           {}
         )
 
-        const omitted = yield* tools.execute({
-          id: 'call_1',
-          name: 'gmail.get_message',
-          params: { id: 'm1', format: 'full', metadataHeaders: null }
-        })
+        const omitted = yield* tools.execute(
+          ToolCall.make({
+            id: 'call_1',
+            name: 'gmail.get_message',
+            params: { id: 'm1', format: 'full', metadataHeaders: null }
+          })
+        )
 
-        const rejected = yield* tools.execute({
-          id: 'call_2',
-          name: 'gmail.get_message',
-          params: { id: 'm1', format: 'full', metadataHeaders: ['From'] }
-        })
+        const rejected = yield* tools.execute(
+          ToolCall.make({
+            id: 'call_2',
+            name: 'gmail.get_message',
+            params: { id: 'm1', format: 'full', metadataHeaders: ['From'] }
+          })
+        )
 
         expect(omitted.isError).not.toBe(true)
         expect(rejected.isError).toBe(true)

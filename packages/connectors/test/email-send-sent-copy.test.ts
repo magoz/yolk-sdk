@@ -1,6 +1,7 @@
 import { Effect, Layer, Result } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import {
@@ -107,7 +108,8 @@ const makeSendHost = (input: {
           if (input.sendResult !== undefined) return input.sendResult
 
           return ActionResult.success(
-            input.sendValue ?? { accepted: true, submissionId: 'submission-1' }
+            input.sendValue ??
+              EmailSendMessageOutput.make({ accepted: true, submissionId: 'submission-1' })
           )
         })
     })
@@ -354,11 +356,13 @@ describe('email.send_message Sent-copy contract', () => {
         {}
       )
 
-      const result = yield* tools.execute({
-        id: 'send-call',
-        name: 'email.send_message',
-        params: { message: composeMessage }
-      })
+      const result = yield* tools.execute(
+        ToolCall.make({
+          id: 'send-call',
+          name: 'email.send_message',
+          params: { message: composeMessage }
+        })
+      )
 
       expect(requests).toHaveLength(1)
       expect(result.isError).not.toBe(true)

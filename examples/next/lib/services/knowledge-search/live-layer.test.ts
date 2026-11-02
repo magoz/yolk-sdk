@@ -48,8 +48,7 @@ describe('TextKnowledgeExtractorLayer', () => {
         metadata: { title: 'Original title' }
       })
     }).pipe(
-      Effect.provide(TextKnowledgeExtractorLayer),
-      Effect.provide(NoopKnowledgeSummarizerLive)
+      Effect.provide(Layer.mergeAll(TextKnowledgeExtractorLayer, NoopKnowledgeSummarizerLive))
     )
   )
 })
@@ -516,13 +515,14 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       }).pipe(
         Effect.ensuring(cleanup),
         Effect.provide(
-          Layer.succeed(KnowledgeEmbedder, {
-            embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
-            embedQuery: () => Effect.succeed(embedding(0))
-          })
+          Layer.mergeAll(
+            Layer.succeed(KnowledgeEmbedder, {
+              embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
+              embedQuery: () => Effect.succeed(embedding(0))
+            }),
+            DrizzleSearchIndexStoreLayer
+          ).pipe(Layer.provideMerge(Db.layer))
         ),
-        Effect.provide(DrizzleSearchIndexStoreLayer),
-        Effect.provide(Db.layer),
         Effect.scoped
       )
     },

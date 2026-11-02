@@ -127,14 +127,27 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 const encodeDurableAgentEventNdjson = <Event extends object>(event: DurableAgentEvent<Event>) =>
   textEncoder.encode(`${JSON.stringify(event)}\n`)
 
+/**
+ * The stream writer rejected a durable event write. `message` repeats the writer's own error
+ * message (`String(cause)` for a non-`Error` rejection); `cause` is the original rejection.
+ */
+export class DurableAgentEventWriteError extends Data.TaggedError('DurableAgentEventWriteError')<{
+  readonly message: string
+  readonly cause: unknown
+}> {}
+
 export const writeDurableAgentEvent = <Event extends object>(
   input: WriteDurableAgentEventInput<Event>
-): Effect.Effect<SequencedDurableAgentEvent<Event>, unknown> =>
+): Effect.Effect<SequencedDurableAgentEvent<Event>, DurableAgentEventWriteError> =>
   Effect.gen(function* () {
     const sequenced = sequenceDurableAgentEvent(input)
     yield* Effect.tryPromise({
       try: () => input.writer.write(encodeDurableAgentEventNdjson(sequenced.event)),
-      catch: cause => cause
+      catch: cause =>
+        new DurableAgentEventWriteError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause
+        })
     })
 
     return sequenced

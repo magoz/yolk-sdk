@@ -1,5 +1,5 @@
 import { Effect, Match, Option } from 'effect'
-import { describe, expect, it } from '@effect/vitest'
+import { assert, describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
   DocumentPart,
@@ -10,6 +10,7 @@ import {
   attachmentSourceDataUrl,
   attachmentSourcePreview,
   attachmentSourceText,
+  AttachmentTextDecodeError,
   attachmentSourceUrl,
   contentParts,
   contentPreview,
@@ -119,6 +120,18 @@ describe('content helpers', () => {
     expect(attachmentSourcePreview(url)).toBe('https://example.com/image.png')
     expect(attachmentSourcePreview(ref)).toBe('artifact_123')
   })
+
+  it.effect('fails with AttachmentTextDecodeError carrying the decoder message', () =>
+    Effect.gen(function* () {
+      const error = yield* attachmentSourceText(inlineBase64AttachmentSource(btoa('\xff'))).pipe(
+        Effect.flip
+      )
+
+      expect(error).toBeInstanceOf(AttachmentTextDecodeError)
+      assert(error.cause instanceof TypeError, 'expected the decoder TypeError as cause')
+      expect(error.message).toBe(error.cause.message)
+    })
+  )
 
   it.effect('decodes inline text document sources', () =>
     Effect.gen(function* () {

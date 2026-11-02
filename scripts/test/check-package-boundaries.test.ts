@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import * as ts from 'typescript'
+import * as ts from '@typescript/typescript6'
 import {
   collectSpecifiers,
   createResolverContext,

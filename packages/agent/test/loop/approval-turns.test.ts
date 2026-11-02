@@ -123,8 +123,12 @@ describe('answers bind the batch they answer', () => {
           resume: false
         }).pipe(
           Stream.runCollect,
-          Effect.provide(TestToolExecutor.layer({ delete_file: 'deleted' })),
-          Effect.provide(LoopConfig.defaultLayer)
+          Effect.provide(
+            Layer.mergeAll(
+              TestToolExecutor.layer({ delete_file: 'deleted' }),
+              LoopConfig.defaultLayer
+            )
+          )
         )
       )
 

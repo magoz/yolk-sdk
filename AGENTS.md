@@ -102,6 +102,7 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 ## NOTES
 
 - No full CI workflow currently checked in; Vercel auto-deploys app. Package publish policy lives in `patterns/PACKAGE_DISTRIBUTION.md`.
-- LSP may show stale Effect v3 errors; trust `pnpm tsc`.
+- `pnpm tsc` is TypeScript 7 (Effect-patched tsrs) with Effect diagnostics; editors should run the
+  Effect language server (`patterns/TYPESCRIPT_CONVENTIONS.md`), and `pnpm tsc` is the truth.
 - Root Vitest may discover package tests; `pnpm test:run` also runs package tests.
 - This is canonical root knowledge.

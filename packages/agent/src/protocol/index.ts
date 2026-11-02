@@ -12,6 +12,7 @@ export {
   attachmentSourceDataUrl,
   AttachmentSource,
   attachmentSourceText,
+  AttachmentTextDecodeError,
   attachmentSourceUrl,
   type AttachmentContentPart,
   type AttachmentSourceResolver,

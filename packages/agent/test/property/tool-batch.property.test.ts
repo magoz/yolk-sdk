@@ -56,8 +56,7 @@ describe('tool batch property tests', () => {
 
         const events = yield* runToolBatch({ calls }).pipe(
           Stream.runCollect,
-          Effect.provide(executorLayer),
-          Effect.provide(LoopConfig.defaultLayer)
+          Effect.provide(Layer.mergeAll(executorLayer, LoopConfig.defaultLayer))
         )
 
         const eventArray = Array.from(events)
@@ -101,8 +100,7 @@ describe('tool batch property tests', () => {
               events.push(event)
             })
           ),
-          Effect.provide(executorLayer),
-          Effect.provide(LoopConfig.defaultLayer),
+          Effect.provide(Layer.mergeAll(executorLayer, LoopConfig.defaultLayer)),
           Effect.result
         )
 

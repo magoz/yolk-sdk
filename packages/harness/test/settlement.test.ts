@@ -240,7 +240,8 @@ describe('terminal settlement', () => {
               }
 
               yield* Deferred.succeed(started, undefined)
-              yield* Effect.never
+
+              return yield* Effect.never
             })
         }).pipe(Layer.provideMerge(wrapInbox), Layer.provideMerge(delayedStore))
 

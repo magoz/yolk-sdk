@@ -32,6 +32,7 @@ import {
   ToolDef,
   ToolJsonSchema,
   ToolJsonSchemaObject,
+  InteractionReceipt,
   InteractionValidationError,
   interactionRequestId,
   sameInteractionBinding,
@@ -1395,12 +1396,16 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
+          // Host data may be malformed: an unconstructible receipt is invalid, never a defect.
+          const settledReceipt = InteractionReceipt.makeOption({
+            ...stored,
+            status: 'settled',
+            result: settled.result
+          })
+
           if (
-            !validInteractionReceipt(
-              { ...stored, status: 'settled', result: settled.result },
-              input.call,
-              ref
-            ) ||
+            Option.isNone(settledReceipt) ||
+            !validInteractionReceipt(settledReceipt.value, input.call, ref) ||
             !Schema.is(Schema.Record(Schema.String, Schema.Unknown))(
               settled.result.structuredContent
             ) ||

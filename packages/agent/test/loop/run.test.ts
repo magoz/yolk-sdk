@@ -1356,9 +1356,11 @@ describe('run', () => {
       }).pipe(
         Stream.runCollect,
         Effect.provide(
-          FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} }))
-        ),
-        Effect.provide(BaseLayer)
+          Layer.mergeAll(
+            FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} })),
+            BaseLayer
+          )
+        )
       )
 
       const events = Array.from(eventsChunk)
@@ -1382,8 +1384,9 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ weather: '72F' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
+        )
       )
 
       const events = Array.from(eventsChunk)
@@ -1405,8 +1408,7 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
         Stream.runCollect,
-        Effect.provide(failingToolExecutorLayer),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(failingToolExecutorLayer, LoopConfig.defaultLayer))
       )
 
       const events = Array.from(eventsChunk)
@@ -1456,8 +1458,7 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [failingCall, successCall] }).pipe(
         Stream.runCollect,
-        Effect.provide(executorLayer),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(Layer.mergeAll(executorLayer, LoopConfig.defaultLayer))
       )
 
       const events = Array.from(eventsChunk)
@@ -1549,8 +1550,12 @@ describe('run', () => {
         turn: 1
       }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ weather: 'should not run' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(
+            TestToolExecutor.layer({ weather: 'should not run' }),
+            LoopConfig.defaultLayer
+          )
+        )
       )
 
       const events = Array.from(eventsChunk)
@@ -1594,8 +1599,12 @@ describe('run', () => {
         hitlResponses: [response]
       }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ weather: 'should not run' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(
+            TestToolExecutor.layer({ weather: 'should not run' }),
+            LoopConfig.defaultLayer
+          )
+        )
       )
 
       const events = Array.from(eventsChunk)
@@ -1641,14 +1650,16 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [slow, fast] }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
         Effect.provide(
-          LoopConfig.layer({
-            maxTurns: 500,
-            maxRetries: 2,
-            retryBaseDelayMs: 1000,
-            toolConcurrency: 2
-          })
+          Layer.mergeAll(
+            executor,
+            LoopConfig.layer({
+              maxTurns: 500,
+              maxRetries: 2,
+              retryBaseDelayMs: 1000,
+              toolConcurrency: 2
+            })
+          )
         )
       )
 
@@ -1678,8 +1689,9 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ subagent: 'done' })),
-        Effect.provide(LoopConfig.defaultLayer)
+        Effect.provide(
+          Layer.mergeAll(TestToolExecutor.layer({ subagent: 'done' }), LoopConfig.defaultLayer)
+        )
       )
 
       const events = Array.from(eventsChunk)
@@ -1735,14 +1747,16 @@ describe('run', () => {
 
       const eventsChunk = yield* runToolBatch({ calls: [slow, fast], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(executor),
         Effect.provide(
-          LoopConfig.layer({
-            maxTurns: 500,
-            maxRetries: 2,
-            retryBaseDelayMs: 1000,
-            toolConcurrency: 2
-          })
+          Layer.mergeAll(
+            executor,
+            LoopConfig.layer({
+              maxTurns: 500,
+              maxRetries: 2,
+              retryBaseDelayMs: 1000,
+              toolConcurrency: 2
+            })
+          )
         )
       )
 

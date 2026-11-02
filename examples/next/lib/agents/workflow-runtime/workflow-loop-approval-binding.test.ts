@@ -6,7 +6,7 @@
  * to automatic, one sibling is answered: the other stays pending.
  */
 import { readFileSync } from 'node:fs'
-import { Effect, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -103,8 +103,12 @@ describe('approval binding through the workflow loop (stand-in tool step)', () =
                 awaitingRequests
               }).pipe(
                 Stream.runCollect,
-                Effect.provide(TestToolExecutor.layer({ delete_file: 'deleted' })),
-                Effect.provide(LoopConfig.defaultLayer)
+                Effect.provide(
+                  Layer.mergeAll(
+                    TestToolExecutor.layer({ delete_file: 'deleted' }),
+                    LoopConfig.defaultLayer
+                  )
+                )
               )
             )
 

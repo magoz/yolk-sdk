@@ -206,17 +206,19 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'explore',
-          model: 'fast-model',
-          reasoning_effort: 'low'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'explore',
+            model: 'fast-model',
+            reasoning_effort: 'low'
+          }
+        })
+      )
 
       expect(result.content).toBe(
         '<subagent_result>\nsession_1:explore:Find auth:Explore auth flow:fast-model:low\n</subagent_result>'
@@ -303,16 +305,18 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'explore',
-          model: opaqueModelId
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'explore',
+            model: opaqueModelId
+          }
+        })
+      )
 
       expect(result.content).toBe(opaqueModelId)
     })
@@ -333,17 +337,19 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'explore',
-          model: 'unknown-model',
-          reasoning_effort: 'low'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'explore',
+            model: 'unknown-model',
+            reasoning_effort: 'low'
+          }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
@@ -368,17 +374,19 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'explore',
-          model: 'fast-model',
-          reasoning_effort: 'medium'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'explore',
+            model: 'fast-model',
+            reasoning_effort: 'medium'
+          }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
@@ -408,15 +416,17 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'explore'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'explore'
+          }
+        })
+      )
 
       expect(result.content).toBe('inherit:inherit')
     })
@@ -435,15 +445,17 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: 'Explore auth flow',
-          subagent_type: 'missing'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'missing'
+          }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
@@ -466,15 +478,17 @@ describe('subagent tool', () => {
         { sessionId: 'session_1' }
       )
 
-      const result = yield* toolSet.execute({
-        id: 'call_1',
-        name: subagentToolName,
-        params: {
-          description: 'Find auth',
-          prompt: ' ',
-          subagent_type: 'explore'
-        }
-      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: subagentToolName,
+          params: {
+            description: 'Find auth',
+            prompt: ' ',
+            subagent_type: 'explore'
+          }
+        })
+      )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',

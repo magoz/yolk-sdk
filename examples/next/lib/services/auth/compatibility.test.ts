@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, vi } from 'vitest'
 import { assert, describe, expect, it } from '@effect/vitest'
-import { ConfigProvider, Effect, Schema } from 'effect'
+import { ConfigProvider, Effect, Layer, Schema } from 'effect'
 import { betterAuth } from 'better-auth'
 import { memoryAdapter } from 'better-auth/adapters/memory'
 import { getAuthTables } from 'better-auth/db'
@@ -10,19 +10,22 @@ import * as schema from '../db/schema'
 import { Auth } from './live-layer'
 
 const makeAuth = Auth.pipe(
-  Effect.provide(Auth.layer),
   Effect.provide(
-    ConfigProvider.layer(
-      ConfigProvider.fromEnv({
-        env: {
-          NODE_ENV: 'test',
-          DATABASE_URL: 'postgresql://test:test@db.example.test/test',
-          NEXT_PUBLIC_PROJECT_URL: 'http://localhost:3000',
-          APP_NAME: 'Auth test',
-          EMAIL_SENDER: 'auth@example.test',
-          RESEND_API_KEY: 're_test'
-        }
-      })
+    Auth.layer.pipe(
+      Layer.provideMerge(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: {
+              NODE_ENV: 'test',
+              DATABASE_URL: 'postgresql://test:test@db.example.test/test',
+              NEXT_PUBLIC_PROJECT_URL: 'http://localhost:3000',
+              APP_NAME: 'Auth test',
+              EMAIL_SENDER: 'auth@example.test',
+              RESEND_API_KEY: 're_test'
+            }
+          })
+        )
+      )
     )
   )
 )
