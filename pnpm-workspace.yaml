@@ -4,12 +4,12 @@ packages:
   - 'examples/*'
   - 'cloudflare/*'
 catalog:
-  '@effect/opentelemetry': 4.0.5
-  '@effect/platform-bun': 4.0.5
-  '@effect/platform-node': 4.0.5
-  '@effect/sql-pg': 4.0.5
-  '@effect/vitest': 4.0.5
-  effect: 4.0.5
+  '@effect/opentelemetry': 4.1.2
+  '@effect/platform-bun': 4.1.2
+  '@effect/platform-node': 4.1.2
+  '@effect/sql-pg': 4.1.2
+  '@effect/vitest': 4.1.2
+  effect: 4.1.2
   typescript: ^7.0.2
   vitest: ^5.0.1
 allowBuilds:
@@ -27,7 +27,12 @@ allowBuilds:
   unrs-resolver: true
   workerd: true
 overrides:
-  '@effect/platform-node-shared': 4.0.5
+  '@effect/platform-node-shared': 4.1.2
+  # @alchemy.run/cloudflare depends on it with a caret range: keep it on the catalog Effect version.
+  '@effect/sql-d1': 4.1.2
+  # One ws for the whole graph: @effect/platform-node-shared 4.1 needs ^8.22.1, and a second ws
+  # splits @workflow/core into two peer variants whose duplicate step ids break workflow builds.
+  ws: ^8.22.1
   # 2.0.0 (like beta.6) imports S3 commands absent from the older lockfile resolution.
   '@effect-aws/client-s3>@aws-sdk/client-s3': 3.1132.0
 patchedDependencies:

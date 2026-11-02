@@ -65,9 +65,9 @@ The smoke command reads `.alchemy/state/YolkAgentWorker/dev_magoz/Api.json` unle
 
 ## Alchemy compatibility
 
-This app pins `alchemy@2.0.0-beta.80` against catalog Effect `4.0.5` (one Effect instance). Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
+This app pins `alchemy@2.0.0-beta.85` and `@alchemy.run/cloudflare@2.0.0-beta.85` against catalog Effect `4.1.2` (one Effect instance); the Cloudflare providers moved from `alchemy/Cloudflare` to the `@alchemy.run/cloudflare` package in beta.85, the first release that supports Effect 4.1. Worker implementations are supplied directly to `Cloudflare.Worker`; the default runtime export is the Worker resource. Durable Objects use `Cloudflare.DurableObject` and `Cloudflare.WebSocket`. Storage adapters capture the genuine isolate `RuntimeContext` so app storage contracts remain environment-free.
 
-The beta.80 dependency cohort (`@alchemy.run/*` beta.80, `@distilled.cloud/*` rc.13) declares `effect ^4.0.0` and runs unpatched; the rc.115 compatibility patches were removed with the Effect 4.0.0 upgrade. Peer ranges are not suppressed. If a future Alchemy release regresses against catalog Effect, fix it upstream or with a reviewed `pnpm patch` rather than restoring removed Effect APIs.
+The beta.85 dependency cohort (`@alchemy.run/*` beta.85, `@distilled.cloud/*` rc.18) declares `effect ^4.1.0` and runs unpatched; the rc.115 compatibility patches were removed with the Effect 4.0.0 upgrade. Peer ranges are not suppressed. If a future Alchemy release regresses against catalog Effect, fix it upstream or with a reviewed `pnpm patch` rather than restoring removed Effect APIs.
 
 The previous beta.56 / Effect beta.80 and beta.77 / rc.115 pairs are no longer the compatibility target. Do not restore old `DurableObjectNamespace` or `ApiLive` wiring, add old Vite patches, or blanket-strip `.asEffect` calls: Alchemy-owned protocols are not Effect API aliases.
 

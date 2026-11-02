@@ -98,8 +98,8 @@ describe('tool argument decoding', () => {
       properties: {
         optional: { anyOf: [{ type: 'string' }, omitted] },
         optionalSpec: { anyOf: [{ $ref: '#/$defs/Spec' }, omitted] },
-        // The inner null is `NullOr`'s and means "clear"; only the outer one is "not sent".
-        clearable: { anyOf: [{ anyOf: [{ type: 'string' }, { type: 'null' }] }, omitted] },
+        // The unmarked null is `NullOr`'s and means "clear"; only the marked one is "not sent".
+        clearable: { anyOf: [{ type: 'string' }, { type: 'null' }, omitted] },
         cleared: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         nullable: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         items: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'null' }] } }
@@ -119,10 +119,11 @@ describe('tool argument decoding', () => {
     expect(
       omitNullOptionalToolArguments(toolJsonSchemaFromSchema(Marked), {
         optional: null,
+        clearable: null,
         cleared: null,
         items: []
       })
-    ).toEqual({ optional: null, cleared: null, items: [] })
+    ).toEqual({ optional: null, clearable: null, cleared: null, items: [] })
   })
 
   it.effect('decodes null on optional fields as absent and applies decoding defaults', () =>
