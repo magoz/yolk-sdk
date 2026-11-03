@@ -1,5 +1,24 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.124
+
+### Minor Changes
+
+- 4f6cd82: Some boundary failures are now typed instead of the global `Error` or `unknown`. Each error keeps the original failure as `cause` when one exists.
+
+  - `@yolk-sdk/agent/client`: `textFromBlob` and `documentPartFromTextFile` fail with the new `BlobTextReadError` instead of `Error`, with the same message (`Could not read text`).
+  - `@yolk-sdk/agent/protocol`: `attachmentSourceText` fails with the new `AttachmentTextDecodeError` instead of the raw decoding error; its `message` is that error's message (or `String(cause)` when it is not an `Error`).
+  - `@yolk-sdk/vercel-workflows`: `writeDurableAgentEvent` fails with the new `DurableAgentEventWriteError` instead of the writer's raw rejection. Its `message` is the rejection's message (or `String(rejection)` when it is not an `Error`), and `cause` is the rejection itself, so code that inspected the raw rejection reads `cause`.
+
+### Patch Changes
+
+- 6a1c1d4: Upgrade the coordinated Effect runtime and platform dependencies to Effect 4.1.2. Hosts must use the matching Effect version, and adopt Effect 4.1's own breaking changes where their code uses the affected APIs (`effect/Crypto`, `HttpClientRequest.method` as `string`, `KeyValueStore`, `FileSystem.make`, `ChildProcess` templates, `McpServer` registrations). `@effect/platform-node` 4.1 requires `ws` ^8.22.1; dedupe `ws` if a Workflow build reports duplicate step ids.
+
+  Tool JSON Schemas generated from Effect schemas are flatter: Effect 4.1 merges a nested `anyOf` into its parent and no longer duplicates a named definition used by both a required and an optional property. What a schema admits is unchanged, and the `yolk:null-means-omitted` marker still tells the codec-added `null` from a `Schema.NullOr` `null`. Hosts that list tools over MCP serve changed tool schemas once, so grants keyed on a tool snapshot digest return to their default for the affected tools.
+
+- Updated dependencies [6a1c1d4]
+  - @yolk-sdk/conformance@0.1.0-canary.124
+
 ## 0.1.0-canary.123
 
 ### Patch Changes
