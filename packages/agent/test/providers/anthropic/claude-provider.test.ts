@@ -1085,7 +1085,7 @@ describe('Anthropic Claude provider', () => {
         properties: { a: { $ref: '#/$defs/Note' }, b: { type: 'string' } },
         required: ['a'],
         additionalProperties: false,
-        $defs: { Note: {}, Note_1: {} }
+        $defs: { Note: {} }
       })
       expect(sharedSchema).toEqual({
         type: 'object',

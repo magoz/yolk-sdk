@@ -14,10 +14,11 @@
     "tail": "alchemy tail"
   },
   "dependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/harness": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",
-    "alchemy": "2.0.0-beta.80",
+    "alchemy": "2.0.0-beta.85",
     "effect": "catalog:"
   },
   "devDependencies": {

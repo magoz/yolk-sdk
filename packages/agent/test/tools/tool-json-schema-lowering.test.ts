@@ -166,9 +166,8 @@ describe('tool JSON Schema lowering', () => {
   })
 
   it('marks optional tuple elements and record values', () => {
-    const number = {
-      anyOf: [{ type: 'number' }, { type: 'string', enum: ['Infinity', '-Infinity', 'NaN'] }]
-    }
+    const number = { type: 'number' }
+    const nonFinite = { type: 'string', enum: ['Infinity', '-Infinity', 'NaN'] }
 
     expect(
       toolJsonSchemaFromSchema(
@@ -179,8 +178,8 @@ describe('tool JSON Schema lowering', () => {
       )
     ).toMatchObject({
       properties: {
-        pair: { prefixItems: [{ type: 'string' }, { anyOf: [number, omitted] }] },
-        scores: { additionalProperties: { anyOf: [number, omitted] } }
+        pair: { prefixItems: [{ type: 'string' }, { anyOf: [number, nonFinite, omitted] }] },
+        scores: { additionalProperties: { anyOf: [number, nonFinite, omitted] } }
       }
     })
   })

@@ -17,10 +17,12 @@ import { Config, Data, Effect, Layer, Match, Option, Predicate } from 'effect'
 import {
   FetchHttpClient,
   Headers as HttpHeaders,
+  HttpBody,
   HttpClient,
   HttpClientError,
   HttpClientRequest,
-  HttpClientResponse
+  HttpClientResponse,
+  UrlParams
 } from 'effect/http'
 
 /** A fetch handler, such as the one returned by an emulator factory. */
@@ -228,7 +230,15 @@ const unroutedOriginError = (
 
   return new HttpClientError.HttpClientError({
     reason: new HttpClientError.TransportError({
-      request: HttpClientRequest.make(request.method)(origin ?? ''),
+      // `makeWith` keeps any method string (Effect 4.1 types `method` as `string`).
+      request: HttpClientRequest.makeWith(
+        request.method,
+        origin ?? '',
+        UrlParams.empty,
+        Option.none(),
+        HttpHeaders.empty,
+        HttpBody.empty
+      ),
       description: `no emulator route for origin ${label}`
     })
   })

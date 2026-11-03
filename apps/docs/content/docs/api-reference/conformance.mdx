@@ -616,7 +616,7 @@ mutation cases, the Telegram and Gmail sends, and the R2 puts also hand a cleanu
 (a failed cleanup, or a create, send, or put whose outcome is unknown) to `ConformanceCleanupReporter`
 from `@yolk-sdk/connectors/conformance`, a `Context.Reference` whose default logs it with
 `Effect.logWarning`. The Fortnox rejection case and the Fortnox email send do not report. With the
-Effect version this repository pins (4.0.5), such a run ends as a plain interruption, just like a
+Effect version this repository pins (4.1.2), such a run ends as a plain interruption, just like a
 run whose cleanup succeeded: Effect drops a typed failure whose recovery handler the interruption
 skipped, so the reporter is the only record of the cleanup problem. Drills in the connector tests
 pin this, so an Effect upgrade that changes it fails visibly. The Dropbox, Notion, Todoist,
