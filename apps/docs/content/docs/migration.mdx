@@ -34,8 +34,8 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 Canary.124 targets `effect@4.1.2`. Upgrade the Yolk packages and Effect together, and move `effect`
 and the coordinated Effect runtime packages (`@effect/platform-*`, `@effect/sql-*`,
-`@effect/opentelemetry`, `@effect/vitest`) to `4.1.2` together. No Yolk signature changes, but
-three boundary failures are now typed (below).
+`@effect/opentelemetry`, `@effect/vitest`) to `4.1.2` together. Three Yolk boundary failures are
+now typed (below).
 
 - Effect 4.1 has breaking changes of its own: `effect/Crypto` is replaced by `effect/crypto/*`
   services that runtimes no longer provide implicitly; `HttpClientRequest.method` is a `string`
