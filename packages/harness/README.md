@@ -11,6 +11,8 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 pnpm add @yolk-sdk/harness@canary effect@4.1.2
 ```
 
+Use the SDK's matching Effect version (`4.1.2`) in host code.
+
 ## Subpaths
 
 | Subpath                                   | Purpose                                                                                                 |

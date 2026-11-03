@@ -11,6 +11,8 @@ pnpm add @yolk-sdk/vercel-workflows@canary effect@4.1.2 workflow@^5.0.0-beta.42
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Use the SDK's matching Effect version (`4.1.2`) in host code.
 Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
+Keep one `ws` version installed (`@effect/platform-node` 4.1 needs ^8.22.1): two copies install
+`@workflow/core` twice and the Workflow build fails with duplicate step ids.
 
 Requires `workflow@^5.0.0-beta.42`. The 5.x line region-pins Vercel runs so durable streams are
 served from the deployment's own region; the 4.x backend was `iad1`-only, which made deployed
@@ -258,6 +260,9 @@ const sequenced =
 
 eventSequence = sequenced.nextEventSequence
 ```
+
+A rejected write fails with `DurableAgentEventWriteError`: its `message` is the rejection's message
+(or `String(rejection)`), and `cause` is the rejection itself.
 
 The id format is `${streamId}:${turn}:${eventSequence}`. Scope `streamId` to one logical durable
 run (for example `workflow:${runId}`), not just one route or feature. Replay-safe clients de-dupe by

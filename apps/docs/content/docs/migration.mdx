@@ -34,7 +34,8 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 Canary.124 targets `effect@4.1.2`. Upgrade the Yolk packages and Effect together, and move `effect`
 and the coordinated Effect runtime packages (`@effect/platform-*`, `@effect/sql-*`,
-`@effect/opentelemetry`, `@effect/vitest`) to `4.1.2` together. Yolk APIs are unchanged.
+`@effect/opentelemetry`, `@effect/vitest`) to `4.1.2` together. Three Yolk boundary failures are
+now typed (below).
 
 - Effect 4.1 has breaking changes of its own: `effect/Crypto` is replaced by `effect/crypto/*`
   services that runtimes no longer provide implicitly; `HttpClientRequest.method` is a `string`
@@ -49,6 +50,11 @@ and the coordinated Effect runtime packages (`@effect/platform-*`, `@effect/sql-
 - `@effect/platform-node` 4.1 requires `ws` ^8.22.1. If another dependency keeps an older `ws`, the
   package manager can install `@workflow/core` twice, and a Workflow build fails with duplicate step
   ids. Dedupe `ws`, for example with a pnpm override `ws: ^8.22.1`.
+- Typed boundary failures, each keeping the original failure as `cause` when one exists:
+  `textFromBlob` and `documentPartFromTextFile` fail with `BlobTextReadError` (was `Error`);
+  `attachmentSourceText` fails with `AttachmentTextDecodeError` (was the raw decoding error); and
+  `writeDurableAgentEvent` fails with `DurableAgentEventWriteError` (was the writer's raw rejection).
+  Code that inspected the raw value reads `cause`.
 
 ### Canary.122: connector input numbers
 

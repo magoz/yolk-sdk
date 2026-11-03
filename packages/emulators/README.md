@@ -33,6 +33,8 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 pnpm add -D @yolk-sdk/emulators@canary effect@4.1.2
 ```
 
+Use the SDK's matching Effect version (`4.1.2`) in host code.
+
 ## Subpaths
 
 There is no root export. Import an explicit subpath:

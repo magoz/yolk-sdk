@@ -637,6 +637,12 @@ rejects jsdom's URL shape. Run any test whose import graph reaches the `workflow
 entrypoint, including through `@yolk-sdk/vercel-workflows`) in a node vitest environment — add
 `// @vitest-environment node` or exclude those suites from jsdom projects.
 
+### Workflow build reports duplicate step ids
+
+Two `ws` versions can make the package manager install `@workflow/core` twice, once per peer
+variant, and the Workflow build then sees each step twice. `@effect/platform-node` 4.1 requires
+`ws` ^8.22.1; dedupe it, for example with a pnpm override `ws: ^8.22.1`.
+
 ### Deployed streams arrive in multi-second bursts
 
 On `workflow` 4.x the hosted backend served durable streams only from `iad1`; deployments in other

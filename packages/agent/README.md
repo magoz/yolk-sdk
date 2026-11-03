@@ -642,6 +642,10 @@ const message = UserMessage.make({
 For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helper
 `documentPartFromTextFile` to create UTF-8 inline
 `DocumentPart` values without trusting filename extensions over explicit non-text MIME types.
+`documentPartFromTextFile` and `textFromBlob` fail with `BlobTextReadError`, keeping the read error
+as `cause` when there is one. `attachmentSourceText` decodes an inline base64 source to UTF-8 text
+(`Option.none()` for URL and ref sources) and fails with `AttachmentTextDecodeError`, whose `cause`
+is the decoder error.
 
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
 `textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.
