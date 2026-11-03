@@ -8,7 +8,8 @@ Domain-free agent protocol types and helpers.
 - Streamed agent event schemas.
 - Tool definition/call/result schemas.
 - HITL approval/question request and response schemas.
-- Text/image/document/audio content helpers.
+- Text/image/document/audio content helpers (`attachmentSourceText` fails with
+  `AttachmentTextDecodeError`).
 - Model capability and reasoning config types.
 
 ## Use it when
