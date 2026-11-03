@@ -67,13 +67,24 @@ const effectFromRoot = resolveEffect(join(repoRoot, 'package.json'))
 
 const effectFromAlchemy = resolveEffect(join(alchemyRoot, 'package.json'))
 
-if (effectFromAgent !== effectFromRoot || effectFromAgent !== effectFromAlchemy) {
+const alchemyCloudflareRoot = fileURLToPath(
+  new URL('..', import.meta.resolve('@alchemy.run/cloudflare'))
+)
+
+const effectFromAlchemyCloudflare = resolveEffect(join(alchemyCloudflareRoot, 'package.json'))
+
+if (
+  effectFromAgent !== effectFromRoot ||
+  effectFromAgent !== effectFromAlchemy ||
+  effectFromAgent !== effectFromAlchemyCloudflare
+) {
   failures.push(
     [
       'Alchemy/app/root resolved different Effect instances:',
       `agent=${effectFromAgent}`,
       `root=${effectFromRoot}`,
-      `alchemy=${effectFromAlchemy}`
+      `alchemy=${effectFromAlchemy}`,
+      `alchemyCloudflare=${effectFromAlchemyCloudflare}`
     ].join(' ')
   )
 }

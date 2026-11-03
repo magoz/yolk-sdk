@@ -120,6 +120,11 @@ describe('EmulatedHttpClient', () => {
       expect(httpError.message).not.toContain('secret-path')
       expect(httpError.message).not.toContain('token')
       expect(httpError.message).not.toContain('synthetic-credential')
+      expect(httpError.request.method).toBe('POST')
+      expect(httpError.request.url).toBe('https://api.example.test')
+      expect(httpError.request.urlParams.params).toEqual([])
+      expect(httpError.request.headers).toEqual({})
+      expect(httpError.request.body._tag).toBe('Empty')
     })
   )
 

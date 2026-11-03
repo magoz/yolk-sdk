@@ -37,14 +37,18 @@ and the coordinated Effect runtime packages (`@effect/platform-*`, `@effect/sql-
 `@effect/opentelemetry`, `@effect/vitest`) to `4.1.2` together. Yolk APIs are unchanged.
 
 - Effect 4.1 has breaking changes of its own: `effect/Crypto` is replaced by `effect/crypto/*`
-  services that runtimes no longer provide implicitly, and `KeyValueStore`, `FileSystem.make`,
-  `ChildProcess` templates and `McpServer` registrations change. Check the
+  services that runtimes no longer provide implicitly; `HttpClientRequest.method` is a `string`
+  (so `HttpClientRequest.make(request.method)` no longer type-checks); and `KeyValueStore`,
+  `FileSystem.make`, `ChildProcess` templates and `McpServer` registrations change. Check the
   [Effect 4.1.0 changelog](https://github.com/Effect-TS/effect/releases/tag/effect%404.1.0) for
   the APIs your code uses.
 - Tool JSON Schemas generated from Effect schemas are flatter: a nested `anyOf` is merged into its
   parent, and a named definition reached from a required and an optional property is emitted once.
   What each schema admits is unchanged. Hosts that list tools over MCP serve changed tool schemas
   once, so grants keyed on a tool snapshot digest return to their default for the affected tools.
+- `@effect/platform-node` 4.1 requires `ws` ^8.22.1. If another dependency keeps an older `ws`, the
+  package manager can install `@workflow/core` twice, and a Workflow build fails with duplicate step
+  ids. Dedupe `ws`, for example with a pnpm override `ws: ^8.22.1`.
 
 ### Canary.122: connector input numbers
 
