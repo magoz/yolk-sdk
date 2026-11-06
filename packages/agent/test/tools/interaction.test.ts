@@ -13,6 +13,8 @@ import {
   FilePart,
   inlineBase64AttachmentSource,
   ToolCall,
+  ToolDef,
+  toolOutputDecoder,
   ToolResult,
   TextPart,
   interactionRequestId,
@@ -25,6 +27,7 @@ import {
   makeInteractionTool,
   modelVisibleToolError,
   resolveTools,
+  toolJsonSchemaFromSchema,
   type InteractionActionResult,
   type ToolFileCaptureOptions,
   type ResolvedToolSet,
@@ -883,6 +886,79 @@ describe('immutable action-backed interaction authority', () => {
 })
 
 describe('interaction results and files', () => {
+  it.effect('checks a typed action value before the receipt is settled', () =>
+    Effect.gen(function* () {
+      const Published = Schema.Struct({ id: Schema.Number })
+
+      const settle = (structuredContent: unknown) =>
+        Effect.gen(function* () {
+          const base = moduleFor(() =>
+            Effect.succeed({ outcome: 'completed', content: 'Published', structuredContent })
+          )
+
+          const [tool] = base.tools
+
+          if (tool === undefined || tool.def.interaction === undefined)
+            throw new Error('Missing interaction tool')
+
+          const typed: ToolModule<Context> = {
+            id: base.id,
+            tools: [
+              {
+                ...tool,
+                def: ToolDef.make({
+                  name: tool.def.name,
+                  description: tool.def.description,
+                  parameters: tool.def.parameters,
+                  interaction: tool.def.interaction,
+                  outputSchema: toolJsonSchemaFromSchema(Published)
+                }),
+                decodeOutput: toolOutputDecoder(Published)
+              }
+            ]
+          }
+
+          const fake = makeFakeInteractionHost({})
+          const tools = yield* resolveTools([typed], context, { interactionHost: fake.host })
+          const interaction = tools.interactions.document
+
+          if (interaction === undefined || interaction.def.interaction === undefined)
+            throw new Error('Missing interaction')
+
+          fake.addPending(
+            InteractionRequest.make({
+              requestId: interactionRequestId(call),
+              toolCallId: call.id,
+              call,
+              interaction: interaction.def.interaction
+            })
+          )
+
+          const ref = yield* fake.accept(response(), interaction)
+          const result = yield* run(tools, ref)
+
+          return { result, receipt: fake.receiptFor(ref.slot) }
+        })
+
+      const valid = yield* settle({ id: 1 })
+
+      expect(valid.result.structuredContent).toMatchObject({
+        outcome: 'completed',
+        result: { id: 1 }
+      })
+      expect(valid.receipt?.result?.structuredContent).toMatchObject({ result: { id: 1 } })
+
+      const invalid = yield* settle({ id: 1, secret: 'leak' })
+
+      // Dropped before settlement: neither the live result nor the receipt holds it.
+      expect(outcomeOf(invalid.result)).toBe('completed')
+      expect(invalid.result.structuredContent).not.toHaveProperty('result')
+      expect(invalid.receipt?.status).toBe('settled')
+      expect(invalid.receipt?.result?.structuredContent).not.toHaveProperty('result')
+      expect(JSON.stringify(invalid.receipt)).not.toContain('leak')
+    })
+  )
+
   it.effect('captures file bytes before the host stores the settled result', () =>
     Effect.gen(function* () {
       const base64 = globalThis.btoa('%PDF-1.7 signed')

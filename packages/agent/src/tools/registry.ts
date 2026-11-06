@@ -364,7 +364,8 @@ export type ToolRegistration<Context> = {
    * otherwise): `resolveTools` runs it on every result of the registration (direct, nested and
    * applied plan calls) and passes on the checked value; a value that does not match is dropped
    * (logged without the value), so code mode rejects the call while the model still sees the
-   * content. `makeTool` builds it from `output` (`toolOutputDecoder`); raw registrations and
+   * content. For interaction tools it checks the action's own value (`structuredContent.result` of
+   * a completed outcome) before the receipt is settled. `makeTool` builds it from `output` (`toolOutputDecoder`); raw registrations and
    * adapters supply their own (MCP: `mcpToolOutputDecoder`).
    */
   readonly decodeOutput?: ToolOutputDecoder
@@ -1021,6 +1022,20 @@ const withCheckedValue = (result: ToolResult, value: Schema.Json | undefined): T
   return ToolResult.make(fields)
 }
 
+// The checked value, or `undefined` (logged without the value) when it does not match.
+const checkedOutputValue = (
+  name: string,
+  decodeOutput: ToolOutputDecoder,
+  value: unknown
+): Effect.Effect<Schema.Json | undefined> =>
+  decodeOutput(value).pipe(
+    Effect.catch(() =>
+      Effect.logWarning(
+        `Tool ${name} returned a value that does not match its output schema; the value was dropped.`
+      ).pipe(Effect.as(undefined))
+    )
+  )
+
 /**
  * The typed-result boundary (ADR 0013), run by `resolveTools` on every result of a registration
  * with `decodeOutput`: a successful result's `structuredContent` is replaced by the checked value
@@ -1039,13 +1054,33 @@ const checkToolResultOutput = (
   result.acceptance !== undefined ||
   result.structuredContent === undefined
     ? Effect.succeed(result)
-    : decodeOutput(result.structuredContent).pipe(
-        Effect.map(value => withCheckedValue(result, value)),
-        Effect.catch(() =>
-          Effect.logWarning(
-            `Tool ${name} returned a value that does not match its output schema; the value was dropped.`
-          ).pipe(Effect.as(withCheckedValue(result, undefined)))
-        )
+    : checkedOutputValue(name, decodeOutput, result.structuredContent).pipe(
+        Effect.map(value => withCheckedValue(result, value))
+      )
+
+/**
+ * The typed-result boundary of an interaction action (ADR 0013). Its result is the interaction
+ * envelope (`makeInteractionToolResult`), so the output schema describes the action's own value
+ * (`structuredContent.result` of a completed outcome): it is checked before the envelope is built
+ * and the receipt settled, so a receipt never holds an unchecked value. Failed and unknown
+ * outcomes keep their value.
+ */
+const checkedInteractionActionResult = <
+  A extends { readonly outcome: InteractionBusinessOutcome; readonly structuredContent?: unknown }
+>(
+  name: string,
+  decodeOutput: ToolOutputDecoder | undefined,
+  actionResult: A
+): Effect.Effect<{ readonly outcome: A['outcome']; readonly structuredContent: unknown }> =>
+  decodeOutput === undefined ||
+  actionResult.outcome !== 'completed' ||
+  actionResult.structuredContent === undefined
+    ? Effect.succeed({
+        outcome: actionResult.outcome,
+        structuredContent: actionResult.structuredContent
+      })
+    : checkedOutputValue(name, decodeOutput, actionResult.structuredContent).pipe(
+        Effect.map(structuredContent => ({ outcome: actionResult.outcome, structuredContent }))
       )
 
 const structuredWithoutOutputError = (name: string) =>
@@ -1437,19 +1472,26 @@ const executeInteractionTool = <Context>(input: {
           : described.pipe(Effect.map(Option.some))
 
       return bounded.pipe(
-        Effect.map(result =>
+        Effect.flatMap(result =>
           Option.isNone(result)
-            ? genericUnknownResult()
-            : makeInteractionToolResult({
-                toolCallId: stored.call.id,
-                requestId: stored.slot,
-                slot: stored.slot,
-                submissionId: stored.submissionId,
-                actionId: stored.actionId ?? '',
+            ? Effect.succeed(genericUnknownResult())
+            : checkedInteractionActionResult(name, input.registration?.decodeOutput, {
                 outcome: phase === 'replay' ? (result.value.outcome ?? 'unknown') : 'unknown',
-                content: result.value.content,
                 structuredContent: result.value.structuredContent
-              })
+              }).pipe(
+                Effect.map(checked =>
+                  makeInteractionToolResult({
+                    toolCallId: stored.call.id,
+                    requestId: stored.slot,
+                    slot: stored.slot,
+                    submissionId: stored.submissionId,
+                    actionId: stored.actionId ?? '',
+                    outcome: checked.outcome,
+                    content: result.value.content,
+                    structuredContent: checked.structuredContent
+                  })
+                )
+              )
         ),
         Effect.catchDefect(defect =>
           Effect.logWarning(
@@ -1612,15 +1654,22 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
+          // Checked before settlement: the receipt only ever holds the checked value.
+          const checked = yield* checkedInteractionActionResult(
+            name,
+            input.registration?.decodeOutput,
+            actionResult
+          )
+
           const actionToolResult = makeInteractionToolResult({
             toolCallId: stored.call.id,
             requestId: stored.slot,
             slot: stored.slot,
             submissionId: stored.submissionId,
             actionId: actionId ?? '',
-            outcome: actionResult.outcome,
+            outcome: checked.outcome,
             content: actionResult.content,
-            structuredContent: actionResult.structuredContent
+            structuredContent: checked.structuredContent
           })
 
           // Storing files is interruptible and bounded; past the bound the bytes become
@@ -2378,7 +2427,6 @@ export const resolveTools = <Context>(
     // through one an enclosing resolution provided.
     const fileCapture = makeToolFileCapture(options.files)
 
-    // The typed-result boundary of one registration (ADR 0013).
     const checkedOutput =
       (tool: ToolRegistration<Context>) =>
       (result: ToolResult): Effect.Effect<ToolResult> =>
@@ -2412,10 +2460,7 @@ export const resolveTools = <Context>(
           ref: executionOptions?.interaction,
           host: options.interactionHost,
           files: options.files
-        }).pipe(
-          Effect.provideService(ToolFileCapture, fileCapture),
-          Effect.flatMap(checkedOutput(match.tool))
-        )
+        }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
       }
 
       if (ledger === undefined) return runRegistration(match, call, undefined)
@@ -2521,14 +2566,7 @@ export const resolveTools = <Context>(
           ref: executionOptions.interaction,
           host: options.interactionHost,
           files: options.files
-        }).pipe(
-          Effect.provideService(ToolFileCapture, fileCapture),
-          Effect.flatMap(result =>
-            registration === undefined
-              ? Effect.succeed(result)
-              : checkedOutput(registration)(result)
-          )
-        )
+        }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
       }
 
       return Option.match(
