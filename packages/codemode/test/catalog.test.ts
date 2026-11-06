@@ -511,6 +511,26 @@ describe('searchTools', () => {
     )
   })
 
+  it('renames file fields named like data keywords', () => {
+    const file = { $ref: '#/$defs/FileRef' }
+
+    const [tool] = codeModeCatalog([
+      nestedTool('mail', 'mail_keywords', {
+        outputSchema: {
+          type: 'object',
+          properties: { enum: file, const: file, default: file, examples: file },
+          required: ['enum', 'const', 'default', 'examples'],
+          additionalProperties: false,
+          $defs: { ...toolFileJsonSchemaDefinitions }
+        }
+      })
+    ])
+
+    expect(tool === undefined ? '' : describeCodeModeTool(tool)).toContain(
+      'Promise<{ const: FileRef; default: FileRef; enum: FileRef; examples: FileRef; }>'
+    )
+  })
+
   it('declares FileRef and FileUnavailable once and how to read results', () => {
     const description = renderCodeModeDescription({ tools: [] })
 

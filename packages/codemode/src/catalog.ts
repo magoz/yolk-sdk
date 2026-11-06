@@ -158,6 +158,22 @@ const fileDefinitions = (schema: CodeModeJsonSchema): ReadonlySet<FileTypeName> 
 // Keywords whose values are data, not schemas: a `$ref`-shaped object there is a literal value.
 const dataKeywords: ReadonlySet<string> = new Set(['const', 'enum', 'default', 'examples'])
 
+// Keywords whose values map author-chosen names to schemas: their keys are names, never keywords.
+const schemaMapKeywords: ReadonlySet<string> = new Set([
+  'properties',
+  'patternProperties',
+  '$defs',
+  'definitions',
+  'dependentSchemas'
+])
+
+const mapValues = (
+  value: Schema.JsonObject,
+  f: (key: string, item: Schema.Json) => Schema.Json
+): Schema.Json =>
+  Object.fromEntries(Object.entries(value).map(([key, item]) => [key, f(key, item)]))
+
+// `value` sits at a schema position (or holds schemas, as an array of `anyOf` members does).
 const withFileSentinels = (value: Schema.Json, names: ReadonlySet<FileTypeName>): Schema.Json => {
   if (Array.isArray(value)) return value.map((item: Schema.Json) => withFileSentinels(item, names))
 
@@ -171,12 +187,16 @@ const withFileSentinels = (value: Schema.Json, names: ReadonlySet<FileTypeName>)
 
   if (named !== undefined) return { const: fileTypeSentinel(named) }
 
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      key,
-      dataKeywords.has(key) ? item : withFileSentinels(item, names)
-    ])
-  )
+  return mapValues(value, (key, item) => {
+    if (dataKeywords.has(key)) return item
+
+    // A named map's values are schemas, whatever their names (a property may be called `enum`).
+    if (schemaMapKeywords.has(key) && isJsonObject(item)) {
+      return mapValues(item, (_name, schema) => withFileSentinels(schema, names))
+    }
+
+    return withFileSentinels(item, names)
+  })
 }
 
 /** An output schema whose file fields render as `FileRef` / `FileUnavailable`. */
