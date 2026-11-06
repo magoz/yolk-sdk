@@ -1,5 +1,7 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.125
+
 ## 0.1.0-canary.124
 
 ### Patch Changes

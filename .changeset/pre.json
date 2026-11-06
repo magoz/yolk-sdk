@@ -159,6 +159,7 @@
     "fortnox-conformance-cases",
     "fortnox-customer-write-semantics",
     "fortnox-emulator-reads",
+    "fortnox-invoice-remarks",
     "fortnox-invoice-wire-amounts",
     "fortnox-microsoft-conformance-cleanup-reporting",
     "fortnox-microsoft-fault-eligibility",
