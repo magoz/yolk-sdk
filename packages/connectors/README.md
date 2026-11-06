@@ -34,6 +34,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                                            |
 | `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                          |
 | `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                        |
+| `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions                                                        |
 | `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
 | `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
 | `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                                     |
@@ -1322,6 +1323,17 @@ Notion and Todoist actions decode provider wire pagination and expose SDK output
 
 LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich Layer accepts the lookup asynchronously.
 
+Kie generation is asynchronous: `kie.create_image_task` (GPT Image 2; image-to-image when
+`inputUrls` are given) and `kie.create_video_task` (Wan 2.7 image-to-video) return a `taskId`, and
+`kie.get_task` returns its `state`, the raw `resultJson`, and the result URLs it carries. Both
+create actions are `write` (each task spends Kie credits). Input URLs are fetched by Kie, not the
+host; the connector checks only that they are absolute http(s) URLs without credentials. Kie
+answers most failures with HTTP 200 and a non-200 envelope `code`; both that and a non-2xx status
+become a `ProviderFailure` (`kie_unauthorized`, `kie_insufficient_credits`, `kie_validation`,
+`kie_rate_limited`, `kie_generation_failed`, ...) whose `underlying` holds the Kie `code` and `msg`.
+A task that ends in `fail` is a successful `kie.get_task` read with `failCode`/`failMsg`. Result
+URLs expire (Kie keeps generated files for 14 days); hosts copy final assets to their own storage.
+
 ### Microsoft conformance cases (experimental)
 
 `@yolk-sdk/connectors/microsoft/conformance` exports eleven conformance cases for
@@ -1828,6 +1840,7 @@ orchestration only.
 | `@yolk-sdk/connectors/fortnox`         | company info; customers, invoices, suppliers, supplier invoices/files, articles, prices, cost centers, payments (incl. bookkeep), offers (incl. convert/cancel/email), print templates, inbox, settings registers, profile; host-only preview/archive/inbox I/O |
 | `@yolk-sdk/connectors/github`          | Issues, comments, labels, sub-issues, dependencies, issue fields, pull requests, reviews, merge, repo context                                                                                                                                                   |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions                                                                                                                                                  |
+| `@yolk-sdk/connectors/kie`             | `kie.create_image_task`, `kie.create_video_task`, `kie.get_task`                                                                                                                                                                                                |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                                                                                                                                                                    |
 | `@yolk-sdk/connectors/microsoft`       | Outlook mail/category and OneDrive metadata/folder/move/copy/recycle actions; host-only file and attachment I/O                                                                                                                                                 |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                                                                                                                                                                    |

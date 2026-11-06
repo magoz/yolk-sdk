@@ -16,6 +16,7 @@ import { FigmaConnector } from '@yolk-sdk/connectors/figma'
 import { FortnoxConnector } from '@yolk-sdk/connectors/fortnox'
 import { GithubConnector } from '@yolk-sdk/connectors/github'
 import { GoogleConnector } from '@yolk-sdk/connectors/google'
+import { KieConnector } from '@yolk-sdk/connectors/kie'
 import { LinkedInSearchConnector } from '@yolk-sdk/connectors/linkedin-search'
 import { MicrosoftConnector } from '@yolk-sdk/connectors/microsoft'
 import { NotionConnector } from '@yolk-sdk/connectors/notion'
@@ -69,6 +70,7 @@ const connectors: ReadonlyArray<
   ['fortnox', () => parametersOf('fortnox', FortnoxConnector, unusedHost)],
   ['github', () => parametersOf('github', GithubConnector, unusedHost)],
   ['google', () => parametersOf('google', GoogleConnector, unusedHost)],
+  ['kie', () => parametersOf('kie', KieConnector, unusedHost)],
   ['linkedin-search', () => parametersOf('linkedin-search', LinkedInSearchConnector, unusedHost)],
   ['microsoft', () => parametersOf('microsoft', MicrosoftConnector, unusedHost)],
   ['notion', () => parametersOf('notion', NotionConnector, unusedHost)],
