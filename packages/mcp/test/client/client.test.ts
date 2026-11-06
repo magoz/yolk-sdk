@@ -125,72 +125,78 @@ const makeScriptedLocalMcpLayer = (
   answers: Readonly<Record<string, LocalAnswer>>,
   sent: Array<string>
 ) =>
-  Layer.succeed(
+  Layer.effect(
     ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make(command =>
-      Effect.gen(function* () {
-        if (!ChildProcess.isStandardCommand(command)) {
-          return yield* Effect.die(new Error('Expected standard command'))
-        }
+    Effect.gen(function* () {
+      // The layer's scope ends with the test that provides it, after the client's own scope.
+      const testScope = yield* Effect.scope
 
-        const stdinConfig = command.options.stdin
+      return ChildProcessSpawner.make(command =>
+        Effect.gen(function* () {
+          if (!ChildProcess.isStandardCommand(command)) {
+            return yield* Effect.die(new Error('Expected standard command'))
+          }
 
-        const stdin =
-          Predicate.isObject(stdinConfig) &&
-          Predicate.hasProperty(stdinConfig, 'stream') &&
-          Stream.isStream(stdinConfig.stream)
-            ? stdinConfig.stream
-            : Stream.empty
+          const stdinConfig = command.options.stdin
 
-        // Reads stdin on its own fiber, outliving the client's scope, so `sent` holds every request
-        // the client wrote even when it stopped reading stdout or failed right after writing.
-        const out = yield* Queue.unbounded<string, Cause.Done>()
+          const stdin =
+            Predicate.isObject(stdinConfig) &&
+            Predicate.hasProperty(stdinConfig, 'stream') &&
+            Stream.isStream(stdinConfig.stream)
+              ? stdinConfig.stream
+              : Stream.empty
 
-        yield* stdin.pipe(
-          Stream.decodeText,
-          Stream.splitLines,
-          Stream.filter(line => line.length > 0),
-          Stream.runForEach(line =>
-            Option.match(decodeStdinMessage(line), {
-              onNone: () => Effect.void,
-              onSome: message => {
-                sent.push(message.method)
+          // Reads stdin on its own fiber in the test's scope. It outlives the client's scope, so
+          // `sent` holds every request the client wrote even when it stopped reading stdout or
+          // failed right after writing, and it ends with the test instead of waiting forever.
+          const out = yield* Queue.unbounded<string, Cause.Done>()
 
-                const answer = answers[message.method]
+          yield* stdin.pipe(
+            Stream.decodeText,
+            Stream.splitLines,
+            Stream.filter(line => line.length > 0),
+            Stream.runForEach(line =>
+              Option.match(decodeStdinMessage(line), {
+                onNone: () => Effect.void,
+                onSome: message => {
+                  sent.push(message.method)
 
-                if (!('id' in message) || answer === undefined) return Effect.void
+                  const answer = answers[message.method]
 
-                return Queue.offer(
-                  out,
-                  'line' in answer
-                    ? `${answer.line}\n`
-                    : `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
-                )
-              }
-            })
-          ),
-          Effect.ensuring(Queue.end(out)),
-          Effect.ignore,
-          Effect.forkDetach
-        )
+                  if (!('id' in message) || answer === undefined) return Effect.void
 
-        const stdout = Stream.fromQueue(out).pipe(Stream.encodeText)
+                  return Queue.offer(
+                    out,
+                    'line' in answer
+                      ? `${answer.line}\n`
+                      : `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
+                  )
+                }
+              })
+            ),
+            Effect.ensuring(Queue.end(out)),
+            Effect.ignore,
+            Effect.forkIn(testScope)
+          )
 
-        return ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-          isRunning: Effect.succeed(false),
-          kill: () => Effect.void,
-          stdin: Sink.drain,
-          stdout,
-          stderr: Stream.empty,
-          all: stdout,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-          unref: Effect.succeed(Effect.void)
+          const stdout = Stream.fromQueue(out).pipe(Stream.encodeText)
+
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout,
+            stderr: Stream.empty,
+            all: stdout,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          })
         })
-      })
-    )
+      )
+    })
   )
 
 const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
@@ -822,17 +828,23 @@ describe('MCP client', () => {
       Effect.gen(function* () {
         const sent: Array<string> = []
 
-        const result = yield* callLocalMcpServerTool({
-          config: { name: 'local', type: 'local', command: ['fake-mcp'] },
-          mcpToolName: 'sum',
-          toolCallId: 'call_1',
-          params: {},
-          options: { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } },
-          fileCapture: makeToolFileCapture({ store: receiptStore })
-        }).pipe(Effect.provide(makeScriptedLocalMcpLayer(answers, sent)), Effect.result)
+        // The fake server's stdin reader lives in this layer's scope, so the drain below stays
+        // inside it: the reader records the client's last write before the scope ends.
+        const result = yield* Effect.gen(function* () {
+          const outcome = yield* callLocalMcpServerTool({
+            config: { name: 'local', type: 'local', command: ['fake-mcp'] },
+            mcpToolName: 'sum',
+            toolCallId: 'call_1',
+            params: {},
+            options: { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } },
+            fileCapture: makeToolFileCapture({ store: receiptStore })
+          }).pipe(Effect.result)
 
-        // Lets the server fiber read whatever the client wrote last.
-        for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow
+          // Lets the server fiber read whatever the client wrote last.
+          for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow
+
+          return outcome
+        }).pipe(Effect.provide(makeScriptedLocalMcpLayer(answers, sent)))
 
         return { result, sent }
       })

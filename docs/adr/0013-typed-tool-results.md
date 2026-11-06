@@ -95,9 +95,8 @@ left out of the envelope (logged without it); failed and unknown outcomes keep t
 runs inside the settlement's uninterruptible region, so like file capture it runs under `restore`
 (interruption reaches the seal-unknown path) and is bounded (`interactionOutputCheckTimeout`, 5 s;
 a decoder may be asynchronous): past the bound the value is dropped like a mismatch and settlement
-proceeds. Checking
-the envelope after settlement was rejected: it would test the wrong shape and make the returned
-result differ from the stored receipt.
+proceeds. Checking the envelope after settlement was rejected: it would test the wrong shape and
+make the returned result differ from the stored receipt.
 
 Decoders: `makeTool` builds one from `output` (`toolOutputDecoder`), for the typed and the
 deprecated form alike; MCP registrations use `mcpToolOutputDecoder` (the `{ value, files }`
