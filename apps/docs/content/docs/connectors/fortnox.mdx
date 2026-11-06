@@ -213,7 +213,8 @@ Their `InvoiceRows` are closed: an unknown row key (such as `PriceExcludingVAT`)
 because dropping it would send a row without its price. Agent
 tools from `makeConnectorToolModule` reject those keys instead, with a model-visible validation
 error, so a model never believes it booked or sent an invoice.
-`executeTyped` trusts an existing invoice input class instance and does not re-check its keys.
+`executeTyped` trusts an existing invoice input class instance and does not re-check its keys;
+its rows were already checked when the instance was made (`make` throws on an unknown row key).
 
 ### Fortnox write semantics
 

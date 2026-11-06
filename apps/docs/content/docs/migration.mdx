@@ -41,9 +41,10 @@ change for hosts that build them:
   with `FortnoxInvoiceRowInput.make`. Read-only `PriceExcludingVAT`, `Total`, and
   `TotalExcludingVAT` are no longer inputs (Fortnox rejected a written `PriceExcludingVAT` with
   code 2000321); send `Price`.
-- Rows are closed: an unknown row key fails validation instead of being dropped, for connector
-  `execute`/`invoke`, `executeTyped`, and generated agent tools alike. Invoice-level unknown keys
-  are still dropped on `execute`.
+- Rows are closed: an unknown row key fails validation instead of being dropped. Connector
+  `execute`/`invoke` fail with `validation_failed`, generated agent tools reject the call, and
+  `FortnoxCreateInvoiceInput.make` / `FortnoxUpdateInvoiceInput.make` throw, so a typed input for
+  `executeTyped` cannot carry one. Invoice-level unknown keys are still dropped on `execute`.
 - Row fields reject `null` (generated agent tools still treat a model's `null` as omitted), `VAT`
   is an integer, `DiscountType` is `AMOUNT` or `PERCENT`, and `Description` and `Unit` follow
   Fortnox's 255 and 20 character limits.
