@@ -997,12 +997,14 @@ Without a host, definitions, approval ids, and inline behavior are unchanged.
 These options are the tool contract that [`@yolk-sdk/codemode`](https://github.com/magoz/yolk-sdk/blob/main/packages/codemode/README.md) builds on.
 This package declares them; it does not run scripts.
 
-- Typed tool results (ADR 0013): `makeTool({ output, execute })` returns `{ output }` and Yolk
-  encodes it with `Schema.toCodecJson(output)` into `structuredContent` (what code mode scripts
-  receive) and `ToolDef.outputSchema`; file fields are `ToolFile` (return `FileBytes`, scripts get
-  `FileRef | FileUnavailable`). The model sees the optional `render(value, files)`, else the
-  compact JSON of the encoding with file labels. Without `output`, `execute` returns
-  `{ content }`. Returning a raw `ToolResult` is deprecated.
+- Typed tool results (ADR 0013): with `output`, `execute` returns `{ output }`; the schema becomes
+  `ToolDef.outputSchema`, and Yolk encodes the value with `Schema.toCodecJson(output)` into
+  `structuredContent` (what code mode scripts receive). File fields are `ToolFile` (return
+  `FileBytes`, scripts get `FileRef | FileUnavailable`). The model sees the optional
+  `render(value, files)`, else a string output as is, else the compact JSON of the encoding with
+  file labels. Without `output`, `execute` returns `{ content }`. With explicit type arguments the
+  typed form takes three: `makeTool<Context, typeof Params, typeof Output>`. Returning a raw
+  `ToolResult` is deprecated.
 - `resolveTools` checks every successful result of a registration with `def.outputSchema` through
   its `decodeOutput` (excess properties rejected, plain JSON only) and passes on the checked value;
   a mismatch is dropped (warning without the value), so scripts reject the call. `makeTool` sets

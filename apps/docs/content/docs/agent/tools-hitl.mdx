@@ -728,7 +728,7 @@ owner (for example a durable Workflow) will run, track, and eventually deliver t
 
 ```ts
 import { Effect, Schema } from 'effect'
-import { BackgroundToolAccepted, ToolResult } from '@yolk-sdk/agent/protocol'
+import { BackgroundToolAccepted } from '@yolk-sdk/agent/protocol'
 import { makeTool, resolveTools, type BackgroundToolHost } from '@yolk-sdk/agent/tools'
 
 export const reportTool = makeTool({
@@ -737,8 +737,7 @@ export const reportTool = makeTool({
   parameters: Schema.Struct({ topic: Schema.String }),
   access: 'write',
   background: true,
-  execute: input =>
-    Effect.succeed(ToolResult.make({ toolCallId: input.call.id, content: 'inline report' }))
+  execute: () => Effect.succeed({ content: 'inline report' })
 })
 
 // Host-owned: durably admit the exact call and return a receipt, never a closure.

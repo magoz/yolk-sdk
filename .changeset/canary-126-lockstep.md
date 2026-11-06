@@ -10,4 +10,4 @@
 '@yolk-sdk/vercel-workflows': patch
 ---
 
-Advance in lockstep with `@yolk-sdk/agent`, `@yolk-sdk/codemode`, `@yolk-sdk/mcp` and `@yolk-sdk/connectors`, which adopt typed tool results (ADR 0013) and add the Kie connector. These packages have no direct changes in this release.
+Advance in lockstep with `@yolk-sdk/agent`, `@yolk-sdk/codemode`, `@yolk-sdk/mcp` and `@yolk-sdk/connectors`, which adopt typed tool results (ADR 0013); `@yolk-sdk/connectors` also adds the Kie connector. These packages have no direct changes in this release.
