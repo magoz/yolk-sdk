@@ -128,8 +128,9 @@ const makeScriptedLocalMcpLayer = (
   Layer.effect(
     ChildProcessSpawner.ChildProcessSpawner,
     Effect.gen(function* () {
-      // The layer's scope ends with the test that provides it, after the client's own scope.
-      const testScope = yield* Effect.scope
+      // The layer's scope ends when the effect it is provided to finishes, after the client's own
+      // scope.
+      const layerScope = yield* Effect.scope
 
       return ChildProcessSpawner.make(command =>
         Effect.gen(function* () {
@@ -146,9 +147,9 @@ const makeScriptedLocalMcpLayer = (
               ? stdinConfig.stream
               : Stream.empty
 
-          // Reads stdin on its own fiber in the test's scope. It outlives the client's scope, so
+          // Reads stdin on its own fiber in the layer's scope. It outlives the client's scope, so
           // `sent` holds every request the client wrote even when it stopped reading stdout or
-          // failed right after writing, and it ends with the test instead of waiting forever.
+          // failed right after writing, and it ends with that scope instead of waiting forever.
           const out = yield* Queue.unbounded<string, Cause.Done>()
 
           yield* stdin.pipe(
@@ -176,7 +177,7 @@ const makeScriptedLocalMcpLayer = (
             ),
             Effect.ensuring(Queue.end(out)),
             Effect.ignore,
-            Effect.forkIn(testScope)
+            Effect.forkIn(layerScope)
           )
 
           const stdout = Stream.fromQueue(out).pipe(Stream.encodeText)
@@ -840,7 +841,6 @@ describe('MCP client', () => {
             fileCapture: makeToolFileCapture({ store: receiptStore })
           }).pipe(Effect.result)
 
-          // Lets the server fiber read whatever the client wrote last.
           for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow
 
           return outcome
