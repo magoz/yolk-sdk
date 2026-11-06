@@ -293,6 +293,13 @@ describe('tool result file capture', () => {
   )
 
   it('keeps captured files when the ledger reduces a stored result', () => {
+    const fileA = FilePart.make({
+      source: refAttachmentSource('file_a'),
+      mimeType: 'application/pdf',
+      filename: 'a.pdf',
+      size: 1
+    })
+
     const file = FileDescriptor.make({
       fileId: 'file_a',
       name: 'a.pdf',
@@ -319,28 +326,46 @@ describe('tool result file capture', () => {
     )
 
     expect(stored.files).toEqual([file])
-    // The model still sees the file label on replay; other media become placeholders.
+    // The File part stays a part (the model sees its label on replay); media become placeholders.
+    expect(stored.content).toContainEqual(fileA)
     expect(contentText(stored.content)).toContain('[file file_a: a.pdf, application/pdf, 1 B]')
     expect(contentText(stored.content)).toContain('[image omitted from the stored result]')
   })
 
-  it('keeps file labels when the ledger has to cut the text', () => {
+  it('keeps File parts structural when the ledger has to cut the text', () => {
+    const file = FilePart.make({
+      source: refAttachmentSource('file_a'),
+      mimeType: 'application/pdf',
+      filename: 'a.pdf'
+    })
+
+    const omitted = omittedFilePart({
+      name: 'b.pdf',
+      mimeType: 'application/pdf',
+      reason: 'too large'
+    })
+
     const stored = toolLedgerResult(
       ToolResult.make({
         toolCallId: 'call_1',
-        content: [
-          TextPart.make({ text: 'x'.repeat(5_000) }),
-          FilePart.make({
-            source: refAttachmentSource('file_a'),
-            mimeType: 'application/pdf',
-            filename: 'a.pdf'
-          })
-        ]
+        content: [TextPart.make({ text: 'x'.repeat(5_000) }), file, omitted]
       }),
-      600
+      800
     )
 
-    expect(contentText(stored.content)).toMatch(/^\[file file_a: a\.pdf, application\/pdf\]\n/u)
+    expect(Predicate.isString(stored.content)).toBe(false)
+
+    if (Predicate.isString(stored.content)) return
+
+    const [text, ...files] = stored.content
+
+    expect(files).toEqual([file, omitted])
+    expect(text?._tag).toBe('Text')
+    // No label became text: the text holds the cut text and the note only.
+    expect(text !== undefined && Predicate.isTagged(text, 'Text') ? text.text : '').not.toContain(
+      '[file'
+    )
+    expect(JSON.stringify(stored).length).toBeLessThanOrEqual(800)
   })
 
   it('keeps untrusted names from forging labels', () => {
