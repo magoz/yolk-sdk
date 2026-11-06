@@ -1450,9 +1450,11 @@ describe('typed results and files in scripts', () => {
     })
 
   const returned = (content: Parameters<typeof text>[0]) => {
-    const match = /Return value:\n(.*)$/su.exec(text(content))
+    const rendered = text(content)
+    const marker = 'Return value:\n'
+    const start = rendered.indexOf(marker)
 
-    return match === null ? undefined : JSON.parse(match[1] ?? 'null')
+    return start === -1 ? undefined : JSON.parse(rendered.slice(start + marker.length))
   }
 
   it.live('gives scripts typed values with FileRefs in place and no labels', () =>
