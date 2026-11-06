@@ -63,6 +63,13 @@ describe('MCP typed results', () => {
       $defs: { Row: outputSchema.$defs.Row, ...toolFileJsonSchemaDefinitions }
     })
     expect(mcpToolOutputSchema(undefined)).toMatchObject({ properties: { value: {} } })
+
+    const recursive = {
+      type: 'object',
+      properties: { children: { type: 'array', items: { $ref: '#' } } }
+    }
+
+    expect(mcpToolOutputSchema(recursive)).toMatchObject({ properties: { value: {} } })
   })
 
   it.effect('takes structuredContent as the value', () =>

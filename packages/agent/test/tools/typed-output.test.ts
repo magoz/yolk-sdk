@@ -334,6 +334,56 @@ describe('typed tool outputs', () => {
     })
   )
 
+  it.effect('keeps every file that encodes alike, and a file used twice once', () =>
+    Effect.gen(function* () {
+      const chart = (bytes: Uint8Array) =>
+        new FileBytes({ bytes, name: 'chart.png', mimeType: 'image/png', view: true })
+
+      const first = chart(png)
+      const second = chart(new TextEncoder().encode('png2'))
+
+      const tool = makeTool({
+        name: 'charts',
+        description: 'Two charts',
+        parameters: EmptyToolParams,
+        output: Schema.Array(ToolFile),
+        access: 'read',
+        execute: () => Effect.succeed({ output: [first, second, first] })
+      })
+
+      const none = yield* run(tool, undefined)
+      const stored = yield* run(tool, { store: memoryStore() })
+
+      expect(Array.isArray(none.content) ? none.content.map(part => part._tag) : []).toEqual([
+        'Text',
+        'Image',
+        'Image'
+      ])
+      expect(stored.files?.map(file => file.fileId)).toEqual(['file_png1', 'file_png2'])
+    })
+  )
+
+  it.effect('fails a render that throws without its value', () =>
+    Effect.gen(function* () {
+      const tool = makeTool({
+        name: 'bad_render',
+        description: 'Render throws',
+        parameters: EmptyToolParams,
+        output: Download,
+        render: () => {
+          throw new Error('secret-render')
+        },
+        access: 'read',
+        execute: () => Effect.succeed({ output: { path: '/a/invoice.pdf', file: invoice } })
+      })
+
+      const exit = yield* Effect.exit(run(tool, undefined))
+
+      expect(String(exit)).toContain('bad_render failed to render its output.')
+      expect(String(exit)).not.toContain('secret-render')
+    })
+  )
+
   it.effect('renders model content from the value and its captured files', () =>
     Effect.gen(function* () {
       const tool = makeTool({

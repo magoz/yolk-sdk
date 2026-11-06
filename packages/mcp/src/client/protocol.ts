@@ -241,20 +241,42 @@ const jsonObjectField = (schema: JsonSchemaObject, key: string): JsonSchemaObjec
     ? Option.getOrUndefined(decodeToolJsonSchemaObject(schema[key]))
     : undefined
 
+// Local `$ref`s that still resolve once the schema sits under `properties.value`: only those into
+// the hoisted `$defs`/`definitions` (`#`, `#/properties/...` would point into the wrapper).
+const isJsonContainer = Schema.is(
+  Schema.Union([Schema.Array(Schema.Json), Schema.Record(Schema.String, Schema.Json)])
+)
+
+const hasOnlyHoistableRefs = (value: Schema.Json): boolean => {
+  if (!isJsonContainer(value)) return true
+
+  if (Array.isArray(value)) return value.every(hasOnlyHoistableRefs)
+
+  return Object.entries(value).every(([key, item]) =>
+    key === '$ref' && Predicate.isString(item)
+      ? !item.startsWith('#') || item.startsWith('#/$defs/') || item.startsWith('#/definitions/')
+      : hasOnlyHoistableRefs(item)
+  )
+}
+
+const unknownValue = { value: {}, defs: {}, definitions: undefined }
+
 // The server's `outputSchema` as the `value` property: its root-relative `$defs` (and draft-07
 // `definitions`) move to the wrapper's root, where its `$ref`s still resolve. A schema whose
-// definitions collide with the file definitions, or that sets `$id`, is not declared (unknown).
+// definitions collide with the file definitions, that sets `$id`, or that refers to other parts of
+// itself, is not declared (unknown).
 const valueSchema = (outputSchema: JsonSchemaObject | undefined) => {
-  if (outputSchema === undefined) return { value: {}, defs: {}, definitions: undefined }
+  if (outputSchema === undefined) return unknownValue
 
   const defs = jsonObjectField(outputSchema, '$defs') ?? {}
   const definitions = jsonObjectField(outputSchema, 'definitions')
 
   if (
     Object.hasOwn(outputSchema, '$id') ||
-    Object.keys(defs).some(name => fileDefinitionNames.has(name))
+    Object.keys(defs).some(name => fileDefinitionNames.has(name)) ||
+    !hasOnlyHoistableRefs(outputSchema)
   ) {
-    return { value: {}, defs: {}, definitions: undefined }
+    return unknownValue
   }
 
   const value = Object.fromEntries(

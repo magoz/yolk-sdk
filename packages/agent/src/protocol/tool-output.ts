@@ -276,20 +276,23 @@ export const encodeToolOutput = <S extends ToolOutputSchema>(
       value
     ).pipe(Effect.provideService(ToolFileCapture, recording))
 
-    const present = fileValueKeys(encoded, [])
+    // Each file value of the encoding, in order, takes the first unused capture with its key: two
+    // files that encode alike (the same unavailable name) both count, a file used twice once.
+    const unused = [...recorded].map(([file, captured]) => ({
+      file,
+      value: captured,
+      key: fileValueKey(captured)
+    }))
 
-    const byKey = new Map<string, CapturedToolFile>()
+    const captured = fileValueKeys(encoded, []).flatMap(key => {
+      const index = unused.findIndex(entry => entry.key === key)
+      const entry = unused[index]
 
-    for (const [file, captured] of recorded) {
-      const key = fileValueKey(captured)
+      if (entry === undefined) return []
 
-      if (key !== undefined && !byKey.has(key)) byKey.set(key, { file, value: captured })
-    }
+      unused.splice(index, 1)
 
-    const captured = [...new Set(present)].flatMap(key => {
-      const entry = byKey.get(key)
-
-      return entry === undefined ? [] : [entry]
+      return [{ file: entry.file, value: entry.value }]
     })
 
     return { value: encoded, captured }
@@ -320,12 +323,14 @@ export const toolOutputText = (encoded: EncodedToolOutput): string => {
   )
 }
 
-/** Descriptors of the stored files of an encoded output (`ToolResult.files`). */
+/** Descriptors of the stored files of an encoded output (`ToolResult.files`), each `fileId` once. */
 export const toolOutputFiles = (
   captured: ReadonlyArray<CapturedToolFile>
 ): ReadonlyArray<FileDescriptor> =>
-  captured.flatMap(({ value }) =>
-    isFileRef(value)
+  captured.flatMap(({ value }, index) =>
+    isFileRef(value) &&
+    captured.findIndex(entry => isFileRef(entry.value) && entry.value.fileId === value.fileId) ===
+      index
       ? [
           FileDescriptor.make({
             fileId: value.fileId,
@@ -384,34 +389,38 @@ export const typedToolResult = <S extends ToolOutputSchema>(input: {
         })
     ),
     Effect.flatMap(encoded =>
-      Effect.sync(() => {
-        const render = input.render
+      Effect.try({
+        try: () => {
+          const render = input.render
 
-        const text =
-          render === undefined
+          return render === undefined
             ? toolOutputText(encoded)
             : render(input.value, renderFiles(encoded.captured))
+        },
+        catch: () =>
+          new ToolOutputEncodingError({ message: `${input.tool} failed to render its output.` })
+      }).pipe(Effect.map(text => ({ encoded, text })))
+    ),
+    Effect.map(({ encoded, text }) => {
+      const views = encoded.captured.flatMap(({ file, value }) =>
+        file.view === true ? capturedFileParts(file, value) : []
+      )
 
-        const views = encoded.captured.flatMap(({ file, value }) =>
-          file.view === true ? capturedFileParts(file, value) : []
-        )
+      const files = toolOutputFiles(encoded.captured)
 
-        const files = toolOutputFiles(encoded.captured)
+      const content = views.length === 0 ? text : [TextPart.make({ text }), ...views]
 
-        const content = views.length === 0 ? text : [TextPart.make({ text }), ...views]
-
-        return files.length === 0
-          ? ToolResult.make({
-              toolCallId: input.toolCallId,
-              content,
-              structuredContent: encoded.value
-            })
-          : ToolResult.make({
-              toolCallId: input.toolCallId,
-              content,
-              structuredContent: encoded.value,
-              files
-            })
-      })
-    )
+      return files.length === 0
+        ? ToolResult.make({
+            toolCallId: input.toolCallId,
+            content,
+            structuredContent: encoded.value
+          })
+        : ToolResult.make({
+            toolCallId: input.toolCallId,
+            content,
+            structuredContent: encoded.value,
+            files
+          })
+    })
   )

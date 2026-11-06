@@ -2323,6 +2323,10 @@ export const resolveTools = <Context>(
       return input
     }
 
+    // Typed outputs store their file fields through this resolution's capture (ADR 0013), never
+    // through one an enclosing resolution provided.
+    const fileCapture = makeToolFileCapture(options.files)
+
     // The single ledger seam: top-level and nested calls of ordinary registrations pass here.
     // Input and interaction tools keep their own HITL receipts and are never ledgered.
     const executeRegistration = (
@@ -2351,7 +2355,7 @@ export const resolveTools = <Context>(
           ref: executionOptions?.interaction,
           host: options.interactionHost,
           files: options.files
-        })
+        }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
       }
 
       if (ledger === undefined) return runRegistration(match, call, undefined)
@@ -2397,10 +2401,6 @@ export const resolveTools = <Context>(
       runRegistrationUncaptured(match, call, idempotencyKey).pipe(
         Effect.flatMap(result => captureToolResultFiles(result, options.files))
       )
-
-    // Typed outputs store their file fields through this resolution's capture (ADR 0013), never
-    // through one an enclosing resolution provided.
-    const fileCapture = makeToolFileCapture(options.files)
 
     const runRegistrationUncaptured = (
       match: ResolvedRegistration<Context>,
@@ -2457,7 +2457,7 @@ export const resolveTools = <Context>(
             ref: executionOptions.interaction,
             host: options.interactionHost,
             files: options.files
-          })
+          }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
         : Option.match(
             Arr.findFirst(
               resolved,

@@ -151,7 +151,8 @@ client cannot reach it: `@yolk-sdk/mcp` only imports `@yolk-sdk/agent/protocol`)
 
 `encodeToolOutput` records captures while encoding. A union member that captured files and then
 failed can leave stray captures (stores are idempotent), so only file values present in the final
-encoding count, each `FileBytes` once, in order of appearance.
+encoding count, in order of appearance: each takes the first unused capture with the same value,
+so two files that encode alike both count and a `FileBytes` used twice counts once.
 
 ### Labels are structure
 
@@ -189,8 +190,9 @@ wire change for bookkeeping).
 ## MCP
 
 `mcpToolToToolDef` declares `{ value: T, files: Array<FileRef | FileUnavailable> }`: `T` is the
-server's `outputSchema` (its `$defs`/`definitions` hoisted to the root; a colliding or `$id`
-schema is left unknown), unknown without one. `callRemoteMcpServerTool` (and the resumable calls)
+server's `outputSchema` (its `$defs`/`definitions` hoisted to the root; a schema whose definitions
+collide, that sets `$id`, or that refers to other parts of itself, such as a recursive `#`, is left
+unknown), unknown without one. `callRemoteMcpServerTool` (and the resumable calls)
 return `mcpToolResult`: `value` is the validated `structuredContent`, else the text blocks parsed
 once when they form one JSON object or array (as OpenCode `tool/mcp.ts`), else the text, `null`
 without text; blobs, images and audio are captured as file fields (images and audio viewable). The
@@ -237,4 +239,6 @@ registration's `outputSchema`), so a replay never depends on the tool's current 
   on the deprecated form for now: its provider failures are error results with their own
   `structuredContent` (the encoded `ProviderFailure`), which the typed form cannot express without
   moving them into the `ModelVisibleToolError` envelope (a breaking change for hosts reading it).
+- Validating local stdio MCP results: `callLocalMcpServerTool` does not list the tool before the
+  call, so its `value` is not checked against the server's `outputSchema` (as before this ADR).
 - An MCP response byte cap (decided against).
