@@ -296,10 +296,12 @@ export const encodeToolOutput = <S extends ToolOutputSchema>(
   })
 
 /**
- * Compact JSON of an encoded tool output with every file field lowered to its label: the default
- * model content of a typed tool.
+ * The default model content of a typed tool: a string output as it is, anything else as compact
+ * JSON with every file field lowered to its label.
  */
 export const toolOutputText = (encoded: EncodedToolOutput): string => {
+  if (Predicate.isString(encoded.value)) return encoded.value
+
   const labels = new Map(
     encoded.captured.flatMap(({ value }) => {
       const key = fileValueKey(value)

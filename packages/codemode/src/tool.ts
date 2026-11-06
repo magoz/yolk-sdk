@@ -33,7 +33,6 @@ import {
 import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import {
   makeTool,
-  ModelVisibleToolErrorStructuredContentSchema,
   type NestedTool,
   type NestedToolExecutor,
   type NestedToolInstructor,
@@ -221,13 +220,13 @@ type NestedResolution =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly message: string; readonly code?: string }
 
-const decodeErrorEnvelope = Schema.decodeUnknownOption(ModelVisibleToolErrorStructuredContentSchema)
+// The `code` of an error result: a model-visible error's (`ModelVisibleToolError.code`) or any
+// structured error with a string `code` (a connector's `ProviderFailure`).
+const decodeErrorCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }))
 
 const errorCode = (result: ToolResult) =>
   Option.getOrUndefined(
-    Option.flatMap(decodeErrorEnvelope(result.structuredContent), envelope =>
-      Option.fromNullishOr(envelope.code)
-    )
+    Option.map(decodeErrorCode(result.structuredContent), envelope => envelope.code)
   )
 
 /** A typed tool's successful result without its value: the script never falls back to text. */
@@ -238,8 +237,8 @@ const isInvalidTypedResult = (tool: CodeModeCatalogTool, result: ToolResult) =>
  * What a nested call resolves to (ADR 0013). A typed tool (one with an output schema) resolves to
  * its value as declared, file fields as `FileRef` or `FileUnavailable`; a typed result without a
  * value rejects ("returned an invalid result"). An untyped tool resolves to its text parts joined
- * with newlines. Error results reject with their text and, for a model-visible error with a code,
- * that `code`. Files never reach scripts as labels.
+ * with newlines. Error results reject with their text and the `code` of their structured error
+ * (a model-visible error's code, a connector failure's code). Files never reach scripts as labels.
  */
 const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
   if (result.isError === true) {
