@@ -36,6 +36,7 @@ import {
   InteractionValidationError,
   interactionRequestId,
   sameInteractionBinding,
+  ToolFileCapture,
   validInteractionReceipt,
   type InputToolHandler,
   type InteractionBusinessOutcome,
@@ -50,8 +51,12 @@ import {
   type ToolApprovalPreviewer,
   type ToolCall,
   type ToolChangePreview,
+  ToolResult,
+  typedToolResult,
+  type Content,
   type ToolExposure,
-  type ToolResult
+  type ToolOutputRender,
+  type ToolOutputSchema
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
@@ -105,7 +110,11 @@ import {
   type ToolPlanResolution
 } from './plan-runtime.ts'
 import { makeToolSearchTool } from './tool-search.ts'
-import { captureToolResultFiles, type ToolFileCaptureOptions } from './files.ts'
+import {
+  captureToolResultFiles,
+  makeToolFileCapture,
+  type ToolFileCaptureOptions
+} from './files.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -149,12 +158,18 @@ export const ModelVisibleToolErrorReason = Schema.Literals([
 
 export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
 
+/**
+ * A recoverable failure the model sees. `code` is an optional machine-readable code of the tool's
+ * own (for example `not_found` from a provider): code mode scripts get it as the rejected `Error`'s
+ * `code` (ADR 0013).
+ */
 export class ModelVisibleToolError extends Schema.TaggedError<ModelVisibleToolError>()(
   'ModelVisibleToolError',
   {
     tool: Schema.String,
     message: Schema.String,
     reason: ModelVisibleToolErrorReason,
+    code: Schema.optional(Schema.String),
     details: Schema.optional(Schema.Unknown)
   }
 ) {}
@@ -164,6 +179,7 @@ export const ModelVisibleToolErrorStructuredContentSchema = Schema.Struct({
   tool: Schema.String,
   reason: ModelVisibleToolErrorReason,
   message: Schema.String,
+  code: Schema.optional(Schema.String),
   details: Schema.optional(Schema.Unknown)
 })
 
@@ -174,6 +190,7 @@ export type ModelVisibleToolErrorInput = {
   readonly tool: string
   readonly message: string
   readonly reason: ModelVisibleToolErrorReason
+  readonly code?: string
   readonly details?: unknown
 }
 
@@ -185,6 +202,7 @@ type ModelVisibleToolErrorStructuredContentFields = {
   tool: ModelVisibleToolError['tool']
   reason: ModelVisibleToolError['reason']
   message: ModelVisibleToolError['message']
+  code?: string
   details?: ModelVisibleToolError['details']
 }
 
@@ -196,6 +214,10 @@ export const modelVisibleToolErrorStructuredContent = (
     tool: error.tool,
     reason: error.reason,
     message: error.message
+  }
+
+  if (error.code !== undefined) {
+    fields.code = error.code
   }
 
   if (error.details !== undefined) {
@@ -445,14 +467,10 @@ type ToolParamsSchema = Schema.Schema<unknown> & { readonly DecodingServices: ne
 
 export const EmptyToolParams = Schema.Record(Schema.String, Schema.Never)
 
-export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
+type MakeToolBaseOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly name: string
   readonly description: string
   readonly parameters: ParamsSchema
-  /** Schema of `ToolResult.structuredContent`, lowered like `parameters` into
-   * `ToolDef.outputSchema` for declarations only. Results are not validated against it.
-   */
-  readonly output?: Schema.Top
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
@@ -483,10 +501,80 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly isReadCall?: (params: ParamsSchema['Type']) => boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
-  readonly execute: (
-    input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
-  ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
 } & ToolExposure
+
+type MakeToolExecute<Context, ParamsSchema extends ToolParamsSchema, A> = (
+  input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
+) => Effect.Effect<A, ToolError | ModelVisibleToolError>
+
+/** What a typed tool's `execute` succeeds with (ADR 0013): its output value. */
+export type ToolOutput<A> = {
+  readonly output: A
+}
+
+/**
+ * What an untyped tool's `execute` succeeds with (ADR 0013): content only, text and optionally
+ * file parts (`filePartFromBytes`) that tool resolution captures. No structured value: declare
+ * `output` for one.
+ */
+export type ToolContent = {
+  readonly content: Content
+  readonly output?: never
+  readonly structuredContent?: never
+  readonly toolCallId?: never
+}
+
+/**
+ * A typed tool (ADR 0013): `execute` returns `{ output }`, which Yolk encodes with
+ * `Schema.toCodecJson(output)` (file fields captured first) into `structuredContent`, the value
+ * code mode scripts receive. A value that does not encode fails the call with a value-free
+ * `execution` `ToolError`. The model sees `render(value, files)`, by default the compact JSON of
+ * the encoding with file fields lowered to their labels, followed by the files it views.
+ */
+export type MakeTypedToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  readonly output: OutputSchema
+  readonly render?: ToolOutputRender<OutputSchema['Type']>
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolOutput<OutputSchema['Type']>>
+}
+
+/** An untyped tool (ADR 0013): `execute` returns content only; scripts receive its text. */
+export type MakeContentToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  readonly output?: never
+  readonly render?: never
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolContent>
+}
+
+/**
+ * @deprecated Return `{ output }` with an `output` schema, or `{ content }` without one (ADR
+ * 0013). A raw `ToolResult` still works in this release: with `output`, a successful result whose
+ * `structuredContent` does not match the schema's JSON encoding loses it (logged), so scripts
+ * reject the call instead of reading an invalid value.
+ */
+export type MakeToolResultToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  /** Schema of `ToolResult.structuredContent`, lowered into `ToolDef.outputSchema`. */
+  readonly output?: ToolOutputSchema
+  readonly render?: never
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolResult>
+}
+
+export type MakeToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema = ToolOutputSchema
+> =
+  | MakeTypedToolOptions<Context, ParamsSchema, OutputSchema>
+  | MakeContentToolOptions<Context, ParamsSchema>
+  | MakeToolResultToolOptions<Context, ParamsSchema>
 
 export type ToolModule<Context> = {
   readonly id: string
@@ -872,9 +960,100 @@ export const toolCallAccess = <Context>(
   )
 }
 
-export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
+const isToolResultValue = (
+  value: ToolOutput<unknown> | ToolContent | ToolResult
+): value is ToolResult =>
+  value instanceof ToolResult ||
+  (Predicate.hasProperty(value, 'toolCallId') && Predicate.isString(value.toolCallId))
+
+const isToolOutputValue = (
+  value: ToolOutput<unknown> | ToolContent
+): value is ToolOutput<unknown> => Reflect.has(value, 'output')
+
+type LegacyResultFields = {
+  toolCallId: string
+  content: ToolResult['content']
+  isError?: boolean
+  acceptance?: ToolResult['acceptance']
+  nestedCalls?: ToolResult['nestedCalls']
+  usage?: ToolResult['usage']
+  files?: ToolResult['files']
+}
+
+// A deprecated `ToolResult` of a tool with `output` keeps `structuredContent` only when it is the
+// JSON encoding the schema declares (checked on the encoded side, so file fields and declarations
+// need no decoding); otherwise scripts would read a value that breaks the declared type.
+const checkedLegacyResult = (
+  name: string,
+  output: Schema.Top | undefined,
+  result: ToolResult
+): Effect.Effect<ToolResult> => {
+  if (output === undefined || result.isError === true || result.structuredContent === undefined) {
+    return Effect.succeed(result)
+  }
+
+  return Schema.decodeUnknownEffect(Schema.toEncoded(Schema.toCodecJson(output)))(
+    result.structuredContent
+  ).pipe(
+    Effect.as(result),
+    Effect.catch(() =>
+      Effect.logWarning(
+        `Tool ${name} returned structuredContent that does not match its output schema; it was dropped.`
+      ).pipe(
+        Effect.as(
+          (() => {
+            const fields: LegacyResultFields = {
+              toolCallId: result.toolCallId,
+              content: result.content
+            }
+
+            if (result.isError !== undefined) fields.isError = result.isError
+
+            if (result.acceptance !== undefined) fields.acceptance = result.acceptance
+
+            if (result.nestedCalls !== undefined) fields.nestedCalls = result.nestedCalls
+
+            if (result.usage !== undefined) fields.usage = result.usage
+
+            if (result.files !== undefined) fields.files = result.files
+
+            return ToolResult.make(fields)
+          })()
+        )
+      )
+    )
+  )
+}
+
+const structuredWithoutOutputError = (name: string) =>
+  new ToolError({
+    tool: name,
+    cause: 'execution',
+    message: `${name} returned a structured value without an output schema.`
+  })
+
+/**
+ * A schema-backed tool registration. Three forms (ADR 0013):
+ *
+ * - with `output`: `execute` returns `{ output }` (see `MakeTypedToolOptions`);
+ * - without `output`: `execute` returns `{ content }` (see `MakeContentToolOptions`);
+ * - deprecated: `execute` returns a raw `ToolResult` (see `MakeToolResultToolOptions`).
+ */
+export function makeTool<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema = ToolOutputSchema
+>(options: MakeTypedToolOptions<Context, ParamsSchema, OutputSchema>): ToolRegistration<Context>
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
+  options: MakeContentToolOptions<Context, ParamsSchema>
+): ToolRegistration<Context>
+/** @deprecated Return `{ output }` with an `output` schema, or `{ content }` without one (ADR 0013). */
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
+  options: MakeToolResultToolOptions<Context, ParamsSchema>
+): ToolRegistration<Context>
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
-): ToolRegistration<Context> => {
+): ToolRegistration<Context> {
   // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
   const decodeParams = decodeToolArguments(options.parameters)
 
@@ -1008,13 +1187,49 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           },
           // Forwards `nested` and `idempotencyKey` exactly as the registry passed them.
           onSuccess: params =>
-            options
-              .execute({ ...input, params })
-              .pipe(
-                Effect.catchTag('ModelVisibleToolError', error =>
-                  Effect.succeed(modelVisibleToolErrorResult(call, error))
-                )
+            options.execute({ ...input, params }).pipe(
+              Effect.flatMap(
+                (
+                  returned: ToolOutput<unknown> | ToolContent | ToolResult
+                ): Effect.Effect<ToolResult, ToolError> => {
+                  if (isToolResultValue(returned)) {
+                    return checkedLegacyResult(options.name, options.output, returned)
+                  }
+
+                  if (!isToolOutputValue(returned)) {
+                    return Effect.succeed(
+                      ToolResult.make({ toolCallId: call.id, content: returned.content })
+                    )
+                  }
+
+                  const output = options.output
+
+                  if (output === undefined) {
+                    return Effect.fail(structuredWithoutOutputError(options.name))
+                  }
+
+                  return typedToolResult({
+                    toolCallId: call.id,
+                    tool: options.name,
+                    output,
+                    value: returned.output,
+                    render: options.render
+                  }).pipe(
+                    Effect.mapError(
+                      error =>
+                        new ToolError({
+                          tool: options.name,
+                          cause: 'execution',
+                          message: error.message
+                        })
+                    )
+                  )
+                }
+              ),
+              Effect.catchTag('ModelVisibleToolError', error =>
+                Effect.succeed(modelVisibleToolErrorResult(call, error))
               )
+            )
         })
       )
     }
@@ -2166,6 +2381,7 @@ export const resolveTools = <Context>(
               call,
               parentKey: parentCallId,
               execute: runRegistration(match, call, idempotencyKey),
+              typed: match.tool.def.outputSchema !== undefined,
               abandonedResult: match.tool.abandonedResult
             })
           : runRegistration(match, call, idempotencyKey)
@@ -2182,6 +2398,10 @@ export const resolveTools = <Context>(
         Effect.flatMap(result => captureToolResultFiles(result, options.files))
       )
 
+    // Typed outputs store their file fields through this resolution's capture (ADR 0013), never
+    // through one an enclosing resolution provided.
+    const fileCapture = makeToolFileCapture(options.files)
+
     const runRegistrationUncaptured = (
       match: ResolvedRegistration<Context>,
       call: ToolCall,
@@ -2190,6 +2410,11 @@ export const resolveTools = <Context>(
       const host = options.backgroundHost
       const validate = match.tool.validate
       const def = match.tool.def
+
+      const executeTool = (businessCall: ToolCall) =>
+        match.tool
+          .execute(executionInput(match.tool, businessCall, call, idempotencyKey))
+          .pipe(Effect.provideService(ToolFileCapture, fileCapture))
 
       return activated(match.tool) && host !== undefined && validate !== undefined
         ? executeBackgroundTool({
@@ -2216,14 +2441,9 @@ export const resolveTools = <Context>(
                     )
                 )
               ),
-            execute: businessCall =>
-              match.tool.execute(executionInput(match.tool, businessCall, call, idempotencyKey))
+            execute: executeTool
           })
-        : businessCallFor(def, call).pipe(
-            Effect.flatMap(normalized =>
-              match.tool.execute(executionInput(match.tool, normalized, call, idempotencyKey))
-            )
-          )
+        : businessCallFor(def, call).pipe(Effect.flatMap(executeTool))
     }
 
     // Model-facing dispatch: codemode-only tools are unknown here (fail closed as not found).

@@ -19,7 +19,12 @@ export {
 
 export { omitNullOptionalToolArguments } from './arguments.ts'
 
-export { captureToolResultFiles, defaultMaxCapturedFileBytes, FileStoreError } from './files.ts'
+export {
+  captureToolResultFiles,
+  defaultMaxCapturedFileBytes,
+  FileStoreError,
+  makeToolFileCapture
+} from './files.ts'
 
 export type { FileStoreApi, ToolFileCaptureOptions } from './files.ts'
 
@@ -195,6 +200,10 @@ export type {
   SchemaToolExecutionInput,
   InteractionActionHandler,
   InteractionToolRegistration,
+  MakeContentToolOptions,
+  MakeToolOptions,
+  MakeToolResultToolOptions,
+  MakeTypedToolOptions,
   ModelVisibleToolErrorInput,
   ModelVisibleToolErrorStructuredContent,
   NestedTool,
@@ -204,8 +213,10 @@ export type {
   NestedToolStagingDescription,
   ToolChangePreviewHandler,
   ToolExecutionInput,
+  ToolContent,
   ToolMetadata,
   ToolModule,
+  ToolOutput,
   ToolRegistration
 } from './registry.ts'
 

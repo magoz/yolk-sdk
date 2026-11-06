@@ -9,6 +9,7 @@ import {
   InteractionRequest,
   InteractionResponse,
   InteractionValidationError,
+  contentText,
   FilePart,
   inlineBase64AttachmentSource,
   ToolCall,
@@ -905,7 +906,7 @@ describe('interaction results and files', () => {
 
       expect(JSON.stringify(result)).not.toContain(base64)
       expect(JSON.stringify(fake.receiptFor(ref.slot))).not.toContain(base64)
-      expect(JSON.stringify(result)).toContain('file not captured (no file store): signed.pdf')
+      expect(contentText(result.content)).toContain('file not captured (no file store): signed.pdf')
     })
   )
 
@@ -948,7 +949,9 @@ describe('interaction results and files', () => {
       expect(outcomeOf(result)).toBe('completed')
       expect(fake.receiptFor(ref.slot)?.status).toBe('settled')
       expect(JSON.stringify(fake.receiptFor(ref.slot))).not.toContain(base64)
-      expect(JSON.stringify(result)).toContain('file not captured (storage timed out): signed.pdf')
+      expect(contentText(result.content)).toContain(
+        'file not captured (storage timed out): signed.pdf'
+      )
     })
   )
 })

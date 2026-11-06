@@ -4,17 +4,20 @@ import * as Schema from 'effect/Schema'
 import {
   base64ToBytes,
   FilePart,
-  fileLabel,
-  fileNotCapturedLabel,
+  fileUnavailable,
+  noFileStoreReason,
   normalizeFileMimeType,
+  omittedFilePart,
   refAttachmentSource,
-  TextPart,
+  ToolFileCapture,
   ToolResult,
   type AudioPart,
   type ContentPart,
   type DocumentPart,
+  type FileBytes,
   type FileDescriptor,
-  type ImagePart
+  type ImagePart,
+  type ToolFileValue
 } from '@yolk-sdk/agent/protocol'
 
 /**
@@ -84,6 +87,23 @@ const defaultName = (part: FilePart | InlineAttachmentPart) =>
 
 type Stored = Result.Result<FileDescriptor, string>
 
+const storeBytes = (
+  bytes: Uint8Array,
+  name: string,
+  mimeType: string,
+  options: ToolFileCaptureOptions
+): Effect.Effect<Stored> =>
+  bytes.byteLength > (options.maxFileBytes ?? defaultMaxCapturedFileBytes)
+    ? Effect.succeed(Result.fail('too large'))
+    : options.store.put({ bytes, name, mimeType: normalizeFileMimeType(mimeType) }).pipe(
+        Effect.map((file): Stored => Result.succeed(file)),
+        Effect.catchTag('FileStoreError', error =>
+          Effect.logWarning('Tool result file was not captured', { reason: error.reason }).pipe(
+            Effect.as<Stored>(Result.fail('storage unavailable'))
+          )
+        )
+      )
+
 const storeInline = (
   data: string,
   name: string,
@@ -97,31 +117,46 @@ const storeInline = (
   }
 
   return decodeBase64(data).pipe(
-    Effect.flatMap(bytes =>
-      options.store.put({ bytes, name, mimeType: normalizeFileMimeType(mimeType) }).pipe(
-        Effect.map((file): Stored => Result.succeed(file)),
-        Effect.catchTag('FileStoreError', error =>
-          Effect.logWarning('Tool result file was not captured', { reason: error.reason }).pipe(
-            Effect.as<Stored>(Result.fail('storage unavailable'))
-          )
-        )
-      )
-    ),
+    Effect.flatMap(bytes => storeBytes(bytes, name, mimeType, options)),
     Effect.catch(reason => Effect.succeed<Stored>(Result.fail(reason)))
   )
 }
+
+/**
+ * The `ToolFileCapture` that `resolveTools` provides to every registration it runs (ADR 0013): it
+ * stores the `FileBytes` of typed tool outputs in `options.store` (bounded by `maxFileBytes`), and
+ * without `options` answers every file as unavailable (`no file store`). Never fails.
+ */
+export const makeToolFileCapture = (
+  options: ToolFileCaptureOptions | undefined
+): ToolFileCapture['Service'] =>
+  ToolFileCapture.of({
+    capture: (file: FileBytes): Effect.Effect<ToolFileValue> =>
+      options === undefined
+        ? Effect.succeed(fileUnavailable(file, noFileStoreReason))
+        : storeBytes(file.bytes, file.name, file.mimeType, options).pipe(
+            Effect.map(
+              Result.match({
+                onFailure: (reason): ToolFileValue => fileUnavailable(file, reason),
+                onSuccess: (stored): ToolFileValue => ({
+                  fileId: stored.fileId,
+                  name: stored.name,
+                  mimeType: stored.mimeType,
+                  size: stored.size
+                })
+              })
+            )
+          )
+  })
 
 type Captured = {
   readonly parts: ReadonlyArray<ContentPart>
   readonly files: ReadonlyArray<FileDescriptor>
 }
 
+// A structural "not captured" marker; providers lower it to the same label as before.
 const notCaptured = (part: FilePart, reason: string): Captured => ({
-  parts: [
-    TextPart.make({
-      text: fileNotCapturedLabel({ name: defaultName(part), mimeType: part.mimeType, reason })
-    })
-  ],
+  parts: [omittedFilePart({ name: defaultName(part), mimeType: part.mimeType, reason })],
   files: []
 })
 
@@ -157,7 +192,7 @@ const captureFilePart = (
 }
 
 // Viewable parts keep their inline source (the model still sees them); the stored copy is what
-// the model can move, named by the label that follows the part.
+// the model can move, named by the `File` part (lowered to its label) that follows the part.
 const captureViewablePart = (
   part: InlineAttachmentPart,
   options: ToolFileCaptureOptions | undefined
@@ -171,7 +206,15 @@ const captureViewablePart = (
       Result.match({
         onFailure: (): Captured => ({ parts: [part], files: [] }),
         onSuccess: (file): Captured => ({
-          parts: [part, TextPart.make({ text: fileLabel(file) })],
+          parts: [
+            part,
+            FilePart.make({
+              source: refAttachmentSource(file.fileId),
+              mimeType: file.mimeType,
+              filename: file.name,
+              size: file.size
+            })
+          ],
           files: [file]
         })
       })
@@ -191,16 +234,30 @@ const capturePart = (
   return captureViewablePart(part, options)
 }
 
+// Capture emits a viewable part followed by its `File` part (`Ref` or `Omitted`, same MIME type):
+// such a pair is already captured, so capturing again changes nothing.
+const isCapturedViewable = (part: ContentPart, next: ContentPart | undefined) =>
+  !Predicate.isTagged(part, 'Text') &&
+  !Predicate.isTagged(part, 'File') &&
+  next !== undefined &&
+  Predicate.isTagged(next, 'File') &&
+  (Predicate.isTagged(next.source, 'Ref') || Predicate.isTagged(next.source, 'Omitted')) &&
+  normalizeFileMimeType(next.mimeType) === normalizeFileMimeType(part.mimeType)
+
+const isCapturable = (
+  part: ContentPart,
+  next: ContentPart | undefined,
+  options: ToolFileCaptureOptions | undefined
+) =>
+  !Predicate.isTagged(part, 'Text') &&
+  Predicate.isTagged(part.source, 'InlineBase64') &&
+  (options !== undefined || Predicate.isTagged(part, 'File')) &&
+  !isCapturedViewable(part, next)
+
 const hasCapturable = (
   parts: ReadonlyArray<ContentPart>,
   options: ToolFileCaptureOptions | undefined
-) =>
-  parts.some(
-    part =>
-      !Predicate.isTagged(part, 'Text') &&
-      Predicate.isTagged(part.source, 'InlineBase64') &&
-      (options !== undefined || Predicate.isTagged(part, 'File'))
-  )
+) => parts.some((part, index) => isCapturable(part, parts[index + 1], options))
 
 type ToolResultFields = {
   toolCallId: string
@@ -239,10 +296,12 @@ const withCaptured = (result: ToolResult, captured: ReadonlyArray<Captured>) => 
 /**
  * Capture the bytes of one tool result (ADR 0009). With `options`, inline `File` parts are stored
  * and rewritten to `Ref { id: fileId }` (the model sees their label), inline image, document and
- * audio parts are stored and followed by their label, and `ToolResult.files` lists every captured
- * file. Without `options`, or when storing fails or the file is over the bound, inline `File`
- * parts become a "not captured" label (`uncapturedReason` names why without a store): base64
- * never reaches the model. Results without inline bytes are returned unchanged. Never fails.
+ * audio parts are stored and followed by a `File` part with that `Ref`, and `ToolResult.files`
+ * lists every captured file. Without `options`, or when storing fails or the file is over the
+ * bound, inline `File` parts become `Omitted { reason }` (`uncapturedReason` names why without a
+ * store; the model sees a "not captured" label): base64 never reaches the model. A viewable part
+ * already followed by its `File` part is left as it is, so capturing twice changes nothing.
+ * Results without inline bytes are returned unchanged. Never fails.
  */
 export const captureToolResultFiles = (
   result: ToolResult,
@@ -255,7 +314,9 @@ export const captureToolResultFiles = (
     return Effect.succeed(result)
   }
 
-  return Effect.forEach(content, part => capturePart(part, options, uncapturedReason)).pipe(
-    Effect.map(captured => withCaptured(result, captured))
-  )
+  return Effect.forEach(content, (part, index) =>
+    isCapturable(part, content[index + 1], options)
+      ? capturePart(part, options, uncapturedReason)
+      : Effect.succeed<Captured>({ parts: [part], files: [] })
+  ).pipe(Effect.map(captured => withCaptured(result, captured)))
 }

@@ -527,7 +527,8 @@ const fitText = (base: StoredResultFields, text: string, maxBytes: number): Tool
  */
 export const toolLedgerResult = (
   result: ToolResult,
-  maxBytes: number = defaultToolLedgerMaxResultBytes
+  maxBytes: number = defaultToolLedgerMaxResultBytes,
+  options: ToolLedgerResultOptions = {}
 ): ToolResult => {
   const full: StoredResultFields = { toolCallId: result.toolCallId, content: result.content }
 
@@ -561,6 +562,16 @@ export const toolLedgerResult = (
 
   if (resultBytes(withoutNested) <= maxBytes) return ToolResult.make(withoutNested)
 
+  // A typed value is what scripts read (ADR 0013): cut the content, which only renders it, and
+  // never the value; a value over the bound by itself replays as a fixed error.
+  if (options.typed === true && result.isError !== true && full.structuredContent !== undefined) {
+    const valueOnly: StoredResultFields = { ...withoutNested, content: reducedNote }
+
+    return resultBytes(valueOnly) <= maxBytes
+      ? fitText(withoutNested, labelsFirstText(result.content), maxBytes)
+      : typedResultTooLarge(full)
+  }
+
   const withoutStructured: StoredResultFields = { ...withoutNested }
 
   delete withoutStructured.structuredContent
@@ -568,6 +579,32 @@ export const toolLedgerResult = (
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
   return fitText(withoutStructured, labelsFirstText(result.content), maxBytes)
+}
+
+/** How `toolLedgerResult` reduces a result. */
+export type ToolLedgerResultOptions = {
+  /** The result is a typed tool's (`ToolDef.outputSchema`): its `structuredContent` is never cut
+   * or dropped; a value over the bound by itself is stored as a fixed error result instead.
+   */
+  readonly typed?: boolean
+}
+
+/** The stored copy of a typed result whose value alone exceeds the ledger bound. */
+export const typedResultTooLargeMessage =
+  'The result of this call was too large for the tool ledger, so it cannot be replayed. The call was not run again; verify its effect before repeating it.'
+
+const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
+  const fields: StoredResultFields = {
+    toolCallId: full.toolCallId,
+    content: typedResultTooLargeMessage,
+    isError: true
+  }
+
+  if (full.usage !== undefined) fields.usage = full.usage
+
+  if (full.files !== undefined) fields.files = full.files
+
+  return ToolResult.make(fields)
 }
 
 // The text the last reduction step cuts: file labels first, so a long text cannot cut them off.
@@ -766,8 +803,14 @@ const boundedStoreWrite = <A>(
     })
   )
 
-const succeededOutcome = (result: ToolResult, maxBytes: number): ToolLedgerOutcome =>
-  ToolLedgerSucceeded.make({ result: toolLedgerResult(result, maxBytes) })
+const succeededOutcome = (
+  result: ToolResult,
+  maxBytes: number,
+  typed: boolean | undefined
+): ToolLedgerOutcome =>
+  ToolLedgerSucceeded.make({
+    result: toolLedgerResult(result, maxBytes, typed === true ? { typed } : {})
+  })
 
 const failedOutcome = (error: ToolError): ToolLedgerOutcome =>
   ToolLedgerFailed.make({
@@ -814,6 +857,10 @@ export const executeLedgered = (input: {
   readonly call: ToolCall
   readonly parentKey: string | undefined
   readonly execute: Effect.Effect<ToolResult, ToolError>
+  /** The call's tool declares an output schema: its stored value is never cut (ADR 0013). Decided
+   * when the outcome is recorded, so a replay never depends on the tool's current definition.
+   */
+  readonly typed?: boolean | undefined
   readonly abandonedResult?: ((input: ToolLedgerAbandonedInput) => ToolResult) | undefined
   /** The result when the wait for an in-flight duplicate ends (default `inFlightTimeoutResult`). */
   readonly inFlightTimeoutResult?: Effect.Effect<ToolResult> | undefined
@@ -963,7 +1010,7 @@ export const executeLedgered = (input: {
     // reports it as abandoned instead of running it again.
     const recordOutcome = (exit: Exit.Exit<ToolResult, ToolError>): Effect.Effect<void> => {
       if (Exit.isSuccess(exit))
-        return record(() => succeededOutcome(exit.value, options.maxResultBytes))
+        return record(() => succeededOutcome(exit.value, options.maxResultBytes, input.typed))
 
       if (Cause.hasDies(exit.cause)) return Effect.void
 

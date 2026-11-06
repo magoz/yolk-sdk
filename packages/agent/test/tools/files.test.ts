@@ -7,6 +7,7 @@ import {
   filePartFromBytes,
   ImagePart,
   inlineBase64Source,
+  omittedFilePart,
   refAttachmentSource,
   TextPart,
   ToolCall,
@@ -138,10 +139,15 @@ describe('tool result file capture', () => {
 
       expect(result.files).toBeUndefined()
       expect(result.content).toEqual([
-        TextPart.make({
-          text: '[file not captured (no file store): Faktura_225.pdf, application/pdf]'
+        omittedFilePart({
+          name: 'Faktura_225.pdf',
+          mimeType: 'application/pdf',
+          reason: 'no file store'
         })
       ])
+      expect(contentText(result.content)).toBe(
+        '[file not captured (no file store): Faktura_225.pdf, application/pdf]'
+      )
     })
   )
 
@@ -200,8 +206,14 @@ describe('tool result file capture', () => {
 
       expect(result.content).toEqual([
         image,
-        TextPart.make({ text: '[file file_png1: image, image/png, 4 B]' })
+        FilePart.make({
+          source: refAttachmentSource('file_png1'),
+          mimeType: 'image/png',
+          filename: 'image',
+          size: 4
+        })
       ])
+      expect(contentText(result.content)).toBe('[file file_png1: image, image/png, 4 B]')
       expect(result.files?.map(file => file.fileId)).toEqual(['file_png1'])
     })
   )
