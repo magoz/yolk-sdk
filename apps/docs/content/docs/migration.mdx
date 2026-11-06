@@ -30,6 +30,30 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.125: Fortnox invoice Remarks and row inputs
+
+`fortnox.create_invoice` and `fortnox.update_invoice` accept `Remarks`, the invoice text
+(Fakturatext) printed on the invoice, and `FortnoxInvoice` returns it. `Comments` stays the
+internal note; both are limited to 1024 characters. Invoice write rows change shape, a breaking
+change for hosts that build them:
+
+- Write rows are `FortnoxInvoiceRowInput`, not the read schema `FortnoxInvoiceRow`. It is a closed
+  schema with a matching type, not a class: replace `FortnoxInvoiceRow.make(row)` with a plain
+  object typed `FortnoxInvoiceRowInput`. Read-only `PriceExcludingVAT`, `Total`, and
+  `TotalExcludingVAT` are no longer inputs (Fortnox rejected a written `PriceExcludingVAT` with
+  code 2000321); send `Price`.
+- Rows are closed: an unknown row key fails instead of being dropped. Connector `execute`/`invoke`
+  fail with `validation_failed`, generated agent tools reject the call, and
+  `FortnoxCreateInvoiceInput.make` / `FortnoxUpdateInvoiceInput.make` throw. `executeTyped` does
+  not re-check an existing instance, so an instance changed after `make` is not re-validated.
+  Invoice-level unknown keys are still dropped on `execute`.
+- Row fields reject `null` (generated agent tools still treat a model's `null` as omitted), `VAT`
+  is an integer, `DiscountType` is `AMOUNT` or `PERCENT`, and `Description` and `Unit` follow
+  Fortnox's 255 and 20 character limits.
+
+Hosts that list these tools over MCP serve changed tool schemas once, so grants keyed on a tool
+snapshot digest return to their default for both invoice write tools.
+
 ### Canary.124: Effect 4.1.2
 
 Canary.124 targets `effect@4.1.2`. Upgrade the Yolk packages and Effect together, and move `effect`

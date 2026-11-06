@@ -1,5 +1,6 @@
 import * as Schema from 'effect/Schema'
 import {
+  closedInput,
   Identifier,
   NonEmptyString,
   NullableBoolean,
@@ -7,7 +8,10 @@ import {
   NullableNumber,
   NullableString,
   OptionalBoolean,
+  OptionalInt,
+  OptionalNumber,
   OptionalString,
+  optionalMaxLength,
   PaginationFields
 } from './fields.ts'
 
@@ -126,6 +130,30 @@ export class FortnoxInvoiceRow extends Schema.Class<FortnoxInvoiceRow>('FortnoxI
   Project: NullableString
 }) {}
 
+// Writable InvoiceRow fields per the Fortnox OpenAPI row payload. RowId only selects which
+// existing row a sent row updates (see the update note); read-only PriceExcludingVAT, Total, and
+// TotalExcludingVAT are not inputs (Fortnox rejects PriceExcludingVAT with code 2000321).
+// A closed schema, not a Class: a Class constructor strips unknown keys, and a stripped key such
+// as PriceExcludingVAT would send a row without its price. Build rows as plain objects; the
+// invoice input classes check them when they are made or decoded.
+export const FortnoxInvoiceRowInput = closedInput({
+  RowId: OptionalInt,
+  AccountNumber: OptionalInt,
+  ArticleNumber: OptionalString,
+  Description: optionalMaxLength(255),
+  DeliveredQuantity: OptionalString,
+  Unit: optionalMaxLength(20),
+  Price: OptionalNumber,
+  Discount: OptionalNumber,
+  DiscountType: Schema.optional(Schema.Literals(['AMOUNT', 'PERCENT'])),
+  VAT: OptionalInt,
+  VATCode: OptionalString,
+  CostCenter: OptionalString,
+  Project: OptionalString
+})
+
+export type FortnoxInvoiceRowInput = typeof FortnoxInvoiceRowInput.Type
+
 const InvoiceFields = {
   Currency: NullableString,
   InvoiceDate: NullableString,
@@ -148,6 +176,7 @@ export class FortnoxInvoice extends Schema.Class<FortnoxInvoice>('FortnoxInvoice
   CustomerNumber: FortnoxCustomerNumber,
   CustomerName: NullableString,
   ...InvoiceFields,
+  Remarks: NullableString,
   Total: NullableNumber,
   Balance: NullableNumber,
   TotalVAT: NullableNumber,
@@ -351,10 +380,12 @@ const InvoiceMutationFields = {
   OCR: OptionalString,
   OurReference: OptionalString,
   YourReference: OptionalString,
-  Comments: OptionalString,
+  Comments: optionalMaxLength(1024),
+  Remarks: optionalMaxLength(1024),
   CostCenter: OptionalString,
   Project: OptionalString,
-  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+  // Rows are closed (see FortnoxInvoiceRowInput) even though invoice-level keys are stripped.
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRowInput))
 } as const
 
 const InvoiceWriteFields = {

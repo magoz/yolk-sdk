@@ -1,6 +1,7 @@
 import { Chunk, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ApiKeyCredential,
@@ -20,9 +21,13 @@ import {
   FortnoxCombinedOAuthCredentialSlot,
   FortnoxCreateCustomerInput,
   FortnoxCustomerNumber,
+  FortnoxDocumentNumber,
+  type FortnoxInvoiceRowInput,
   FortnoxUpdateCustomerInput,
+  FortnoxUpdateInvoiceInput,
   fortnoxCreateCustomerAction,
   fortnoxUpdateCustomerAction,
+  fortnoxUpdateInvoiceAction,
   FortnoxOAuthCredentialSlot,
   FortnoxInvoice,
   FortnoxSupplierInvoice,
@@ -615,6 +620,210 @@ describe('Fortnox connector', () => {
 
       expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
         Invoice: { CustomerNumber: '001' }
+      })
+    })
+  )
+
+  it.effect('writes and reads the printed invoice text (Remarks) apart from Comments', () =>
+    Effect.gen(function* () {
+      const invoice = {
+        DocumentNumber: '002',
+        CustomerNumber: '001',
+        Comments: 'Internal note',
+        Remarks: 'Printed invoice text'
+      }
+
+      const harness = makeHarness([
+        response({ Invoice: invoice }),
+        response({ Invoice: { ...invoice, Remarks: 'Updated invoice text' } }),
+        response({ Invoice: { ...invoice, Remarks: 'Updated invoice text' } })
+      ])
+
+      const created = yield* invoke('fortnox.create_invoice', {
+        CustomerNumber: '001',
+        Comments: 'Internal note',
+        Remarks: 'Printed invoice text'
+      }).pipe(Effect.provide(harness.layer))
+
+      const updated = yield* invoke('fortnox.update_invoice', {
+        DocumentNumber: '002',
+        Remarks: 'Updated invoice text'
+      }).pipe(Effect.provide(harness.layer))
+
+      const read = yield* invoke('fortnox.get_invoice', { documentNumber: '002' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: {
+          CustomerNumber: '001',
+          Comments: 'Internal note',
+          Remarks: 'Printed invoice text'
+        }
+      })
+      expect(JSON.parse(harness.requests[1]?.body ?? '')).toEqual({
+        Invoice: { Remarks: 'Updated invoice text' }
+      })
+
+      expect(created).toMatchObject({
+        value: { Comments: 'Internal note', Remarks: 'Printed invoice text' }
+      })
+      expect(updated).toMatchObject({ value: { Remarks: 'Updated invoice text' } })
+      expect(read).toMatchObject({ value: { Remarks: 'Updated invoice text' } })
+    })
+  )
+
+  it.effect('advertises Remarks on the invoice write tool schemas', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
+        {}
+      )
+
+      for (const name of ['fortnox.create_invoice', 'fortnox.update_invoice']) {
+        const tool = toolSet.tools.find(item => item.name === name)
+
+        const { properties } = yield* Schema.decodeUnknownEffect(ToolParameterProperties)(
+          tool?.parameters
+        )
+
+        expect(Object.keys(properties)).toEqual(expect.arrayContaining(['Comments', 'Remarks']))
+        expect(tool?.description).toContain('Remarks is the invoice text (Fakturatext)')
+      }
+    })
+  )
+
+  it.effect('advertises only writable invoice row fields and rejects read-only ones', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
+        {}
+      )
+
+      for (const name of ['fortnox.create_invoice', 'fortnox.update_invoice']) {
+        const tool = toolSet.tools.find(item => item.name === name)
+
+        const { properties } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            properties: Schema.Struct({
+              InvoiceRows: Schema.Struct({ anyOf: Schema.Array(Schema.Unknown) })
+            })
+          })
+        )(tool?.parameters)
+
+        const { items } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            items: Schema.Struct({
+              ...ToolParameterProperties.fields,
+              additionalProperties: Schema.Literal(false)
+            })
+          })
+        )(properties.InvoiceRows.anyOf[0])
+
+        const rowKeys = Object.keys(items.properties)
+
+        expect(rowKeys).toEqual(
+          expect.arrayContaining(['RowId', 'Price', 'Discount', 'DiscountType', 'VAT', 'VATCode'])
+        )
+
+        for (const readOnly of ['PriceExcludingVAT', 'Total', 'TotalExcludingVAT'])
+          expect(rowKeys).not.toContain(readOnly)
+      }
+
+      const rejected = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'fortnox.create_invoice',
+          params: {
+            CustomerNumber: '001',
+            InvoiceRows: [
+              { Description: 'Filmning', DeliveredQuantity: '1', PriceExcludingVAT: 1160 }
+            ]
+          }
+        })
+      )
+
+      expect(rejected.isError).toBe(true)
+      expect(JSON.stringify(rejected)).toContain('PriceExcludingVAT')
+      expect(harness.requests).toHaveLength(0)
+    })
+  )
+
+  it.effect('rejects unknown invoice row keys on execute instead of dropping them', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const rows: ReadonlyArray<Schema.JsonObject> = [
+        { Description: 'Filmning', DeliveredQuantity: '1', PriceExcludingVAT: 1160 },
+        { Description: 'Filmning', Total: 1160 },
+        { Description: 'Filmning', VAT: 12.5 }
+      ]
+
+      for (const row of rows) {
+        const inputs: ReadonlyArray<readonly [string, Schema.JsonObject]> = [
+          ['fortnox.create_invoice', { CustomerNumber: '001', InvoiceRows: [row] }],
+          ['fortnox.update_invoice', { DocumentNumber: '002', InvoiceRows: [row] }]
+        ]
+
+        for (const [action, input] of inputs) {
+          const result = yield* invoke(action, input).pipe(
+            Effect.provide(harness.layer),
+            Effect.result
+          )
+
+          expect(result, JSON.stringify(row)).toMatchObject({
+            failure: { cause: 'validation_failed' }
+          })
+        }
+      }
+
+      expect(harness.requests).toHaveLength(0)
+      expect(harness.scopes).toHaveLength(0)
+    })
+  )
+
+  it.effect('checks typed invoice rows when the input is made and sends them unchanged', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({ Invoice: { DocumentNumber: '002', CustomerNumber: '001' } })
+      ])
+
+      const row: FortnoxInvoiceRowInput = {
+        Description: 'Filmning',
+        DeliveredQuantity: '1',
+        Price: 1160
+      }
+
+      const extraRow = Object.assign({ Description: 'Filmning' }, { PriceExcludingVAT: 1160 })
+      const documentNumber = FortnoxDocumentNumber.make('002')
+
+      expect(() =>
+        FortnoxUpdateInvoiceInput.make({ DocumentNumber: documentNumber, InvoiceRows: [extraRow] })
+      ).toThrow()
+
+      const input = FortnoxUpdateInvoiceInput.make({
+        DocumentNumber: documentNumber,
+        Remarks: 'Printed invoice text',
+        InvoiceRows: [row]
+      })
+
+      // Hosts that wrap the action re-encode the input before invoking the connector.
+      expect(yield* Schema.encodeUnknownEffect(FortnoxUpdateInvoiceInput)(input)).toEqual({
+        DocumentNumber: '002',
+        Remarks: 'Printed invoice text',
+        InvoiceRows: [row]
+      })
+
+      yield* fortnoxUpdateInvoiceAction
+        .executeTyped({ integration, input })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: { Remarks: 'Printed invoice text', InvoiceRows: [row] }
       })
     })
   )

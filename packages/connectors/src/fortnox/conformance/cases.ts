@@ -52,7 +52,8 @@ import {
   FortnoxDocumentNumber,
   FortnoxGetCustomerInput,
   FortnoxGetInvoiceInput,
-  FortnoxInvoiceRow,
+  type FortnoxInvoiceRow,
+  type FortnoxInvoiceRowInput,
   FortnoxListInvoicesInput,
   FortnoxUpdateInvoiceInput,
   type FortnoxCustomer,
@@ -501,7 +502,7 @@ type WritableInvoiceRow = {
   CostCenter?: string
   Project?: string
   Discount?: number
-  DiscountType?: string
+  DiscountType?: 'AMOUNT' | 'PERCENT'
 }
 
 const setWritable = <K extends keyof WritableInvoiceRow>(
@@ -527,7 +528,7 @@ type RowDiscount =
  * `DiscountType` omitted. `VATCode` is never sent (the row's `VAT` is), but the restore check
  * compares it.
  */
-const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvoiceRow => {
+const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvoiceRowInput => {
   const out: WritableInvoiceRow = {}
 
   setWritable(out, 'ArticleNumber', row.ArticleNumber)
@@ -543,7 +544,11 @@ const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvo
   switch (discount.kind) {
     case 'original':
       setWritable(out, 'Discount', row.Discount)
-      setWritable(out, 'DiscountType', row.DiscountType)
+
+      if (row.DiscountType === 'AMOUNT' || row.DiscountType === 'PERCENT') {
+        out.DiscountType = row.DiscountType
+      }
+
       break
     case 'set':
       out.Discount = discount.discount
@@ -553,7 +558,7 @@ const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvo
       break
   }
 
-  return FortnoxInvoiceRow.make(out)
+  return out
 }
 
 /** Rows the restore can write back exactly: an explicit numeric `Discount` and a PERCENT type. */
@@ -565,7 +570,7 @@ const invoiceRows = (invoice: FortnoxInvoice): ReadonlyArray<FortnoxInvoiceRow> 
 
 const putInvoiceRows = (
   documentNumber: FortnoxDocumentNumber,
-  rows: ReadonlyArray<FortnoxInvoiceRow>
+  rows: ReadonlyArray<FortnoxInvoiceRowInput>
 ) =>
   fortnoxUpdateInvoiceAction
     .executeTyped({

@@ -707,6 +707,45 @@ describe('invoices', () => {
       })
   )
 
+  it.effect('stores the printed invoice text (Remarks) on create and update', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+
+      const created = await call(target, 'POST', '/3/invoices', {
+        body: { Invoice: { CustomerNumber: '1002', Remarks: 'Printed text (synthetic)' } }
+      })
+
+      const invoice = field(await jsonOf(created), 'Invoice')
+      const documentNumber = field(invoice, 'DocumentNumber')
+
+      expect(created.status).toBe(201)
+      expect([field(invoice, 'Remarks'), field(invoice, 'Comments')]).toEqual([
+        'Printed text (synthetic)',
+        ''
+      ])
+
+      const updated = await call(target, 'PUT', `/3/invoices/${String(documentNumber)}`, {
+        body: { Invoice: { Remarks: 'Updated text (synthetic)' } }
+      })
+
+      expect(updated.status).toBe(200)
+
+      const read = field(
+        await jsonOf(await call(target, 'GET', `/3/invoices/${String(documentNumber)}`)),
+        'Invoice'
+      )
+
+      expect(field(read, 'Remarks')).toBe('Updated text (synthetic)')
+      expect(
+        (
+          await call(target, 'PUT', `/3/invoices/${String(documentNumber)}`, {
+            body: { Invoice: { Remarks: 1 } }
+          })
+        ).status
+      ).toBe(400)
+    })
+  )
+
   it.effect('validates the inherited customer currency before creating an invoice', () =>
     Effect.promise(async () => {
       const target = await emulator({
