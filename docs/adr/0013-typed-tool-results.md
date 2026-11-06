@@ -91,7 +91,11 @@ them the output schema describes the action's own value, `structuredContent.resu
 outcome. It is checked inside `executeInteractionTool`, after the action ran and before the
 envelope is built and the receipt settled (and on a replay's described outcome), so a receipt never
 holds an unchecked value and a replayed receipt needs no check. A value that does not match is
-left out of the envelope (logged without it); failed and unknown outcomes keep theirs. Checking
+left out of the envelope (logged without it); failed and unknown outcomes keep theirs. The check
+runs inside the settlement's uninterruptible region, so like file capture it runs under `restore`
+(interruption reaches the seal-unknown path) and is bounded (`interactionOutputCheckTimeout`, 5 s;
+a decoder may be asynchronous): past the bound the value is dropped like a mismatch and settlement
+proceeds. Checking
 the envelope after settlement was rejected: it would test the wrong shape and make the returned
 result differ from the stored receipt.
 
@@ -265,9 +269,12 @@ nothing that fails before dispatch can fail after a write ran (a model might ret
   message `Tool '<name>' has an invalid outputSchema`) with no `tools/call` sent, as the remote
   resumable calls fail before sending. The tool's input schema plays no part (arguments are not
   validated client side), so an input schema without `type: 'object'` changes nothing;
-- the listing fails (a JSON-RPC error, an undecodable result) or does not hold the tool (the local
-  client reads the first page only): the call is sent without output validation and a
-  value-free warning is logged; `mcpToolOutputDecoder` still checks the `{ value, files }`
+- the session breaks before the listing is answered (a stdout line that is no JSON-RPC response,
+  stdout ending early): the call fails with no `tools/call` sent, since its answer could not be
+  read either;
+- the listing is answered with a JSON-RPC error or an undecodable result, or does not hold the
+  tool (the local client reads the first page only): the call is sent without output validation
+  and a value-free warning is logged; `mcpToolOutputDecoder` still checks the `{ value, files }`
   envelope;
 - a successful result of a tool with a usable `outputSchema` whose `structuredContent` is missing
   or does not pass it fails the call (`validation`), as on remote.

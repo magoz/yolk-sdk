@@ -103,7 +103,10 @@ makeTool({
 - Raw registrations (not `makeTool`) whose `def.outputSchema` is set need
   `decodeOutput: toolOutputDecoder(schema)` (`@yolk-sdk/agent/protocol`); MCP registrations built
   from `mcpToolToToolDef` defs need `decodeOutput: mcpToolOutputDecoder` (`@yolk-sdk/mcp/client`).
-  Without it `resolveTools` fails with `output_validation_required`.
+  Without it `resolveTools` fails with `output_validation_required`. For raw interaction
+  registrations, `def.outputSchema` and `decodeOutput` describe the action's own value
+  (`structuredContent.result` of a completed outcome), checked before the receipt is settled
+  ([ADR 0013, Result boundary](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md#result-boundary)).
 - `makeTool` with explicit type arguments and `output` takes three:
   `makeTool<Context, typeof Params, typeof Output>`. Two explicit type arguments no longer accept a
   typed `{ output }` (it used to escape its schema); drop them to infer, or add the third.

@@ -80,8 +80,10 @@ A successful call's `structuredContent` is `{ value, files }`, and code mode scr
   configured, the file is too large, or storing failed).
 
 The model sees the server's content: a result without blobs, images or audio exactly as before;
-otherwise images and audio as sent, each followed by its file label, and blobs as file labels, so
-base64 never reaches the model ([Move files between tools](./files)).
+otherwise images and audio stay viewable media exactly as the server sent them (their inline data
+reaches providers that accept media), each followed by its file label once stored, and blob
+resources become file labels, so a blob's base64 never reaches the model
+([Move files between tools](./files)).
 
 Files are stored when the call runs. Inside a registration, `resolveTools` stores them through its
 `files` option. A call made anywhere else (your own `ToolExecutor`, a route resuming
