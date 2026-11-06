@@ -1183,7 +1183,7 @@ export const outlookListAttachmentsAction = defineAction({
 export const outlookGetAttachmentAction = defineAction({
   id: 'outlook.get_attachment',
   description:
-    'Get one Microsoft Outlook file attachment. As an agent tool it returns the attachment as a file (fileId) with its metadata; invoked directly it returns base64 content.',
+    'Get one Microsoft Outlook file attachment. As an agent tool it returns { value, files }: value is the attachment metadata, files holds the attachment (a FileRef with its fileId, or FileUnavailable when it was not stored); invoked directly it returns base64 content.',
   inputSchema: OutlookGetAttachmentInput,
   outputSchema: OutlookGetAttachmentOutput,
   fileOutput: {

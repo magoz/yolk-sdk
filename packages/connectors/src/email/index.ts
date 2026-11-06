@@ -1135,7 +1135,7 @@ export const emailGetMessageAction = defineAction({
 export const emailGetAttachmentAction = defineAction({
   id: 'email.get_attachment',
   description:
-    'Get one decoded attachment from a configured IMAP or POP3 account. As an agent tool it returns the attachment as a file (fileId) with its metadata; invoked directly it returns base64.',
+    'Get one decoded attachment from a configured IMAP or POP3 account. As an agent tool it returns { value, files }: value is the attachment metadata, files holds the attachment (a FileRef with its fileId, or FileUnavailable when it was not stored); invoked directly it returns base64.',
   access: 'read',
   inputSchema: EmailGetAttachmentInput,
   outputSchema: EmailGetAttachmentOutput,
