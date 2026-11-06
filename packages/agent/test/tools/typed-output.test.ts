@@ -421,6 +421,40 @@ describe('typed tool outputs', () => {
   )
 })
 
+describe('background tools with typed outputs', () => {
+  it.effect('captures file fields when an activated tool runs in the foreground', () =>
+    Effect.gen(function* () {
+      const store = memoryStore()
+
+      const tool = makeTool({
+        name: 'export',
+        description: 'Exports a file',
+        parameters: EmptyToolParams,
+        output: Download,
+        access: 'write',
+        background: true,
+        execute: () => Effect.succeed({ output: { path: '/a/invoice.pdf', file: invoice } })
+      })
+
+      const toolSet = yield* resolveTools([moduleOf([tool])], context, {
+        files: { store },
+        backgroundHost: { accept: () => Effect.die(new Error('not accepted in the foreground')) }
+      })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'export',
+          params: { execution: 'foreground', arguments: {} }
+        })
+      )
+
+      expect(result.structuredContent).toEqual({ path: '/a/invoice.pdf', file: invoiceRef })
+      expect(store.puts).toEqual(['invoice.pdf'])
+    })
+  )
+})
+
 describe('untyped tool content', () => {
   it.effect('returns content and captures its file parts', () =>
     Effect.gen(function* () {
