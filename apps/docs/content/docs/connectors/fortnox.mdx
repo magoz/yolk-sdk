@@ -212,8 +212,8 @@ provider-managed invoice keys (such as `Booked` or `VoucherNumber`) are dropped 
 Agent tools from `makeConnectorToolModule` reject those keys instead, with a model-visible
 validation error, so a model never believes it booked or sent an invoice.
 `executeTyped` trusts an existing invoice input class instance and does not re-check its keys.
-`InvoiceRows` are closed on every path, because dropping a row key (such as `PriceExcludingVAT`)
-would send a row without its price: `execute` and agent tools fail validation, and
+`InvoiceRows` are closed when decoded or made, because dropping a row key (such as
+`PriceExcludingVAT`) would send a row without its price: `execute` and agent tools fail validation, and
 `FortnoxCreateInvoiceInput.make` / `FortnoxUpdateInvoiceInput.make` throw on an unknown row key.
 `FortnoxInvoiceRowInput` is a closed schema, not a class: build rows as plain objects.
 
