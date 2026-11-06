@@ -2438,7 +2438,7 @@ export const gmailListAttachmentsAction = defineAction({
 export const gmailGetAttachmentAction = defineAction({
   id: 'gmail.get_attachment',
   description:
-    'Get one Gmail attachment. As an agent tool it returns the attachment as a file (fileId); invoked directly it returns standard base64 and the Gmail base64url data.',
+    'Get one Gmail attachment. As an agent tool it returns { value, files }: value is the attachment metadata, files is a one-item array holding the attachment (a FileRef with its fileId, or FileUnavailable when it was not stored); invoked directly it returns standard base64 and the Gmail base64url data.',
   inputSchema: GmailGetAttachmentInput,
   outputSchema: GmailGetAttachmentOutput,
   fileOutput: {

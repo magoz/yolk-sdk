@@ -254,6 +254,13 @@ Tool change previews add one cause:
 
 - `change_preview_unsupported_policy`: a tool sets `changePreview` without `approval`.
 
+Typed tool results add one cause:
+
+- `output_validation_required`: a registration sets `def.outputSchema` without `decodeOutput`.
+  `makeTool` with `output` sets it; raw registrations pass `toolOutputDecoder(schema)`, MCP
+  registrations `mcpToolOutputDecoder`, and wrappers that rebuild a registration field by field
+  must forward it. See [Typed outputs and file fields](./agent/tools-hitl#typed-outputs-and-file-fields).
+
 ### `stage` is not defined, or `review_plan` is unavailable
 
 Scripts get `stage(name, args)`, and the review tool becomes available, only when the resolution
@@ -281,22 +288,41 @@ arguments are invalid), `invalid` (not a `ToolChangePreview`), `too_large` (labe
 summary, warnings, or `blocked` alone exceed `maxBytes`), or `timeout`. Show the raw arguments in
 that case. See [Preview the change](./agent/tools-hitl#preview-the-change).
 
-### A file shows as "file not captured"
+### A file shows as "file not captured" or `FileUnavailable`
 
-A tool returned file bytes (`FilePart`) that were not stored, so the model sees
-`[file not captured (reason): name, mime]` instead of a `fileId`. `no file store`: pass
-`files: { store }` to `resolveTools` on that surface. `too large`: the file is over `maxFileBytes`
-(default 100 MiB). `invalid base64`: the tool returned malformed bytes. `storage unavailable` or `storage timed out`:
-the store failed; check its logs.
-File tools report a missing or foreign `fileId` as not found. A `file_upload` that got no complete
-response has an unknown outcome: check the destination before retrying. See
-[Move files between tools](./integrations/files).
+A tool returned file bytes that were not stored: a `FileBytes` in a typed tool's `ToolFile` field
+(the script value holds `FileUnavailable { unavailable, name, mimeType }`) or an untyped tool's
+`FilePart`. The model sees `[file not captured (reason): name, mime]` instead of a `fileId`. The
+reason says why:
 
-### Attachment tools return a `fileId` instead of base64
+- `no file store`: pass `files: { store }` to `resolveTools` on that surface (MCP calls outside
+  `resolveTools`: pass `fileCapture: makeToolFileCapture({ store })`).
+- `too large`: the file is over `maxFileBytes` (default 100 MiB).
+- `storage unavailable`: the store failed; check its logs.
+- `storage timed out`: an interaction result's files were not stored within the bound before its
+  receipt was settled.
+- `invalid base64`: an MCP server or an untyped tool returned malformed bytes.
 
-Since `0.1.0-canary.114`, `gmail.get_attachment`, `outlook.get_attachment` and
-`email.get_attachment` return the attachment as a file when used as agent tools. Move it with the
-`@yolk-sdk/files` tools, or call `connector.invoke` for the base64 output.
+Typed file fields take `FileBytes` only, never base64 strings: decode the bytes yourself
+(`base64ToBytes`) before returning them. File tools report a missing or foreign `fileId` as not
+found. A `file_upload` that got no complete response has an unknown outcome: check the destination
+before retrying. See [Move files between tools](./integrations/files).
+
+### A script call rejects with `returned an invalid result`
+
+A code mode call of a typed tool rejects with `<label>: returned an invalid result` when the result
+reaching the script has no value: the tool returned no `structuredContent`, or `resolveTools`
+dropped a value that did not match the output schema (an excess property, a wrong type, or a value
+that is not plain JSON). The model still saw the content. A warning naming only the tool (never
+the value) is logged: fix the tool so its value matches its `output`, or return `{ output }` from
+`makeTool` so Yolk encodes it. Scripts never fall back to text.
+
+### Attachment tools return `{ value, files }` instead of base64
+
+`gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` used as agent tools
+resolve to `{ value, files }`: `value` is the metadata output, `files` the attachment as a
+`FileRef` (or `FileUnavailable`). Move it with the `@yolk-sdk/files` tools, or call
+`connector.invoke` for the base64 output.
 
 ### Approval pauses forever
 
@@ -351,7 +377,7 @@ Stdio MCP is Node-only. Keep it behind `@yolk-sdk/mcp/client/node` and run it fr
 
 ### Tool result shape differs from agent results
 
-Use the MCP client/server adapters so `structuredContent`, `isError`, and supported content blocks are preserved. Embedded resource blobs arrive as `FilePart`s (file labels), not base64 text.
+Use the MCP client/server adapters so `isError` and supported content blocks are preserved. A successful call's `structuredContent` is `{ value, files }` (the server's `structuredContent` is `value`); blobs, images and audio are `files`, stored as `FileRef`s or `FileUnavailable`. See [Add MCP tools](./integrations/mcp-tools).
 
 ## Knowledge errors
 

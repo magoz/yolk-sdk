@@ -20,29 +20,27 @@ import { Effect, Layer, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply } from '@yolk-sdk/agent/loop/testing'
-import { assistantContent, ToolResult, UserMessage } from '@yolk-sdk/agent/protocol'
+import { assistantContent, UserMessage } from '@yolk-sdk/agent/protocol'
 import { makeTool, makeToolExecutorLayer, resolveTools } from '@yolk-sdk/agent/tools'
 
 const WeatherParams = Schema.Struct({
   city: Schema.String
 })
 
+const Weather = Schema.Struct({
+  city: Schema.String,
+  condition: Schema.String
+})
+
 const weatherTool = makeTool({
   name: 'get_weather',
   description: 'Get the current weather for a city.',
   parameters: WeatherParams,
+  output: Weather,
   access: 'read',
-  execute: input =>
-    Effect.succeed(
-      ToolResult.make({
-        toolCallId: input.call.id,
-        content: `Weather in ${input.params.city}: sunny`,
-        structuredContent: {
-          city: input.params.city,
-          condition: 'sunny'
-        }
-      })
-    )
+  // Optional: what the model reads. Without it, the compact JSON of the output.
+  render: weather => `Weather in ${weather.city}: ${weather.condition}`,
+  execute: ({ params }) => Effect.succeed({ output: { city: params.city, condition: 'sunny' } })
 })
 
 const toolSet = await Effect.runPromise(resolveTools([{ id: 'weather', tools: [weatherTool] }], {}))
@@ -96,7 +94,8 @@ It is sunny in Barcelona.
 
 ## What happened
 
-1. `makeTool` built a schema-backed tool definition and executor.
+1. `makeTool` built a schema-backed tool definition and executor; its typed `output` is encoded
+   into the result (`render` turns it into the text the model reads).
 2. `resolveTools` produced the model-visible `ToolDef` list and host executor.
 3. `FauxProvider` simulated a model calling `get_weather`, then answering.
 4. `run` streamed protocol events for model output, tool execution, assistant messages, and terminal state.

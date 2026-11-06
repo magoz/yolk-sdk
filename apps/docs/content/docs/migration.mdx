@@ -30,7 +30,7 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
-### Next canary: typed tool results
+### Canary.126: typed tool results
 
 A tool's typed output is now the single contract for code mode scripts, files are typed fields of
 that output, and script values never contain file labels
@@ -38,12 +38,14 @@ that output, and script values never contain file labels
 `makeTool` tools that return a `ToolResult` keep working in this canary (deprecated), except for
 files: see the first bullet below before upgrading.
 
-Convert a tool that returns `[TextPart(JSON), FilePart]`:
+Convert a tool that returns `[TextPart(JSON), FilePart]`. Fragment: `Params` and `exportInvoice` are
+host-owned; `ToolFile` and `FileBytes` come from `@yolk-sdk/agent/protocol`.
 
 ```ts
 // Before (deprecated)
 makeTool({
   name: 'export_invoice',
+  description: 'Export an invoice as JSON and its PDF.',
   parameters: Params,
   access: 'read',
   execute: ({ call, params }) =>
@@ -67,6 +69,7 @@ makeTool({
 // After
 makeTool({
   name: 'export_invoice',
+  description: 'Export an invoice as JSON and its PDF.',
   parameters: Params,
   output: Schema.Struct({ number: Schema.String, pdf: ToolFile }),
   access: 'read',
@@ -135,6 +138,9 @@ makeTool({
 - The tool ledger keeps typed values whole: an oversized value replays as an error result. Stored
   copies keep `File` parts as parts through every reduction (labels are never flattened into the
   text).
+
+New, opt-in: `@yolk-sdk/connectors/kie` adds the Kie connector (GPT Image 2 and Wan 2.7 tasks and
+their status) with the `KieApiKeySlot` credential slot. See [Kie](./integrations/connectors#kie).
 
 ### Canary.125: Fortnox invoice Remarks and row inputs
 

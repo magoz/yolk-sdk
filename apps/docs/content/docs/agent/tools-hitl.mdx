@@ -11,7 +11,6 @@ Use `makeTool` with Effect Schema so validation is the source of truth.
 
 ```ts
 import { Effect, Schema } from 'effect'
-import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 
 const EchoParams = Schema.Struct({ text: Schema.String })
@@ -20,14 +19,9 @@ export const echoTool = makeTool({
   name: 'echo',
   description: 'Echo text.',
   parameters: EchoParams,
+  output: Schema.Struct({ text: Schema.String }),
   access: 'read',
-  execute: input =>
-    Effect.succeed(
-      ToolResult.make({
-        toolCallId: input.call.id,
-        content: input.params.text
-      })
-    )
+  execute: ({ params }) => Effect.succeed({ output: { text: params.text } })
 })
 ```
 
@@ -40,6 +34,36 @@ unknown keys and lists the allowed keys. Custom callbacks can keep that hint wit
 `Error`, but do not default to `.message`: that drops the `SchemaError(...)` wrapper required by
 this tool-message contract. Existing
 `(error: unknown) => string` callbacks remain assignable.
+
+### Typed outputs and file fields
+
+A tool's typed output is its result contract
+([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)):
+
+- With `output` (an Effect Schema that encodes without services), `execute` returns
+  `{ output }`. Yolk encodes it with `Schema.toCodecJson(output)` into `structuredContent`, which
+  [code mode](../integrations/code-mode) scripts receive as declared. A value that does not encode
+  (or does not encode to plain JSON) fails the call without the value in the error.
+- The model sees `render(value, files)` when you pass it (optional), else a string output as is,
+  else the compact JSON of the encoding with file fields shown as file labels.
+- Without `output`, `execute` returns `{ content }` (text, and file parts from
+  `filePartFromBytes`); scripts get its text only.
+- File fields are `ToolFile` in the output schema: return `new FileBytes({ bytes, name, mimeType })`
+  (`view: true` also shows the model an image, audio or document). `resolveTools` stores the bytes
+  through its `files` option, and the encoding holds a `FileRef` `{ fileId, name, mimeType, size }`
+  or a `FileUnavailable` `{ unavailable, name, mimeType }`
+  ([Move files between tools](../integrations/files)). `ToolFile` belongs only in `output`.
+- `resolveTools` checks every successful result of a tool with an output schema through its
+  registration's `decodeOutput` (excess properties rejected, plain JSON only) and passes on the
+  checked value; a mismatched value is dropped with a warning that names only the tool, so scripts
+  reject the call while the model still sees the content. `makeTool` sets `decodeOutput` from
+  `output`; raw registrations that set `def.outputSchema` pass `toolOutputDecoder(schema)`, or
+  resolution fails with `output_validation_required`.
+- With explicit type arguments, the typed form takes three:
+  `makeTool<Context, typeof Params, typeof Output>`.
+
+Migration note: returning a raw `ToolResult` from `execute` still works in this canary but is
+deprecated; move to `{ output }` or `{ content }` ([Migration](../migration)).
 
 ### Optional arguments, `null`, and unknown keys
 
@@ -704,7 +728,7 @@ owner (for example a durable Workflow) will run, track, and eventually deliver t
 
 ```ts
 import { Effect, Schema } from 'effect'
-import { BackgroundToolAccepted, ToolResult } from '@yolk-sdk/agent/protocol'
+import { BackgroundToolAccepted } from '@yolk-sdk/agent/protocol'
 import { makeTool, resolveTools, type BackgroundToolHost } from '@yolk-sdk/agent/tools'
 
 export const reportTool = makeTool({
@@ -713,8 +737,7 @@ export const reportTool = makeTool({
   parameters: Schema.Struct({ topic: Schema.String }),
   access: 'write',
   background: true,
-  execute: input =>
-    Effect.succeed(ToolResult.make({ toolCallId: input.call.id, content: 'inline report' }))
+  execute: () => Effect.succeed({ content: 'inline report' })
 })
 
 // Host-owned: durably admit the exact call and return a receipt, never a closure.

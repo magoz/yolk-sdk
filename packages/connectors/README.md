@@ -34,7 +34,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                                            |
 | `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                          |
 | `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                        |
-| `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions                                                        |
+| `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                       |
 | `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
 | `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
 | `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                                     |
@@ -81,7 +81,9 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 
 `makeConnectorToolModule` uses the connector `description` as the module description (override
 with `description`) and returns each action result as the JSON encoding of its `outputSchema`
-(`Chunk`s become arrays, dates ISO strings) in both `structuredContent` and the text. Fields the
+(`Chunk`s become arrays, dates ISO strings) in both `structuredContent` and the text. `fileOutput`
+actions declare and return `{ value, files }` instead: `value` is the encoded byte-free output,
+`files` its file fields (`FileRef` or `FileUnavailable`), which the text shows as file labels. Fields the
 output schema does not declare are not returned; a value that does not encode fails the call with
 an `execution` `ToolError`, and provider failures carry the JSON-encoded `ProviderFailure` as
 `structuredContent`. Agent tools decode arguments like `makeTool`: `null` optionals are absent and
@@ -270,8 +272,9 @@ base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `E
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
 typed validation error. Successful host output is schema-validated at the connector boundary before
 it is returned. Hosts that implement it own MIME parsing, base64 encoding, size policy,
-storage, and content scanning. As an agent tool the action returns the attachment as a file
-(`fileId`) with its metadata instead of base64.
+storage, and content scanning. As an agent tool the action resolves to `{ value, files }`
+instead of base64: `value` is the metadata output, `files` the attachment as a `FileRef` (or
+`FileUnavailable` when it was not stored).
 IMAP adapters should fetch parts without marking messages read when supported. POP3 has no standard
 partial-part fetch, so adapters may retrieve the whole stable UIDL-addressed message before
 extracting the part. POP3 rejects `folder` for attachment retrieval just as it does for list/get.
@@ -494,7 +497,7 @@ metadata. No automatic retry occurs. Hosts must reconcile an unconfirmed send be
 another; a deterministic Message-ID does not make sending idempotent. Keep raw sending out of
 model tool allowlists when it is intended only for a host-owned reviewed action.
 
-`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it (Gmail answers `body.data` transfer-decoded, so a part's `Content-Transfer-Encoding` is never applied again), and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Its optional `filename` and `mimeType` inputs (the values `gmail.list_attachments` reports) are echoed unverified in the output and name the file it yields as an agent tool (`fileOutput`, ADR 0009). Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
+`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it (Gmail answers `body.data` transfer-decoded, so a part's `Content-Transfer-Encoding` is never applied again), and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Its optional `filename` and `mimeType` inputs (the values `gmail.list_attachments` reports) are echoed unverified in the output and name the file it yields as an agent tool (`fileOutput`, ADR 0009): the tool resolves to `{ value, files }`, `value` the metadata output and `files` the attachment as a `FileRef` (or `FileUnavailable`). Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
 `gmail.list_threads` (`gmailListThreadsAction`, read, `gmail.readonly` slot) sends
 `GET /users/me/threads` with the `gmail.list` filters (`GmailListThreadsInput`: `query`, `labelId`,
@@ -639,6 +642,41 @@ These are not actions and never appear in `GithubConnector.actions`:
   user token (OAuth or PAT). GitHub refuses installation tokens there (they surface as `not_found`,
   so the helper rejects `ghs_` tokens up front). A 404 otherwise means no push access. Without
   `repositoryId`, the helper looks it up via `GET /repos/{owner}/{repo}`.
+
+## Kie connector
+
+`KieConnector` submits Kie Market generation tasks and reads their status (actions: `kieActions`;
+details in the [connector docs](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/integrations/connectors.mdx#kie)).
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { kieApiKeySlotId } from '@yolk-sdk/connectors/kie'
+
+const integration = makeIntegration({
+  connectorId: 'kie',
+  credentialBindings: [makeCredentialBinding({ slotId: kieApiKeySlotId, credentialRef: 'kie' })]
+})
+```
+
+- `kie.api_key` (`KieApiKeySlot`) accepts `ApiKeyCredential`, `BearerTokenCredential`, or
+  `OAuthCredential`; its value is sent as `Authorization: Bearer <key>`. Username/password
+  credentials fail with `credential_invalid`.
+
+Kie generation is asynchronous: `kie.create_image_task` (GPT Image 2; image-to-image when
+`inputUrls` are given) and `kie.create_video_task` (Wan 2.7 image-to-video) return a `taskId`, and
+`kie.get_task` returns its `state`, the raw `resultJson`, and the result URLs it carries. Both
+create actions are `write` (each task spends Kie credits). Input URLs are fetched by Kie, not the
+host; the connector checks only that they are absolute http(s) URLs without credentials. Kie
+answers most failures with HTTP 200 and a non-200 envelope `code`; both that and a non-2xx status
+become a `ProviderFailure` (`kie_unauthorized`, `kie_insufficient_credits`, `kie_validation`,
+`kie_rate_limited`, `kie_generation_failed`, ...) whose `underlying` is `{ kieCode, msg }` (the Kie
+envelope `code`, or the HTTP status when a non-2xx answer has no envelope, and its message when
+present). A task that ends in `fail` is a successful `kie.get_task` read with
+`failCode`/`failMsg`. Result URLs expire (Kie keeps generated files for 14 days); hosts copy final
+assets to their own storage. `callBackUrl` is an action input (model-supplied when the action is a
+tool); hosts that allow it own the webhook and its verification, and hosts that must pin it strip
+or override it. Code-mode scripts have no timers: expose `kie.get_task` with
+`callableBy: 'model'` (ADR 0002, "Known gap: polling").
 
 ## Fortnox connector
 
@@ -1121,7 +1159,8 @@ decodes it validates it) and returns those bytes as required `contentBase64`. It
 as list metadata and are rejected by this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning. As an agent tool `outlook.get_attachment`
-returns the attachment as a file (`fileId`) with its metadata instead of base64.
+resolves to `{ value, files }` instead of base64: `value` is the metadata output, `files` the
+attachment as a `FileRef` (or `FileUnavailable` when it was not stored).
 
 To add a file to an existing draft (for example one from `outlook.create_draft` or
 `outlook.create_reply_draft`) before `outlook.send_draft`, host code calls the host-only
@@ -1325,20 +1364,6 @@ host work. Do not route the raw result into generic model tool JSON.
 Notion and Todoist actions decode provider wire pagination and expose SDK outputs with camelCase fields such as `nextCursor`. Inputs accept documented camelCase fields and common provider-native snake_case aliases where useful, such as Notion `data_source_id` / `rich_text` and Todoist `project_id` / `task_id` / `filter_lang`.
 
 LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich Layer accepts the lookup asynchronously.
-
-Kie generation is asynchronous: `kie.create_image_task` (GPT Image 2; image-to-image when
-`inputUrls` are given) and `kie.create_video_task` (Wan 2.7 image-to-video) return a `taskId`, and
-`kie.get_task` returns its `state`, the raw `resultJson`, and the result URLs it carries. Both
-create actions are `write` (each task spends Kie credits). Input URLs are fetched by Kie, not the
-host; the connector checks only that they are absolute http(s) URLs without credentials. Kie
-answers most failures with HTTP 200 and a non-200 envelope `code`; both that and a non-2xx status
-become a `ProviderFailure` (`kie_unauthorized`, `kie_insufficient_credits`, `kie_validation`,
-`kie_rate_limited`, `kie_generation_failed`, ...) whose `underlying` holds the Kie `code` and `msg`.
-A task that ends in `fail` is a successful `kie.get_task` read with `failCode`/`failMsg`. Result
-URLs expire (Kie keeps generated files for 14 days); hosts copy final assets to their own storage.
-`callBackUrl` is an action input, so a model chooses it when the action is a tool; hosts that must
-pin the webhook strip or override it. Code-mode scripts have no timers: expose `kie.get_task` with
-`callableBy: 'model'` (ADR 0002, "Known gap: polling").
 
 ### Microsoft conformance cases (experimental)
 
@@ -1846,7 +1871,7 @@ orchestration only.
 | `@yolk-sdk/connectors/fortnox`         | company info; customers, invoices, suppliers, supplier invoices/files, articles, prices, cost centers, payments (incl. bookkeep), offers (incl. convert/cancel/email), print templates, inbox, settings registers, profile; host-only preview/archive/inbox I/O |
 | `@yolk-sdk/connectors/github`          | Issues, comments, labels, sub-issues, dependencies, issue fields, pull requests, reviews, merge, repo context                                                                                                                                                   |
 | `@yolk-sdk/connectors/google`          | Gmail mail and label actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions                                                                                                                                                  |
-| `@yolk-sdk/connectors/kie`             | `kie.create_image_task`, `kie.create_video_task`, `kie.get_task`                                                                                                                                                                                                |
+| `@yolk-sdk/connectors/kie`             | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                                                                                                                                          |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                                                                                                                                                                    |
 | `@yolk-sdk/connectors/microsoft`       | Outlook mail/category and OneDrive metadata/folder/move/copy/recycle actions; host-only file and attachment I/O                                                                                                                                                 |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                                                                                                                                                                    |

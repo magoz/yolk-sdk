@@ -3,21 +3,25 @@ title: Protocol glossary
 description: Core transcript and event terms used across Yolk packages.
 ---
 
-| Term                    | Meaning                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| `UserMessage`           | user-authored transcript message                                                      |
-| `AssistantAgentMessage` | assistant/model-authored message with text, reasoning, and tool calls                 |
-| `ToolResultMessage`     | host-authored result for a tool call                                                  |
-| `AgentMessage`          | union of user, assistant, and tool-result messages                                    |
-| `AgentEvent`            | stream event emitted by loop/runtime/client surfaces                                  |
-| `UserMessageEvent`      | replay-safe event for host-promoted user input in durable streams                     |
-| `ToolDef`               | model-visible tool name, description, parameters, and approval (and staging) metadata |
-| `ToolCall`              | model request to execute a host tool                                                  |
-| `ToolResult`            | host result returned to the model                                                     |
-| `AgentAwaitingInput`    | logical terminal pause state for approvals/questions                                  |
-| `AgentStatus`           | one run status: `Idle`, `Working`, `Blocked`, `Done`, or `Failed` (OSC 7501 terms)    |
-| `FilePart`              | file bytes a tool yields for other tools to move; the model only sees its label       |
-| `fileId`                | `file_…` handle of a captured file (`ToolResult.files` lists them)                    |
-| `ToolChangePreview`     | tool-agnostic before → after diff of one call, shown on approvals and plan reviews    |
+| Term                    | Meaning                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `UserMessage`           | user-authored transcript message                                                                             |
+| `AssistantAgentMessage` | assistant/model-authored message with text, reasoning, and tool calls                                        |
+| `ToolResultMessage`     | host-authored result for a tool call                                                                         |
+| `AgentMessage`          | union of user, assistant, and tool-result messages                                                           |
+| `AgentEvent`            | stream event emitted by loop/runtime/client surfaces                                                         |
+| `UserMessageEvent`      | replay-safe event for host-promoted user input in durable streams                                            |
+| `ToolDef`               | model-visible tool name, description, parameters, and approval (and staging) metadata                        |
+| `ToolCall`              | model request to execute a host tool                                                                         |
+| `ToolResult`            | host result returned to the model                                                                            |
+| `AgentAwaitingInput`    | logical terminal pause state for approvals/questions                                                         |
+| `AgentStatus`           | one run status: `Idle`, `Working`, `Blocked`, `Done`, or `Failed` (OSC 7501 terms)                           |
+| `FilePart`              | file bytes a tool yields for other tools to move; the model only sees its label                              |
+| `fileId`                | `file_…` handle of a captured file (`ToolResult.files` lists them)                                           |
+| `ToolFile`              | a file field of a typed tool's `output` schema: `FileBytes` in, `FileRef` or `FileUnavailable` out           |
+| `FileBytes`             | the bytes, name and MIME type a typed tool returns in a `ToolFile` field (`view: true` also shows the model) |
+| `FileRef`               | a stored file as scripts see it: `{ fileId, name, mimeType, size }`                                          |
+| `FileUnavailable`       | a file field whose bytes were not stored: `{ unavailable: reason, name, mimeType }`                          |
+| `ToolChangePreview`     | tool-agnostic before → after diff of one call, shown on approvals and plan reviews                           |
 
 See [Agent protocol](../agent/protocol) for examples.
