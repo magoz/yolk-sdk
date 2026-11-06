@@ -937,7 +937,10 @@ Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en
 
 All actions use `KieApiKeySlot` (`kie.api_key`, sent as a bearer token). Generation is
 asynchronous: the create actions return a `taskId` (each task spends Kie credits) and
-`kie.get_task` polls it; hosts that pass `callBackUrl` own the webhook and its verification. Input
+`kie.get_task` polls it. `callBackUrl` is an action input (model-supplied when the action is a
+tool); hosts that allow it own the webhook and its verification, and hosts that must pin it strip
+or override it. Code-mode scripts have no timers, so expose `kie.get_task` with
+`callableBy: 'model'` ([code mode polling gap](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0002-code-mode.md#known-gap-polling)). Input
 URLs are fetched by Kie, so the connector checks only that they are absolute http(s) URLs without
 credentials. Kie answers most failures with HTTP 200 and a non-200 envelope `code`; the connector
 returns those, and non-2xx statuses, as `ProviderFailure`s (`kie_unauthorized`,

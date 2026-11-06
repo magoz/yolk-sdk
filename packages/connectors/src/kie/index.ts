@@ -46,6 +46,9 @@ const resolveKieApiKey = (integration: ConnectorIntegration) =>
 
 // Kie fetches these URLs from its own servers; only their syntax is checked here.
 const isHttpUrl = Schema.makeFilter<string>(value => {
+  // URL parsing tolerates surrounding whitespace that would reach Kie verbatim.
+  if (/\s/u.test(value)) return 'must not contain whitespace'
+
   if (!URL.canParse(value)) return 'must be an absolute http or https URL'
 
   const url = new URL(value)
@@ -59,6 +62,11 @@ const isHttpUrl = Schema.makeFilter<string>(value => {
 
 export const KieHttpUrl = Schema.String.check(isHttpUrl).annotate({
   description: 'Public http or https URL that Kie can fetch'
+})
+
+// Model-visible when exposed as a tool: hosts that must pin the webhook strip or override it.
+const KieCallBackUrl = KieHttpUrl.annotate({
+  description: 'Optional URL Kie POSTs the finished task to (instead of polling kie.get_task)'
 })
 
 export const KieAspectRatio = Schema.Literals([
@@ -105,7 +113,7 @@ export class KieCreateImageTaskInput extends Schema.Class<KieCreateImageTaskInpu
   ),
   aspectRatio: Schema.optional(KieAspectRatio),
   resolution: Schema.optional(KieImageResolution),
-  callBackUrl: Schema.optional(KieHttpUrl)
+  callBackUrl: Schema.optional(KieCallBackUrl)
 }) {}
 
 // Wan 2.7 needs a first frame or a first clip, and a last frame only pairs with a first frame.
@@ -143,7 +151,7 @@ export class KieCreateVideoTaskInput extends Schema.Class<KieCreateVideoTaskInpu
     watermark: Schema.optional(Schema.Boolean),
     seed: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2147483647 }))),
     nsfwChecker: Schema.optional(Schema.Boolean),
-    callBackUrl: Schema.optional(KieHttpUrl)
+    callBackUrl: Schema.optional(KieCallBackUrl)
   }).check(wanVideoSource)
 ) {}
 
@@ -200,12 +208,14 @@ const KieTaskRecord = Schema.Struct({
   creditsConsumed: OptionalNullableNumber
 })
 
-const KieResultUrl = Schema.Union([Schema.String, Schema.Array(Schema.String)])
+const KieResultUrl = Schema.optional(
+  Schema.NullOr(Schema.Union([Schema.String, Schema.Array(Schema.String)]))
+)
 
 const KieResultJson = Schema.Struct({
-  resultUrls: Schema.optional(Schema.Array(Schema.String)),
-  firstFrameUrl: Schema.optional(KieResultUrl),
-  lastFrameUrl: Schema.optional(KieResultUrl)
+  resultUrls: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  firstFrameUrl: KieResultUrl,
+  lastFrameUrl: KieResultUrl
 })
 
 const kieFailureCode = (code: number) => {

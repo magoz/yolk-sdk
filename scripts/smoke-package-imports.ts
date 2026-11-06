@@ -75,6 +75,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './github/conformance',
       './google',
       './google/conformance',
+      './kie',
       './linkedin-search',
       './linkedin-search/conformance',
       './microsoft',

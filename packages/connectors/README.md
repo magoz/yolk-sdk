@@ -1333,6 +1333,9 @@ become a `ProviderFailure` (`kie_unauthorized`, `kie_insufficient_credits`, `kie
 `kie_rate_limited`, `kie_generation_failed`, ...) whose `underlying` holds the Kie `code` and `msg`.
 A task that ends in `fail` is a successful `kie.get_task` read with `failCode`/`failMsg`. Result
 URLs expire (Kie keeps generated files for 14 days); hosts copy final assets to their own storage.
+`callBackUrl` is an action input, so a model chooses it when the action is a tool; hosts that must
+pin the webhook strip or override it. Code-mode scripts have no timers: expose `kie.get_task` with
+`callableBy: 'model'` (ADR 0002, "Known gap: polling").
 
 ### Microsoft conformance cases (experimental)
 

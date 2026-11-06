@@ -262,6 +262,100 @@ describe('Kie connector', () => {
     })
   )
 
+  it.effect('prefers the envelope code of a non-2xx JSON body and omits an empty msg', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([response({ code: 401, msg: '' }, 401)])
+
+      const result = yield* kieGetTaskAction
+        .execute({ integration, input: { taskId: 'task_1' } })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        error: { code: 'kie_unauthorized', message: 'Kie get_task failed', status: 401 }
+      })
+    })
+  )
+
+  it.effect('fails with validation_failed on a success envelope without task data', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([response({ code: 200, msg: 'success', data: null })])
+
+      const error = yield* kieCreateImageTaskAction
+        .execute({ integration, input: { prompt: 'x' } })
+        .pipe(Effect.provide(harness.layer), Effect.flip)
+
+      expect(error).toMatchObject({ cause: 'validation_failed' })
+    })
+  )
+
+  it.effect('rejects URLs with whitespace before any request', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      for (const url of [' https://a.example/f.png', 'https://a.example/x y.png']) {
+        const error = yield* kieCreateVideoTaskAction
+          .execute({ integration, input: { prompt: 'x', firstFrameUrl: url } })
+          .pipe(Effect.provide(harness.layer), Effect.flip)
+
+        expect(error).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(harness.requests).toEqual([])
+    })
+  )
+
+  it.effect('submits a first-clip continuation without a first frame', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([created])
+
+      yield* kieCreateVideoTaskAction
+        .execute({
+          integration,
+          input: { prompt: 'Keep going', firstClipUrl: 'https://a.example/c.mp4' }
+        })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(bodyOf(harness.requests[0])).toEqual({
+        model: 'wan/2-7-image-to-video',
+        input: { prompt: 'Keep going', first_clip_url: 'https://a.example/c.mp4' }
+      })
+    })
+  )
+
+  it.effect('keeps result URLs beside null frame fields and raw JSON without URLs', () =>
+    Effect.gen(function* () {
+      const task = (resultJson: string) =>
+        response({ code: 200, msg: 'success', data: { taskId: 't', state: 'success', resultJson } })
+
+      const withNulls = JSON.stringify({
+        resultUrls: ['https://f.example/a.mp4'],
+        lastFrameUrl: null
+      })
+
+      const textResult = JSON.stringify({ resultObject: { subject_status: 1 } })
+
+      const harness = makeHarness([task(withNulls), task(textResult)])
+
+      const first = yield* kieGetTaskAction
+        .execute({ integration, input: { taskId: 't' } })
+        .pipe(Effect.provide(harness.layer))
+
+      const second = yield* kieGetTaskAction
+        .execute({ integration, input: { taskId: 't' } })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(first).toMatchObject({
+        _tag: 'Success',
+        value: { resultUrls: ['https://f.example/a.mp4'] }
+      })
+      expect(second).toMatchObject({
+        _tag: 'Success',
+        value: { resultUrls: [], resultJson: textResult }
+      })
+    })
+  )
+
   it.effect('fails with validation_failed on an unreadable 2xx body', () =>
     Effect.gen(function* () {
       const harness = makeHarness([
