@@ -10,15 +10,20 @@ import {
   TextPart,
   ToolApprovalPolicy,
   ToolCall,
+  ToolDef,
   ToolFile,
-  ToolResult
+  toolOutputDecoder,
+  ToolResult,
+  type ToolOutputSchema
 } from '@yolk-sdk/agent/protocol'
 import {
   makeQuestionToolRegistration,
   makeTool,
   modelVisibleToolError,
   resolveTools,
-  type FileStoreApi
+  toolJsonSchemaFromSchema,
+  type FileStoreApi,
+  type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
   codeModeStoreFromToolResults,
@@ -1386,6 +1391,32 @@ describe('typed results and files in scripts', () => {
       )
   })
 
+  // Raw registrations: the shared result boundary of `resolveTools` checks them too.
+  const rawTyped = (
+    name: string,
+    structuredContent: unknown,
+    output: ToolOutputSchema = HitsOutput
+  ): ToolRegistration<TestContext> => ({
+    def: ToolDef.make({
+      name,
+      description: 'A raw typed registration',
+      parameters: toolJsonSchemaFromSchema(QueryParams),
+      outputSchema: toolJsonSchemaFromSchema(output)
+    }),
+    access: 'read',
+    decodeOutput: toolOutputDecoder(output),
+    execute: ({ call }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'text', structuredContent }))
+  })
+
+  const rawExcess = rawTyped('raw_excess', { hits: [], secret: 'x' })
+
+  const rawBytes = rawTyped(
+    'raw_bytes',
+    { value: new FileBytes({ bytes: pdf, name: 'a.pdf', mimeType: 'application/pdf' }) },
+    Schema.Struct({ value: Schema.Any })
+  )
+
   const failing = makeTool({
     name: 'fail_with_code',
     description: 'Fails with a code',
@@ -1429,6 +1460,8 @@ describe('typed results and files in scripts', () => {
     untypedFile,
     missingValue,
     invalidValue,
+    rawExcess,
+    rawBytes,
     failing,
     failingWithFile
   ]
@@ -1540,7 +1573,7 @@ describe('typed results and files in scripts', () => {
     Effect.gen(function* () {
       const result = yield* runWith(
         `const errors = []
-         for (const name of ['missing_value', 'invalid_value']) {
+         for (const name of ['missing_value', 'invalid_value', 'raw_excess', 'raw_bytes']) {
            try { await tools[name]({ query: 'x' }) } catch (error) { errors.push(error.message) }
          }
          return errors`,
@@ -1549,7 +1582,9 @@ describe('typed results and files in scripts', () => {
 
       expect(returned(result.content)).toEqual([
         'tools.missing_value: returned an invalid result',
-        'tools.invalid_value: returned an invalid result'
+        'tools.invalid_value: returned an invalid result',
+        'tools.raw_excess: returned an invalid result',
+        'tools.raw_bytes: returned an invalid result'
       ])
     })
   )

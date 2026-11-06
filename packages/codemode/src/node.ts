@@ -439,7 +439,6 @@ const piCallable = (
   return converted
 }
 
-// Tool rejections carry their `code` into the VM (see `rejectionPrefix`).
 const piTool = (tool: CodeModeExecutorTool): CodemodeTool =>
   piCallable(tool, (args, context) =>
     tool.execute(args, context).catch((error: unknown) => {

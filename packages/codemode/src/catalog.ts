@@ -155,6 +155,9 @@ const fileDefinitions = (schema: CodeModeJsonSchema): ReadonlySet<FileTypeName> 
   )
 }
 
+// Keywords whose values are data, not schemas: a `$ref`-shaped object there is a literal value.
+const dataKeywords: ReadonlySet<string> = new Set(['const', 'enum', 'default', 'examples'])
+
 const withFileSentinels = (value: Schema.Json, names: ReadonlySet<FileTypeName>): Schema.Json => {
   if (Array.isArray(value)) return value.map((item: Schema.Json) => withFileSentinels(item, names))
 
@@ -169,7 +172,10 @@ const withFileSentinels = (value: Schema.Json, names: ReadonlySet<FileTypeName>)
   if (named !== undefined) return { const: fileTypeSentinel(named) }
 
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, withFileSentinels(item, names)])
+    Object.entries(value).map(([key, item]) => [
+      key,
+      dataKeywords.has(key) ? item : withFileSentinels(item, names)
+    ])
   )
 }
 

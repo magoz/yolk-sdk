@@ -8,6 +8,7 @@ import {
   ToolApprovalPolicy,
   ToolDef,
   ToolFile,
+  toolFileJsonSchemaDefinitions,
   toolJsonSchemaOmittedNullComment,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
@@ -481,6 +482,32 @@ describe('searchTools', () => {
     expect(description).toContain('attachment: FileRef | FileUnavailable;')
     expect(description).toContain(
       'takes the arguments of the `mail_open` tool and resolves to `object`'
+    )
+  })
+
+  it('never renames $ref-shaped data in const, enum, default or examples', () => {
+    const data = { $ref: '#/$defs/FileRef' }
+
+    const [tool] = codeModeCatalog([
+      nestedTool('mail', 'mail_marker', {
+        outputSchema: {
+          type: 'object',
+          properties: {
+            file: { $ref: '#/$defs/FileRef' },
+            marker: { const: data, default: data, examples: [data] },
+            kind: { enum: [data] }
+          },
+          required: ['file', 'marker', 'kind'],
+          additionalProperties: false,
+          $defs: { ...toolFileJsonSchemaDefinitions }
+        }
+      })
+    ])
+
+    const declaration = tool === undefined ? '' : describeCodeModeTool(tool)
+
+    expect(declaration).toContain(
+      'Promise<{ file: FileRef; kind: {"$ref":"#/$defs/FileRef"}; marker: {"$ref":"#/$defs/FileRef"}; }>'
     )
   })
 
