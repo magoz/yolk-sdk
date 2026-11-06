@@ -15,7 +15,14 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
-import { AudioPart, ImagePart, TextPart, inlineBase64Source } from '@yolk-sdk/agent/protocol'
+import {
+  AudioPart,
+  FileDescriptor,
+  ImagePart,
+  TextPart,
+  inlineBase64Source
+} from '@yolk-sdk/agent/protocol'
+import { makeToolFileCapture, type FileStoreApi } from '@yolk-sdk/agent/tools'
 import {
   JsonRpcMessage,
   listLocalMcpServerTools,
@@ -69,7 +76,105 @@ type ResponseMode =
   | 'metadata'
   | 'tool-error'
   | 'rich-result'
+  | 'blob-result'
   | 'legacy'
+
+const receipt = new TextEncoder().encode('%PDF receipt')
+
+const receiptBlock = {
+  type: 'resource',
+  resource: {
+    uri: 'file:///receipts/receipt.pdf',
+    mimeType: 'application/pdf',
+    blob: Buffer.from(receipt).toString('base64')
+  }
+}
+
+const receiptStore: FileStoreApi = {
+  put: ({ bytes, name, mimeType }) =>
+    Effect.succeed(
+      FileDescriptor.make({ fileId: 'file_receipt', name, mimeType, size: bytes.byteLength })
+    ),
+  head: () => Effect.succeed(Option.none()),
+  read: () => Effect.succeed(receipt),
+  signRead: ({ fileId }) => Effect.succeed(`https://files.example/${fileId}`)
+}
+
+const capturedReceipt = {
+  fileId: 'file_receipt',
+  name: 'receipt.pdf',
+  mimeType: 'application/pdf',
+  size: receipt.byteLength
+}
+
+const decodeStdinMessage = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcMessage))
+
+type LocalAnswer = { readonly result: unknown } | { readonly error: unknown }
+
+/**
+ * A local stdio server that answers each request it reads on stdin by method, so a test sees
+ * exactly which requests were sent (`sent`) and in which order. Requests without an answer get none.
+ */
+const makeScriptedLocalMcpLayer = (
+  answers: Readonly<Record<string, LocalAnswer>>,
+  sent: Array<string>
+) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(command =>
+      Effect.sync(() => {
+        if (!ChildProcess.isStandardCommand(command)) {
+          throw new Error('Expected standard command')
+        }
+
+        const stdinConfig = command.options.stdin
+
+        const stdin =
+          Predicate.isObject(stdinConfig) &&
+          Predicate.hasProperty(stdinConfig, 'stream') &&
+          Stream.isStream(stdinConfig.stream)
+            ? stdinConfig.stream
+            : Stream.empty
+
+        const stdout = stdin.pipe(
+          Stream.decodeText,
+          Stream.splitLines,
+          Stream.filter(line => line.length > 0),
+          Stream.flatMap(line =>
+            Option.match(decodeStdinMessage(line), {
+              onNone: () => Stream.empty,
+              onSome: message => {
+                sent.push(message.method)
+
+                const answer = answers[message.method]
+
+                return 'id' in message && answer !== undefined
+                  ? Stream.make(
+                      `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
+                    )
+                  : Stream.empty
+              }
+            })
+          ),
+          Stream.encodeText
+        )
+
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout,
+          stderr: Stream.empty,
+          all: stdout,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void)
+        })
+      })
+    )
+  )
 
 const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
   Layer.succeed(
@@ -262,30 +367,35 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
                       content: [{ type: 'text', text: 'bad params' }],
                       isError: true
                     }
-                  : mode === 'rich-result'
+                  : mode === 'blob-result'
                     ? {
                         resultType: 'complete',
-                        content: [
-                          { type: 'text', text: 'remote result' },
-                          { type: 'image', data: 'abc', mimeType: 'image/png' },
-                          { type: 'audio', data: 'def', mimeType: 'audio/opus' },
-                          {
-                            type: 'resource',
-                            resource: { uri: 'file:///tmp/out.txt', text: 'resource text' }
-                          },
-                          {
-                            type: 'resource_link',
-                            uri: 'file:///tmp/linked.txt',
-                            name: 'linked.txt'
-                          }
-                        ],
-                        structuredContent: { answer: 42 },
-                        isError: true
+                        content: [{ type: 'text', text: 'remote result' }, receiptBlock]
                       }
-                    : {
-                        resultType: 'complete',
-                        content: [{ type: 'text', text: 'remote result' }]
-                      }
+                    : mode === 'rich-result'
+                      ? {
+                          resultType: 'complete',
+                          content: [
+                            { type: 'text', text: 'remote result' },
+                            { type: 'image', data: 'abc', mimeType: 'image/png' },
+                            { type: 'audio', data: 'def', mimeType: 'audio/opus' },
+                            {
+                              type: 'resource',
+                              resource: { uri: 'file:///tmp/out.txt', text: 'resource text' }
+                            },
+                            {
+                              type: 'resource_link',
+                              uri: 'file:///tmp/linked.txt',
+                              name: 'linked.txt'
+                            }
+                          ],
+                          structuredContent: { answer: 42 },
+                          isError: true
+                        }
+                      : {
+                          resultType: 'complete',
+                          content: [{ type: 'text', text: 'remote result' }]
+                        }
 
         if (method === 'notifications/initialized') {
           return HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 }))
@@ -667,6 +777,182 @@ describe('MCP client', () => {
       ])
 
       expect(Predicate.isTagged(unlisted, 'Success')).toBe(true)
+    })
+  )
+
+  describe('local calls list before they call', () => {
+    const initialized = {
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        serverInfo: { name: 'local', version: '0' }
+      }
+    }
+
+    const totalSchema = {
+      type: 'object',
+      properties: { total: { type: 'number' } },
+      required: ['total']
+    }
+
+    const listing = (tool: Schema.Json) => ({ result: { tools: [tool] } })
+
+    const answered = (structuredContent: unknown) => ({
+      result: { content: [{ type: 'text', text: 'done' }], structuredContent }
+    })
+
+    const call = (answers: Readonly<Record<string, LocalAnswer>>) =>
+      Effect.gen(function* () {
+        const sent: Array<string> = []
+
+        const result = yield* callLocalMcpServerTool({
+          config: { name: 'local', type: 'local', command: ['fake-mcp'] },
+          mcpToolName: 'sum',
+          toolCallId: 'call_1',
+          params: {},
+          options: { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } },
+          fileCapture: makeToolFileCapture({ store: receiptStore })
+        }).pipe(Effect.provide(makeScriptedLocalMcpLayer(answers, sent)), Effect.result)
+
+        return { result, sent }
+      })
+
+    const listedAndCalled = ['initialize', 'notifications/initialized', 'tools/list', 'tools/call']
+
+    const listedOnly = ['initialize', 'notifications/initialized', 'tools/list']
+
+    it.effect('sends no tools/call when the output schema is unusable or does not compile', () =>
+      Effect.gen(function* () {
+        const unusable = [
+          { name: 'sum', inputSchema: { type: 'object' }, outputSchema: 42 },
+          {
+            name: 'sum',
+            inputSchema: { type: 'object' },
+            outputSchema: { type: 'object', properties: { a: { type: 'string', pattern: '(' } } }
+          }
+        ]
+
+        for (const tool of unusable) {
+          const { result, sent } = yield* call({
+            initialize: initialized,
+            'tools/list': listing(tool),
+            'tools/call': answered({ total: 3 })
+          })
+
+          expectMcpFailureCause(result, 'validation')
+          expect(Predicate.isTagged(result, 'Failure') && result.failure.message).toContain(
+            "Tool 'sum' has an invalid outputSchema"
+          )
+          expect(sent).toEqual(listedOnly)
+        }
+      })
+    )
+
+    it.effect('sends no tools/call when initialize fails', () =>
+      Effect.gen(function* () {
+        const { result, sent } = yield* call({
+          initialize: { error: { code: -32603, message: 'boom' } },
+          'tools/list': listing({ name: 'sum', inputSchema: { type: 'object' } }),
+          'tools/call': answered({ total: 3 })
+        })
+
+        expectMcpFailureCause(result, 'protocol')
+        expect(sent).not.toContain('tools/call')
+      })
+    )
+
+    it.effect('still calls, unvalidated, when the listing fails or lacks the tool', () =>
+      Effect.gen(function* () {
+        const listings: ReadonlyArray<LocalAnswer> = [
+          { error: { code: -32601, message: 'Method not found' } },
+          { result: { tools: 'not a list' } },
+          { result: { tools: [{ name: 'other', outputSchema: totalSchema }], nextCursor: 'p2' } }
+        ]
+
+        for (const toolsList of listings) {
+          const { result, sent } = yield* call({
+            initialize: initialized,
+            'tools/list': toolsList,
+            'tools/call': answered({ total: 'three' })
+          })
+
+          expect(sent).toEqual(listedAndCalled)
+          expect(Predicate.isTagged(result, 'Success') && result.success.structuredContent).toEqual(
+            { value: { total: 'three' }, files: [] }
+          )
+        }
+      })
+    )
+
+    it.effect('validates a tool whose input schema lacks type against its output schema', () =>
+      Effect.gen(function* () {
+        const tool = { name: 'sum', inputSchema: {}, outputSchema: totalSchema }
+
+        const valid = yield* call({
+          initialize: initialized,
+          'tools/list': listing(tool),
+          'tools/call': answered({ total: 3 })
+        })
+
+        expect(valid.sent).toEqual(listedAndCalled)
+        expect(Predicate.isTagged(valid.result, 'Success')).toBe(true)
+
+        const invalid = yield* call({
+          initialize: initialized,
+          'tools/list': listing(tool),
+          'tools/call': answered({ total: 'three' })
+        })
+
+        expect(invalid.sent).toEqual(listedAndCalled)
+        expectMcpFailureCause(invalid.result, 'validation')
+      })
+    )
+
+    it.effect('stores blobs through the fileCapture option', () =>
+      Effect.gen(function* () {
+        const { result } = yield* call({
+          initialize: initialized,
+          'tools/list': listing({ name: 'sum', inputSchema: { type: 'object' } }),
+          'tools/call': { result: { content: [receiptBlock] } }
+        })
+
+        expect(Predicate.isTagged(result, 'Success') && result.success.structuredContent).toEqual({
+          value: null,
+          files: [capturedReceipt]
+        })
+      })
+    )
+  })
+
+  it.effect('stores remote blobs through the fileCapture option', () =>
+    Effect.gen(function* () {
+      const input = {
+        config: { name: 'remote', type: 'remote' as const, url: 'https://example.com/mcp' },
+        mcpToolName: 'search',
+        toolCallId: 'call_1',
+        params: {},
+        options: { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      }
+
+      const captured = yield* callRemoteMcpServerTool({
+        ...input,
+        fileCapture: makeToolFileCapture({ store: receiptStore })
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('blob-result')))
+
+      expect(captured.structuredContent).toEqual({
+        value: 'remote result',
+        files: [capturedReceipt]
+      })
+      expect(captured.files).toEqual([FileDescriptor.make(capturedReceipt)])
+
+      const uncaptured = yield* callRemoteMcpServerTool(input).pipe(
+        Effect.provide(makeFakeRemoteMcpLayer('blob-result'))
+      )
+
+      expect(uncaptured.structuredContent).toEqual({
+        value: 'remote result',
+        files: [{ unavailable: 'no file store', name: 'receipt.pdf', mimeType: 'application/pdf' }]
+      })
     })
   )
 
