@@ -1083,7 +1083,7 @@ export const mcpCallReadCase: McpConformanceCase = defineConformanceCase({
   id: 'mcp.tools.call-read',
   title: 'the read tool answers a tool result that decodes and passes output validation',
   safety: 'read',
-  docs: '`callRemoteMcpServerTool` lists tools and calls on one connection; the SDK validates `structuredContent` against the listed `outputSchema` (and requires it when the tool has one), then `decodeToolCallResult` and `toolCallResultToToolResult` map the answer to a `ToolResult`.',
+  docs: '`callRemoteMcpServerTool` lists tools and calls on one connection; the SDK validates `structuredContent` against the listed `outputSchema` (and requires it when the tool has one), then `decodeToolCallResult` and `mcpToolResult` map the answer to a `ToolResult` whose `structuredContent` is `{ value, files }`.',
   wire: "Precondition, checked through the real listing before any tools/call, and again by the call gate on the call operation's own complete, fully understood listing (zero forwarded calls otherwise): the listing marks `readTool` `readOnlyHint: true`. Calling `readTool` with its seeded arguments answers a JSON-RPC `result` object (not an error, not a non-object result) that decodes as `ToolCallResult` with `isError` absent or false and maps to a `ToolResult`. When the tool has an `outputSchema`, `structuredContent` is present and passes SDK validation.",
   fixtures: [mcpCallReadModernFixture.id, mcpCallReadLegacyFixture.id],
   run: Effect.gen(function* () {

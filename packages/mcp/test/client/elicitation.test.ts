@@ -496,7 +496,7 @@ describe('MCP form elicitation (MRTR)', () => {
       expect(result).toMatchObject({
         toolCallId: 'call_1',
         content: 'deleted',
-        structuredContent: { deleted: true }
+        structuredContent: { value: { deleted: true }, files: [] }
       })
       expect(harness.ledger).toEqual({ minted: 1, executed: 1 })
 
@@ -998,7 +998,7 @@ describe('MCP form elicitation (MRTR)', () => {
         }).pipe(Effect.provide(harness.layer))
       )
 
-      expect(result.structuredContent).toEqual({ deleted: true })
+      expect(result.structuredContent).toEqual({ value: { deleted: true }, files: [] })
     })
   )
 

@@ -64,7 +64,7 @@ import {
   JsonRpcRequest,
   legacyMcpProtocolVersion,
   mcpToolToToolDef,
-  toolCallResultToToolResult,
+  mcpToolResult,
   ToolsCallParams,
   type McpToolAnnotations,
   type McpToolExposureResolver,
@@ -574,7 +574,7 @@ export const callRemoteMcpServerTool = (
 
     const toolCallResult = yield* decodeCallResult(input.config.name, result)
 
-    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
+    return yield* mcpToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export type CallRemoteMcpServerToolInput = Omit<CallMcpServerToolInput, 'config'> & {
@@ -1042,11 +1042,8 @@ const resumableOutcome = (
       }
 
       return decodeCallResult(server, step.raw).pipe(
-        Effect.map(result =>
-          McpToolCallComplete.make({
-            result: toolCallResultToToolResult({ toolCallId: input.toolCallId, result })
-          })
-        )
+        Effect.flatMap(result => mcpToolResult({ toolCallId: input.toolCallId, result })),
+        Effect.map(result => McpToolCallComplete.make({ result }))
       )
   }
 }
@@ -1168,7 +1165,7 @@ export const callLocalMcpServerTool = (
       )
     )
 
-    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
+    return yield* mcpToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callMcpServerTool = (

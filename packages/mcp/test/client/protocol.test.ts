@@ -6,7 +6,9 @@ import {
   FilePart,
   ImagePart,
   TextPart,
-  inlineBase64Source
+  inlineBase64Source,
+  toolFileJsonSchema,
+  toolFileJsonSchemaDefinitions
 } from '@yolk-sdk/agent/protocol'
 import {
   defaultMcpSecurityPolicy,
@@ -18,6 +20,7 @@ import {
   makeInitializeParams,
   makeInitializedNotification,
   makeJsonRpcRequest,
+  mcpToolOutputSchema,
   mcpToolToToolDef,
   McpTool,
   sanitizeMcpName,
@@ -166,10 +169,10 @@ describe('MCP protocol helpers', () => {
     })
 
     expect(omitted.parameters).toEqual({ type: 'object', additionalProperties: true })
-    expect(Object.hasOwn(omitted, 'outputSchema')).toBe(false)
+    expect(omitted.outputSchema).toEqual(mcpToolOutputSchema(undefined))
   })
 
-  it('passes a present MCP outputSchema through as a declaration-only ToolDef.outputSchema', () => {
+  it('declares a present MCP outputSchema as the value of { value, files }', () => {
     const outputSchema = { type: 'object', properties: { total: { type: 'number' } } }
 
     const listed = Schema.decodeUnknownResult(ToolsListResult)({
@@ -184,7 +187,16 @@ describe('MCP protocol helpers', () => {
         tool: listed.success.tools[0] ?? { name: 'count', outputSchema }
       })
 
-      expect(def.outputSchema).toBe(outputSchema)
+      expect(def.outputSchema).toEqual({
+        type: 'object',
+        properties: {
+          value: outputSchema,
+          files: { type: 'array', items: toolFileJsonSchema }
+        },
+        required: ['value', 'files'],
+        additionalProperties: false,
+        $defs: toolFileJsonSchemaDefinitions
+      })
       expect(def.callableBy).toBeUndefined()
     }
 
@@ -194,7 +206,7 @@ describe('MCP protocol helpers', () => {
         tool: { name: 'count', outputSchema: invalid }
       })
 
-      expect(Object.hasOwn(def, 'outputSchema')).toBe(false)
+      expect(def.outputSchema).toEqual(mcpToolOutputSchema(undefined))
     }
   })
 
