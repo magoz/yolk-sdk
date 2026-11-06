@@ -21,9 +21,13 @@ import {
   FortnoxCombinedOAuthCredentialSlot,
   FortnoxCreateCustomerInput,
   FortnoxCustomerNumber,
+  FortnoxDocumentNumber,
+  type FortnoxInvoiceRowInput,
   FortnoxUpdateCustomerInput,
+  FortnoxUpdateInvoiceInput,
   fortnoxCreateCustomerAction,
   fortnoxUpdateCustomerAction,
+  fortnoxUpdateInvoiceAction,
   FortnoxOAuthCredentialSlot,
   FortnoxInvoice,
   FortnoxSupplierInvoice,
@@ -779,6 +783,48 @@ describe('Fortnox connector', () => {
 
       expect(harness.requests).toHaveLength(0)
       expect(harness.scopes).toHaveLength(0)
+    })
+  )
+
+  it.effect('checks typed invoice rows when the input is made and sends them unchanged', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({ Invoice: { DocumentNumber: '002', CustomerNumber: '001' } })
+      ])
+
+      const row: FortnoxInvoiceRowInput = {
+        Description: 'Filmning',
+        DeliveredQuantity: '1',
+        Price: 1160
+      }
+
+      const extraRow = Object.assign({ Description: 'Filmning' }, { PriceExcludingVAT: 1160 })
+      const documentNumber = FortnoxDocumentNumber.make('002')
+
+      expect(() =>
+        FortnoxUpdateInvoiceInput.make({ DocumentNumber: documentNumber, InvoiceRows: [extraRow] })
+      ).toThrow()
+
+      const input = FortnoxUpdateInvoiceInput.make({
+        DocumentNumber: documentNumber,
+        Remarks: 'Printed invoice text',
+        InvoiceRows: [row]
+      })
+
+      // Hosts that wrap the action re-encode the input before invoking the connector.
+      expect(yield* Schema.encodeUnknownEffect(FortnoxUpdateInvoiceInput)(input)).toEqual({
+        DocumentNumber: '002',
+        Remarks: 'Printed invoice text',
+        InvoiceRows: [row]
+      })
+
+      yield* fortnoxUpdateInvoiceAction
+        .executeTyped({ integration, input })
+        .pipe(Effect.provide(harness.layer))
+
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: { Remarks: 'Printed invoice text', InvoiceRows: [row] }
+      })
     })
   )
 

@@ -53,7 +53,7 @@ import {
   FortnoxGetCustomerInput,
   FortnoxGetInvoiceInput,
   type FortnoxInvoiceRow,
-  FortnoxInvoiceRowInput,
+  type FortnoxInvoiceRowInput,
   FortnoxListInvoicesInput,
   FortnoxUpdateInvoiceInput,
   type FortnoxCustomer,
@@ -558,7 +558,7 @@ const writableRow = (row: FortnoxInvoiceRow, discount: RowDiscount): FortnoxInvo
       break
   }
 
-  return FortnoxInvoiceRowInput.make(out)
+  return out
 }
 
 /** Rows the restore can write back exactly: an explicit numeric `Discount` and a PERCENT type. */

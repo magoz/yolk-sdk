@@ -37,14 +37,16 @@ Do not mix versions unless a release note explicitly says it is safe.
 internal note; both are limited to 1024 characters. Invoice write rows change shape, a breaking
 change for hosts that build them:
 
-- Write rows are `FortnoxInvoiceRowInput`, not the read schema `FortnoxInvoiceRow`. Build typed rows
-  with `FortnoxInvoiceRowInput.make`. Read-only `PriceExcludingVAT`, `Total`, and
+- Write rows are `FortnoxInvoiceRowInput`, not the read schema `FortnoxInvoiceRow`. It is a closed
+  schema with a matching type, not a class: replace `FortnoxInvoiceRow.make(row)` with a plain
+  object typed `FortnoxInvoiceRowInput`. Read-only `PriceExcludingVAT`, `Total`, and
   `TotalExcludingVAT` are no longer inputs (Fortnox rejected a written `PriceExcludingVAT` with
   code 2000321); send `Price`.
-- Rows are closed: an unknown row key fails validation instead of being dropped. Connector
-  `execute`/`invoke` fail with `validation_failed`, generated agent tools reject the call, and
-  `FortnoxCreateInvoiceInput.make` / `FortnoxUpdateInvoiceInput.make` throw, so a typed input for
-  `executeTyped` cannot carry one. Invoice-level unknown keys are still dropped on `execute`.
+- Rows are closed: an unknown row key fails instead of being dropped. Connector `execute`/`invoke`
+  fail with `validation_failed`, generated agent tools reject the call, and
+  `FortnoxCreateInvoiceInput.make` / `FortnoxUpdateInvoiceInput.make` throw. `executeTyped` does
+  not re-check an existing instance, so an instance changed after `make` is not re-validated.
+  Invoice-level unknown keys are still dropped on `execute`.
 - Row fields reject `null` (generated agent tools still treat a model's `null` as omitted), `VAT`
   is an integer, `DiscountType` is `AMOUNT` or `PERCENT`, and `Description` and `Unit` follow
   Fortnox's 255 and 20 character limits.

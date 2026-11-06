@@ -133,9 +133,10 @@ export class FortnoxInvoiceRow extends Schema.Class<FortnoxInvoiceRow>('FortnoxI
 // Writable InvoiceRow fields per the Fortnox OpenAPI row payload. RowId only selects which
 // existing row a sent row updates (see the update note); read-only PriceExcludingVAT, Total, and
 // TotalExcludingVAT are not inputs (Fortnox rejects PriceExcludingVAT with code 2000321).
-export class FortnoxInvoiceRowInput extends Schema.Class<FortnoxInvoiceRowInput>(
-  'FortnoxInvoiceRowInput'
-)({
+// A closed schema, not a Class: a Class constructor strips unknown keys, and a stripped key such
+// as PriceExcludingVAT would send a row without its price. Build rows as plain objects; the
+// invoice input classes check them when they are made or decoded.
+export const FortnoxInvoiceRowInput = closedInput({
   RowId: OptionalInt,
   AccountNumber: OptionalInt,
   ArticleNumber: OptionalString,
@@ -149,7 +150,9 @@ export class FortnoxInvoiceRowInput extends Schema.Class<FortnoxInvoiceRowInput>
   VATCode: OptionalString,
   CostCenter: OptionalString,
   Project: OptionalString
-}) {}
+})
+
+export type FortnoxInvoiceRowInput = typeof FortnoxInvoiceRowInput.Type
 
 const InvoiceFields = {
   Currency: NullableString,
@@ -381,9 +384,8 @@ const InvoiceMutationFields = {
   Remarks: optionalMaxLength(1024),
   CostCenter: OptionalString,
   Project: OptionalString,
-  // Rows are closed: a stripped row key (for example PriceExcludingVAT) would send a row without
-  // its price, so unknown row keys fail validation even though invoice-level keys are stripped.
-  InvoiceRows: Schema.optional(Schema.Array(closedInput(FortnoxInvoiceRowInput.fields)))
+  // Rows are closed (see FortnoxInvoiceRowInput) even though invoice-level keys are stripped.
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRowInput))
 } as const
 
 const InvoiceWriteFields = {
