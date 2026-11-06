@@ -568,6 +568,7 @@ describe('@yolk-sdk/connectors', () => {
       email,
       figma,
       google,
+      kie,
       linkedIn,
       microsoft,
       notion,
@@ -582,6 +583,7 @@ describe('@yolk-sdk/connectors', () => {
       import('@yolk-sdk/connectors/email'),
       import('@yolk-sdk/connectors/figma'),
       import('@yolk-sdk/connectors/google'),
+      import('@yolk-sdk/connectors/kie'),
       import('@yolk-sdk/connectors/linkedin-search'),
       import('@yolk-sdk/connectors/microsoft'),
       import('@yolk-sdk/connectors/notion'),
@@ -598,6 +600,7 @@ describe('@yolk-sdk/connectors', () => {
     expect(email.EmailConnector).toBeDefined()
     expect(figma.FigmaConnector).toBeDefined()
     expect(google.GoogleConnector).toBeDefined()
+    expect(kie.KieConnector).toBeDefined()
     expect(linkedIn.LinkedInSearchConnector).toBeDefined()
     expect(microsoft.MicrosoftConnector).toBeDefined()
     expect(notion.NotionConnector).toBeDefined()

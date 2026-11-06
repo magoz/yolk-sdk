@@ -16,6 +16,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customers, invoices, suppliers, articles, prices, cost centers, payments, offers, print, inbox, settings, profile |
 | GitHub          | `@yolk-sdk/connectors/github`          | `GithubTokenSlot`, `GithubUploadTokenSlot`   | `owner`, `repo`                                    | issue, PR, review, merge, repo context actions                                                                             |
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                                                                                           |
+| Kie             | `@yolk-sdk/connectors/kie`             | `KieApiKeySlot`                              | none                                               | image + video generation tasks, task status                                                                                |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                                                                                     |
 | Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph                                                                                           |
 | Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions                                                                                           |
@@ -925,6 +926,27 @@ The built-in endpoint targets the global Microsoft cloud; it does not currently 
 national-cloud Graph hosts.
 
 Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
+
+## Kie
+
+| Action id               | What it does                                                            | Access  |
+| ----------------------- | ----------------------------------------------------------------------- | ------- |
+| `kie.create_image_task` | submit a GPT Image 2 task (image-to-image when `inputUrls` are given)   | `write` |
+| `kie.create_video_task` | submit a Wan 2.7 image-to-video task from a first frame or a first clip | `write` |
+| `kie.get_task`          | read a task's state, raw `resultJson`, result URLs, and failure detail  | `read`  |
+
+All actions use `KieApiKeySlot` (`kie.api_key`, sent as a bearer token). Generation is
+asynchronous: the create actions return a `taskId` (each task spends Kie credits) and
+`kie.get_task` polls it. `callBackUrl` is an action input (model-supplied when the action is a
+tool); hosts that allow it own the webhook and its verification, and hosts that must pin it strip
+or override it. Code-mode scripts have no timers, so expose `kie.get_task` with
+`callableBy: 'model'` ([code mode polling gap](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0002-code-mode.md#known-gap-polling)). Input
+URLs are fetched by Kie, so the connector checks only that they are absolute http(s) URLs without
+credentials. Kie answers most failures with HTTP 200 and a non-200 envelope `code`; the connector
+returns those, and non-2xx statuses, as `ProviderFailure`s (`kie_unauthorized`,
+`kie_insufficient_credits`, `kie_validation`, `kie_rate_limited`, `kie_generation_failed`, ...).
+A task in state `fail` is a successful read carrying `failCode` and `failMsg`. Result URLs expire
+(Kie keeps generated files for 14 days).
 
 ## LinkedIn search
 
