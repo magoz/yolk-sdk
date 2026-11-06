@@ -34,9 +34,14 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 
 - Nested calls go only through `nested.execute` (the resolved execute path). Never call tool
   executors directly; never bypass input decoding or registration wrappers.
-- A nested result with captured files (`ToolResult.files`, ADR 0009) resolves with `files`
-  descriptors (merged into an object value, replacing any own `files` key, else
-  `{ text, files }`); scripts pass `fileId`s, never bytes.
+- Nested results follow ADR 0013 (`resolveNestedResult` in `tool.ts`): a typed tool (output schema)
+  resolves to its `structuredContent` as declared, file fields `FileRef | FileUnavailable`, nothing
+  merged; a typed success without a value rejects `<label>: returned an invalid result` (and logs a
+  warning), never falls back to text; an untyped tool resolves to its `Text` parts joined with
+  `\n` (file, image, document and audio parts contribute nothing, so labels never reach scripts);
+  failures reject `<label>: <text parts>` with `.code` from a structured error's string `code`
+  (`ModelVisibleToolError.code`, a connector `ProviderFailure`). Scripts pass `fileId`s, never
+  bytes.
 - Host decorators around the `ToolExecutor` (outside `ResolvedToolSet.execute`) never see nested
   calls. Per-call run-authority checks belong in `beforeNestedCall` (a failure rejects the call in
   the script and records it as `error` without executing) or registration-level wrappers.
@@ -128,8 +133,19 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   Cancelled and failed-unexpectedly rejections use the same label.
 - Nested calls rejected for an error result, a `beforeNestedCall` failure, or `maxNestedCalls`
   reject with `<label>: <text>` (fallback text `Tool <name> failed.`); nested-call records keep the
-  raw text. A tool with an output schema but no `structuredContent` resolves to its text (a tool
-  bug, kept readable).
+  raw text (text parts only). A tool with an output schema but no `structuredContent` rejects
+  (`returned an invalid result`).
+- The description intro declares `FileRef` and `FileUnavailable` once and says "`string` results
+  are text to read; parse JSON only when the tool says it returns JSON." Declarations, signatures and
+  direct tool lines render file fields as `FileRef | FileUnavailable` when the output schema's
+  `$defs` equal `toolFileJsonSchemaDefinitions` (`renderableOutput` in `catalog.ts`: sentinel
+  constants the pi renderer quotes, replaced by the names after rendering); untyped tools render
+  `string`. Result types keep the 60-character short-type budget.
+- pi forwards only a rejection's message into QuickJS: the pi executor's tool bridge (`piTool` in
+  `node.ts`) rejects every tool call with `rejectionPrefix` plus the JSON of `{ message, code? }`,
+  and the tools guard (built-ins captured before the script runs) rebuilds the `Error` with its
+  `code`. Globals are not encoded. Calls through the unguarded `globalThis.tools` see the encoded
+  message.
 - Code mode access is `write`; nested calls keep their own access metadata.
 - Staged tool plans (ADR 0005): when `nested.staging` exists and `staging !== false`, the script
   gets a `stage(name, args)` global (spread args, fibers of a scoped `FiberSet`, not recorded as

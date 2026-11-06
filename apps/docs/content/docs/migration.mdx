@@ -30,6 +30,82 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: typed tool results
+
+A tool's typed output is now the single contract for code mode scripts, files are typed fields of
+that output, and script values never contain file labels
+([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)).
+`makeTool` tools that return a `ToolResult` keep working in this canary (deprecated).
+
+Convert a tool that returns `[TextPart(JSON), FilePart]`:
+
+```ts
+// Before (deprecated)
+makeTool({
+  name: 'export_invoice',
+  parameters: Params,
+  access: 'read',
+  execute: ({ call, params }) =>
+    exportInvoice(params.id).pipe(
+      Effect.map(invoice =>
+        ToolResult.make({
+          toolCallId: call.id,
+          content: [
+            TextPart.make({ text: JSON.stringify({ number: invoice.number }) }),
+            filePartFromBytes({
+              bytes: invoice.pdf,
+              mimeType: 'application/pdf',
+              filename: 'invoice.pdf'
+            })
+          ]
+        })
+      )
+    )
+})
+
+// After
+makeTool({
+  name: 'export_invoice',
+  parameters: Params,
+  output: Schema.Struct({ number: Schema.String, pdf: ToolFile }),
+  access: 'read',
+  execute: ({ params }) =>
+    exportInvoice(params.id).pipe(
+      Effect.map(invoice => ({
+        output: {
+          number: invoice.number,
+          pdf: new FileBytes({
+            bytes: invoice.pdf,
+            name: 'invoice.pdf',
+            mimeType: 'application/pdf'
+          })
+        }
+      }))
+    )
+})
+```
+
+- With `output`, return `{ output }`: Yolk encodes it (`Schema.toCodecJson`), captures file fields
+  into `FileRef { fileId, name, mimeType, size }` (or `FileUnavailable { unavailable, name,
+mimeType }`), and shows the model compact JSON with file labels, or `render(value, files)`.
+  `output` schemas must encode without services. A deprecated `ToolResult` whose
+  `structuredContent` does not match `output` loses it (logged), so scripts reject the call.
+- Without `output`, return `{ content }`; a structured value needs `output`.
+- `modelVisibleToolError({ code })` gives scripts `error.code`.
+- Scripts: typed tools resolve to their declared value with no merged `files`; a typed result
+  without a value rejects (`returned an invalid result`); untyped tools resolve to their text
+  without file labels; failures reject with the message and `error.code`. Remove `JSON.parse` of
+  typed results and `typeof r === 'string'` guards.
+- MCP tools declare and resolve to `{ value, files }` (`value` is `structuredContent`, else the text
+  parsed once when it is one JSON object or array, else the text).
+- Connector `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` resolve to
+  `{ value, files }` instead of `{ ...metadata, files }`.
+- Labels are `File` parts now: a captured image, document or audio part is followed by a `File` part
+  with a `Ref` source instead of a text label, and an unstored file is a `File` part with the new
+  `Omitted { reason }` source. Providers render the same text. Readers older than this canary cannot
+  decode transcripts holding an `Omitted` source.
+- The tool ledger keeps typed values whole: an oversized value replays as an error result.
+
 ### Canary.125: Fortnox invoice Remarks and row inputs
 
 `fortnox.create_invoice` and `fortnox.update_invoice` accept `Remarks`, the invoice text

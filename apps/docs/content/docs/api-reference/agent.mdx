@@ -243,7 +243,9 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 | `toolIdempotencyKey`, `defaultToolLedgerPolicy`, `abandonedToolCallResult`, `ToolLedgerPolicyInput`, `ToolLedgerAbandonedInput`, `ToolLedgerErrorDetails`                                                                                                                                                                                                                   | idempotency keys, default policy, and ledger results                                                                                                                               |
 | `FileStoreApi`, `FileStoreError`, `ToolFileCaptureOptions`, `captureToolResultFiles`, `defaultMaxCapturedFileBytes`                                                                                                                                                                                                                                                         | file capture (`resolveTools` `files` option, 100 MiB default bound; [move files between tools](../integrations/files))                                                             |
 
-`makeTool` also accepts `output` (declaration-only `ToolDef.outputSchema`), `callableBy`,
+`makeTool` also accepts `output` (typed results: `execute` returns `{ output }`, encoded into
+`structuredContent` and declared as `ToolDef.outputSchema`; file fields are `ToolFile`, ADR 0013),
+`render`, `callableBy`,
 `discovery`, `loading`, `nestedToolAccess`, `describe`, `instruct`, `abandonedResult` (the result of a ledgered call
 found abandoned), `changePreview` (approval-gated tools: the change preview of approvals and plan
 reviews; `ResolvedToolSet.approvalPreviews` carries the resolved previewers for loop configs, and

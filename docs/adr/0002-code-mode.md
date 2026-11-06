@@ -134,10 +134,10 @@ These changes are useful without code mode and land first.
 
 ### Output schemas
 
-Add an optional `output` Effect Schema to `makeTool` and `ToolRegistration`, rendered to JSON
-Schema for declarations. Connector registrations pass their action `outputSchema` through. A
-nested call to a tool with an output schema resolves to its `structuredContent`; other tools
-resolve to their text content.
+Superseded by [Typed tool results](0013-typed-tool-results.md): a tool's `output` schema encodes
+its result (`Schema.toCodecJson`), and that encoding is what nested calls resolve to; a typed
+result without a value rejects, untyped tools resolve to their text parts, and file fields are
+`FileRef | FileUnavailable`.
 
 ### Exposure
 

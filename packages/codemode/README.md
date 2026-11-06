@@ -58,14 +58,20 @@ const program = Effect.gen(function* () {
   truncated error, and usage. The record keeps up to `maxNestedCalls` calls, at most 4096
   (`nestedToolCallMaxRecordedCalls`; argument byte budgets still apply), and per-status `counts`
   over every call. Nested results never reach the model; only the script output and return value do.
-- A call resolves to `structuredContent` for tools with an output schema and to the text content
-  otherwise; error results, `beforeNestedCall` failures, and calls past `maxNestedCalls` reject
-  with an `Error` whose message is `tools.<id>: <text>`, or `tools["<name>"]: <text>` for a tool
-  whose identifier an earlier tool already uses (the nested-call record keeps the raw text). Calls
-  still running when the script ends are cancelled and recorded as `cancelled`.
-- A call whose result captured files (`ToolResult.files`, ADR 0009) also resolves
-  `files: [{ fileId, name, mimeType, size }]`, merged into an object result (replacing any own
-  `files` key) or as `{ text, files }`. Scripts pass `fileId`s to other tools; file bytes never
+- Typed results ([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)):
+  a tool with an output schema resolves to its value as declared (arrays and primitives included;
+  file fields are `FileRef | FileUnavailable`); a typed result without a value rejects
+  `tools.<id>: returned an invalid result`. A tool without one resolves to its text parts joined
+  with newlines (`Promise<string>`); its files reach the model, not the script. Script values
+  never contain file labels. Error results, `beforeNestedCall` failures, and calls past
+  `maxNestedCalls` reject with an `Error` whose message is `tools.<id>: <text>`, or
+  `tools["<name>"]: <text>` for a tool whose identifier an earlier tool already uses (the
+  nested-call record keeps the raw text), with `error.code` when the tool reports a code
+  (`ModelVisibleToolError.code`, a connector failure's code). Calls still running when the script
+  ends are cancelled and recorded as `cancelled`.
+- `type FileRef = { fileId, name, mimeType, size }` and
+  `type FileUnavailable = { unavailable, name, mimeType }` are declared once in the description;
+  signatures show file fields by name. Scripts pass `fileId`s to other tools; file bytes never
   enter the script.
 - Arguments make a JSON round trip: `undefined` keys and `null` optionals are absent, unknown keys
   reject with a hint naming the allowed keys, and values JSON would silently change (`NaN`,

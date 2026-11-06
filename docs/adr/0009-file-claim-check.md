@@ -43,7 +43,7 @@ transcript, and swap the id back for bytes (or a signed link) at the edge that c
 | Capture     | `resolveTools({ files })` captures every registration result, top-level, nested and staged, pre-ledger  |
 | Identity    | `fileId` is derived from the scope and `sha256`: replays and duplicates resolve to the same file        |
 | Model view  | Captured `File` parts become `Ref { id: fileId }`, lowered as a text label; bytes never reach the model |
-| Scripts     | `ToolResult.files` lists descriptors; nested results resolve them as `files`                            |
+| Scripts     | Superseded by [ADR 0013](0013-typed-tool-results.md): files are typed fields (`FileRef`) of the value   |
 | Store       | Scope-bound `FileStoreApi` from the host; `@yolk-sdk/files` ships an object-storage implementation      |
 | Tools       | `file_upload`, `file_url`, `file_to_sandbox`, `file_from_sandbox` in `@yolk-sdk/files`                  |
 | Sinks       | Host and connector tools that take files accept `fileId`, in tagged unions where inputs vary            |
@@ -63,7 +63,7 @@ the files captured from that result. Like `nestedCalls` it is not sent to provid
 carries the labels.
 
 Captured `Image`, `Document` and `Audio` parts keep their inline source in this slice, so the model
-still sees them unchanged; capture stores a copy and appends its label. Rewriting their source to
+still sees them unchanged; capture stores a copy and appends its `File` part (`Ref`). Rewriting their source to
 the same `Ref` (one object for viewing and moving) needs hosts to resolve `file_` refs in their
 `AttachmentSourceResolver` and is a later step.
 
@@ -73,16 +73,20 @@ the same `Ref` (one object for viewing and moving) needs hosts to resolve `file_
 result passes `captureToolResultFiles` in `runRegistration`, the single path of direct calls,
 nested code mode calls and applied staged plans, before the ledger records it. For each inline part:
 
-1. `File`: stored and rewritten to `Ref`; over the bound or when storing fails, replaced by the
-   "not captured" label (the failure is logged, never fatal);
-2. `Image`, `Document`, `Audio`: stored and followed by their label; on failure left as they are.
+1. `File`: stored and rewritten to `Ref`; over the bound or when storing fails, rewritten to
+   `Omitted { reason }`, lowered as the "not captured" label (the failure is logged, never fatal);
+2. `Image`, `Document`, `Audio`: stored and followed by a `File` part with that `Ref` (lowered as
+   their label); on failure left as they are.
+
+Labels are `File` parts, never plain text parts ([ADR 0013](0013-typed-tool-results.md)), so
+scripts never see them; capturing a captured result again changes nothing.
 
 Capture runs before the ledger and durable history, so replays, the transcript and code mode stores
 hold `fileId`s instead of `File` bytes (viewable media keep their inline source in this slice). The ledger keeps `files` through every reduction step and on replay. Results
 without inline bytes pass through unchanged. Capture is eager: MCP blobs and fetched bodies cannot
 be fetched again later.
 
-Without `files`, inline `File` parts still become the "not captured" label, so no base64 reaches a
+Without `files`, inline `File` parts still become `Omitted` ("not captured"), so no base64 reaches a
 provider; image, document and audio parts keep today's behaviour. Hosts pass `files` only on
 surfaces allowed to capture (for example not on automatic continuations); to share files with a
 subagent, they give it a store bound to the same scope.
@@ -92,14 +96,14 @@ reduces a stored result, a `File` part becomes its label, so replays keep the `f
 
 ## 3. Scripts
 
-Code mode nested calls resolve to `structuredContent` when a tool declares `output`, otherwise to
-text. When `ToolResult.files` is not empty the script also gets the descriptors as `files`: merged
-into an object value, otherwise as `{ text, files }`. The code mode description says so. Scripts
+Superseded by [Typed tool results](0013-typed-tool-results.md). Files are typed fields of a tool's
+output: scripts read a `FileRef` (or `FileUnavailable`) where the tool declared a `ToolFile`, never
+a merged `files` key or `{ text, files }`, and script values never contain file labels. Scripts
 pass `fileId` strings between tools; bytes never enter QuickJS or `store()`.
 
 ```js
-const r = await tools.gmail({ operation: 'get_attachment', messageId, attachmentId, account })
-const f = r.files[0]
+const r = await tools.gmail_get_attachment({ messageId, attachmentId })
+const f = r.files[0] // { fileId, name, mimeType, size } or { unavailable, name, mimeType }
 const up = await tools.mcp_afloat_create_receipt_upload({
   contentLength: f.size,
   contentType: f.mimeType
@@ -178,7 +182,9 @@ defaultUrlTtlSeconds?, isEnabled? })`:
 - `@yolk-sdk/connectors`: an action whose output carries bytes declares `fileOutput`: a byte-free
   `schema` (declared as the agent tool output) and `split` (that value plus base64 files, typed by
   `connectorActionFile`, which sniffs common MIME types). The agent bridge returns the bytes as
-  `FilePart`s after the text; `connector.invoke` keeps the full output for hosts.
+  `FilePart`s after the text; `connector.invoke` keeps the full output for hosts. Since
+  [ADR 0013](0013-typed-tool-results.md) the bridge declares `{ value, files }` and returns the
+  files as file fields instead.
   `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` use it. Host-only
   downloaders (`downloadGoogleDriveFile`, ...) stay host APIs: hosts wrap their bytes with
   `filePartFromBytes`.

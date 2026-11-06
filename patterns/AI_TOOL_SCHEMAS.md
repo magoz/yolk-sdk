@@ -16,11 +16,13 @@ to typed validation errors. Background envelopes preserve boolean schemas as the
 
 - `ToolDef.outputSchema` (from `makeTool({ output })`, connector action `outputSchema`, or MCP
   `outputSchema`) uses the same `ToolJsonSchema` representation and the same lowering as
-  `parameters`, omitted-null marker included (see Tool arguments). It is declaration-only guidance for code mode: provider adapters never send it and
-  results are never validated against it, so provider rules below do not apply to it.
-- A tool declaring an output schema returns, on successful results, `structuredContent` that is the
-  `Schema.toCodecJson(output)` encoding of its value; error results (`isError`) keep their own
-  structured content (see `packages/agent/AGENTS.md`).
+  `parameters`, omitted-null marker included (see Tool arguments). Provider adapters never send it,
+  so provider rules below do not apply to it; it is the type code mode scripts receive.
+- Typed tool results ([ADR 0013](../docs/adr/0013-typed-tool-results.md)): a `makeTool` with
+  `output` returns `{ output }` and Yolk encodes it with `Schema.toCodecJson(output)` into
+  `structuredContent` (a value that does not encode is an `execution` `ToolError`). File fields are
+  `ToolFile` (`FileRef | FileUnavailable` in the encoding, `$defs` `FileRef`/`FileUnavailable`).
+  Error results (`isError`) keep their own structured content (see `packages/agent/AGENTS.md`).
 - `callableBy: 'codemode'` definitions are not provider-facing at all; the loop and realtime
   builders filter them with `providerToolDefs` before any adapter lowers schemas.
 
