@@ -3,10 +3,11 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   contentText,
-  filePartText,
   TextPart,
   ToolResult,
   type Content,
+  type ContentPart,
+  type FilePart,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -433,17 +434,21 @@ const reducedNote = '[The stored copy of this result was reduced to fit the tool
 
 const mediaPlaceholder = (tag: string) => `[${tag.toLowerCase()} omitted from the stored result]`
 
-// Files keep their label (their `fileId` stays model-visible on replay, ADR 0009); other media
-// parts become placeholders.
-const textOnlyContent = (content: Content): Content =>
+// A `File` part without inline bytes: a `Ref` (or `Url`) to a stored file, or an `Omitted` marker.
+// A few bytes each; they stay structural through every reduction (ADR 0013).
+const isStructuralFilePart = (part: ContentPart): part is FilePart =>
+  Predicate.isTagged(part, 'File') && !Predicate.isTagged(part.source, 'InlineBase64')
+
+// Inline media bytes become placeholders. `File` parts stay as they are: their `fileId` stays
+// model-visible on replay (ADR 0009, lowered to its label by providers), and their label never
+// becomes text that code mode scripts would read (ADR 0013).
+const withoutMediaBytes = (content: Content): Content =>
   Predicate.isString(content)
     ? content
     : content.map(part =>
-        Predicate.isTagged(part, 'Text')
+        Predicate.isTagged(part, 'Text') || isStructuralFilePart(part)
           ? part
-          : Predicate.isTagged(part, 'File')
-            ? TextPart.make({ text: filePartText(part) })
-            : TextPart.make({ text: mediaPlaceholder(part._tag) })
+          : TextPart.make({ text: mediaPlaceholder(part._tag) })
       )
 
 const withNote = (content: Content): Content =>
@@ -473,11 +478,17 @@ const codeUnitPrefix = (text: string, maxUnits: number) => {
 
 // The whole `text` when it fits, else its longest prefix (whole code points) whose cut content
 // keeps the result within `maxBytes`, measured on the actual serialized JSON (escapes such as
-// `\u0001` take six bytes). Below that: the note alone, then an empty content.
-const fitText = (base: StoredResultFields, text: string, maxBytes: number): ToolResult => {
+// `\u0001` take six bytes). The `File` parts follow the text, structural. Below that: the note
+// alone (with the file parts, then without), then an empty content; `files` stays either way.
+const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number): ToolResult => {
+  const { text, files } = reduced
+
+  const withFiles = (kept: string): Content =>
+    files.length === 0 ? kept : [TextPart.make({ text: kept }), ...files]
+
   const withText = (kept: string): StoredResultFields => ({
     ...base,
-    content: `${kept}\n\n${reducedNote}`
+    content: withFiles(`${kept}\n\n${reducedNote}`)
   })
 
   const whole = withText(text)
@@ -492,9 +503,14 @@ const fitText = (base: StoredResultFields, text: string, maxBytes: number): Tool
     withText(`${characters.slice(0, count).join('')}${truncationMarker}`)
 
   if (resultBytes(cut(0)) > maxBytes) {
-    const noteOnly: StoredResultFields = { ...base, content: reducedNote }
+    const fallbacks: ReadonlyArray<StoredResultFields> = [
+      { ...base, content: withFiles(reducedNote) },
+      { ...base, content: reducedNote }
+    ]
 
-    return ToolResult.make(resultBytes(noteOnly) <= maxBytes ? noteOnly : { ...base, content: '' })
+    return ToolResult.make(
+      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? { ...base, content: '' }
+    )
   }
 
   // `cut(characters.length)` never fits: it is the whole text plus the marker, or a prefix of at
@@ -519,15 +535,21 @@ const fitText = (base: StoredResultFields, text: string, maxBytes: number): Tool
  * The stored copy of a result: wire-safe (`structuredContent` made plain JSON through a JSON round
  * trip, dropped when it cannot be serialized) and at most `maxBytes` UTF-8 bytes of compact JSON,
  * measured on the serialized result. Over the bound it degrades in steps, each adding a note to
- * the content: media parts become text placeholders, then `nestedCalls` (audit data) is dropped,
- * then `structuredContent` (which can carry state, such as code mode store writes), then the text
- * is cut. A bound smaller than the identifying fields (`toolCallId`, `isError`, `acceptance`,
- * `usage`) leaves an empty content. The live call still returns the original result; only replays
- * see the stored copy.
+ * the content: inline media bytes become text placeholders, then `nestedCalls` (audit data) is
+ * dropped, then `structuredContent` (which can carry state, such as code mode store writes), then
+ * the text is cut. With `typed` (ADR 0013), a successful result's `structuredContent` is never
+ * dropped or cut: the content is cut instead, and a value over the bound by itself is stored as a
+ * fixed error result (`typedResultTooLargeMessage`). `File` parts without inline bytes (`Ref`,
+ * `Omitted`) and `files` stay through every step: the text cut keeps them after the text, as
+ * parts, so their labels never become text a code mode script reads; only a bound too small for
+ * them leaves the note alone. A bound smaller than the identifying fields (`toolCallId`,
+ * `isError`, `acceptance`, `usage`) leaves an empty content. The live call still returns the
+ * original result; only replays see the stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,
-  maxBytes: number = defaultToolLedgerMaxResultBytes
+  maxBytes: number = defaultToolLedgerMaxResultBytes,
+  options: ToolLedgerResultOptions = {}
 ): ToolResult => {
   const full: StoredResultFields = { toolCallId: result.toolCallId, content: result.content }
 
@@ -551,7 +573,10 @@ export const toolLedgerResult = (
 
   if (resultBytes(full) <= maxBytes) return ToolResult.make(full)
 
-  const textOnly: StoredResultFields = { ...full, content: withNote(textOnlyContent(full.content)) }
+  const textOnly: StoredResultFields = {
+    ...full,
+    content: withNote(withoutMediaBytes(full.content))
+  }
 
   if (resultBytes(textOnly) <= maxBytes) return ToolResult.make(textOnly)
 
@@ -561,29 +586,65 @@ export const toolLedgerResult = (
 
   if (resultBytes(withoutNested) <= maxBytes) return ToolResult.make(withoutNested)
 
+  // A typed value is what scripts read (ADR 0013): cut the content, which only renders it, and
+  // never the value; a value over the bound by itself replays as a fixed error.
+  if (options.typed === true && result.isError !== true && full.structuredContent !== undefined) {
+    const valueOnly: StoredResultFields = { ...withoutNested, content: reducedNote }
+
+    return resultBytes(valueOnly) <= maxBytes
+      ? fitText(withoutNested, cutContent(result.content), maxBytes)
+      : typedResultTooLarge(full)
+  }
+
   const withoutStructured: StoredResultFields = { ...withoutNested }
 
   delete withoutStructured.structuredContent
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  return fitText(withoutStructured, labelsFirstText(result.content), maxBytes)
+  return fitText(withoutStructured, cutContent(result.content), maxBytes)
 }
 
-// The text the last reduction step cuts: file labels first, so a long text cannot cut them off.
-const labelsFirstText = (content: Content) => {
-  if (Predicate.isString(content)) return content
-
-  const labels = content.flatMap(part =>
-    Predicate.isTagged(part, 'File') ? [filePartText(part)] : []
-  )
-
-  const rest = contentText(
-    textOnlyContent(content.filter(part => !Predicate.isTagged(part, 'File')))
-  )
-
-  return [...labels, rest].join('\n')
+/** How `toolLedgerResult` reduces a result. */
+export type ToolLedgerResultOptions = {
+  /** The result is a typed tool's (`ToolDef.outputSchema`): its `structuredContent` is never cut
+   * or dropped; a value over the bound by itself is stored as a fixed error result instead.
+   */
+  readonly typed?: boolean
 }
+
+/** The stored copy of a typed result whose value alone exceeds the ledger bound. */
+export const typedResultTooLargeMessage =
+  'The result of this call was too large for the tool ledger, so it cannot be replayed. The call was not run again; verify its effect before repeating it.'
+
+const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
+  const fields: StoredResultFields = {
+    toolCallId: full.toolCallId,
+    content: typedResultTooLargeMessage,
+    isError: true
+  }
+
+  if (full.usage !== undefined) fields.usage = full.usage
+
+  if (full.files !== undefined) fields.files = full.files
+
+  return ToolResult.make(fields)
+}
+
+type CutContent = {
+  readonly text: string
+  readonly files: ReadonlyArray<FilePart>
+}
+
+// What the last reduction step keeps: the text (media as placeholders), which it cuts, and the
+// `File` parts, which it never cuts and never turns into text.
+const cutContent = (content: Content): CutContent =>
+  Predicate.isString(content)
+    ? { text: content, files: [] }
+    : {
+        text: contentText(withoutMediaBytes(content.filter(part => !isStructuralFilePart(part)))),
+        files: content.filter(isStructuralFilePart)
+      }
 
 const nestedSeq = (key: string) => {
   const seq = Number(key.slice(key.lastIndexOf('/') + 1))
@@ -766,8 +827,14 @@ const boundedStoreWrite = <A>(
     })
   )
 
-const succeededOutcome = (result: ToolResult, maxBytes: number): ToolLedgerOutcome =>
-  ToolLedgerSucceeded.make({ result: toolLedgerResult(result, maxBytes) })
+const succeededOutcome = (
+  result: ToolResult,
+  maxBytes: number,
+  typed: boolean | undefined
+): ToolLedgerOutcome =>
+  ToolLedgerSucceeded.make({
+    result: toolLedgerResult(result, maxBytes, typed === true ? { typed } : {})
+  })
 
 const failedOutcome = (error: ToolError): ToolLedgerOutcome =>
   ToolLedgerFailed.make({
@@ -814,6 +881,10 @@ export const executeLedgered = (input: {
   readonly call: ToolCall
   readonly parentKey: string | undefined
   readonly execute: Effect.Effect<ToolResult, ToolError>
+  /** The call's tool declares an output schema: its stored value is never cut (ADR 0013). Decided
+   * when the outcome is recorded, so a replay never depends on the tool's current definition.
+   */
+  readonly typed?: boolean | undefined
   readonly abandonedResult?: ((input: ToolLedgerAbandonedInput) => ToolResult) | undefined
   /** The result when the wait for an in-flight duplicate ends (default `inFlightTimeoutResult`). */
   readonly inFlightTimeoutResult?: Effect.Effect<ToolResult> | undefined
@@ -963,7 +1034,7 @@ export const executeLedgered = (input: {
     // reports it as abandoned instead of running it again.
     const recordOutcome = (exit: Exit.Exit<ToolResult, ToolError>): Effect.Effect<void> => {
       if (Exit.isSuccess(exit))
-        return record(() => succeededOutcome(exit.value, options.maxResultBytes))
+        return record(() => succeededOutcome(exit.value, options.maxResultBytes, input.typed))
 
       if (Cause.hasDies(exit.cause)) return Effect.void
 

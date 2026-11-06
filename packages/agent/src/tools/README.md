@@ -106,7 +106,11 @@ bind to the call, and `staging.precheck` and the tool's write stay authoritative
 
 These are the code mode contract (`docs/adr/0002-code-mode.md`); this package does not run scripts.
 
-- `makeTool({ output })` adds declaration-only `ToolDef.outputSchema`, lowered like `parameters`.
+- Typed tool results (ADR 0013): `makeTool({ output, execute })` returns `{ output }` and Yolk
+  encodes it with `Schema.toCodecJson(output)` into `structuredContent` (what code mode scripts
+  receive) and `ToolDef.outputSchema`; file fields are `ToolFile` (return `FileBytes`, scripts get
+  `FileRef | FileUnavailable`). Without `output`, `execute` returns `{ content }`. Returning a raw
+  `ToolResult` is deprecated.
 - `callableBy: 'all' | 'model' | 'codemode'` (default `all`) and, for `codemode` only,
   `discovery: 'listed' | 'search'` (default `listed`) decide who may call a tool. Codemode-only
   tools never reach providers. Approval, input, interaction, activated background, `question`, and

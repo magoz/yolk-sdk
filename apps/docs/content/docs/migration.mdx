@@ -30,6 +30,112 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: typed tool results
+
+A tool's typed output is now the single contract for code mode scripts, files are typed fields of
+that output, and script values never contain file labels
+([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)).
+`makeTool` tools that return a `ToolResult` keep working in this canary (deprecated), except for
+files: see the first bullet below before upgrading.
+
+Convert a tool that returns `[TextPart(JSON), FilePart]`:
+
+```ts
+// Before (deprecated)
+makeTool({
+  name: 'export_invoice',
+  parameters: Params,
+  access: 'read',
+  execute: ({ call, params }) =>
+    exportInvoice(params.id).pipe(
+      Effect.map(invoice =>
+        ToolResult.make({
+          toolCallId: call.id,
+          content: [
+            TextPart.make({ text: JSON.stringify({ number: invoice.number }) }),
+            filePartFromBytes({
+              bytes: invoice.pdf,
+              mimeType: 'application/pdf',
+              filename: 'invoice.pdf'
+            })
+          ]
+        })
+      )
+    )
+})
+
+// After
+makeTool({
+  name: 'export_invoice',
+  parameters: Params,
+  output: Schema.Struct({ number: Schema.String, pdf: ToolFile }),
+  access: 'read',
+  execute: ({ params }) =>
+    exportInvoice(params.id).pipe(
+      Effect.map(invoice => ({
+        output: {
+          number: invoice.number,
+          pdf: new FileBytes({
+            bytes: invoice.pdf,
+            name: 'invoice.pdf',
+            mimeType: 'application/pdf'
+          })
+        }
+      }))
+    )
+})
+```
+
+- Files returned as `FilePart` by tools without `output` (deprecated `ToolResult` tools included)
+  are no longer reachable from scripts: the model still sees their labels, the script only the
+  text. Before upgrading, give every byte-producing tool whose files scripts move an `output` with
+  a `ToolFile` field (as above).
+- With `output`, return `{ output }`: Yolk encodes it (`Schema.toCodecJson`), captures file fields
+  into `FileRef` (`{ fileId, name, mimeType, size }`) or `FileUnavailable`
+  (`{ unavailable, name, mimeType }`), and shows the model compact JSON with file labels, or
+  `render(value, files)`. `output` schemas must encode without services and to plain JSON (a
+  `FileBytes` in a `Schema.Any` field fails the call); `Schema.Void` encodes as `null`. `ToolFile`
+  belongs only in `output`: `makeTool` throws when `parameters` holds one.
+- `resolveTools` checks every successful result of a tool with an output schema against it
+  (excess properties rejected) and passes on the checked value; a value that does not match is
+  dropped (logged without the value), so scripts reject the call while the model still sees the
+  content. This covers deprecated `ToolResult` tools and raw registrations.
+- Raw registrations (not `makeTool`) whose `def.outputSchema` is set need
+  `decodeOutput: toolOutputDecoder(schema)` (`@yolk-sdk/agent/protocol`); MCP registrations built
+  from `mcpToolToToolDef` defs need `decodeOutput: mcpToolOutputDecoder` (`@yolk-sdk/mcp/client`).
+  Without it `resolveTools` fails with `output_validation_required`. For raw interaction
+  registrations, `def.outputSchema` and `decodeOutput` describe the action's own value
+  (`structuredContent.result` of a completed outcome), checked before the receipt is settled
+  ([ADR 0013, Result boundary](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md#result-boundary)).
+- `makeTool` with explicit type arguments and `output` takes three:
+  `makeTool<Context, typeof Params, typeof Output>`. Two explicit type arguments no longer accept a
+  typed `{ output }` (it used to escape its schema); drop them to infer, or add the third.
+- Without `output`, return `{ content }`; a structured value needs `output`.
+- `modelVisibleToolError({ code })` gives scripts `error.code`.
+- Scripts: typed tools resolve to their declared value with no merged `files`; a typed result
+  without a value rejects (`returned an invalid result`); untyped tools resolve to their text
+  without file labels; failures reject with the message and `error.code`. Remove `JSON.parse` of
+  typed results and `typeof r === 'string'` guards.
+- MCP tools declare and resolve to `{ value, files }` (`value` is `structuredContent`, else the text
+  of the text blocks and embedded text resources, parsed once when it is one JSON object or array,
+  else the text; `resource_link` blocks never enter it). Read `value` where scripts read the result
+  itself (`upload.value.url`, not `upload.url`). Local stdio calls now list the tools in the same
+  session and validate `structuredContent` against the listed `outputSchema`, like remote calls.
+- MCP blobs, images and audio are stored when the call runs: inside `resolveTools` through the
+  resolution's `files`; elsewhere (a HITL route calling `resumeRemoteMcpServerToolCall`, a direct
+  `callLocalMcpServerTool`) pass `fileCapture: makeToolFileCapture({ store })`
+  (`@yolk-sdk/agent/tools`) on the call input, or every file is `FileUnavailable`
+  (`no file store`). Results without file blocks keep their previous model content.
+- Connector `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment` resolve to
+  `{ value, files }` instead of `{ ...metadata, files }`.
+- Labels are `File` parts now: a captured image, document or audio part is followed by a `File` part
+  with a `Ref` source instead of a text label, and an unstored file is a `File` part with the new
+  `Omitted { reason }` source. Providers render the same text. Readers older than this canary cannot
+  decode transcripts holding an `Omitted` source.
+- The tool ledger keeps typed values whole: an oversized value replays as an error result. Stored
+  copies keep `File` parts as parts through every reduction (labels are never flattened into the
+  text).
+
 ### Canary.125: Fortnox invoice Remarks and row inputs
 
 `fortnox.create_invoice` and `fortnox.update_invoice` accept `Remarks`, the invoice text

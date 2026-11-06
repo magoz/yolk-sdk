@@ -10,6 +10,8 @@ import { Effect, Exit, Layer, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
+import { FileDescriptor } from '@yolk-sdk/agent/protocol'
+import { makeToolFileCapture, type FileStoreApi } from '@yolk-sdk/agent/tools'
 import {
   callRemoteMcpServerTool,
   callRemoteMcpServerToolResumable,
@@ -496,7 +498,7 @@ describe('MCP form elicitation (MRTR)', () => {
       expect(result).toMatchObject({
         toolCallId: 'call_1',
         content: 'deleted',
-        structuredContent: { deleted: true }
+        structuredContent: { value: { deleted: true }, files: [] }
       })
       expect(harness.ledger).toEqual({ minted: 1, executed: 1 })
 
@@ -616,6 +618,95 @@ describe('MCP form elicitation (MRTR)', () => {
         requestState: 'retry-later'
       })
     })
+  )
+
+  it.effect(
+    'stores the blobs of a resumed call through a fileCapture, else answers unavailable',
+    () =>
+      Effect.gen(function* () {
+        const receipt = new TextEncoder().encode('%PDF receipt')
+
+        const blobResult = {
+          resultType: 'complete',
+          content: [
+            { type: 'text', text: 'deleted' },
+            {
+              type: 'resource',
+              resource: {
+                uri: 'file:///receipts/receipt.pdf',
+                mimeType: 'application/pdf',
+                blob: Buffer.from(receipt).toString('base64')
+              }
+            }
+          ],
+          structuredContent: { deleted: true }
+        }
+
+        const store: FileStoreApi = {
+          put: ({ bytes, name, mimeType }) =>
+            Effect.succeed(
+              FileDescriptor.make({
+                fileId: 'file_receipt',
+                name,
+                mimeType,
+                size: bytes.byteLength
+              })
+            ),
+          head: () => Effect.succeed(Option.none()),
+          read: () => Effect.succeed(receipt),
+          signRead: ({ fileId }) => Effect.succeed(`https://files.example/${fileId}`)
+        }
+
+        const resume = (fileCapture: ReturnType<typeof makeToolFileCapture> | undefined) =>
+          Effect.gen(function* () {
+            const harness = makeHarness(attempt =>
+              attempt === 1 ? { resultType: 'input_required', requestState: 'later' } : blobResult
+            )
+
+            const input =
+              fileCapture === undefined ? callInput({}) : { ...callInput({}), fileCapture }
+
+            const pending = expectInputRequired(
+              yield* callRemoteMcpServerToolResumable(input).pipe(Effect.provide(harness.layer))
+            )
+
+            return expectComplete(
+              yield* resumeRemoteMcpServerToolCall({
+                ...input,
+                inputRequired: pending,
+                responses: {}
+              }).pipe(Effect.provide(harness.layer))
+            )
+          })
+
+        const captured = yield* resume(makeToolFileCapture({ store }))
+
+        expect(captured.structuredContent).toEqual({
+          value: { deleted: true },
+          files: [
+            { fileId: 'file_receipt', name: 'receipt.pdf', mimeType: 'application/pdf', size: 12 }
+          ]
+        })
+        expect(captured.files).toEqual([
+          FileDescriptor.make({
+            fileId: 'file_receipt',
+            name: 'receipt.pdf',
+            mimeType: 'application/pdf',
+            size: 12
+          })
+        ])
+
+        // Outside a `resolveTools` registration and without the option: no store to recover with.
+        const uncaptured = yield* resume(undefined)
+
+        expect(uncaptured.structuredContent).toEqual({
+          value: { deleted: true },
+          files: [
+            { unavailable: 'no file store', name: 'receipt.pdf', mimeType: 'application/pdf' }
+          ]
+        })
+        expect(JSON.stringify(uncaptured)).not.toContain(Buffer.from(receipt).toString('base64'))
+      })
   )
 
   it.effect('fails malformed InputRequired results with a typed error', () =>
@@ -998,7 +1089,7 @@ describe('MCP form elicitation (MRTR)', () => {
         }).pipe(Effect.provide(harness.layer))
       )
 
-      expect(result.structuredContent).toEqual({ deleted: true })
+      expect(result.structuredContent).toEqual({ value: { deleted: true }, files: [] })
     })
   )
 

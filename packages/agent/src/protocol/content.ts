@@ -53,12 +53,31 @@ export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
 }) {}
 
 /**
+ * Bytes that were not stored (ADR 0013): no file store, over the size bound, or storage failed.
+ * Only a `FilePart` can carry it; the model sees a "not captured" label naming `reason`.
+ */
+export class OmittedFileSource extends Schema.TaggedClass<OmittedFileSource>()('Omitted', {
+  reason: Schema.String
+}) {}
+
+/** Where a `FilePart`'s bytes are: the attachment sources, or `Omitted` when capture dropped them. */
+export const FileSource = Schema.Union([
+  InlineBase64AttachmentSource,
+  UrlAttachmentSource,
+  RefAttachmentSource,
+  OmittedFileSource
+])
+
+export type FileSource = typeof FileSource.Type
+
+/**
  * Bytes the agent can move between tools, not content for the model to view (ADR 0009). Producers
  * emit an `InlineBase64` source; tool resolution captures it into the host file store and rewrites
- * it to `Ref { id: fileId }`. Providers lower it to its text label only, never as an attachment.
+ * it to `Ref { id: fileId }`, or to `Omitted { reason }` when it cannot store them. Providers lower
+ * it to its text label only, never as an attachment.
  */
 export class FilePart extends Schema.TaggedClass<FilePart>()('File', {
-  source: AttachmentSource,
+  source: FileSource,
   mimeType: Schema.String,
   filename: Schema.optional(Schema.String),
   size: Schema.optional(Schema.Number)
@@ -137,19 +156,36 @@ export const resolveContentAttachmentSources = <E, R>(
 
 /**
  * The model-visible text of a file part: its label when captured (`Ref` to a file id), otherwise a
- * "not captured" line. Inline bytes are never rendered.
+ * "not captured" line (with the `Omitted` reason). Inline bytes are never rendered.
  */
 export const filePartText = (part: FilePart) => {
   const name = part.filename ?? 'file'
+  const source = part.source
 
-  if (Predicate.isTagged(part.source, 'Ref') && isFileId(part.source.id)) {
+  if (Predicate.isTagged(source, 'Ref') && isFileId(source.id)) {
     return part.size === undefined
-      ? fileLabel({ fileId: part.source.id, name, mimeType: part.mimeType })
-      : fileLabel({ fileId: part.source.id, name, mimeType: part.mimeType, size: part.size })
+      ? fileLabel({ fileId: source.id, name, mimeType: part.mimeType })
+      : fileLabel({ fileId: source.id, name, mimeType: part.mimeType, size: part.size })
   }
 
-  return fileNotCapturedLabel({ name, mimeType: part.mimeType, reason: 'no file store' })
+  return fileNotCapturedLabel({
+    name,
+    mimeType: part.mimeType,
+    reason: Predicate.isTagged(source, 'Omitted') ? source.reason : 'no file store'
+  })
 }
+
+/** An `Omitted` file part: the structural "not captured" marker capture leaves for the model. */
+export const omittedFilePart = (input: {
+  readonly name: string
+  readonly mimeType: string
+  readonly reason: string
+}) =>
+  FilePart.make({
+    source: OmittedFileSource.make({ reason: input.reason }),
+    mimeType: input.mimeType,
+    filename: input.name
+  })
 
 export const contentPartText = (part: ContentPart) =>
   Match.value(part).pipe(
@@ -289,26 +325,27 @@ export const filePartFromBytes = (input: {
         size: input.bytes.byteLength
       })
 
-export const attachmentSourcePreview = (source: AttachmentSource) =>
+export const attachmentSourcePreview = (source: FileSource) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', () => 'inline'),
     Match.tag('Url', current => current.url),
     Match.tag('Ref', current => current.id),
+    Match.tag('Omitted', current => `omitted (${current.reason})`),
     Match.exhaustive
   )
 
-export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: string) =>
+export const attachmentSourceDataUrl = (source: FileSource, mimeType: string) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', current => Option.some(`data:${mimeType};base64,${current.data}`)),
-    Match.tag('Url', 'Ref', () => Option.none<string>()),
+    Match.tag('Url', 'Ref', 'Omitted', () => Option.none<string>()),
     Match.exhaustive
   )
 
-export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) =>
+export const attachmentSourceUrl = (source: FileSource, mimeType: string) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', current => Option.some(`data:${mimeType};base64,${current.data}`)),
     Match.tag('Url', current => Option.some(current.url)),
-    Match.tag('Ref', () => Option.none<string>()),
+    Match.tag('Ref', 'Omitted', () => Option.none<string>()),
     Match.exhaustive
   )
 
@@ -440,7 +477,7 @@ export class AttachmentTextDecodeError extends Schema.TaggedError<AttachmentText
   }
 ) {}
 
-export const attachmentSourceText = (source: AttachmentSource) =>
+export const attachmentSourceText = (source: FileSource) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', current =>
       Effect.try({
@@ -452,13 +489,13 @@ export const attachmentSourceText = (source: AttachmentSource) =>
           })
       })
     ),
-    Match.tag('Url', 'Ref', () => Effect.succeed(Option.none<string>())),
+    Match.tag('Url', 'Ref', 'Omitted', () => Effect.succeed(Option.none<string>())),
     Match.exhaustive
   )
 
-export const attachmentSourceBase64 = (source: AttachmentSource) =>
+export const attachmentSourceBase64 = (source: FileSource) =>
   Match.value(source).pipe(
     Match.tag('InlineBase64', current => Option.some(current.data)),
-    Match.tag('Url', 'Ref', () => Option.none<string>()),
+    Match.tag('Url', 'Ref', 'Omitted', () => Option.none<string>()),
     Match.exhaustive
   )

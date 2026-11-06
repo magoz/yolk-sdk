@@ -34,6 +34,7 @@ export {
   FilePart,
   filePartFromBytes,
   filePartText,
+  FileSource,
   ImagePart,
   inferTextDocumentMimeType,
   InlineBase64AttachmentSource,
@@ -41,6 +42,8 @@ export {
   inlineBase64Source,
   isContentEmpty,
   isTextDocumentMimeType,
+  OmittedFileSource,
+  omittedFilePart,
   refAttachmentSource,
   RefAttachmentSource,
   resolveContentAttachmentSources,
@@ -61,6 +64,36 @@ export {
   isFileId,
   normalizeFileMimeType
 } from './file.ts'
+
+export {
+  captureToolFileValue,
+  capturedFileParts,
+  containsToolFile,
+  encodeToolOutput,
+  FileBytes,
+  FileRef,
+  FileUnavailable,
+  fileUnavailable,
+  isFileRef,
+  noFileStoreReason,
+  ToolFile,
+  ToolFileCapture,
+  toolFileJsonSchema,
+  toolFileJsonSchemaDefinitions,
+  toolFileLabel,
+  ToolFileValue,
+  ToolOutputEncodingError,
+  toolOutputDecoder,
+  toolOutputFiles,
+  toolOutputText,
+  typedToolResult,
+  type CapturedToolFile,
+  type EncodedToolOutput,
+  type ToolOutputDecoder,
+  type ToolOutputRender,
+  type ToolOutputRenderFiles,
+  type ToolOutputSchema
+} from './tool-output.ts'
 
 export {
   AgentAbortReason,

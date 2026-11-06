@@ -20,15 +20,20 @@ Available from `0.1.0-canary.114`. The package is runtime-neutral (Web Crypto, n
 
 ## How it works
 
-1. A tool returns bytes as a `FilePart` (`filePartFromBytes` from `@yolk-sdk/agent/protocol`).
-   Connector actions with `fileOutput` (`gmail.get_attachment`, `outlook.get_attachment`,
-   `email.get_attachment`) and MCP embedded resource blobs already do.
+1. A typed tool returns bytes in a file field of its output: declare `output` with a `ToolFile`
+   field and return `new FileBytes({ bytes, name, mimeType })` (both from
+   `@yolk-sdk/agent/protocol`; `view: true` also shows the model an image or document). Tools
+   without `output` may return a `FilePart` (`filePartFromBytes`) in their content. Connector
+   actions with `fileOutput` (`gmail.get_attachment`, `outlook.get_attachment`,
+   `email.get_attachment`) and MCP blobs, images and audio already do.
 2. `resolveTools(modules, context, { files: { store } })` stores the bytes before the ledger sees
-   the result. The model sees a label such as `[file file_…: Faktura_225.pdf, application/pdf, 89 KB]`
-   and `ToolResult.files` lists the descriptors.
+   the result. The value holds a `FileRef { fileId, name, mimeType, size }` where the bytes were,
+   the model sees a label such as `[file file_…: Faktura_225.pdf, application/pdf, 89 KB]`, and
+   `ToolResult.files` lists the descriptors.
 3. The agent passes the `fileId` to a tool that needs the file.
 
-Without `files`, over `maxFileBytes` (default 100 MiB), or when storing fails, the bytes become a
+Without `files`, over `maxFileBytes` (default 100 MiB), or when storing fails, a file field becomes
+`FileUnavailable { unavailable: reason, name, mimeType }` and the model sees a
 `[file not captured (reason): …]` label: base64 never falls through to the model. Inline images,
 documents and audio the model views keep their source and also get a stored copy and a label.
 
@@ -89,18 +94,23 @@ tools read the whole file into memory, so a captured file larger than this canno
 
 ## From a code mode script
 
-Nested calls that captured files resolve `files: [{ fileId, name, mimeType, size }]`, so one script
-moves a Gmail attachment to an MCP server's presigned upload URL (script fragment; the IDs come
-from earlier calls):
+Scripts read file fields as `FileRef` (or `FileUnavailable`), never labels, so one script moves a
+Gmail attachment to an MCP server's presigned upload URL (script fragment; the IDs come from earlier
+calls; `get_attachment` and MCP tools resolve to `{ value, files }`):
 
 ```js
 const attachment = await tools['gmail.get_attachment']({ messageId, attachmentId, filename })
 const file = attachment.files[0]
+if ('unavailable' in file) return `not stored: ${file.unavailable}`
 const upload = await tools.mcp_afloat_create_receipt_upload({
   contentLength: file.size,
   contentType: file.mimeType
 })
-await tools.file_upload({ fileId: file.fileId, url: upload.url, headers: upload.headers })
+await tools.file_upload({
+  fileId: file.fileId,
+  url: upload.value.url,
+  headers: upload.value.headers
+})
 ```
 
 ## Your app owns

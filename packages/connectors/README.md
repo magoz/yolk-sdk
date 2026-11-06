@@ -70,9 +70,12 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
 - **fileOutput**: optional on an action whose output carries file bytes (ADR 0009): a byte-free
-  `schema` (the agent tool output) and `split` into that value plus `ConnectorActionFile`s
-  (`connectorActionFile`, with `sniffBase64MimeType` for common types). The agent bridge returns
-  the bytes as `FilePart`s that tool resolution captures into `fileId`s; `connector.invoke` keeps
+  `schema` and `split` into that value plus `ConnectorActionFile`s (`connectorActionFile`, with
+  `sniffBase64MimeType` for common types). The agent tool declares `{ value, files }` and returns
+  the bytes as file fields that tool resolution captures into `FileRef`s, or `FileUnavailable`
+  (`{ unavailable, name, mimeType }`) when no file store is configured, the file is too large or
+  storing failed (ADR 0013), so scripts check `'unavailable' in file` before reading
+  `result.files[0].fileId`; `connector.invoke` keeps
   the full output. `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment`
   declare it.
 

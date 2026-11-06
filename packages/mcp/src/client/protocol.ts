@@ -2,16 +2,34 @@ import { Array as Arr, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AudioPart,
+  base64ToBytes,
+  captureToolFileValue,
+  capturedFileParts,
+  FileBytes,
   FilePart,
   ImagePart,
+  normalizeFileMimeType,
+  omittedFilePart,
   TextPart,
   ToolDef,
+  ToolFile,
+  ToolFileCapture,
+  toolFileJsonSchema,
+  toolFileJsonSchemaDefinitions,
+  toolOutputDecoder,
+  toolOutputFiles,
   ToolJsonSchemaObject,
   ToolResult,
   decodeToolJsonSchemaObject,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
-import type { Content, ContentPart, ToolExposure } from '@yolk-sdk/agent/protocol'
+import type {
+  Content,
+  ContentPart,
+  ToolExposure,
+  ToolFileValue,
+  ToolOutputDecoder
+} from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2026-07-28'
@@ -222,9 +240,89 @@ type McpToolDefFields = {
   loading?: ToolDef['loading']
 }
 
-/** Adapts one listed MCP tool. A present `outputSchema` that is a plain JSON Schema object
- * passes through as declaration-only `ToolDef.outputSchema`; any other value is omitted.
- * `exposure` (host policy) sets `callableBy`/`discovery`/`loading`; without it none is set.
+type JsonSchemaObject = typeof ToolJsonSchemaObject.Type
+
+const fileDefinitionNames: ReadonlySet<string> = new Set(Object.keys(toolFileJsonSchemaDefinitions))
+
+const jsonObjectField = (schema: JsonSchemaObject, key: string): JsonSchemaObject | undefined =>
+  Object.hasOwn(schema, key)
+    ? Option.getOrUndefined(decodeToolJsonSchemaObject(schema[key]))
+    : undefined
+
+// Local `$ref`s that still resolve once the schema sits under `properties.value`: only those into
+// the hoisted `$defs`/`definitions` (`#`, `#/properties/...` would point into the wrapper).
+const isJsonContainer = Schema.is(
+  Schema.Union([Schema.Array(Schema.Json), Schema.Record(Schema.String, Schema.Json)])
+)
+
+const hasOnlyHoistableRefs = (value: Schema.Json): boolean => {
+  if (!isJsonContainer(value)) return true
+
+  if (Array.isArray(value)) return value.every(hasOnlyHoistableRefs)
+
+  return Object.entries(value).every(([key, item]) =>
+    key === '$ref' && Predicate.isString(item)
+      ? !item.startsWith('#') || item.startsWith('#/$defs/') || item.startsWith('#/definitions/')
+      : hasOnlyHoistableRefs(item)
+  )
+}
+
+const unknownValue = { value: {}, defs: {}, definitions: undefined }
+
+// The server's `outputSchema` as the `value` property: its root-relative `$defs` (and draft-07
+// `definitions`) move to the wrapper's root, where its `$ref`s still resolve. A schema whose
+// definitions collide with the file definitions, that sets `$id`, or that refers to other parts of
+// itself, is not declared (unknown).
+const valueSchema = (outputSchema: JsonSchemaObject | undefined) => {
+  if (outputSchema === undefined) return unknownValue
+
+  const defs = jsonObjectField(outputSchema, '$defs') ?? {}
+  const definitions = jsonObjectField(outputSchema, 'definitions')
+
+  if (
+    Object.hasOwn(outputSchema, '$id') ||
+    Object.keys(defs).some(name => fileDefinitionNames.has(name)) ||
+    !hasOnlyHoistableRefs(outputSchema)
+  ) {
+    return unknownValue
+  }
+
+  const value = Object.fromEntries(
+    Object.entries(outputSchema).filter(
+      ([key]) => key !== '$defs' && key !== 'definitions' && key !== '$schema'
+    )
+  )
+
+  return { value, defs, definitions }
+}
+
+/**
+ * The declared output of an adapted MCP tool (ADR 0013): `{ value, files }`. `value` is the
+ * server's `outputSchema` when it lists one, otherwise unknown (parsed JSON or text, see
+ * `mcpToolResult`); `files` are the call's blobs, images and audio as file fields.
+ */
+export const mcpToolOutputSchema = (outputSchema: unknown): JsonSchemaObject => {
+  const { value, defs, definitions } = valueSchema(
+    Option.getOrUndefined(decodeToolJsonSchemaObject(outputSchema))
+  )
+
+  const schema: JsonSchemaObject = {
+    type: 'object',
+    properties: {
+      value,
+      files: { type: 'array', items: toolFileJsonSchema }
+    },
+    required: ['value', 'files'],
+    additionalProperties: false,
+    $defs: { ...defs, ...toolFileJsonSchemaDefinitions }
+  }
+
+  return definitions === undefined ? schema : { ...schema, definitions }
+}
+
+/** Adapts one listed MCP tool. Its `ToolDef.outputSchema` is `mcpToolOutputSchema`: a present
+ * `outputSchema` that is a plain JSON Schema object declares `value`; any other value leaves it
+ * unknown. `exposure` (host policy) sets `callableBy`/`discovery`/`loading`; without it none is set.
  */
 export const mcpToolToToolDef = (input: {
   readonly serverName: string
@@ -234,12 +332,9 @@ export const mcpToolToToolDef = (input: {
   const fields: McpToolDefFields = {
     name: `${sanitizeMcpName(input.serverName)}_${sanitizeMcpName(input.tool.name)}`,
     description: input.tool.description ?? `MCP tool ${input.serverName}/${input.tool.name}`,
-    parameters: input.tool.inputSchema ?? { type: 'object', additionalProperties: true }
+    parameters: input.tool.inputSchema ?? { type: 'object', additionalProperties: true },
+    outputSchema: mcpToolOutputSchema(input.tool.outputSchema)
   }
-
-  const outputSchema = decodeToolJsonSchemaObject(input.tool.outputSchema)
-
-  if (Option.isSome(outputSchema)) fields.outputSchema = outputSchema.value
 
   const exposure = Predicate.isFunction(input.exposure)
     ? input.exposure(input.tool, input.serverName)
@@ -420,6 +515,198 @@ export const toolCallResultToToolResult = (input: {
     isError: input.result.isError,
     structuredContent: input.result.structuredContent
   })
+}
+
+type McpFileBlock = {
+  readonly data: string
+  readonly name: string
+  readonly mimeType: string
+  readonly view: boolean
+}
+
+// The bytes of a blob, image or audio block, or `None` for any other block.
+const fileBlock = (block: GenericContentBlock): Option.Option<McpFileBlock> => {
+  const type = block['type']
+
+  if (type === 'image' || type === 'audio') {
+    return Option.all({
+      data: stringProperty(block, 'data'),
+      mimeType: stringProperty(block, 'mimeType')
+    }).pipe(Option.map(({ data, mimeType }) => ({ data, mimeType, name: type, view: true })))
+  }
+
+  if (type !== 'resource') return Option.none()
+
+  return Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
+    Option.flatMap(({ resource }) =>
+      resource.text !== undefined || resource.blob === undefined
+        ? Option.none()
+        : Option.some({
+            data: resource.blob,
+            mimeType: resource.mimeType ?? 'application/octet-stream',
+            name:
+              (resource.uri === undefined ? undefined : resourceFilename(resource.uri)) ?? 'file',
+            view: false
+          })
+    )
+  )
+}
+
+type CapturedBlock = {
+  readonly parts: ReadonlyArray<ContentPart>
+  readonly file?: ToolFileValue
+}
+
+// Bytes that are not base64 never reach a store or the model.
+const invalidFile = (file: McpFileBlock): CapturedBlock => {
+  const value: ToolFileValue = {
+    unavailable: 'invalid base64',
+    name: file.name,
+    mimeType: normalizeFileMimeType(file.mimeType)
+  }
+
+  return {
+    parts: [
+      omittedFilePart({ name: file.name, mimeType: file.mimeType, reason: 'invalid base64' })
+    ],
+    file: value
+  }
+}
+
+const captureBlock = (block: GenericContentBlock): Effect.Effect<CapturedBlock> =>
+  Option.match(fileBlock(block), {
+    onNone: () => Effect.succeed({ parts: [contentPartFromBlock(block)] }),
+    onSome: file =>
+      Effect.try(() => base64ToBytes(file.data)).pipe(
+        Effect.map(
+          bytes =>
+            new FileBytes({ bytes, name: file.name, mimeType: file.mimeType, view: file.view })
+        ),
+        Effect.flatMap(bytes =>
+          captureToolFileValue(bytes).pipe(
+            Effect.map((value): CapturedBlock => {
+              const parts = capturedFileParts(bytes, value)
+
+              // A viewed image or audio keeps the server's block as the model saw it before
+              // (no file name, its own MIME type); only its `File` part, if any, follows.
+              return {
+                parts: file.view ? [contentPartFromBlock(block), ...parts.slice(1)] : parts,
+                file: value
+              }
+            })
+          )
+        ),
+        Effect.orElseSucceed(() => invalidFile(file))
+      )
+  })
+
+const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+// The text a block carries as data: a `text` block's text, an embedded text resource's text.
+// Resource links are references (a URI, not content) and file blocks are file fields, so neither
+// enters the value.
+const valueText = (block: GenericContentBlock): Option.Option<string> =>
+  block['type'] === 'resource'
+    ? Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
+        Option.flatMap(({ resource }) => Option.fromNullishOr(resource.text))
+      )
+    : contentBlockText(block)
+
+/**
+ * The value of an MCP result without `structuredContent` (ADR 0013): the text of its `text`
+ * blocks and embedded text resources, in order and joined with newlines, parsed once when it is
+ * one JSON object or array, otherwise the text; `null` without text. `resource_link` blocks are
+ * references, not text: the model sees their link line, the value never does.
+ */
+export const mcpTextValue = (blocks: ReadonlyArray<GenericContentBlock>): Schema.Json => {
+  const texts = Arr.getSomes(Arr.map(blocks, valueText))
+
+  if (texts.length === 0) return null
+
+  const text = texts.join('\n')
+  const trimmed = text.trim()
+
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return text
+
+  return Option.match(decodeJsonText(trimmed), {
+    onNone: () => text,
+    onSome: value => (Predicate.isObjectOrArray(value) ? value : text)
+  })
+}
+
+/**
+ * The declared output of an adapted MCP tool (`mcpToolOutputSchema`) as a schema: the shape of
+ * every `mcpToolResult` value. `value` is any JSON here: the remote client checks it against the
+ * server's `outputSchema` before `mcpToolResult` runs (the local client does the same when its
+ * listing holds the tool).
+ */
+export const McpToolOutput = Schema.Struct({ value: Schema.Json, files: Schema.Array(ToolFile) })
+
+/**
+ * The `ToolRegistration.decodeOutput` of an MCP tool registration (`mcpToolToToolDef` defs):
+ * checks the `{ value, files }` envelope (excess properties rejected, file fields
+ * `FileRef | FileUnavailable`, plain JSON).
+ */
+export const mcpToolOutputDecoder: ToolOutputDecoder = toolOutputDecoder(McpToolOutput)
+
+/**
+ * The typed result of an MCP tool call (ADR 0013). A successful result's `structuredContent` is
+ * `{ value, files }` (`mcpToolOutputSchema`): `value` is the server's `structuredContent`, or the
+ * text (`mcpTextValue`); `files` are its blobs, images and audio, stored through `fileCapture`
+ * when given, else the ambient `ToolFileCapture` (`FileRef`, or `FileUnavailable` without one).
+ * The model sees the server's content: a result without file blocks exactly as
+ * `toolCallResultToToolResult` adapts it, otherwise each block in order with images and audio
+ * followed by their `File` part once stored, and blobs as `File` parts. Error results keep
+ * `toolCallResultToToolResult`.
+ */
+export const mcpToolResult = (input: {
+  readonly toolCallId: string
+  readonly result: ToolCallResult
+  /** Stores the call's files; overrides the ambient `ToolFileCapture` (`makeToolFileCapture`). */
+  readonly fileCapture?: ToolFileCapture['Service'] | undefined
+}): Effect.Effect<ToolResult> => {
+  if (input.result.isError === true) return Effect.succeed(toolCallResultToToolResult(input))
+
+  const blocks = input.result.content ?? []
+
+  const converted = Effect.forEach(blocks, captureBlock).pipe(
+    Effect.map(captured => {
+      const files = captured.flatMap(block => (block.file === undefined ? [] : [block.file]))
+
+      const content: Content =
+        blocks.length === 0
+          ? input.result.structuredContent === undefined
+            ? 'Unsupported MCP tool content.'
+            : 'Structured MCP tool result.'
+          : files.length === 0
+            ? contentFromBlocks(blocks)
+            : captured.flatMap(block => block.parts)
+
+      const value =
+        input.result.structuredContent === undefined
+          ? mcpTextValue(blocks)
+          : input.result.structuredContent
+
+      const descriptors = toolOutputFiles(files.map(file => ({ value: file })))
+
+      return descriptors.length === 0
+        ? ToolResult.make({
+            toolCallId: input.toolCallId,
+            content,
+            structuredContent: { value, files }
+          })
+        : ToolResult.make({
+            toolCallId: input.toolCallId,
+            content,
+            structuredContent: { value, files },
+            files: descriptors
+          })
+    })
+  )
+
+  return input.fileCapture === undefined
+    ? converted
+    : converted.pipe(Effect.provideService(ToolFileCapture, input.fileCapture))
 }
 
 export const decodeJsonRpcResponse = Schema.decodeUnknownEffect(JsonRpcResponse)

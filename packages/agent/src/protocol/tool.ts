@@ -370,7 +370,7 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
    */
   usage: Schema.optional(AgentUsage),
   /** Files captured from this result (ADR 0009). Not sent to providers: the content carries each
-   * file's label. Code mode scripts receive them as `files`.
+   * file's label. Code mode scripts read files from a typed tool's file fields (ADR 0013).
    */
   files: Schema.optional(Schema.Array(FileDescriptor))
 }) {}

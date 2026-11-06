@@ -16,8 +16,9 @@ export type CodeModeToolContext = {
  * A function a script can call. Tools are called as `tools.<identifier>(args)` and
  * `tools["<name>"](args)`; the identifier replaces characters that are not valid in a JavaScript
  * identifier with `_`. Arguments and results make a JSON round trip; a rejection surfaces in the
- * script as an `Error` with the same message (`makeCodeModeTool` rejects with
- * `<call label>: <message>`, the label being `tools.<identifier>` or `tools["<name>"]`).
+ * script as an `Error` with the same message and, when the rejected error has a string `code`, that
+ * `code` (`makeCodeModeTool` rejects with `<call label>: <message>`, the label being
+ * `tools.<identifier>` or `tools["<name>"]`, and the tool's model-visible error code).
  *
  * `args` is the JSON value of the script's first argument (`undefined` when there is none), read
  * once the way `JSON.stringify` reads it (getters and `toJSON` run once); the checked value is the

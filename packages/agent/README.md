@@ -990,7 +990,11 @@ Without a host, definitions, approval ids, and inline behavior are unchanged.
 These options are the tool contract that [`@yolk-sdk/codemode`](https://github.com/magoz/yolk-sdk/blob/main/packages/codemode/README.md) builds on.
 This package declares them; it does not run scripts.
 
-- `makeTool({ output })` adds declaration-only `ToolDef.outputSchema`, lowered like `parameters`.
+- Typed tool results (ADR 0013): `makeTool({ output, execute })` returns `{ output }` and Yolk
+  encodes it with `Schema.toCodecJson(output)` into `structuredContent` (what code mode scripts
+  receive) and `ToolDef.outputSchema`; file fields are `ToolFile` (return `FileBytes`, scripts get
+  `FileRef | FileUnavailable`). Without `output`, `execute` returns `{ content }`. Returning a raw
+  `ToolResult` is deprecated.
 - `callableBy: 'all' | 'model' | 'codemode'` (default `all`) decides who may call a tool. For
   `codemode` only, `discovery: 'listed' | 'search' | 'pinned'` (default `listed`; `pinned` is
   always listed, outside the catalog budget) decides how scripts find it.

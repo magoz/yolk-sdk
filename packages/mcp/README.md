@@ -84,7 +84,7 @@ const { tools } = await client.listTools()
 
 ## Use Effect/Yolk tool adapters
 
-The high-level remote helpers use the official v2 client over an Effect `HttpClient` bridge. They negotiate modern MCP automatically, aggregate paginated tool lists, honor v2 routing headers and cache hints, and fall back to legacy servers. Discovered tools preserve provider `title`, `inputSchema`, `outputSchema`, and `annotations` metadata. Pass `exposure` in the options (a `ToolExposure` value or `(tool, serverName) => ToolExposure`) to set code mode `callableBy`/`discovery` on the adapted definitions; `mcpToolToToolDef` takes the same option.
+The high-level remote helpers use the official v2 client over an Effect `HttpClient` bridge. They negotiate modern MCP automatically, aggregate paginated tool lists, honor v2 routing headers and cache hints, and fall back to legacy servers. Discovered tools preserve provider `title`, `inputSchema`, `outputSchema`, and `annotations` metadata. Adapted tools are typed ([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)): `ToolDef.outputSchema` is `{ value, files }` (`value` the server's `outputSchema`, unknown without one) and a successful call's `structuredContent` is `{ value, files }`: `value` is the server's `structuredContent` (checked against the listed `outputSchema`, remote and local), else the text of its text blocks and embedded text resources parsed once when it is one JSON object or array, else the text (`resource_link` blocks never enter it); blobs, images and audio become file fields (`FileRef`, or `FileUnavailable` without a file store). The model still sees the server's content, unchanged for results without file blocks. Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder` (`resolveTools` checks every result with it and fails `output_validation_required` without it). Files are stored when the call runs, through the `ToolFileCapture` `resolveTools` provides to its registrations; a call outside one (a HITL route calling `resumeRemoteMcpServerToolCall`, a direct `callLocalMcpServerTool`) passes `fileCapture: makeToolFileCapture({ store })` from `@yolk-sdk/agent/tools` on its input, or every file is `FileUnavailable` (`no file store`) and the blob is lost. Pass `exposure` in the options (a `ToolExposure` value or `(tool, serverName) => ToolExposure`) to set code mode `callableBy`/`discovery` on the adapted definitions; `mcpToolToToolDef` takes the same option.
 
 ```ts
 import { Effect } from 'effect'
@@ -110,6 +110,7 @@ step, so Yolk returns the pause as data and resumes later, possibly in another p
 
 ```ts
 import { Effect } from 'effect'
+import { makeToolFileCapture } from '@yolk-sdk/agent/tools'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
@@ -119,7 +120,17 @@ import {
 } from '@yolk-sdk/mcp/client'
 
 const options: McpClientOptions = { elicitation: { form: true } }
-const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_1', params, options }
+
+// A resume runs outside `resolveTools`: pass a capture (`makeToolFileCapture({ store })` from
+// `@yolk-sdk/agent/tools`) or the resumed result's blobs are `FileUnavailable` and lost.
+const call = {
+  config,
+  mcpToolName: 'delete-invoice',
+  toolCallId: 'call_1',
+  params,
+  options,
+  fileCapture: makeToolFileCapture({ store })
+}
 
 const step = Effect.gen(function* () {
   const outcome = yield* callRemoteMcpServerToolResumable(call)

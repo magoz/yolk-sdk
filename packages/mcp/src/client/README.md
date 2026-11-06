@@ -13,6 +13,9 @@ Full-core MCP v2 client exports plus Effect/Yolk tool adapters.
 - Durable form elicitation (MRTR): `callRemoteMcpServerToolResumable` answers `Complete` or a
   serializable `InputRequired` pause; `resumeRemoteMcpServerToolCall` retries with the exact
   `requestState` and the host's decisions. Opt in with `McpClientOptions.elicitation`.
+- Typed results (ADR 0013): calls return `structuredContent` `{ value, files }`; registrations set
+  `decodeOutput: mcpToolOutputDecoder`; calls outside `resolveTools` pass `fileCapture` (else blobs
+  are `FileUnavailable`). Local calls list before they call and validate `structuredContent`.
 
 The official `Client` keeps its upstream legacy default. Select `versionNegotiation: { mode: 'auto' }` or pin `2026-07-28` for modern MCP.
 

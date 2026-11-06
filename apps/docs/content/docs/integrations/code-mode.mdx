@@ -108,17 +108,19 @@ An `all` tool with `loading: 'deferred'` (see [Defer rarely used tools](../agent
 is not in the model's context until loaded, so the catalog treats it like a `search` tool.
 
 ```ts
+import { Effect } from 'effect'
 import { makeTool } from '@yolk-sdk/agent/tools'
 
-const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
+// With `output`, explicit type arguments are three: context, parameters, output.
+const listInvoices = makeTool<HostContext, typeof ListInvoicesParams, typeof InvoicePage>({
   name: 'list_invoices',
   description: 'List invoices, newest first, one page at a time.',
   parameters: ListInvoicesParams, // host-owned Effect Schema
-  output: InvoicePage, // calls resolve to structuredContent of this shape
+  output: InvoicePage, // calls resolve to the JSON encoding of this shape
   access: 'read',
   callableBy: 'codemode',
   discovery: 'search',
-  execute: ({ params }) => listInvoicePage(params) // host-owned
+  execute: ({ params }) => listInvoicePage(params).pipe(Effect.map(page => ({ output: page })))
 })
 ```
 
@@ -209,13 +211,15 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
 - `code` is the body of an async function: top-level `await` and `return` work. Simple TypeScript
   annotations are stripped; enums and namespaces are rejected with a clear error.
 - `tools.<id>(args)` runs the tool through the resolved tool set with your host context: inputs are
-  decoded, disabled tools stay unavailable, and registration wrappers run. A call resolves to
-  `structuredContent` for tools with an output schema and to the text content otherwise, and
-  rejects with an `Error` when the tool returns an error result. Unknown names suggest close
-  matches. Calls still running when the script ends are cancelled.
-- A call whose result captured files also resolves `files: [{ fileId, name, mimeType, size }]`,
-  merged into an object result or as `{ text, files }`. Pass the `fileId`s to other tools; file
-  bytes never enter the script ([Move files between tools](./files)).
+  decoded, disabled tools stay unavailable, and registration wrappers run. A tool with an output
+  schema resolves to its declared value (a typed result without a value rejects with
+  `returned an invalid result`); a tool without one resolves to its text (`string`). A call rejects
+  with an `Error` when the tool returns an error result, with `error.code` when the tool reports a
+  code. Unknown names suggest close matches. Calls still running when the script ends are cancelled.
+- Files are typed fields of results: `FileRef { fileId, name, mimeType, size }` or
+  `FileUnavailable { unavailable, name, mimeType }`. Script values never contain file labels. Pass
+  the `fileId`s to other tools; file bytes never enter the script ([Move files between
+  tools](./files)).
 - Arguments make a JSON round trip, and the tool decodes them exactly as it decodes model calls:
   - The argument is read once, the way `JSON.stringify` reads it (each getter and `toJSON` runs
     once), into a checked JSON copy, and that copy is what the call sends.
@@ -390,13 +394,17 @@ description's Stageable list.
 
 Scripts can only use what a tool declares and returns. For each tool scripts may call:
 
-- Declare `output` (an Effect Schema) and return its JSON encoding as the `structuredContent` of
-  successful results, for example with `Schema.encodeEffect(Schema.toCodecJson(Output))`. Error
-  results (`isError`) keep their own `structuredContent` (scripts only see their message).
-  `makeTool` never encodes or validates results: `Chunk`, `DateTime`, `Option`, or class instances
-  in `structuredContent` reach scripts as their raw JSON (`{"_id":"Chunk",...}`), not the declared
-  shape. A tool that declares `output` but returns no `structuredContent` resolves to its text; treat
-  that as a bug in the tool.
+- Declare `output` (an Effect Schema) and return `{ output: value }`: Yolk encodes it with
+  `Schema.toCodecJson(output)` (so `Chunk` and `DateTime` reach scripts as arrays and ISO strings)
+  and a value that does not encode fails the call. Files are `ToolFile` fields: return
+  `new FileBytes({ bytes, name, mimeType })` and scripts get a `FileRef`. Tools without `output`
+  return `{ content }`, and scripts get their text. Fail with `modelVisibleToolError({ code })` to
+  give scripts `error.code`. See [ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md).
+- `resolveTools` checks every typed result against its output schema before scripts see it (excess
+  properties rejected); a value that does not match makes the call reject with
+  `returned an invalid result`. Raw registrations that set `def.outputSchema` supply
+  `decodeOutput` (`toolOutputDecoder(schema)`, or `mcpToolOutputDecoder` for MCP tools), or
+  resolution fails with `output_validation_required`.
 - Give each module a `description` (`{ id, description, tools }`): scripts read it under the
   namespace heading, from `describeNamespace()`, and through `searchTools()`.
 - Custom `invalidParamsMessage` callbacks should end with

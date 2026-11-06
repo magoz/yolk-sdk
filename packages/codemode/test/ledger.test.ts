@@ -1,14 +1,18 @@
-import { type Duration, Effect, Fiber, Logger } from 'effect'
+import { type Duration, Effect, Fiber, Logger, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  FileDescriptor,
+  filePartFromBytes,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxTotalArgsBytes,
+  TextPart,
   ToolCall,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
+  EmptyToolParams,
   makeInMemoryToolLedgerStore,
   makeTool,
   resolveTools,
@@ -16,6 +20,7 @@ import {
   ToolLedgerError,
   ToolLedgerFailed,
   ToolLedgerSucceeded,
+  type FileStoreApi,
   type ToolLedgerArgs,
   type ToolLedgerOptions,
   type ToolLedgerStore,
@@ -492,6 +497,83 @@ describe('code mode with a tool ledger', () => {
       expect(log.map(entry => entry.note)).toEqual(['once'])
       expect(second).toEqual(first)
       expect(second.nestedCalls?.calls.map(call => call.id)).toEqual(['call_1/1'])
+    })
+  )
+
+  it.effect('replays a reduced untyped nested result to the script without file labels', () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const values: Array<unknown> = []
+      let executions = 0
+
+      const fileStore: FileStoreApi = {
+        put: ({ name, mimeType, bytes }) =>
+          Effect.succeed(
+            FileDescriptor.make({ fileId: 'file_report', name, mimeType, size: bytes.byteLength })
+          ),
+        head: () => Effect.succeed(Option.none()),
+        read: () => Effect.succeed(new Uint8Array()),
+        signRead: ({ fileId }) => Effect.succeed(`https://files.example/${fileId}`)
+      }
+
+      // Untyped and over the ledger bound: its stored copy is cut, with its File part.
+      const exportReport = makeTool({
+        name: 'export_report',
+        description: 'Exports a report',
+        parameters: EmptyToolParams,
+        access: 'write',
+        execute: () =>
+          Effect.sync(() => {
+            executions++
+
+            return {
+              content: [
+                TextPart.make({ text: 'x'.repeat(5_000) }),
+                filePartFromBytes({
+                  bytes: new TextEncoder().encode('report'),
+                  mimeType: 'text/csv',
+                  filename: 'report.csv'
+                })
+              ]
+            }
+          })
+      })
+
+      const { executor } = scriptedExecutor(async call => {
+        values.push(await call('export_report', {}))
+
+        return 'done'
+      })
+
+      // Only the nested call is ledgered, so the script runs again and replays it.
+      const ledger: ToolLedgerOptions = {
+        store,
+        maxResultBytes: 1_200,
+        isLedgered: ({ call }) => call.name === 'export_report'
+      }
+
+      const run = Effect.gen(function* () {
+        const toolSet = yield* resolveTools(codeModeModules(executor, [exportReport]), context, {
+          ledger,
+          files: { store: fileStore }
+        })
+
+        return yield* toolSet.execute(
+          ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } })
+        )
+      })
+
+      yield* run
+      yield* run
+
+      expect(executions).toBe(1)
+      expect(values).toHaveLength(2)
+
+      const replayed = yield* Schema.decodeUnknownEffect(Schema.String)(values[1])
+
+      expect(replayed).not.toContain('[file')
+      expect(replayed).not.toContain('file_report')
+      expect(replayed).toContain('reduced to fit the tool ledger bound')
     })
   )
 

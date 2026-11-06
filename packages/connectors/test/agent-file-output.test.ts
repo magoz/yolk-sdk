@@ -1,7 +1,12 @@
-import { Effect, Layer, Option, Predicate } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { FileDescriptor, TextPart, ToolCall } from '@yolk-sdk/agent/protocol'
+import {
+  FileDescriptor,
+  ToolCall,
+  ToolFile,
+  toolFileJsonSchemaDefinitions
+} from '@yolk-sdk/agent/protocol'
 import { resolveTools, toolJsonSchemaFromSchema, type FileStoreApi } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
@@ -64,10 +69,15 @@ const store: FileStoreApi = {
 }
 
 describe('connector actions that yield files', () => {
-  it('declares the byte-free output as the tool output', () => {
+  it('declares the byte-free value and its files as file fields', () => {
     const registration = makeConnectorToolRegistration(TestConnector, 'test.download', options)
 
-    expect(registration.def.outputSchema).toEqual(toolJsonSchemaFromSchema(DownloadFileOutput))
+    expect(registration.def.outputSchema).toEqual(
+      toolJsonSchemaFromSchema(
+        Schema.Struct({ value: DownloadFileOutput, files: Schema.Array(ToolFile) })
+      )
+    )
+    expect(registration.def.outputSchema).toMatchObject({ $defs: toolFileJsonSchemaDefinitions })
   })
 
   it('declares byte-free outputs for the email attachment actions', () => {
@@ -76,7 +86,7 @@ describe('connector actions that yield files', () => {
     expect(emailGetAttachmentAction.fileOutput?.schema).toBe(EmailGetAttachmentFileOutput)
   })
 
-  it.effect('returns the bytes as a file part, never in the text or structured output', () =>
+  it.effect('returns the files as file fields, never their bytes', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools([makeConnectorToolModule(TestConnector, options)], {})
 
@@ -84,13 +94,14 @@ describe('connector actions that yield files', () => {
         ToolCall.make({ id: 'call_1', name: 'test.download', params: {} })
       )
 
-      expect(result.structuredContent).toEqual({ name: 'invoice.pdf' })
-
-      expect(Predicate.isString(result.content) ? [] : result.content.slice(0, 1)).toEqual([
-        TextPart.make({ text: '{"name":"invoice.pdf"}' })
-      ])
-
-      // Without a file store the bytes are dropped for a label (fail-closed).
+      // Without a file store the file is unavailable (fail-closed).
+      expect(result.structuredContent).toEqual({
+        value: { name: 'invoice.pdf' },
+        files: [{ unavailable: 'no file store', name: 'invoice.pdf', mimeType: 'application/pdf' }]
+      })
+      expect(result.content).toBe(
+        '{"value":{"name":"invoice.pdf"},"files":["[file not captured (no file store): invoice.pdf, application/pdf]"]}'
+      )
       expect(JSON.stringify(result)).not.toContain(pdfBase64)
     })
   )
@@ -109,14 +120,10 @@ describe('connector actions that yield files', () => {
         ToolCall.make({ id: 'call_1', name: 'test.download', params: {} })
       )
 
-      expect(result.files).toEqual([
-        FileDescriptor.make({
-          fileId: 'file_1',
-          name: 'invoice.pdf',
-          mimeType: 'application/pdf',
-          size: 16
-        })
-      ])
+      const file = { fileId: 'file_1', name: 'invoice.pdf', mimeType: 'application/pdf', size: 16 }
+
+      expect(result.files).toEqual([FileDescriptor.make(file)])
+      expect(result.structuredContent).toEqual({ value: { name: 'invoice.pdf' }, files: [file] })
       expect(JSON.stringify(result)).not.toContain(pdfBase64)
     })
   )

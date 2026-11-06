@@ -1,6 +1,6 @@
 import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolCall, ToolResult, contentText, type Content } from '@yolk-sdk/agent/protocol'
+import { ToolCall, ToolFile, ToolResult, contentText, type Content } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
   resolveTools,
@@ -18,6 +18,8 @@ export const QueryParams = Schema.Struct({ query: Schema.String })
 export const HitsOutput = Schema.Struct({
   hits: Schema.Array(Schema.Struct({ id: Schema.String, score: Schema.Number }))
 })
+
+export const AttachmentOutput = Schema.Struct({ attachment: ToolFile })
 
 type Exposure =
   | { readonly callableBy?: 'all' | 'model' }

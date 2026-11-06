@@ -72,14 +72,17 @@ A code mode script moves a file from one tool to another without seeing its byte
 
 ```js
 const attachment = await tools['gmail.get_attachment']({ messageId, attachmentId, filename })
+const file = attachment.files[0]
+if ('unavailable' in file) return `not stored: ${file.unavailable}`
+// MCP tools resolve to { value, files }: the server's result is `value`.
 const upload = await tools.mcp_afloat_create_receipt_upload({
-  contentLength: attachment.files[0].size,
-  contentType: attachment.files[0].mimeType
+  contentLength: file.size,
+  contentType: file.mimeType
 })
 await tools.file_upload({
-  fileId: attachment.files[0].fileId,
-  url: upload.url,
-  headers: upload.headers
+  fileId: file.fileId,
+  url: upload.value.url,
+  headers: upload.value.headers
 })
 ```
 

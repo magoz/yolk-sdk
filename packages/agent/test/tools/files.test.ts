@@ -7,6 +7,7 @@ import {
   filePartFromBytes,
   ImagePart,
   inlineBase64Source,
+  omittedFilePart,
   refAttachmentSource,
   TextPart,
   ToolCall,
@@ -138,10 +139,15 @@ describe('tool result file capture', () => {
 
       expect(result.files).toBeUndefined()
       expect(result.content).toEqual([
-        TextPart.make({
-          text: '[file not captured (no file store): Faktura_225.pdf, application/pdf]'
+        omittedFilePart({
+          name: 'Faktura_225.pdf',
+          mimeType: 'application/pdf',
+          reason: 'no file store'
         })
       ])
+      expect(contentText(result.content)).toBe(
+        '[file not captured (no file store): Faktura_225.pdf, application/pdf]'
+      )
     })
   )
 
@@ -200,8 +206,14 @@ describe('tool result file capture', () => {
 
       expect(result.content).toEqual([
         image,
-        TextPart.make({ text: '[file file_png1: image, image/png, 4 B]' })
+        FilePart.make({
+          source: refAttachmentSource('file_png1'),
+          mimeType: 'image/png',
+          filename: 'image',
+          size: 4
+        })
       ])
+      expect(contentText(result.content)).toBe('[file file_png1: image, image/png, 4 B]')
       expect(result.files?.map(file => file.fileId)).toEqual(['file_png1'])
     })
   )
@@ -281,6 +293,13 @@ describe('tool result file capture', () => {
   )
 
   it('keeps captured files when the ledger reduces a stored result', () => {
+    const fileA = FilePart.make({
+      source: refAttachmentSource('file_a'),
+      mimeType: 'application/pdf',
+      filename: 'a.pdf',
+      size: 1
+    })
+
     const file = FileDescriptor.make({
       fileId: 'file_a',
       name: 'a.pdf',
@@ -307,28 +326,46 @@ describe('tool result file capture', () => {
     )
 
     expect(stored.files).toEqual([file])
-    // The model still sees the file label on replay; other media become placeholders.
+    // The File part stays a part (the model sees its label on replay); media become placeholders.
+    expect(stored.content).toContainEqual(fileA)
     expect(contentText(stored.content)).toContain('[file file_a: a.pdf, application/pdf, 1 B]')
     expect(contentText(stored.content)).toContain('[image omitted from the stored result]')
   })
 
-  it('keeps file labels when the ledger has to cut the text', () => {
+  it('keeps File parts structural when the ledger has to cut the text', () => {
+    const file = FilePart.make({
+      source: refAttachmentSource('file_a'),
+      mimeType: 'application/pdf',
+      filename: 'a.pdf'
+    })
+
+    const omitted = omittedFilePart({
+      name: 'b.pdf',
+      mimeType: 'application/pdf',
+      reason: 'too large'
+    })
+
     const stored = toolLedgerResult(
       ToolResult.make({
         toolCallId: 'call_1',
-        content: [
-          TextPart.make({ text: 'x'.repeat(5_000) }),
-          FilePart.make({
-            source: refAttachmentSource('file_a'),
-            mimeType: 'application/pdf',
-            filename: 'a.pdf'
-          })
-        ]
+        content: [TextPart.make({ text: 'x'.repeat(5_000) }), file, omitted]
       }),
-      600
+      800
     )
 
-    expect(contentText(stored.content)).toMatch(/^\[file file_a: a\.pdf, application\/pdf\]\n/u)
+    expect(Predicate.isString(stored.content)).toBe(false)
+
+    if (Predicate.isString(stored.content)) return
+
+    const [text, ...files] = stored.content
+
+    expect(files).toEqual([file, omitted])
+    expect(text?._tag).toBe('Text')
+    // No label became text: the text holds the cut text and the note only.
+    expect(text !== undefined && Predicate.isTagged(text, 'Text') ? text.text : '').not.toContain(
+      '[file'
+    )
+    expect(JSON.stringify(stored).length).toBeLessThanOrEqual(800)
   })
 
   it('keeps untrusted names from forging labels', () => {

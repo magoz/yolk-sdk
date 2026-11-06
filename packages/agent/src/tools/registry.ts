@@ -36,6 +36,9 @@ import {
   InteractionValidationError,
   interactionRequestId,
   sameInteractionBinding,
+  containsToolFile,
+  ToolFileCapture,
+  toolOutputDecoder,
   validInteractionReceipt,
   type InputToolHandler,
   type InteractionBusinessOutcome,
@@ -50,8 +53,13 @@ import {
   type ToolApprovalPreviewer,
   type ToolCall,
   type ToolChangePreview,
+  ToolResult,
+  typedToolResult,
+  type Content,
   type ToolExposure,
-  type ToolResult
+  type ToolOutputDecoder,
+  type ToolOutputRender,
+  type ToolOutputSchema
 } from '@yolk-sdk/agent/protocol'
 import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
@@ -105,7 +113,11 @@ import {
   type ToolPlanResolution
 } from './plan-runtime.ts'
 import { makeToolSearchTool } from './tool-search.ts'
-import { captureToolResultFiles, type ToolFileCaptureOptions } from './files.ts'
+import {
+  captureToolResultFiles,
+  makeToolFileCapture,
+  type ToolFileCaptureOptions
+} from './files.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 
@@ -129,6 +141,7 @@ export class ToolRegistryError extends Schema.TaggedError<ToolRegistryError>()(
       'invalid_tool_exposure',
       'staging_unsupported_policy',
       'staging_validation_required',
+      'output_validation_required',
       'plan_review_duplicate',
       'change_preview_unsupported_policy',
       'deferred_unsupported_tool',
@@ -149,12 +162,18 @@ export const ModelVisibleToolErrorReason = Schema.Literals([
 
 export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
 
+/**
+ * A recoverable failure the model sees. `code` is an optional machine-readable code of the tool's
+ * own (for example `not_found` from a provider): code mode scripts get it as the rejected `Error`'s
+ * `code` (ADR 0013).
+ */
 export class ModelVisibleToolError extends Schema.TaggedError<ModelVisibleToolError>()(
   'ModelVisibleToolError',
   {
     tool: Schema.String,
     message: Schema.String,
     reason: ModelVisibleToolErrorReason,
+    code: Schema.optional(Schema.String),
     details: Schema.optional(Schema.Unknown)
   }
 ) {}
@@ -164,6 +183,7 @@ export const ModelVisibleToolErrorStructuredContentSchema = Schema.Struct({
   tool: Schema.String,
   reason: ModelVisibleToolErrorReason,
   message: Schema.String,
+  code: Schema.optional(Schema.String),
   details: Schema.optional(Schema.Unknown)
 })
 
@@ -174,6 +194,7 @@ export type ModelVisibleToolErrorInput = {
   readonly tool: string
   readonly message: string
   readonly reason: ModelVisibleToolErrorReason
+  readonly code?: string
   readonly details?: unknown
 }
 
@@ -185,6 +206,7 @@ type ModelVisibleToolErrorStructuredContentFields = {
   tool: ModelVisibleToolError['tool']
   reason: ModelVisibleToolError['reason']
   message: ModelVisibleToolError['message']
+  code?: string
   details?: ModelVisibleToolError['details']
 }
 
@@ -196,6 +218,10 @@ export const modelVisibleToolErrorStructuredContent = (
     tool: error.tool,
     reason: error.reason,
     message: error.message
+  }
+
+  if (error.code !== undefined) {
+    fields.code = error.code
   }
 
   if (error.details !== undefined) {
@@ -333,6 +359,17 @@ export type ToolRegistration<Context> = {
   readonly instruct?: NestedToolInstructor
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+  /** Checks the `structuredContent` of successful results against `def.outputSchema` (ADR 0013).
+   * Required whenever `def.outputSchema` is set (`resolveTools` fails `output_validation_required`
+   * otherwise): `resolveTools` runs it on every result of the registration (direct, nested and
+   * applied plan calls) and passes on the checked value; a value that does not match is dropped
+   * (logged without the value), so code mode rejects the call while the model still sees the
+   * content. For interaction tools it checks the action's own value (`structuredContent.result` of
+   * a completed outcome) before the receipt is settled. `makeTool` builds it from `output`
+   * (`toolOutputDecoder`); raw registrations and adapters supply their own (MCP:
+   * `mcpToolOutputDecoder`).
+   */
+  readonly decodeOutput?: ToolOutputDecoder
   /** Present only on schema-backed input registrations; owns user-payload validation. */
   readonly input?: InputToolHandler
   /** Present only on action-backed interaction registrations; owns values validation
@@ -445,14 +482,10 @@ type ToolParamsSchema = Schema.Schema<unknown> & { readonly DecodingServices: ne
 
 export const EmptyToolParams = Schema.Record(Schema.String, Schema.Never)
 
-export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
+type MakeToolBaseOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly name: string
   readonly description: string
   readonly parameters: ParamsSchema
-  /** Schema of `ToolResult.structuredContent`, lowered like `parameters` into
-   * `ToolDef.outputSchema` for declarations only. Results are not validated against it.
-   */
-  readonly output?: Schema.Top
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
@@ -483,10 +516,86 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly isReadCall?: (params: ParamsSchema['Type']) => boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
-  readonly execute: (
-    input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
-  ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
 } & ToolExposure
+
+type MakeToolExecute<Context, ParamsSchema extends ToolParamsSchema, A> = (
+  input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
+) => Effect.Effect<A, ToolError | ModelVisibleToolError>
+
+/** What a typed tool's `execute` succeeds with (ADR 0013): its output value. */
+export type ToolOutput<A> = {
+  readonly output: A
+}
+
+/**
+ * What an untyped tool's `execute` succeeds with (ADR 0013): content only, text and optionally
+ * file parts (`filePartFromBytes`) that tool resolution captures. No structured value: declare
+ * `output` for one.
+ */
+export type ToolContent = {
+  readonly content: Content
+  readonly output?: never
+  readonly structuredContent?: never
+  readonly toolCallId?: never
+}
+
+/**
+ * A typed tool (ADR 0013): `execute` returns `{ output }`, which Yolk encodes with
+ * `Schema.toCodecJson(output)` (file fields captured first) into `structuredContent`, the value
+ * code mode scripts receive. A value that does not encode fails the call with a value-free
+ * `execution` `ToolError`. The model sees `render(value, files)`, by default the compact JSON of
+ * the encoding with file fields lowered to their labels, followed by the files it views.
+ */
+export type MakeTypedToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  readonly output: OutputSchema
+  readonly render?: ToolOutputRender<OutputSchema['Type']>
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolOutput<OutputSchema['Type']>>
+}
+
+/** An untyped tool (ADR 0013): `execute` returns content only; scripts receive its text. */
+export type MakeContentToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  readonly output?: never
+  readonly render?: never
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolContent>
+}
+
+/**
+ * @deprecated Return `{ output }` with an `output` schema, or `{ content }` without one (ADR
+ * 0013). A raw `ToolResult` still works in this release: with `output`, `resolveTools` checks a
+ * successful result's `structuredContent` against the schema's JSON encoding (excess properties
+ * rejected) and passes on the checked value; one that does not match is dropped (logged), so
+ * scripts reject the call instead of reading an invalid value.
+ */
+export type MakeToolResultToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema
+> = MakeToolBaseOptions<Context, ParamsSchema> & {
+  /** Schema of `ToolResult.structuredContent`, lowered into `ToolDef.outputSchema`. */
+  readonly output?: ToolOutputSchema
+  readonly render?: never
+  readonly execute: MakeToolExecute<Context, ParamsSchema, ToolResult>
+}
+
+/**
+ * The options of any `makeTool` form: the type of its implementation, not an overload. Not
+ * exported from `@yolk-sdk/agent/tools`: pass one of `MakeTypedToolOptions`,
+ * `MakeContentToolOptions` or `MakeToolResultToolOptions`, which the overloads accept.
+ */
+export type MakeToolOptions<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema = ToolOutputSchema
+> =
+  | MakeTypedToolOptions<Context, ParamsSchema, OutputSchema>
+  | MakeContentToolOptions<Context, ParamsSchema>
+  | MakeToolResultToolOptions<Context, ParamsSchema>
 
 export type ToolModule<Context> = {
   readonly id: string
@@ -806,6 +915,7 @@ type MakeToolRegistrationFields<Context> = {
   isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
   staging?: ToolStagingHandlers<Context>
   changePreview?: ToolChangePreviewHandler<Context>
+  decodeOutput?: ToolOutputDecoder
 }
 
 type MakeToolDefFields<Context, ParamsSchema extends ToolParamsSchema> = {
@@ -872,9 +982,165 @@ export const toolCallAccess = <Context>(
   )
 }
 
-export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
+const isToolResultValue = (
+  value: ToolOutput<unknown> | ToolContent | ToolResult
+): value is ToolResult =>
+  value instanceof ToolResult ||
+  (Predicate.hasProperty(value, 'toolCallId') && Predicate.isString(value.toolCallId))
+
+const isToolOutputValue = (
+  value: ToolOutput<unknown> | ToolContent
+): value is ToolOutput<unknown> => Reflect.has(value, 'output')
+
+type CheckedResultFields = {
+  toolCallId: string
+  content: ToolResult['content']
+  isError?: boolean
+  structuredContent?: Schema.Json
+  acceptance?: ToolResult['acceptance']
+  nestedCalls?: ToolResult['nestedCalls']
+  usage?: ToolResult['usage']
+  files?: ToolResult['files']
+}
+
+// Explicit field selection (`ToolResult.make` would keep excess own keys of a spread instance):
+// the result with its `structuredContent` replaced by the checked value, or without one.
+const withCheckedValue = (result: ToolResult, value: Schema.Json | undefined): ToolResult => {
+  const fields: CheckedResultFields = { toolCallId: result.toolCallId, content: result.content }
+
+  if (result.isError !== undefined) fields.isError = result.isError
+
+  if (value !== undefined) fields.structuredContent = value
+
+  if (result.acceptance !== undefined) fields.acceptance = result.acceptance
+
+  if (result.nestedCalls !== undefined) fields.nestedCalls = result.nestedCalls
+
+  if (result.usage !== undefined) fields.usage = result.usage
+
+  if (result.files !== undefined) fields.files = result.files
+
+  return ToolResult.make(fields)
+}
+
+// The checked value, or `undefined` (logged without the value) when it does not match.
+const checkedOutputValue = (
+  name: string,
+  decodeOutput: ToolOutputDecoder,
+  value: unknown
+): Effect.Effect<Schema.Json | undefined> =>
+  decodeOutput(value).pipe(
+    Effect.catch(() =>
+      Effect.logWarning(
+        `Tool ${name} returned a value that does not match its output schema; the value was dropped.`
+      ).pipe(Effect.as(undefined))
+    )
+  )
+
+/**
+ * The typed-result boundary (ADR 0013), run by `resolveTools` on every result of a registration
+ * with `decodeOutput`: a successful result's `structuredContent` is replaced by the checked value
+ * (excess properties rejected, plain JSON only), or dropped with a value-free warning when it
+ * does not match, so code mode rejects the call ("returned an invalid result") while the model
+ * still sees the content. Error results, background acceptances and results without a value are
+ * left as they are.
+ */
+const checkToolResultOutput = (
+  name: string,
+  decodeOutput: ToolOutputDecoder | undefined,
+  result: ToolResult
+): Effect.Effect<ToolResult> =>
+  decodeOutput === undefined ||
+  result.isError === true ||
+  result.acceptance !== undefined ||
+  result.structuredContent === undefined
+    ? Effect.succeed(result)
+    : checkedOutputValue(name, decodeOutput, result.structuredContent).pipe(
+        Effect.map(value => withCheckedValue(result, value))
+      )
+
+/** Bound of checking an interaction action's value (ADR 0013); past it the value is dropped. */
+const interactionOutputCheckTimeout = Duration.seconds(5)
+
+/**
+ * The typed-result boundary of an interaction action (ADR 0013). Its result is the interaction
+ * envelope (`makeInteractionToolResult`), so the output schema describes the action's own value
+ * (`structuredContent.result` of a completed outcome): it is checked before the envelope is built
+ * and the receipt settled, so a receipt never holds an unchecked value. The check is bounded by
+ * `interactionOutputCheckTimeout` (a decoder may be asynchronous); past it the value is dropped
+ * like a mismatch, so settlement always proceeds. Callers inside the settlement's uninterruptible
+ * region run it under `restore`, so interruption reaches the seal. Failed and unknown outcomes
+ * keep their value.
+ */
+const checkedInteractionActionResult = <
+  A extends { readonly outcome: InteractionBusinessOutcome; readonly structuredContent?: unknown }
+>(
+  name: string,
+  decodeOutput: ToolOutputDecoder | undefined,
+  actionResult: A
+): Effect.Effect<{ readonly outcome: A['outcome']; readonly structuredContent: unknown }> =>
+  decodeOutput === undefined ||
+  actionResult.outcome !== 'completed' ||
+  actionResult.structuredContent === undefined
+    ? Effect.succeed({
+        outcome: actionResult.outcome,
+        structuredContent: actionResult.structuredContent
+      })
+    : checkedOutputValue(name, decodeOutput, actionResult.structuredContent).pipe(
+        Effect.timeoutOption(interactionOutputCheckTimeout),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.logWarning(
+                `Tool ${name}: checking its output did not finish in time; the value was dropped.`
+              ).pipe(Effect.as(undefined)),
+            onSome: Effect.succeed
+          })
+        ),
+        Effect.map(structuredContent => ({ outcome: actionResult.outcome, structuredContent }))
+      )
+
+const structuredWithoutOutputError = (name: string) =>
+  new ToolError({
+    tool: name,
+    cause: 'execution',
+    message: `${name} returned a structured value without an output schema.`
+  })
+
+/**
+ * A schema-backed tool registration. Three forms (ADR 0013):
+ *
+ * - with `output`: `execute` returns `{ output }` (see `MakeTypedToolOptions`);
+ * - without `output`: `execute` returns `{ content }` (see `MakeContentToolOptions`);
+ * - deprecated: `execute` returns a raw `ToolResult` (see `MakeToolResultToolOptions`).
+ *
+ * The typed form infers its output schema; with explicit type arguments it takes three
+ * (`makeTool<Context, typeof Params, typeof Output>`), so a two-argument call never accepts a
+ * wrong `{ output }`. With `output`, the registration's `decodeOutput` checks every result
+ * against it. `ToolFile` belongs only in `output`: a `parameters` schema holding one throws
+ * (it could never decode).
+ */
+export function makeTool<
+  Context,
+  ParamsSchema extends ToolParamsSchema,
+  OutputSchema extends ToolOutputSchema
+>(options: MakeTypedToolOptions<Context, ParamsSchema, OutputSchema>): ToolRegistration<Context>
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
+  options: MakeContentToolOptions<Context, ParamsSchema>
+): ToolRegistration<Context>
+/** @deprecated Return `{ output }` with an `output` schema, or `{ content }` without one (ADR 0013). */
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
+  options: MakeToolResultToolOptions<Context, ParamsSchema>
+): ToolRegistration<Context>
+export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
-): ToolRegistration<Context> => {
+): ToolRegistration<Context> {
+  if (containsToolFile(options.parameters)) {
+    throw new Error(
+      `Tool ${options.name} has a ToolFile in its parameters: ToolFile belongs only in output schemas; take a fileId instead.`
+    )
+  }
+
   // Decode what `def.parameters` advertises: the JSON codec, not the type-side schema.
   const decodeParams = decodeToolArguments(options.parameters)
 
@@ -915,6 +1181,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
         return fields
       })()
     )
+  }
+
+  if (options.output !== undefined) {
+    registration.decodeOutput = toolOutputDecoder(options.output)
   }
 
   if (options.staging !== undefined && options.staging !== true) {
@@ -1008,13 +1278,50 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
           },
           // Forwards `nested` and `idempotencyKey` exactly as the registry passed them.
           onSuccess: params =>
-            options
-              .execute({ ...input, params })
-              .pipe(
-                Effect.catchTag('ModelVisibleToolError', error =>
-                  Effect.succeed(modelVisibleToolErrorResult(call, error))
-                )
+            options.execute({ ...input, params }).pipe(
+              Effect.flatMap(
+                (
+                  returned: ToolOutput<unknown> | ToolContent | ToolResult
+                ): Effect.Effect<ToolResult, ToolError> => {
+                  // Deprecated: `resolveTools` checks its value (`decodeOutput`).
+                  if (isToolResultValue(returned)) {
+                    return Effect.succeed(returned)
+                  }
+
+                  if (!isToolOutputValue(returned)) {
+                    return Effect.succeed(
+                      ToolResult.make({ toolCallId: call.id, content: returned.content })
+                    )
+                  }
+
+                  const output = options.output
+
+                  if (output === undefined) {
+                    return Effect.fail(structuredWithoutOutputError(options.name))
+                  }
+
+                  return typedToolResult({
+                    toolCallId: call.id,
+                    tool: options.name,
+                    output,
+                    value: returned.output,
+                    render: options.render
+                  }).pipe(
+                    Effect.mapError(
+                      error =>
+                        new ToolError({
+                          tool: options.name,
+                          cause: 'execution',
+                          message: error.message
+                        })
+                    )
+                  )
+                }
+              ),
+              Effect.catchTag('ModelVisibleToolError', error =>
+                Effect.succeed(modelVisibleToolErrorResult(call, error))
               )
+            )
         })
       )
     }
@@ -1182,19 +1489,26 @@ const executeInteractionTool = <Context>(input: {
           : described.pipe(Effect.map(Option.some))
 
       return bounded.pipe(
-        Effect.map(result =>
+        Effect.flatMap(result =>
           Option.isNone(result)
-            ? genericUnknownResult()
-            : makeInteractionToolResult({
-                toolCallId: stored.call.id,
-                requestId: stored.slot,
-                slot: stored.slot,
-                submissionId: stored.submissionId,
-                actionId: stored.actionId ?? '',
+            ? Effect.succeed(genericUnknownResult())
+            : checkedInteractionActionResult(name, input.registration?.decodeOutput, {
                 outcome: phase === 'replay' ? (result.value.outcome ?? 'unknown') : 'unknown',
-                content: result.value.content,
                 structuredContent: result.value.structuredContent
-              })
+              }).pipe(
+                Effect.map(checked =>
+                  makeInteractionToolResult({
+                    toolCallId: stored.call.id,
+                    requestId: stored.slot,
+                    slot: stored.slot,
+                    submissionId: stored.submissionId,
+                    actionId: stored.actionId ?? '',
+                    outcome: checked.outcome,
+                    content: result.value.content,
+                    structuredContent: checked.structuredContent
+                  })
+                )
+              )
         ),
         Effect.catchDefect(defect =>
           Effect.logWarning(
@@ -1357,15 +1671,21 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
+          // Checked before settlement, interruptible and bounded (like file capture below): the
+          // receipt only ever holds the checked value.
+          const checked = yield* restore(
+            checkedInteractionActionResult(name, input.registration?.decodeOutput, actionResult)
+          )
+
           const actionToolResult = makeInteractionToolResult({
             toolCallId: stored.call.id,
             requestId: stored.slot,
             slot: stored.slot,
             submissionId: stored.submissionId,
             actionId: actionId ?? '',
-            outcome: actionResult.outcome,
+            outcome: checked.outcome,
             content: actionResult.content,
-            structuredContent: actionResult.structuredContent
+            structuredContent: checked.structuredContent
           })
 
           // Storing files is interruptible and bounded; past the bound the bytes become
@@ -1715,6 +2035,17 @@ export const resolveTools = <Context>(
             })
           )
         }
+      }
+
+      // Typed results reach scripts only through the output boundary (ADR 0013): a declared
+      // output schema without a decoder would pass any value on unchecked.
+      if (tool.def.outputSchema !== undefined && tool.decodeOutput === undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'output_validation_required',
+            message: `Tool ${tool.def.name} declares an outputSchema but no decodeOutput: give it an output schema with makeTool, or a decoder (toolOutputDecoder, mcpToolOutputDecoder).`
+          })
+        )
       }
 
       // A change preview describes a call a person approves: approval-gated tools only.
@@ -2108,6 +2439,15 @@ export const resolveTools = <Context>(
       return input
     }
 
+    // Typed outputs store their file fields through this resolution's capture (ADR 0013), never
+    // through one an enclosing resolution provided.
+    const fileCapture = makeToolFileCapture(options.files)
+
+    const checkedOutput =
+      (tool: ToolRegistration<Context>) =>
+      (result: ToolResult): Effect.Effect<ToolResult> =>
+        checkToolResultOutput(tool.def.name, tool.decodeOutput, result)
+
     // The single ledger seam: top-level and nested calls of ordinary registrations pass here.
     // Input and interaction tools keep their own HITL receipts and are never ledgered.
     const executeRegistration = (
@@ -2136,7 +2476,7 @@ export const resolveTools = <Context>(
           ref: executionOptions?.interaction,
           host: options.interactionHost,
           files: options.files
-        })
+        }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
       }
 
       if (ledger === undefined) return runRegistration(match, call, undefined)
@@ -2166,20 +2506,23 @@ export const resolveTools = <Context>(
               call,
               parentKey: parentCallId,
               execute: runRegistration(match, call, idempotencyKey),
+              typed: match.tool.def.outputSchema !== undefined,
               abandonedResult: match.tool.abandonedResult
             })
           : runRegistration(match, call, idempotencyKey)
       })
     }
 
-    // Every registration result passes file capture before the ledger, transcript or scripts.
+    // Every registration result passes file capture and the typed-result boundary before the
+    // ledger, transcript or scripts.
     const runRegistration = (
       match: ResolvedRegistration<Context>,
       call: ToolCall,
       idempotencyKey: string | undefined
     ): Effect.Effect<ToolResult, ToolError> =>
       runRegistrationUncaptured(match, call, idempotencyKey).pipe(
-        Effect.flatMap(result => captureToolResultFiles(result, options.files))
+        Effect.flatMap(result => captureToolResultFiles(result, options.files)),
+        Effect.flatMap(checkedOutput(match.tool))
       )
 
     const runRegistrationUncaptured = (
@@ -2190,6 +2533,11 @@ export const resolveTools = <Context>(
       const host = options.backgroundHost
       const validate = match.tool.validate
       const def = match.tool.def
+
+      const executeTool = (businessCall: ToolCall) =>
+        match.tool
+          .execute(executionInput(match.tool, businessCall, call, idempotencyKey))
+          .pipe(Effect.provideService(ToolFileCapture, fileCapture))
 
       return activated(match.tool) && host !== undefined && validate !== undefined
         ? executeBackgroundTool({
@@ -2216,38 +2564,38 @@ export const resolveTools = <Context>(
                     )
                 )
               ),
-            execute: businessCall =>
-              match.tool.execute(executionInput(match.tool, businessCall, call, idempotencyKey))
+            execute: executeTool
           })
-        : businessCallFor(def, call).pipe(
-            Effect.flatMap(normalized =>
-              match.tool.execute(executionInput(match.tool, normalized, call, idempotencyKey))
-            )
-          )
+        : businessCallFor(def, call).pipe(Effect.flatMap(executeTool))
     }
 
     // Model-facing dispatch: codemode-only tools are unknown here (fail closed as not found).
-    const execute = (call: ToolCall, executionOptions?: ToolExecutionOptions) =>
-      executionOptions?.interaction !== undefined
-        ? executeInteractionTool({
-            registration: resolved.find(item => item.tool.def.name === call.name)?.tool,
-            handler: interactionOf(resolved.find(item => item.tool.def.name === call.name)?.tool),
-            call,
-            context,
-            ref: executionOptions.interaction,
-            host: options.interactionHost,
-            files: options.files
-          })
-        : Option.match(
-            Arr.findFirst(
-              resolved,
-              item => item.tool.def.name === call.name && item.tool.def.callableBy !== 'codemode'
-            ),
-            {
-              onNone: () => Effect.fail(missingToolError(call.name)),
-              onSome: match => executeRegistration(match, call, executionOptions)
-            }
-          )
+    const execute = (call: ToolCall, executionOptions?: ToolExecutionOptions) => {
+      if (executionOptions?.interaction !== undefined) {
+        const registration = resolved.find(item => item.tool.def.name === call.name)?.tool
+
+        return executeInteractionTool({
+          registration,
+          handler: interactionOf(registration),
+          call,
+          context,
+          ref: executionOptions.interaction,
+          host: options.interactionHost,
+          files: options.files
+        }).pipe(Effect.provideService(ToolFileCapture, fileCapture))
+      }
+
+      return Option.match(
+        Arr.findFirst(
+          resolved,
+          item => item.tool.def.name === call.name && item.tool.def.callableBy !== 'codemode'
+        ),
+        {
+          onNone: () => Effect.fail(missingToolError(call.name)),
+          onSome: match => executeRegistration(match, call, executionOptions)
+        }
+      )
+    }
 
     const nestedFor = (parent: ToolCall): NestedToolExecutor => {
       const executor: NestedToolExecutorFields = {

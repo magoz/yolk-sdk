@@ -7,6 +7,8 @@ import {
   isInstructionMessage,
   ToolApprovalPolicy,
   ToolDef,
+  ToolFile,
+  toolFileJsonSchemaDefinitions,
   toolJsonSchemaOmittedNullComment,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
@@ -430,6 +432,118 @@ describe('searchTools', () => {
     expect(searchCodeModeTools(described, 'find contact')[0]?.signature).toBe(
       'tools.crm_find({ filter: { email: string; }; mode?: "// not a comment" | "fast"; }): Promise<{ id: string; }>'
     )
+  })
+
+  it('names file fields FileRef | FileUnavailable in signatures and declarations', () => {
+    const output = toolJsonSchemaFromSchema(
+      Schema.Struct({
+        path: Schema.String,
+        attachment: ToolFile,
+        pages: Schema.optional(Schema.Array(ToolFile))
+      })
+    )
+
+    const short = toolJsonSchemaFromSchema(
+      Schema.Struct({ path: Schema.String, attachment: ToolFile })
+    )
+
+    const files = codeModeCatalog([
+      nestedTool('mail', 'mail_get_attachment', {
+        description: 'Get one attachment',
+        outputSchema: output
+      }),
+      nestedTool('mail', 'mail_list', { description: 'List mail' }),
+      nestedTool('mail', 'mail_save', { description: 'Save one', outputSchema: short })
+    ])
+
+    const [typed, untyped, saved] = files
+
+    // Long result types keep the short-type budget; named file types keep short ones readable.
+    expect(typed === undefined ? undefined : codeModeToolSignature(typed)).toBe(
+      'tools.mail_get_attachment({ query: string; }): Promise<object>'
+    )
+    expect(saved === undefined ? undefined : codeModeToolSignature(saved)).toBe(
+      'tools.mail_save({ query: string; }): Promise<{ attachment: FileRef | FileUnavailable; path: string; }>'
+    )
+    expect(untyped === undefined ? undefined : codeModeToolSignature(untyped)).toBe(
+      'tools.mail_list({ query: string; }): Promise<string>'
+    )
+    expect(typed === undefined ? undefined : describeCodeModeTool(typed)).toContain(
+      'mail_get_attachment(args: { query: string; }): Promise<{ attachment: FileRef | FileUnavailable; pages?: Array<FileRef | FileUnavailable> | null; path: string; }>'
+    )
+
+    const description = renderCodeModeDescription({
+      tools: [
+        nestedTool('mail', 'mail_get_attachment', { outputSchema: output }),
+        nestedTool('mail', 'mail_open', { exposure: 'all', outputSchema: output })
+      ]
+    })
+
+    expect(description).toContain('attachment: FileRef | FileUnavailable;')
+    expect(description).toContain(
+      'takes the arguments of the `mail_open` tool and resolves to `object`'
+    )
+  })
+
+  it('never renames $ref-shaped data in const, enum, default or examples', () => {
+    const data = { $ref: '#/$defs/FileRef' }
+
+    const [tool] = codeModeCatalog([
+      nestedTool('mail', 'mail_marker', {
+        outputSchema: {
+          type: 'object',
+          properties: {
+            file: { $ref: '#/$defs/FileRef' },
+            marker: { const: data, default: data, examples: [data] },
+            kind: { enum: [data] }
+          },
+          required: ['file', 'marker', 'kind'],
+          additionalProperties: false,
+          $defs: { ...toolFileJsonSchemaDefinitions }
+        }
+      })
+    ])
+
+    const declaration = tool === undefined ? '' : describeCodeModeTool(tool)
+
+    expect(declaration).toContain(
+      'Promise<{ file: FileRef; kind: {"$ref":"#/$defs/FileRef"}; marker: {"$ref":"#/$defs/FileRef"}; }>'
+    )
+  })
+
+  it('renames file fields named like data keywords', () => {
+    const file = { $ref: '#/$defs/FileRef' }
+
+    const [tool] = codeModeCatalog([
+      nestedTool('mail', 'mail_keywords', {
+        outputSchema: {
+          type: 'object',
+          properties: { enum: file, const: file, default: file, examples: file },
+          required: ['enum', 'const', 'default', 'examples'],
+          additionalProperties: false,
+          $defs: { ...toolFileJsonSchemaDefinitions }
+        }
+      })
+    ])
+
+    expect(tool === undefined ? '' : describeCodeModeTool(tool)).toContain(
+      'Promise<{ const: FileRef; default: FileRef; enum: FileRef; examples: FileRef; }>'
+    )
+  })
+
+  it('declares FileRef and FileUnavailable once and how to read results', () => {
+    const description = renderCodeModeDescription({ tools: [] })
+
+    expect(description).toContain(
+      'type FileRef = { fileId: string; name: string; mimeType: string; size: number }'
+    )
+    expect(description).toContain(
+      'type FileUnavailable = { unavailable: string; name: string; mimeType: string }'
+    )
+    expect(description).toContain(
+      '`string` results are text to read; parse JSON only when the tool says it returns JSON.'
+    )
+    expect(description).not.toContain('{ text, files }')
   })
 
   it('cuts a long signature within the limit, with a pointer to describeTool', () => {
