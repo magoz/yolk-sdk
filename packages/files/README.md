@@ -2,14 +2,24 @@
 
 Files as handles for Yolk agents
 ([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md), the
-Claim Check pattern). File bytes a tool returns (`FilePart`) are stored once by the host; the
-model, code mode scripts, the tool ledger and the transcript only see a `fileId`. Tools turn a
-`fileId` back into bytes or a link at the edge that needs them. Inline images, documents and audio
-the model views keep their inline source; capture stores a copy and adds its label.
+Claim Check pattern). File bytes a tool returns are stored once by the host; the model, code mode
+scripts, the tool ledger and the transcript never see the bytes, only a handle. Tools turn a
+`fileId` back into bytes or a link at the edge that needs them.
 
-Capture is part of `@yolk-sdk/agent`: tools emit `FilePart` (`filePartFromBytes`), and
-`resolveTools(modules, context, { files: { store } })` stores the bytes and replaces them with
-`[file file_…: name, mime, size]` labels. This package provides the default store and the tools.
+Capture is part of `@yolk-sdk/agent`, and `resolveTools(modules, context, { files: { store } })`
+stores both kinds of file a tool can return:
+
+- typed tools (the primary form,
+  [ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md))
+  return `new FileBytes({ bytes, name, mimeType })` in a `ToolFile` field of their `output`;
+  scripts and the ledger read that field as a `FileRef` `{ fileId, name, mimeType, size }`, or a
+  `FileUnavailable` `{ unavailable, name, mimeType }` when it was not stored;
+- untyped and legacy tools return `FilePart`s (`filePartFromBytes`), stored and replaced by
+  `File` parts with the `fileId` (the model sees `[file file_…: name, mime, size]`); scripts get
+  only such a tool's text.
+
+Inline images, documents and audio the model views keep their inline source; capture stores a copy
+and adds its label. This package provides the default store and the tools.
 
 ## Install
 

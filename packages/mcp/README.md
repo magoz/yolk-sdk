@@ -202,12 +202,22 @@ const step = Effect.gen(function* () {
 
 ### Files in tool results
 
-The client maps embedded resource blobs in tool results to `FilePart`s (named from the URI), so
-`resolveTools({ files })` stores them and the model sees a `fileId` label instead of base64
-([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md));
-embedded text stays text, and images and audio stay viewable parts. When adapting Yolk tools into
-an MCP server, an inline `FilePart` leaves as an embedded resource blob and a captured one as its
-label.
+A successful call's `structuredContent` is `{ value, files }`
+([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)):
+embedded text resources go into `value` with the text blocks, and blobs, images and audio become
+`files`, each a `FileRef` `{ fileId, name, mimeType, size }` (blob names come from the URI) or a
+`FileUnavailable` `{ unavailable, name, mimeType }`. The model sees blob resources as file labels
+(never base64) and images and audio as the server sent them, followed by their label once stored.
+
+Files are stored while the call runs. Inside a `resolveTools` registration they go to the
+resolution's `files` store. A call made anywhere else (a HITL route resuming
+`resumeRemoteMcpServerToolCall`, a direct `callRemoteMcpServerTool` or `callLocalMcpServerTool`)
+passes `fileCapture: makeToolFileCapture({ store })` (`@yolk-sdk/agent/tools`); without it every
+file is `FileUnavailable` (`no file store`), and the blob cannot be fetched again later. See
+[Move files between tools](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/integrations/files.mdx).
+
+When adapting Yolk tools into an MCP server (`makeMcpToolServer`), an inline `FilePart` leaves as
+an embedded resource blob and a stored (or omitted) one as its label.
 
 ## Connect to a local stdio server
 

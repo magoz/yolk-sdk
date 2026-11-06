@@ -580,15 +580,22 @@ inside one source fail validation. Hosts own file discovery, storage, enablement
 
 ### File capture
 
-`resolveTools(modules, context, { files: { store, maxFileBytes? } })` stores the inline bytes of
+`resolveTools(modules, context, { files: { store, maxFileBytes? } })` stores the file bytes of
 every executed result (direct, code mode nested, staged and interaction calls) through the host
 `FileStoreApi` before the ledger or transcript sees them
-([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md)). A
-`FilePart` becomes a `fileId` label (`[file file_…: name, mime, size]`), inline images, documents
-and audio keep their source and gain a label, and `ToolResult.files` lists the descriptors
-(`FileDescriptor`, not sent to providers). Without `files`, over `maxFileBytes` (default 100 MiB)
-or when storing fails, inline `FilePart` bytes become a "file not captured" label. Tools build
-file parts with `filePartFromBytes`. `@yolk-sdk/files` provides an object-storage store and tools
+([ADR 0009](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0009-file-claim-check.md),
+[ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)):
+
+- Typed tools return `FileBytes` in a `ToolFile` output field; its encoding (what scripts and the
+  ledger read) is a `FileRef` `{ fileId, name, mimeType, size }`, or a `FileUnavailable`
+  `{ unavailable, name, mimeType }` (`no file store`, `too large`, `storage unavailable`).
+- Untyped tools return `FilePart`s (`filePartFromBytes`); each becomes a `File` part with the
+  `fileId` (rendered `[file file_…: name, mime, size]`), or one with an `Omitted { reason }` source
+  (rendered "file not captured") without `files`, over `maxFileBytes` (default 100 MiB) or when
+  storing fails.
+- Inline images, documents and audio keep their source and gain a `File` part once stored.
+
+`ToolResult.files` lists the stored descriptors (`FileDescriptor`, not sent to providers). `@yolk-sdk/files` provides an object-storage store and tools
 that move a `fileId` to upload URLs, links and the sandbox.
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
@@ -993,8 +1000,14 @@ This package declares them; it does not run scripts.
 - Typed tool results (ADR 0013): `makeTool({ output, execute })` returns `{ output }` and Yolk
   encodes it with `Schema.toCodecJson(output)` into `structuredContent` (what code mode scripts
   receive) and `ToolDef.outputSchema`; file fields are `ToolFile` (return `FileBytes`, scripts get
-  `FileRef | FileUnavailable`). Without `output`, `execute` returns `{ content }`. Returning a raw
-  `ToolResult` is deprecated.
+  `FileRef | FileUnavailable`). The model sees the optional `render(value, files)`, else the
+  compact JSON of the encoding with file labels. Without `output`, `execute` returns
+  `{ content }`. Returning a raw `ToolResult` is deprecated.
+- `resolveTools` checks every successful result of a registration with `def.outputSchema` through
+  its `decodeOutput` (excess properties rejected, plain JSON only) and passes on the checked value;
+  a mismatch is dropped (warning without the value), so scripts reject the call. `makeTool` sets
+  it from `output`; raw registrations pass `toolOutputDecoder(schema)` (MCP:
+  `mcpToolOutputDecoder`), or resolution fails with `output_validation_required`.
 - `callableBy: 'all' | 'model' | 'codemode'` (default `all`) decides who may call a tool. For
   `codemode` only, `discovery: 'listed' | 'search' | 'pinned'` (default `listed`; `pinned` is
   always listed, outside the catalog budget) decides how scripts find it.
