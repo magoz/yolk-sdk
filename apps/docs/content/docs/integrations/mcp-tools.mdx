@@ -27,34 +27,71 @@ const toolDefs = mcpTools.map(tool => tool.def)
 const toolByName = new Map(mcpTools.map(tool => [tool.def.name, tool]))
 ```
 
-Pass `toolDefs` into `run` or `runRuntime`.
+Pass `toolDefs` into `run` or `runRuntime`, or register them as tools (below).
 
-## Execute a tool call
+## Register them as tools
+
+Each listed tool declares `ToolDef.outputSchema` `{ value, files }`
+([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)), so
+its registration sets `decodeOutput: mcpToolOutputDecoder`: `resolveTools` checks every result
+with it (and fails with `output_validation_required` without it).
 
 ```ts
-import { callRemoteMcpServerTool } from '@yolk-sdk/mcp/client'
+import { ToolError } from '@yolk-sdk/agent/loop'
+import type { ToolModule, ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  callRemoteMcpServerTool,
+  mcpToolOutputDecoder,
+  type McpResolvedTool
+} from '@yolk-sdk/mcp/client'
 
-const resolved = toolByName.get(call.name)
+type HostContext = { readonly userId: string } // your app's context
 
-if (resolved === undefined) {
-  throw new Error(`Unknown MCP tool: ${call.name}`)
-}
+const registration = (resolved: McpResolvedTool): ToolRegistration<HostContext> => ({
+  def: resolved.def,
+  access: 'read', // host policy, for example from `resolved.annotations`
+  decodeOutput: mcpToolOutputDecoder,
+  execute: ({ call }) =>
+    callRemoteMcpServerTool({
+      config: server,
+      mcpToolName: resolved.mcpToolName,
+      toolCallId: call.id,
+      params: call.params
+    }).pipe(
+      Effect.provide(FetchHttpClient.layer),
+      Effect.mapError(
+        error => new ToolError({ tool: call.name, message: error.message, cause: 'execution' })
+      )
+    )
+})
 
-const result = await Effect.runPromise(
-  callRemoteMcpServerTool({
-    config: server,
-    mcpToolName: resolved.mcpToolName,
-    toolCallId: call.id,
-    params: call.params
-  }).pipe(Effect.provide(FetchHttpClient.layer))
-)
+const mcpModule: ToolModule<HostContext> = { id: 'mcp-docs', tools: mcpTools.map(registration) }
 ```
 
-Return `result` from your agent `ToolExecutor`.
+## What a call returns
 
-Embedded resource blobs in the result become `FilePart`s (named from the URI), so the model sees a
-file label instead of base64; pass `files` to `resolveTools` to store them and get `fileId`s
-([Move files between tools](./files)). Embedded text stays text.
+A successful call's `structuredContent` is `{ value, files }`, and code mode scripts resolve to it:
+
+- `value` is the server's `structuredContent` (checked against the listed `outputSchema`), else
+  the text of its text blocks and embedded text resources (`resource` with `text`), in order,
+  parsed once when it is one JSON object or array, else the text, `null` without text.
+  `resource_link` blocks never enter it.
+- `files` are its blobs, images and audio as `FileRef` (or `FileUnavailable` when no store is
+  configured, the file is too large, or storing failed).
+
+The model sees the server's content: a result without blobs, images or audio exactly as before;
+otherwise images and audio as sent, each followed by its file label, and blobs as file labels, so
+base64 never reaches the model ([Move files between tools](./files)).
+
+Files are stored when the call runs. Inside a registration, `resolveTools` stores them through its
+`files` option. A call made anywhere else (your own `ToolExecutor`, a route resuming
+`resumeRemoteMcpServerToolCall`, a direct `callLocalMcpServerTool`) passes
+`fileCapture: makeToolFileCapture({ store })` from `@yolk-sdk/agent/tools`; without it every file
+is `FileUnavailable` (`no file store`) and the blob is lost (MCP blobs cannot be fetched again).
+
+Local stdio calls list the tools first in the same session and check `structuredContent` against
+the listed `outputSchema` before trusting it; a listing that fails or lacks the tool runs the call
+without that check.
 
 ## Host responsibilities
 

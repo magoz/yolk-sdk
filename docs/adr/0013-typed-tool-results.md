@@ -72,10 +72,9 @@ dropped there, so code mode sees no value and rejects.
 ### Result boundary
 
 Every execution of a registration passes `runRegistration` in `resolveTools` (direct model calls,
-nested code mode calls, applied plan calls, background tools run inline) and, for interaction
-tools, the interaction path. There, after file capture and before the ledger, a successful result
-of a registration with `decodeOutput` (`ToolRegistration.decodeOutput: ToolOutputDecoder`) is
-checked:
+nested code mode calls, applied plan calls, background tools run inline). There, after file
+capture and before the ledger, a successful result of a registration with `decodeOutput`
+(`ToolRegistration.decodeOutput: ToolOutputDecoder`) is checked:
 
 - the decoder decodes `structuredContent` against the encoded side of the output schema
   (`Schema.toEncoded(Schema.toCodecJson(output))`) with excess properties rejected
@@ -85,6 +84,16 @@ checked:
 - a value that does not pass is dropped with a value-free warning; the model still sees the
   content; code mode rejects `<label>: returned an invalid result`, never falls back to text;
 - error results, background acceptances and results without a value are left as they are.
+
+Interaction tools (never callable from code mode) return the interaction envelope
+(`makeInteractionToolResult`: `{ type: 'interaction_outcome', outcome, ..., result? }`), so for
+them the output schema describes the action's own value, `structuredContent.result` of a completed
+outcome. It is checked inside `executeInteractionTool`, after the action ran and before the
+envelope is built and the receipt settled (and on a replay's described outcome), so a receipt never
+holds an unchecked value and a replayed receipt needs no check. A value that does not match is
+left out of the envelope (logged without it); failed and unknown outcomes keep theirs. Checking
+the envelope after settlement was rejected: it would test the wrong shape and make the returned
+result differ from the stored receipt.
 
 Decoders: `makeTool` builds one from `output` (`toolOutputDecoder`), for the typed and the
 deprecated form alike; MCP registrations use `mcpToolOutputDecoder` (the `{ value, files }`
@@ -245,11 +254,25 @@ file blocks, each block in order, images and audio as the server sent them follo
 (each `fileId` once). Error results are unchanged (`toolCallResultToToolResult`).
 
 Validation: the remote client lets the SDK check `structuredContent` against the listed
-`outputSchema` (the resumable calls do it with the SDK's rules, `assertStructuredOutput`). The
-local client lists the tools and calls in one stdio session and runs the same check
-(`compileOutputValidator` + `assertStructuredOutput`) when the listing's first page holds the tool;
-a tool missing from it is not checked. Registrations of adapted tools set
-`decodeOutput: mcpToolOutputDecoder`.
+`outputSchema` (the resumable calls compile the schema before calling, `compileOutputValidator`,
+and check with the SDK's rules, `assertStructuredOutput`). The local client keeps one stdio
+session but never pipelines the call behind the listing: it sends `initialize` and `tools/list`,
+awaits and decodes the listing, compiles the validator, and only then sends `tools/call`, so
+nothing that fails before dispatch can fail after a write ran (a model might retry it):
+
+- `initialize` fails, or the listed tool's `outputSchema` is not a usable MCP output schema
+  (`isSpecType.Tool`) or does not compile: the call fails (`McpError` `validation`, the remote
+  message `Tool '<name>' has an invalid outputSchema`) with no `tools/call` sent, as the remote
+  resumable calls fail before sending. The tool's input schema plays no part (arguments are not
+  validated client side), so an input schema without `type: 'object'` changes nothing;
+- the listing fails (a JSON-RPC error, an undecodable result) or does not hold the tool (the local
+  client reads the first page only): the call is sent without output validation and a
+  value-free warning is logged; `mcpToolOutputDecoder` still checks the `{ value, files }`
+  envelope;
+- a successful result of a tool with a usable `outputSchema` whose `structuredContent` is missing
+  or does not pass it fails the call (`validation`), as on remote.
+
+Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder`.
 
 Capture: files are stored when the call runs, through `CallMcpServerToolInput.fileCapture` when
 given, else the ambient `ToolFileCapture`, which `resolveTools` provides around every
@@ -290,7 +313,9 @@ registration's `outputSchema`), so a replay never depends on the tool's current 
    `{ output: value }` (the encoding is done for you; `Chunk`/`DateTime` become JSON).
 3. A tool without `output`: return `{ content }`. A structured value now needs `output`.
 4. Errors: fail with `modelVisibleToolError({ ..., code })` to give scripts `error.code`.
-5. Hosts that wrap registrations need no change: capture is provided by `resolveTools`.
+5. Hosts that wrap registrations need no change for capture (`resolveTools` provides it). Wrappers
+   that rebuild a registration field by field (instead of spreading it) must forward
+   `decodeOutput`, or a typed tool fails resolution with `output_validation_required`.
 6. Files returned as `FilePart` by tools without `output` (deprecated `ToolResult` tools included)
    are no longer reachable from scripts (the model still sees their labels). Before upgrading,
    give every byte-producing tool whose files scripts move an `output` with a `ToolFile` field

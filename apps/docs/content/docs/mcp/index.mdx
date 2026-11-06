@@ -66,6 +66,7 @@ Pass `tools.map(tool => tool.def)` into the agent loop.
 ## Call a remote MCP tool
 
 ```ts
+import { makeToolFileCapture } from '@yolk-sdk/agent/tools'
 import { callRemoteMcpServerTool } from '@yolk-sdk/mcp/client'
 
 const result = await Effect.runPromise(
@@ -73,12 +74,22 @@ const result = await Effect.runPromise(
     config,
     mcpToolName: 'search',
     toolCallId: 'call_123',
-    params: { query: 'Yolk SDK' }
+    params: { query: 'Yolk SDK' },
+    // Stores the call's blobs, images and audio (`store` is your FileStoreApi).
+    fileCapture: makeToolFileCapture({ store })
   }).pipe(Effect.provide(FetchHttpClient.layer))
 )
 ```
 
-The result is a Yolk `ToolResult`, ready to feed back into the agent loop.
+The result is a Yolk `ToolResult`, ready to feed back into the agent loop. Its `structuredContent`
+is `{ value, files }`: `value` is the server's `structuredContent` (checked against the listed
+`outputSchema`), else the text of its text blocks and embedded text resources, parsed once when it
+is one JSON object or array; `files` are its blobs, images and audio as `FileRef` (or
+`FileUnavailable`). Inside a `resolveTools` registration the files are stored through the
+resolution's `files`; a call made anywhere else (a route, a resume) passes `fileCapture`, or every
+file is `FileUnavailable` (`no file store`) and the blob is lost: MCP blobs cannot be fetched again.
+Registrations built from listed tools set `decodeOutput: mcpToolOutputDecoder`
+([Add MCP tools](../integrations/mcp-tools)).
 
 ## Confirm tool calls with form elicitation
 
@@ -96,6 +107,7 @@ the form to a person, await their answer, possibly in another process). Never au
 confirmation; when no person decides, answer `decline` or `cancel`.
 
 ```ts
+import { makeToolFileCapture } from '@yolk-sdk/agent/tools'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
@@ -108,7 +120,17 @@ import {
 declare const collectDecision: (form: McpFormElicitation) => Promise<McpElicitationResponse>
 
 const options: McpClientOptions = { elicitation: { form: true } }
-const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_123', params, options }
+
+// The resume runs outside `resolveTools` (a HITL route, another process): pass a capture, or the
+// resumed result's blobs are `FileUnavailable` and lost (`store` is your FileStoreApi).
+const call = {
+  config,
+  mcpToolName: 'delete-invoice',
+  toolCallId: 'call_123',
+  params,
+  options,
+  fileCapture: makeToolFileCapture({ store })
+}
 
 const outcome = await Effect.runPromise(
   callRemoteMcpServerToolResumable(call).pipe(Effect.provide(FetchHttpClient.layer))

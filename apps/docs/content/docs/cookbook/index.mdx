@@ -27,9 +27,11 @@ Use this shape when reconnect, resume, HITL, or server-owned transcript state ma
 
 1. Load host-owned MCP server config.
 2. Call `listMcpTools` or `listRemoteMcpServerTools`.
-3. Pass returned `def` values into the loop.
-4. When the model calls one, call `callMcpServerTool`.
-5. Return the resulting Yolk `ToolResult` to the loop.
+3. Register each returned `def` as a tool with `decodeOutput: mcpToolOutputDecoder` (or pass the
+   defs into the loop yourself).
+4. When the model calls one, call `callMcpServerTool`; outside `resolveTools`, pass
+   `fileCapture: makeToolFileCapture({ store })` so its blobs are stored, not lost.
+5. Return the resulting Yolk `ToolResult` (`structuredContent` `{ value, files }`) to the loop.
 
 Persist MCP server config and credentials outside the package.
 

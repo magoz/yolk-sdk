@@ -110,6 +110,7 @@ step, so Yolk returns the pause as data and resumes later, possibly in another p
 
 ```ts
 import { Effect } from 'effect'
+import { makeToolFileCapture } from '@yolk-sdk/agent/tools'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
@@ -119,7 +120,17 @@ import {
 } from '@yolk-sdk/mcp/client'
 
 const options: McpClientOptions = { elicitation: { form: true } }
-const call = { config, mcpToolName: 'delete-invoice', toolCallId: 'call_1', params, options }
+
+// A resume runs outside `resolveTools`: pass a capture (`makeToolFileCapture({ store })` from
+// `@yolk-sdk/agent/tools`) or the resumed result's blobs are `FileUnavailable` and lost.
+const call = {
+  config,
+  mcpToolName: 'delete-invoice',
+  toolCallId: 'call_1',
+  params,
+  options,
+  fileCapture: makeToolFileCapture({ store })
+}
 
 const step = Effect.gen(function* () {
   const outcome = yield* callRemoteMcpServerToolResumable(call)
