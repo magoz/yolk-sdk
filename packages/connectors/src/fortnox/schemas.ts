@@ -7,7 +7,10 @@ import {
   NullableNumber,
   NullableString,
   OptionalBoolean,
+  OptionalInt,
+  OptionalNumber,
   OptionalString,
+  optionalMaxLength,
   PaginationFields
 } from './fields.ts'
 
@@ -124,6 +127,27 @@ export class FortnoxInvoiceRow extends Schema.Class<FortnoxInvoiceRow>('FortnoxI
   TotalExcludingVAT: NullableNumber,
   CostCenter: NullableString,
   Project: NullableString
+}) {}
+
+// Writable InvoiceRow fields per the Fortnox OpenAPI row payload. RowId only selects which
+// existing row a sent row updates (see the update note); read-only PriceExcludingVAT, Total, and
+// TotalExcludingVAT are not inputs (Fortnox rejects PriceExcludingVAT with code 2000321).
+export class FortnoxInvoiceRowInput extends Schema.Class<FortnoxInvoiceRowInput>(
+  'FortnoxInvoiceRowInput'
+)({
+  RowId: OptionalInt,
+  AccountNumber: OptionalInt,
+  ArticleNumber: OptionalString,
+  Description: optionalMaxLength(255),
+  DeliveredQuantity: OptionalString,
+  Unit: optionalMaxLength(20),
+  Price: OptionalNumber,
+  Discount: OptionalNumber,
+  DiscountType: Schema.optional(Schema.Literals(['AMOUNT', 'PERCENT'])),
+  VAT: OptionalNumber,
+  VATCode: OptionalString,
+  CostCenter: OptionalString,
+  Project: OptionalString
 }) {}
 
 const InvoiceFields = {
@@ -353,10 +377,10 @@ const InvoiceMutationFields = {
   OurReference: OptionalString,
   YourReference: OptionalString,
   Comments: OptionalString,
-  Remarks: OptionalString,
+  Remarks: optionalMaxLength(1024),
   CostCenter: OptionalString,
   Project: OptionalString,
-  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))
+  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRowInput))
 } as const
 
 const InvoiceWriteFields = {

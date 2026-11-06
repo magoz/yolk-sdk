@@ -1,6 +1,7 @@
 import { Chunk, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ApiKeyCredential,
@@ -687,6 +688,53 @@ describe('Fortnox connector', () => {
         expect(Object.keys(properties)).toEqual(expect.arrayContaining(['Comments', 'Remarks']))
         expect(tool?.description).toContain('Remarks is the invoice text (Fakturatext)')
       }
+    })
+  )
+
+  it.effect('advertises only writable invoice row fields and rejects read-only ones', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
+        {}
+      )
+
+      for (const name of ['fortnox.create_invoice', 'fortnox.update_invoice']) {
+        const tool = toolSet.tools.find(item => item.name === name)
+
+        const { $defs } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            $defs: Schema.Struct({ FortnoxInvoiceRowInputEncoded: ToolParameterProperties })
+          })
+        )(tool?.parameters)
+
+        const rowKeys = Object.keys($defs.FortnoxInvoiceRowInputEncoded.properties)
+
+        expect(rowKeys).toEqual(
+          expect.arrayContaining(['RowId', 'Price', 'Discount', 'DiscountType', 'VAT', 'VATCode'])
+        )
+
+        for (const readOnly of ['PriceExcludingVAT', 'Total', 'TotalExcludingVAT'])
+          expect(rowKeys).not.toContain(readOnly)
+      }
+
+      const rejected = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'fortnox.create_invoice',
+          params: {
+            CustomerNumber: '001',
+            InvoiceRows: [
+              { Description: 'Filmning', DeliveredQuantity: '1', PriceExcludingVAT: 1160 }
+            ]
+          }
+        })
+      )
+
+      expect(rejected.isError).toBe(true)
+      expect(JSON.stringify(rejected)).toContain('PriceExcludingVAT')
+      expect(harness.requests).toHaveLength(0)
     })
   )
 
