@@ -11,10 +11,13 @@ import {
   refAttachmentSource,
   TextPart,
   ToolCall,
+  containsToolFile,
+  FileRef,
   ToolFile,
   toolFileJsonSchemaDefinitions,
-  ToolResult,
-  type ToolDef
+  toolOutputDecoder,
+  ToolDef,
+  ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
   captureToolResultFiles,
@@ -26,6 +29,7 @@ import {
   resolveTools,
   toolJsonSchemaFromSchema,
   toolLedgerResult,
+  ToolRegistryError,
   type FileStoreApi,
   type ToolFileCaptureOptions,
   type ToolModule,
@@ -564,6 +568,213 @@ describe('untyped tool content', () => {
       // @ts-expect-error the output must match the schema's type.
       execute: () => Effect.succeed({ output: { count: 'one' } })
     })
+  })
+
+  it('keeps output type checking with explicit context and params type arguments', () => {
+    const Count = Schema.Struct({ count: Schema.Number })
+
+    // Two explicit type arguments select no typed overload (it takes three), so a typed
+    // `{ output }` never escapes its schema.
+    makeTool<TestContext, typeof EmptyToolParams>({
+      name: 'explicit_wrong_output',
+      description: 'Invalid',
+      parameters: EmptyToolParams,
+      output: Count,
+      access: 'read',
+      // @ts-expect-error a wrong output does not compile with two explicit type arguments.
+      execute: () => Effect.succeed({ output: { count: 'one' } })
+    })
+
+    makeTool<TestContext, typeof EmptyToolParams, typeof Count>({
+      name: 'explicit_output_mismatch',
+      description: 'Invalid',
+      parameters: EmptyToolParams,
+      output: Count,
+      access: 'read',
+      // @ts-expect-error the output must match the explicit output schema's type.
+      execute: () => Effect.succeed({ output: { count: 'one' } })
+    })
+
+    makeTool<TestContext, typeof EmptyToolParams, typeof Count>({
+      name: 'explicit_output',
+      description: 'Valid',
+      parameters: EmptyToolParams,
+      output: Count,
+      access: 'read',
+      execute: () => Effect.succeed({ output: { count: 1 } })
+    })
+  })
+})
+
+describe('typed result boundary', () => {
+  const Count = Schema.Struct({
+    count: Schema.Number,
+    nested: Schema.Struct({ ok: Schema.Boolean })
+  })
+
+  // A raw registration: what reaches the boundary is exactly what `execute` returns.
+  const raw = (structuredContent: unknown): ToolRegistration<TestContext> => ({
+    def: ToolDef.make({
+      name: 'raw',
+      description: 'Raw typed tool',
+      parameters: { type: 'object', additionalProperties: false },
+      outputSchema: toolJsonSchemaFromSchema(Count)
+    }),
+    access: 'read',
+    decodeOutput: toolOutputDecoder(Count),
+    execute: ({ call }) =>
+      Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'text', structuredContent }))
+  })
+
+  it.effect('passes on the checked value of a matching result', () =>
+    Effect.gen(function* () {
+      const result = yield* run(raw({ count: 1, nested: { ok: true } }), undefined)
+
+      expect(result.structuredContent).toEqual({ count: 1, nested: { ok: true } })
+      expect(result.content).toBe('text')
+    })
+  )
+
+  it.effect('drops a value with an excess top-level field, even a FileBytes', () =>
+    Effect.gen(function* () {
+      const result = yield* run(raw({ count: 1, nested: { ok: true }, leak: invoice }), undefined)
+
+      expect(result.structuredContent).toBeUndefined()
+      expect(result.content).toBe('text')
+    })
+  )
+
+  it.effect('drops a value with a nested excess field', () =>
+    Effect.gen(function* () {
+      const result = yield* run(raw({ count: 1, nested: { ok: true, extra: 'x' } }), undefined)
+
+      expect(result.structuredContent).toBeUndefined()
+    })
+  )
+
+  it.effect('drops a value that is not JSON', () =>
+    Effect.gen(function* () {
+      const AnyValue = Schema.Struct({ value: Schema.Any })
+
+      const tool: ToolRegistration<TestContext> = {
+        def: ToolDef.make({
+          name: 'raw_any',
+          description: 'Raw tool with an any field',
+          parameters: { type: 'object', additionalProperties: false },
+          outputSchema: toolJsonSchemaFromSchema(AnyValue)
+        }),
+        access: 'read',
+        decodeOutput: toolOutputDecoder(AnyValue),
+        execute: ({ call }) =>
+          Effect.succeed(
+            ToolResult.make({
+              toolCallId: call.id,
+              content: 'text',
+              structuredContent: { value: new Uint8Array([1, 2]) }
+            })
+          )
+      }
+
+      const result = yield* run(tool, undefined)
+
+      expect(result.structuredContent).toBeUndefined()
+      expect(result.content).toBe('text')
+    })
+  )
+
+  it.effect('checks a deprecated ToolResult of makeTool and drops its excess fields', () =>
+    Effect.gen(function* () {
+      const tool = makeTool({
+        name: 'legacy_excess',
+        description: 'Returns a ToolResult with an extra field',
+        parameters: EmptyToolParams,
+        output: Count,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(
+            ToolResult.make({
+              toolCallId: call.id,
+              content: 'text',
+              structuredContent: { count: 1, nested: { ok: true }, file: invoice }
+            })
+          )
+      })
+
+      const result = yield* run(tool, undefined)
+
+      expect(result.structuredContent).toBeUndefined()
+    })
+  )
+
+  it.effect('fails resolution for an outputSchema without a decoder', () =>
+    Effect.gen(function* () {
+      const { decodeOutput: _decodeOutput, ...undecoded } = raw({ count: 1 })
+
+      const exit = yield* Effect.exit(resolveTools([moduleOf([undecoded])], context))
+
+      expect(exit).toStrictEqual(
+        Exit.fail(
+          new ToolRegistryError({
+            cause: 'output_validation_required',
+            message:
+              'Tool raw declares an outputSchema but no decodeOutput: give it an output schema with makeTool, or a decoder (toolOutputDecoder, mcpToolOutputDecoder).'
+          })
+        )
+      )
+    })
+  )
+
+  it.effect('fails a Schema.Any field holding bytes at encoding, without the bytes', () =>
+    Effect.gen(function* () {
+      const tool = makeTool({
+        name: 'any_bytes',
+        description: 'Puts bytes in an any field',
+        parameters: EmptyToolParams,
+        output: Schema.Struct({ value: Schema.Any }),
+        access: 'read',
+        execute: () => Effect.succeed({ output: { value: invoice } })
+      })
+
+      const exit = yield* Effect.exit(run(tool, { store: memoryStore() }))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(String(exit)).toContain(
+        'any_bytes returned a value that does not match its output schema.'
+      )
+      expect(String(exit)).not.toContain(base64(pdf))
+    })
+  )
+
+  it.effect('encodes an output that encodes to undefined as null', () =>
+    Effect.gen(function* () {
+      const tool = makeTool({
+        name: 'nothing',
+        description: 'Returns nothing',
+        parameters: EmptyToolParams,
+        output: Schema.Void,
+        access: 'write',
+        execute: () => Effect.succeed({ output: undefined })
+      })
+
+      const result = yield* run(tool, undefined)
+
+      expect(result.structuredContent).toBeNull()
+      expect(result.content).toBe('null')
+    })
+  )
+
+  it('rejects ToolFile in parameters', () => {
+    expect(() =>
+      makeTool({
+        name: 'file_param',
+        description: 'Invalid',
+        parameters: Schema.Struct({ items: Schema.Array(Schema.Struct({ file: ToolFile })) }),
+        access: 'read',
+        execute: () => Effect.succeed({ content: 'x' })
+      })
+    ).toThrow('Tool file_param has a ToolFile in its parameters')
+
+    expect(containsToolFile(Schema.Struct({ ref: FileRef }))).toBe(false)
   })
 })
 

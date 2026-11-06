@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Option, Predicate, Schema, SchemaGetter } from 'effect'
+import { Context, Data, Effect, Option, Predicate, Schema, SchemaAST, SchemaGetter } from 'effect'
 import {
   AudioPart,
   bytesToBase64,
@@ -59,9 +59,13 @@ export class FileBytes extends Data.TaggedClass('FileBytes')<{
   readonly view?: boolean
 }> {}
 
+// Marks the `ToolFile` declaration, so `containsToolFile` finds it in any schema, even when two
+// copies of this module are loaded.
+const toolFileAnnotation = '@yolk-sdk/agent/ToolFile'
+
 const FileBytesSchema = Schema.declare(
   (input: unknown): input is FileBytes => input instanceof FileBytes,
-  { title: 'FileBytes' }
+  { title: 'FileBytes', [toolFileAnnotation]: true }
 )
 
 /**
@@ -104,6 +108,40 @@ export const ToolFile = ToolFileValue.pipe(
     encode: SchemaGetter.transformEffect((file: FileBytes) => captureToolFileValue(file))
   })
 )
+
+// Walks the type side of a schema: struct properties, index signatures, tuple and array members,
+// union members, declaration type parameters (classes), suspended schemas once each.
+const astContainsToolFile = (ast: SchemaAST.AST, seen: Set<SchemaAST.AST>): boolean => {
+  if (seen.has(ast)) return false
+
+  seen.add(ast)
+
+  if (SchemaAST.resolve(ast)?.[toolFileAnnotation] === true) return true
+
+  const children: ReadonlyArray<SchemaAST.AST> = SchemaAST.isObjects(ast)
+    ? [
+        ...ast.propertySignatures.map(property => property.type),
+        ...ast.indexSignatures.map(signature => signature.type)
+      ]
+    : SchemaAST.isArrays(ast)
+      ? [...ast.elements, ...ast.rest]
+      : SchemaAST.isUnion(ast)
+        ? ast.types
+        : SchemaAST.isDeclaration(ast)
+          ? ast.typeParameters
+          : SchemaAST.isSuspend(ast)
+            ? [ast.thunk()]
+            : []
+
+  return children.some(child => astContainsToolFile(child, seen))
+}
+
+/**
+ * Whether a schema holds a `ToolFile` field. `ToolFile` belongs only in tool output schemas:
+ * `makeTool` rejects it in `parameters`, where it could never decode.
+ */
+export const containsToolFile = (schema: Schema.Top): boolean =>
+  astContainsToolFile(schema.ast, new Set())
 
 /**
  * JSON Schema definitions of `FileRef` and `FileUnavailable` exactly as tool output schemas lower
@@ -248,15 +286,27 @@ const fileValueKeys = (value: unknown, keys: Array<string>): Array<string> => {
   return keys
 }
 
+/** A typed tool returned a value its output schema does not encode. Value-free. */
+export class ToolOutputEncodingError extends Schema.TaggedError<ToolOutputEncodingError>()(
+  'ToolOutputEncodingError',
+  { message: Schema.String }
+) {}
+
+const isJson = Schema.is(Schema.Json)
+
 /**
  * Encodes a tool output with `Schema.toCodecJson(schema)`, storing every `ToolFile` field through
  * the ambient `ToolFileCapture`. The captured files are the file values the encoding holds (a
- * union member that failed after capturing a file does not count), each `FileBytes` once.
+ * union member that failed after capturing a file does not count), each `FileBytes` once. Fails
+ * closed when the encoding is not plain JSON: `Schema.Any` passes values through unchanged, so a
+ * `FileBytes` or `Uint8Array` (or `undefined`, a `Date`, a class instance) there never reaches
+ * `structuredContent`. Outputs that encode to `undefined` (`Schema.Void`, `Schema.Undefined`)
+ * encode as `null`, which `toCodecJson` does.
  */
 export const encodeToolOutput = <S extends ToolOutputSchema>(
   schema: S,
   value: unknown
-): Effect.Effect<EncodedToolOutput, Schema.SchemaError> =>
+): Effect.Effect<EncodedToolOutput, Schema.SchemaError | ToolOutputEncodingError> =>
   Effect.gen(function* () {
     const recorded = new Map<FileBytes, ToolFileValue>()
     const capture = captureWith(yield* Effect.serviceOption(ToolFileCapture))
@@ -275,6 +325,12 @@ export const encodeToolOutput = <S extends ToolOutputSchema>(
     const encoded: unknown = yield* Schema.encodeUnknownEffect(Schema.toCodecJson(schema))(
       value
     ).pipe(Effect.provideService(ToolFileCapture, recording))
+
+    if (!isJson(encoded)) {
+      return yield* Effect.fail(
+        new ToolOutputEncodingError({ message: 'The encoded output is not JSON.' })
+      )
+    }
 
     // Each file value of the encoding, in order, takes the first unused capture with its key: two
     // files that encode alike (the same unavailable name) both count, a file used twice once.
@@ -323,9 +379,12 @@ export const toolOutputText = (encoded: EncodedToolOutput): string => {
   )
 }
 
-/** Descriptors of the stored files of an encoded output (`ToolResult.files`), each `fileId` once. */
+/**
+ * Descriptors of the stored files of an encoded output (`ToolResult.files`), each `fileId` once,
+ * in order. Takes any file field values (adapters that capture by hand, such as MCP).
+ */
 export const toolOutputFiles = (
-  captured: ReadonlyArray<CapturedToolFile>
+  captured: ReadonlyArray<{ readonly value: ToolFileValue }>
 ): ReadonlyArray<FileDescriptor> =>
   captured.flatMap(({ value }, index) =>
     isFileRef(value) &&
@@ -342,11 +401,30 @@ export const toolOutputFiles = (
       : []
   )
 
-/** A typed tool returned a value its output schema does not encode. Value-free. */
-export class ToolOutputEncodingError extends Schema.TaggedError<ToolOutputEncodingError>()(
-  'ToolOutputEncodingError',
-  { message: Schema.String }
-) {}
+/**
+ * Checks the `structuredContent` of a typed tool's successful result (ADR 0013). `resolveTools`
+ * runs it on every result of a registration whose `ToolDef.outputSchema` is set, before the
+ * ledger, the transcript and code mode scripts see the result. It succeeds with the checked value
+ * (built by the decoder, never the input object) and fails when the value does not match.
+ */
+export type ToolOutputDecoder = (value: unknown) => Effect.Effect<Schema.Json, Schema.SchemaError>
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json)
+
+/**
+ * The `ToolOutputDecoder` of an output schema: decodes against the encoded side of
+ * `Schema.toCodecJson(schema)` (what `encodeToolOutput` produces; file fields are
+ * `FileRef | FileUnavailable`, never decoded to bytes) with excess properties rejected, then
+ * requires plain JSON (`Schema.Any` fields accept anything, bytes included).
+ */
+export const toolOutputDecoder = (schema: ToolOutputSchema): ToolOutputDecoder => {
+  const decode = Schema.decodeUnknownEffect(Schema.toEncoded(Schema.toCodecJson(schema)))
+
+  return value =>
+    decode(value, { onExcessProperty: 'error' }).pipe(
+      Effect.flatMap(checked => decodeJson(checked))
+    )
+}
 
 /**
  * The captured value of each file field, for `render`: `value(file)` is the `FileRef` or

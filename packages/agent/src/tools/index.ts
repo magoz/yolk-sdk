@@ -201,7 +201,6 @@ export type {
   InteractionActionHandler,
   InteractionToolRegistration,
   MakeContentToolOptions,
-  MakeToolOptions,
   MakeToolResultToolOptions,
   MakeTypedToolOptions,
   ModelVisibleToolErrorInput,

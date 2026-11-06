@@ -68,6 +68,7 @@ export {
 export {
   captureToolFileValue,
   capturedFileParts,
+  containsToolFile,
   encodeToolOutput,
   FileBytes,
   FileRef,
@@ -82,11 +83,13 @@ export {
   toolFileLabel,
   ToolFileValue,
   ToolOutputEncodingError,
+  toolOutputDecoder,
   toolOutputFiles,
   toolOutputText,
   typedToolResult,
   type CapturedToolFile,
   type EncodedToolOutput,
+  type ToolOutputDecoder,
   type ToolOutputRender,
   type ToolOutputRenderFiles,
   type ToolOutputSchema
