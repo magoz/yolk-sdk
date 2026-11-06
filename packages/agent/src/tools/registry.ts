@@ -365,8 +365,9 @@ export type ToolRegistration<Context> = {
    * applied plan calls) and passes on the checked value; a value that does not match is dropped
    * (logged without the value), so code mode rejects the call while the model still sees the
    * content. For interaction tools it checks the action's own value (`structuredContent.result` of
-   * a completed outcome) before the receipt is settled. `makeTool` builds it from `output` (`toolOutputDecoder`); raw registrations and
-   * adapters supply their own (MCP: `mcpToolOutputDecoder`).
+   * a completed outcome) before the receipt is settled. `makeTool` builds it from `output`
+   * (`toolOutputDecoder`); raw registrations and adapters supply their own (MCP:
+   * `mcpToolOutputDecoder`).
    */
   readonly decodeOutput?: ToolOutputDecoder
   /** Present only on schema-backed input registrations; owns user-payload validation. */
@@ -1058,12 +1059,18 @@ const checkToolResultOutput = (
         Effect.map(value => withCheckedValue(result, value))
       )
 
+/** Bound of checking an interaction action's value (ADR 0013); past it the value is dropped. */
+const interactionOutputCheckTimeout = Duration.seconds(5)
+
 /**
  * The typed-result boundary of an interaction action (ADR 0013). Its result is the interaction
  * envelope (`makeInteractionToolResult`), so the output schema describes the action's own value
  * (`structuredContent.result` of a completed outcome): it is checked before the envelope is built
- * and the receipt settled, so a receipt never holds an unchecked value. Failed and unknown
- * outcomes keep their value.
+ * and the receipt settled, so a receipt never holds an unchecked value. The check is bounded by
+ * `interactionOutputCheckTimeout` (a decoder may be asynchronous); past it the value is dropped
+ * like a mismatch, so settlement always proceeds. Callers inside the settlement's uninterruptible
+ * region run it under `restore`, so interruption reaches the seal. Failed and unknown outcomes
+ * keep their value.
  */
 const checkedInteractionActionResult = <
   A extends { readonly outcome: InteractionBusinessOutcome; readonly structuredContent?: unknown }
@@ -1080,6 +1087,16 @@ const checkedInteractionActionResult = <
         structuredContent: actionResult.structuredContent
       })
     : checkedOutputValue(name, decodeOutput, actionResult.structuredContent).pipe(
+        Effect.timeoutOption(interactionOutputCheckTimeout),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.logWarning(
+                `Tool ${name}: checking its output did not finish in time; the value was dropped.`
+              ).pipe(Effect.as(undefined)),
+            onSome: Effect.succeed
+          })
+        ),
         Effect.map(structuredContent => ({ outcome: actionResult.outcome, structuredContent }))
       )
 
@@ -1654,11 +1671,10 @@ const executeInteractionTool = <Context>(input: {
             )
           )
 
-          // Checked before settlement: the receipt only ever holds the checked value.
-          const checked = yield* checkedInteractionActionResult(
-            name,
-            input.registration?.decodeOutput,
-            actionResult
+          // Checked before settlement, interruptible and bounded (like file capture below): the
+          // receipt only ever holds the checked value.
+          const checked = yield* restore(
+            checkedInteractionActionResult(name, input.registration?.decodeOutput, actionResult)
           )
 
           const actionToolResult = makeInteractionToolResult({

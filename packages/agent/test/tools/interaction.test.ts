@@ -20,7 +20,8 @@ import {
   interactionRequestId,
   validateInteractionSubmission,
   type InteractionHost,
-  type InteractionRef
+  type InteractionRef,
+  type ToolOutputDecoder
 } from '@yolk-sdk/agent/protocol'
 import {
   makeInputTool,
@@ -29,6 +30,7 @@ import {
   resolveTools,
   toolJsonSchemaFromSchema,
   type InteractionActionResult,
+  type InteractionToolRegistration,
   type ToolFileCaptureOptions,
   type ResolvedToolSet,
   type ToolModule
@@ -886,55 +888,83 @@ describe('immutable action-backed interaction authority', () => {
 })
 
 describe('interaction results and files', () => {
+  const Published = Schema.Struct({ id: Schema.Number })
+
+  type TypedInteraction = {
+    readonly execute: Parameters<typeof moduleFor>[0]
+    readonly decodeOutput: ToolOutputDecoder
+    readonly unknownOutcome?: InteractionToolRegistration<Context>['unknownOutcome']
+  }
+
+  // The `document` interaction tool declaring `Published` as its action's output.
+  const typedInteraction = (options: TypedInteraction) =>
+    Effect.gen(function* () {
+      const base = moduleFor(options.execute)
+      const [tool] = base.tools
+
+      if (
+        tool === undefined ||
+        tool.def.interaction === undefined ||
+        tool.interaction === undefined
+      )
+        throw new Error('Missing interaction tool')
+
+      const typed: ToolModule<Context> = {
+        id: base.id,
+        tools: [
+          {
+            ...tool,
+            def: ToolDef.make({
+              name: tool.def.name,
+              description: tool.def.description,
+              parameters: tool.def.parameters,
+              interaction: tool.def.interaction,
+              outputSchema: toolJsonSchemaFromSchema(Published)
+            }),
+            decodeOutput: options.decodeOutput,
+            interaction:
+              options.unknownOutcome === undefined
+                ? tool.interaction
+                : { ...tool.interaction, unknownOutcome: options.unknownOutcome }
+          }
+        ]
+      }
+
+      const fake = makeFakeInteractionHost({})
+      const tools = yield* resolveTools([typed], context, { interactionHost: fake.host })
+      const interaction = tools.interactions.document
+
+      if (interaction === undefined || interaction.def.interaction === undefined)
+        throw new Error('Missing interaction')
+
+      fake.addPending(
+        InteractionRequest.make({
+          requestId: interactionRequestId(call),
+          toolCallId: call.id,
+          call,
+          interaction: interaction.def.interaction
+        })
+      )
+
+      const ref = yield* fake.accept(response(), interaction)
+
+      return { fake, tools, ref }
+    })
+
+  const completedWith =
+    (structuredContent: unknown): Parameters<typeof moduleFor>[0] =>
+    () =>
+      Effect.succeed({ outcome: 'completed', content: 'Published', structuredContent })
+
   it.effect('checks a typed action value before the receipt is settled', () =>
     Effect.gen(function* () {
-      const Published = Schema.Struct({ id: Schema.Number })
-
       const settle = (structuredContent: unknown) =>
         Effect.gen(function* () {
-          const base = moduleFor(() =>
-            Effect.succeed({ outcome: 'completed', content: 'Published', structuredContent })
-          )
+          const { fake, tools, ref } = yield* typedInteraction({
+            execute: completedWith(structuredContent),
+            decodeOutput: toolOutputDecoder(Published)
+          })
 
-          const [tool] = base.tools
-
-          if (tool === undefined || tool.def.interaction === undefined)
-            throw new Error('Missing interaction tool')
-
-          const typed: ToolModule<Context> = {
-            id: base.id,
-            tools: [
-              {
-                ...tool,
-                def: ToolDef.make({
-                  name: tool.def.name,
-                  description: tool.def.description,
-                  parameters: tool.def.parameters,
-                  interaction: tool.def.interaction,
-                  outputSchema: toolJsonSchemaFromSchema(Published)
-                }),
-                decodeOutput: toolOutputDecoder(Published)
-              }
-            ]
-          }
-
-          const fake = makeFakeInteractionHost({})
-          const tools = yield* resolveTools([typed], context, { interactionHost: fake.host })
-          const interaction = tools.interactions.document
-
-          if (interaction === undefined || interaction.def.interaction === undefined)
-            throw new Error('Missing interaction')
-
-          fake.addPending(
-            InteractionRequest.make({
-              requestId: interactionRequestId(call),
-              toolCallId: call.id,
-              call,
-              interaction: interaction.def.interaction
-            })
-          )
-
-          const ref = yield* fake.accept(response(), interaction)
           const result = yield* run(tools, ref)
 
           return { result, receipt: fake.receiptFor(ref.slot) }
@@ -956,6 +986,75 @@ describe('interaction results and files', () => {
       expect(invalid.receipt?.status).toBe('settled')
       expect(invalid.receipt?.result?.structuredContent).not.toHaveProperty('result')
       expect(JSON.stringify(invalid.receipt)).not.toContain('leak')
+    })
+  )
+
+  it.effect('drops the value and settles when the output check does not finish in time', () =>
+    Effect.gen(function* () {
+      const { fake, tools, ref } = yield* typedInteraction({
+        execute: completedWith({ id: 1 }),
+        decodeOutput: () => Effect.never
+      })
+
+      const fiber = yield* Effect.forkChild(run(tools, ref))
+
+      yield* TestClock.adjust('6 seconds')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(outcomeOf(result)).toBe('completed')
+      expect(result.structuredContent).not.toHaveProperty('result')
+      expect(fake.receiptFor(ref.slot)?.status).toBe('settled')
+      expect(fake.receiptFor(ref.slot)?.result?.structuredContent).not.toHaveProperty('result')
+    })
+  )
+
+  it.effect('seals unknown when interrupted while checking the output', () =>
+    Effect.gen(function* () {
+      const checking = yield* Deferred.make<void>()
+
+      const { fake, tools, ref } = yield* typedInteraction({
+        execute: completedWith({ id: 1 }),
+        decodeOutput: () => Deferred.succeed(checking, undefined).pipe(Effect.andThen(Effect.never))
+      })
+
+      const fiber = yield* Effect.forkChild(run(tools, ref))
+
+      yield* Deferred.await(checking)
+      yield* Fiber.interrupt(fiber)
+
+      expect(fake.receiptFor(ref.slot)?.status).toBe('settled')
+      expect(outcomeOf(yield* run(tools, ref))).toBe('unknown')
+    })
+  )
+
+  it.effect('checks a completed value that a replay description reports', () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+
+      const { tools, ref } = yield* typedInteraction({
+        execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+        decodeOutput: toolOutputDecoder(Published),
+        unknownOutcome: () =>
+          Effect.succeed({
+            outcome: 'completed',
+            content: 'Published earlier.',
+            structuredContent: { id: 'one', secret: 'leak' }
+          })
+      })
+
+      // The first execution holds the started receipt; the second one replays it.
+      const first = yield* Effect.forkChild(run(tools, ref))
+
+      yield* Deferred.await(started)
+
+      const replayed = yield* run(tools, ref)
+
+      expect(outcomeOf(replayed)).toBe('completed')
+      expect(replayed.structuredContent).not.toHaveProperty('result')
+      expect(JSON.stringify(replayed)).not.toContain('leak')
+
+      yield* Fiber.interrupt(first)
     })
   )
 
