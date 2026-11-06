@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.126
+
+### Patch Changes
+
+- 74c1fe5: Advance in lockstep with `@yolk-sdk/agent`, `@yolk-sdk/codemode`, `@yolk-sdk/mcp` and `@yolk-sdk/connectors`, which adopt typed tool results (ADR 0013); `@yolk-sdk/connectors` also adds the Kie connector. These packages have no direct changes in this release.
+- Updated dependencies [bcb26c8]
+  - @yolk-sdk/agent@0.1.0-canary.126
+
 ## 0.1.0-canary.125
 
 ### Patch Changes
