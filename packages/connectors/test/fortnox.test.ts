@@ -619,6 +619,77 @@ describe('Fortnox connector', () => {
     })
   )
 
+  it.effect('writes and reads the printed invoice text (Remarks) apart from Comments', () =>
+    Effect.gen(function* () {
+      const invoice = {
+        DocumentNumber: '002',
+        CustomerNumber: '001',
+        Comments: 'Internal note',
+        Remarks: 'Printed invoice text'
+      }
+
+      const harness = makeHarness([
+        response({ Invoice: invoice }),
+        response({ Invoice: { ...invoice, Remarks: 'Updated invoice text' } }),
+        response({ Invoice: { ...invoice, Remarks: 'Updated invoice text' } })
+      ])
+
+      const created = yield* invoke('fortnox.create_invoice', {
+        CustomerNumber: '001',
+        Comments: 'Internal note',
+        Remarks: 'Printed invoice text'
+      }).pipe(Effect.provide(harness.layer))
+
+      const updated = yield* invoke('fortnox.update_invoice', {
+        DocumentNumber: '002',
+        Remarks: 'Updated invoice text'
+      }).pipe(Effect.provide(harness.layer))
+
+      const read = yield* invoke('fortnox.get_invoice', { documentNumber: '002' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      expect(JSON.parse(harness.requests[0]?.body ?? '')).toEqual({
+        Invoice: {
+          CustomerNumber: '001',
+          Comments: 'Internal note',
+          Remarks: 'Printed invoice text'
+        }
+      })
+      expect(JSON.parse(harness.requests[1]?.body ?? '')).toEqual({
+        Invoice: { Remarks: 'Updated invoice text' }
+      })
+
+      expect(created).toMatchObject({
+        value: { Comments: 'Internal note', Remarks: 'Printed invoice text' }
+      })
+      expect(updated).toMatchObject({ value: { Remarks: 'Updated invoice text' } })
+      expect(read).toMatchObject({ value: { Remarks: 'Updated invoice text' } })
+    })
+  )
+
+  it.effect('advertises Remarks on the invoice write tool schemas', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
+        {}
+      )
+
+      for (const name of ['fortnox.create_invoice', 'fortnox.update_invoice']) {
+        const tool = toolSet.tools.find(item => item.name === name)
+
+        const { properties } = yield* Schema.decodeUnknownEffect(ToolParameterProperties)(
+          tool?.parameters
+        )
+
+        expect(Object.keys(properties)).toEqual(expect.arrayContaining(['Comments', 'Remarks']))
+        expect(tool?.description).toContain('Remarks is the invoice text (Fakturatext)')
+      }
+    })
+  )
+
   for (const item of lists) {
     it.effect(`${item.action} returns one page, a next page, then an empty final page`, () =>
       Effect.gen(function* () {

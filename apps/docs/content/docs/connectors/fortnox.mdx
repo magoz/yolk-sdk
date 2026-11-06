@@ -234,6 +234,9 @@ see repeat the Fortnox behavior:
   `Discount: 0` when no discount is intended. If any sent row has `RowId`, rows with a matching
   `RowId` are updated and rows without one are added. Fortnox
   regenerates RowIds on every update, so read the invoice again before reusing them.
+- **Invoice text.** `Remarks` is the invoice text (Fakturatext) printed on the invoice; `Comments`
+  is an internal note that is not printed. Both are writable on create and update, and
+  `FortnoxInvoice` returns both.
 - **Referenced records.** `CostCenter`, `Project`, `ArticleNumber`, `AccountNumber`, and a non-SEK
   `Currency` must already exist in the Fortnox company.
 

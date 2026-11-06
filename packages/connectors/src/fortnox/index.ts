@@ -121,6 +121,9 @@ const fortnoxCustomerContactFieldsNote =
 const fortnoxInvoiceReferencesNote =
   'Referenced CostCenter, Project, ArticleNumber, AccountNumber, and non-SEK Currency must already exist in the Fortnox company.'
 
+const fortnoxInvoiceTextNote =
+  'Remarks is the invoice text (Fakturatext) printed on the invoice; Comments is an internal note that is not printed.'
+
 const fortnoxInvoiceRowsUpdateNote =
   'Sending InvoiceRows replaces the row list: existing rows not sent are deleted. If no sent row has RowId, rows are matched to existing rows by position, and fields omitted on a matched row keep their previous value (for example Discount/DiscountType), so send every row that should remain with all pricing fields, including Discount 0 when no discount is intended. If any sent row has RowId, rows with a matching RowId are updated and rows without RowId are added. RowIds are regenerated on every update; read the invoice again before reusing RowIds.'
 
@@ -257,7 +260,7 @@ export const fortnoxGetInvoiceAction = defineAction({
 
 export const fortnoxCreateInvoiceAction = defineAction({
   id: 'fortnox.create_invoice',
-  description: `Create a Fortnox customer invoice. Fortnox assigns DocumentNumber. ${fortnoxInvoiceReferencesNote}`,
+  description: `Create a Fortnox customer invoice. Fortnox assigns DocumentNumber. ${fortnoxInvoiceTextNote} ${fortnoxInvoiceReferencesNote}`,
   access: 'write',
   inputSchema: FortnoxCreateInvoiceInput,
   outputSchema: FortnoxInvoice,
@@ -275,7 +278,7 @@ export const fortnoxCreateInvoiceAction = defineAction({
 
 export const fortnoxUpdateInvoiceAction = defineAction({
   id: 'fortnox.update_invoice',
-  description: `Update a Fortnox customer invoice by DocumentNumber. Does not send or book it. ${fortnoxInvoiceRowsUpdateNote} ${fortnoxInvoiceReferencesNote}`,
+  description: `Update a Fortnox customer invoice by DocumentNumber. Does not send or book it. ${fortnoxInvoiceTextNote} ${fortnoxInvoiceRowsUpdateNote} ${fortnoxInvoiceReferencesNote}`,
   access: 'write',
   inputSchema: FortnoxUpdateInvoiceInput,
   outputSchema: FortnoxInvoice,

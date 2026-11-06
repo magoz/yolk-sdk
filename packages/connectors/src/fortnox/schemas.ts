@@ -148,6 +148,7 @@ export class FortnoxInvoice extends Schema.Class<FortnoxInvoice>('FortnoxInvoice
   CustomerNumber: FortnoxCustomerNumber,
   CustomerName: NullableString,
   ...InvoiceFields,
+  Remarks: NullableString,
   Total: NullableNumber,
   Balance: NullableNumber,
   TotalVAT: NullableNumber,
@@ -352,6 +353,7 @@ const InvoiceMutationFields = {
   OurReference: OptionalString,
   YourReference: OptionalString,
   Comments: OptionalString,
+  Remarks: OptionalString,
   CostCenter: OptionalString,
   Project: OptionalString,
   InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRow))

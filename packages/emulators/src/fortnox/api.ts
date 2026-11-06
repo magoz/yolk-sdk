@@ -724,7 +724,7 @@ const mergeRows = (
   return rows
 }
 
-const invoiceTextFields = ['Comments', 'OurReference', 'YourReference', 'OCR'] as const
+const invoiceTextFields = ['Comments', 'Remarks', 'OurReference', 'YourReference', 'OCR'] as const
 
 type InvoiceTextField = (typeof invoiceTextFields)[number]
 
