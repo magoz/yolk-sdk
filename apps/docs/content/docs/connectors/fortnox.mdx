@@ -208,7 +208,9 @@ bound into the URL. Invoice write inputs use `InvoiceRows` as JSON arrays; retur
 runtime `Chunk` values. Writes do not send or book invoices and are subject to host authorization.
 The connector forwards accepted write fields unchanged; it does not inject defaults or rewrite
 values. Invoice write inputs are not closed: when `execute` decodes input, unknown or
-provider-managed keys (such as `Booked` or `VoucherNumber`) are dropped before the request. Agent
+provider-managed invoice keys (such as `Booked` or `VoucherNumber`) are dropped before the request.
+Their `InvoiceRows` are closed: an unknown row key (such as `PriceExcludingVAT`) fails validation,
+because dropping it would send a row without its price. Agent
 tools from `makeConnectorToolModule` reject those keys instead, with a model-visible validation
 error, so a model never believes it booked or sent an invoice.
 `executeTyped` trusts an existing invoice input class instance and does not re-check its keys.
@@ -230,7 +232,8 @@ see repeat the Fortnox behavior:
 - **Invoice row inputs.** Write rows are `FortnoxInvoiceRowInput`: the writable fields of
   Fortnox's row payload. `Price` is the unit price; Fortnox computes `PriceExcludingVAT`, `Total`,
   and `TotalExcludingVAT`, which are read-only (Fortnox rejects a written `PriceExcludingVAT` with
-  code 2000321) and appear only on returned `FortnoxInvoiceRow` values.
+  code 2000321) and appear only on returned `FortnoxInvoiceRow` values. `Price` excludes VAT
+  unless the invoice is VAT-inclusive (`VATIncluded`).
 - **Invoice rows on update.** Sending `InvoiceRows` replaces the row list: existing rows that are
   not sent are deleted. If no sent row has `RowId`, rows are matched to existing rows by position,
   and fields omitted on a matched row keep their previous value (for example

@@ -1,5 +1,6 @@
 import * as Schema from 'effect/Schema'
 import {
+  closedInput,
   Identifier,
   NonEmptyString,
   NullableBoolean,
@@ -144,7 +145,7 @@ export class FortnoxInvoiceRowInput extends Schema.Class<FortnoxInvoiceRowInput>
   Price: OptionalNumber,
   Discount: OptionalNumber,
   DiscountType: Schema.optional(Schema.Literals(['AMOUNT', 'PERCENT'])),
-  VAT: OptionalNumber,
+  VAT: OptionalInt,
   VATCode: OptionalString,
   CostCenter: OptionalString,
   Project: OptionalString
@@ -376,11 +377,13 @@ const InvoiceMutationFields = {
   OCR: OptionalString,
   OurReference: OptionalString,
   YourReference: OptionalString,
-  Comments: OptionalString,
+  Comments: optionalMaxLength(1024),
   Remarks: optionalMaxLength(1024),
   CostCenter: OptionalString,
   Project: OptionalString,
-  InvoiceRows: Schema.optional(Schema.Array(FortnoxInvoiceRowInput))
+  // Rows are closed: a stripped row key (for example PriceExcludingVAT) would send a row without
+  // its price, so unknown row keys fail validation even though invoice-level keys are stripped.
+  InvoiceRows: Schema.optional(Schema.Array(closedInput(FortnoxInvoiceRowInput.fields)))
 } as const
 
 const InvoiceWriteFields = {

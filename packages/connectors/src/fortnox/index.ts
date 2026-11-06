@@ -125,7 +125,7 @@ const fortnoxInvoiceTextNote =
   'Remarks is the invoice text (Fakturatext) printed on the invoice; Comments is an internal note that is not printed.'
 
 const fortnoxInvoiceRowPriceNote =
-  'Row Price is the unit price; Fortnox computes PriceExcludingVAT, Total, and TotalExcludingVAT, which are not inputs.'
+  'Row Price is the unit price, excluding VAT unless the invoice is VAT-inclusive (VATIncluded); Fortnox computes PriceExcludingVAT, Total, and TotalExcludingVAT, which are not inputs.'
 
 const fortnoxInvoiceRowsUpdateNote =
   'Sending InvoiceRows replaces the row list: existing rows not sent are deleted. If no sent row has RowId, rows are matched to existing rows by position, and fields omitted on a matched row keep their previous value (for example Discount/DiscountType), so send every row that should remain with all pricing fields, including Discount 0 when no discount is intended. If any sent row has RowId, rows with a matching RowId are updated and rows without RowId are added. RowIds are regenerated on every update; read the invoice again before reusing RowIds.'

@@ -703,13 +703,24 @@ describe('Fortnox connector', () => {
       for (const name of ['fortnox.create_invoice', 'fortnox.update_invoice']) {
         const tool = toolSet.tools.find(item => item.name === name)
 
-        const { $defs } = yield* Schema.decodeUnknownEffect(
+        const { properties } = yield* Schema.decodeUnknownEffect(
           Schema.Struct({
-            $defs: Schema.Struct({ FortnoxInvoiceRowInputEncoded: ToolParameterProperties })
+            properties: Schema.Struct({
+              InvoiceRows: Schema.Struct({ anyOf: Schema.Array(Schema.Unknown) })
+            })
           })
         )(tool?.parameters)
 
-        const rowKeys = Object.keys($defs.FortnoxInvoiceRowInputEncoded.properties)
+        const { items } = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            items: Schema.Struct({
+              ...ToolParameterProperties.fields,
+              additionalProperties: Schema.Literal(false)
+            })
+          })
+        )(properties.InvoiceRows.anyOf[0])
+
+        const rowKeys = Object.keys(items.properties)
 
         expect(rowKeys).toEqual(
           expect.arrayContaining(['RowId', 'Price', 'Discount', 'DiscountType', 'VAT', 'VATCode'])
@@ -735,6 +746,39 @@ describe('Fortnox connector', () => {
       expect(rejected.isError).toBe(true)
       expect(JSON.stringify(rejected)).toContain('PriceExcludingVAT')
       expect(harness.requests).toHaveLength(0)
+    })
+  )
+
+  it.effect('rejects unknown invoice row keys on execute instead of dropping them', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([])
+
+      const rows: ReadonlyArray<Schema.JsonObject> = [
+        { Description: 'Filmning', DeliveredQuantity: '1', PriceExcludingVAT: 1160 },
+        { Description: 'Filmning', Total: 1160 },
+        { Description: 'Filmning', VAT: 12.5 }
+      ]
+
+      for (const row of rows) {
+        const inputs: ReadonlyArray<readonly [string, Schema.JsonObject]> = [
+          ['fortnox.create_invoice', { CustomerNumber: '001', InvoiceRows: [row] }],
+          ['fortnox.update_invoice', { DocumentNumber: '002', InvoiceRows: [row] }]
+        ]
+
+        for (const [action, input] of inputs) {
+          const result = yield* invoke(action, input).pipe(
+            Effect.provide(harness.layer),
+            Effect.result
+          )
+
+          expect(result, JSON.stringify(row)).toMatchObject({
+            failure: { cause: 'validation_failed' }
+          })
+        }
+      }
+
+      expect(harness.requests).toHaveLength(0)
+      expect(harness.scopes).toHaveLength(0)
     })
   )
 
