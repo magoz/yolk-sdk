@@ -5,8 +5,10 @@ import {
   Layer,
   Option,
   Predicate,
+  Queue,
   Sink,
   Stream,
+  type Cause,
   type Result
 } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -109,7 +111,11 @@ const capturedReceipt = {
 
 const decodeStdinMessage = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcMessage))
 
-type LocalAnswer = { readonly result: unknown } | { readonly error: unknown }
+type LocalAnswer =
+  | { readonly result: unknown }
+  | { readonly error: unknown }
+  // A stdout line written as is instead of a JSON-RPC response.
+  | { readonly line: string }
 
 /**
  * A local stdio server that answers each request it reads on stdin by method, so a test sees
@@ -122,9 +128,9 @@ const makeScriptedLocalMcpLayer = (
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make(command =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         if (!ChildProcess.isStandardCommand(command)) {
-          throw new Error('Expected standard command')
+          return yield* Effect.die(new Error('Expected standard command'))
         }
 
         const stdinConfig = command.options.stdin
@@ -136,28 +142,39 @@ const makeScriptedLocalMcpLayer = (
             ? stdinConfig.stream
             : Stream.empty
 
-        const stdout = stdin.pipe(
+        // Reads stdin on its own fiber, outliving the client's scope, so `sent` holds every request
+        // the client wrote even when it stopped reading stdout or failed right after writing.
+        const out = yield* Queue.unbounded<string, Cause.Done>()
+
+        yield* stdin.pipe(
           Stream.decodeText,
           Stream.splitLines,
           Stream.filter(line => line.length > 0),
-          Stream.flatMap(line =>
+          Stream.runForEach(line =>
             Option.match(decodeStdinMessage(line), {
-              onNone: () => Stream.empty,
+              onNone: () => Effect.void,
               onSome: message => {
                 sent.push(message.method)
 
                 const answer = answers[message.method]
 
-                return 'id' in message && answer !== undefined
-                  ? Stream.make(
-                      `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
-                    )
-                  : Stream.empty
+                if (!('id' in message) || answer === undefined) return Effect.void
+
+                return Queue.offer(
+                  out,
+                  'line' in answer
+                    ? `${answer.line}\n`
+                    : `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
+                )
               }
             })
           ),
-          Stream.encodeText
+          Effect.ensuring(Queue.end(out)),
+          Effect.ignore,
+          Effect.forkDetach
         )
+
+        const stdout = Stream.fromQueue(out).pipe(Stream.encodeText)
 
         return ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(1),
@@ -814,6 +831,9 @@ describe('MCP client', () => {
           fileCapture: makeToolFileCapture({ store: receiptStore })
         }).pipe(Effect.provide(makeScriptedLocalMcpLayer(answers, sent)), Effect.result)
 
+        // Lets the server fiber read whatever the client wrote last.
+        for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow
+
         return { result, sent }
       })
 
@@ -858,6 +878,19 @@ describe('MCP client', () => {
 
         expectMcpFailureCause(result, 'protocol')
         expect(sent).not.toContain('tools/call')
+      })
+    )
+
+    it.effect('sends no tools/call when the session breaks before the listing answers', () =>
+      Effect.gen(function* () {
+        const { result, sent } = yield* call({
+          initialize: initialized,
+          'tools/list': { line: 'server log line, not JSON-RPC' },
+          'tools/call': answered({ total: 3 })
+        })
+
+        expect(Predicate.isTagged(result, 'Failure')).toBe(true)
+        expect(sent).toEqual(listedOnly)
       })
     )
 

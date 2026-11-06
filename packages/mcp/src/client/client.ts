@@ -1304,11 +1304,13 @@ const localOutputValidator = (
  * Calls a local stdio MCP tool in one session, in order: `initialize`, then `tools/list`, awaited
  * and decoded, then the output validator compiled, and only then `tools/call`. So anything that
  * fails before the call (an `initialize` error, an `outputSchema` that is unusable or does not
- * compile) sends no `tools/call`. A listing that fails or does not hold the tool (the first page
- * only) does not fail the call: it runs without output validation (a value-free warning is
- * logged; `mcpToolOutputDecoder` still checks the `{ value, files }` envelope). A successful
- * result of a tool with a usable `outputSchema` must carry `structuredContent` that passes it, as
- * on the remote calls (`assertStructuredOutput`).
+ * compile) sends no `tools/call`, nor does a broken session (a stdout line that is no JSON-RPC
+ * response, an early end before the listing's answer). A listing answered with an error or an
+ * undecodable result, or one that does not hold the tool (the first page only), does not fail
+ * the call: it runs without output validation (a value-free warning is logged;
+ * `mcpToolOutputDecoder` still checks the `{ value, files }` envelope). A successful result of a
+ * tool with a usable `outputSchema` must carry `structuredContent` that passes it, as on the
+ * remote calls (`assertStructuredOutput`).
  */
 export const callLocalMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpLocalServerConfig }
@@ -1330,8 +1332,12 @@ export const callLocalMcpServerTool = (
           .response(initialize.id)
           .pipe(Effect.flatMap(response => unwrapResponse(server, response)))
 
-        const listed = yield* session.response(list.id).pipe(
-          Effect.flatMap(response => unwrapResponse(server, response)),
+        // A broken session (a line that is no JSON-RPC response, an early end) fails the call
+        // before `tools/call`: its answer could not be read either. Only the listing's own
+        // failures (an error answer, an undecodable result) let the call run unvalidated.
+        const listResponse = yield* session.response(list.id)
+
+        const listed = yield* unwrapResponse(server, listResponse).pipe(
           Effect.flatMap(decodeToolsListResult),
           Effect.mapError(error => invalidListing(server, error)),
           Effect.map(result => result.tools.find(tool => tool.name === input.mcpToolName)),
