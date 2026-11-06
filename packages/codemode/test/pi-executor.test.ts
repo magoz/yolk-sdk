@@ -2,17 +2,21 @@ import { Deferred, Effect, Fiber, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  contentText,
+  FileBytes,
   FileDescriptor,
   filePartFromBytes,
   providerToolDefs,
   TextPart,
   ToolApprovalPolicy,
   ToolCall,
+  ToolFile,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
   makeQuestionToolRegistration,
   makeTool,
+  modelVisibleToolError,
   resolveTools,
   type FileStoreApi
 } from '@yolk-sdk/agent/tools'
@@ -24,6 +28,7 @@ import {
 } from '../src/index.ts'
 import { makePiCodeModeExecutor } from '../src/node.ts'
 import {
+  AttachmentOutput,
   context,
   HitsOutput,
   moduleOf,
@@ -149,38 +154,42 @@ describe('code mode with the pi executor', () => {
     })
   )
 
-  it.live('resolves structured content for output-schema tools and text otherwise', () =>
-    Effect.gen(function* () {
-      const bare = makeTool<TestContext, typeof QueryParams>({
-        name: 'bare',
-        description: 'Declares an output schema but returns no structured content',
-        parameters: QueryParams,
-        output: HitsOutput,
-        access: 'read',
-        execute: ({ call }) =>
-          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'plain' }))
-      })
+  it.live(
+    'resolves the value of output-schema tools, text otherwise, never text for a missing value',
+    () =>
+      Effect.gen(function* () {
+        const bare = makeTool<TestContext, typeof QueryParams>({
+          name: 'bare',
+          description: 'Declares an output schema but returns no structured content',
+          parameters: QueryParams,
+          output: HitsOutput,
+          access: 'read',
+          execute: ({ call }) =>
+            Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'plain' }))
+        })
 
-      const result = yield* runCode(
-        [
-          moduleOf('host', [codemode()]),
-          moduleOf('docs', [
-            queryTool('texty'),
-            queryTool('structured', { structured: true }),
-            bare
-          ])
-        ],
-        `return [
+        const result = yield* runCode(
+          [
+            moduleOf('host', [codemode()]),
+            moduleOf('docs', [
+              queryTool('texty'),
+              queryTool('structured', { structured: true }),
+              bare
+            ])
+          ],
+          `let bare
+         try { bare = await tools.bare({ query: 'c' }) } catch (error) { bare = error.message }
+         return [
            await tools.texty({ query: 'a' }),
            await tools.structured({ query: 'b' }),
-           await tools.bare({ query: 'c' })
+           bare
          ]`
-      )
+        )
 
-      expect(text(result.content)).toContain(
-        'Return value:\n["texty:a",{"hits":[{"id":"b","score":1}]},"plain"]'
-      )
-    })
+        expect(text(result.content)).toContain(
+          'Return value:\n["texty:a",{"hits":[{"id":"b","score":1}]},"tools.bare: returned an invalid result"]'
+        )
+      })
   )
 
   it.live('rejects failed nested calls and reports partial output and calls made', () =>
@@ -1261,85 +1270,309 @@ describe('pi executor concurrency', () => {
   )
 })
 
-describe('code mode with captured files', () => {
+describe('typed results and files in scripts', () => {
   const pdf = new TextEncoder().encode('%PDF invoice')
+  const png = new TextEncoder().encode('png1')
 
-  const store: FileStoreApi = {
-    put: ({ name, mimeType, bytes }) =>
-      Effect.succeed(
-        FileDescriptor.make({ fileId: 'file_a1', name, mimeType, size: bytes.length })
-      ),
-    head: () => Effect.succeed(Option.none()),
-    read: () => Effect.succeed(pdf),
-    signRead: () => Effect.succeed('https://files.example/file_a1')
+  type MemoryStore = FileStoreApi & { readonly puts: Array<string> }
+
+  const memoryStore = (): MemoryStore => {
+    const puts: Array<string> = []
+
+    return {
+      puts,
+      put: ({ name, mimeType, bytes }) => {
+        puts.push(name)
+
+        return Effect.succeed(
+          FileDescriptor.make({
+            fileId: `file_${new TextDecoder().decode(bytes).replace(/[^A-Za-z0-9]/gu, '')}`,
+            name,
+            mimeType,
+            size: bytes.length
+          })
+        )
+      },
+      head: () => Effect.succeed(Option.none()),
+      read: () => Effect.succeed(pdf),
+      signRead: ({ fileId }) => Effect.succeed(`https://files.example/${fileId}`)
+    }
   }
 
-  const attachment = filePartFromBytes({
-    bytes: pdf,
+  const invoice = new FileBytes({ bytes: pdf, name: 'invoice.pdf', mimeType: 'application/pdf' })
+
+  const invoiceRef = {
+    fileId: 'file_PDFinvoice',
+    name: 'invoice.pdf',
     mimeType: 'application/pdf',
-    filename: 'invoice.pdf'
+    size: 12
+  }
+
+  const label = '[file file_PDFinvoice: invoice.pdf, application/pdf, 12 B]'
+
+  const typedFile = makeTool<TestContext, typeof QueryParams, typeof AttachmentOutput>({
+    name: 'get_attachment',
+    description: 'Yields a typed file field',
+    parameters: QueryParams,
+    output: AttachmentOutput,
+    access: 'read',
+    execute: () => Effect.succeed({ output: { attachment: invoice } })
   })
 
-  const textProducer = makeTool<TestContext, typeof QueryParams>({
-    name: 'get_attachment',
-    description: 'Yields a file with text',
+  const typedList = makeTool({
+    name: 'export_files',
+    description: 'Yields an array of files',
+    parameters: QueryParams,
+    output: Schema.Array(ToolFile),
+    access: 'read',
+    execute: () => Effect.succeed({ output: [invoice] })
+  })
+
+  const ownFiles = makeTool({
+    name: 'list_names',
+    description: 'Has its own files field',
+    parameters: QueryParams,
+    output: Schema.Struct({ files: Schema.Array(Schema.String), attachment: ToolFile }),
+    access: 'read',
+    execute: () => Effect.succeed({ output: { files: ['a.txt'], attachment: invoice } })
+  })
+
+  const viewable = makeTool({
+    name: 'get_chart',
+    description: 'Yields an image the model views',
+    parameters: QueryParams,
+    output: Schema.Struct({ chart: ToolFile }),
+    access: 'read',
+    execute: () =>
+      Effect.succeed({
+        output: {
+          chart: new FileBytes({ bytes: png, name: 'chart.png', mimeType: 'image/png', view: true })
+        }
+      })
+  })
+
+  const untypedFile = makeTool({
+    name: 'download_text',
+    description: 'Yields text and a file part',
     parameters: QueryParams,
     access: 'read',
-    execute: ({ call }) =>
-      Effect.succeed(
-        ToolResult.make({
-          toolCallId: call.id,
-          content: [TextPart.make({ text: 'attachment' }), attachment]
-        })
-      )
+    execute: () =>
+      Effect.succeed({
+        content: [
+          TextPart.make({ text: 'attachment' }),
+          filePartFromBytes({ bytes: pdf, mimeType: 'application/pdf', filename: 'invoice.pdf' })
+        ]
+      })
   })
 
-  const structuredProducer = makeTool<TestContext, typeof QueryParams>({
-    name: 'export_hits',
-    description: 'Yields a file with structured output',
+  const missingValue = makeTool<TestContext, typeof QueryParams>({
+    name: 'missing_value',
+    description: 'Declares output but returns none',
+    parameters: QueryParams,
+    output: HitsOutput,
+    access: 'read',
+    execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'oops' }))
+  })
+
+  const invalidValue = makeTool<TestContext, typeof QueryParams>({
+    name: 'invalid_value',
+    description: 'Declares output but returns another shape',
     parameters: QueryParams,
     output: HitsOutput,
     access: 'read',
     execute: ({ call }) =>
       Effect.succeed(
-        ToolResult.make({
-          toolCallId: call.id,
-          content: [attachment],
-          structuredContent: { hits: [{ id: 'a', score: 1 }] }
+        ToolResult.make({ toolCallId: call.id, content: '{}', structuredContent: { hits: 'no' } })
+      )
+  })
+
+  const failing = makeTool({
+    name: 'fail_with_code',
+    description: 'Fails with a code',
+    parameters: QueryParams,
+    output: AttachmentOutput,
+    access: 'read',
+    execute: () =>
+      Effect.fail(
+        modelVisibleToolError({
+          tool: 'fail_with_code',
+          reason: 'not_found',
+          code: 'attachment_not_found',
+          message: 'No such attachment.'
         })
       )
   })
 
-  it.live('gives scripts file descriptors and never the bytes', () =>
-    Effect.gen(function* () {
-      const toolSet = yield* resolveTools(
-        [moduleOf('host', [codemode()]), moduleOf('mail', [textProducer, structuredProducer])],
-        context,
-        { files: { store } }
-      )
-
-      const result = yield* toolSet.execute(
-        ToolCall.make({
-          id: 'call_1',
-          name: 'codemode',
-          params: {
-            code: `const a = await tools.get_attachment({ query: 'x' })
-                   const b = await tools.export_hits({ query: 'y' })
-                   return { text: a.text, a: a.files, b: b.files, hits: b.hits.length }`
-          }
+  const failingWithFile = makeTool({
+    name: 'fail_with_file',
+    description: 'An error result carrying a file part',
+    parameters: QueryParams,
+    access: 'read',
+    execute: ({ call }) =>
+      Effect.succeed(
+        ToolResult.make({
+          toolCallId: call.id,
+          isError: true,
+          content: [
+            TextPart.make({ text: 'Upload rejected.' }),
+            filePartFromBytes({ bytes: pdf, mimeType: 'application/pdf', filename: 'invoice.pdf' })
+          ]
         })
       )
+  })
 
-      const file = { fileId: 'file_a1', name: 'invoice.pdf', mimeType: 'application/pdf', size: 12 }
+  const tools = [
+    typedFile,
+    typedList,
+    ownFiles,
+    viewable,
+    untypedFile,
+    missingValue,
+    invalidValue,
+    failing,
+    failingWithFile
+  ]
 
-      expect(text(result.content)).toContain(
-        `Return value:\n${JSON.stringify({
-          text: 'attachment\n[file file_a1: invoice.pdf, application/pdf, 12 B]',
-          a: [file],
-          b: [file],
-          hits: 1
-        })}`
+  const runWith = (
+    code: string,
+    files: { readonly store: FileStoreApi; readonly maxFileBytes?: number } | undefined
+  ) =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [moduleOf('host', [codemode()]), moduleOf('mail', tools)],
+        context,
+        files === undefined ? {} : { files }
       )
+
+      return yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'codemode', params: { code } })
+      )
+    })
+
+  const returned = (content: Parameters<typeof text>[0]) => {
+    const match = /Return value:\n(.*)$/su.exec(text(content))
+
+    return match === null ? undefined : JSON.parse(match[1] ?? 'null')
+  }
+
+  it.live('gives scripts typed values with FileRefs in place and no labels', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(
+        `const a = await tools.get_attachment({ query: 'x' })
+         const b = await tools.export_files({ query: 'x' })
+         const c = await tools.list_names({ query: 'x' })
+         return { a, b, c }`,
+        { store: memoryStore() }
+      )
+
+      expect(returned(result.content)).toEqual({
+        a: { attachment: invoiceRef },
+        b: [invoiceRef],
+        c: { files: ['a.txt'], attachment: invoiceRef }
+      })
+      expect(text(result.content)).not.toContain('[file ')
+    })
+  )
+
+  it.live('gives untyped tools their text without labels, while the model still gets them', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(
+        `const r = await tools.download_text({ query: 'x' })
+         return { r, type: typeof r }`,
+        { store: memoryStore() }
+      )
+
+      expect(returned(result.content)).toEqual({ r: 'attachment', type: 'string' })
+
+      const toolSet = yield* resolveTools([moduleOf('mail', tools)], context, {
+        files: { store: memoryStore() }
+      })
+
+      const direct = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_2', name: 'download_text', params: { query: 'x' } })
+      )
+
+      expect(contentText(direct.content)).toBe(`attachment${label}`)
+    })
+  )
+
+  it.live('keeps a viewed image out of the script', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(`return await tools.get_chart({ query: 'x' })`, {
+        store: memoryStore()
+      })
+
+      expect(returned(result.content)).toEqual({
+        chart: { fileId: 'file_png1', name: 'chart.png', mimeType: 'image/png', size: 4 }
+      })
+      expect(text(result.content)).not.toContain('[file ')
+    })
+  )
+
+  it.live('answers FileUnavailable without a store or over the size bound', () =>
+    Effect.gen(function* () {
+      const script = `return await tools.get_attachment({ query: 'x' })`
+      const none = yield* runWith(script, undefined)
+      const tooLarge = yield* runWith(script, { store: memoryStore(), maxFileBytes: 4 })
+
+      const unavailable = (reason: string) => ({
+        attachment: { unavailable: reason, name: 'invoice.pdf', mimeType: 'application/pdf' }
+      })
+
+      expect(returned(none.content)).toEqual(unavailable('no file store'))
+      expect(returned(tooLarge.content)).toEqual(unavailable('too large'))
+
+      const toolSet = yield* resolveTools([moduleOf('mail', tools)], context)
+
+      const direct = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_2', name: 'get_attachment', params: { query: 'x' } })
+      )
+
+      expect(contentText(direct.content)).toBe(
+        '{"attachment":"[file not captured (no file store): invoice.pdf, application/pdf]"}'
+      )
+    })
+  )
+
+  it.live('rejects a typed tool that returns no value or an invalid one', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(
+        `const errors = []
+         for (const name of ['missing_value', 'invalid_value']) {
+           try { await tools[name]({ query: 'x' }) } catch (error) { errors.push(error.message) }
+         }
+         return errors`,
+        undefined
+      )
+
+      expect(returned(result.content)).toEqual([
+        'tools.missing_value: returned an invalid result',
+        'tools.invalid_value: returned an invalid result'
+      ])
+    })
+  )
+
+  it.live('rejects failures with the message and code, without file labels', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(
+        `const out = []
+         for (const name of ['fail_with_code', 'fail_with_file']) {
+           try { await tools[name]({ query: 'x' }) } catch (error) {
+             out.push({ message: error.message, code: error.code ?? null, isError: error instanceof Error })
+           }
+         }
+         return out`,
+        { store: memoryStore() }
+      )
+
+      expect(returned(result.content)).toEqual([
+        {
+          message: 'tools.fail_with_code: No such attachment.',
+          code: 'attachment_not_found',
+          isError: true
+        },
+        { message: 'tools.fail_with_file: Upload rejected.', code: null, isError: true }
+      ])
     })
   )
 })

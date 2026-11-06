@@ -7,7 +7,12 @@ import {
   schemaToType,
   toCodemodeIdentifier
 } from '@earendil-works/pi-codemode/declarations'
-import { isDeferredTool, toolDiscovery } from '@yolk-sdk/agent/protocol'
+import {
+  interactionJsonEquals,
+  isDeferredTool,
+  toolDiscovery,
+  toolFileJsonSchemaDefinitions
+} from '@yolk-sdk/agent/protocol'
 import type { RunInstruction } from '@yolk-sdk/agent/loop'
 import type { NestedTool } from '@yolk-sdk/agent/tools'
 import type { CodeModeJsonSchema } from './executor.ts'
@@ -126,10 +131,72 @@ export const defaultCodeModeInlineBudget = 3000
 /** Estimated tokens of a text: four characters per token, rounded up. */
 export const estimateCodeModeTokens = (text: string): number => Math.ceil(text.length / 4)
 
+// File fields render by name (`FileRef | FileUnavailable`, declared once in the intro): their
+// `$ref`s become sentinel constants the renderer quotes, and the quoted sentinels become the names.
+const fileTypeNames = { FileRef: 'FileRef', FileUnavailable: 'FileUnavailable' } as const
+
+type FileTypeName = keyof typeof fileTypeNames
+
+const fileTypeSentinel = (name: FileTypeName) => `\u0000yolk:${name}`
+
+const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  Predicate.isObject(value) && !Array.isArray(value)
+
+// The file definitions an output schema holds exactly as tool output schemas lower them.
+const fileDefinitions = (schema: CodeModeJsonSchema): ReadonlySet<FileTypeName> => {
+  const defs = isJsonObject(schema) ? schema['$defs'] : undefined
+
+  if (!isJsonObject(defs)) return new Set()
+
+  return new Set(
+    (['FileRef', 'FileUnavailable'] as const).filter(name =>
+      interactionJsonEquals(defs[name], toolFileJsonSchemaDefinitions[name])
+    )
+  )
+}
+
+const withFileSentinels = (value: Schema.Json, names: ReadonlySet<FileTypeName>): Schema.Json => {
+  if (Array.isArray(value)) return value.map((item: Schema.Json) => withFileSentinels(item, names))
+
+  if (!isJsonObject(value)) return value
+
+  const ref = value['$ref']
+
+  const named = (['FileRef', 'FileUnavailable'] as const).find(
+    name => names.has(name) && ref === `#/$defs/${name}`
+  )
+
+  if (named !== undefined) return { const: fileTypeSentinel(named) }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, withFileSentinels(item, names)])
+  )
+}
+
+/** An output schema whose file fields render as `FileRef` / `FileUnavailable`. */
+const renderableOutput = (schema: CodeModeJsonSchema): CodeModeJsonSchema => {
+  const names = fileDefinitions(schema)
+
+  if (names.size === 0) return schema
+
+  const replaced = withFileSentinels(schema, names)
+
+  return isJsonObject(replaced) ? replaced : schema
+}
+
+const withFileTypeNames = (rendered: string) =>
+  (['FileRef', 'FileUnavailable'] as const).reduce(
+    (text, name) => text.replaceAll(JSON.stringify(fileTypeSentinel(name)), fileTypeNames[name]),
+    rendered
+  )
+
+const renderOutputType = (schema: CodeModeJsonSchema) =>
+  withFileTypeNames(renderToolOutputType(renderableOutput(schema)))
+
 const maxShortTypeChars = 60
 
 const shortType = (schema: CodeModeJsonSchema): string => {
-  const rendered = renderToolOutputType(schema)
+  const rendered = renderOutputType(schema)
 
   if (rendered.length <= maxShortTypeChars) return rendered
 
@@ -147,7 +214,7 @@ const declarationTool = (tool: CodeModeCatalogTool) => ({
   name: tool.name,
   description: tool.description,
   inputSchema: tool.inputSchema,
-  outputSchema: tool.outputSchema,
+  outputSchema: renderableOutput(tool.outputSchema),
   execute: () => undefined
 })
 
@@ -155,7 +222,7 @@ const directToolLine = (tool: CodeModeCatalogTool) =>
   `- \`tools.${tool.identifier}(args)\` takes the arguments of the \`${tool.name}\` tool and resolves to \`${shortType(tool.outputSchema)}\`.`
 
 const declarationMembers = (tools: ReadonlyArray<CodeModeCatalogTool>) =>
-  renderDeclarations({ tools: tools.map(declarationTool) })
+  withFileTypeNames(renderDeclarations({ tools: tools.map(declarationTool) }))
 
 type Candidate = {
   readonly tool: CodeModeCatalogTool
@@ -255,8 +322,9 @@ export const selectCodeModeListing = (
 const intro = [
   'Run a JavaScript script that calls tools and returns only what matters.',
   '`code` is the body of an async function: top-level `await` and `return` work. Write plain JavaScript; simple TypeScript annotations are stripped. There is no Node.js, network, filesystem, `require`, `fetch`, or timers.',
-  'Call tools as `await tools.<id>(args)`. Arguments must be plain JSON (no `NaN`, `undefined` array items, `Map`, or functions). A call resolves to the declared result type and rejects with an Error whose message starts with `tools.<id>:` when the tool fails. Calls still running when the script ends are cancelled, so await every call (use `Promise.all` for parallel calls).',
-  'A call that yields files also resolves `files: [{ fileId, name, mimeType, size }]`, added to an object result or as `{ text, files }`. Pass `fileId`s to other tools; file bytes never enter the script.',
+  'Call tools as `await tools.<id>(args)`. Arguments must be plain JSON (no `NaN`, `undefined` array items, `Map`, or functions). A call resolves to the declared result type and rejects with an Error whose message starts with `tools.<id>:` when the tool fails (`error.code` is set when the tool reports one). Calls still running when the script ends are cancelled, so await every call (use `Promise.all` for parallel calls).',
+  '`string` results are text to read; parse JSON only when the tool says it returns JSON.',
+  'Files are typed fields of results: `type FileRef = { fileId: string; name: string; mimeType: string; size: number }`; `type FileUnavailable = { unavailable: string; name: string; mimeType: string }` (`unavailable` says why the file was not stored). Pass `fileId`s to other tools; file bytes never enter the script.',
   'Only the script output and its return value come back to you: filter and aggregate inside the script and return a small JSON value.'
 ].join('\n')
 
@@ -410,7 +478,7 @@ const compactText = (rendered: string) =>
     .join(' ')
 
 const compactResultType = (schema: CodeModeJsonSchema) => {
-  const rendered = compactText(renderToolOutputType(schema))
+  const rendered = compactText(renderOutputType(schema))
 
   return rendered.length <= maxShortTypeChars ? rendered : shortType(schema)
 }
@@ -449,7 +517,7 @@ export const describeCodeModeTool = (tool: CodeModeCatalogTool): string =>
         `Stage-only (approval-gated): record a call with \`await stage(${JSON.stringify(tool.name)}, args)\`; it runs only after a person approves the plan.`,
         `args: ${schemaToType(tool.inputSchema)}`
       ].join('\n\n')
-    : renderToolSample(declarationTool(tool))
+    : withFileTypeNames(renderToolSample(declarationTool(tool)))
 
 /**
  * Finds a tool by identifier or raw name. A stageable tool's exact raw name wins first: it has no

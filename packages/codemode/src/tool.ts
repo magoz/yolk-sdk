@@ -22,7 +22,6 @@ import {
   nestedToolCallResultFields,
   recordNestedToolCall,
   truncateCodePoints,
-  contentPartText,
   ToolCall,
   ToolResult,
   type AgentUsage,
@@ -34,6 +33,7 @@ import {
 import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import {
   makeTool,
+  ModelVisibleToolErrorStructuredContentSchema,
   type NestedTool,
   type NestedToolExecutor,
   type NestedToolInstructor,
@@ -207,47 +207,61 @@ class CodeModeExecutorRejected extends Data.TaggedError('CodeModeExecutorRejecte
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : Predicate.isString(error) ? error : 'unknown error'
 
+// The text a script sees of a result: its text parts only. File, image, document and audio parts
+// (and the labels providers render for them) never enter scripts (ADR 0013).
 const nestedText = (content: Content) =>
   Predicate.isString(content)
     ? content
     : content
-        .map(contentPartText)
+        .flatMap(part => (Predicate.isTagged(part, 'Text') ? [part.text] : []))
         .filter(text => text.length > 0)
         .join('\n')
 
 type NestedResolution =
   | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly message: string }
+  | { readonly ok: false; readonly message: string; readonly code?: string }
 
-/** What a nested call resolves to: `structuredContent` for tools with an output schema (when
- * present), text content otherwise; error results reject with their text. A tool that declares an
- * output schema but returns no `structuredContent` resolves to its text: that is a tool bug, kept
- * readable rather than turned into a failure. When the result captured files (ADR 0009), the
- * script also gets their descriptors as `files`: merged into an object `structuredContent`,
- * otherwise as `{ text, files }`.
+const decodeErrorEnvelope = Schema.decodeUnknownOption(ModelVisibleToolErrorStructuredContentSchema)
+
+const errorCode = (result: ToolResult) =>
+  Option.getOrUndefined(
+    Option.flatMap(decodeErrorEnvelope(result.structuredContent), envelope =>
+      Option.fromNullishOr(envelope.code)
+    )
+  )
+
+/** A typed tool's successful result without its value: the script never falls back to text. */
+const isInvalidTypedResult = (tool: CodeModeCatalogTool, result: ToolResult) =>
+  tool.structured && result.isError !== true && result.structuredContent === undefined
+
+/**
+ * What a nested call resolves to (ADR 0013). A typed tool (one with an output schema) resolves to
+ * its value as declared, file fields as `FileRef` or `FileUnavailable`; a typed result without a
+ * value rejects ("returned an invalid result"). An untyped tool resolves to its text parts joined
+ * with newlines. Error results reject with their text and, for a model-visible error with a code,
+ * that `code`. Files never reach scripts as labels.
  */
 const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
-  const text = nestedText(result.content)
-
   if (result.isError === true) {
-    return { ok: false, message: text.length > 0 ? text : `Tool ${tool.name} failed.` }
+    const text = nestedText(result.content)
+    const message = text.length > 0 ? text : `Tool ${tool.name} failed.`
+    const code = errorCode(result)
+
+    return code === undefined ? { ok: false, message } : { ok: false, message, code }
   }
 
-  const value =
-    tool.structured && result.structuredContent !== undefined ? result.structuredContent : text
+  if (!tool.structured) return { ok: true, value: nestedText(result.content) }
 
-  if (result.files === undefined || result.files.length === 0) return { ok: true, value }
+  return result.structuredContent === undefined
+    ? { ok: false, message: 'returned an invalid result' }
+    : { ok: true, value: result.structuredContent }
+}
 
-  const files = result.files.map(file => ({
-    fileId: file.fileId,
-    name: file.name,
-    mimeType: file.mimeType,
-    size: file.size
-  }))
+/** The script-visible rejection of a nested call, with the tool's error `code` when it has one. */
+const nestedCallError = (label: string, resolution: { message: string; code?: string }) => {
+  const error = new Error(`${label}: ${resolution.message}`)
 
-  return Predicate.isObject(value) && !Array.isArray(value)
-    ? { ok: true, value: { ...value, files } }
-    : { ok: true, value: { text, files } }
+  return resolution.code === undefined ? error : Object.assign(error, { code: resolution.code })
 }
 
 type CallOutcome = {
@@ -642,6 +656,13 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     Effect.map(Clock.currentTimeMillis, finished => {
                       record.outcome = recordedOutcome(exit, finished - started)
                     })
+                  ),
+                  Effect.tap(result =>
+                    isInvalidTypedResult(tool, result)
+                      ? Effect.logWarning(
+                          `Code mode: ${tool.name} declares an output schema but returned no value (call ${nestedCall.id}).`
+                        )
+                      : Effect.void
                   )
                 )
               })
@@ -666,7 +687,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                     resolve(resolution.value)
                   } else {
                     // The script sees which call failed; the nested-call record keeps the raw text.
-                    reject(new Error(`${tool.callLabel}: ${resolution.message}`))
+                    reject(nestedCallError(tool.callLabel, resolution))
                   }
                 })
               })

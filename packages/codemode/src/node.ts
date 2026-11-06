@@ -121,7 +121,7 @@ const maxArgumentDepth = 64
  * proxy (close-match suggestions). Not a security boundary (`globalThis.tools` is unguarded):
  * arguments are still decoded by the host.
  */
-const toolsGuardSource = `(function (tools, labels, unbound) {
+const toolsGuardSource = `(function (tools, labels, unbound, rejectionPrefix) {
   // Captured before the script runs, so a script that changes built-ins cannot change the checks.
   const { apply, getPrototypeOf, setPrototypeOf } = Reflect
   const isFinite = Number.isFinite
@@ -136,6 +136,10 @@ const toolsGuardSource = `(function (tools, labels, unbound) {
   const ObjectProto = Object.prototype
   const { trunc, min } = Math
   const stringify = JSON.stringify
+  const parse = JSON.parse
+  const ErrorCtor = Error
+  const startsWith = String.prototype.startsWith
+  const sliceString = String.prototype.slice
   const plainJson = 'pass plain JSON (objects, arrays, strings, finite numbers, booleans, null)'
   const maxValues = ${maxArgumentValues}
   const maxDepth = ${maxArgumentDepth}
@@ -236,6 +240,24 @@ const toolsGuardSource = `(function (tools, labels, unbound) {
     apply(setDelete, walk.ancestors, [value])
     return copy
   }
+  // The host sends every rejection of a tool call as the prefix and the JSON of { message, code? }
+  // (pi only carries a message): rebuild the Error with its code.
+  const restored = error => {
+    const message = error instanceof ErrorCtor ? error.message : undefined
+    if (typeof message !== 'string' || !apply(startsWith, message, [rejectionPrefix])) return error
+    let payload
+    try {
+      payload = parse(apply(sliceString, message, [rejectionPrefix.length]))
+    } catch {
+      return error
+    }
+    if (payload === null || typeof payload !== 'object') return error
+    const rebuilt = new ErrorCtor(typeof payload.message === 'string' ? payload.message : '')
+    if (typeof payload.code === 'string') {
+      defineProperty(rebuilt, 'code', { value: payload.code, writable: true, configurable: true })
+    }
+    return rebuilt
+  }
   const wrap = (label, call) => async (...args) => {
     let json
     try {
@@ -244,7 +266,11 @@ const toolsGuardSource = `(function (tools, labels, unbound) {
       if (error instanceof Rejected) throw new TypeErrorCtor(label + ': argument ' + error.message)
       throw error
     }
-    return call(json)
+    try {
+      return await call(json)
+    } catch (error) {
+      throw restored(error)
+    }
   }
   // Each tool's function sits at tools[name] unless an earlier tool holds that key, in which case
   // that earlier function is already wrapped.
@@ -295,7 +321,7 @@ const guardSuffix = (
 
   const rejected = (unbound ?? []).map(entry => [entry.key, entry.message])
 
-  return `\n})(${toolsGuardSource}(tools, ${jsonSource(pairs)}, ${jsonSource(rejected)}), console)`
+  return `\n})(${toolsGuardSource}(tools, ${jsonSource(pairs)}, ${jsonSource(rejected)}, ${jsonSource(rejectionPrefix)}), console)`
 }
 
 const lineTerminators = /\r\n?|[\n\u2028\u2029]/g
@@ -373,11 +399,36 @@ const stripTypes = (code: string): Stripped => {
   }
 }
 
-const piTool = (tool: CodeModeExecutorTool): CodemodeTool => {
-  const converted: CodemodeTool = {
-    name: tool.name,
-    execute: (args, context) => tool.execute(args, context)
+/**
+ * pi passes only the message of a rejected tool call into the VM. Every tool rejection crosses as
+ * this prefix and the JSON of `{ message, code? }`, which the tools guard turns back into an
+ * `Error` with its `code`. Calls through the unguarded `globalThis.tools` see the encoded message.
+ */
+const rejectionPrefix = '\u0000yolk-tool-rejection:'
+
+type EncodedRejection = { message: string; code?: string }
+
+const RejectionCode = Schema.Struct({ code: Schema.String })
+
+const encodedRejection = (error: unknown) => {
+  const payload: EncodedRejection = {
+    message: error instanceof Error ? error.message : String(error)
   }
+
+  const code = Option.getOrUndefined(
+    Option.map(Schema.decodeUnknownOption(RejectionCode)(error), found => found.code)
+  )
+
+  if (code !== undefined) payload.code = code
+
+  return new Error(`${rejectionPrefix}${JSON.stringify(payload)}`)
+}
+
+const piCallable = (
+  tool: CodeModeExecutorTool | CodeModeExecutorGlobal,
+  execute: CodemodeTool['execute']
+): CodemodeTool => {
+  const converted: CodemodeTool = { name: tool.name, execute }
 
   if (tool.description !== undefined) converted.description = tool.description
 
@@ -388,8 +439,16 @@ const piTool = (tool: CodeModeExecutorTool): CodemodeTool => {
   return converted
 }
 
+// Tool rejections carry their `code` into the VM (see `rejectionPrefix`).
+const piTool = (tool: CodeModeExecutorTool): CodemodeTool =>
+  piCallable(tool, (args, context) =>
+    tool.execute(args, context).catch((error: unknown) => {
+      throw encodedRejection(error)
+    })
+  )
+
 const piGlobal = (global: CodeModeExecutorGlobal): CodemodeTool => {
-  const converted = piTool(global)
+  const converted = piCallable(global, (args, context) => global.execute(args, context))
 
   if (global.spread !== undefined) converted.spread = global.spread
 
