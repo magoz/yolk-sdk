@@ -92,7 +92,9 @@ surfaces allowed to capture (for example not on automatic continuations); to sha
 subagent, they give it a store bound to the same scope.
 
 Interaction tool results are captured before the host stores the settled receipt. When the ledger
-reduces a stored result, a `File` part becomes its label, so replays keep the `fileId` visible.
+reduces a stored result, a `File` part stays a `File` part (only inline media bytes become
+placeholders), so replays keep the `fileId` visible and its label never becomes script text (ADR
+0013).
 
 ## 3. Scripts
 
@@ -104,11 +106,13 @@ pass `fileId` strings between tools; bytes never enter QuickJS or `store()`.
 ```js
 const r = await tools.gmail_get_attachment({ messageId, attachmentId })
 const f = r.files[0] // { fileId, name, mimeType, size } or { unavailable, name, mimeType }
+if ('unavailable' in f) return `not stored: ${f.unavailable}`
+// MCP tools resolve to { value, files }: the server's result is `value`.
 const up = await tools.mcp_afloat_create_receipt_upload({
   contentLength: f.size,
   contentType: f.mimeType
 })
-await tools.file_upload({ fileId: f.fileId, url: up.url, headers: up.headers })
+await tools.file_upload({ fileId: f.fileId, url: up.value.url, headers: up.value.headers })
 ```
 
 ## 4. Store

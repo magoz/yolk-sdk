@@ -37,7 +37,9 @@ bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 - Nested results follow ADR 0013 (`resolveNestedResult` in `tool.ts`): a typed tool (output schema)
   resolves to its `structuredContent` as declared, file fields `FileRef | FileUnavailable`, nothing
   merged; a typed success without a value rejects `<label>: returned an invalid result` (and logs a
-  warning), never falls back to text; an untyped tool resolves to its `Text` parts joined with
+  warning), never falls back to text. Code mode does not validate values: the `resolveTools` result
+  boundary (`ToolRegistration.decodeOutput`) already replaced the value with the checked one or
+  dropped it, for every registration; an untyped tool resolves to its `Text` parts joined with
   `\n` (file, image, document and audio parts contribute nothing, so labels never reach scripts);
   failures reject `<label>: <text parts>` with `.code` from a structured error's string `code`
   (`ModelVisibleToolError.code`, a connector `ProviderFailure`). Scripts pass `fileId`s, never
@@ -139,8 +141,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   are text to read; parse JSON only when the tool says it returns JSON." Declarations, signatures and
   direct tool lines render file fields as `FileRef | FileUnavailable` when the output schema's
   `$defs` equal `toolFileJsonSchemaDefinitions` (`renderableOutput` in `catalog.ts`: sentinel
-  constants the pi renderer quotes, replaced by the names after rendering); untyped tools render
-  `string`. Result types keep the 60-character short-type budget.
+  constants the pi renderer quotes, replaced by the names after rendering; `withFileSentinels`
+  never descends into the data keywords `const`, `enum`, `default` and `examples`); untyped tools
+  render `string`. Result types keep the 60-character short-type budget.
 - pi forwards only a rejection's message into QuickJS: the pi executor's tool bridge (`piTool` in
   `node.ts`) rejects every tool call with `rejectionPrefix` plus the JSON of `{ message, code? }`,
   and the tools guard (built-ins captured before the script runs) rebuilds the `Error` with its

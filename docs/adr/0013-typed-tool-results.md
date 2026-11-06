@@ -35,22 +35,23 @@ files never enter script text). Yolk goes further: scripts need file handles (AD
 
 ## Decision summary
 
-| Area               | Decision                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `makeTool`         | Three overloads: `output` + `{ output }`, no `output` + `{ content }`, deprecated raw `ToolResult`                                            |
-| Encoding           | `Schema.toCodecJson(output)`; a value that does not encode is a value-free `execution` `ToolError`                                            |
-| Model content      | `render(value, files)`, default: compact JSON of the encoding with file fields lowered to labels (a string output as it is)                   |
-| File fields        | `ToolFile` in output schemas; tools return `FileBytes`; the encoding holds `FileRef` or `FileUnavailable`                                     |
-| `ToolResult.files` | Derived from the value's file fields, never supplied by tools                                                                                 |
-| Capture            | Encoding a `ToolFile` stores through `ToolFileCapture`, which `resolveTools` provides to every registration it runs                           |
-| Labels             | Never plain `TextPart`s: viewable parts get a following `File` part (`Ref`), unstored files a `File` part with an `Omitted { reason }` source |
-| Scripts            | See [Rules for scripts](#rules-for-scripts)                                                                                                   |
-| Catalog            | `FileRef` and `FileUnavailable` declared once in the intro; file fields render by name; untyped tools `Promise<string>`                       |
-| MCP                | Every adapted tool declares `{ value, files }`                                                                                                |
-| Connectors         | `fileOutput` actions declare `{ value, files }` with file fields                                                                              |
-| Ledger             | Typed values are never cut: content is trimmed first; a value over the bound by itself is stored as a fixed error result                      |
-| Errors             | `ModelVisibleToolError.code`; scripts get `error.code`                                                                                        |
-| Not in scope       | An MCP response byte cap                                                                                                                      |
+| Area               | Decision                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `makeTool`         | Three overloads: `output` + `{ output }`, no `output` + `{ content }`, deprecated raw `ToolResult`                                                |
+| Encoding           | `Schema.toCodecJson(output)`, plain JSON only; a value that does not encode is a value-free `execution` `ToolError`                               |
+| Result boundary    | `resolveTools` checks every typed result with the registration's `decodeOutput`; a mismatch drops the value                                       |
+| Model content      | `render(value, files)`, default: compact JSON of the encoding with file fields lowered to labels (a string output as it is)                       |
+| File fields        | `ToolFile` in output schemas; tools return `FileBytes`; the encoding holds `FileRef` or `FileUnavailable`                                         |
+| `ToolResult.files` | Derived from the value's file fields, never supplied by tools                                                                                     |
+| Capture            | Encoding a `ToolFile` stores through `ToolFileCapture`, which `resolveTools` provides to every registration it runs                               |
+| Labels             | Never plain `TextPart`s: viewable parts get a following `File` part (`Ref`), unstored files a `File` part with an `Omitted { reason }` source     |
+| Scripts            | See [Rules for scripts](#rules-for-scripts)                                                                                                       |
+| Catalog            | `FileRef` and `FileUnavailable` declared once in the intro; file fields render by name; untyped tools `Promise<string>`                           |
+| MCP                | Every adapted tool declares `{ value, files }`                                                                                                    |
+| Connectors         | `fileOutput` actions declare `{ value, files }` with file fields                                                                                  |
+| Ledger             | Typed values are never cut: content is trimmed first; a value over the bound by itself is stored as a fixed error result; `File` parts stay parts |
+| Errors             | `ModelVisibleToolError.code`; scripts get `error.code`                                                                                            |
+| Not in scope       | An MCP response byte cap                                                                                                                          |
 
 ## Rules for scripts
 
@@ -64,12 +65,38 @@ A nested call resolves (or rejects) by these rules; `<label>` is the call label 
 | Any failure or `isError`                          | Rejects `Error("<label>: <message>")` (the text parts, no file labels), with `.code` when the structured error has a string `code`        |
 
 Files of untyped tools still reach the model (as labels) but not the script. A typed tool's value
-is "invalid" when the result has no `structuredContent`. Code mode only has the JSON Schema, so it
-cannot validate further; the sources of typed results guarantee the shape: `makeTool` encodes it,
-the deprecated `ToolResult` path drops `structuredContent` that does not decode against the encoded
-side of the schema (`Schema.toEncoded(Schema.toCodecJson(output))`, logged), the MCP client
-validates against the server's schema, and the connector bridge encodes. Raw registrations that
-declare `outputSchema` are trusted.
+is "invalid" when the result reaching code mode has no `structuredContent`. Code mode only has the
+JSON Schema, so the check happens earlier, at the result boundary below; a value that fails it is
+dropped there, so code mode sees no value and rejects.
+
+### Result boundary
+
+Every execution of a registration passes `runRegistration` in `resolveTools` (direct model calls,
+nested code mode calls, applied plan calls, background tools run inline) and, for interaction
+tools, the interaction path. There, after file capture and before the ledger, a successful result
+of a registration with `decodeOutput` (`ToolRegistration.decodeOutput: ToolOutputDecoder`) is
+checked:
+
+- the decoder decodes `structuredContent` against the encoded side of the output schema
+  (`Schema.toEncoded(Schema.toCodecJson(output))`) with excess properties rejected
+  (`onExcessProperty: 'error'`), then requires plain JSON (`Schema.Json`), and the result carries
+  the checked value, never the original object (an excess field, a `FileBytes`, a `Uint8Array` or
+  `undefined` never passes);
+- a value that does not pass is dropped with a value-free warning; the model still sees the
+  content; code mode rejects `<label>: returned an invalid result`, never falls back to text;
+- error results, background acceptances and results without a value are left as they are.
+
+Decoders: `makeTool` builds one from `output` (`toolOutputDecoder`), for the typed and the
+deprecated form alike; MCP registrations use `mcpToolOutputDecoder` (the `{ value, files }`
+envelope; `value` is any JSON there because the MCP client checks it against the server's
+`outputSchema`); raw registrations use `toolOutputDecoder(schema)`. A registration whose
+`def.outputSchema` is set without `decodeOutput` fails `resolveTools` with
+`output_validation_required` (fail closed, like `staging_validation_required`). Replays from the
+tool ledger are stored results of this boundary and are not checked again. Calling
+`registration.execute` outside `resolveTools` bypasses the boundary.
+
+Rejected: validating in code mode (it only has JSON Schema) and trusting raw registrations (a
+`structuredContent` with bytes or extra fields reached scripts).
 
 ## Tool contract
 
@@ -99,6 +126,13 @@ makeTool({ ..., execute: () => Effect.succeed({ content: 'Done.' }) })
 - The overloads make illegal states unrepresentable: a structured value without `output` and
   `{ content, structuredContent }` do not compile; `ToolContent` forbids `output`,
   `structuredContent` and `toolCallId`. Failures stay `ToolError` or `ModelVisibleToolError`.
+- The typed overload has no default for its output type parameter: with explicit type arguments
+  it takes three (`makeTool<Context, typeof Params, typeof Output>`), so the two-argument form
+  (context and parameters only) never accepts a typed `{ output }` (a default of the broad
+  `ToolOutputSchema` let any value through). `MakeToolOptions` (the implementation's union) is not
+  exported from `@yolk-sdk/agent/tools`; the three form types are.
+- Outputs that encode to `undefined` (`Schema.Void`, `Schema.Undefined`) encode as `null`
+  (`toCodecJson` does), so scripts and the model see the same value.
 - `output` schemas must encode without services (`ToolOutputSchema`); this also applies to the
   deprecated form's `output`.
 - The deprecated form (`execute` returns a `ToolResult`) keeps working in this release, marked
@@ -131,9 +165,13 @@ type FileUnavailable = { unavailable: string; name: string; mimeType: string }
   media part followed by its `File` part (`Ref`, or `Omitted` when storing failed); without a store
   the media part stands alone (a label after every image, on surfaces that cannot move files, is
   noise).
-- Bytes never reach the JSON encoder outside a `ToolFile`: a `FileBytes` in a `Schema.Unknown`
-  field fails encoding (fail-closed).
-- `ToolFile` belongs only in tool output schemas: encoding it has a side effect (a store `put`).
+- Bytes never reach `structuredContent` outside a `ToolFile`: `toCodecJson` turns
+  `Schema.Unknown` into `Schema.Json`, so a `FileBytes` there fails encoding; `Schema.Any` passes
+  values through the codec unchanged, so `encodeToolOutput` fails closed when the encoding is not
+  plain JSON (a `FileBytes` or `Uint8Array` is not), with the same value-free error.
+- `ToolFile` belongs only in tool output schemas: encoding it has a side effect (a store `put`),
+  and it never decodes. `makeTool` throws when its `parameters` hold one (`containsToolFile`; the
+  `ToolFile` declaration carries an annotation, so the check also holds across module copies).
 - JSON Schema: `$defs.FileRef` and `$defs.FileUnavailable` exactly as `toolFileJsonSchemaDefinitions`
   (protocol) states; adapters building output schemas by hand (MCP) use the same definitions.
 
@@ -183,7 +221,8 @@ wire change for bookkeeping).
   sentence) and says: "`string` results are text to read; parse JSON only when the tool says it
   returns JSON."
 - Signatures and declarations render file fields as `FileRef | FileUnavailable` (when the output
-  schema's `$defs` hold the canonical definitions); untyped tools render `Promise<string>`. Result
+  schema's `$defs` hold the canonical definitions; `$ref`-shaped data in `const`, `enum`,
+  `default` and `examples` stays data); untyped tools render `Promise<string>`. Result
   types keep the 60-character short-type budget of search signatures; `describeTool` shows the
   whole declaration.
 
@@ -192,12 +231,34 @@ wire change for bookkeeping).
 `mcpToolToToolDef` declares `{ value: T, files: Array<FileRef | FileUnavailable> }`: `T` is the
 server's `outputSchema` (its `$defs`/`definitions` hoisted to the root; a schema whose definitions
 collide, that sets `$id`, or that refers to other parts of itself, such as a recursive `#`, is left
-unknown), unknown without one. `callRemoteMcpServerTool` (and the resumable calls)
-return `mcpToolResult`: `value` is the validated `structuredContent`, else the text blocks parsed
-once when they form one JSON object or array (as OpenCode `tool/mcp.ts`), else the text, `null`
-without text; blobs, images and audio are captured as file fields (images and audio viewable). The
-model content keeps the server's blocks (labels as `File` parts). Error results are unchanged
-(`toolCallResultToToolResult`).
+unknown), unknown without one. `callRemoteMcpServerTool`,
+`callLocalMcpServerTool` (and the resumable calls) return `mcpToolResult`: `value` is the validated
+`structuredContent`, else the text of the `text` blocks and embedded text resources (`resource`
+with `text`), in order and joined with newlines, parsed once when it forms one JSON object or
+array (as OpenCode `tool/mcp.ts`), else the text, `null` without text. `resource_link` blocks are
+references, not text: the model sees their link line, the value never does (a link's synthesized
+line would break the parse-once rule). Blobs, images and audio are captured as file fields (images
+and audio viewable). The model content keeps the server's blocks: a result without file blocks is
+exactly what `toolCallResultToToolResult` gives (text blocks joined, mixed blocks as parts); with
+file blocks, each block in order, images and audio as the server sent them followed by their
+`File` part once stored, blobs as `File` parts. `ToolResult.files` comes from `toolOutputFiles`
+(each `fileId` once). Error results are unchanged (`toolCallResultToToolResult`).
+
+Validation: the remote client lets the SDK check `structuredContent` against the listed
+`outputSchema` (the resumable calls do it with the SDK's rules, `assertStructuredOutput`). The
+local client lists the tools and calls in one stdio session and runs the same check
+(`compileOutputValidator` + `assertStructuredOutput`) when the listing's first page holds the tool;
+a tool missing from it is not checked. Registrations of adapted tools set
+`decodeOutput: mcpToolOutputDecoder`.
+
+Capture: files are stored when the call runs, through `CallMcpServerToolInput.fileCapture` when
+given, else the ambient `ToolFileCapture`, which `resolveTools` provides around every
+registration. A call made outside a registration (a HITL route calling
+`resumeRemoteMcpServerToolCall`, a host calling `callLocalMcpServerTool` directly) passes
+`fileCapture: makeToolFileCapture({ store })`; without it every file is `FileUnavailable`
+(`no file store`) and the bytes cannot be fetched again (MCP blobs are not re-readable). An explicit
+option was chosen over documenting `Effect.provideService(ToolFileCapture, ...)`: the call
+signature shows it, and it overrides an enclosing resolution's capture.
 
 ## Connectors
 
@@ -209,8 +270,12 @@ before. Provider failures keep their `structuredContent` (the encoded `ProviderF
 ## Ledger
 
 `toolLedgerResult(result, maxBytes, { typed })`: for a successful typed result the value is never
-cut or dropped. Over the bound, media becomes placeholders, `nestedCalls` is dropped, then the
-content is cut (it only renders the value). When the value alone exceeds the bound, the stored
+cut or dropped. Over the bound, inline media bytes become placeholders, `nestedCalls` is dropped,
+then the content is cut (it only renders the value). `File` parts without inline bytes (`Ref`,
+`Omitted`; a few bytes each) stay parts through every step: the final cut keeps them after the cut
+text instead of flattening their labels into it, so a replayed untyped result gives code mode the
+same label-free text as a live one. Only a bound too small for them leaves the note alone (`files`
+is kept either way). When the value alone exceeds the bound, the stored
 copy is a fixed `isError` result ("too large for the tool ledger … not run again; verify"). The
 decision is made when the outcome is recorded (`executeLedgered({ typed })` from the
 registration's `outputSchema`), so a replay never depends on the tool's current definition.
@@ -226,10 +291,21 @@ registration's `outputSchema`), so a replay never depends on the tool's current 
 3. A tool without `output`: return `{ content }`. A structured value now needs `output`.
 4. Errors: fail with `modelVisibleToolError({ ..., code })` to give scripts `error.code`.
 5. Hosts that wrap registrations need no change: capture is provided by `resolveTools`.
-6. Scripts: typed tools resolve to their declared value; `files` is no longer merged in (read the
-   tool's file fields); untyped tools resolve to plain text without labels; MCP tools resolve to
-   `{ value, files }`; Gmail/Outlook/email `get_attachment` resolve to `{ value, files }`. Remove
-   `JSON.parse` of typed results and defensive `typeof r === 'string'` checks.
+6. Files returned as `FilePart` by tools without `output` (deprecated `ToolResult` tools included)
+   are no longer reachable from scripts (the model still sees their labels). Before upgrading,
+   give every byte-producing tool whose files scripts move an `output` with a `ToolFile` field
+   (step 1).
+7. Raw registrations that set `def.outputSchema` add `decodeOutput: toolOutputDecoder(schema)`;
+   MCP registrations built from `mcpToolToToolDef` add `decodeOutput: mcpToolOutputDecoder`.
+   `resolveTools` fails with `output_validation_required` otherwise.
+8. Direct MCP calls outside `resolveTools` (HITL routes resuming `resumeRemoteMcpServerToolCall`,
+   `callLocalMcpServerTool`, `callMcpServerTool`) pass `fileCapture: makeToolFileCapture({ store })`
+   to store the call's blobs; `captureToolResultFiles` stays the capture of untyped content.
+9. `makeTool` with explicit type arguments and `output` takes three type arguments.
+10. Scripts: typed tools resolve to their declared value; `files` is no longer merged in (read the
+    tool's file fields); untyped tools resolve to plain text without labels; MCP tools resolve to
+    `{ value, files }`; Gmail/Outlook/email `get_attachment` resolve to `{ value, files }`. Remove
+    `JSON.parse` of typed results and defensive `typeof r === 'string'` checks.
 
 ## Not done
 
@@ -239,6 +315,6 @@ registration's `outputSchema`), so a replay never depends on the tool's current 
   on the deprecated form for now: its provider failures are error results with their own
   `structuredContent` (the encoded `ProviderFailure`), which the typed form cannot express without
   moving them into the `ModelVisibleToolError` envelope (a breaking change for hosts reading it).
-- Validating local stdio MCP results: `callLocalMcpServerTool` does not list the tool before the
-  call, so its `value` is not checked against the server's `outputSchema` (as before this ADR).
+- Validating local stdio MCP results for tools past the first page of the session's listing (the
+  local client reads one page).
 - An MCP response byte cap (decided against).

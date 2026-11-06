@@ -96,7 +96,7 @@ tools read the whole file into memory, so a captured file larger than this canno
 
 Scripts read file fields as `FileRef` (or `FileUnavailable`), never labels, so one script moves a
 Gmail attachment to an MCP server's presigned upload URL (script fragment; the IDs come from earlier
-calls; `get_attachment` resolves to `{ value, files }`):
+calls; `get_attachment` and MCP tools resolve to `{ value, files }`):
 
 ```js
 const attachment = await tools['gmail.get_attachment']({ messageId, attachmentId, filename })
@@ -106,7 +106,11 @@ const upload = await tools.mcp_afloat_create_receipt_upload({
   contentLength: file.size,
   contentType: file.mimeType
 })
-await tools.file_upload({ fileId: file.fileId, url: upload.url, headers: upload.headers })
+await tools.file_upload({
+  fileId: file.fileId,
+  url: upload.value.url,
+  headers: upload.value.headers
+})
 ```
 
 ## Your app owns

@@ -108,17 +108,19 @@ An `all` tool with `loading: 'deferred'` (see [Defer rarely used tools](../agent
 is not in the model's context until loaded, so the catalog treats it like a `search` tool.
 
 ```ts
+import { Effect } from 'effect'
 import { makeTool } from '@yolk-sdk/agent/tools'
 
-const listInvoices = makeTool<HostContext, typeof ListInvoicesParams>({
+// With `output`, explicit type arguments are three: context, parameters, output.
+const listInvoices = makeTool<HostContext, typeof ListInvoicesParams, typeof InvoicePage>({
   name: 'list_invoices',
   description: 'List invoices, newest first, one page at a time.',
   parameters: ListInvoicesParams, // host-owned Effect Schema
-  output: InvoicePage, // calls resolve to structuredContent of this shape
+  output: InvoicePage, // calls resolve to the JSON encoding of this shape
   access: 'read',
   callableBy: 'codemode',
   discovery: 'search',
-  execute: ({ params }) => listInvoicePage(params) // host-owned
+  execute: ({ params }) => listInvoicePage(params).pipe(Effect.map(page => ({ output: page })))
 })
 ```
 
@@ -398,6 +400,11 @@ Scripts can only use what a tool declares and returns. For each tool scripts may
   `new FileBytes({ bytes, name, mimeType })` and scripts get a `FileRef`. Tools without `output`
   return `{ content }`, and scripts get their text. Fail with `modelVisibleToolError({ code })` to
   give scripts `error.code`. See [ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md).
+- `resolveTools` checks every typed result against its output schema before scripts see it (excess
+  properties rejected); a value that does not match makes the call reject with
+  `returned an invalid result`. Raw registrations that set `def.outputSchema` supply
+  `decodeOutput` (`toolOutputDecoder(schema)`, or `mcpToolOutputDecoder` for MCP tools), or
+  resolution fails with `output_validation_required`.
 - Give each module a `description` (`{ id, description, tools }`): scripts read it under the
   namespace heading, from `describeNamespace()`, and through `searchTools()`.
 - Custom `invalidParamsMessage` callbacks should end with
