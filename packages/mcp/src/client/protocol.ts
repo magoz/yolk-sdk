@@ -6,22 +6,30 @@ import {
   captureToolFileValue,
   capturedFileParts,
   FileBytes,
-  FileDescriptor,
   FilePart,
   ImagePart,
-  isFileRef,
   normalizeFileMimeType,
   omittedFilePart,
   TextPart,
   ToolDef,
+  ToolFile,
+  ToolFileCapture,
   toolFileJsonSchema,
   toolFileJsonSchemaDefinitions,
+  toolOutputDecoder,
+  toolOutputFiles,
   ToolJsonSchemaObject,
   ToolResult,
   decodeToolJsonSchemaObject,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
-import type { Content, ContentPart, ToolExposure, ToolFileValue } from '@yolk-sdk/agent/protocol'
+import type {
+  Content,
+  ContentPart,
+  ToolExposure,
+  ToolFileValue,
+  ToolOutputDecoder
+} from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2026-07-28'
@@ -576,10 +584,16 @@ const captureBlock = (block: GenericContentBlock): Effect.Effect<CapturedBlock> 
         ),
         Effect.flatMap(bytes =>
           captureToolFileValue(bytes).pipe(
-            Effect.map((value): CapturedBlock => ({
-              parts: capturedFileParts(bytes, value),
-              file: value
-            }))
+            Effect.map((value): CapturedBlock => {
+              const parts = capturedFileParts(bytes, value)
+
+              // A viewed image or audio keeps the server's block as the model saw it before
+              // (no file name, its own MIME type); only its `File` part, if any, follows.
+              return {
+                parts: file.view ? [contentPartFromBlock(block), ...parts.slice(1)] : parts,
+                file: value
+              }
+            })
           )
         ),
         Effect.orElseSucceed(() => invalidFile(file))
@@ -588,12 +602,24 @@ const captureBlock = (block: GenericContentBlock): Effect.Effect<CapturedBlock> 
 
 const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
+// The text a block carries as data: a `text` block's text, an embedded text resource's text.
+// Resource links are references (a URI, not content) and file blocks are file fields, so neither
+// enters the value.
+const valueText = (block: GenericContentBlock): Option.Option<string> =>
+  block['type'] === 'resource'
+    ? Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
+        Option.flatMap(({ resource }) => Option.fromNullishOr(resource.text))
+      )
+    : contentBlockText(block)
+
 /**
- * The value of an MCP result without `structuredContent`: the text blocks parsed once when they
- * form one JSON object or array, otherwise the text, or `null` without text (ADR 0013).
+ * The value of an MCP result without `structuredContent` (ADR 0013): the text of its `text`
+ * blocks and embedded text resources, in order and joined with newlines, parsed once when it is
+ * one JSON object or array, otherwise the text; `null` without text. `resource_link` blocks are
+ * references, not text: the model sees their link line, the value never does.
  */
 export const mcpTextValue = (blocks: ReadonlyArray<GenericContentBlock>): Schema.Json => {
-  const texts = Arr.getSomes(Arr.map(blocks, contentBlockText))
+  const texts = Arr.getSomes(Arr.map(blocks, valueText))
 
   if (texts.length === 0) return null
 
@@ -609,54 +635,59 @@ export const mcpTextValue = (blocks: ReadonlyArray<GenericContentBlock>): Schema
 }
 
 /**
+ * The declared output of an adapted MCP tool (`mcpToolOutputSchema`) as a schema: the shape of
+ * every `mcpToolResult` value. `value` is any JSON here: the remote client checks it against the
+ * server's `outputSchema` before `mcpToolResult` runs (the local client does the same when its
+ * listing holds the tool).
+ */
+export const McpToolOutput = Schema.Struct({ value: Schema.Json, files: Schema.Array(ToolFile) })
+
+/**
+ * The `ToolRegistration.decodeOutput` of an MCP tool registration (`mcpToolToToolDef` defs):
+ * checks the `{ value, files }` envelope (excess properties rejected, file fields
+ * `FileRef | FileUnavailable`, plain JSON).
+ */
+export const mcpToolOutputDecoder: ToolOutputDecoder = toolOutputDecoder(McpToolOutput)
+
+/**
  * The typed result of an MCP tool call (ADR 0013). A successful result's `structuredContent` is
  * `{ value, files }` (`mcpToolOutputSchema`): `value` is the server's `structuredContent`, or the
- * text (`mcpTextValue`); `files` are its blobs, images and audio, stored through the ambient
- * `ToolFileCapture` (`FileRef`, or `FileUnavailable` without a store). The model sees the server's
- * content: text, viewable images and audio followed by their file label, and blob labels. Error
- * results keep `toolCallResultToToolResult`.
+ * text (`mcpTextValue`); `files` are its blobs, images and audio, stored through `fileCapture`
+ * when given, else the ambient `ToolFileCapture` (`FileRef`, or `FileUnavailable` without one).
+ * The model sees the server's content: a result without file blocks exactly as
+ * `toolCallResultToToolResult` adapts it, otherwise each block in order with images and audio
+ * followed by their `File` part once stored, and blobs as `File` parts. Error results keep
+ * `toolCallResultToToolResult`.
  */
 export const mcpToolResult = (input: {
   readonly toolCallId: string
   readonly result: ToolCallResult
+  /** Stores the call's files; overrides the ambient `ToolFileCapture` (`makeToolFileCapture`). */
+  readonly fileCapture?: ToolFileCapture['Service'] | undefined
 }): Effect.Effect<ToolResult> => {
   if (input.result.isError === true) return Effect.succeed(toolCallResultToToolResult(input))
 
   const blocks = input.result.content ?? []
 
-  return Effect.forEach(blocks, captureBlock).pipe(
+  const converted = Effect.forEach(blocks, captureBlock).pipe(
     Effect.map(captured => {
       const files = captured.flatMap(block => (block.file === undefined ? [] : [block.file]))
-      const parts = captured.flatMap(block => block.parts)
 
       const content: Content =
         blocks.length === 0
           ? input.result.structuredContent === undefined
             ? 'Unsupported MCP tool content.'
             : 'Structured MCP tool result.'
-          : parts.every(part => Predicate.isTagged(part, 'Text'))
-            ? parts
-                .flatMap(part => (Predicate.isTagged(part, 'Text') ? [part.text] : []))
-                .join('\n')
-            : parts
+          : files.length === 0
+            ? contentFromBlocks(blocks)
+            : captured.flatMap(block => block.parts)
 
       const value =
         input.result.structuredContent === undefined
           ? mcpTextValue(blocks)
           : input.result.structuredContent
 
-      const descriptors = files.flatMap(file =>
-        isFileRef(file)
-          ? [
-              FileDescriptor.make({
-                fileId: file.fileId,
-                name: file.name,
-                mimeType: file.mimeType,
-                size: file.size
-              })
-            ]
-          : []
-      )
+      const descriptors = toolOutputFiles(files.map(file => ({ value: file })))
 
       return descriptors.length === 0
         ? ToolResult.make({
@@ -672,6 +703,10 @@ export const mcpToolResult = (input: {
           })
     })
   )
+
+  return input.fileCapture === undefined
+    ? converted
+    : converted.pipe(Effect.provideService(ToolFileCapture, input.fileCapture))
 }
 
 export const decodeJsonRpcResponse = Schema.decodeUnknownEffect(JsonRpcResponse)

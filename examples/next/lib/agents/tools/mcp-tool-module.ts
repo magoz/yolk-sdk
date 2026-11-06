@@ -6,6 +6,7 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   callRemoteMcpServerTool,
   listRemoteMcpServerTools,
+  mcpToolOutputDecoder,
   sanitizeMcpName
 } from '@yolk-sdk/mcp/client'
 import type {
@@ -45,6 +46,7 @@ const makeRegistration = (
 ): ToolRegistration<AgentToolContext> => ({
   def: resolved.def,
   access: 'read',
+  decodeOutput: mcpToolOutputDecoder,
   isEnabled: context => Effect.succeed(context.surface === 'text'),
   execute: ({ call }) =>
     Effect.gen(function* () {

@@ -12,7 +12,12 @@ import {
   resolveTools,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
-import { mcpToolToToolDef, McpTool, type McpToolExposureResolver } from '../../src/client'
+import {
+  mcpToolOutputDecoder,
+  mcpToolToToolDef,
+  McpTool,
+  type McpToolExposureResolver
+} from '../../src/client'
 
 type Context = { readonly tenant: string }
 
@@ -39,6 +44,7 @@ const byReadOnlyHint: McpToolExposureResolver = tool =>
 const registration = (def: ReturnType<typeof mcpToolToToolDef>): ToolRegistration<Context> => ({
   def,
   access: 'read',
+  decodeOutput: mcpToolOutputDecoder,
   execute: ({ call }) =>
     Effect.succeed(ToolResult.make({ toolCallId: call.id, content: `${call.name}:ok` }))
 })

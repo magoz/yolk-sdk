@@ -27,7 +27,7 @@ import {
 import { HttpClient } from 'effect/http'
 import { ChildProcess } from 'effect/process'
 import type { ChildProcessSpawner } from 'effect/process'
-import type { ToolResult } from '@yolk-sdk/agent/protocol'
+import type { ToolFileCapture, ToolResult } from '@yolk-sdk/agent/protocol'
 import type {
   McpClientInfo,
   McpLocalServerConfig,
@@ -70,6 +70,7 @@ import {
   type McpToolExposureResolver,
   type JsonRpcNotification,
   type JsonRpcResponse,
+  type ToolCallResult,
   type ToolsListResult
 } from './protocol.ts'
 import { makeEffectFetch } from './effect-fetch.ts'
@@ -416,9 +417,10 @@ const callToolRequest = (input: { readonly toolName: string; readonly params: un
 const responseById = (responses: ReadonlyArray<JsonRpcResponse>, id: string | number) =>
   Option.fromNullishOr(responses.find(response => response.id === id))
 
-const requestLocalSession = (
+// One local session: initialize, then `requests` in order; answers every response.
+const requestLocalSessionResponses = (
   config: McpLocalServerConfig,
-  request: JsonRpcRequest,
+  requests: ReadonlyArray<JsonRpcRequest>,
   options?: McpClientOptions
 ) =>
   Effect.gen(function* () {
@@ -432,9 +434,9 @@ const requestLocalSession = (
           jsonrpc: '2.0',
           method: 'notifications/initialized'
         }),
-        request
+        ...requests
       ],
-      2,
+      requests.length + 1,
       options
     )
 
@@ -447,14 +449,28 @@ const requestLocalSession = (
     yield* unwrapResponse(config.name, initializeResponse.value)
 
     return responses
-  }).pipe(
-    Effect.flatMap(responses => {
-      const response = responseById(responses, request.id)
+  })
 
-      return Option.isNone(response)
-        ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
-        : unwrapResponse(config.name, response.value)
-    })
+// The unwrapped result of one request's response.
+const localResult = (
+  config: McpLocalServerConfig,
+  responses: ReadonlyArray<JsonRpcResponse>,
+  request: JsonRpcRequest
+) => {
+  const response = responseById(responses, request.id)
+
+  return Option.isNone(response)
+    ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
+    : unwrapResponse(config.name, response.value)
+}
+
+const requestLocalSession = (
+  config: McpLocalServerConfig,
+  request: JsonRpcRequest,
+  options?: McpClientOptions
+) =>
+  requestLocalSessionResponses(config, [request], options).pipe(
+    Effect.flatMap(responses => localResult(config, responses, request))
   )
 
 const resolvedMcpTools = (
@@ -555,6 +571,14 @@ export type CallMcpServerToolInput = {
   readonly toolCallId: string
   readonly params: unknown
   readonly options?: McpClientOptions
+  /**
+   * Stores the call's blobs, images and audio as file fields (ADR 0013), for example
+   * `makeToolFileCapture({ store })` from `@yolk-sdk/agent/tools`. Defaults to the ambient
+   * `ToolFileCapture`, which `resolveTools` provides around every registration; a call made
+   * outside one (a HITL route resuming a call, a host calling directly) needs this option, or
+   * every file is `FileUnavailable` (`no file store`).
+   */
+  readonly fileCapture?: ToolFileCapture['Service']
 }
 
 export const callRemoteMcpServerTool = (
@@ -574,7 +598,11 @@ export const callRemoteMcpServerTool = (
 
     const toolCallResult = yield* decodeCallResult(input.config.name, result)
 
-    return yield* mcpToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
+    return yield* mcpToolResult({
+      toolCallId: input.toolCallId,
+      result: toolCallResult,
+      fileCapture: input.fileCapture
+    })
   })
 
 export type CallRemoteMcpServerToolInput = Omit<CallMcpServerToolInput, 'config'> & {
@@ -856,7 +884,7 @@ const compileOutputValidator = (
 const assertStructuredOutput = async (
   toolName: string,
   validator: OutputValidator,
-  result: CallToolResult
+  result: Pick<CallToolResult, 'isError' | 'structuredContent'>
 ) => {
   if (result.isError === true) return
 
@@ -1042,7 +1070,9 @@ const resumableOutcome = (
       }
 
       return decodeCallResult(server, step.raw).pipe(
-        Effect.flatMap(result => mcpToolResult({ toolCallId: input.toolCallId, result })),
+        Effect.flatMap(result =>
+          mcpToolResult({ toolCallId: input.toolCallId, result, fileCapture: input.fileCapture })
+        ),
         Effect.map(result => McpToolCallComplete.make({ result }))
       )
   }
@@ -1144,28 +1174,84 @@ export const resumeRemoteMcpServerToolCall = (
     return yield* resumableOutcome(input, step, argumentsDigest)
   })
 
+// The local counterpart of the SDK's output validation: when the session's listing (first page)
+// holds the tool with an `outputSchema`, a successful result must carry `structuredContent` that
+// passes it, with the same compiler and rules as the remote calls (`compileOutputValidator`,
+// `assertStructuredOutput`). A tool missing from the listing is not checked.
+const checkLocalStructuredOutput = (
+  input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpLocalServerConfig },
+  listed: ToolsListResult,
+  result: ToolCallResult
+): Effect.Effect<void, McpError> => {
+  const server = input.config.name
+  const tool = listed.tools.find(item => item.name === input.mcpToolName)
+
+  if (tool === undefined || tool.outputSchema === undefined) return Effect.void
+
+  const candidate = {
+    name: tool.name,
+    inputSchema: tool.inputSchema ?? { type: 'object' },
+    outputSchema: tool.outputSchema
+  }
+
+  if (!isSpecType.Tool(candidate)) {
+    return fail(server, `Tool ${input.mcpToolName} has an invalid outputSchema`, 'validation')
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const validator = compileOutputValidator(candidate, input.options)
+
+      if (validator !== undefined) {
+        await assertStructuredOutput(input.mcpToolName, validator, result)
+      }
+    },
+    catch: error =>
+      new McpError({
+        server,
+        message: unknownToMessage(error).slice(0, 500),
+        cause: 'validation'
+      })
+  })
+}
+
+/**
+ * Calls a local stdio MCP tool. One session lists the tools and calls: the listing gives the
+ * tool's `outputSchema`, which a successful result's `structuredContent` must pass (as the remote
+ * calls check it).
+ */
 export const callLocalMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpLocalServerConfig }
 ): Effect.Effect<ToolResult, McpError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
-    const result = yield* requestLocalSession(
-      input.config,
-      callToolRequest({ toolName: input.mcpToolName, params: input.params }),
-      input.options
-    )
+    const list = listToolsRequest()
+    const call = callToolRequest({ toolName: input.mcpToolName, params: input.params })
 
-    const toolCallResult = yield* decodeToolCallResult(result).pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: input.config.name,
-            message: `Invalid tools/call result: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
+    const responses = yield* requestLocalSessionResponses(input.config, [list, call], input.options)
+
+    const listed = yield* localResult(input.config, responses, list).pipe(
+      Effect.flatMap(decodeToolsListResult),
+      Effect.mapError(error =>
+        error instanceof McpError
+          ? error
+          : new McpError({
+              server: input.config.name,
+              message: `Invalid tools/list result: ${unknownToMessage(error)}`,
+              cause: 'validation'
+            })
       )
     )
 
-    return yield* mcpToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
+    const result = yield* localResult(input.config, responses, call)
+    const toolCallResult = yield* decodeCallResult(input.config.name, result)
+
+    yield* checkLocalStructuredOutput(input, listed, toolCallResult)
+
+    return yield* mcpToolResult({
+      toolCallId: input.toolCallId,
+      result: toolCallResult,
+      fileCapture: input.fileCapture
+    })
   })
 
 export const callMcpServerTool = (
@@ -1176,20 +1262,8 @@ export const callMcpServerTool = (
   ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
 > =>
   input.config.type === 'local'
-    ? callLocalMcpServerTool({
-        config: input.config,
-        mcpToolName: input.mcpToolName,
-        toolCallId: input.toolCallId,
-        params: input.params,
-        options: input.options
-      })
-    : callRemoteMcpServerTool({
-        config: input.config,
-        mcpToolName: input.mcpToolName,
-        toolCallId: input.toolCallId,
-        params: input.params,
-        options: input.options
-      })
+    ? callLocalMcpServerTool({ ...input, config: input.config })
+    : callRemoteMcpServerTool({ ...input, config: input.config })
 
 export const listMcpTools = (configs: ReadonlyArray<McpServerConfig>, options?: McpClientOptions) =>
   Effect.flatMap(

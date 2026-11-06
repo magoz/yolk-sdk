@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Exit, Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   contentText,
@@ -12,7 +12,13 @@ import {
   toolFileJsonSchemaDefinitions
 } from '@yolk-sdk/agent/protocol'
 import { makeToolFileCapture, type FileStoreApi } from '@yolk-sdk/agent/tools'
-import { mcpToolOutputSchema, mcpToolResult, type ToolCallResult } from '../../src/client'
+import {
+  mcpToolOutputDecoder,
+  mcpToolOutputSchema,
+  mcpToolResult,
+  toolCallResultToToolResult,
+  type ToolCallResult
+} from '../../src/client'
 
 const pdf = new TextEncoder().encode('%PDF invoice')
 
@@ -140,11 +146,8 @@ describe('MCP typed results', () => {
           filename: 'invoice.pdf',
           size: 12
         }),
-        ImagePart.make({
-          source: inlineBase64Source(base64(png)),
-          mimeType: 'image/png',
-          filename: 'image'
-        }),
+        // The server's image block as before: no file name, its own MIME type.
+        ImagePart.make({ source: inlineBase64Source(base64(png)), mimeType: 'image/png' }),
         FilePart.make({
           source: refAttachmentSource('file_png1'),
           mimeType: 'image/png',
@@ -184,6 +187,115 @@ describe('MCP typed results', () => {
         '[file not captured (no file store): invoice.pdf, application/pdf]'
       )
       expect(JSON.stringify(result)).not.toContain(base64(pdf))
+    })
+  )
+
+  it.effect('takes the text of embedded text resources into the value, in order', () =>
+    Effect.gen(function* () {
+      const resource = (text: string) => ({
+        type: 'resource',
+        resource: { uri: 'file:///rows.json', mimeType: 'application/json', text }
+      })
+
+      const value = (content: NonNullable<ToolCallResult['content']>) =>
+        convert({ content }).pipe(Effect.map(result => result.structuredContent))
+
+      expect(yield* value([resource('{"rows":[1,2]}')])).toEqual({
+        value: { rows: [1, 2] },
+        files: []
+      })
+      expect(yield* value([{ type: 'text', text: '[1,' }, resource('2]')])).toEqual({
+        value: [1, 2],
+        files: []
+      })
+      expect(yield* value([resource('first'), { type: 'text', text: 'second' }])).toEqual({
+        value: 'first\nsecond',
+        files: []
+      })
+      // Resource links are references, never value text.
+      expect(
+        yield* value([
+          { type: 'text', text: '{"a":1}' },
+          { type: 'resource_link', uri: 'file:///b.txt', name: 'b.txt' }
+        ])
+      ).toEqual({ value: { a: 1 }, files: [] })
+      expect(
+        yield* value([{ type: 'resource_link', uri: 'file:///b.txt', name: 'b.txt' }])
+      ).toEqual({ value: null, files: [] })
+    })
+  )
+
+  it.effect('keeps the model view of results without file blocks exactly', () =>
+    Effect.gen(function* () {
+      const results: ReadonlyArray<ToolCallResult> = [
+        {
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'text', text: 'b' }
+          ]
+        },
+        {
+          content: [
+            { type: 'text', text: 'a' },
+            { type: 'resource_link', uri: 'file:///b.txt', name: 'b.txt' },
+            { type: 'resource', resource: { uri: 'file:///c.txt', text: 'c' } }
+          ]
+        },
+        { content: [], structuredContent: { ok: true } }
+      ]
+
+      for (const result of results) {
+        const typed = yield* convert(result)
+
+        expect(typed.content).toEqual(
+          toolCallResultToToolResult({ toolCallId: 'call_1', result }).content
+        )
+      }
+    })
+  )
+
+  it.effect('stores files through an explicit capture, over the ambient one', () =>
+    Effect.gen(function* () {
+      const result = yield* mcpToolResult({
+        toolCallId: 'call_1',
+        result: {
+          content: [
+            {
+              type: 'resource',
+              resource: {
+                uri: 'file:///invoice.pdf',
+                mimeType: 'application/pdf',
+                blob: base64(pdf)
+              }
+            }
+          ]
+        },
+        fileCapture: makeToolFileCapture({ store })
+      })
+
+      expect(result.structuredContent).toEqual({
+        value: null,
+        files: [
+          { fileId: 'file_PDFinvoice', name: 'invoice.pdf', mimeType: 'application/pdf', size: 12 }
+        ]
+      })
+    })
+  )
+
+  it.effect('checks the { value, files } envelope with mcpToolOutputDecoder', () =>
+    Effect.gen(function* () {
+      const decode = (value: unknown) => Effect.exit(mcpToolOutputDecoder(value))
+
+      expect(yield* decode({ value: { a: 1 }, files: [] })).toEqual(
+        Exit.succeed({ value: { a: 1 }, files: [] })
+      )
+      expect(Exit.isFailure(yield* decode({ value: 1, files: [], extra: true }))).toBe(true)
+      expect(
+        Exit.isFailure(
+          yield* decode({ value: 1, files: [{ fileId: 'file_a', name: 'a', mimeType: 'x' }] })
+        )
+      ).toBe(true)
+      expect(Exit.isFailure(yield* decode({ value: new Uint8Array([1]), files: [] }))).toBe(true)
     })
   )
 

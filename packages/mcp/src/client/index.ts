@@ -89,6 +89,8 @@ export {
   makeJsonRpcRequest,
   McpTool,
   mcpTextValue,
+  McpToolOutput,
+  mcpToolOutputDecoder,
   mcpToolOutputSchema,
   mcpToolResult,
   mcpToolToToolDef,

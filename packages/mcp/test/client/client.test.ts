@@ -19,6 +19,7 @@ import { AudioPart, ImagePart, TextPart, inlineBase64Source } from '@yolk-sdk/ag
 import {
   JsonRpcMessage,
   listLocalMcpServerTools,
+  callLocalMcpServerTool,
   callRemoteMcpServerTool,
   listRemoteMcpServerTools,
   McpError,
@@ -579,6 +580,93 @@ describe('MCP client', () => {
       ).pipe(Effect.provide(makeFakeLocalMcpLayer([initializeResponse, toolsResponse])))
 
       expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
+    })
+  )
+
+  it.effect('validates local structured content against the listed output schema', () =>
+    Effect.gen(function* () {
+      const initializeResponse =
+        '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"local","version":"0"}}}'
+
+      const toolsResponse = (name: string) =>
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          result: {
+            tools: [
+              {
+                name,
+                inputSchema: { type: 'object' },
+                outputSchema: {
+                  type: 'object',
+                  properties: { total: { type: 'number' } },
+                  required: ['total']
+                }
+              }
+            ]
+          }
+        })
+
+      const callResponse = (structuredContent: unknown) =>
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { content: [{ type: 'text', text: 'done' }], structuredContent }
+        })
+
+      const call = (lines: ReadonlyArray<string>) =>
+        callLocalMcpServerTool({
+          config: {
+            name: 'local',
+            type: 'local',
+            command: ['fake-mcp'],
+            environment: { MCP_TOKEN: 'token' }
+          },
+          mcpToolName: 'sum',
+          toolCallId: 'call_1',
+          params: {},
+          options: { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+        }).pipe(Effect.provide(makeFakeLocalMcpLayer(lines)), Effect.result)
+
+      const valid = yield* call([
+        initializeResponse,
+        toolsResponse('sum'),
+        callResponse({ total: 3 })
+      ])
+
+      expect(Predicate.isTagged(valid, 'Success') && valid.success.structuredContent).toEqual({
+        value: { total: 3 },
+        files: []
+      })
+
+      const invalid = yield* call([
+        initializeResponse,
+        toolsResponse('sum'),
+        callResponse({ total: 'three' })
+      ])
+
+      expectMcpFailureCause(invalid, 'validation')
+
+      const missing = yield* call([
+        initializeResponse,
+        toolsResponse('sum'),
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          result: { content: [{ type: 'text', text: 'x' }] }
+        })
+      ])
+
+      expectMcpFailureCause(missing, 'validation')
+
+      // A tool the listing does not hold is not checked.
+      const unlisted = yield* call([
+        initializeResponse,
+        toolsResponse('other'),
+        callResponse({ total: 'three' })
+      ])
+
+      expect(Predicate.isTagged(unlisted, 'Success')).toBe(true)
     })
   )
 
