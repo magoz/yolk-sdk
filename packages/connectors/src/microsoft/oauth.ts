@@ -40,6 +40,8 @@ export const microsoftGraphFilesReadWriteScope = 'https://graph.microsoft.com/Fi
 export const microsoftGraphFilesReadWriteAllScope =
   'https://graph.microsoft.com/Files.ReadWrite.All'
 
+export const microsoftGraphSitesReadAllScope = 'https://graph.microsoft.com/Sites.Read.All'
+
 export const microsoftOutlookReadScopes = Object.freeze([microsoftGraphMailReadScope])
 
 export const microsoftOutlookWriteScopes = Object.freeze([microsoftGraphMailReadWriteScope])
@@ -69,6 +71,8 @@ export const microsoftOneDriveReadAllScopes = Object.freeze([microsoftGraphFiles
 export const microsoftOneDriveWriteScopes = Object.freeze([microsoftGraphFilesReadWriteScope])
 
 export const microsoftOneDriveWriteAllScopes = Object.freeze([microsoftGraphFilesReadWriteAllScope])
+
+export const microsoftSharePointSitesReadScopes = Object.freeze([microsoftGraphSitesReadAllScope])
 
 export const MicrosoftOAuthCredentialSlot = CredentialSlot.make({
   id: microsoftOAuthSlotId,
@@ -149,6 +153,14 @@ export const MicrosoftOneDriveWriteAllOAuthCredentialSlot = CredentialSlot.make(
   id: microsoftOAuthSlotId,
   kind: 'oauth',
   requiredScopes: [...microsoftOneDriveWriteAllScopes]
+})
+
+// Site discovery is opt-in: Sites.Read.All (delegated and application alike) is the least
+// privileged permission for site search, and the combined slot is intentionally not widened.
+export const MicrosoftSharePointSitesReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftSharePointSitesReadScopes]
 })
 
 export const MicrosoftCombinedOAuthCredentialSlot = CredentialSlot.make({

@@ -18,7 +18,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                                                                                           |
 | Kie             | `@yolk-sdk/connectors/kie`             | `KieApiKeySlot`                              | none                                               | image + video generation tasks, task status                                                                                |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                                                                                     |
-| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph                                                                                           |
+| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook, OneDrive, and SharePoint sites through Graph                                                                      |
 | Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions                                                                                           |
 | Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL                                                                                                       |
 | Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                                                                                                             |
@@ -583,30 +583,32 @@ Google references: [files.list](https://developers.google.com/workspace/drive/ap
 
 ## Microsoft
 
-Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail and OneDrive files. Both workloads
-share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus the same `microsoft.oauth`
-credential binding. The connector does not use the retired Outlook REST endpoint, direct Exchange
-Online APIs, or legacy OneDrive APIs. The sole exception is the pre-authenticated Outlook attachment
-upload-session URLs that Graph issues to `addOutlookAttachment`, contacted without Authorization.
+Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail, OneDrive files, and SharePoint site
+libraries. These workloads share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus
+the same `microsoft.oauth` credential binding. The connector does not use the retired Outlook REST
+endpoint, direct Exchange Online APIs, or legacy OneDrive APIs. The sole exception is the
+pre-authenticated Outlook attachment upload-session URLs that Graph issues to
+`addOutlookAttachment`, contacted without Authorization.
 
 All OAuth slots use the shared `microsoft.oauth` binding id:
 
-| Slot                                               | Permission hint                                    |
-| -------------------------------------------------- | -------------------------------------------------- |
-| `MicrosoftOutlookReadOAuthCredentialSlot`          | `Mail.Read`                                        |
-| `MicrosoftOutlookWriteOAuthCredentialSlot`         | `Mail.ReadWrite`                                   |
-| `MicrosoftOutlookSendOAuthCredentialSlot`          | `Mail.Send`                                        |
-| `MicrosoftOutlookSharedReadOAuthCredentialSlot`    | `Mail.Read.Shared`                                 |
-| `MicrosoftOutlookSharedWriteOAuthCredentialSlot`   | `Mail.ReadWrite.Shared`                            |
-| `MicrosoftOutlookSharedSendOAuthCredentialSlot`    | `Mail.Send.Shared`                                 |
-| `MicrosoftOneDriveReadOAuthCredentialSlot`         | `Files.Read`                                       |
-| `MicrosoftOneDriveWriteOAuthCredentialSlot`        | `Files.ReadWrite`                                  |
-| `MicrosoftOneDriveReadAllOAuthCredentialSlot`      | `Files.Read.All`                                   |
-| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`     | `Files.ReadWrite.All`                              |
-| `MicrosoftOutlookCategoryReadOAuthCredentialSlot`  | `MailboxSettings.Read`                             |
-| `MicrosoftOutlookCategoryWriteOAuthCredentialSlot` | `MailboxSettings.ReadWrite`                        |
-| `MicrosoftCombinedOAuthCredentialSlot`             | mail and file scopes, excluding category lifecycle |
-| `MicrosoftOAuthCredentialSlot`                     | none declared                                      |
+| Slot                                               | Permission hint                                   |
+| -------------------------------------------------- | ------------------------------------------------- |
+| `MicrosoftOutlookReadOAuthCredentialSlot`          | `Mail.Read`                                       |
+| `MicrosoftOutlookWriteOAuthCredentialSlot`         | `Mail.ReadWrite`                                  |
+| `MicrosoftOutlookSendOAuthCredentialSlot`          | `Mail.Send`                                       |
+| `MicrosoftOutlookSharedReadOAuthCredentialSlot`    | `Mail.Read.Shared`                                |
+| `MicrosoftOutlookSharedWriteOAuthCredentialSlot`   | `Mail.ReadWrite.Shared`                           |
+| `MicrosoftOutlookSharedSendOAuthCredentialSlot`    | `Mail.Send.Shared`                                |
+| `MicrosoftOneDriveReadOAuthCredentialSlot`         | `Files.Read`                                      |
+| `MicrosoftOneDriveWriteOAuthCredentialSlot`        | `Files.ReadWrite`                                 |
+| `MicrosoftOneDriveReadAllOAuthCredentialSlot`      | `Files.Read.All`                                  |
+| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`     | `Files.ReadWrite.All`                             |
+| `MicrosoftSharePointSitesReadOAuthCredentialSlot`  | `Sites.Read.All`                                  |
+| `MicrosoftOutlookCategoryReadOAuthCredentialSlot`  | `MailboxSettings.Read`                            |
+| `MicrosoftOutlookCategoryWriteOAuthCredentialSlot` | `MailboxSettings.ReadWrite`                       |
+| `MicrosoftCombinedOAuthCredentialSlot`             | mail and file scopes, excluding categories, sites |
+| `MicrosoftOAuthCredentialSlot`                     | none declared                                     |
 
 Inputs default to the signed-in mailbox through `/me`. Set optional `mailbox` to a user ID or user
 principal name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`.
@@ -869,16 +871,17 @@ broader delegated access. Application-token hosts set it to `application`, must 
 and use the same `Files.*.All` permission hints. The host owns admin consent and application access
 policy.
 
-| Action id                  | What it does                                                         |
-| -------------------------- | -------------------------------------------------------------------- |
-| `onedrive.list_items`      | list root or folder children with opaque Graph paging                |
-| `onedrive.search_items`    | search names, metadata, and indexed content                          |
-| `onedrive.get_item`        | fetch metadata by stable DriveItem id                                |
-| `onedrive.create_folder`   | create a root or child folder with conflict behavior                 |
-| `onedrive.move_item`       | move an item within one drive; `write`; optional `ifMatch`           |
-| `onedrive.copy_item`       | accept an asynchronous copy; `write`; `accepted` is not completed    |
-| `onedrive.get_copy_status` | poll one copy monitor; `read`; send no credential to the monitor URL |
-| `onedrive.delete_item`     | move a file or folder to the recycle bin, optionally by ETag         |
+| Action id                       | What it does                                                            |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `onedrive.list_items`           | list root or folder children with opaque Graph paging                   |
+| `onedrive.search_items`         | search names, metadata, and indexed content                             |
+| `onedrive.get_item`             | fetch metadata by stable DriveItem id                                   |
+| `onedrive.resolve_sharing_link` | resolve a sharing link to its DriveItem, with `parentReference.driveId` |
+| `onedrive.create_folder`        | create a root or child folder with conflict behavior                    |
+| `onedrive.move_item`            | move an item within one drive; `write`; optional `ifMatch`              |
+| `onedrive.copy_item`            | accept an asynchronous copy; `write`; `accepted` is not completed       |
+| `onedrive.get_copy_status`      | poll one copy monitor; `read`; send no credential to the monitor URL    |
+| `onedrive.delete_item`          | move a file or folder to the recycle bin, optionally by ETag            |
 
 `onedrive.move_item` sends a same-drive `PATCH` with a destination parent ID and optional rename.
 It does not move across drives or invent copy-then-delete. Moving to drive root requires the root
@@ -890,6 +893,18 @@ exposed. `onedrive.get_copy_status` performs one poll and requires the host HTTP
 completed; do not follow or expose its `Location`. Hosts own approval, cadence, expiry, retries,
 and reconciliation.
 
+`onedrive.resolve_sharing_link` takes a OneDrive or SharePoint sharing link exactly as received
+(https on `*.sharepoint.com`, `1drv.ms`, or `onedrive.live.com`), encodes it as Graph's `u!` share
+id (`oneDriveSharingUrlShareId`), and sends `GET /shares/{shareId}/driveItem` with
+`Prefer: redeemSharingLinkIfNecessary`, so access is granted for that request only and the link is
+never redeemed. The returned item's `parentReference.driveId` and `id` address it in the other
+OneDrive actions and `downloadOneDriveItem`; those later requests still need the user's own access
+to the item. Sharing links usually point at files other people own, which delegated `Files.Read`
+does not reach for work or school accounts, so both delegated modes ask for `Files.Read.All`;
+`application` asks for `Files.ReadWrite.All`. Graph's permission table lists `Files.ReadWrite` as
+the least privileged delegated permission for this API (unverified: whether delegated
+`Files.Read.All` alone resolves links to files other people own).
+
 Pass list/search `nextLink` values back unchanged. Repeat `driveId` for explicit-drive
 continuations and `parentItemId` for folder-list continuations. The connector validates the global
 Graph origin and selected OneDrive collection before replaying a link.
@@ -897,6 +912,26 @@ Graph origin and selected OneDrive collection before replaying a link.
 The current OneDrive **action set** still excludes binary download, upload, and resumable upload
 sessions: its HTTP port is string/JSON-oriented. Original-byte download is a separate host helper,
 not an action. Host-only create/update use a separate write port; resumable sessions remain unimplemented.
+
+### SharePoint actions
+
+SharePoint team-site document libraries are drives too. The SharePoint actions find their drive
+IDs; the OneDrive actions then read them through `driveId`. Both use
+`MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`, Graph's least privileged
+permission for site search, delegated and application alike), which stays out of the combined slot.
+Reading the libraries' items with delegated tokens also needs `Files.Read.All` (or
+`Sites.Read.All`) in the token: delegated `Files.Read` covers only the signed-in user's own files
+for work or school accounts. Graph site search is not available for personal Microsoft accounts.
+
+| Action id                     | What it does                                                       |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `sharepoint.search_sites`     | search the sites the signed-in user can access, with opaque paging |
+| `sharepoint.list_site_drives` | list one site's document libraries (drives) by site id             |
+
+Site ids have the form `{hostname},{site-collection-id},{web-id}`; the connector keeps the commas
+literal in the request path. Outputs omit properties Graph sends as `null`. Pass `nextLink` values
+back unchanged (with the same `siteId` for drive listings); the connector replays only links to
+the same Graph collection.
 
 ### Host-only OneDrive original-byte download
 
@@ -917,7 +952,8 @@ const download = downloadOneDriveItem(
 The budgets are trusted host configuration, not tool parameters. Provide the existing
 `CredentialResolver` and a compliant `ConnectorBinaryHttpClient` layer; default Microsoft actions
 still use only `ConnectorHttpClient`. IDs come from discovery (`itemId`, optional `driveId`).
-SharePoint files need a known document-library drive ID; this helper does not discover sites.
+SharePoint files need a document-library drive ID: discover it with the
+[SharePoint actions](#sharepoint-actions) or `onedrive.resolve_sharing_link`.
 Hosts must materialize, scan, and extract the `Uint8Array`; do not put raw bytes into generic
 model tool JSON. See [Integration APIs](../api-reference/integrations#connectors) and
 [Troubleshooting](../troubleshooting) for adapter and error details.
@@ -925,7 +961,7 @@ model tool JSON. See [Integration APIs](../api-reference/integrations#connectors
 The built-in endpoint targets the global Microsoft cloud; it does not currently configure
 national-cloud Graph hosts.
 
-Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
+Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0), [access shared items](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0), [search sites](https://learn.microsoft.com/en-us/graph/api/site-search?view=graph-rest-1.0), and [list a site's drives](https://learn.microsoft.com/en-us/graph/api/drive-list?view=graph-rest-1.0).
 
 ## Kie
 

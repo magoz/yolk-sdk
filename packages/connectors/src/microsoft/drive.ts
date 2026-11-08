@@ -147,6 +147,39 @@ export class OneDriveItemIdInput extends Schema.Class<OneDriveItemIdInput>('OneD
   driveId: Schema.optional(NonEmptyString)
 }) {}
 
+export const oneDriveSharingUrlMaxLength = 2048
+
+const isOneDriveSharingHost = (hostname: string) =>
+  hostname.endsWith('.sharepoint.com') || hostname === '1drv.ms' || hostname === 'onedrive.live.com'
+
+const isOneDriveSharingUrl = (value: string) => {
+  if (value.trim() !== value || !URL.canParse(value)) return false
+
+  const parsed = new URL(value)
+
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.port === '' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    isOneDriveSharingHost(parsed.hostname)
+  )
+}
+
+export const OneDriveSharingUrl = Schema.String.check(
+  Schema.isMaxLength(oneDriveSharingUrlMaxLength),
+  Schema.makeFilter(isOneDriveSharingUrl)
+).annotate({
+  description:
+    'A OneDrive or SharePoint sharing link (https on *.sharepoint.com, 1drv.ms, or onedrive.live.com), exactly as received.'
+})
+
+export class OneDriveResolveSharingLinkInput extends Schema.Class<OneDriveResolveSharingLinkInput>(
+  'OneDriveResolveSharingLinkInput'
+)({
+  sharingUrl: OneDriveSharingUrl
+}) {}
+
 export class OneDriveCreateFolderInput extends Schema.Class<OneDriveCreateFolderInput>(
   'OneDriveCreateFolderInput'
 )({
@@ -627,6 +660,64 @@ export const oneDriveGetItemAction = defineAction({
     })
 })
 
+/** Graph's `u!` share id: the sharing URL as unpadded base64url of its UTF-8 bytes. */
+export const oneDriveSharingUrlShareId = (sharingUrl: string) => {
+  let binary = ''
+
+  for (const byte of new TextEncoder().encode(sharingUrl)) binary += String.fromCharCode(byte)
+
+  return `u!${btoa(binary).replaceAll('=', '').replaceAll('/', '_').replaceAll('+', '-')}`
+}
+
+// Sharing links usually point at files other people own, which `Files.Read` does not reach for
+// work or school accounts, so both delegated modes ask for `Files.Read.All`. Application tokens
+// use Graph's least privileged application permission for this API, `Files.ReadWrite.All`.
+const oneDriveSharingLinkSlot = (integration: ConnectorIntegration) =>
+  oneDriveAccessMode(integration).pipe(
+    Effect.map(accessMode =>
+      accessMode === 'application'
+        ? MicrosoftOneDriveWriteAllOAuthCredentialSlot
+        : MicrosoftOneDriveReadAllOAuthCredentialSlot
+    )
+  )
+
+export const oneDriveResolveSharingLinkAction = defineAction({
+  id: 'onedrive.resolve_sharing_link',
+  description:
+    'Resolve a OneDrive or SharePoint sharing link to its file or folder metadata, including parentReference.driveId for SharePoint document libraries. Access is granted for this request only; the link is never redeemed.',
+  inputSchema: OneDriveResolveSharingLinkInput,
+  outputSchema: OneDriveItem,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* oneDriveSharingLinkSlot(integration)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+      const params = new URLSearchParams({ $select: oneDriveItemSelect })
+
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: `${microsoftGraphApiBaseUrl}/shares/${oneDriveSharingUrlShareId(input.sharingUrl)}/driveItem?${params.toString()}`,
+          headers: { ...oneDriveReadHeaders(token), prefer: 'redeemSharingLinkIfNecessary' }
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'onedrive_resolve_sharing_link_failed',
+          message: 'Microsoft OneDrive resolve sharing link failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OneDriveItem, response)
+
+      return ActionResult.success(output)
+    })
+})
+
 export const oneDriveCreateFolderAction = defineAction({
   id: 'onedrive.create_folder',
   description: 'Create a folder in a Microsoft OneDrive root or selected parent folder.',
@@ -962,6 +1053,7 @@ export const oneDriveActions = [
   oneDriveListItemsAction,
   oneDriveSearchItemsAction,
   oneDriveGetItemAction,
+  oneDriveResolveSharingLinkAction,
   oneDriveCreateFolderAction,
   oneDriveMoveItemAction,
   oneDriveCopyItemAction,

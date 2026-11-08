@@ -966,11 +966,14 @@ describe('@yolk-sdk/connectors', () => {
       'onedrive.list_items',
       'onedrive.search_items',
       'onedrive.get_item',
+      'onedrive.resolve_sharing_link',
       'onedrive.create_folder',
       'onedrive.move_item',
       'onedrive.copy_item',
       'onedrive.get_copy_status',
-      'onedrive.delete_item'
+      'onedrive.delete_item',
+      'sharepoint.search_sites',
+      'sharepoint.list_site_drives'
     ])
     expect(
       MicrosoftConnector.actions
