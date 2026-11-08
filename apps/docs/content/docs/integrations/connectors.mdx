@@ -921,7 +921,12 @@ IDs; the OneDrive actions then read them through `driveId`. Both use
 permission for site search, delegated and application alike), which stays out of the combined slot.
 Reading the libraries' items with delegated tokens also needs `Files.Read.All` (or
 `Sites.Read.All`) in the token: delegated `Files.Read` covers only the signed-in user's own files
-for work or school accounts. Graph site search is not available for personal Microsoft accounts.
+for work or school accounts. Keep `oneDriveAccessMode` at `delegated`: the OneDrive read slots still
+ask for `Files.Read`, Graph honors every scope the token carries, and `delegated_all` would also
+make writes ask for `Files.ReadWrite.All`. `sharepoint.list_site_drives` uses the site slot rather
+than Graph's listed `Files.Read` because its site ids come from site search. Graph site search is
+not available for personal Microsoft accounts. The SharePoint actions and
+`onedrive.resolve_sharing_link` do not require `driveId` in `application` mode.
 
 | Action id                     | What it does                                                       |
 | ----------------------------- | ------------------------------------------------------------------ |

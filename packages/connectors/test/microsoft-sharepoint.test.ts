@@ -98,7 +98,7 @@ const invoke = (
   )
 
 describe('Microsoft SharePoint sites and sharing links', () => {
-  it.effect('registers read-only actions with root-object tool parameters', () =>
+  it.effect('registers actions without write access and with root-object tool parameters', () =>
     Effect.gen(function* () {
       const host = makeHost([])
 
@@ -227,6 +227,8 @@ describe('Microsoft SharePoint sites and sharing links', () => {
     'https://evil-sharepoint.com/:p:/s/Sales/abc',
     'https://sharepoint.com.example.test/:p:/s/Sales/abc',
     ` ${sharingUrl}`,
+    `${sharingUrl}\n`,
+    'https://contoso.sharepoint.com/:p:/s/Sales/a\tb',
     'not a url',
     `https://contoso.sharepoint.com/${'a'.repeat(2048)}`
   ])('rejects %s before credentials or requests', sharingUrlInput =>
@@ -413,16 +415,52 @@ describe('Microsoft SharePoint sites and sharing links', () => {
     })
   )
 
-  it.effect('rejects dot-only site ids before any request', () =>
-    Effect.gen(function* () {
-      const host = makeHost([])
+  it.effect.each<string>(['..', 'contoso.sharepoint.com,\ud800', 'site\u0000id'])(
+    'rejects the site id %j before credentials or requests',
+    badSiteId =>
+      Effect.gen(function* () {
+        const host = makeHost([])
 
-      const error = yield* Effect.flip(
-        invoke('sharepoint.list_site_drives', { siteId: '..' }, host.layer)
+        const error = yield* Effect.flip(
+          invoke('sharepoint.list_site_drives', { siteId: badSiteId }, host.layer)
+        )
+
+        expect(error).toMatchObject({ cause: 'validation_failed' })
+        expect(host.credentialRequests).toHaveLength(0)
+        expect(host.requests).toHaveLength(0)
+      })
+  )
+
+  it.effect('reports a refused site search as a provider failure', () =>
+    Effect.gen(function* () {
+      const host = makeHost([
+        response(403, JSON.stringify({ error: { code: 'accessDenied', message: 'Denied' } }))
+      ])
+
+      const result = yield* invoke('sharepoint.search_sites', { query: 'sales' }, host.layer)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        error: { status: 403, message: expect.stringContaining('search sites failed') }
+      })
+    })
+  )
+
+  it.effect('accepts a 1drv.ms personal sharing link', () =>
+    Effect.gen(function* () {
+      const link = 'https://1drv.ms/w/s!AkPersonalShareToken'
+      const host = makeHost([response(200, JSON.stringify({ id: 'ITEM', name: 'a.docx' }))])
+
+      const result = yield* invoke(
+        'onedrive.resolve_sharing_link',
+        { sharingUrl: link },
+        host.layer
       )
 
-      expect(error).toMatchObject({ cause: 'validation_failed' })
-      expect(host.credentialRequests).toHaveLength(0)
+      expect(result).toMatchObject({ _tag: 'Success', value: { id: 'ITEM' } })
+      expect(new URL(host.requests[0]?.url ?? '').pathname).toBe(
+        `/v1.0/shares/${oneDriveSharingUrlShareId(link)}/driveItem`
+      )
     })
   )
 })

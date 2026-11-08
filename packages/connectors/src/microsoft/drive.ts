@@ -16,6 +16,7 @@ import {
 } from './oauth.ts'
 import {
   isMicrosoftSuccessStatus,
+  isTrustedGraphUrl,
   microsoftGraphApiBaseUrl,
   microsoftProviderFailure,
   microsoftSanitizedProviderFailure,
@@ -153,7 +154,9 @@ const isOneDriveSharingHost = (hostname: string) =>
   hostname.endsWith('.sharepoint.com') || hostname === '1drv.ms' || hostname === 'onedrive.live.com'
 
 const isOneDriveSharingUrl = (value: string) => {
-  if (value.trim() !== value || !URL.canParse(value)) return false
+  if (value.trim() !== value || /[\u0000-\u001f\u007f]/.test(value) || !URL.canParse(value)) {
+    return false
+  }
 
   const parsed = new URL(value)
 
@@ -438,14 +441,6 @@ const invalidNextLink = (actionId: string) =>
     connectorId: microsoftConnectorId,
     actionId
   })
-
-const isTrustedGraphUrl = (parsed: URL) =>
-  parsed.protocol === 'https:' &&
-  parsed.hostname === 'graph.microsoft.com' &&
-  parsed.port === '' &&
-  parsed.username === '' &&
-  parsed.password === '' &&
-  parsed.hash === ''
 
 const requireOneDriveListNextLink = (
   nextLink: string,

@@ -12,6 +12,7 @@ import {
 } from './oauth.ts'
 import {
   isMicrosoftSuccessStatus,
+  isTrustedGraphUrl,
   microsoftGraphApiBaseUrl,
   microsoftProviderFailure,
   resolveMicrosoftAccessToken
@@ -21,9 +22,15 @@ const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
 
 const SharePointPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999 }))
 
-// A site id is `{hostname},{site-collection-id},{web-id}`; a dot-only id would be normalized away.
+// A site id is `{hostname},{site-collection-id},{web-id}`. A dot-only id would be normalized away,
+// and a lone surrogate would make `encodeURIComponent` throw instead of failing validation.
 const SharePointSiteId = NonEmptyString.check(
-  Schema.makeFilter(value => !/^\.+$/.test(value) && !/[\u0000-\u001f\u007f]/.test(value))
+  Schema.makeFilter(
+    value =>
+      !/^\.+$/.test(value) &&
+      !/[\u0000-\u001f\u007f]/.test(value) &&
+      !/[\ud800-\udfff]/u.test(value)
+  )
 )
 
 // Graph sends null for some unset site and drive properties; the public shapes omit them.
@@ -175,14 +182,7 @@ const trustedGraphPathname = (nextLink: string) => {
 
   const parsed = new URL(nextLink)
 
-  return parsed.protocol === 'https:' &&
-    parsed.hostname === 'graph.microsoft.com' &&
-    parsed.port === '' &&
-    parsed.username === '' &&
-    parsed.password === '' &&
-    parsed.hash === ''
-    ? parsed.pathname
-    : undefined
+  return isTrustedGraphUrl(parsed) ? parsed.pathname : undefined
 }
 
 // Commas separate the parts of a site id and are valid in a path segment, so they stay literal.
