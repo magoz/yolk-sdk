@@ -1,5 +1,11 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.127
+
+### Patch Changes
+
+- 5a12835: Advance in lockstep with `@yolk-sdk/connectors`, which adds SharePoint site search, site drive listing and sharing-link resolution to `@yolk-sdk/connectors/microsoft`. These packages have no direct changes in this release.
+
 ## 0.1.0-canary.126
 
 ### Patch Changes

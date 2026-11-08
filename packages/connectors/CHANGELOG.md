@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.127
+
+### Minor Changes
+
+- 5a12835: Reach SharePoint team-site document libraries through `@yolk-sdk/connectors/microsoft`. New read actions: `sharepoint.search_sites` (`GET /sites?search=`, opaque paging) and `sharepoint.list_site_drives` (`GET /sites/{siteId}/drives`) find library drive ids for the existing OneDrive actions' `driveId`, and `onedrive.resolve_sharing_link` resolves a OneDrive or SharePoint sharing link (https on `*.sharepoint.com`, `1drv.ms`, or `onedrive.live.com`) to its `OneDriveItem` through `GET /shares/{u!shareId}/driveItem` with `Prefer: redeemSharingLinkIfNecessary`, so the link is never redeemed. The site actions use the new opt-in `MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`, exported as `microsoftGraphSitesReadAllScope` and `microsoftSharePointSitesReadScopes`), which `MicrosoftCombinedOAuthCredentialSlot` does not include; link resolution uses the `Files.Read.All` slot in both delegated modes and `Files.ReadWrite.All` in `application` mode. `oneDriveSharingUrlShareId` exposes the share-id encoding. `MicrosoftConnector.actions` gains the three actions (`onedrive.resolve_sharing_link` after `onedrive.get_item`, the SharePoint actions last).
+
+### Patch Changes
+
+- Updated dependencies [5a12835]
+  - @yolk-sdk/agent@0.1.0-canary.127
+  - @yolk-sdk/conformance@0.1.0-canary.127
+
 ## 0.1.0-canary.126
 
 ### Minor Changes
