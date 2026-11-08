@@ -227,7 +227,9 @@ describe('Microsoft SharePoint sites and sharing links', () => {
     'https://evil-sharepoint.com/:p:/s/Sales/abc',
     'https://sharepoint.com.example.test/:p:/s/Sales/abc',
     ` ${sharingUrl}`,
-    `${sharingUrl}\n`,
+    'https://contoso.sharepoint.com/:p:/s/Sales/a\nb',
+    'https:contoso.sharepoint.com/:p:/s/Sales/abc',
+    'https://contoso.sharepoint.com\\:p:\\s\\Sales\\abc',
     'https://contoso.sharepoint.com/:p:/s/Sales/a\tb',
     'not a url',
     `https://contoso.sharepoint.com/${'a'.repeat(2048)}`

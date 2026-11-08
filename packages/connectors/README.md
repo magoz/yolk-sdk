@@ -1045,8 +1045,8 @@ const filesProgram = MicrosoftConnector.invoke({
 ```
 
 This integration targets **Microsoft Outlook, OneDrive, and SharePoint sites through Microsoft
-Graph v1.0**. It does
-not use the retired Outlook REST endpoint, direct Exchange Online APIs, or legacy OneDrive APIs.
+Graph v1.0**. It does not use the retired Outlook REST endpoint, direct Exchange Online APIs, or
+legacy OneDrive APIs.
 Microsoft Graph is the shared API and OAuth resource boundary. The sole exception is the
 pre-authenticated Outlook attachment upload-session URLs that Graph issues to `addOutlookAttachment`,
 contacted without Authorization.
@@ -1240,14 +1240,16 @@ OneDrive actions default to the signed-in user's `/me/drive`; set `driveId` to t
 `/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read` or `Files.ReadWrite`. Set
 `oneDriveAccessMode` to `delegated_all` when the host has consented `Files.Read.All` or
 `Files.ReadWrite.All` for broader delegated access. For application tokens, set it to `application`
-and always provide `driveId`; application mode also uses the `Files.*.All` slots. List and search
-continuations must repeat the same drive target; list continuations must also repeat `parentItemId`.
+and always provide `driveId` (the sharing-link and SharePoint actions below need none); application
+mode also uses the `Files.*.All` slots. List and search continuations must repeat the same drive
+target; list continuations must also repeat `parentItemId`.
 
 `onedrive.resolve_sharing_link` resolves a OneDrive or SharePoint sharing link to its item (with
 `parentReference.driveId`) for this request only, never redeeming it, under `Files.Read.All`
-(delegated) or `Files.ReadWrite.All` (`application`). `sharepoint.search_sites` and
-`sharepoint.list_site_drives` find SharePoint document-library drive ids for `driveId`; they use the
-opt-in `MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`), which the combined
+(delegated; unverified live for files other people own, since Graph lists `Files.ReadWrite` as least
+privileged) or `Files.ReadWrite.All` (`application`, no `driveId` needed). `sharepoint.search_sites`
+and `sharepoint.list_site_drives` find SharePoint document-library drive ids for `driveId`; they use
+the opt-in `MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`), which the combined
 slot does not include. Delegated hosts reading library items keep `oneDriveAccessMode: 'delegated'`
 and consent `Files.Read.All` or `Sites.Read.All` as well: Graph honors every scope in the token.
 

@@ -154,7 +154,14 @@ const isOneDriveSharingHost = (hostname: string) =>
   hostname.endsWith('.sharepoint.com') || hostname === '1drv.ms' || hostname === 'onedrive.live.com'
 
 const isOneDriveSharingUrl = (value: string) => {
-  if (value.trim() !== value || /[\u0000-\u001f\u007f]/.test(value) || !URL.canParse(value)) {
+  // WHATWG parsing drops tabs and line breaks, turns `\` into `/` and accepts `https:host`, so the
+  // host it checks could differ from the string that is encoded.
+  if (
+    value.trim() !== value ||
+    !value.startsWith('https://') ||
+    /[\u0000-\u001f\u007f\\]/.test(value) ||
+    !URL.canParse(value)
+  ) {
     return false
   }
 
