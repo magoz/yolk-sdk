@@ -37,7 +37,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                       |
 | `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
 | `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
-| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                                     |
+| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                          |
 | `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                                                   |
 | `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                                                        |
 | `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                                            |
@@ -1044,8 +1044,9 @@ const filesProgram = MicrosoftConnector.invoke({
 })
 ```
 
-This integration targets **Microsoft Outlook and OneDrive through Microsoft Graph v1.0**. It does
-not use the retired Outlook REST endpoint, direct Exchange Online APIs, or legacy OneDrive APIs.
+This integration targets **Microsoft Outlook, OneDrive, and SharePoint sites through Microsoft
+Graph v1.0**. It does not use the retired Outlook REST endpoint, direct Exchange Online APIs, or
+legacy OneDrive APIs.
 Microsoft Graph is the shared API and OAuth resource boundary. The sole exception is the
 pre-authenticated Outlook attachment upload-session URLs that Graph issues to `addOutlookAttachment`,
 contacted without Authorization.
@@ -1239,8 +1240,18 @@ OneDrive actions default to the signed-in user's `/me/drive`; set `driveId` to t
 `/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read` or `Files.ReadWrite`. Set
 `oneDriveAccessMode` to `delegated_all` when the host has consented `Files.Read.All` or
 `Files.ReadWrite.All` for broader delegated access. For application tokens, set it to `application`
-and always provide `driveId`; application mode also uses the `Files.*.All` slots. List and search
-continuations must repeat the same drive target; list continuations must also repeat `parentItemId`.
+and always provide `driveId` (the sharing-link and SharePoint actions below need none); application
+mode also uses the `Files.*.All` slots. List and search continuations must repeat the same drive
+target; list continuations must also repeat `parentItemId`.
+
+`onedrive.resolve_sharing_link` resolves a OneDrive or SharePoint sharing link to its item (with
+`parentReference.driveId`) for this request only, never redeeming it, under `Files.Read.All`
+(delegated; unverified live for files other people own, since Graph lists `Files.ReadWrite` as least
+privileged) or `Files.ReadWrite.All` (`application`, no `driveId` needed). `sharepoint.search_sites`
+and `sharepoint.list_site_drives` find SharePoint document-library drive ids for `driveId`; they use
+the opt-in `MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`), which the combined
+slot does not include. Delegated hosts reading library items keep `oneDriveAccessMode: 'delegated'`
+and consent `Files.Read.All` or `Sites.Read.All` as well: Graph honors every scope in the token.
 
 The OneDrive action set lists, searches, and gets file/folder metadata; creates folders; moves items
 within one drive; queues asynchronous copies; polls copy status; and moves items to the recycle bin.

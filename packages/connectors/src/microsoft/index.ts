@@ -119,7 +119,9 @@ export {
   OneDriveMoveItemInput,
   OneDrivePackageFacet,
   OneDriveParentReference,
+  OneDriveResolveSharingLinkInput,
   OneDriveSearchItemsInput,
+  OneDriveSharingUrl,
   oneDriveActions,
   oneDriveCopyItemAction,
   oneDriveCreateFolderAction,
@@ -128,8 +130,23 @@ export {
   oneDriveGetItemAction,
   oneDriveListItemsAction,
   oneDriveMoveItemAction,
-  oneDriveSearchItemsAction
+  oneDriveResolveSharingLinkAction,
+  oneDriveSearchItemsAction,
+  oneDriveSharingUrlMaxLength,
+  oneDriveSharingUrlShareId
 } from './drive.ts'
+
+export {
+  SharePointDrive,
+  SharePointListSiteDrivesInput,
+  SharePointListSiteDrivesOutput,
+  SharePointSearchSitesInput,
+  SharePointSearchSitesOutput,
+  SharePointSite,
+  sharePointActions,
+  sharePointListSiteDrivesAction,
+  sharePointSearchSitesAction
+} from './sites.ts'
 
 export {
   MicrosoftCombinedOAuthCredentialSlot,
@@ -146,6 +163,7 @@ export {
   MicrosoftOutlookSharedSendOAuthCredentialSlot,
   MicrosoftOutlookSharedWriteOAuthCredentialSlot,
   MicrosoftOutlookWriteOAuthCredentialSlot,
+  MicrosoftSharePointSitesReadOAuthCredentialSlot,
   microsoftAuthorizationHeaders,
   microsoftConnectorId,
   microsoftGraphFilesReadAllScope,
@@ -160,6 +178,7 @@ export {
   microsoftGraphMailReadWriteSharedScope,
   microsoftGraphMailSendScope,
   microsoftGraphMailSendSharedScope,
+  microsoftGraphSitesReadAllScope,
   microsoftIdentityAuthorityUrl,
   microsoftOAuthAuthorizeUrl,
   microsoftOAuthSlotId,
@@ -176,7 +195,8 @@ export {
   microsoftOutlookSharedReadScopes,
   microsoftOutlookSharedSendScopes,
   microsoftOutlookSharedWriteScopes,
-  microsoftOutlookWriteScopes
+  microsoftOutlookWriteScopes,
+  microsoftSharePointSitesReadScopes
 } from './oauth.ts'
 
 export { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
@@ -196,11 +216,12 @@ import { defineConnector } from '../connector.ts'
 import { oneDriveActions } from './drive.ts'
 import { outlookMailActions } from './mail.ts'
 import { microsoftConnectorId } from './oauth.ts'
+import { sharePointActions } from './sites.ts'
 
 export const MicrosoftConnector = defineConnector({
   id: microsoftConnectorId,
-  description: 'Microsoft Outlook and OneDrive actions through Microsoft Graph.',
-  actions: [...outlookMailActions, ...oneDriveActions]
+  description: 'Microsoft Outlook, OneDrive, and SharePoint actions through Microsoft Graph.',
+  actions: [...outlookMailActions, ...oneDriveActions, ...sharePointActions]
 })
 
 export { createOneDriveFile, updateOneDriveFile, oneDriveSingleUploadMaxBytes } from './write.ts'

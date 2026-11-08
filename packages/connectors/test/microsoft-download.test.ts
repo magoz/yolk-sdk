@@ -21,6 +21,7 @@ import {
   MicrosoftConnector,
   microsoftOAuthSlotId,
   oneDriveActions,
+  sharePointActions,
   OneDriveListItemsOutput,
   outlookMailActions,
   type OneDriveDownloadBudget,
@@ -595,13 +596,18 @@ describe('host-only OneDrive download', () => {
 
   it.effect('does not change default inventory or generic tool dependencies/serialization', () =>
     Effect.gen(function* () {
-      expect(MicrosoftConnector.actions).toEqual([...outlookMailActions, ...oneDriveActions])
+      expect(MicrosoftConnector.actions).toEqual([
+        ...outlookMailActions,
+        ...oneDriveActions,
+        ...sharePointActions
+      ])
       expect(
         MicrosoftConnector.actions.filter(a => a.id.startsWith('onedrive.')).map(a => a.id)
       ).toEqual([
         'onedrive.list_items',
         'onedrive.search_items',
         'onedrive.get_item',
+        'onedrive.resolve_sharing_link',
         'onedrive.create_folder',
         'onedrive.move_item',
         'onedrive.copy_item',

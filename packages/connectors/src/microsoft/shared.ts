@@ -151,3 +151,12 @@ export const microsoftProviderFailure = (
   )
 
 export const isMicrosoftSuccessStatus = (status: number) => status >= 200 && status < 300
+
+/** An `@odata.nextLink` host check: only the global Graph origin, no credentials or fragment. */
+export const isTrustedGraphUrl = (parsed: URL) =>
+  parsed.protocol === 'https:' &&
+  parsed.hostname === 'graph.microsoft.com' &&
+  parsed.port === '' &&
+  parsed.username === '' &&
+  parsed.password === '' &&
+  parsed.hash === ''
