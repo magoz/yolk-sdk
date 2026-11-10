@@ -984,7 +984,8 @@ keep Graph's body (`contentType` and `content`, usually HTML), sender (`from` wi
 application or device), attachments' metadata, mentions, and `messageType` and `deletedDateTime`,
 so system events and deleted messages stay recognizable. Outputs omit properties Graph sends as
 `null`. Pass `nextLink` values back unchanged with the same ids; the connector replays only links
-to the same Graph collection (ids compared decoded, since Graph may echo them either way).
+to the same Graph collection (ids compared decoded, since Graph may echo them either way; a `/me`
+collection's link may name the user as `/users/{id}`).
 
 Graph has no delegated way to list meetings. Take the join link from a calendar event
 (`onlineMeeting.joinUrl`) or a meeting chat (`onlineMeetingJoinWebUrl`), pass it to

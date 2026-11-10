@@ -60,7 +60,7 @@ export const downloadTeamsMeetingTranscript = (
     const url = `${microsoftGraphApiBaseUrl}/me/onlineMeetings/${encodeURIComponent(target.meetingId)}/transcripts/${encodeURIComponent(target.transcriptId)}`
 
     const metadataResponse = yield* readBytes(
-      `${url}?$select=id,meetingId,createdDateTime,endDateTime`,
+      url,
       { authorization: `Bearer ${token}`, accept: 'application/json' },
       limits,
       true

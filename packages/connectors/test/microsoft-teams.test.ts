@@ -24,14 +24,19 @@ import {
   microsoftGraphChannelMessageReadAllScope,
   microsoftGraphChannelMessageSendScope,
   microsoftGraphChatMessageSendScope,
+  microsoftGraphChannelReadBasicAllScope,
   microsoftGraphChatReadScope,
   microsoftGraphOnlineMeetingsReadScope,
   microsoftGraphOnlineMeetingTranscriptReadAllScope,
+  microsoftGraphTeamReadBasicAllScope,
   microsoftOAuthSlotId,
   microsoftTeamsScopes,
   teamsActions,
   teamsMessageHtml,
   teamsMessageMaxBytes,
+  TeamsChatMessageIdInput,
+  TeamsListMeetingTranscriptsInput,
+  TeamsFindOnlineMeetingInput,
   TeamsSendChatMessageInput
 } from '@yolk-sdk/connectors/microsoft'
 
@@ -320,6 +325,141 @@ describe('Microsoft Teams actions', () => {
       }
 
       expect(host.requests).toHaveLength(2)
+    })
+  )
+
+  it.effect.each<{
+    readonly action: string
+    readonly input: Readonly<Record<string, string>>
+    readonly path: string
+    readonly scope: string
+    readonly body: GraphJson
+  }>([
+    {
+      action: 'teams.get_chat',
+      input: { chatId },
+      path: `/v1.0/chats/${chatId}`,
+      scope: microsoftGraphChatReadScope,
+      body: { id: 'x' }
+    },
+    {
+      action: 'teams.get_chat_message',
+      input: { chatId, messageId: '1700000000001' },
+      path: `/v1.0/chats/${chatId}/messages/1700000000001`,
+      scope: microsoftGraphChatReadScope,
+      body: { id: 'x' }
+    },
+    {
+      action: 'teams.list_joined_teams',
+      input: {},
+      path: '/v1.0/me/joinedTeams',
+      scope: microsoftGraphTeamReadBasicAllScope,
+      body: { value: [] }
+    },
+    {
+      action: 'teams.get_team',
+      input: { teamId },
+      path: `/v1.0/teams/${teamId}`,
+      scope: microsoftGraphTeamReadBasicAllScope,
+      body: { id: 'x' }
+    },
+    {
+      action: 'teams.list_channels',
+      input: { teamId },
+      path: `/v1.0/teams/${teamId}/channels`,
+      scope: microsoftGraphChannelReadBasicAllScope,
+      body: { value: [] }
+    },
+    {
+      action: 'teams.get_channel',
+      input: { teamId, channelId },
+      path: `/v1.0/teams/${teamId}/channels/${channelId}`,
+      scope: microsoftGraphChannelReadBasicAllScope,
+      body: { id: 'x' }
+    },
+    {
+      action: 'teams.get_channel_message',
+      input: { teamId, channelId, messageId: '1700000000003' },
+      path: `/v1.0/teams/${teamId}/channels/${channelId}/messages/1700000000003`,
+      scope: microsoftGraphChannelMessageReadAllScope,
+      body: { id: 'x' }
+    }
+  ])('$action reads $path under its own scope', ({ action, input, path, scope, body }) =>
+    Effect.gen(function* () {
+      const host = makeHost([response(200, body)])
+
+      const result = yield* invoke(action, input, host.layer)
+
+      expect(result).toMatchObject({ _tag: 'Success' })
+      expect(host.requests[0]?.method).toBe('GET')
+      expect(decodeURIComponent(requestUrl(host.requests[0]).pathname)).toBe(path)
+      expect(scopesOf(host)).toEqual([[scope]])
+    })
+  )
+
+  it.each<string>(['..', '.', 'a/b', 'a?b', 'a#b', 'a%2Fb', 'a\tb', ' a', 'a b', '\ud800'])(
+    'rejects a Teams id that is not one opaque path segment (%j)',
+    messageId => {
+      expect(Schema.decodeUnknownResult(TeamsChatMessageIdInput)({ chatId, messageId })._tag).toBe(
+        'Failure'
+      )
+    }
+  )
+
+  it.each<string>(['/', '..', './.', 'a?b', 'a%2Fb', 'a b', 'a#b'])(
+    'rejects a meeting id outside base64 (%j)',
+    id => {
+      expect(
+        Schema.decodeUnknownResult(TeamsListMeetingTranscriptsInput)({ meetingId: id })._tag
+      ).toBe('Failure')
+    }
+  )
+
+  it.each<string>([
+    'https://teams.microsoft.com:8443/l/meetup-join/x',
+    'https://teams.microsoft.com.evil.test/l/meetup-join/x',
+    'https://teams.live.com/meet/123'
+  ])('rejects the join link %s', joinWebUrl => {
+    expect(Schema.decodeUnknownResult(TeamsFindOnlineMeetingInput)({ joinWebUrl })._tag).toBe(
+      'Failure'
+    )
+  })
+
+  it.effect('pages a meeting id holding / and accepts /users/{id} links for /me collections', () =>
+    Effect.gen(function* () {
+      const transcripts = `https://graph.microsoft.com/v1.0/users/user-anna/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts?$skiptoken=x`
+      const chats = 'https://graph.microsoft.com/v1.0/users/7f3e1c2a/chats?$skiptoken=y'
+      const host = makeHost([response(200, { value: [] }), response(200, { value: [] })])
+
+      expect(
+        yield* invoke(
+          'teams.list_meeting_transcripts',
+          { meetingId, nextLink: transcripts },
+          host.layer
+        )
+      ).toMatchObject({ _tag: 'Success' })
+      expect(yield* invoke('teams.list_chats', { nextLink: chats }, host.layer)).toMatchObject({
+        _tag: 'Success'
+      })
+      expect(host.requests.map(request => request.url)).toEqual([transcripts, chats])
+
+      for (const nextLink of [
+        'https://graph.microsoft.com/v1.0/users/a/b/chats?$skiptoken=y',
+        'https://graph.microsoft.com/v1.0/users/a/chats/extra',
+        'https://graph.microsoft.com/beta/me/chats?$skiptoken=y',
+        'https://graph.microsoft.com/v1.0/teams/x/chats',
+        'https://user@graph.microsoft.com/v1.0/me/chats',
+        'https://graph.microsoft.com:444/v1.0/me/chats',
+        'https://graph.microsoft.com/v1.0/me/chats#x',
+        'http://graph.microsoft.com/v1.0/me/chats'
+      ]) {
+        const failed = yield* invoke('teams.list_chats', { nextLink }, host.layer).pipe(Effect.flip)
+
+        expect(failed).toMatchObject({ cause: 'validation_failed' })
+      }
+
+      expect(host.requests).toHaveLength(2)
+      expect(host.credentialRequests).toHaveLength(2)
     })
   )
 
@@ -642,7 +782,7 @@ describe('host-only Teams transcript download', () => {
         host.requests.map(request => [request.url, request.redirect, request.headers.accept])
       ).toEqual([
         [
-          `https://graph.microsoft.com/v1.0/me/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts/transcript-1?$select=id,meetingId,createdDateTime,endDateTime`,
+          `https://graph.microsoft.com/v1.0/me/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts/transcript-1`,
           'manual',
           'application/json'
         ],

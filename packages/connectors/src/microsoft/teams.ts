@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, type Types } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -26,39 +26,34 @@ import {
   resolveMicrosoftAccessToken
 } from './shared.ts'
 
-// Graph ids of chats (`19:…@thread.v2`), channels, teams, messages and meetings are opaque. A
-// dot-only id would be normalized away; separators, controls and lone surrogates fail validation.
+// Graph ids of chats (`19:…@thread.v2`), channels, teams and messages are opaque path segments. A
+// dot-only id would be normalized away; separators, `%`, controls and lone surrogates fail, so a
+// page link's path compares unambiguously once decoded.
 export const TeamsId = Schema.Trimmed.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(1024),
   Schema.makeFilter(
     value =>
       !/^\.+$/.test(value) &&
-      !/[\s/\\?#]/.test(value) &&
+      !/[\s/\\?#%]/.test(value) &&
       !/[\u0000-\u001f\u007f]/.test(value) &&
       !/[\ud800-\udfff]/u.test(value)
   )
 )
 
-// Meeting and transcript ids are base64 and may hold `/`, `+` or `=`; the path encodes them whole.
-export const TeamsMeetingId = Schema.Trimmed.check(
-  Schema.isNonEmpty(),
+// Meeting and transcript ids are base64 (they may hold `/`, `+` or `=`); the path encodes them
+// whole as one segment.
+export const TeamsMeetingId = Schema.String.check(
   Schema.isMaxLength(2048),
-  Schema.makeFilter(
-    value =>
-      !/^[./]+$/.test(value) &&
-      !/[\s\\?#]/.test(value) &&
-      !/[\u0000-\u001f\u007f]/.test(value) &&
-      !/[\ud800-\udfff]/u.test(value)
-  )
+  Schema.isPattern(/^(?![./]+$)[A-Za-z0-9+/=_-]+$/u)
 )
 
 const TeamsPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))
 
 /**
- * Upper bound of a sent message's HTML body in UTF-8 bytes. Teams accepts about 100 KB per post
- * (80 KB recommended, mentions and reactions included); the margin keeps an approved send from
- * failing on size.
+ * Upper bound of a sent message's HTML body in UTF-8 bytes. Teams accepts about 100 KB per chat
+ * message or channel post, recommending at most 80 KB (mentions and reactions count; the Teams
+ * limits page as of 2026-07); the margin keeps an approved send from failing on size.
  */
 export const teamsMessageMaxBytes = 28 * 1024
 
@@ -108,8 +103,6 @@ const OptionalWireBoolean = Schema.optional(Schema.NullOr(Schema.Boolean))
 
 const present = <A>(value: A | null | undefined) => (value === null ? undefined : value)
 
-type Mutable<T> = { -readonly [K in keyof T]: T[K] }
-
 /** The present (non-null) string properties `keys` of a decoded wire object. */
 const stringFields = <K extends string>(
   wire: { readonly [P in K]?: string | null | undefined },
@@ -126,10 +119,6 @@ const stringFields = <K extends string>(
   return fields
 }
 
-// ---------------------------------------------------------------------------------------------
-// Public shapes
-// ---------------------------------------------------------------------------------------------
-
 export class TeamsIdentity extends Schema.Class<TeamsIdentity>('TeamsIdentity')({
   kind: Schema.Literals(['user', 'application', 'device']),
   id: Schema.optional(Schema.String),
@@ -137,7 +126,7 @@ export class TeamsIdentity extends Schema.Class<TeamsIdentity>('TeamsIdentity')(
 }) {}
 
 export class TeamsMessageBody extends Schema.Class<TeamsMessageBody>('TeamsMessageBody')({
-  contentType: Schema.String,
+  contentType: Schema.optional(Schema.String),
   content: Schema.String
 }) {}
 
@@ -257,10 +246,6 @@ export class TeamsMeetingTranscript extends Schema.Class<TeamsMeetingTranscript>
   endDateTime: Schema.optional(Schema.String),
   organizer: Schema.optional(TeamsIdentity)
 }) {}
-
-// ---------------------------------------------------------------------------------------------
-// Wire shapes
-// ---------------------------------------------------------------------------------------------
 
 const IdentityApi = Schema.Struct({
   id: OptionalWireString,
@@ -395,10 +380,6 @@ const collectionApi = <S extends Schema.Top>(item: S) =>
     '@odata.nextLink': Schema.optional(Schema.NullOr(Schema.String))
   })
 
-// ---------------------------------------------------------------------------------------------
-// Projections
-// ---------------------------------------------------------------------------------------------
-
 const identityKinds = ['user', 'application', 'device'] as const
 
 const identity = (wire: typeof IdentitySetApi.Type | null | undefined) => {
@@ -420,11 +401,15 @@ const messageBody = (wire: typeof BodyApi.Type | null | undefined) => {
 
   if (content === undefined) return undefined
 
-  return TeamsMessageBody.make({ contentType: present(wire?.contentType) ?? 'text', content })
+  const contentType = present(wire?.contentType)
+
+  return contentType === undefined
+    ? TeamsMessageBody.make({ content })
+    : TeamsMessageBody.make({ contentType, content })
 }
 
 const teamsMessage = (wire: typeof MessageApi.Type) => {
-  const fields: Mutable<TeamsMessage> = {
+  const fields: Types.Mutable<TeamsMessage> = {
     id: wire.id,
     ...stringFields(wire, [
       'replyToId',
@@ -462,7 +447,10 @@ const teamsMessage = (wire: typeof MessageApi.Type) => {
 
   if (mentions !== undefined && mentions.length > 0) {
     fields.mentions = mentions.map(mention => {
-      const mentionFields: Mutable<TeamsMessageMention> = stringFields(mention, ['mentionText'])
+      const mentionFields: Types.Mutable<TeamsMessageMention> = stringFields(mention, [
+        'mentionText'
+      ])
+
       const mentioned = identity(mention.mentioned)
 
       if (mentioned !== undefined) mentionFields.mentioned = mentioned
@@ -483,7 +471,7 @@ const teamsMessage = (wire: typeof MessageApi.Type) => {
 }
 
 const chatMessagePreview = (wire: typeof MessagePreviewApi.Type) => {
-  const fields: Mutable<TeamsChatMessagePreview> = stringFields(wire, [
+  const fields: Types.Mutable<TeamsChatMessagePreview> = stringFields(wire, [
     'id',
     'createdDateTime',
     'messageType'
@@ -505,7 +493,11 @@ const chatMessagePreview = (wire: typeof MessagePreviewApi.Type) => {
 }
 
 const chatMember = (wire: typeof MemberApi.Type) => {
-  const fields: Mutable<TeamsChatMember> = stringFields(wire, ['displayName', 'email', 'userId'])
+  const fields: Types.Mutable<TeamsChatMember> = stringFields(wire, [
+    'displayName',
+    'email',
+    'userId'
+  ])
 
   const roles = present(wire.roles)
 
@@ -515,7 +507,7 @@ const chatMember = (wire: typeof MemberApi.Type) => {
 }
 
 const teamsChat = (wire: typeof ChatApi.Type) => {
-  const fields: Mutable<TeamsChat> = {
+  const fields: Types.Mutable<TeamsChat> = {
     id: wire.id,
     ...stringFields(wire, ['topic', 'chatType', 'createdDateTime', 'lastUpdatedDateTime', 'webUrl'])
   }
@@ -536,7 +528,7 @@ const teamsChat = (wire: typeof ChatApi.Type) => {
 }
 
 const teamsTeam = (wire: typeof TeamApi.Type) => {
-  const fields: Mutable<TeamsTeam> = {
+  const fields: Types.Mutable<TeamsTeam> = {
     id: wire.id,
     ...stringFields(wire, ['displayName', 'description', 'webUrl'])
   }
@@ -563,7 +555,7 @@ const teamsChannel = (wire: typeof ChannelApi.Type) =>
 const meetingParticipant = (wire: typeof MeetingParticipantApi.Type) => {
   const user = present(present(wire.identity)?.user)
 
-  const fields: Mutable<TeamsMeetingParticipant> = stringFields(wire, ['upn', 'role'])
+  const fields: Types.Mutable<TeamsMeetingParticipant> = stringFields(wire, ['upn', 'role'])
 
   const displayName = present(user?.displayName)
 
@@ -577,7 +569,7 @@ const meetingParticipant = (wire: typeof MeetingParticipantApi.Type) => {
 }
 
 const teamsOnlineMeeting = (wire: typeof OnlineMeetingApi.Type) => {
-  const fields: Mutable<TeamsOnlineMeeting> = {
+  const fields: Types.Mutable<TeamsOnlineMeeting> = {
     id: wire.id,
     ...stringFields(wire, ['subject', 'startDateTime', 'endDateTime', 'joinWebUrl'])
   }
@@ -599,7 +591,7 @@ const teamsOnlineMeeting = (wire: typeof OnlineMeetingApi.Type) => {
 }
 
 const teamsTranscript = (wire: typeof TranscriptApi.Type) => {
-  const fields: Mutable<TeamsMeetingTranscript> = {
+  const fields: Types.Mutable<TeamsMeetingTranscript> = {
     id: wire.id,
     ...stringFields(wire, ['meetingId', 'createdDateTime', 'endDateTime'])
   }
@@ -610,10 +602,6 @@ const teamsTranscript = (wire: typeof TranscriptApi.Type) => {
 
   return TeamsMeetingTranscript.make(fields)
 }
-
-// ---------------------------------------------------------------------------------------------
-// Inputs and outputs
-// ---------------------------------------------------------------------------------------------
 
 const NextLink = Schema.optional(Schema.String)
 
@@ -803,10 +791,6 @@ export class TeamsListMeetingTranscriptsOutput extends Schema.Class<TeamsListMee
   nextLink: Schema.optional(Schema.String)
 }) {}
 
-// ---------------------------------------------------------------------------------------------
-// Requests
-// ---------------------------------------------------------------------------------------------
-
 const segment = encodeURIComponent
 
 const invalidNextLink = (actionId: string) =>
@@ -825,10 +809,14 @@ const decodedPathname = (url: URL) => {
   }
 }
 
+// Graph may echo the signed-in user's `/me` collections as `/users/{id}/…` in page links; a
+// delegated token still reaches only that user's own data.
+const userCollectionPath = (path: string) => /^\/users\/[^/]+(\/.+)$/.exec(path)?.[1]
+
 /**
  * A page link is followed with the bearer token only on the global Graph origin and for the
  * collection the first page listed (`path` with raw ids; Graph may echo ids encoded or not, so
- * the link's path is compared decoded).
+ * the link's path is compared decoded). The parsed link is what gets requested.
  */
 const pageUrl = (input: {
   readonly actionId: string
@@ -841,9 +829,16 @@ const pageUrl = (input: {
   if (!URL.canParse(input.nextLink)) return Effect.fail(invalidNextLink(input.actionId))
 
   const parsed = new URL(input.nextLink)
+  const pathname = decodedPathname(parsed)
+  const versioned = pathname?.startsWith('/v1.0/') === true ? pathname.slice('/v1.0'.length) : ''
 
-  return isTrustedGraphUrl(parsed) && decodedPathname(parsed) === `/v1.0${input.path}`
-    ? Effect.succeed(input.nextLink)
+  const sameCollection =
+    versioned === input.path ||
+    (input.path.startsWith('/me/') &&
+      userCollectionPath(versioned) === input.path.slice('/me'.length))
+
+  return isTrustedGraphUrl(parsed) && sameCollection
+    ? Effect.succeed(parsed.href)
     : Effect.fail(invalidNextLink(input.actionId))
 }
 
@@ -887,8 +882,9 @@ const graphRequest = <Wire, Output>(input: {
   readonly notFound?: GraphFailure
 }) =>
   Effect.gen(function* () {
-    const token = yield* resolveMicrosoftAccessToken(input.integration, input.slot)
+    // An invalid page link fails before credentials are resolved.
     const url = yield* input.url
+    const token = yield* resolveMicrosoftAccessToken(input.integration, input.slot)
     const http = yield* ConnectorHttpClient
     const read = { ...microsoftAuthorizationHeaders(token), accept: 'application/json' }
 
@@ -943,10 +939,6 @@ const sendBody = (content: string, subject?: string): TeamsSendBody => {
 
   return body
 }
-
-// ---------------------------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------------------------
 
 export const teamsListChatsAction = defineAction({
   id: 'teams.list_chats',
