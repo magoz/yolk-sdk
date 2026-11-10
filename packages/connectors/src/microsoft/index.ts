@@ -149,6 +149,75 @@ export {
 } from './sites.ts'
 
 export {
+  TeamsChannel,
+  TeamsChannelIdentity,
+  TeamsChannelIdInput,
+  TeamsChannelMessageIdInput,
+  TeamsChat,
+  TeamsChatExpand,
+  TeamsChatIdInput,
+  TeamsChatMember,
+  TeamsChatMessageIdInput,
+  TeamsChatMessagePreview,
+  TeamsFindOnlineMeetingInput,
+  TeamsFindOnlineMeetingOutput,
+  TeamsId,
+  TeamsIdentity,
+  TeamsJoinWebUrl,
+  TeamsListChannelMessageRepliesInput,
+  TeamsListChannelMessagesInput,
+  TeamsListChannelsInput,
+  TeamsListChannelsOutput,
+  TeamsListChatMessagesInput,
+  TeamsListChatsInput,
+  TeamsListChatsOutput,
+  TeamsListJoinedTeamsInput,
+  TeamsListJoinedTeamsOutput,
+  TeamsListMeetingTranscriptsInput,
+  TeamsListMeetingTranscriptsOutput,
+  TeamsListMessagesOutput,
+  TeamsMeetingId,
+  TeamsMeetingParticipant,
+  TeamsMeetingTranscript,
+  TeamsMessage,
+  TeamsMessageAttachment,
+  TeamsMessageBody,
+  TeamsMessageMention,
+  TeamsMessageText,
+  TeamsOnlineMeeting,
+  TeamsReplyToChannelMessageInput,
+  TeamsSendChannelMessageInput,
+  TeamsSendChatMessageInput,
+  TeamsTeam,
+  TeamsTeamIdInput,
+  TeamsUtcDateTime,
+  teamsActions,
+  teamsFindOnlineMeetingAction,
+  teamsGetChannelAction,
+  teamsGetChannelMessageAction,
+  teamsGetChatAction,
+  teamsGetChatMessageAction,
+  teamsGetTeamAction,
+  teamsJoinWebUrlMaxLength,
+  teamsListChannelMessageRepliesAction,
+  teamsListChannelMessagesAction,
+  teamsListChannelsAction,
+  teamsListChatMessagesAction,
+  teamsListChatsAction,
+  teamsListJoinedTeamsAction,
+  teamsListMeetingTranscriptsAction,
+  teamsMessageHtml,
+  teamsMessageMaxBytes,
+  teamsReplyToChannelMessageAction,
+  teamsSendChannelMessageAction,
+  teamsSendChatMessageAction
+} from './teams.ts'
+
+export { downloadTeamsMeetingTranscript, teamsTranscriptMimeType } from './teams-download.ts'
+
+export type { TeamsDownloadTranscriptInput } from './teams-download.ts'
+
+export {
   MicrosoftCombinedOAuthCredentialSlot,
   MicrosoftOAuthCredentialSlot,
   MicrosoftOneDriveReadAllOAuthCredentialSlot,
@@ -164,8 +233,21 @@ export {
   MicrosoftOutlookSharedWriteOAuthCredentialSlot,
   MicrosoftOutlookWriteOAuthCredentialSlot,
   MicrosoftSharePointSitesReadOAuthCredentialSlot,
+  MicrosoftTeamsChannelMessageReadOAuthCredentialSlot,
+  MicrosoftTeamsChannelMessageSendOAuthCredentialSlot,
+  MicrosoftTeamsChannelReadOAuthCredentialSlot,
+  MicrosoftTeamsChatReadOAuthCredentialSlot,
+  MicrosoftTeamsChatSendOAuthCredentialSlot,
+  MicrosoftTeamsMeetingReadOAuthCredentialSlot,
+  MicrosoftTeamsTeamReadOAuthCredentialSlot,
+  MicrosoftTeamsTranscriptReadOAuthCredentialSlot,
   microsoftAuthorizationHeaders,
   microsoftConnectorId,
+  microsoftGraphChannelMessageReadAllScope,
+  microsoftGraphChannelMessageSendScope,
+  microsoftGraphChannelReadBasicAllScope,
+  microsoftGraphChatMessageSendScope,
+  microsoftGraphChatReadScope,
   microsoftGraphFilesReadAllScope,
   microsoftGraphFilesReadScope,
   microsoftGraphFilesReadWriteAllScope,
@@ -178,7 +260,10 @@ export {
   microsoftGraphMailReadWriteSharedScope,
   microsoftGraphMailSendScope,
   microsoftGraphMailSendSharedScope,
+  microsoftGraphOnlineMeetingTranscriptReadAllScope,
+  microsoftGraphOnlineMeetingsReadScope,
   microsoftGraphSitesReadAllScope,
+  microsoftGraphTeamReadBasicAllScope,
   microsoftIdentityAuthorityUrl,
   microsoftOAuthAuthorizeUrl,
   microsoftOAuthSlotId,
@@ -196,7 +281,16 @@ export {
   microsoftOutlookSharedSendScopes,
   microsoftOutlookSharedWriteScopes,
   microsoftOutlookWriteScopes,
-  microsoftSharePointSitesReadScopes
+  microsoftSharePointSitesReadScopes,
+  microsoftTeamsChannelMessageReadScopes,
+  microsoftTeamsChannelMessageSendScopes,
+  microsoftTeamsChannelReadScopes,
+  microsoftTeamsChatReadScopes,
+  microsoftTeamsChatSendScopes,
+  microsoftTeamsMeetingReadScopes,
+  microsoftTeamsScopes,
+  microsoftTeamsTeamReadScopes,
+  microsoftTeamsTranscriptReadScopes
 } from './oauth.ts'
 
 export { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
@@ -217,11 +311,13 @@ import { oneDriveActions } from './drive.ts'
 import { outlookMailActions } from './mail.ts'
 import { microsoftConnectorId } from './oauth.ts'
 import { sharePointActions } from './sites.ts'
+import { teamsActions } from './teams.ts'
 
 export const MicrosoftConnector = defineConnector({
   id: microsoftConnectorId,
-  description: 'Microsoft Outlook, OneDrive, and SharePoint actions through Microsoft Graph.',
-  actions: [...outlookMailActions, ...oneDriveActions, ...sharePointActions]
+  description:
+    'Microsoft Outlook, OneDrive, SharePoint, and Teams actions through Microsoft Graph.',
+  actions: [...outlookMailActions, ...oneDriveActions, ...sharePointActions, ...teamsActions]
 })
 
 export { createOneDriveFile, updateOneDriveFile, oneDriveSingleUploadMaxBytes } from './write.ts'

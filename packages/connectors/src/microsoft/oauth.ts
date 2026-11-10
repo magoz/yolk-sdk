@@ -42,6 +42,27 @@ export const microsoftGraphFilesReadWriteAllScope =
 
 export const microsoftGraphSitesReadAllScope = 'https://graph.microsoft.com/Sites.Read.All'
 
+export const microsoftGraphChatReadScope = 'https://graph.microsoft.com/Chat.Read'
+
+export const microsoftGraphChatMessageSendScope = 'https://graph.microsoft.com/ChatMessage.Send'
+
+export const microsoftGraphTeamReadBasicAllScope = 'https://graph.microsoft.com/Team.ReadBasic.All'
+
+export const microsoftGraphChannelReadBasicAllScope =
+  'https://graph.microsoft.com/Channel.ReadBasic.All'
+
+export const microsoftGraphChannelMessageReadAllScope =
+  'https://graph.microsoft.com/ChannelMessage.Read.All'
+
+export const microsoftGraphChannelMessageSendScope =
+  'https://graph.microsoft.com/ChannelMessage.Send'
+
+export const microsoftGraphOnlineMeetingsReadScope =
+  'https://graph.microsoft.com/OnlineMeetings.Read'
+
+export const microsoftGraphOnlineMeetingTranscriptReadAllScope =
+  'https://graph.microsoft.com/OnlineMeetingTranscript.Read.All'
+
 export const microsoftOutlookReadScopes = Object.freeze([microsoftGraphMailReadScope])
 
 export const microsoftOutlookWriteScopes = Object.freeze([microsoftGraphMailReadWriteScope])
@@ -73,6 +94,44 @@ export const microsoftOneDriveWriteScopes = Object.freeze([microsoftGraphFilesRe
 export const microsoftOneDriveWriteAllScopes = Object.freeze([microsoftGraphFilesReadWriteAllScope])
 
 export const microsoftSharePointSitesReadScopes = Object.freeze([microsoftGraphSitesReadAllScope])
+
+export const microsoftTeamsChatReadScopes = Object.freeze([microsoftGraphChatReadScope])
+
+export const microsoftTeamsChatSendScopes = Object.freeze([microsoftGraphChatMessageSendScope])
+
+export const microsoftTeamsTeamReadScopes = Object.freeze([microsoftGraphTeamReadBasicAllScope])
+
+export const microsoftTeamsChannelReadScopes = Object.freeze([
+  microsoftGraphChannelReadBasicAllScope
+])
+
+export const microsoftTeamsChannelMessageReadScopes = Object.freeze([
+  microsoftGraphChannelMessageReadAllScope
+])
+
+export const microsoftTeamsChannelMessageSendScopes = Object.freeze([
+  microsoftGraphChannelMessageSendScope
+])
+
+export const microsoftTeamsMeetingReadScopes = Object.freeze([
+  microsoftGraphOnlineMeetingsReadScope
+])
+
+export const microsoftTeamsTranscriptReadScopes = Object.freeze([
+  microsoftGraphOnlineMeetingTranscriptReadAllScope
+])
+
+/** Every delegated Teams scope the Teams actions and the transcript download use. */
+export const microsoftTeamsScopes = Object.freeze([
+  ...microsoftTeamsChatReadScopes,
+  ...microsoftTeamsChatSendScopes,
+  ...microsoftTeamsTeamReadScopes,
+  ...microsoftTeamsChannelReadScopes,
+  ...microsoftTeamsChannelMessageReadScopes,
+  ...microsoftTeamsChannelMessageSendScopes,
+  ...microsoftTeamsMeetingReadScopes,
+  ...microsoftTeamsTranscriptReadScopes
+])
 
 export const MicrosoftOAuthCredentialSlot = CredentialSlot.make({
   id: microsoftOAuthSlotId,
@@ -161,6 +220,57 @@ export const MicrosoftSharePointSitesReadOAuthCredentialSlot = CredentialSlot.ma
   id: microsoftOAuthSlotId,
   kind: 'oauth',
   requiredScopes: [...microsoftSharePointSitesReadScopes]
+})
+
+// Teams consent is opt-in, one slot per least-privileged delegated permission, and the combined
+// slot is intentionally not widened. ChannelMessage.Read.All and OnlineMeetingTranscript.Read.All
+// need tenant admin consent even as delegated permissions.
+export const MicrosoftTeamsChatReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsChatReadScopes]
+})
+
+export const MicrosoftTeamsChatSendOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsChatSendScopes]
+})
+
+export const MicrosoftTeamsTeamReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsTeamReadScopes]
+})
+
+export const MicrosoftTeamsChannelReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsChannelReadScopes]
+})
+
+export const MicrosoftTeamsChannelMessageReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsChannelMessageReadScopes]
+})
+
+export const MicrosoftTeamsChannelMessageSendOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsChannelMessageSendScopes]
+})
+
+export const MicrosoftTeamsMeetingReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsMeetingReadScopes]
+})
+
+export const MicrosoftTeamsTranscriptReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftTeamsTranscriptReadScopes]
 })
 
 export const MicrosoftCombinedOAuthCredentialSlot = CredentialSlot.make({

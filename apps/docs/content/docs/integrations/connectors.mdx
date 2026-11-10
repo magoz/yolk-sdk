@@ -18,7 +18,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions                                                                                           |
 | Kie             | `@yolk-sdk/connectors/kie`             | `KieApiKeySlot`                              | none                                               | image + video generation tasks, task status                                                                                |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                                                                                                     |
-| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook, OneDrive, and SharePoint sites through Graph                                                                      |
+| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook, OneDrive, SharePoint sites, and Teams through Graph                                                               |
 | Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions                                                                                           |
 | Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL                                                                                                       |
 | Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                                                                                                             |
@@ -583,8 +583,8 @@ Google references: [files.list](https://developers.google.com/workspace/drive/ap
 
 ## Microsoft
 
-Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail, OneDrive files, and SharePoint site
-libraries. These workloads share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus
+Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail, OneDrive files, SharePoint site
+libraries, and Microsoft Teams chats, channels and meeting transcripts. These workloads share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus
 the same `microsoft.oauth` credential binding. The connector does not use the retired Outlook REST
 endpoint, direct Exchange Online APIs, or legacy OneDrive APIs. The sole exception is the
 pre-authenticated Outlook attachment upload-session URLs that Graph issues to
@@ -592,23 +592,31 @@ pre-authenticated Outlook attachment upload-session URLs that Graph issues to
 
 All OAuth slots use the shared `microsoft.oauth` binding id:
 
-| Slot                                               | Permission hint                                   |
-| -------------------------------------------------- | ------------------------------------------------- |
-| `MicrosoftOutlookReadOAuthCredentialSlot`          | `Mail.Read`                                       |
-| `MicrosoftOutlookWriteOAuthCredentialSlot`         | `Mail.ReadWrite`                                  |
-| `MicrosoftOutlookSendOAuthCredentialSlot`          | `Mail.Send`                                       |
-| `MicrosoftOutlookSharedReadOAuthCredentialSlot`    | `Mail.Read.Shared`                                |
-| `MicrosoftOutlookSharedWriteOAuthCredentialSlot`   | `Mail.ReadWrite.Shared`                           |
-| `MicrosoftOutlookSharedSendOAuthCredentialSlot`    | `Mail.Send.Shared`                                |
-| `MicrosoftOneDriveReadOAuthCredentialSlot`         | `Files.Read`                                      |
-| `MicrosoftOneDriveWriteOAuthCredentialSlot`        | `Files.ReadWrite`                                 |
-| `MicrosoftOneDriveReadAllOAuthCredentialSlot`      | `Files.Read.All`                                  |
-| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`     | `Files.ReadWrite.All`                             |
-| `MicrosoftSharePointSitesReadOAuthCredentialSlot`  | `Sites.Read.All`                                  |
-| `MicrosoftOutlookCategoryReadOAuthCredentialSlot`  | `MailboxSettings.Read`                            |
-| `MicrosoftOutlookCategoryWriteOAuthCredentialSlot` | `MailboxSettings.ReadWrite`                       |
-| `MicrosoftCombinedOAuthCredentialSlot`             | mail and file scopes, excluding categories, sites |
-| `MicrosoftOAuthCredentialSlot`                     | none declared                                     |
+| Slot                                                  | Permission hint                                          |
+| ----------------------------------------------------- | -------------------------------------------------------- |
+| `MicrosoftOutlookReadOAuthCredentialSlot`             | `Mail.Read`                                              |
+| `MicrosoftOutlookWriteOAuthCredentialSlot`            | `Mail.ReadWrite`                                         |
+| `MicrosoftOutlookSendOAuthCredentialSlot`             | `Mail.Send`                                              |
+| `MicrosoftOutlookSharedReadOAuthCredentialSlot`       | `Mail.Read.Shared`                                       |
+| `MicrosoftOutlookSharedWriteOAuthCredentialSlot`      | `Mail.ReadWrite.Shared`                                  |
+| `MicrosoftOutlookSharedSendOAuthCredentialSlot`       | `Mail.Send.Shared`                                       |
+| `MicrosoftOneDriveReadOAuthCredentialSlot`            | `Files.Read`                                             |
+| `MicrosoftOneDriveWriteOAuthCredentialSlot`           | `Files.ReadWrite`                                        |
+| `MicrosoftOneDriveReadAllOAuthCredentialSlot`         | `Files.Read.All`                                         |
+| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`        | `Files.ReadWrite.All`                                    |
+| `MicrosoftSharePointSitesReadOAuthCredentialSlot`     | `Sites.Read.All`                                         |
+| `MicrosoftTeamsChatReadOAuthCredentialSlot`           | `Chat.Read`                                              |
+| `MicrosoftTeamsChatSendOAuthCredentialSlot`           | `ChatMessage.Send`                                       |
+| `MicrosoftTeamsTeamReadOAuthCredentialSlot`           | `Team.ReadBasic.All`                                     |
+| `MicrosoftTeamsChannelReadOAuthCredentialSlot`        | `Channel.ReadBasic.All`                                  |
+| `MicrosoftTeamsChannelMessageReadOAuthCredentialSlot` | `ChannelMessage.Read.All` (admin consent)                |
+| `MicrosoftTeamsChannelMessageSendOAuthCredentialSlot` | `ChannelMessage.Send`                                    |
+| `MicrosoftTeamsMeetingReadOAuthCredentialSlot`        | `OnlineMeetings.Read`                                    |
+| `MicrosoftTeamsTranscriptReadOAuthCredentialSlot`     | `OnlineMeetingTranscript.Read.All` (admin consent)       |
+| `MicrosoftOutlookCategoryReadOAuthCredentialSlot`     | `MailboxSettings.Read`                                   |
+| `MicrosoftOutlookCategoryWriteOAuthCredentialSlot`    | `MailboxSettings.ReadWrite`                              |
+| `MicrosoftCombinedOAuthCredentialSlot`                | mail and file scopes, excluding categories, sites, Teams |
+| `MicrosoftOAuthCredentialSlot`                        | none declared                                            |
 
 Inputs default to the signed-in mailbox through `/me`. Set optional `mailbox` to a user ID or user
 principal name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`.
@@ -939,6 +947,57 @@ literal in the request path. Outputs omit properties Graph sends as `null`. Pass
 back unchanged (with the same `siteId` for drive listings); the connector replays only links to
 the same Graph collection.
 
+### Teams actions
+
+The Teams actions (`src/microsoft/teams.ts`) read and send as the signed-in user with delegated
+permissions only; each uses its own opt-in slot (table above), none of which the combined slot
+includes, so hosts can show each action only while the token carries its permission. Graph
+supports none of them for personal Microsoft accounts. `ChannelMessage.Read.All` and
+`OnlineMeetingTranscript.Read.All` need tenant admin consent even as delegated permissions; Entra
+fails the whole authorization request when one requested permission lacks consent, so a host that
+requests them with other Microsoft scopes makes that consent a prerequisite of the whole sign-in.
+
+| Action id                            | What it does                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| `teams.list_chats`                   | list the user's chats with members (default) or the latest message preview    |
+| `teams.get_chat`                     | get one chat with up to 25 members                                            |
+| `teams.list_chat_messages`           | list a chat's messages, most recently changed first; optional `modifiedSince` |
+| `teams.get_chat_message`             | get one chat message                                                          |
+| `teams.send_chat_message`            | send a plain-text message to an existing chat; `destructive`                  |
+| `teams.list_joined_teams`            | list the teams the user belongs to                                            |
+| `teams.get_team`                     | get one team's name, description and archived state                           |
+| `teams.list_channels`                | list a team's channels the user can see                                       |
+| `teams.get_channel`                  | get one channel                                                               |
+| `teams.list_channel_messages`        | list a channel's top-level posts                                              |
+| `teams.get_channel_message`          | get one channel post                                                          |
+| `teams.list_channel_message_replies` | list one post's replies                                                       |
+| `teams.send_channel_message`         | post a plain-text message with an optional subject; `destructive`             |
+| `teams.reply_to_channel_message`     | reply in plain text to a channel post; `destructive`                          |
+| `teams.find_online_meeting`          | find a meeting the user organized or was invited to by its join link          |
+| `teams.list_meeting_transcripts`     | list one meeting's transcripts                                                |
+
+Sends take plain text: the connector escapes it, turns line breaks into `<br>` and posts an HTML
+body (Graph documents no line-break handling for `text` bodies), so markup and mentions are not
+supported. The escaped body is limited to `teamsMessageMaxBytes` (28 KiB), well below Teams' about
+100 KB per post, and an over-limit message fails validation before any request. Message outputs
+keep Graph's body (`contentType` and `content`, usually HTML), sender (`from` with `kind` user,
+application or device), attachments' metadata, mentions, and `messageType` and `deletedDateTime`,
+so system events and deleted messages stay recognizable. Outputs omit properties Graph sends as
+`null`. Pass `nextLink` values back unchanged with the same ids; the connector replays only links
+to the same Graph collection (ids compared decoded, since Graph may echo them either way; a `/me`
+collection's link may name the user as `/users/{id}`).
+
+Graph has no delegated way to list meetings. Take the join link from a calendar event
+(`onlineMeeting.joinUrl`) or a meeting chat (`onlineMeetingJoinWebUrl`), pass it to
+`teams.find_online_meeting` (only `https://teams.microsoft.com` links; the filter quotes it), then
+list transcripts by the returned meeting id. Transcripts need the meeting to be transcribed, on the
+user's calendar and not expired; tenants that turn off Graph access to transcripts answer 403.
+
+`downloadTeamsMeetingTranscript` is a host-only download like `downloadOneDriveItem`: it reads the
+transcript's metadata (its id must match), then `content?$format=text/vtt` through the binary port,
+returning WebVTT bytes (`teamsTranscriptMimeType`) or a typed `ConnectorFileTransferError`. No
+conformance cases or emulator routes exist for Teams yet.
+
 ### Host-only OneDrive original-byte download
 
 `downloadOneDriveItem` from `@yolk-sdk/connectors/microsoft` returns original file bytes. It is not
@@ -967,7 +1026,7 @@ model tool JSON. See [Integration APIs](../api-reference/integrations#connectors
 The built-in endpoint targets the global Microsoft cloud; it does not currently configure
 national-cloud Graph hosts.
 
-Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0), [access shared items](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0), [search sites](https://learn.microsoft.com/en-us/graph/api/site-search?view=graph-rest-1.0), and [list a site's drives](https://learn.microsoft.com/en-us/graph/api/drive-list?view=graph-rest-1.0).
+Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0), [access shared items](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0), [search sites](https://learn.microsoft.com/en-us/graph/api/site-search?view=graph-rest-1.0), [list a site's drives](https://learn.microsoft.com/en-us/graph/api/drive-list?view=graph-rest-1.0), [list chats](https://learn.microsoft.com/en-us/graph/api/chat-list?view=graph-rest-1.0), [send a chat message](https://learn.microsoft.com/en-us/graph/api/chat-post-messages?view=graph-rest-1.0), [list channel messages](https://learn.microsoft.com/en-us/graph/api/channel-list-messages?view=graph-rest-1.0), [get an online meeting](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-get?view=graph-rest-1.0), and [list transcripts](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-list-transcripts?view=graph-rest-1.0).
 
 ## Kie
 

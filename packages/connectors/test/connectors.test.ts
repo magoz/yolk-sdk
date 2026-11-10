@@ -973,7 +973,23 @@ describe('@yolk-sdk/connectors', () => {
       'onedrive.get_copy_status',
       'onedrive.delete_item',
       'sharepoint.search_sites',
-      'sharepoint.list_site_drives'
+      'sharepoint.list_site_drives',
+      'teams.list_chats',
+      'teams.get_chat',
+      'teams.list_chat_messages',
+      'teams.get_chat_message',
+      'teams.send_chat_message',
+      'teams.list_joined_teams',
+      'teams.get_team',
+      'teams.list_channels',
+      'teams.get_channel',
+      'teams.list_channel_messages',
+      'teams.get_channel_message',
+      'teams.list_channel_message_replies',
+      'teams.send_channel_message',
+      'teams.reply_to_channel_message',
+      'teams.find_online_meeting',
+      'teams.list_meeting_transcripts'
     ])
     expect(
       MicrosoftConnector.actions
@@ -1012,7 +1028,10 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.delete_category',
       'outlook.batch_trash',
       'outlook.delete_permanently',
-      'onedrive.delete_item'
+      'onedrive.delete_item',
+      'teams.send_chat_message',
+      'teams.send_channel_message',
+      'teams.reply_to_channel_message'
     ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
