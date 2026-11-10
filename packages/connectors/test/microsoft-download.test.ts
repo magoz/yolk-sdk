@@ -22,6 +22,7 @@ import {
   microsoftOAuthSlotId,
   oneDriveActions,
   sharePointActions,
+  teamsActions,
   OneDriveListItemsOutput,
   outlookMailActions,
   type OneDriveDownloadBudget,
@@ -599,7 +600,8 @@ describe('host-only OneDrive download', () => {
       expect(MicrosoftConnector.actions).toEqual([
         ...outlookMailActions,
         ...oneDriveActions,
-        ...sharePointActions
+        ...sharePointActions,
+        ...teamsActions
       ])
       expect(
         MicrosoftConnector.actions.filter(a => a.id.startsWith('onedrive.')).map(a => a.id)

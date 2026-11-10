@@ -37,7 +37,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                       |
 | `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
 | `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
-| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint Graph actions, shared OAuth slots, host-only file download/upload and draft attachments                          |
+| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint/Teams Graph actions, shared OAuth slots, host-only file and transcript download, upload, draft attachments       |
 | `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                                                   |
 | `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                                                        |
 | `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                                            |
@@ -1044,8 +1044,8 @@ const filesProgram = MicrosoftConnector.invoke({
 })
 ```
 
-This integration targets **Microsoft Outlook, OneDrive, and SharePoint sites through Microsoft
-Graph v1.0**. It does not use the retired Outlook REST endpoint, direct Exchange Online APIs, or
+This integration targets **Microsoft Outlook, OneDrive, SharePoint sites, and Teams through
+Microsoft Graph v1.0**. It does not use the retired Outlook REST endpoint, direct Exchange Online APIs, or
 legacy OneDrive APIs.
 Microsoft Graph is the shared API and OAuth resource boundary. The sole exception is the
 pre-authenticated Outlook attachment upload-session URLs that Graph issues to `addOutlookAttachment`,
@@ -1252,6 +1252,14 @@ and `sharepoint.list_site_drives` find SharePoint document-library drive ids for
 the opt-in `MicrosoftSharePointSitesReadOAuthCredentialSlot` (`Sites.Read.All`), which the combined
 slot does not include. Delegated hosts reading library items keep `oneDriveAccessMode: 'delegated'`
 and consent `Files.Read.All` or `Sites.Read.All` as well: Graph honors every scope in the token.
+
+The `teams.*` actions list and read chats, joined teams, channels, channel posts and replies, send
+chat messages and channel posts or replies (`destructive`; plain text sent as escaped HTML within
+`teamsMessageMaxBytes`), find a meeting by its join link and list its transcripts; the host-only
+`downloadTeamsMeetingTranscript` returns a transcript's WebVTT bytes. Each uses its own opt-in
+delegated slot (`MicrosoftTeams*OAuthCredentialSlot`, all scopes in `microsoftTeamsScopes`), none
+in the combined slot; `ChannelMessage.Read.All` and `OnlineMeetingTranscript.Read.All` need tenant
+admin consent, and Graph supports none of them for personal Microsoft accounts.
 
 The OneDrive action set lists, searches, and gets file/folder metadata; creates folders; moves items
 within one drive; queues asynchronous copies; polls copy status; and moves items to the recycle bin.
