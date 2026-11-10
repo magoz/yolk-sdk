@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.128
+
+### Minor Changes
+
+- cae5998: Add Microsoft Teams to `@yolk-sdk/connectors/microsoft`, delegated only. Reads: `teams.list_chats` (members or latest-message preview), `teams.get_chat`, `teams.list_chat_messages` (optional `modifiedSince`), `teams.get_chat_message`, `teams.list_joined_teams`, `teams.get_team`, `teams.list_channels`, `teams.get_channel`, `teams.list_channel_messages`, `teams.get_channel_message`, `teams.list_channel_message_replies`, `teams.find_online_meeting` (by `https://teams.microsoft.com` join link) and `teams.list_meeting_transcripts`. Destructive sends: `teams.send_chat_message`, `teams.send_channel_message` (optional subject) and `teams.reply_to_channel_message` take plain text, sent as escaped HTML with `<br>` line breaks within `teamsMessageMaxBytes` (28 KiB). Host-only `downloadTeamsMeetingTranscript` returns a transcript's WebVTT bytes through the binary port. Each action uses a new opt-in slot (`MicrosoftTeamsChatReadOAuthCredentialSlot`, `…ChatSend…`, `…TeamRead…`, `…ChannelRead…`, `…ChannelMessageRead…`, `…ChannelMessageSend…`, `…MeetingRead…`, `…TranscriptRead…`; scope constants and `microsoftTeamsScopes`), none in `MicrosoftCombinedOAuthCredentialSlot`. `MicrosoftConnector.actions` gains the Teams actions last.
+
+### Patch Changes
+
+- Updated dependencies [cae5998]
+  - @yolk-sdk/agent@0.1.0-canary.128
+  - @yolk-sdk/conformance@0.1.0-canary.128
+
 ## 0.1.0-canary.127
 
 ### Minor Changes
