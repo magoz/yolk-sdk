@@ -92,7 +92,10 @@ import {
   toolChangePreviewMaxErrorChars,
   type ToolChangePreviewFailure
 } from '../protocol/change-preview.ts'
-import { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
+import {
+  recordToolArgumentsInput,
+  withToolArgumentsErrorHint
+} from '../protocol/tool-argument-hints.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -854,7 +857,10 @@ const prepareQuestionCall = (
   responses: ReadonlyArray<HitlResponse>
 ): Effect.Effect<PreparedToolCall> =>
   Effect.gen(function* () {
-    const decoded = yield* decodeQuestionToolParams(call.params).pipe(Effect.result)
+    const decoded = yield* decodeQuestionToolParams(call.params).pipe(
+      Effect.tapError(error => Effect.sync(() => recordToolArgumentsInput(error, call.params))),
+      Effect.result
+    )
 
     if (Predicate.isTagged(decoded, 'Failure')) {
       return PreparedToolCall.Result({
