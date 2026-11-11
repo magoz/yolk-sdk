@@ -10,7 +10,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
-  ToolCall,
+  type ToolCall,
   attachmentSourceText,
   assistantContent,
   assistantHostToolCalls,
@@ -36,7 +36,6 @@ import {
   LLMReasoningDelta,
   LLMReasoningReplay,
   LLMTextDelta,
-  LLMToolCall,
   LLMUsage,
   type LLMEvent,
   type LLMRequest
@@ -55,6 +54,7 @@ import {
   providerFailureRetryable
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
+import { providerToolCallEvent } from './tool-call-internal.ts'
 import {
   isToolJsonSchemaOmittedNull,
   withoutToolJsonSchemaOmittedNullMarker
@@ -2130,29 +2130,31 @@ const toLlmEvents = (
       return yield* Effect.fail(unsignedThinkingError())
     }
 
-    const events = response.content.flatMap((block): ReadonlyArray<LLMEvent> => {
-      switch (block.type) {
-        case 'text':
-          return [LLMTextDelta.make({ text: block.text })]
-        case 'thinking':
-          return [
-            ...reasoningDeltaEvents(block.thinking),
-            ...signedReasoningEvents(block.signature, options.reasoningReplayProvider)
-          ]
-        case 'redacted_thinking':
-          return redactedReasoningEvents(block.data, options.reasoningReplayProvider)
-        case 'tool_use':
-          return [
-            LLMToolCall.make({
-              call: ToolCall.make({
-                id: block.id,
-                name: options.decodeToolName(block.name),
-                params: block.input
-              })
-            })
-          ]
+    const blockEvents = yield* Effect.forEach(
+      response.content,
+      (block): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> => {
+        switch (block.type) {
+          case 'text':
+            return Effect.succeed([LLMTextDelta.make({ text: block.text })])
+          case 'thinking':
+            return Effect.succeed([
+              ...reasoningDeltaEvents(block.thinking),
+              ...signedReasoningEvents(block.signature, options.reasoningReplayProvider)
+            ])
+          case 'redacted_thinking':
+            return Effect.succeed(
+              redactedReasoningEvents(block.data, options.reasoningReplayProvider)
+            )
+          case 'tool_use':
+            return providerToolCallEvent(
+              { id: block.id, name: options.decodeToolName(block.name), params: block.input },
+              invalidToolUseError
+            ).pipe(Effect.map(event => [event]))
+        }
       }
-    })
+    )
+
+    const events = blockEvents.flat()
 
     const stopReason = response.stop_reason === 'tool_use' ? 'tool_use' : 'stop'
 
@@ -2251,6 +2253,13 @@ const classifyAnthropicBody = (buffer: string): AnthropicBodyFormat => {
 
   return 'json'
 }
+
+const invalidToolUseError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Invalid Anthropic Claude tool_use block',
+    retryable: false
+  })
 
 const invalidToolUseStartError = () =>
   new LLMError({
@@ -2396,21 +2405,16 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
       if (toolBlock === undefined) return Effect.succeed({ state, events: [] })
 
       return parseToolParams(toolBlock.partialJson).pipe(
-        Effect.map(params => {
+        Effect.flatMap(params =>
+          providerToolCallEvent(
+            { id: toolBlock.id, name: toolBlock.name, params },
+            invalidToolUseStartError
+          )
+        ),
+        Effect.map(event => {
           if (index !== undefined) toolBlocks.delete(index)
 
-          return {
-            state: { ...state, hasToolCall: true },
-            events: [
-              LLMToolCall.make({
-                call: ToolCall.make({
-                  id: toolBlock.id,
-                  name: toolBlock.name,
-                  params
-                })
-              })
-            ]
-          }
+          return { state: { ...state, hasToolCall: true }, events: [event] }
         })
       )
     }

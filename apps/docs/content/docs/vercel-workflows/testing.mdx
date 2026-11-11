@@ -48,6 +48,23 @@ ambient mock does not apply platform retry policy by itself: wrap host step call
 attempts, step attempts, status, and run errors. Use `world.sdk` with
 `VercelWorkflows.layerFromSdk` when testing Effect route/service boundaries.
 
+### Step errors
+
+Step errors cross the platform boundary as they do in a deployment. `world.runStep` stores each
+thrown value with the installed `workflow` runtime's step-error serializer and throws only the value
+read back, so error tags, prototypes, and custom fields are gone and `cause` survives:
+
+- A `FatalError` (by `name`, or `fatal: true`) is never retried.
+- An exhausted step fails with the platform's `FatalError` (`Step "<name>" failed after N
+retries: ...`) whose `cause` is the last thrown value.
+- A value the platform cannot store, such as an error with a class instance in its `cause` chain,
+  never reaches the workflow body. The platform redelivers the step instead, so the world runs it
+  again as the next attempt; past the budget the step fails with `Step "<name>" exceeded max
+retries`. `world.inspect(runId).unstorableStepErrors` lists every such value.
+
+Carry anything the workflow body must read across the boundary as plain data, for example in an
+error's `cause`, and assert `unstorableStepErrors` is empty in tests of your step failures.
+
 ## Pure contract tests
 
 Use normal Vitest tests for `runVercelAgentWorkflow` with fake callbacks.

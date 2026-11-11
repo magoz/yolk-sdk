@@ -1,4 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import fs from 'node:fs'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { Predicate } from 'effect'
 import type {
   VercelWorkflowsSdkClient,
   VercelWorkflowsSdkRun,
@@ -13,6 +17,13 @@ import type {
 // and cancellation. Host code under test runs unmodified against it; tests mock
 // only the `workflow` module's ambient APIs, delegating to the active world
 // (see `testWorkflowModule`).
+//
+// Step errors cross the platform boundary the way they do in a deployment: each one is stored with
+// the installed `workflow` runtime's own step-error serializer, and the workflow body sees only the
+// value read back (error tags, prototypes and custom fields are gone; a `cause` survives). A thrown
+// value the serializer cannot store (a class instance anywhere in its `cause` chain) never reaches
+// the body: the platform's queue handler fails and redelivers the step, which runs again until its
+// retries run out and it fails with "exceeded max retries" (see `unstorableStepErrors`).
 //
 // The single most important semantic: writing to (or re-closing) a closed
 // durable stream fails with the platform's HTTP 409 "already completed"
@@ -83,6 +94,13 @@ export type TestWorkflowStepMetadata = {
   readonly stepName: string
 }
 
+/** A thrown step value the platform could not store; the step was redelivered instead. */
+export type TestWorkflowUnstorableStepError = {
+  readonly stepName: string
+  readonly attempt: number
+  readonly error: unknown
+}
+
 export type TestWorkflowStepFunction<TArgs extends ReadonlyArray<unknown>, TResult> = ((
   ...args: TArgs
 ) => Promise<TResult>) & { readonly maxRetries?: number }
@@ -110,6 +128,7 @@ type TestWorkflowRunRecord = {
   readonly resumedHookTokens: Set<string>
   stepSequence: number
   readonly stepAttempts: Map<string, number>
+  readonly unstorableStepErrors: Array<TestWorkflowUnstorableStepError>
 }
 
 type AmbientContext = {
@@ -130,6 +149,76 @@ const requireAmbient = (): AmbientContext => {
   return ambient
 }
 
+type StepErrorSerializer = {
+  readonly dehydrate: (error: unknown, runId: string) => Promise<Uint8Array>
+  readonly hydrate: (bytes: Uint8Array, runId: string) => Promise<unknown>
+}
+
+let stepErrorSerializer: Promise<StepErrorSerializer> | undefined
+
+// The installed `workflow` runtime's own step-error serializer (`@workflow/core`, resolved
+// through `workflow`'s package so its version matches the host's), loaded natively: a
+// `vi.mock('workflow')` of the ambient module never replaces it.
+const loadStepErrorSerializer = (): Promise<StepErrorSerializer> =>
+  (stepErrorSerializer ??= (async () => {
+    const require = createRequire(import.meta.url)
+    let workflowDir = path.dirname(require.resolve('workflow'))
+
+    while (!fs.existsSync(path.join(workflowDir, 'package.json'))) {
+      workflowDir = path.dirname(workflowDir)
+    }
+
+    const serialization: unknown = await import(
+      require.resolve('@workflow/core/serialization', { paths: [workflowDir] })
+    )
+
+    if (
+      !Predicate.hasProperty(serialization, 'dehydrateStepError') ||
+      !Predicate.hasProperty(serialization, 'hydrateStepError') ||
+      !Predicate.isFunction(serialization.dehydrateStepError) ||
+      !Predicate.isFunction(serialization.hydrateStepError)
+    ) {
+      throw new Error('The installed workflow runtime has no step-error serializer')
+    }
+
+    const { dehydrateStepError, hydrateStepError } = serialization
+
+    return {
+      dehydrate: async (error, runId) => {
+        const bytes: unknown = await dehydrateStepError(error, runId, undefined)
+
+        if (!(bytes instanceof Uint8Array)) {
+          throw new Error('The workflow step-error serializer returned no bytes')
+        }
+
+        return bytes
+      },
+      hydrate: async (bytes, runId) => {
+        const error: unknown = await hydrateStepError(bytes, runId, undefined)
+
+        return error
+      }
+    }
+  })())
+
+// The platform's own test: `FatalError.is` (by `name`, or a `fatal: true` own property).
+const isFatalStepError = (error: unknown) =>
+  error instanceof Error &&
+  (error.name === 'FatalError' || ('fatal' in error && error.fatal === true))
+
+// Stored and read back, an error named `FatalError` is the platform's FatalError.
+const platformFatalError = (message: string, cause: unknown) => {
+  const error = cause === undefined ? new Error(message) : new Error(message, { cause })
+
+  error.name = 'FatalError'
+
+  return error
+}
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const retriesLabel = (count: number) => (count === 1 ? 'retry' : 'retries')
+
 export type TestWorkflowRunInspection = {
   readonly runId: string
   readonly status: TestWorkflowRunStatus
@@ -139,6 +228,8 @@ export type TestWorkflowRunInspection = {
   readonly writeAfterCloseAttempts: number
   readonly stepAttempts: ReadonlyMap<string, number>
   readonly runError: unknown
+  /** Every thrown step value the platform could not store, in order. */
+  readonly unstorableStepErrors: ReadonlyArray<TestWorkflowUnstorableStepError>
 }
 
 export type TestWorkflowHook<T> = Promise<T> & { readonly [Symbol.dispose]: () => void }
@@ -170,7 +261,8 @@ export class TestWorkflowWorld {
       hooks: new Map(),
       resumedHookTokens: new Set(),
       stepSequence: 0,
-      stepAttempts: new Map()
+      stepAttempts: new Map(),
+      unstorableStepErrors: []
     }
 
     this.runs.set(runId, run)
@@ -218,7 +310,8 @@ export class TestWorkflowWorld {
       streamCloseCount: run.streamCloseCount,
       writeAfterCloseAttempts: run.writeAfterCloseAttempts,
       stepAttempts: new Map(run.stepAttempts),
-      runError: run.runError
+      runError: run.runError,
+      unstorableStepErrors: [...run.unstorableStepErrors]
     }
   }
 
@@ -277,7 +370,10 @@ export class TestWorkflowWorld {
 
   // Runs a step body with the platform's retry contract: `fn.maxRetries`
   // retries after the first attempt (total attempts = maxRetries + 1) and
-  // 1-based `getStepMetadata().attempt` visible to the body.
+  // 1-based `getStepMetadata().attempt` visible to the body. A FatalError
+  // (by `name`, or `fatal: true`) is never retried; an exhausted step fails
+  // with the platform's FatalError whose `cause` is the last thrown value.
+  // The caller sees errors only as the platform stores and reads them back.
   async runStep<TArgs extends ReadonlyArray<unknown>, TResult>(
     stepFn: TestWorkflowStepFunction<TArgs, TResult>,
     args: TArgs,
@@ -289,11 +385,16 @@ export class TestWorkflowWorld {
     const stepId = `${run.runId}:step:${run.stepSequence}:${stepName}`
     const maxRetries = stepFn.maxRetries ?? defaultTestWorkflowStepMaxRetries
     const maxAttempts = maxRetries + 1
+    const serializer = await loadStepErrorSerializer()
+    // The last retried error the platform stored: the cause of an "exceeded max retries" failure.
+    let lastStoredError: Uint8Array | undefined
 
     let attempt = 1
 
     for (;;) {
       run.stepAttempts.set(stepName, (run.stepAttempts.get(stepName) ?? 0) + 1)
+
+      let thrown: unknown
 
       try {
         return await ambientStorage.run(
@@ -301,9 +402,53 @@ export class TestWorkflowWorld {
           () => stepFn(...args)
         )
       } catch (error) {
-        if (attempt >= maxAttempts) throw error
-        attempt += 1
+        thrown = error
       }
+
+      const fatal = isFatalStepError(thrown)
+
+      const terminal =
+        fatal || attempt < maxAttempts
+          ? thrown
+          : platformFatalError(
+              `Step "${stepName}" failed after ${maxRetries} ${retriesLabel(maxRetries)}: ${errorMessage(thrown)}`,
+              thrown
+            )
+
+      const stored = await serializer.dehydrate(terminal, run.runId).then(
+        bytes => ({ stored: true as const, bytes }),
+        () => ({ stored: false as const })
+      )
+
+      if (!stored.stored) {
+        // The platform cannot record this attempt: its queue handler fails and the
+        // redelivered message runs the step again as the next attempt.
+        run.unstorableStepErrors.push({ stepName, attempt, error: thrown })
+
+        if (attempt >= maxAttempts) {
+          // The redelivery past the budget fails the step without running it again.
+          throw await serializer.hydrate(
+            await serializer.dehydrate(
+              platformFatalError(
+                `Step "${stepName}" exceeded max retries (${maxRetries} ${retriesLabel(maxRetries)})`,
+                lastStoredError === undefined
+                  ? undefined
+                  : await serializer.hydrate(lastStoredError, run.runId)
+              ),
+              run.runId
+            ),
+            run.runId
+          )
+        }
+
+        attempt += 1
+        continue
+      }
+
+      if (fatal || attempt >= maxAttempts) throw await serializer.hydrate(stored.bytes, run.runId)
+
+      lastStoredError = stored.bytes
+      attempt += 1
     }
   }
 

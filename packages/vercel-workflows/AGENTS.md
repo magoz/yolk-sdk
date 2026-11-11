@@ -22,6 +22,12 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - `./testing` ships `TestWorkflowWorld`: a behavioral platform emulator (run lifecycle,
   append-only durable streams with close-once -> 409 conflicts, retrying step executor,
   hooks/resume, cancellation) plus `testWorkflowModule` for mocking the ambient `workflow` module.
+  Its step executor stores every step error with the installed `workflow` runtime's own serializer
+  (`@workflow/core/serialization`, resolved through `workflow` natively so `vi.mock('workflow')`
+  never replaces it) and throws only the value read back, with the platform's FatalError rules (no
+  retry; exhausted steps wrapped). An unstorable error is retried as the platform's redelivery is,
+  then fails with "exceeded max retries", and is recorded in `unstorableStepErrors`. Keep it as
+  faithful as the platform: hosts rely on it to see what a deployment does to their errors.
 - Requires `workflow@^5.0.0-beta.42` (region-pinned runs; the 4.x backend was `iad1`-only and
   cross-region streaming arrived in multi-second bursts). v5's hardened serialization captures
   Node `URL` intrinsics at import and rejects jsdom's URL shape: any test whose import graph

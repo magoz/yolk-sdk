@@ -220,13 +220,16 @@ describe('TestWorkflowWorld step executor', () => {
     expect(world.inspect(runId).stepAttempts.get('flaky')).toBe(3)
   })
 
-  it('exhausts the retry budget and rethrows the final error', async () => {
+  it('fails an exhausted step with the platform FatalError, as stored and read back', async () => {
     const world = new TestWorkflowWorld()
-    const failure = new Error('permanent')
+
+    class TaggedFailure extends Error {
+      readonly _tag = 'TaggedFailure'
+    }
 
     const step = Object.assign(
       async (): Promise<never> => {
-        throw failure
+        throw new TaggedFailure('permanent')
       },
       { maxRetries: 1 }
     )
@@ -234,9 +237,131 @@ describe('TestWorkflowWorld step executor', () => {
     const { runId } = world.start(async () => world.runStep(step, [], 'doomed'), [])
     await world.settled(runId)
 
+    const { runError, stepAttempts, unstorableStepErrors } = world.inspect(runId)
+
     expect(world.status(runId)).toBe('failed')
-    expect(world.inspect(runId).runError).toBe(failure)
-    expect(world.inspect(runId).stepAttempts.get('doomed')).toBe(2)
+    expect(stepAttempts.get('doomed')).toBe(2)
+    expect(unstorableStepErrors).toEqual([])
+    expect(runError).toMatchObject({
+      name: 'FatalError',
+      message: 'Step "doomed" failed after 1 retry: permanent'
+    })
+
+    // The body's error survives as the cause, without its class or tag.
+    const cause = runError instanceof Error ? runError.cause : undefined
+
+    expect(cause).toBeInstanceOf(Error)
+    expect(cause).not.toBeInstanceOf(TaggedFailure)
+    expect(cause).toMatchObject({ message: 'permanent' })
+    expect(cause).not.toHaveProperty('_tag')
+  })
+
+  it('never retries a FatalError', async () => {
+    const world = new TestWorkflowWorld()
+    const fatal = new Error('configuration refused')
+
+    fatal.name = 'FatalError'
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        throw fatal
+      },
+      { maxRetries: 3 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'refused'), [])
+    await world.settled(runId)
+
+    expect(world.inspect(runId).stepAttempts.get('refused')).toBe(1)
+    expect(world.inspect(runId).runError).toMatchObject({
+      name: 'FatalError',
+      message: 'configuration refused'
+    })
+  })
+
+  it('redelivers a step whose error the platform cannot store, until it exceeds its retries', async () => {
+    const world = new TestWorkflowWorld()
+
+    // A class instance in the cause chain, like a schema issue: the platform cannot store it.
+    class Issue {
+      readonly path = ['name']
+    }
+
+    const unstorable = new Error('Schema validation failed', { cause: new Issue() })
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        throw unstorable
+      },
+      { maxRetries: 2 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    const { runError, stepAttempts, unstorableStepErrors } = world.inspect(runId)
+
+    expect(stepAttempts.get('model')).toBe(3)
+    expect(unstorableStepErrors).toEqual([
+      { stepName: 'model', attempt: 1, error: unstorable },
+      { stepName: 'model', attempt: 2, error: unstorable },
+      { stepName: 'model', attempt: 3, error: unstorable }
+    ])
+    expect(runError).toMatchObject({
+      name: 'FatalError',
+      message: 'Step "model" exceeded max retries (2 retries)'
+    })
+    expect(runError).not.toHaveProperty('cause')
+  })
+
+  it('keeps the last stored error as the cause when only the final attempt cannot be stored', async () => {
+    const world = new TestWorkflowWorld()
+    let attempts = 0
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        attempts += 1
+
+        if (attempts === 1) throw new Error('transient')
+
+        throw new Error('final', { cause: new (class Issue {})() })
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    const { runError, unstorableStepErrors } = world.inspect(runId)
+
+    expect(unstorableStepErrors.map(entry => entry.attempt)).toEqual([2])
+    expect(runError).toMatchObject({
+      name: 'FatalError',
+      message: 'Step "model" exceeded max retries (1 retry)',
+      cause: { message: 'transient' }
+    })
+  })
+
+  it('retries after an unstorable error like the platform redelivery', async () => {
+    const world = new TestWorkflowWorld()
+    let attempts = 0
+
+    const step = Object.assign(
+      async () => {
+        attempts += 1
+
+        if (attempts === 1) throw new Error('crash', { cause: new (class Issue {})() })
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(world.status(runId)).toBe('completed')
+    expect(world.inspect(runId).unstorableStepErrors).toHaveLength(1)
   })
 
   it('defaults to the platform retry budget when maxRetries is unset', async () => {

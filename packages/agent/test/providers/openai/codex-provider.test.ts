@@ -819,6 +819,28 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('fails function calls with an empty name as typed errors', () =>
+    Effect.gen(function* () {
+      const nameless = codexFunctionCall('call-1', '')
+
+      for (const events of [
+        [{ type: 'response.output_item.done', item: nameless }, completedCodexResponse(nameless)],
+        [completedCodexResponse(nameless)]
+      ]) {
+        const error = yield* streamOpenAiCodexResponse(responseFromSseEvents(events)).pipe(
+          Stream.runCollect,
+          Effect.flip
+        )
+
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          retryable: false
+        })
+      }
+    })
+  )
+
   it.effect('ends a streamed sibling tool batch without a completion event', () =>
     Effect.gen(function* () {
       const response = responseFromSseEvents([
