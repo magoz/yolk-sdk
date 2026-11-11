@@ -12,7 +12,7 @@ description: Core transcript and event terms used across Yolk packages.
 | `AgentEvent`            | stream event emitted by loop/runtime/client surfaces                                                         |
 | `UserMessageEvent`      | replay-safe event for host-promoted user input in durable streams                                            |
 | `ToolDef`               | model-visible tool name, description, parameters, and approval (and staging) metadata                        |
-| `ToolCall`              | model request to execute a host tool                                                                         |
+| `ToolCall`              | model request to execute a host tool; `id` and `name` are non-empty trimmed strings                          |
 | `ToolResult`            | host result returned to the model                                                                            |
 | `AgentAwaitingInput`    | logical terminal pause state for approvals/questions                                                         |
 | `AgentStatus`           | one run status: `Idle`, `Working`, `Blocked`, `Done`, or `Failed` (OSC 7501 terms)                           |

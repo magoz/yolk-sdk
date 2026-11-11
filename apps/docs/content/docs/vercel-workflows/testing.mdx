@@ -46,7 +46,8 @@ it('runs host orchestration against Workflow behavior', async () => {
 ambient mock does not apply platform retry policy by itself: wrap host step callbacks with
 `world.step(...)` or call `world.runStep(...)` when the test must exercise retries and
 `getStepMetadata().attempt`. Use `world.inspect(runId)` for stream closure, write-after-close
-attempts, step attempts, status, and run errors. Use `world.sdk` with
+attempts, step attempts, status, run errors, and `unstorableStepErrors` (`stepName`, `attempt`,
+`error`). Use `world.sdk` with
 `VercelWorkflows.layerFromSdk` when testing Effect route/service boundaries.
 
 ### Step errors

@@ -76,7 +76,7 @@ with sanitized errors.
 
 ## What the provider gives the loop
 
-Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events.
+Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events. Tool calls are decoded as protocol `ToolCall`; a malformed one (empty or padded id or name) fails the request with a typed `LLMError`, never a thrown defect.
 
 ## OpenAI JSON admission
 

@@ -124,6 +124,14 @@ fragments are retained. Streams that end without a terminal frame fail `incomple
 (non-retryable) even when output already started, and the SDK never synthesizes success or a
 retry for a missing terminal.
 
+### Provider returned a tool call with an empty name
+
+A model or endpoint sometimes returns a tool call whose `id` or `name` is empty or padded. Providers
+fail the request with a typed non-retryable `LLMError` (`invalid_response`); on Chat Completions it
+carries `providerCode: 'invalid_tool_call'`. The call never reaches your tools. Surface it like other
+provider failures: a host fallback model can retry the turn, and repeated failures point at the
+model or endpoint. See [provider errors](./api-reference/agent#providers).
+
 ### OAuth provider returns unauthorized
 
 Codex, Claude, and Grok provider layers need a fresh `OAuthAccessToken`. Your host owns token storage,
@@ -661,7 +669,19 @@ progress. See [Bounded child observations](./vercel-workflows/step-contracts#bou
 `workflow` 5.x hardens serialization by capturing Node `URL` intrinsics when the module loads and
 rejects jsdom's URL shape. Run any test whose import graph reaches the `workflow` package (any
 entrypoint, including through `@yolk-sdk/vercel-workflows`) in a node vitest environment — add
-`// @vitest-environment node` or exclude those suites from jsdom projects.
+`// @vitest-environment node` or exclude those suites from jsdom projects. `TestWorkflowWorld` loads
+the same runtime when it executes a step, so under jsdom `runStep` fails with an error starting
+"TestWorkflowWorld cannot load the workflow step-error serializer"; see
+[Step errors](./vercel-workflows/testing#step-errors).
+
+### A custom error class or field is lost across a step boundary
+
+The platform stores a step's thrown value and the workflow body reads it back: error tags,
+prototypes and custom fields are gone, and only `message`, `name`, `stack` and a serializable `cause`
+survive. Carry what the workflow body must read as plain data in `cause`. A class instance anywhere in
+the `cause` chain makes the error unstorable, and the step is redelivered until it exceeds its
+retries; in tests, assert `world.inspect(runId).unstorableStepErrors` is empty. See
+[Step errors](./vercel-workflows/testing#step-errors).
 
 ### Workflow build reports duplicate step ids
 

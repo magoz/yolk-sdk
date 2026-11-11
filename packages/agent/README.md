@@ -458,6 +458,11 @@ policy and emits protocol-visible retry/error state:
   `type`) into `provider.providerCode`; free-text upstream bodies stay out of `LLMError`.
 - Claude subscription (`anthropic_claude`) HTTP and stream errors use `error.details.error_code`
   (for example `claude_code_version_too_old`), then `error.type`, then `error.code`.
+- Built-in providers reject a returned tool call whose id or name is empty or padded as a
+  non-retryable `LLMError` (`invalid_response`) instead of a defect, so it reaches the loop's error
+  handling (the loop does not retry it), host fallback models, and host failure handling. Chat
+  Completions sets `providerCode: 'invalid_tool_call'` (streamed and JSON); OpenCode Go chat's
+  one-time re-route applies when that failure happens before any event.
 - `AgentRetry.provider` exposes current retry metadata and chosen `delayMs`.
 - `AgentError.provider` preserves final terminal metadata.
 - `AgentErrorCode` includes `rate_limit`, `overloaded`, `context_overflow`, and generic
