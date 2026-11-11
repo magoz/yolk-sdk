@@ -1,20 +1,35 @@
 export * from '@modelcontextprotocol/server'
 
-export { approvalInputKey, declaresFormElicitation, staleApprovalMessage } from './approval.ts'
+export {
+  approvalInputKey,
+  changedPromptMessage,
+  declaresFormElicitation,
+  mcpServerMaxPromptBytes,
+  oversizedPromptMessage,
+  staleApprovalMessage
+} from './approval.ts'
 
 export type {
   McpServerApprovalOptions,
+  McpServerElicitation,
+  McpServerPrompt,
+  McpServerToolAnswered,
   McpServerToolApprovalPolicy,
   McpServerToolApproved
 } from './approval.ts'
 
+export { mcpFormBoolean, mcpFormChoice, mcpFormMultiSelect, mcpServerForm } from './form.ts'
+
+export type { McpServerForm, McpServerFormField, McpServerFormOption } from './form.ts'
+
 export { McpServerError } from './errors.ts'
 
-export { makeMcpToolServer } from './server.ts'
+export { makeMcpServerElicitedTool, makeMcpToolServer } from './server.ts'
 
 export type {
   McpServerApprovalTool,
   McpServerDirectTool,
+  McpServerElicitedTool,
   McpServerTool,
   McpServerToolAnnotations,
   McpToolServer
