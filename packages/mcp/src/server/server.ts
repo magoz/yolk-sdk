@@ -439,6 +439,9 @@ const internalErrorBody = (error: McpServerError) =>
     )
   )
 
+/** The SDK's request body bound option, absent for its default. */
+type BodyLimit = { readonly maxRequestBodySize: number } | undefined
+
 const isEventStream = (response: Response) =>
   response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
 
@@ -448,9 +451,9 @@ const isEventStream = (response: Response) =>
  * routes as modern; a legacy one may carry any `Mcp-Method`, so the SDK's own era routing
  * (`isLegacyRequest`, on a body clone) decides. If classifying fails, the stream is read.
  */
-const isListenRequest = (request: Request) =>
+const isListenRequest = (request: Request, bodyLimit: BodyLimit) =>
   request.headers.get('mcp-method') === 'subscriptions/listen'
-    ? Effect.tryPromise(() => isLegacyRequest(request)).pipe(
+    ? Effect.tryPromise(() => isLegacyRequest(request, undefined, bodyLimit)).pipe(
         Effect.map(legacy => !legacy),
         Effect.orElseSucceed(() => false)
       )
@@ -545,7 +548,24 @@ export const makeMcpToolServer = <R>(input: {
   readonly tools: ReadonlyArray<McpServerTool<R>>
   readonly allowedOriginHostnames?: ReadonlyArray<string>
   readonly approvals?: McpServerApprovalOptions
+  /**
+   * Most bytes of a request body the SDK path reads (every request with `MCP-Protocol-Version`,
+   * both eras); a larger one is answered `413`. Default the SDK's 4 MiB. A host that caps bodies
+   * itself passes its own cap here. The header-less JSON path reads the body unbounded: the host
+   * caps it.
+   */
+  readonly maxRequestBodySize?: number
 }): McpToolServer<R> => {
+  const { maxRequestBodySize } = input
+
+  const bodySizeProblem =
+    maxRequestBodySize === undefined ||
+    (Number.isFinite(maxRequestBodySize) && maxRequestBodySize > 0)
+      ? undefined
+      : `maxRequestBodySize must be a positive number of bytes, got ${maxRequestBodySize}`
+
+  const bodyLimit: BodyLimit = maxRequestBodySize === undefined ? undefined : { maxRequestBodySize }
+
   const approvals = makeMcpServerApprovals(input.name, input.approvals)
 
   const offersApprovals = !Predicate.isTagged(approvals, 'Unconfigured')
@@ -741,14 +761,23 @@ export const makeMcpToolServer = <R>(input: {
 
   const handleSdkHttpRequest = (request: Request) =>
     Effect.gen(function* () {
+      if (bodySizeProblem !== undefined) {
+        const body = yield* internalErrorBody(
+          new McpServerError({ message: bodySizeProblem, cause: 'protocol' })
+        )
+
+        return jsonResponse(body, { status: 500 })
+      }
+
       // Read before `fetch` consumes the body.
-      const listen = yield* isListenRequest(request)
+      const listen = yield* isListenRequest(request, bodyLimit)
 
       // Tool calls run as fibers of this request: closing the scope below interrupts and awaits any
       // still running (a cancelled call's finalizers), so no tool outlives the caller's scope.
       const toolFibers = yield* FiberSet.make()
       const runTool = yield* FiberSet.runtimePromise(toolFibers)<R>()
-      const handler = createMcpHandler(context => makeSdkServer(runTool, context.era))
+
+      const handler = createMcpHandler(context => makeSdkServer(runTool, context.era), bodyLimit)
 
       return yield* Effect.acquireUseRelease(
         Effect.succeed(handler),
