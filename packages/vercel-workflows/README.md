@@ -69,9 +69,17 @@ queues, hooks, or stream storage.
 `@yolk-sdk/vercel-workflows/testing` provides `TestWorkflowWorld`, a behavioral emulator for host
 tests. It covers run lifecycle, append-only streams with close-once conflicts, step retries and
 attempt metadata, hooks/resume, cancellation, and the SDK seam used by
-`VercelWorkflows.layerFromSdk`. Ambient module mocks do not apply retry policy by themselves: wrap
-host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly when the test
-must exercise platform retry attempts and `getStepMetadata().attempt`.
+`VercelWorkflows.layerFromSdk`. Step errors cross the platform boundary as in a deployment: each is
+stored with the installed `workflow` runtime's step-error serializer and the workflow body sees only
+the value read back (error tags, prototypes and custom fields are lost; `cause` survives). A
+FatalError (named `FatalError`, or with `fatal: true`; an `AbortError` is promoted to one) is never
+retried, an exhausted step fails with the platform's FatalError wrapping the last error, and a
+thrown value the platform cannot store (a class instance in its `cause` chain) is redelivered like
+the platform does until the step exceeds its retries; `world.inspect(runId).unstorableStepErrors`
+lists those values. Executing a step loads the workflow runtime, so it needs the Node test
+environment. Ambient module mocks do not apply retry policy by themselves: wrap host step callbacks
+with `world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise platform
+retry attempts and `getStepMetadata().attempt`.
 
 Mock the ambient `workflow` module so production orchestration runs against the active test world:
 

@@ -20,7 +20,7 @@ import {
 } from 'effect/http'
 import * as Schema from 'effect/Schema'
 import {
-  ToolCall,
+  type ToolCall,
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
@@ -49,7 +49,6 @@ import {
   LLMProvider,
   LLMReasoningDelta,
   LLMTextDelta,
-  LLMToolCall,
   LLMUsage,
   type LLMEvent,
   type LLMRequest
@@ -63,6 +62,7 @@ import {
 import { validateProviderTranscript } from '../transcript.ts'
 import { requestCacheKeyHeaders } from '../cache-key-headers.ts'
 import { invalidFieldOf } from '../invalid-field-internal.ts'
+import { providerToolCallEvent } from '../tool-call-internal.ts'
 import { withoutToolJsonSchemaOmittedNullMarker } from '../../protocol/tool-json-schema-marker.ts'
 
 type OpenAiProviderIdentity = {
@@ -1156,14 +1156,15 @@ const toLlmEvents = (
 
     const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
       parseToolArguments(call.function.arguments, providerIdentity, undefined).pipe(
-        Effect.map(params =>
-          LLMToolCall.make({
-            call: ToolCall.make({
-              id: call.id,
-              name: call.function.name,
-              params
+        Effect.flatMap(params =>
+          providerToolCallEvent({ id: call.id, name: call.function.name, params }, () =>
+            chatResponseIssueError({
+              providerIdentity,
+              issue: 'invalid_tool_call',
+              message: `Invalid ${providerIdentity.name} tool call`,
+              stream: undefined
             })
-          })
+          )
         )
       )
     )
@@ -1266,7 +1267,7 @@ const chatSseBlockData = (block: string) => {
  * - `invalid_stream_json`: an SSE `data:` payload is not JSON.
  * - `invalid_stream_chunk`: a stream chunk does not match the `chat.completion.chunk` shape.
  * - `invalid_reasoning`: reasoning content is neither a string nor null.
- * - `invalid_tool_call`: a streamed tool call has no id or no name.
+ * - `invalid_tool_call`: a tool call has no id or no name, or one that is empty or padded.
  * - `invalid_tool_arguments`: tool call arguments are not JSON.
  * - `invalid_usage`: the usage block lacks its token counts.
  * - `invalid_response_json`: a JSON (non-streaming) response body is not JSON.
@@ -1360,6 +1361,9 @@ const chatStreamError = (
     )
   })
 
+const nonEmptyOr = (value: string | null | undefined, current: string | undefined) =>
+  value === undefined || value === null || value.length === 0 ? current : value
+
 const mergeChatToolCallDelta = (
   toolCalls: ReadonlyArray<OpenAiChatStreamToolCall>,
   delta: typeof OpenAiChatDeltaToolCall.Type
@@ -1369,8 +1373,10 @@ const mergeChatToolCallDelta = (
 
   const merged = {
     index,
-    id: delta.id ?? current?.id,
-    name: delta.function?.name ?? current?.name,
+    // Only the first chunk of a call carries its id and name; an empty one on a later chunk is
+    // not a new value and must not erase them.
+    id: nonEmptyOr(delta.id, current?.id),
+    name: nonEmptyOr(delta.function?.name, current?.name),
     arguments: `${current?.arguments ?? ''}${delta.function?.arguments ?? ''}`
   }
 
@@ -1597,22 +1603,21 @@ const finalizeChatStreamState = (
       const id = call.id
       const name = call.name
 
-      if (id === undefined || name === undefined) {
-        return Effect.fail(
-          chatResponseIssueError({
-            providerIdentity,
-            issue: 'invalid_tool_call',
-            message: `Invalid ${providerIdentity.name} streamed tool call`,
-            stream: chatStreamDiagnostics(responseFormat, state)
-          })
-        )
-      }
+      const invalidToolCall = () =>
+        chatResponseIssueError({
+          providerIdentity,
+          issue: 'invalid_tool_call',
+          message: `Invalid ${providerIdentity.name} streamed tool call`,
+          stream: chatStreamDiagnostics(responseFormat, state)
+        })
+
+      if (id === undefined || name === undefined) return Effect.fail(invalidToolCall())
 
       return parseToolArguments(
         call.arguments,
         providerIdentity,
         chatStreamDiagnostics(responseFormat, state)
-      ).pipe(Effect.map(params => LLMToolCall.make({ call: ToolCall.make({ id, name, params }) })))
+      ).pipe(Effect.flatMap(params => providerToolCallEvent({ id, name, params }, invalidToolCall)))
     })
 
     const events: Array<LLMEvent> = [...toolCallEvents]

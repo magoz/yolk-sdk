@@ -1905,6 +1905,45 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('fails tool calls with an empty name as typed errors, streamed or not', () =>
+    Effect.gen(function* () {
+      const streamed = yield* collectProviderEvents(
+        responseFromChunks([
+          'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":""}}\n\n',
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}\n\n',
+          'data: {"type":"content_block_stop","index":0}\n\n',
+          'data: {"type":"message_stop"}\n\n'
+        ]),
+        []
+      ).pipe(Effect.flip)
+
+      expect(streamed).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false
+      })
+
+      const whole = yield* collectProviderEvents(
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'tool_use', id: 'toolu_1', name: '', input: {} }],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 2, output_tokens: 3 }
+          }),
+          { status: 200 }
+        ),
+        []
+      ).pipe(Effect.flip)
+
+      expect(whole).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'Invalid Anthropic Claude tool_use block',
+        retryable: false
+      })
+    })
+  )
+
   it.effect('preserves StructuredOutput casing when unprefixing Claude tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

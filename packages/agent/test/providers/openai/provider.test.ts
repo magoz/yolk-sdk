@@ -800,6 +800,22 @@ describe('OpenAI provider', () => {
             ]
           }),
           'invalid_tool_arguments'
+        ],
+        [
+          Response.json({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    { id: 'call_1', type: 'function', function: { name: '', arguments: '{}' } }
+                  ]
+                },
+                finish_reason: 'tool_calls'
+              }
+            ]
+          }),
+          'invalid_tool_call'
         ]
       ] as const
 
@@ -1521,6 +1537,50 @@ describe('OpenAI provider streaming', () => {
         cause: 'invalid_response',
         provider: { providerCode: 'invalid_tool_call' }
       })
+    })
+  )
+
+  // A model returned a call with an empty name in production; building it threw a defect that
+  // skipped the loop's retries and every host failure handler.
+  it.effect('fails a streamed tool call with an empty name as a typed error', () =>
+    Effect.gen(function* () {
+      const error = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({
+            tool_calls: [{ index: 0, id: 'call_1', function: { name: '', arguments: '{}' } }]
+          }),
+          chatChunk({}, 'tool_calls')
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false,
+        message: 'Invalid OpenAI streamed tool call',
+        provider: { providerCode: 'invalid_tool_call', stream: { terminalSeen: true } }
+      })
+    })
+  )
+
+  it.effect('keeps a tool call identity that a later chunk repeats as empty', () =>
+    Effect.gen(function* () {
+      const events = yield* collectStreamEvents(
+        chatSse([
+          chatChunk({
+            tool_calls: [{ index: 0, id: 'call_1', function: { name: 'lookup', arguments: '' } }]
+          }),
+          chatChunk({
+            tool_calls: [{ index: 0, id: '', function: { name: '', arguments: '{"q":1}' } }]
+          }),
+          chatChunk({}, 'tool_calls')
+        ])
+      )
+
+      expect(Array.from(events)).toMatchObject([
+        { _tag: 'ToolCall', call: { id: 'call_1', name: 'lookup', params: { q: 1 } } },
+        { _tag: 'Done', stopReason: 'tool_use' }
+      ])
     })
   )
 

@@ -21,7 +21,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
-  ToolCall,
+  type ToolCall,
   attachmentSourceDataUrl,
   attachmentSourceUrl,
   assistantContent,
@@ -45,7 +45,6 @@ import {
   LLMProvider,
   LLMReasoningDelta,
   LLMTextDelta,
-  LLMToolCall,
   LLMUsage,
   type LLMEvent,
   type LLMRequest
@@ -60,6 +59,7 @@ import {
 import { openAiCodexQuotaResetsAtMs } from './quota-reset-internal.ts'
 import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import { validateProviderTranscript } from './transcript.ts'
+import { providerToolCallEvent } from './tool-call-internal.ts'
 import { withoutToolJsonSchemaOmittedNullMarker } from '../protocol/tool-json-schema-marker.ts'
 
 type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
@@ -951,17 +951,13 @@ const flattenedResponseContentEvents = (
             return Effect.succeed(Option.none())
           case 'function_call':
             return parseToolArguments(item.arguments).pipe(
-              Effect.map(params =>
-                Option.some(
-                  LLMToolCall.make({
-                    call: ToolCall.make({
-                      id: item.call_id,
-                      name: item.name,
-                      params
-                    })
-                  })
+              Effect.flatMap(params =>
+                providerToolCallEvent(
+                  { id: item.call_id, name: item.name, params },
+                  invalidFunctionCallError
                 )
-              )
+              ),
+              Effect.map(Option.some)
             )
         }
       })
@@ -1157,6 +1153,13 @@ const dataFromSseBlock = (block: string) => {
 const parseOpenAiResponsesSseJson = (data: string) =>
   decodeJsonString(data, 'Could not parse OpenAI Responses stream event JSON')
 
+const invalidFunctionCallError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Invalid OpenAI Responses function call',
+    retryable: false
+  })
+
 const invalidFunctionCallSseItemError = () =>
   new LLMError({
     cause: 'invalid_response',
@@ -1184,15 +1187,13 @@ const eventsFromOutputItem = (
 
     case 'function_call':
       return parseToolArguments(item.arguments).pipe(
-        Effect.map(params => [
-          LLMToolCall.make({
-            call: ToolCall.make({
-              id: item.call_id,
-              name: item.name,
-              params
-            })
-          })
-        ])
+        Effect.flatMap(params =>
+          providerToolCallEvent(
+            { id: item.call_id, name: item.name, params },
+            invalidFunctionCallSseItemError
+          )
+        ),
+        Effect.map(event => [event])
       )
   }
 }
