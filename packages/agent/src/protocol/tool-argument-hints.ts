@@ -99,7 +99,7 @@ const acceptedOnWire = (ast: SchemaAST.AST, seen: ReadonlySet<SchemaAST.AST>): A
 
   if (SchemaAST.isSuspend(ast)) {
     return seen.has(ast)
-      ? none
+      ? { numbers: 'any', booleans: 'any', strings: 'any' }
       : acceptedOnWire(SchemaAST.toEncoded(ast.thunk()), new Set([...seen, ast]))
   }
 
@@ -127,27 +127,38 @@ const related = (path: ReadonlyArray<PropertyKey>, target: ReadonlyArray<Propert
   startsWith(target, path) || startsWith(path, target)
 
 // Whether an issue rejects the value at `target`: a failure on, above or under it. A union rejects
-// it only when every member it tried does, so a nested union keeps its alternatives.
+// it only when every member it tried does, so a nested union keeps its alternatives. A failed check
+// runs after its value parsed, so one above `target` (a cross-field refinement) accepted it.
 const rejects = (
   issue: SchemaIssue.Issue,
   path: ReadonlyArray<PropertyKey>,
-  target: ReadonlyArray<PropertyKey>
+  target: ReadonlyArray<PropertyKey>,
+  checked = false
 ): boolean =>
   Match.value(issue).pipe(
-    Match.tag('Pointer', pointer => rejects(pointer.issue, [...path, ...pointer.path], target)),
-    Match.tag('Filter', 'Encoding', wrapper => rejects(wrapper.issue, path, target)),
+    Match.tag('Pointer', pointer =>
+      rejects(pointer.issue, [...path, ...pointer.path], target, checked)
+    ),
+    Match.tag('Filter', wrapper => rejects(wrapper.issue, path, target, true)),
+    Match.tag('Encoding', wrapper => rejects(wrapper.issue, path, target, checked)),
     Match.tag('Composite', group =>
       group.issues.length === 0
-        ? related(path, target)
-        : group.issues.some(child => rejects(child, path, target))
+        ? failedAt(path, target, checked)
+        : group.issues.some(child => rejects(child, path, target, checked))
     ),
     Match.tag('AnyOf', group =>
       group.issues.length === 0
-        ? related(path, target)
-        : group.issues.every(child => rejects(child, path, target))
+        ? failedAt(path, target, checked)
+        : group.issues.every(child => rejects(child, path, target, checked))
     ),
-    Match.orElse(() => related(path, target))
+    Match.orElse(() => failedAt(path, target, checked))
   )
+
+const failedAt = (
+  path: ReadonlyArray<PropertyKey>,
+  target: ReadonlyArray<PropertyKey>,
+  checked: boolean
+) => (checked && path.length < target.length ? false : related(path, target))
 
 // Union members Effect tried: an argument one member rejects is dropped when another member
 // accepted the value there, since the fix may lie elsewhere. A member that does not declare the

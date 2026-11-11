@@ -1647,6 +1647,17 @@ describe('number and boolean arguments sent as strings', () => {
       )
 
       expect(recursive).not.toContain('Argument "v"')
+
+      // The member's cross-field check ran after `a` parsed as a string.
+      const refined = yield* probe(
+        Schema.Union([
+          Schema.Struct({ a: Schema.Int }),
+          Schema.Struct({ a: Schema.String }).check(Schema.makeFilter(() => false))
+        ]),
+        { a: '5' }
+      )
+
+      expect(refined).not.toContain('Argument "a"')
     })
   )
 
