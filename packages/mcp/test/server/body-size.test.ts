@@ -1,7 +1,7 @@
-import { Effect, Option } from 'effect'
+import { Context, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import { type ToolCall, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeMcpToolServer, type McpServerTool } from '../../src/server'
 import { jsonObject, modernRequest } from './mcp-requests'
 
@@ -25,6 +25,51 @@ const echo: McpServerTool = {
     )
 }
 
+class Resource extends Context.Service<Resource, { readonly isOpen: () => boolean }>()(
+  'test/BodySizeResource'
+) {}
+
+// Closed when the caller's scope closes, as a host's request layer is.
+const ResourceLive = Layer.effect(
+  Resource,
+  Effect.gen(function* () {
+    const state = { open: true }
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        state.open = false
+      })
+    )
+
+    return Resource.of({ isOpen: () => state.open })
+  })
+)
+
+const scopedEcho = {
+  def: ToolDef.make({
+    name: 'echo',
+    description: 'Echo the text length once its resource is read',
+    parameters: { type: 'object', properties: { text: { type: 'string' } } }
+  }),
+  execute: (call: ToolCall) =>
+    Effect.gen(function* () {
+      const resource = yield* Resource
+
+      // Real async work, so the tool is still running when the HTTP response is produced.
+      yield* Effect.sleep('10 millis')
+
+      const length = Option.match(decodeText(call.params), {
+        onNone: () => 'no text',
+        onSome: ({ text: value }) => String(value.length)
+      })
+
+      return ToolResult.make({
+        toolCallId: call.id,
+        content: `${resource.isOpen() ? 'open' : 'closed'} ${length}`
+      })
+    })
+}
+
 // Over the SDK's default 4 MiB, under 5 MiB.
 const text = 'x'.repeat(4.5 * 1024 * 1024)
 
@@ -40,13 +85,14 @@ const modernCall = () =>
     params: jsonObject({ name: 'echo', arguments: { text } })
   })
 
-const legacyCall = () =>
+const legacyCall = (headers: Readonly<Record<string, string>> = {}) =>
   new Request('https://example.com/mcp', {
     method: 'POST',
     headers: {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
-      'mcp-protocol-version': '2025-06-18'
+      'mcp-protocol-version': '2025-06-18',
+      ...headers
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -83,13 +129,43 @@ describe('MCP server request body bound', () => {
     })
   )
 
+  // A 2025-era call may carry any `Mcp-Method`; era routing must read it under the same bound, or
+  // an oversized call would count as listen and its tool would run after the scope closed.
+  it.live('routes a 2025-era call claiming listen by the raised bound, running it in scope', () =>
+    Effect.gen(function* () {
+      const response = yield* makeMcpToolServer({
+        name: 'body-server',
+        version: '0',
+        tools: [scopedEcho],
+        maxRequestBodySize: 5 * 1024 * 1024
+      })
+        .handleHttpRequest(legacyCall({ 'mcp-method': 'subscriptions/listen' }))
+        .pipe(Effect.provide(ResourceLive), Effect.scoped)
+
+      expect(response.status).toBe(200)
+      expect(yield* Effect.promise(() => response.text())).toContain(`"text":"open ${text.length}"`)
+    })
+  )
+
   it.effect('answers an error naming an unusable `maxRequestBodySize`, running nothing', () =>
     Effect.gen(function* () {
-      for (const bound of [0, -1, Number.NaN, Infinity]) {
-        const { status, body } = yield* answer(server(bound), modernCall())
+      for (const [bound, request] of [0, -1, Number.NaN, Infinity].flatMap(value => [
+        [value, modernCall()] as const,
+        [value, legacyCall()] as const
+      ])) {
+        const { status, body } = yield* answer(server(bound), request)
 
         expect(status).toBe(500)
-        expect(body).toContain('maxRequestBodySize must be a positive number of bytes')
+        expect(JSON.parse(body)).toMatchObject({
+          error: {
+            code: -32603,
+            message: expect.stringContaining(
+              'maxRequestBodySize must be a positive number of bytes'
+            )
+          }
+        })
+        // The echo never ran: its answer would carry the text length.
+        expect(body).not.toContain(String(text.length))
       }
     })
   )
