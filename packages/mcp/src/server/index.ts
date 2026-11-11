@@ -1,6 +1,6 @@
 export * from '@modelcontextprotocol/server'
 
-export { approvalInputKey, declaresFormElicitation } from './approval.ts'
+export { approvalInputKey, declaresFormElicitation, staleApprovalMessage } from './approval.ts'
 
 export type {
   McpServerApprovalOptions,
