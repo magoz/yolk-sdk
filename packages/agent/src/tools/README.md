@@ -13,7 +13,7 @@ Generic host tool registration and resolution.
 - `ModelVisibleToolError` helpers for recoverable, model-visible tool failures.
 - Model-argument decoding through the advertised JSON codec (`null` on `Schema.optional` means
   absent) and `omitNullOptionalToolArguments`, which `resolveTools` applies to every call.
-- `withToolArgumentsErrorHint` for actionable unknown-key validation messages.
+- `withToolArgumentsErrorHint` for actionable unknown-key and wrong-type validation messages.
 - The durable tool-call ledger contract (`ToolLedgerStore`, `ToolLedgerEntry`) and an in-memory
   reference store, so a re-executed ledgered call (by default writes and `subagent`) never runs
   twice under the same ledger key.

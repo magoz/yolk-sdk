@@ -1476,3 +1476,89 @@ describe('unknown tool argument keys', () => {
     })
   )
 })
+
+describe('number and boolean arguments sent as strings', () => {
+  // The production shape: a union of operations whose optional counts advertise `integer | null`.
+  const Pages = Schema.Union([
+    Schema.Struct({
+      operation: Schema.Literal('list'),
+      offset: Schema.optional(
+        Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+      ),
+      limit: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)))
+    }),
+    Schema.Struct({
+      operation: Schema.Literal('read'),
+      id: Schema.String,
+      offset: Schema.optional(
+        Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+      ),
+      raw: Schema.optional(Schema.Boolean)
+    })
+  ])
+
+  it.effect('names the string and the literal to send instead', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(
+        call({ operation: 'read', id: 'x', offset: '120', raw: 'true' })
+      )
+
+      expect(result.isError).toBe(true)
+      expect(received).toEqual([])
+      expect(result.content).toContain(
+        'Argument "offset" must be a JSON number, but it was the string "120": send 120 without quotes.'
+      )
+      expect(result.content).toContain(
+        'Argument "raw" must be a JSON boolean, but it was the string "true": send true without quotes.'
+      )
+
+      // One line per argument, though `offset` fails in both union members.
+      expect(String(result.content).split('Argument "offset"')).toHaveLength(2)
+    })
+  )
+
+  it.effect('names a non-numeric string without inventing a literal', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const short = yield* toolSet.execute(call({ operation: 'list', limit: 'all' }))
+
+      expect(short.content).toContain(
+        'Argument "limit" must be a JSON number, but it was the string "all".'
+      )
+
+      const long = yield* toolSet.execute(call({ operation: 'list', limit: 'x'.repeat(80) }))
+
+      expect(long.content).toContain('Argument "limit" must be a JSON number, but it was a string.')
+      expect(long.content).not.toContain('x'.repeat(41))
+    })
+  )
+
+  it.effect('adds nothing for a wrong value that is not a string', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(call({ operation: 'list', limit: 0 }))
+
+      expect(result.isError).toBe(true)
+      expect(result.content).not.toContain('Argument "limit"')
+    })
+  )
+
+  it.effect('decodes real numbers as before', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(call({ operation: 'list', offset: 120, limit: 20 }))
+
+      expect(result.isError).toBeFalsy()
+      expect(received).toEqual([{ operation: 'list', offset: 120, limit: 20 }])
+    })
+  )
+})
