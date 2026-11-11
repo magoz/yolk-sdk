@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.134
+
+### Patch Changes
+
+- dc74275: Advance in lockstep with `@yolk-sdk/agent`, whose tool argument validation errors now name a number or boolean the model sent as a JSON string, with the literal to send instead. The tools of `@yolk-sdk/connectors`, `@yolk-sdk/knowledge`, `@yolk-sdk/sandbox` and `@yolk-sdk/files` already append that hint, so their errors gain the line. These packages have no direct changes in this release.
+- Updated dependencies [21fd3fe]
+  - @yolk-sdk/agent@0.1.0-canary.134
+
 ## 0.1.0-canary.133
 
 ### Patch Changes
