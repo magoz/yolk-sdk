@@ -1,5 +1,13 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.130
+
+### Patch Changes
+
+- 6a6354a: A direct tool of `makeMcpToolServer` now refuses a call that answers an approval prompt (it carries a `requestState` or an answer under `approvalInputKey`) with the error result `staleApprovalMessage`, and runs nothing. Such a call answers a prompt from when the tool was an approval tool: a host that rebuilds its tools per request may have changed the tool's policy between the prompt and the answer, and neither a declined answer nor a replayed accept may then run as a plain call. New export: `staleApprovalMessage`.
+  - @yolk-sdk/agent@0.1.0-canary.130
+  - @yolk-sdk/conformance@0.1.0-canary.130
+
 ## 0.1.0-canary.129
 
 ### Minor Changes

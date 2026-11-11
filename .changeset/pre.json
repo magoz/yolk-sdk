@@ -221,6 +221,7 @@
     "mcp-sdk-2-4",
     "mcp-server-approvals",
     "mcp-server-complete-exchange",
+    "mcp-stale-approval",
     "microsoft-conformance-cases",
     "microsoft-host-file-download",
     "microsoft-outlook-connector",
