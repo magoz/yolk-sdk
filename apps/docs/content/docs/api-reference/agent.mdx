@@ -736,6 +736,12 @@ failed check (`invalid_stream_json`, `invalid_stream_chunk`, `invalid_reasoning`
 `invalid_response_body`, `missing_choices`). Streamed failures also carry `provider.stream`
 diagnostics. The codes are fixed literals, never upstream values, so hosts can log and persist them.
 
+Every provider turns a returned tool call into an `LLMToolCall` by decoding protocol `ToolCall`, whose
+`id` and `name` are non-empty trimmed strings. A malformed call (for example an empty name) fails as
+the provider's own typed non-retryable `LLMError` (`invalid_response`; Chat Completions adds
+`providerCode: 'invalid_tool_call'`), never a defect, so loop retries, host fallback models and host
+failure handling still apply.
+
 Claude lowering (`toAnthropicClaudeRequestBody` / `makeAnthropicClaudeProviderLayer`) requires
 `ToolDef.parameters` and `ToolCall.params` to decode as `Schema.Json`. Non-JSON fails non-retryable
 `LLMError` `provider_error`. Protocol `ToolDef.parameters` admits a `ToolJsonSchema` representation
