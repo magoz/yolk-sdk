@@ -1606,6 +1606,50 @@ describe('number and boolean arguments sent as strings', () => {
     })
   )
 
+  it.effect('keeps the alternatives of a nested union', () =>
+    Effect.gen(function* () {
+      // The second member's nested union takes `value` as a string in one of its alternatives.
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ nested: Schema.Struct({ value: Schema.Int }) }),
+          Schema.Struct({
+            nested: Schema.Union([
+              Schema.Struct({ value: Schema.String, enabled: Schema.Boolean }),
+              Schema.Struct({ value: Schema.Boolean })
+            ])
+          })
+        ]),
+        { nested: { value: '120', enabled: 'true' } }
+      )
+
+      expect(content).not.toContain('Argument "nested.value"')
+      expect(content).toContain('Argument "nested.enabled" must be a JSON boolean')
+    })
+  )
+
+  it.effect('names no type where another member takes a constrained string', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ a: Schema.Int }),
+          Schema.Struct({ a: Schema.String.check(Schema.isMinLength(3)), b: Schema.String })
+        ]),
+        { a: '5' }
+      )
+
+      expect(content).not.toContain('Argument "a"')
+
+      const recursive = yield* probe(
+        Schema.Struct({
+          v: Schema.Union([Schema.Int, Schema.suspend(() => Schema.NonEmptyString)])
+        }),
+        { v: '' }
+      )
+
+      expect(recursive).not.toContain('Argument "v"')
+    })
+  )
+
   it.effect('merges the kinds union members accept at one argument', () =>
     Effect.gen(function* () {
       const content = yield* probe(
@@ -1670,6 +1714,17 @@ describe('number and boolean arguments sent as strings', () => {
       expect(content).toContain('Argument "filter.limit" must be a JSON number')
       expect(content).toContain('Argument "ids.1" must be a JSON number')
       expect(content).toContain('send 7 without quotes')
+
+      // A literal outside the set would only fail again.
+      const outside = yield* probe(
+        Schema.Struct({ size: Schema.Literals([1, 2]), strict: Schema.Literal(true) }),
+        { size: '3', strict: 'false' }
+      )
+
+      expect(outside).toContain('Argument "size" must be a JSON number, but it was the string "3".')
+      expect(outside).toContain(
+        'Argument "strict" must be a JSON boolean, but it was the string "false".'
+      )
     })
   )
 
@@ -1686,7 +1741,7 @@ describe('number and boolean arguments sent as strings', () => {
         expect(yield* probe(Count, { count: sent })).toContain(`send ${literal} without quotes.`)
       }
 
-      for (const sent of ['0x10', '1.', 'Infinity', '12abc', '1e400']) {
+      for (const sent of ['0x10', '1.', 'Infinity', '12abc', '1e400', `0.${'0'.repeat(100)}1`]) {
         const content = yield* probe(Count, { count: sent })
 
         expect(content, sent).toContain('Argument "count" must be a JSON number')
@@ -1725,6 +1780,17 @@ describe('number and boolean arguments sent as strings', () => {
           )
         }
       })
+    })
+  )
+
+  it.effect('caps the lines', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(Schema.Struct({ ids: Schema.Array(Schema.Int) }), {
+        ids: Array.from({ length: 21 }, (_, index) => String(index))
+      })
+
+      expect(content.split('must be a JSON number')).toHaveLength(21)
+      expect(content).toContain('1 more number or boolean argument was sent as a string.')
     })
   )
 })

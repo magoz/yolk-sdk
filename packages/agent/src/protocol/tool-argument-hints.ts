@@ -31,108 +31,138 @@ export const recordToolArgumentsInput = (error: Schema.SchemaError, input: unkno
 
 type ScalarKind = 'number' | 'boolean'
 
-// What a schema accepts on its wire (encoded) side: number/boolean kinds, and which strings
-// (`any`, or only these literals).
+// Values of one JSON type a schema takes: `any`, or only these literals (none when empty).
+type Values<T> = 'any' | ReadonlyArray<T>
+
+// What a schema accepts on its wire (encoded) side.
 type Accepted = {
-  readonly kinds: ReadonlyArray<ScalarKind>
-  readonly strings: 'any' | ReadonlyArray<string>
+  readonly numbers: Values<number>
+  readonly booleans: Values<boolean>
+  readonly strings: Values<string>
 }
 
 type WrongTypeArgument = { readonly path: ReadonlyArray<PropertyKey> } & Accepted
+
+const none: Accepted = { numbers: [], booleans: [], strings: [] }
+
+const takes = <T>(values: Values<T>) => values === 'any' || values.length > 0
+
+const takesValue = <T>(values: Values<T>, value: T) => values === 'any' || values.includes(value)
+
+const kindsOf = (accepted: Accepted): ReadonlyArray<ScalarKind> => {
+  const kinds: Array<ScalarKind> = []
+
+  if (takes(accepted.numbers)) kinds.push('number')
+
+  if (takes(accepted.booleans)) kinds.push('boolean')
+
+  return kinds
+}
 
 // The JSON codec of a bare `Schema.Number` adds these string literals; they do not make a quoted
 // number valid.
 const nonFiniteLiterals: ReadonlySet<string> = new Set(['NaN', 'Infinity', '-Infinity'])
 
-const acceptedOnWire = (ast: SchemaAST.AST): Accepted => {
-  if (SchemaAST.isNumber(ast)) return { kinds: ['number'], strings: [] }
+const mergeValues = <T>(all: ReadonlyArray<Values<T>>): Values<T> =>
+  all.some(values => values === 'any')
+    ? 'any'
+    : Array.from(new Set(all.flatMap(values => (values === 'any' ? [] : values))))
 
-  if (SchemaAST.isBoolean(ast)) return { kinds: ['boolean'], strings: [] }
+const mergeAccepted = (all: ReadonlyArray<Accepted>): Accepted => ({
+  numbers: mergeValues(all.map(accepted => accepted.numbers)),
+  booleans: mergeValues(all.map(accepted => accepted.booleans)),
+  strings: mergeValues(all.map(accepted => accepted.strings))
+})
 
-  if (SchemaAST.isString(ast) || SchemaAST.isTemplateLiteral(ast)) {
-    return { kinds: [], strings: 'any' }
-  }
+const acceptedLiterals = (literals: ReadonlyArray<unknown>): Accepted => ({
+  numbers: literals.filter(Predicate.isNumber),
+  booleans: literals.filter(Predicate.isBoolean),
+  strings: literals.filter(Predicate.isString).filter(text => !nonFiniteLiterals.has(text))
+})
+
+// Schemas this walk cannot read (unknown, opaque declarations) may take any string.
+const acceptedOnWire = (ast: SchemaAST.AST, seen: ReadonlySet<SchemaAST.AST>): Accepted => {
+  if (SchemaAST.isNumber(ast)) return { ...none, numbers: 'any' }
+
+  if (SchemaAST.isBoolean(ast)) return { ...none, booleans: 'any' }
+
+  if (SchemaAST.isString(ast) || SchemaAST.isTemplateLiteral(ast))
+    return { ...none, strings: 'any' }
 
   if (SchemaAST.isLiteral(ast)) return acceptedLiterals([ast.literal])
 
   if (SchemaAST.isEnum(ast)) return acceptedLiterals(ast.enums.map(([, value]) => value))
 
-  if (SchemaAST.isUnion(ast)) return mergeAccepted(ast.types.map(acceptedOnWire))
-
-  return { kinds: [], strings: [] }
-}
-
-const acceptedLiterals = (literals: ReadonlyArray<unknown>): Accepted => {
-  const kinds: Array<ScalarKind> = []
-
-  if (literals.some(Predicate.isNumber)) kinds.push('number')
-
-  if (literals.some(Predicate.isBoolean)) kinds.push('boolean')
-
-  return {
-    kinds,
-    strings: literals.filter(Predicate.isString).filter(text => !nonFiniteLiterals.has(text))
+  if (SchemaAST.isUnion(ast)) {
+    return mergeAccepted(ast.types.map(member => acceptedOnWire(member, seen)))
   }
+
+  if (SchemaAST.isSuspend(ast)) {
+    return seen.has(ast)
+      ? none
+      : acceptedOnWire(SchemaAST.toEncoded(ast.thunk()), new Set([...seen, ast]))
+  }
+
+  if (SchemaAST.isUnknown(ast) || SchemaAST.isAny(ast) || SchemaAST.isDeclaration(ast)) {
+    return { numbers: 'any', booleans: 'any', strings: 'any' }
+  }
+
+  return none
 }
 
-const mergeAccepted = (all: ReadonlyArray<Accepted>): Accepted => ({
-  kinds: Array.from(new Set(all.flatMap(accepted => accepted.kinds))),
-  strings: all.some(accepted => accepted.strings === 'any')
-    ? 'any'
-    : Array.from(
-        new Set(all.flatMap(accepted => (accepted.strings === 'any' ? [] : accepted.strings)))
-      )
-})
-
+// An entry wherever the failing schema takes a number, boolean or string on the wire: string
+// entries suppress a line when union members are merged at one path.
 const acceptedAt = (ast: SchemaAST.AST, path: ReadonlyArray<PropertyKey>) => {
-  const accepted = acceptedOnWire(SchemaAST.toEncoded(ast))
+  const accepted = acceptedOnWire(SchemaAST.toEncoded(ast), new Set())
 
-  return accepted.kinds.length > 0 && path.length > 0 ? [{ path, ...accepted }] : []
+  return path.length > 0 && (kindsOf(accepted).length > 0 || takes(accepted.strings))
+    ? [{ path, ...accepted }]
+    : []
 }
 
 const startsWith = (path: ReadonlyArray<PropertyKey>, prefix: ReadonlyArray<PropertyKey>) =>
   prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment)
 
-// Every path where an issue failed, so a union member can tell whether it accepted a value.
-const issuePathsIn = (
-  issue: SchemaIssue.Issue,
-  path: ReadonlyArray<PropertyKey>
-): ReadonlyArray<ReadonlyArray<PropertyKey>> =>
-  Match.value(issue).pipe(
-    Match.tag('Pointer', pointer => issuePathsIn(pointer.issue, [...path, ...pointer.path])),
-    Match.tag('Filter', 'Encoding', wrapper => issuePathsIn(wrapper.issue, path)),
-    Match.tag('Composite', 'AnyOf', group => {
-      const paths = group.issues.flatMap(child => issuePathsIn(child, path))
+const related = (path: ReadonlyArray<PropertyKey>, target: ReadonlyArray<PropertyKey>) =>
+  startsWith(target, path) || startsWith(path, target)
 
-      return paths.length === 0 ? [path] : paths
-    }),
-    Match.orElse(() => [path])
+// Whether an issue rejects the value at `target`: a failure on, above or under it. A union rejects
+// it only when every member it tried does, so a nested union keeps its alternatives.
+const rejects = (
+  issue: SchemaIssue.Issue,
+  path: ReadonlyArray<PropertyKey>,
+  target: ReadonlyArray<PropertyKey>
+): boolean =>
+  Match.value(issue).pipe(
+    Match.tag('Pointer', pointer => rejects(pointer.issue, [...path, ...pointer.path], target)),
+    Match.tag('Filter', 'Encoding', wrapper => rejects(wrapper.issue, path, target)),
+    Match.tag('Composite', group =>
+      group.issues.length === 0
+        ? related(path, target)
+        : group.issues.some(child => rejects(child, path, target))
+    ),
+    Match.tag('AnyOf', group =>
+      group.issues.length === 0
+        ? related(path, target)
+        : group.issues.every(child => rejects(child, path, target))
+    ),
+    Match.orElse(() => related(path, target))
   )
 
 // Union members Effect tried: an argument one member rejects is dropped when another member
-// accepted the value there (it failed nowhere on or under that path), since the fix may lie
-// elsewhere. A member that does not declare the key reports it as unexpected, which counts as a
-// failure there.
+// accepted the value there, since the fix may lie elsewhere. A member that does not declare the
+// key reports it as unexpected, which counts as a rejection.
 const unionWrongTypeArguments = (
   issues: ReadonlyArray<SchemaIssue.Issue>,
   path: ReadonlyArray<PropertyKey>
-): ReadonlyArray<WrongTypeArgument> => {
-  if (issues.length <= 1) return issues.flatMap(child => wrongTypeArgumentsIn(child, path))
-
-  const failures = issues.map(child => issuePathsIn(child, path))
-
-  return issues.flatMap((child, index) =>
+): ReadonlyArray<WrongTypeArgument> =>
+  issues.flatMap((child, index) =>
     wrongTypeArgumentsIn(child, path).filter(argument =>
-      failures.every(
-        (paths, other) =>
-          other === index ||
-          paths.some(
-            failed => startsWith(argument.path, failed) || startsWith(failed, argument.path)
-          )
+      issues.every(
+        (other, otherIndex) => otherIndex === index || rejects(other, path, argument.path)
       )
     )
   )
-}
 
 // Failures at a schema that takes a number or boolean on the wire; the input decides whether a
 // string sat there.
@@ -149,9 +179,10 @@ const wrongTypeArgumentsIn = (
       ...acceptedAt(wrapper.ast, path),
       ...wrongTypeArgumentsIn(wrapper.issue, path)
     ]),
-    Match.tag('Composite', group =>
-      group.issues.flatMap(child => wrongTypeArgumentsIn(child, path))
-    ),
+    Match.tag('Composite', group => [
+      ...acceptedAt(group.ast, path),
+      ...group.issues.flatMap(child => wrongTypeArgumentsIn(child, path))
+    ]),
     Match.tag('AnyOf', group => [
       ...acceptedAt(group.ast, path),
       ...unionWrongTypeArguments(group.issues, path)
@@ -177,34 +208,40 @@ const argumentAt = (input: unknown, path: ReadonlyArray<PropertyKey>): unknown =
   return current
 }
 
+// Keeps the hint one short line even when a model sends long text where a number belongs.
+const maxQuotedValueCharacters = 40
+
 const jsonNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 
-// A string that is exactly a JSON literal of one of the kinds, sent back unquoted as written.
-const literalFor = (text: string, kinds: ReadonlyArray<ScalarKind>): string | undefined => {
+// A string that is exactly a JSON literal the schema takes, sent back unquoted as written.
+const literalFor = (text: string, accepted: Accepted): string | undefined => {
   const trimmed = text.trim()
 
-  if (kinds.includes('boolean') && (trimmed === 'true' || trimmed === 'false')) return trimmed
+  if (trimmed === 'true' || trimmed === 'false') {
+    return takesValue(accepted.booleans, trimmed === 'true') ? trimmed : undefined
+  }
 
-  return kinds.includes('number') && jsonNumber.test(trimmed) && Number.isFinite(Number(trimmed))
+  return trimmed.length <= maxQuotedValueCharacters &&
+    jsonNumber.test(trimmed) &&
+    Number.isFinite(Number(trimmed)) &&
+    takesValue(accepted.numbers, Number(trimmed))
     ? trimmed
     : undefined
 }
 
-// Keeps the hint one short line even when a model sends long text where a number belongs.
-const maxQuotedValueCharacters = 40
-
 const maxWrongTypeLines = 20
 
 const formatWrongType = (argument: WrongTypeArgument, value: string): string | undefined => {
-  const literal = literalFor(value, argument.kinds)
+  const kinds = kindsOf(argument)
+  const literal = literalFor(value, argument)
 
   // A string the schema may take (`String`), or one of its string literals ("all"): only a
   // quoted literal is certainly the mistake.
-  if (argument.strings === 'any' || argument.strings.includes(value)) return undefined
+  if (kinds.length === 0 || takesValue(argument.strings, value)) return undefined
 
-  if (argument.strings.length > 0 && literal === undefined) return undefined
+  if (takes(argument.strings) && literal === undefined) return undefined
 
-  const expected = argument.kinds.map(kind => `a JSON ${kind}`).join(' or ')
+  const expected = kinds.map(kind => `a JSON ${kind}`).join(' or ')
 
   const received =
     value.length > maxQuotedValueCharacters ? `a string` : `the string ${JSON.stringify(value)}`
@@ -240,7 +277,9 @@ const wrongTypeHints = (error: Schema.SchemaError): ReadonlyArray<string> => {
   return lines.length > maxWrongTypeLines
     ? [
         ...lines.slice(0, maxWrongTypeLines),
-        `${lines.length - maxWrongTypeLines} more number or boolean arguments were sent as strings.`
+        lines.length - maxWrongTypeLines === 1
+          ? '1 more number or boolean argument was sent as a string.'
+          : `${lines.length - maxWrongTypeLines} more number or boolean arguments were sent as strings.`
       ]
     : lines
 }
