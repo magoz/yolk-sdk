@@ -7,7 +7,9 @@ import {
   isLegacyRequest,
   originValidationResponse,
   type CallToolResult as SdkCallToolResult,
-  type ContentBlock as SdkContentBlock
+  type ContentBlock as SdkContentBlock,
+  type InputRequiredResult,
+  type ServerContext
 } from '@modelcontextprotocol/server'
 import {
   ToolCall,
@@ -20,6 +22,15 @@ import {
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
+import {
+  approvalRound,
+  McpApprovalRound,
+  makeMcpServerApprovals,
+  type McpServerApprovalOptions,
+  type McpServerApprovals,
+  type McpServerToolApprovalPolicy,
+  type McpServerToolApproved
+} from './approval.ts'
 import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {
@@ -245,26 +256,100 @@ const mcpErrorResult = (message: string): SdkCallToolResult => ({
   isError: true
 })
 
-const mcpResultFromExecutionResult = (
-  result: ToolResult | ReturnType<typeof mcpErrorResult>
-): SdkCallToolResult => (result instanceof ToolResult ? mcpResultFromToolResult(result) : result)
+/** The MCP tool annotation hints a server lists with a tool (`ToolAnnotations`). */
+export type McpServerToolAnnotations = {
+  readonly title?: string
+  readonly readOnlyHint?: boolean
+  readonly destructiveHint?: boolean
+  readonly idempotentHint?: boolean
+  readonly openWorldHint?: boolean
+}
 
-const toolListItem = (tool: ToolDef) => ({
-  name: tool.name,
-  description: tool.description,
-  inputSchema: tool.parameters
-})
+type ToolListItem = {
+  readonly name: string
+  readonly description: string
+  readonly inputSchema: ToolDef['parameters']
+  title?: string
+  annotations?: McpServerToolAnnotations
+}
 
-export type McpServerTool<R = never> = {
+const toolListItem = <R>(tool: McpServerTool<R>) => {
+  const item: ToolListItem = {
+    name: tool.def.name,
+    description: tool.def.description,
+    inputSchema: tool.def.parameters
+  }
+
+  if (tool.annotations !== undefined) {
+    item.annotations = tool.annotations
+
+    if (tool.annotations.title !== undefined) item.title = tool.annotations.title
+  }
+
+  return item
+}
+
+type SdkToolConfig = {
+  readonly description: string
+  readonly inputSchema: ReturnType<typeof fromJsonSchema>
+  title?: string
+  annotations?: McpServerToolAnnotations
+}
+
+const sdkToolConfig = <R>(tool: McpServerTool<R>, schema: Parameters<typeof fromJsonSchema>[0]) => {
+  const config: SdkToolConfig = {
+    description: tool.def.description,
+    inputSchema: fromJsonSchema(schema)
+  }
+
+  if (tool.annotations !== undefined) {
+    config.annotations = tool.annotations
+
+    if (tool.annotations.title !== undefined) config.title = tool.annotations.title
+  }
+
+  return config
+}
+
+/** A tool that runs on every call. */
+export type McpServerDirectTool<R = never> = {
   readonly def: ToolDef
+  readonly annotations?: McpServerToolAnnotations
+  readonly approval?: undefined
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, McpServerError, R>
 }
 
+/**
+ * A tool that runs only after the user approves the call through MCP form elicitation
+ * (`approval.ts`): offered to `2026-07-28` requests only, when the server has `approvals`.
+ * `execute` receives the approval; key once-only execution on its `approvalId`.
+ */
+export type McpServerApprovalTool<R = never> = {
+  readonly def: ToolDef
+  readonly annotations?: McpServerToolAnnotations
+  readonly approval: McpServerToolApprovalPolicy<R>
+  readonly execute: (
+    call: ToolCall,
+    approved: McpServerToolApproved
+  ) => Effect.Effect<ToolResult, McpServerError, R>
+}
+
+export type McpServerTool<R = never> = McpServerDirectTool<R> | McpServerApprovalTool<R>
+
+/** Why the header-less JSON path refuses an approval tool: it cannot carry an elicitation. */
+const approvalUnavailableResult = () =>
+  mcpErrorResult(
+    'This tool runs only after the user approves it, which needs an MCP 2026-07-28 client ' +
+      'with form elicitation. Nothing ran.'
+  )
+
+type ToolCallOutcome = ToolResult | SdkCallToolResult | InputRequiredResult
+
 /** Runs one tool call's Effect as a fiber of the current HTTP request. */
 type ToolRunner<R> = (
-  effect: Effect.Effect<ToolResult | SdkCallToolResult, never, R>,
+  effect: Effect.Effect<ToolCallOutcome, never, R>,
   options: Effect.RunOptions
-) => Promise<ToolResult | SdkCallToolResult>
+) => Promise<ToolCallOutcome>
 
 export type McpToolServer<R = never> = {
   readonly handleLine: (line: string) => Effect.Effect<Option.Option<string>, McpServerError, R>
@@ -355,12 +440,54 @@ const completedExchange = (response: Response, listen: boolean) => {
   )
 }
 
+/** One call of a tool through the SDK: a direct tool runs; an approval tool runs one round. */
+const sdkToolCall = <R>(input: {
+  readonly tool: McpServerTool<R>
+  readonly approvals: McpServerApprovals
+  readonly call: ToolCall
+  readonly ctx: ServerContext
+}): Effect.Effect<ToolCallOutcome, McpServerError, R> => {
+  const { tool, call } = input
+
+  if (tool.approval === undefined) return tool.execute(call)
+
+  const execute = tool.execute
+
+  return approvalRound({
+    approvals: input.approvals,
+    policy: tool.approval,
+    call,
+    ctx: input.ctx
+  }).pipe(
+    Effect.flatMap((round): Effect.Effect<ToolCallOutcome, McpServerError, R> =>
+      McpApprovalRound.$match(round, {
+        Run: ({ approved }) => execute(call, approved),
+        Answer: ({ message }) => Effect.succeed(mcpErrorResult(message)),
+        Ask: ({ result }) => Effect.succeed(result)
+      })
+    )
+  )
+}
+
+/**
+ * A Yolk tool set as an MCP server. Approval tools (`McpServerApprovalTool`) are offered only on
+ * `2026-07-28` requests and only with `approvals`: the stateless 2025-era serving cannot carry an
+ * elicitation (the client's answer would reach another instance), and the header-less JSON path
+ * neither lists nor runs them.
+ */
 export const makeMcpToolServer = <R>(input: {
   readonly name: string
   readonly version: string
   readonly tools: ReadonlyArray<McpServerTool<R>>
   readonly allowedOriginHostnames?: ReadonlyArray<string>
+  readonly approvals?: McpServerApprovalOptions
 }): McpToolServer<R> => {
+  const approvals = makeMcpServerApprovals(input.name, input.approvals)
+
+  const offersApprovals = !Predicate.isTagged(approvals, 'Unconfigured')
+
+  const directTools = input.tools.filter(tool => tool.approval === undefined)
+
   const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
 
   const toolInputSchemas = input.tools.map(tool => ({
@@ -370,7 +497,7 @@ export const makeMcpToolServer = <R>(input: {
     ).pipe(Option.getOrElse(() => ({ type: 'object', additionalProperties: true })))
   }))
 
-  const makeSdkServer = (runTool: ToolRunner<R>) => {
+  const makeSdkServer = (runTool: ToolRunner<R>, era: 'legacy' | 'modern') => {
     const server = new SdkMcpServer(
       { name: input.name, version: input.version },
       {
@@ -382,35 +509,31 @@ export const makeMcpToolServer = <R>(input: {
     )
 
     for (const { schema, tool } of toolInputSchemas) {
-      server.registerTool(
-        tool.def.name,
-        {
-          description: tool.def.description,
-          inputSchema: fromJsonSchema(schema)
-        },
-        async (args, sdkContext) => {
-          // The SDK aborts this signal when the client cancels the request (on Streamable HTTP,
-          // by closing its response stream), so the tool stops instead of running unobserved.
-          const result = await runTool(
-            tool
-              .execute(
-                ToolCall.make({
-                  id: String(sdkContext.mcpReq.id),
-                  name: tool.def.name,
-                  params: args
-                })
-              )
-              .pipe(
-                Effect.catch(error =>
-                  Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
-                )
-              ),
-            { signal: sdkContext.mcpReq.signal }
-          )
+      if (tool.approval !== undefined && (era === 'legacy' || !offersApprovals)) continue
 
-          return mcpResultFromExecutionResult(result)
-        }
-      )
+      server.registerTool(tool.def.name, sdkToolConfig(tool, schema), async (args, sdkContext) => {
+        // The SDK aborts this signal when the client cancels the request (on Streamable HTTP,
+        // by closing its response stream), so the tool stops instead of running unobserved.
+        const result = await runTool(
+          sdkToolCall({
+            tool,
+            approvals,
+            call: ToolCall.make({
+              id: String(sdkContext.mcpReq.id),
+              name: tool.def.name,
+              params: args
+            }),
+            ctx: sdkContext
+          }).pipe(
+            Effect.catch(error =>
+              Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
+            )
+          ),
+          { signal: sdkContext.mcpReq.signal }
+        )
+
+        return result instanceof ToolResult ? mcpResultFromToolResult(result) : result
+      })
     }
 
     return server
@@ -426,9 +549,7 @@ export const makeMcpToolServer = <R>(input: {
             serverInfo: { name: input.name, version: input.version }
           })
         case 'tools/list':
-          return successResponse(request.id, {
-            tools: input.tools.map(tool => toolListItem(tool.def))
-          })
+          return successResponse(request.id, { tools: directTools.map(toolListItem) })
         case 'tools/call': {
           const params = yield* decodeCallToolParams(request.params).pipe(
             Effect.mapError(
@@ -446,6 +567,10 @@ export const makeMcpToolServer = <R>(input: {
             return errorResponse(request.id, -32_602, `Unknown tool: ${params.name}`)
           }
 
+          if (tool.value.approval !== undefined) {
+            return successResponse(request.id, approvalUnavailableResult())
+          }
+
           const result = yield* tool.value
             .execute(
               ToolCall.make({
@@ -460,7 +585,10 @@ export const makeMcpToolServer = <R>(input: {
               )
             )
 
-          return successResponse(request.id, mcpResultFromExecutionResult(result))
+          return successResponse(
+            request.id,
+            result instanceof ToolResult ? mcpResultFromToolResult(result) : result
+          )
         }
 
         default:
@@ -554,7 +682,7 @@ export const makeMcpToolServer = <R>(input: {
       // still running (a cancelled call's finalizers), so no tool outlives the caller's scope.
       const toolFibers = yield* FiberSet.make()
       const runTool = yield* FiberSet.runtimePromise(toolFibers)<R>()
-      const handler = createMcpHandler(() => makeSdkServer(runTool))
+      const handler = createMcpHandler(context => makeSdkServer(runTool, context.era))
 
       return yield* Effect.acquireUseRelease(
         Effect.succeed(handler),

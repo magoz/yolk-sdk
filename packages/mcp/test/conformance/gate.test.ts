@@ -267,7 +267,9 @@ describe('the fail-closed call gate refuses, with zero forwarded tools/call', ()
     })
   )
 
-  it.effect('an incomplete multi-page listing (a repeated cursor stops the SDK early)', () =>
+  // Since client 2.2.0 the SDK follows a repeated cursor and stops only on a repeated page: the
+  // same items under the same `nextCursor` (#2886). The listing still ends with a cursor.
+  it.effect('an incomplete multi-page listing (a repeated page stops the SDK early)', () =>
     Effect.gen(function* () {
       const [discover, firstList, callExchange] = modernCallExchanges(
         { name: 'yolk_conformance_absent', arguments: {} },
@@ -282,7 +284,7 @@ describe('the fail-closed call gate refuses, with zero forwarded tools/call', ()
         ...modernListingExchanges(),
         discover,
         { ...firstList, response: listAnswer(0, [mcpConformanceSyntheticReadTool], 'cursor-1') },
-        { ...firstList, response: listAnswer(1, [mcpConformanceSyntheticWriteTool], 'cursor-1') },
+        { ...firstList, response: listAnswer(1, [mcpConformanceSyntheticReadTool], 'cursor-1') },
         callExchange
       ])
 

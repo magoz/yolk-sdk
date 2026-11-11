@@ -33,6 +33,26 @@
 - Decode wire JSON in two steps: JSON string → unknown (`Schema.fromJsonString(Schema.Unknown)`) → protocol schema.
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server `handleHttpRequest` lets no tool call outlive its Effect: tools run with the caller's context, whose scope (a host's request layer) closes on return, and the SDK fills SSE answers after returning the `Response` (always for 2025-era requests; for `2026-07-28` once a handler sends a related message). So an SSE answer is read to its end and re-answered with the same status, headers and events (a read failure answers 500 `-32603`), and tool calls run as fibers of a request-scoped `FiberSet` that interrupts and awaits any still running (a cancelled call's finalizers) before return. Only `subscriptions/listen` is returned unread: it runs no tool, and its stream ends only when the per-request handler closes, so it answers the acknowledgement plus `complete`. It is identified by `Mcp-Method` plus the SDK's own era routing (`isLegacyRequest` on a body clone, only when that header claims listen): the SDK checks `Mcp-Method` against the body only on requests it routes as modern, and a 2025-era request may carry any. Only the SDK branch is scoped; the header-less JSON path keeps the caller's scope. Tool Effects run with the SDK's `ctx.mcpReq.signal`, so cancelling an SDK-routed request (on Streamable HTTP, a closed response stream) interrupts the tool; the header-less JSON path runs tools inside the caller's Effect, whose interruption the host owns. Tests: `test/server/server.test.ts` (scoped resource incl. a 2025-era request claiming listen, cancellation finalizers in both eras, listen, 202 notification).
+- Server approvals (`src/server/approval.ts`): `McpServerTool` is `McpServerDirectTool |
+McpServerApprovalTool` (discriminated by `approval`). An approval tool answers its first call
+  with an MRTR `InputRequiredResult` (one form elicitation under `approvalInputKey`, an empty
+  `requestedSchema`) and a `requestState` minted by the SDK's `createRequestStateCodec` (HMAC,
+  TTL, bound to the server `name`, the host's `approvals.principal` and the method; payload: tool,
+  `mcpArgumentsDigest` of the arguments, a fresh `approvalId`). The handler verifies the state
+  itself (no `ServerOptions.requestState.verify` hook), so a state that fails verification,
+  belongs to another tool or arguments, or comes without a decision asks again instead of
+  answering the SDK's `-32602`; only `accept` runs `execute(call, { approvalId })`. Once-only is
+  the host's (key it on `approvalId`). Requests that do not declare form elicitation in their
+  envelope get a tool error result (not `-32021`: the agent reads why nothing ran) before
+  anything is signed. Approval tools are registered only on `modern` factory instances with
+  `approvals`: the stateless legacy fallback builds one instance per request and holds no
+  initialize-declared capabilities, and `completedExchange` buffers SSE answers to their end, so
+  the SDK's legacy shim could never deliver a pushed elicitation. The header-less JSON path
+  neither lists nor runs them. Configuration that cannot be used (a key under 32 bytes, an empty
+  principal, a non-positive or fractional `ttlSeconds`) leaves them listed, answering an error
+  result that names the field. Tool `annotations` (and `title`) are listed on both paths. Tests:
+  `test/server/approval.test.ts` (including SDK-routed 2025-era requests and the real resumable
+  client against this server).
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
 - Typed results (ADR 0013): `mcpToolToToolDef` declares `mcpToolOutputSchema` as `ToolDef.outputSchema` (never sent to providers): `{ value, files }`, `value` the server's plain-JSON-object `outputSchema` (its `$defs`/`definitions` hoisted to the root; a colliding or `$id` schema, or any other value, leaves it unknown), `files` `Array<FileRef | FileUnavailable>` with the protocol's `toolFileJsonSchemaDefinitions`. `callRemoteMcpServerTool`, `callLocalMcpServerTool` and resumable calls return `mcpToolResult`: `value` is `structuredContent`, else the text of `text` blocks and embedded text resources in order, parsed once when it is one JSON object or array (`mcpTextValue`), else the text, `null` without text (`resource_link` blocks are references and never enter it); blobs, images and audio are captured as file fields through `CallMcpServerToolInput.fileCapture` when given, else the ambient `ToolFileCapture` (calls outside `resolveTools`, such as HITL resumes, need the option); `ToolResult.files` comes from `toolOutputFiles`. Model content: a result without file blocks is byte-identical to `toolCallResultToToolResult`; otherwise each block in order, images and audio as the server sent them (never renamed or MIME-normalized) followed by their `File` part once stored. Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder` (`McpToolOutput`; `resolveTools` requires a decoder whenever `def.outputSchema` is set). The local client (`callLocalMcpServerTool`, `withLocalSession`) keeps one stdio session but awaits each answer before the next request: `initialize` and `tools/list` first, the listing decoded and the validator compiled, and only then `tools/call`, so nothing that fails before dispatch fails after a write ran. An `initialize` error, or a listed `outputSchema` that is not a usable MCP output schema (`isSpecType.Tool` over the tool's name, a fixed object input schema and the listed `outputSchema`; the input schema is never validated) or does not compile, fails before any `tools/call` (`validation`, the remote message). A broken session before the listing's answer (a stdout line that is no JSON-RPC response, an early end) fails the call with no `tools/call` sent. A listing answered with an error or an undecodable result, or one that lacks the tool (first page only), never fails the call: it runs without output validation and logs a value-free warning. The test fake reads stdin on its own detached fiber, so `sent` also holds requests written just before the client failed. Only a real `structuredContent` mismatch against a usable schema fails after the call, with the remote rules (`assertStructuredOutput`). Tests drive a scripted stdio fake that answers what it reads on stdin and assert the requests sent (`test/client/client.test.ts`, "local calls list before they call"). Error results stay `toolCallResultToToolResult`. Tests: `test/client/typed-result.test.ts`, `test/client/client.test.ts` (local validation), `test/client/elicitation.test.ts` (resumed blobs with and without `fileCapture`).
@@ -121,9 +141,10 @@
   test. The sixteen fixtures are copied as data into `packages/emulators/src/mcp/recordings.ts`
   (the `@yolk-sdk/emulators/mcp` emulator); `packages/emulators/test/mcp.test.ts` fails when the
   copy drifts, so a fixture change updates that copy in the same change.
-- Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.0.0; trust the SDK source
+- Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
-  - `listTools(undefined)` follows `nextCursor` (stopping silently on a repeated cursor), lists
+  - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
+    repeated page: the same items under the same `nextCursor`, not added twice), lists
     nothing without `capabilities.tools`, and on modern connections drops tools with an invalid
     `x-mcp-header`. Listed and resolved tools must correspond one to one.
   - The tool schema keeps only the five annotation keys and keeps `outputSchema` as received; the
@@ -137,7 +158,7 @@
     abort.
   - SSE: the cases and the gate never mirror the SSE grammar by hand. They use the same
     `eventsource-parser` the client resolves: a direct dependency declared with the client's own
-    range (`^3.0.0`), so a package manager resolves one copy; in this repository a parity test in
+    range (`^3.0.8`), so a package manager resolves one copy; in this repository a parity test in
     `gate.test.ts` verifies the two resolve the same copy (3.0.8). Residual: a consumer whose
     package manager does not dedupe could install two copies, which the parity test cannot see.
     `makeEffectFetch` buffers the whole body, so `TextDecoderStream` gets one byte chunk and emits

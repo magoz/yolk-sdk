@@ -82,7 +82,7 @@ const ListedJsonSchema = Schema.Record(Schema.String, Schema.Json)
  * The paused tool's listed definition: name, input and output schemas. A resume calls with it
  * instead of listing again (input schema for `x-mcp-header` mirroring, output schema for the
  * structured-output check). These are the only definition fields the pinned official client reads
- * from `toolDefinition` (`@modelcontextprotocol/client` 2.0.0); `annotations`, `_meta` and
+ * from `toolDefinition` (`@modelcontextprotocol/client` 2.4.0); `annotations`, `_meta` and
  * `execution` (task support, which its 2026-07-28 codec deletes from listings) are not carried.
  */
 export class McpPausedTool extends Schema.Class<McpPausedTool>('McpPausedTool')({

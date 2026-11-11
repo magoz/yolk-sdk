@@ -475,7 +475,7 @@ describe('mcp.tools.list', () => {
     ).toHaveLength(2)
   })
 
-  it.effect('fails on a repeated cursor (the SDK stops paging silently)', () =>
+  it.effect('fails on a repeated cursor (the SDK pages on past it)', () =>
     Effect.gen(function* () {
       const drill = withResponse(
         mcpToolsListModernFixture,

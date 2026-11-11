@@ -1,6 +1,6 @@
 /**
  * The MCP header value encoding the pinned SDK applies to `mcp-name` and `Mcp-Param-*` headers
- * (`encodeMcpParamValue` in `@modelcontextprotocol/client` 2.0.0, not exported there): a value that
+ * (`encodeMcpParamValue` in `@modelcontextprotocol/client` 2.4.0, not exported there): a value that
  * is already a safe plain-ASCII field value passes through unchanged; anything else (an empty
  * value, a byte outside 0x20 to 0x7E other than tab, leading or trailing whitespace, or a value
  * already shaped like the sentinel) becomes `=?base64?<base64 of UTF-8>?=`.

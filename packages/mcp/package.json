@@ -121,12 +121,12 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/core": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/conformance": "workspace:^",
     "effect": "catalog:",
-    "eventsource-parser": "^3.0.0"
+    "eventsource-parser": "^3.0.8"
   }
 }
