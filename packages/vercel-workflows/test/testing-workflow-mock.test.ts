@@ -13,9 +13,13 @@ describe('TestWorkflowWorld under a mocked workflow module', () => {
   it('still stores step errors with the installed runtime', async () => {
     const world = new TestWorkflowWorld()
 
+    class TaggedFailure extends Error {
+      readonly _tag = 'TaggedFailure'
+    }
+
     const step = Object.assign(
       async (): Promise<never> => {
-        throw new Error('permanent')
+        throw new TaggedFailure('permanent')
       },
       { maxRetries: 0 }
     )
@@ -23,10 +27,14 @@ describe('TestWorkflowWorld under a mocked workflow module', () => {
     const { runId } = world.start(async () => world.runStep(step, [], 'doomed'), [])
     await world.settled(runId)
 
-    expect(world.inspect(runId).runError).toMatchObject({
+    const { runError } = world.inspect(runId)
+
+    expect(runError).toMatchObject({
       name: 'FatalError',
       message: 'Step "doomed" failed after 0 retries: permanent',
       cause: { message: 'permanent' }
     })
+    // Read back from storage: the tag is gone.
+    expect(runError instanceof Error ? runError.cause : undefined).not.toHaveProperty('_tag')
   })
 })

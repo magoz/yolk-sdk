@@ -184,7 +184,7 @@ const loadStepErrorSerializer = (): Promise<StepErrorSerializer> =>
     ).catch((cause: unknown) => {
       // Workflow 5 captures Node `URL` intrinsics when its serializer loads; jsdom's fail.
       throw new Error(
-        'TestWorkflowWorld cannot load the workflow step-error serializer; step execution needs the Node test environment, not jsdom',
+        'TestWorkflowWorld cannot load the workflow step-error serializer (under jsdom: step execution needs the Node test environment)',
         { cause }
       )
     })
@@ -248,6 +248,9 @@ const promoteAbortError = (value: unknown) => {
     value.name !== 'AbortError' ||
     !Predicate.hasProperty(value, 'message') ||
     !Predicate.isString(value.message) ||
+    (Predicate.hasProperty(value, 'stack') &&
+      value.stack !== undefined &&
+      !Predicate.isString(value.stack)) ||
     isFatalStepError(value)
   ) {
     return value
@@ -287,7 +290,7 @@ const platformErrorMessage = async (value: unknown): Promise<string> => {
   if (Predicate.isString(value)) return value
 
   try {
-    return JSON.stringify(value) ?? String(value)
+    return String(JSON.stringify(value))
   } catch {
     return String(value)
   }
@@ -481,6 +484,8 @@ export class TestWorkflowWorld {
       }
 
       const effective = promoteAbortError(thrown)
+      // Normalized on every attempt, as the platform does: a thrown thenable is awaited here.
+      const message = await platformErrorMessage(effective)
       const fatal = isFatalStepError(effective)
       const exhausted = !fatal && attempt >= maxAttempts
 
@@ -490,7 +495,7 @@ export class TestWorkflowWorld {
         ? effective
         : exhausted
           ? platformFatalError(
-              `Step "${stepName}" failed after ${maxRetries} ${retriesLabel(maxRetries)}: ${await platformErrorMessage(effective)}`,
+              `Step "${stepName}" failed after ${maxRetries} ${retriesLabel(maxRetries)}: ${message}`,
               thrown
             )
           : thrown

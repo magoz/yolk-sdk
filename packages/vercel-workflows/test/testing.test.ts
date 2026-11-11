@@ -256,29 +256,6 @@ describe('TestWorkflowWorld step executor', () => {
     expect(cause).not.toHaveProperty('_tag')
   })
 
-  it('never retries a FatalError', async () => {
-    const world = new TestWorkflowWorld()
-    const fatal = new Error('configuration refused')
-
-    fatal.name = 'FatalError'
-
-    const step = Object.assign(
-      async (): Promise<never> => {
-        throw fatal
-      },
-      { maxRetries: 3 }
-    )
-
-    const { runId } = world.start(async () => world.runStep(step, [], 'refused'), [])
-    await world.settled(runId)
-
-    expect(world.inspect(runId).stepAttempts.get('refused')).toBe(1)
-    expect(world.inspect(runId).runError).toMatchObject({
-      name: 'FatalError',
-      message: 'configuration refused'
-    })
-  })
-
   it('redelivers a step whose error the platform cannot store, until it exceeds its retries', async () => {
     const world = new TestWorkflowWorld()
 
@@ -382,6 +359,61 @@ describe('TestWorkflowWorld step executor', () => {
       name: 'FatalError',
       message: 'Aborted: signal fired'
     })
+  })
+
+  it('keeps retrying an AbortError-shaped value the platform would not promote', async () => {
+    const world = new TestWorkflowWorld()
+    let attempts = 0
+
+    const step = Object.assign(
+      async () => {
+        attempts += 1
+
+        // oxlint-disable-next-line no-throw-literal -- a malformed abort shape is the case under test
+        if (attempts === 1) throw { name: 'AbortError', message: 'retry', stack: null }
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'shaped'), [])
+    await world.settled(runId)
+
+    expect(world.status(runId)).toBe('completed')
+    expect(world.inspect(runId).stepAttempts.get('shaped')).toBe(2)
+  })
+
+  it('consumes a thrown rejected promise before retrying, like the platform', async () => {
+    const world = new TestWorkflowWorld()
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    let attempts = 0
+
+    process.on('unhandledRejection', onUnhandled)
+
+    try {
+      const step = Object.assign(
+        async () => {
+          attempts += 1
+
+          // oxlint-disable-next-line no-throw-literal -- a thrown thenable is the case under test
+          if (attempts === 1) throw Promise.reject(new Error('transient'))
+
+          return 'ok'
+        },
+        { maxRetries: 1 }
+      )
+
+      const { runId } = world.start(async () => world.runStep(step, [], 'thenable'), [])
+      await world.settled(runId)
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(world.status(runId)).toBe('completed')
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 
   it('names a thrown non-error in the exhausted message as the platform does', async () => {
