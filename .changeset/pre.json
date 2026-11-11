@@ -218,6 +218,8 @@
     "linkedin-search-conformance-cases",
     "mcp-conformance-cases",
     "mcp-form-elicitation",
+    "mcp-sdk-2-4",
+    "mcp-server-approvals",
     "mcp-server-complete-exchange",
     "microsoft-conformance-cases",
     "microsoft-host-file-download",
