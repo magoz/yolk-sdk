@@ -41,32 +41,32 @@
   entry), whose `prompt` returns a type-erased `McpServerPrompt` (`run` decodes the answer with the
   form's Effect Schema, untrusted, then executes). Forms have only boolean, single-choice and
   multi-select (at least one value) fields, all required and built only by `form.ts`
-  (`mcpFormFieldBrand`); `mcpServerForm({})` omits `required`, keeping the approval wire shape. A
-  form built from bad data (repeated option values, defaults the field would not accept, `maxItems`
-  out of range, a `__proto__` key) carries `problems`, and `elicitedPrompt` fails with them before
-  anything is signed. An asking tool answers its first call with an MRTR `InputRequiredResult` (one
-  form elicitation under `approvalInputKey`) and a `requestState` minted by the SDK's
-  `createRequestStateCodec` (HMAC, TTL, bound to the server `name`, the host's `approvals.principal`
-  and the method; payload: tool, `mcpArgumentsDigest` of the arguments, `formDigest` of the prompt's
-  message and form, a fresh `elicitationId`). The prompt is rebuilt every round (so hosts must build
-  it deterministically, decline and cancel rounds included): an accept whose `formDigest` no longer
-  matches answers `changedPromptMessage`, and a prompt over `mcpServerMaxPromptBytes` answers
-  `oversizedPromptMessage` (never cut). The handler verifies the state itself (no
-  `ServerOptions.requestState.verify` hook), so a state that fails verification, belongs to another
-  tool or arguments, comes without a decision, or accepts an answer that does not fit the form asks
-  again instead of answering the SDK's `-32602`; only a fitting `accept` runs `execute` (approval
-  tools get `{ approvalId }`, the `elicitationId`). Once-only is the host's (key it on that id). A
-  direct tool refuses a call that carries a `requestState` or an `approvalInputKey` answer
-  (`answersApproval`, `staleApprovalMessage`): the host's policy changed since the prompt, and a
-  decline or replayed accept must not run as a plain call. Requests that do not declare form
-  elicitation in their envelope get a tool error result (not `-32021`: the agent reads why nothing
-  ran) before anything is signed. Asking tools are registered only on `modern` factory instances
-  with `approvals`: the stateless legacy fallback builds one instance per request and holds no
-  initialize-declared capabilities, and `completedExchange` buffers SSE answers to their end, so the
-  SDK's legacy shim could never deliver a pushed elicitation. The header-less JSON path neither
-  lists nor runs them. Configuration that cannot be used (a key under 32 bytes, an empty principal,
-  a non-positive or fractional `ttlSeconds`) leaves them listed, answering an error result that
-  names the field. Tool `annotations` (and `title`) are listed on both paths. Tests:
+  (`mcpFormFieldBrand`, forms `mcpServerFormBrand`); `mcpServerForm({})` omits `required`, keeping
+  the approval wire shape. A form built from bad data (repeated option values, defaults the field
+  would not accept, `maxItems` out of range, a `__proto__` key) carries `problems`, and
+  `elicitedPrompt` fails with them before anything is signed. An asking tool answers its first call
+  with an MRTR `InputRequiredResult` (one form elicitation under `approvalInputKey`) and a
+  `requestState` minted by the SDK's `createRequestStateCodec` (HMAC, TTL, bound to the server
+  `name`, the host's `approvals.principal` and the method; payload: tool, `mcpArgumentsDigest` of
+  the arguments, `formDigest` of the prompt's message and form, a fresh `elicitationId`). The prompt
+  is rebuilt every round (so hosts must build it deterministically, decline and cancel rounds
+  included): an accept whose `formDigest` no longer matches answers `changedPromptMessage`, and a
+  prompt over `mcpServerMaxPromptBytes` answers `oversizedPromptMessage` (never cut). The handler
+  verifies the state itself (no `ServerOptions.requestState.verify` hook), so a state that fails
+  verification, belongs to another tool or arguments, comes without a decision, or accepts an answer
+  that does not fit the form asks again instead of answering the SDK's `-32602`; only a fitting
+  `accept` runs `execute` (approval tools get `{ approvalId }`, the `elicitationId`). Once-only is
+  the host's (key it on that id). A direct tool refuses a call that carries a `requestState` or an
+  `approvalInputKey` answer (`answersApproval`, `staleApprovalMessage`): the host's policy changed
+  since the prompt, and a decline or replayed accept must not run as a plain call. Requests that do
+  not declare form elicitation in their envelope get a tool error result (not `-32021`: the agent
+  reads why nothing ran) before anything is signed. Asking tools are registered only on `modern`
+  factory instances with `approvals`: the stateless legacy fallback builds one instance per request
+  and holds no initialize-declared capabilities, and `completedExchange` buffers SSE answers to
+  their end, so the SDK's legacy shim could never deliver a pushed elicitation. The header-less JSON
+  path neither lists nor runs them. Configuration that cannot be used (a key under 32 bytes, an
+  empty principal, a non-positive or fractional `ttlSeconds`) leaves them listed, answering an error
+  result that names the field. Tool `annotations` (and `title`) are listed on both paths. Tests:
   `test/server/approval.test.ts` (including SDK-routed 2025-era requests and the real resumable
   client against this server) and `test/server/elicitation.test.ts` (forms, changed and oversized
   prompts, a multi-select through the resumable client); shared builders in

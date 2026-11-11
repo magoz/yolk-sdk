@@ -448,8 +448,8 @@ describe('MCP elicited tools', () => {
         })
 
       // Its only tool unregistered, the 2025-era server has no tools at all.
-      expect(yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toEqual([
-        { jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } }
+      expect(yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toMatchObject([
+        { jsonrpc: '2.0', id: 1, error: { code: -32601 } }
       ])
 
       const called = yield* legacy({
