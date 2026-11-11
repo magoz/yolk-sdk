@@ -1,5 +1,13 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.131
+
+### Patch Changes
+
+- 6e9bd7d: Advance in lockstep with `@yolk-sdk/agent`, whose providers now fail a returned tool call with an empty or padded id or name as a typed `invalid_response` instead of a defect, and `@yolk-sdk/vercel-workflows`, whose `TestWorkflowWorld` now stores step errors through the platform's serializer and records unstorable ones in `inspect(runId).unstorableStepErrors`. These packages have no direct changes in this release.
+- Updated dependencies [59c9747]
+  - @yolk-sdk/agent@0.1.0-canary.131
+
 ## 0.1.0-canary.130
 
 ### Patch Changes
