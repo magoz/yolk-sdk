@@ -1,19 +1,24 @@
 /**
- * User approval of a tool call through MCP form elicitation over multi round-trip requests (MRTR,
- * protocol `2026-07-28`). The server never blocks on a human and keeps no state: the first
- * `tools/call` of an approval tool answers an `InputRequiredResult` holding one form elicitation
- * (`approvalInputKey`, no fields: the client offers accept, decline and cancel) and a signed
- * `requestState`; the client re-sends the same call with the user's decision and that state, and
- * only an `accept` bound to the same principal, tool and arguments runs the tool.
+ * Asking the user before a tool call runs, through MCP form elicitation over multi round-trip
+ * requests (MRTR, protocol `2026-07-28`). The server never blocks on a human and keeps no state:
+ * the first `tools/call` of an asking tool answers an `InputRequiredResult` holding one form
+ * elicitation (`approvalInputKey`) and a signed `requestState`; the client re-sends the same call
+ * with the user's answer and that state. An approval tool asks with an empty form (the client
+ * offers accept, decline and cancel); an elicited tool asks with a form (`form.ts`) whose answer
+ * is decoded as untrusted input. Only an `accept` bound to the same principal, tool, arguments and
+ * prompt, with an answer that fits the form, runs the call.
  *
  * `requestState` is HMAC-signed by the SDK's `createRequestStateCodec`, expires (`ttlSeconds`),
  * and is bound to the host's authenticated principal and the `tools/call` method; its payload
- * names the tool, the canonical digest of the arguments (`mcpArgumentsDigest`) and a fresh
- * `approvalId`. A state that fails verification, belongs to another call, or arrives without a
- * decision is never an approval: the server asks again with a new state. The server does not
- * enforce once-only execution: an accepted state replays until it expires, so the host keys
- * once-only execution on `approvalId` (MRTR: signing, binding and expiry "do not by themselves
- * guarantee single-use"; the server must enforce it).
+ * names the tool, the canonical digest of the arguments (`mcpArgumentsDigest`), the digest of the
+ * prompt shown (message and form) and a fresh `elicitationId` (an approval tool's `approvalId`).
+ * The prompt is rebuilt on the answering round: an accept of a prompt that changed meanwhile is
+ * refused (`changedPromptMessage`), and a prompt over `mcpServerMaxPromptBytes` is refused, never
+ * cut. A state that fails verification, belongs to another call, or arrives without a decision
+ * or with an answer that does not fit is never an approval: the server asks again with a new
+ * state. The server does not enforce once-only execution: an accepted state replays until it
+ * expires, so the host keys once-only execution on `elicitationId` (MRTR: signing, binding and
+ * expiry "do not by themselves guarantee single-use"; the server must enforce it).
  *
  * A request that does not declare form elicitation gets a tool error result, not the SDK's
  * `-32021` missing-capability error: the calling agent reads why nothing ran, and nothing is
@@ -25,16 +30,20 @@ import * as Schema from 'effect/Schema'
 import {
   CLIENT_CAPABILITIES_META_KEY,
   createRequestStateCodec,
+  type ElicitRequestFormParams,
   inputRequired,
   type InputRequiredResult,
   type RequestStateCodec,
   type ServerContext
 } from '@modelcontextprotocol/server'
-import type { ToolCall } from '@yolk-sdk/agent/protocol'
+import type { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import { mcpArgumentsDigest } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
+import { mcpServerForm, type McpServerForm } from './form.ts'
 
-/** Host configuration for approval tools. Without it no approval tool is offered. */
+/**
+ * Host configuration for asking tools (approval and elicited tools). Without it none is offered.
+ */
 export type McpServerApprovalOptions = {
   /**
    * The HMAC key that signs `requestState`: at least 32 bytes (a string is UTF-8 encoded), the same
@@ -60,20 +69,55 @@ export type McpServerToolApprovalPolicy<R = never> = {
   readonly message: (call: ToolCall) => Effect.Effect<string, McpServerError, R>
 }
 
+/** What an elicited tool asks for one call: `message` as plain text, and the form to fill. */
+export type McpServerElicitation<A> = {
+  readonly message: string
+  readonly form: McpServerForm<A>
+}
+
+/**
+ * A call the user answered: `answer` is decoded with the form's schema; `elicitationId` is unique
+ * per prompt, so key once-only execution on it.
+ */
+export type McpServerToolAnswered<A> = {
+  readonly elicitationId: string
+  readonly answer: A
+}
+
+/**
+ * The prompt an asking tool shows for one call, its answer type erased: `run` decodes an accepted
+ * answer and returns the call's execution, or none when the answer does not fit the form.
+ */
+export type McpServerPrompt<R = never> = {
+  readonly message: string
+  readonly requestedSchema: ElicitRequestFormParams['requestedSchema']
+  readonly run: (
+    content: unknown,
+    elicitationId: string
+  ) => Option.Option<Effect.Effect<ToolResult, McpServerError, R>>
+}
+
+/** Most UTF-8 bytes of a prompt's message plus form (JSON): a larger prompt is refused, never cut. */
+export const mcpServerMaxPromptBytes = 65_536
+
 /** The `inputRequests` key of the approval elicitation. */
 export const approvalInputKey = 'approval'
 
 const ApprovalState = Schema.Struct({
   tool: Schema.String,
   argumentsDigest: Schema.String,
-  approvalId: Schema.String
+  formDigest: Schema.String,
+  elicitationId: Schema.String
 })
 
 type ApprovalState = typeof ApprovalState.Type
 
 const decodeApprovalState = Schema.decodeUnknownOption(ApprovalState)
 
-const ElicitDecision = Schema.Struct({ action: Schema.Literals(['accept', 'decline', 'cancel']) })
+const ElicitDecision = Schema.Struct({
+  action: Schema.Literals(['accept', 'decline', 'cancel']),
+  content: Schema.optional(Schema.Unknown)
+})
 
 const decodeDecision = Schema.decodeUnknownOption(ElicitDecision)
 
@@ -156,16 +200,21 @@ export const makeMcpServerApprovals = (
   })
 }
 
-/** The outcome of one approval round: run the tool, answer with a result, or ask the user. */
-export type McpApprovalRound = Data.TaggedEnum<{
-  Run: { readonly approved: McpServerToolApproved }
+/** The outcome of one asking round: run the call, answer with a result, or ask the user. */
+export type McpApprovalRound<R> = Data.TaggedEnum<{
+  Run: { readonly execution: Effect.Effect<ToolResult, McpServerError, R> }
   Answer: { readonly message: string }
   Ask: { readonly result: InputRequiredResult }
 }>
 
-export const McpApprovalRound = Data.taggedEnum<McpApprovalRound>()
+interface McpApprovalRoundDefinition extends Data.TaggedEnum.WithGenerics<1> {
+  readonly taggedEnum: McpApprovalRound<this['A']>
+}
 
-const answer = (message: string) => Effect.succeed(McpApprovalRound.Answer({ message }))
+export const McpApprovalRound = Data.taggedEnum<McpApprovalRoundDefinition>()
+
+const answer = (message: string): Effect.Effect<McpApprovalRound<never>> =>
+  Effect.succeed(McpApprovalRound.Answer({ message }))
 
 const decodeRawState = Schema.decodeUnknownOption(Schema.String)
 
@@ -197,21 +246,74 @@ export const staleApprovalMessage =
   'This call answers an approval prompt this tool no longer shows. Nothing ran; call it again.'
 
 const decisionOf = (ctx: ServerContext) =>
-  Option.map(
-    decodeDecision(ctx.mcpReq.inputResponses?.[approvalInputKey]),
-    decision => decision.action
+  decodeDecision(ctx.mcpReq.inputResponses?.[approvalInputKey])
+
+/** The answer to an accepted prompt whose message or form changed since the user saw it. */
+export const changedPromptMessage =
+  'This prompt changed since it was shown. Nothing ran; call it again.'
+
+/** The answer to a prompt too large to show (`mcpServerMaxPromptBytes`). */
+export const oversizedPromptMessage = 'This prompt is too large to show. Nothing ran.'
+
+const encoder = new TextEncoder()
+
+const promptBytes = (prompt: McpServerPrompt<unknown>) =>
+  encoder.encode(JSON.stringify({ message: prompt.message, form: prompt.requestedSchema })).length
+
+/** An approval tool's prompt: its policy's message and a plain accept/decline form. */
+export const approvalPrompt = <R>(input: {
+  readonly policy: McpServerToolApprovalPolicy<R>
+  readonly execute: (
+    call: ToolCall,
+    approved: McpServerToolApproved
+  ) => Effect.Effect<ToolResult, McpServerError, R>
+  readonly call: ToolCall
+}): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
+  elicitedPrompt({
+    elicit: call =>
+      Effect.map(input.policy.message(call), message => ({ message, form: mcpServerForm({}) })),
+    execute: (call, answered) => input.execute(call, { approvalId: answered.elicitationId }),
+    call: input.call
+  })
+
+/** An elicited tool's prompt for one call: its elicitation, with `run` decoding the answer. */
+export const elicitedPrompt = <A, R>(input: {
+  readonly elicit: (call: ToolCall) => Effect.Effect<McpServerElicitation<A>, McpServerError, R>
+  readonly execute: (
+    call: ToolCall,
+    answered: McpServerToolAnswered<A>
+  ) => Effect.Effect<ToolResult, McpServerError, R>
+  readonly call: ToolCall
+}): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
+  Effect.flatMap(input.elicit(input.call), elicitation =>
+    elicitation.form.problems.length > 0
+      ? Effect.fail(
+          new McpServerError({
+            message: `This form cannot be shown (${elicitation.form.problems.join('; ')}). Nothing ran.`,
+            cause: 'validation'
+          })
+        )
+      : Effect.succeed({
+          message: elicitation.message,
+          requestedSchema: elicitation.form.requestedSchema,
+          run: (content: unknown, elicitationId: string) =>
+            Option.map(elicitation.form.decode(content), answer =>
+              input.execute(input.call, { elicitationId, answer })
+            )
+        })
   )
 
 /**
- * One round of an approval tool's call. Never runs the tool without an `accept` answering a
- * verified state for the same tool and arguments; every other path answers or asks again.
+ * One round of an asking tool's call (an approval or elicited tool). Never runs the call without an
+ * `accept` answering a verified state for the same tool, arguments and prompt, with an answer that
+ * fits the form; every other path answers or asks again.
  */
 export const approvalRound = <R>(input: {
   readonly approvals: McpServerApprovals
-  readonly policy: McpServerToolApprovalPolicy<R>
+  readonly prompt: (call: ToolCall) => Effect.Effect<McpServerPrompt<R>, McpServerError, R>
   readonly call: ToolCall
   readonly ctx: ServerContext
-}): Effect.Effect<McpApprovalRound, McpServerError, R> =>
+}): Effect.Effect<McpApprovalRound<R>, McpServerError, R> =>
   McpServerApprovals.$match(input.approvals, {
     Unconfigured: () =>
       answer("This tool needs the user's approval, which this server does not offer."),
@@ -223,10 +325,10 @@ export const approvalRound = <R>(input: {
 
 const configuredRound = <R>(input: {
   readonly codec: RequestStateCodec<ApprovalState>
-  readonly policy: McpServerToolApprovalPolicy<R>
+  readonly prompt: (call: ToolCall) => Effect.Effect<McpServerPrompt<R>, McpServerError, R>
   readonly call: ToolCall
   readonly ctx: ServerContext
-}): Effect.Effect<McpApprovalRound, McpServerError, R> =>
+}): Effect.Effect<McpApprovalRound<R>, McpServerError, R> =>
   Effect.gen(function* () {
     const { codec, call, ctx } = input
 
@@ -247,6 +349,24 @@ const configuredRound = <R>(input: {
       )
     )
 
+    // Built on every round: an accept is checked against the prompt as it is now.
+    const prompt = yield* input.prompt(call)
+
+    if (promptBytes(prompt) > mcpServerMaxPromptBytes) return yield* answer(oversizedPromptMessage)
+
+    const formDigest = yield* mcpArgumentsDigest({
+      message: prompt.message,
+      form: prompt.requestedSchema
+    }).pipe(
+      Effect.mapError(
+        error =>
+          new McpServerError({
+            message: `Invalid prompt: not JSON: ${error.message}`,
+            cause: 'protocol'
+          })
+      )
+    )
+
     const state = Option.filter(
       yield* verifiedState(codec, ctx),
       current => current.tool === call.name && current.argumentsDigest === argumentsDigest
@@ -255,9 +375,20 @@ const configuredRound = <R>(input: {
     const decision = Option.flatMap(state, () => decisionOf(ctx))
 
     if (Option.isSome(state) && Option.isSome(decision)) {
-      switch (decision.value) {
-        case 'accept':
-          return McpApprovalRound.Run({ approved: { approvalId: state.value.approvalId } })
+      switch (decision.value.action) {
+        case 'accept': {
+          if (state.value.formDigest !== formDigest) return yield* answer(changedPromptMessage)
+
+          const execution = prompt.run(decision.value.content ?? {}, state.value.elicitationId)
+
+          // An answer that does not fit the form is no answer: ask again.
+          if (Option.isSome(execution)) {
+            return McpApprovalRound.Run({ execution: execution.value })
+          }
+
+          break
+        }
+
         case 'decline':
           return yield* answer('The user declined this call. Nothing ran.')
         case 'cancel':
@@ -265,11 +396,12 @@ const configuredRound = <R>(input: {
       }
     }
 
-    const message = yield* input.policy.message(call)
-
     const requestState = yield* Effect.tryPromise({
       try: () =>
-        codec.mint({ tool: call.name, argumentsDigest, approvalId: crypto.randomUUID() }, ctx),
+        codec.mint(
+          { tool: call.name, argumentsDigest, formDigest, elicitationId: crypto.randomUUID() },
+          ctx
+        ),
       catch: error =>
         new McpServerError({
           message: `Could not sign the approval request: ${error instanceof Error ? error.message : String(error)}`,
@@ -282,8 +414,8 @@ const configuredRound = <R>(input: {
         inputRequests: {
           [approvalInputKey]: inputRequired.elicit({
             mode: 'form',
-            message,
-            requestedSchema: { type: 'object', properties: {} }
+            message: prompt.message,
+            requestedSchema: prompt.requestedSchema
           })
         },
         requestState

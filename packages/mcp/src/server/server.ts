@@ -24,11 +24,16 @@ import {
 import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import {
   answersApproval,
+  approvalPrompt,
   approvalRound,
+  elicitedPrompt,
   McpApprovalRound,
   makeMcpServerApprovals,
   type McpServerApprovalOptions,
   type McpServerApprovals,
+  type McpServerElicitation,
+  type McpServerPrompt,
+  type McpServerToolAnswered,
   type McpServerToolApprovalPolicy,
   type McpServerToolApproved,
   staleApprovalMessage
@@ -318,6 +323,7 @@ export type McpServerDirectTool<R = never> = {
   readonly def: ToolDef
   readonly annotations?: McpServerToolAnnotations
   readonly approval?: undefined
+  readonly prompt?: undefined
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, McpServerError, R>
 }
 
@@ -330,15 +336,59 @@ export type McpServerApprovalTool<R = never> = {
   readonly def: ToolDef
   readonly annotations?: McpServerToolAnnotations
   readonly approval: McpServerToolApprovalPolicy<R>
+  readonly prompt?: undefined
   readonly execute: (
     call: ToolCall,
     approved: McpServerToolApproved
   ) => Effect.Effect<ToolResult, McpServerError, R>
 }
 
-export type McpServerTool<R = never> = McpServerDirectTool<R> | McpServerApprovalTool<R>
+/** Set only by `makeMcpServerElicitedTool`, so every elicited tool decodes its answer. */
+export const mcpElicitedToolBrand: unique symbol = Symbol('@yolk-sdk/mcp/McpServerElicitedTool')
 
-/** Why the header-less JSON path refuses an approval tool: it cannot carry an elicitation. */
+/**
+ * A tool that asks the user a form before it runs (MCP form elicitation, `approval.ts`; offered
+ * like an approval tool). Its answer type is erased behind `prompt`: build one only with
+ * `makeMcpServerElicitedTool`, which decodes the user's answer with the form before `execute`.
+ */
+export type McpServerElicitedTool<R = never> = {
+  readonly def: ToolDef
+  readonly annotations?: McpServerToolAnnotations
+  readonly approval?: undefined
+  readonly [mcpElicitedToolBrand]: true
+  readonly prompt: (call: ToolCall) => Effect.Effect<McpServerPrompt<R>, McpServerError, R>
+}
+
+/**
+ * An elicited tool: `elicit` builds the message and form for a call (again on the answering round,
+ * so an answer to a prompt that has since changed never runs); `execute` gets the decoded answer
+ * and the prompt's `elicitationId` (key once-only execution on it).
+ */
+export const makeMcpServerElicitedTool = <A, R = never>(input: {
+  readonly def: ToolDef
+  readonly annotations?: McpServerToolAnnotations
+  readonly elicit: (call: ToolCall) => Effect.Effect<McpServerElicitation<A>, McpServerError, R>
+  readonly execute: (
+    call: ToolCall,
+    answered: McpServerToolAnswered<A>
+  ) => Effect.Effect<ToolResult, McpServerError, R>
+}): McpServerElicitedTool<R> => {
+  const prompt = (call: ToolCall) =>
+    elicitedPrompt({ elicit: input.elicit, execute: input.execute, call })
+
+  return input.annotations === undefined
+    ? { def: input.def, [mcpElicitedToolBrand]: true, prompt }
+    : { def: input.def, annotations: input.annotations, [mcpElicitedToolBrand]: true, prompt }
+}
+
+export type McpServerTool<R = never> =
+  | McpServerDirectTool<R>
+  | McpServerApprovalTool<R>
+  | McpServerElicitedTool<R>
+
+const asks = <R>(tool: McpServerTool<R>) => tool.approval !== undefined || tool.prompt !== undefined
+
+/** Why the header-less JSON path refuses an asking tool: it cannot carry an elicitation. */
 const approvalUnavailableResult = () =>
   mcpErrorResult(
     'This tool runs only after the user approves it, which needs an MCP 2026-07-28 client ' +
@@ -442,7 +492,15 @@ const completedExchange = (response: Response, listen: boolean) => {
   )
 }
 
-/** One call of a tool through the SDK: a direct tool runs; an approval tool runs one round. */
+const promptOf = <R>(tool: McpServerApprovalTool<R> | McpServerElicitedTool<R>) => {
+  if (tool.approval === undefined) return tool.prompt
+
+  const { approval, execute } = tool
+
+  return (call: ToolCall) => approvalPrompt({ policy: approval, execute, call })
+}
+
+/** One call of a tool through the SDK: a direct tool runs; an asking tool runs one round. */
 const sdkToolCall = <R>(input: {
   readonly tool: McpServerTool<R>
   readonly approvals: McpServerApprovals
@@ -451,23 +509,23 @@ const sdkToolCall = <R>(input: {
 }): Effect.Effect<ToolCallOutcome, McpServerError, R> => {
   const { tool, call } = input
 
-  if (tool.approval === undefined) {
+  if (tool.approval === undefined && tool.prompt === undefined) {
     return answersApproval(input.ctx)
       ? Effect.succeed(mcpErrorResult(staleApprovalMessage))
       : tool.execute(call)
   }
 
-  const execute = tool.execute
+  const prompt = promptOf(tool)
 
   return approvalRound({
     approvals: input.approvals,
-    policy: tool.approval,
+    prompt,
     call,
     ctx: input.ctx
   }).pipe(
     Effect.flatMap((round): Effect.Effect<ToolCallOutcome, McpServerError, R> =>
       McpApprovalRound.$match(round, {
-        Run: ({ approved }) => execute(call, approved),
+        Run: ({ execution }) => execution,
         Answer: ({ message }) => Effect.succeed(mcpErrorResult(message)),
         Ask: ({ result }) => Effect.succeed(result)
       })
@@ -476,10 +534,10 @@ const sdkToolCall = <R>(input: {
 }
 
 /**
- * A Yolk tool set as an MCP server. Approval tools (`McpServerApprovalTool`) are offered only on
- * `2026-07-28` requests and only with `approvals`: the stateless 2025-era serving cannot carry an
- * elicitation (the client's answer would reach another instance), and the header-less JSON path
- * neither lists nor runs them.
+ * A Yolk tool set as an MCP server. Asking tools (`McpServerApprovalTool`, `McpServerElicitedTool`)
+ * are offered only on `2026-07-28` requests and only with `approvals`: the stateless 2025-era
+ * serving cannot carry an elicitation (the client's answer would reach another instance), and the
+ * header-less JSON path neither lists nor runs them.
  */
 export const makeMcpToolServer = <R>(input: {
   readonly name: string
@@ -492,7 +550,7 @@ export const makeMcpToolServer = <R>(input: {
 
   const offersApprovals = !Predicate.isTagged(approvals, 'Unconfigured')
 
-  const directTools = input.tools.filter(tool => tool.approval === undefined)
+  const directTools = input.tools.filter(tool => !asks(tool))
 
   const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
 
@@ -515,7 +573,7 @@ export const makeMcpToolServer = <R>(input: {
     )
 
     for (const { schema, tool } of toolInputSchemas) {
-      if (tool.approval !== undefined && (era === 'legacy' || !offersApprovals)) continue
+      if (asks(tool) && (era === 'legacy' || !offersApprovals)) continue
 
       server.registerTool(tool.def.name, sdkToolConfig(tool, schema), async (args, sdkContext) => {
         // The SDK aborts this signal when the client cancels the request (on Streamable HTTP,
@@ -573,11 +631,13 @@ export const makeMcpToolServer = <R>(input: {
             return errorResponse(request.id, -32_602, `Unknown tool: ${params.name}`)
           }
 
-          if (tool.value.approval !== undefined) {
+          const found = tool.value
+
+          if (found.approval !== undefined || found.prompt !== undefined) {
             return successResponse(request.id, approvalUnavailableResult())
           }
 
-          const result = yield* tool.value
+          const result = yield* found
             .execute(
               ToolCall.make({
                 id: String(request.id),
