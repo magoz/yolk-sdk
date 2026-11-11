@@ -1,5 +1,11 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.133
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.133
+
 ## 0.1.0-canary.132
 
 ### Patch Changes
