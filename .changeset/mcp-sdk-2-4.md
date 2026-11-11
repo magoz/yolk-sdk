@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/mcp': patch
+---
+
+Upgrade the official MCP SDK (`@modelcontextprotocol/client`, `core` and `server`) from 2.0.0 to 2.4.0, and require `eventsource-parser` 3.0.8 or later (the range the 2.4.0 client declares). Behavior changes that reach Yolk hosts: request bodies on `createMcpHandler` are capped at 4 MiB and batches at 100 messages; the server converts tool schemas when it lists them instead of at registration, so a server built per request no longer converts every tool on every request; request id `0` is a real id; the HTTP client follows only same-origin redirects that keep the method (a remote server whose URL redirects to another origin now fails: configure the final URL); a listing without a cursor follows `nextCursor` until the server stops sending one, and ends only on a repeated page (same items and cursor), no longer on a repeated cursor; the bundled Ajv validator rejects a `$id` or `$ref` whose text before the first colon is not a valid URI scheme (`my_tool:output`), so a remote tool whose `outputSchema` uses one fails before its call.
