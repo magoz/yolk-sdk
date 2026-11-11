@@ -1476,3 +1476,332 @@ describe('unknown tool argument keys', () => {
     })
   )
 })
+
+describe('number and boolean arguments sent as strings', () => {
+  // The production shape: a union of operations whose optional counts advertise `integer | null`.
+  const Pages = Schema.Union([
+    Schema.Struct({
+      operation: Schema.Literal('list'),
+      offset: Schema.optional(
+        Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+      ),
+      limit: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)))
+    }),
+    Schema.Struct({
+      operation: Schema.Literal('read'),
+      id: Schema.String,
+      offset: Schema.optional(
+        Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+      ),
+      raw: Schema.optional(Schema.Boolean)
+    })
+  ])
+
+  it.effect('names the string and the literal to send instead', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(
+        call({ operation: 'read', id: 'x', offset: '120', raw: 'true' })
+      )
+
+      expect(result.isError).toBe(true)
+      expect(received).toEqual([])
+      expect(result.content).toContain(
+        'Argument "offset" must be a JSON number, but it was the string "120": send 120 without quotes.'
+      )
+      expect(result.content).toContain(
+        'Argument "raw" must be a JSON boolean, but it was the string "true": send true without quotes.'
+      )
+    })
+  )
+
+  it.effect('names a non-numeric string without inventing a literal', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const short = yield* toolSet.execute(call({ operation: 'list', limit: 'all' }))
+
+      expect(short.content).toContain(
+        'Argument "limit" must be a JSON number, but it was the string "all".'
+      )
+
+      const long = yield* toolSet.execute(call({ operation: 'list', limit: 'x'.repeat(80) }))
+
+      expect(long.content).toContain('Argument "limit" must be a JSON number, but it was a string.')
+      expect(long.content).not.toContain('x'.repeat(41))
+    })
+  )
+
+  it.effect('adds nothing for a wrong value that is not a string', () =>
+    Effect.gen(function* () {
+      const { tool } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(call({ operation: 'list', limit: 0 }))
+
+      expect(result.isError).toBe(true)
+      expect(result.content).not.toContain('Argument "limit"')
+    })
+  )
+
+  it.effect('decodes real numbers as before', () =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(Pages)
+      const toolSet = yield* resolveOne(tool)
+
+      const result = yield* toolSet.execute(call({ operation: 'list', offset: 120, limit: 20 }))
+
+      expect(result.isError).toBeFalsy()
+      expect(received).toEqual([{ operation: 'list', offset: 120, limit: 20 }])
+    })
+  )
+
+  const probe = (parameters: Parameters<typeof capturingTool>[0], params: unknown) =>
+    Effect.gen(function* () {
+      const { tool, received } = capturingTool(parameters)
+      const toolSet = yield* resolveOne(tool)
+      const result = yield* toolSet.execute(call(params))
+
+      expect(result.isError).toBe(true)
+      expect(received).toEqual([])
+
+      return String(result.content)
+    })
+
+  it.effect('reports an argument once when several union members reject it', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ a: Schema.Int }),
+          Schema.Struct({ a: Schema.Int, b: Schema.String })
+        ]),
+        { a: '5' }
+      )
+
+      expect(content).toContain(
+        'Argument "a" must be a JSON number, but it was the string "5": send 5 without quotes.'
+      )
+      expect(content.split('Argument "a"')).toHaveLength(2)
+    })
+  )
+
+  it.effect('names no type a union member accepted the string as', () =>
+    Effect.gen(function* () {
+      // The second member takes `value` as a string, so only `enabled` is certainly wrong.
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ value: Schema.Finite }),
+          Schema.Struct({ value: Schema.String, enabled: Schema.Boolean })
+        ]),
+        { value: '120', enabled: 'true' }
+      )
+
+      expect(content).not.toContain('Argument "value"')
+      expect(content).toContain(
+        'Argument "enabled" must be a JSON boolean, but it was the string "true": send true without quotes.'
+      )
+    })
+  )
+
+  it.effect('keeps the alternatives of a nested union', () =>
+    Effect.gen(function* () {
+      // The second member's nested union takes `value` as a string in one of its alternatives.
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ nested: Schema.Struct({ value: Schema.Int }) }),
+          Schema.Struct({
+            nested: Schema.Union([
+              Schema.Struct({ value: Schema.String, enabled: Schema.Boolean }),
+              Schema.Struct({ value: Schema.Boolean })
+            ])
+          })
+        ]),
+        { nested: { value: '120', enabled: 'true' } }
+      )
+
+      expect(content).not.toContain('Argument "nested.value"')
+      expect(content).toContain('Argument "nested.enabled" must be a JSON boolean')
+    })
+  )
+
+  it.effect('names no type where another member takes a constrained string', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ a: Schema.Int }),
+          Schema.Struct({ a: Schema.String.check(Schema.isMinLength(3)), b: Schema.String })
+        ]),
+        { a: '5' }
+      )
+
+      expect(content).not.toContain('Argument "a"')
+
+      const recursive = yield* probe(
+        Schema.Struct({
+          v: Schema.Union([Schema.Int, Schema.suspend(() => Schema.NonEmptyString)])
+        }),
+        { v: '' }
+      )
+
+      expect(recursive).not.toContain('Argument "v"')
+
+      // The member's cross-field check ran after `a` parsed as a string.
+      const refined = yield* probe(
+        Schema.Union([
+          Schema.Struct({ a: Schema.Int }),
+          Schema.Struct({ a: Schema.String }).check(Schema.makeFilter(() => false))
+        ]),
+        { a: '5' }
+      )
+
+      expect(refined).not.toContain('Argument "a"')
+    })
+  )
+
+  it.effect('merges the kinds union members accept at one argument', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(
+        Schema.Union([
+          Schema.Struct({ x: Schema.Int, a: Schema.String }),
+          Schema.Struct({ x: Schema.Boolean, b: Schema.String })
+        ]),
+        { x: 'true' }
+      )
+
+      expect(content).toContain(
+        'Argument "x" must be a JSON number or a JSON boolean, but it was the string "true": send true without quotes.'
+      )
+    })
+  )
+
+  it.effect('names only quoted literals where the schema also takes string literals', () =>
+    Effect.gen(function* () {
+      const Limit = Schema.Struct({ limit: Schema.Union([Schema.Int, Schema.Literal('all')]) })
+
+      const word = yield* probe(Limit, { limit: 'max' })
+
+      expect(word).not.toContain('Argument "limit"')
+
+      const quoted = yield* probe(Limit, { limit: '5' })
+
+      expect(quoted).toContain('Argument "limit" must be a JSON number, but it was the string "5"')
+    })
+  )
+
+  it.effect('adds nothing where the wire type is a string', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(Schema.Struct({ count: Schema.NumberFromString }), {
+        count: 'twelve'
+      })
+
+      expect(content).not.toContain('Argument "count"')
+
+      const free = yield* probe(
+        Schema.Struct({ v: Schema.Union([Schema.Int, Schema.NonEmptyString]) }),
+        { v: '' }
+      )
+
+      expect(free).not.toContain('Argument "v"')
+    })
+  )
+
+  it.effect('names number and boolean literals, nested and array arguments', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(
+        Schema.Struct({
+          size: Schema.Literals([1, 2]),
+          strict: Schema.Literal(true),
+          filter: Schema.Union([Schema.Int, Schema.Struct({ limit: Schema.Int })]),
+          ids: Schema.Array(Schema.Int)
+        }),
+        { size: '2', strict: 'true', filter: { limit: '3' }, ids: [1, '7'] }
+      )
+
+      expect(content).toContain('Argument "size" must be a JSON number')
+      expect(content).toContain('Argument "strict" must be a JSON boolean')
+      expect(content).toContain('Argument "filter.limit" must be a JSON number')
+      expect(content).toContain('Argument "ids.1" must be a JSON number')
+      expect(content).toContain('send 7 without quotes')
+
+      // A literal outside the set would only fail again.
+      const outside = yield* probe(
+        Schema.Struct({ size: Schema.Literals([1, 2]), strict: Schema.Literal(true) }),
+        { size: '3', strict: 'false' }
+      )
+
+      expect(outside).toContain('Argument "size" must be a JSON number, but it was the string "3".')
+      expect(outside).toContain(
+        'Argument "strict" must be a JSON boolean, but it was the string "false".'
+      )
+    })
+  )
+
+  it.effect('suggests only JSON number literals, as written', () =>
+    Effect.gen(function* () {
+      const Count = Schema.Struct({ count: Schema.Finite })
+
+      for (const [sent, literal] of [
+        ['1e3', '1e3'],
+        [' 12 ', '12'],
+        ['-0', '-0'],
+        ['12345678901234567890', '12345678901234567890']
+      ]) {
+        expect(yield* probe(Count, { count: sent })).toContain(`send ${literal} without quotes.`)
+      }
+
+      for (const sent of ['0x10', '1.', 'Infinity', '12abc', '1e400', `0.${'0'.repeat(100)}1`]) {
+        const content = yield* probe(Count, { count: sent })
+
+        expect(content, sent).toContain('Argument "count" must be a JSON number')
+        expect(content, sent).not.toContain('without quotes')
+      }
+    })
+  )
+
+  it.effect('loop names booleans sent as strings in question prompts', () =>
+    Effect.gen(function* () {
+      const executor = {
+        execute: (toolCall: ToolCall): Effect.Effect<ToolResult, ToolError> => ok(toolCall)
+      }
+
+      const events = yield* runToolBatch({
+        calls: [
+          call(
+            { questions: [{ id: 'choice', prompt: 'Pick one', multiple: 'true' }] },
+            questionToolName
+          )
+        ],
+        tools: [ToolDef.make({ name: questionToolName, description: 'Ask', parameters: {} })]
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(LoopConfig.defaultLayer),
+        Effect.provideService(ToolExecutor, executor)
+      )
+
+      expect(
+        Array.from(events).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
+        result: {
+          isError: true,
+          content: expect.stringContaining(
+            'Argument "questions.0.multiple" must be a JSON boolean, but it was the string "true": send true without quotes.'
+          )
+        }
+      })
+    })
+  )
+
+  it.effect('caps the lines', () =>
+    Effect.gen(function* () {
+      const content = yield* probe(Schema.Struct({ ids: Schema.Array(Schema.Int) }), {
+        ids: Array.from({ length: 21 }, (_, index) => String(index))
+      })
+
+      expect(content.split('must be a JSON number')).toHaveLength(21)
+      expect(content).toContain('1 more number or boolean argument was sent as a string.')
+    })
+  )
+})

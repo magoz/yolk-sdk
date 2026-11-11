@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import * as SchemaAST from 'effect/SchemaAST'
 import * as SchemaIssue from 'effect/SchemaIssue'
 import { ToolCall, type ToolJsonSchema } from '@yolk-sdk/agent/protocol'
+import { recordToolArgumentsInput } from '../protocol/tool-argument-hints.ts'
 
 // Model tool-call arguments are JSON that the model produced from the advertised `ToolDef.parameters`.
 // That advertisement is `Schema.toJsonSchemaDocument(schema)`, which describes the canonical JSON
@@ -223,16 +224,21 @@ export const decodeToolArguments = <S extends ToolArgumentsSchema>(schema: S) =>
       ? decode(input)
       : checkNoArguments(input).pipe(Effect.flatMap(() => decode(input)))
 
-  return (input: unknown): Effect.Effect<S['Type'], Schema.SchemaError> =>
-    decodeChecked(omitUndefinedKeys(input)).pipe(
+  return (input: unknown): Effect.Effect<S['Type'], Schema.SchemaError> => {
+    const args = omitUndefinedKeys(input)
+
+    return decodeChecked(args).pipe(
       Effect.flatMap(decoded => {
         const path = nonFiniteNumberPath(decoded)
 
         return path === undefined
           ? Effect.succeed(decoded)
           : Effect.fail(nonFiniteNumberError(path))
-      })
+      }),
+      // Keeps the rejected arguments for the wrong-type hint (a number sent as "120").
+      Effect.tapError(error => Effect.sync(() => recordToolArgumentsInput(error, args)))
     )
+  }
 }
 
 type JsonObject = Schema.JsonObject

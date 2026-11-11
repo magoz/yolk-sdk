@@ -199,8 +199,10 @@ The model called a tool name not present in the resolved tool set. Resolve tools
 
 Unknown keys are rejected at any depth, for example
 `Unknown argument "x". Allowed arguments: a, b.` Remove extra keys from callers, fixtures, and code
-mode scripts. `null` on a `Schema.optional(X)` field is accepted as omitted, but required fields
-still reject it. Custom `invalidParamsMessage` callbacks can keep the hint with
+mode scripts. A number or boolean the model sent as a JSON string is rejected with the string and
+the literal to send (`Argument "offset" must be a JSON number, but it was the string "120": send 120
+without quotes.`); some models quote numbers inside union-shaped parameters. `null` on a
+`Schema.optional(X)` field is accepted as omitted, but required fields still reject it. Custom `invalidParamsMessage` callbacks can keep the hint with
 `withToolArgumentsErrorHint(message, error)` from `@yolk-sdk/agent/tools`.
 
 In code mode, a call whose arguments JSON would change (`NaN`, invalid `Date`s, `Map`, class
