@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
+import { types } from 'node:util'
 import path from 'node:path'
 import { Predicate } from 'effect'
 import type {
@@ -150,11 +151,26 @@ const requireAmbient = (): AmbientContext => {
 }
 
 type StepErrorSerializer = {
-  readonly dehydrate: (error: unknown, runId: string) => Promise<Uint8Array>
+  /** Undefined when the platform cannot store the value (its `SerializationError`). */
+  readonly dehydrate: (error: unknown, runId: string) => Promise<Uint8Array | undefined>
   readonly hydrate: (bytes: Uint8Array, runId: string) => Promise<unknown>
 }
 
 let stepErrorSerializer: Promise<StepErrorSerializer> | undefined
+
+const workflowPackageDir = (require: NodeJS.Require) => {
+  let dir = path.dirname(require.resolve('workflow'))
+
+  while (!fs.existsSync(path.join(dir, 'package.json'))) {
+    const parent = path.dirname(dir)
+
+    if (parent === dir) throw new Error('Cannot locate the installed workflow package')
+
+    dir = parent
+  }
+
+  return dir
+}
 
 // The installed `workflow` runtime's own step-error serializer (`@workflow/core`, resolved
 // through `workflow`'s package so its version matches the host's), loaded natively: a
@@ -162,15 +178,16 @@ let stepErrorSerializer: Promise<StepErrorSerializer> | undefined
 const loadStepErrorSerializer = (): Promise<StepErrorSerializer> =>
   (stepErrorSerializer ??= (async () => {
     const require = createRequire(import.meta.url)
-    let workflowDir = path.dirname(require.resolve('workflow'))
-
-    while (!fs.existsSync(path.join(workflowDir, 'package.json'))) {
-      workflowDir = path.dirname(workflowDir)
-    }
 
     const serialization: unknown = await import(
-      require.resolve('@workflow/core/serialization', { paths: [workflowDir] })
-    )
+      require.resolve('@workflow/core/serialization', { paths: [workflowPackageDir(require)] })
+    ).catch((cause: unknown) => {
+      // Workflow 5 captures Node `URL` intrinsics when its serializer loads; jsdom's fail.
+      throw new Error(
+        'TestWorkflowWorld cannot load the workflow step-error serializer; step execution needs the Node test environment, not jsdom',
+        { cause }
+      )
+    })
 
     if (
       !Predicate.hasProperty(serialization, 'dehydrateStepError') ||
@@ -185,7 +202,19 @@ const loadStepErrorSerializer = (): Promise<StepErrorSerializer> =>
 
     return {
       dehydrate: async (error, runId) => {
-        const bytes: unknown = await dehydrateStepError(error, runId, undefined)
+        let bytes: unknown
+
+        try {
+          bytes = await dehydrateStepError(error, runId, undefined)
+        } catch (failure) {
+          // The platform reframes every failure to store a value as `SerializationError`; any
+          // other failure is this emulator's integration breaking, never the host's error.
+          if (Predicate.hasProperty(failure, 'name') && failure.name === 'SerializationError') {
+            return undefined
+          }
+
+          throw failure
+        }
 
         if (!(bytes instanceof Uint8Array)) {
           throw new Error('The workflow step-error serializer returned no bytes')
@@ -201,10 +230,37 @@ const loadStepErrorSerializer = (): Promise<StepErrorSerializer> =>
     }
   })())
 
-// The platform's own test: `FatalError.is` (by `name`, or a `fatal: true` own property).
-const isFatalStepError = (error: unknown) =>
-  error instanceof Error &&
-  (error.name === 'FatalError' || ('fatal' in error && error.fatal === true))
+// The platform's error shape check (`@workflow/errors`): duck-typed, so it holds across realms.
+const isPlatformError = (value: unknown) =>
+  Predicate.hasProperty(value, 'name') && Predicate.hasProperty(value, 'message')
+
+// `FatalError.is`: named `FatalError`, or carrying `fatal: true`.
+const isFatalStepError = (value: unknown) =>
+  isPlatformError(value) &&
+  ((Predicate.hasProperty(value, 'name') && value.name === 'FatalError') ||
+    (Predicate.hasProperty(value, 'fatal') && value.fatal === true))
+
+// The platform turns an abort into a FatalError before classifying a step error
+// (`promoteAbortErrorToFatal`), so an aborted step is never retried.
+const promoteAbortError = (value: unknown) => {
+  if (
+    !Predicate.hasProperty(value, 'name') ||
+    value.name !== 'AbortError' ||
+    !Predicate.hasProperty(value, 'message') ||
+    !Predicate.isString(value.message) ||
+    isFatalStepError(value)
+  ) {
+    return value
+  }
+
+  const fatal = platformFatalError(`Aborted: ${value.message}`, undefined)
+
+  if (Predicate.hasProperty(value, 'stack') && Predicate.isString(value.stack)) {
+    fatal.stack = value.stack
+  }
+
+  return fatal
+}
 
 // Stored and read back, an error named `FatalError` is the platform's FatalError.
 const platformFatalError = (message: string, cause: unknown) => {
@@ -215,7 +271,27 @@ const platformFatalError = (message: string, cause: unknown) => {
   return error
 }
 
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+// The platform's `normalizeUnknownError` message: an error's message, a string as is, anything
+// else as JSON (else `String`), and an awaited thenable prefixed `Promise rejection: `.
+const platformErrorMessage = async (value: unknown): Promise<string> => {
+  if (Predicate.hasProperty(value, 'then') && Predicate.isFunction(value.then)) {
+    try {
+      return `Promise rejection: ${await platformErrorMessage(await value)}`
+    } catch (rejection) {
+      return `Promise rejection: ${await platformErrorMessage(rejection)}`
+    }
+  }
+
+  if (types.isNativeError(value)) return value.message
+
+  if (Predicate.isString(value)) return value
+
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
 
 const retriesLabel = (count: number) => (count === 1 ? 'retry' : 'retries')
 
@@ -371,9 +447,10 @@ export class TestWorkflowWorld {
   // Runs a step body with the platform's retry contract: `fn.maxRetries`
   // retries after the first attempt (total attempts = maxRetries + 1) and
   // 1-based `getStepMetadata().attempt` visible to the body. A FatalError
-  // (by `name`, or `fatal: true`) is never retried; an exhausted step fails
-  // with the platform's FatalError whose `cause` is the last thrown value.
-  // The caller sees errors only as the platform stores and reads them back.
+  // (by `name`, or `fatal: true`; an AbortError is promoted to one) is never
+  // retried; an exhausted step fails with the platform's FatalError whose
+  // `cause` is the last thrown value. The caller sees errors only as the
+  // platform stores and reads them back.
   async runStep<TArgs extends ReadonlyArray<unknown>, TResult>(
     stepFn: TestWorkflowStepFunction<TArgs, TResult>,
     args: TArgs,
@@ -386,8 +463,6 @@ export class TestWorkflowWorld {
     const maxRetries = stepFn.maxRetries ?? defaultTestWorkflowStepMaxRetries
     const maxAttempts = maxRetries + 1
     const serializer = await loadStepErrorSerializer()
-    // The last retried error the platform stored: the cause of an "exceeded max retries" failure.
-    let lastStoredError: Uint8Array | undefined
 
     let attempt = 1
 
@@ -405,49 +480,50 @@ export class TestWorkflowWorld {
         thrown = error
       }
 
-      const fatal = isFatalStepError(thrown)
+      const effective = promoteAbortError(thrown)
+      const fatal = isFatalStepError(effective)
+      const exhausted = !fatal && attempt >= maxAttempts
 
-      const terminal =
-        fatal || attempt < maxAttempts
-          ? thrown
-          : platformFatalError(
-              `Step "${stepName}" failed after ${maxRetries} ${retriesLabel(maxRetries)}: ${errorMessage(thrown)}`,
+      // A fatal error is stored as is (abort promoted); an exhausted step's error becomes the
+      // cause of the platform's FatalError; a retried attempt stores the thrown value.
+      const recorded = fatal
+        ? effective
+        : exhausted
+          ? platformFatalError(
+              `Step "${stepName}" failed after ${maxRetries} ${retriesLabel(maxRetries)}: ${await platformErrorMessage(effective)}`,
               thrown
             )
+          : thrown
 
-      const stored = await serializer.dehydrate(terminal, run.runId).then(
-        bytes => ({ stored: true as const, bytes }),
-        () => ({ stored: false as const })
-      )
+      const bytes = await serializer.dehydrate(recorded, run.runId)
 
-      if (!stored.stored) {
+      if (bytes === undefined) {
         // The platform cannot record this attempt: its queue handler fails and the
         // redelivered message runs the step again as the next attempt.
         run.unstorableStepErrors.push({ stepName, attempt, error: thrown })
 
         if (attempt >= maxAttempts) {
-          // The redelivery past the budget fails the step without running it again.
-          throw await serializer.hydrate(
-            await serializer.dehydrate(
-              platformFatalError(
-                `Step "${stepName}" exceeded max retries (${maxRetries} ${retriesLabel(maxRetries)})`,
-                lastStoredError === undefined
-                  ? undefined
-                  : await serializer.hydrate(lastStoredError, run.runId)
-              ),
-              run.runId
+          // The redelivery past the budget fails the step before running it again.
+          const exceeded = await serializer.dehydrate(
+            platformFatalError(
+              `Step "${stepName}" exceeded max retries (${maxRetries} ${retriesLabel(maxRetries)})`,
+              undefined
             ),
             run.runId
           )
+
+          if (exceeded === undefined)
+            throw new Error('The workflow runtime cannot store a FatalError')
+
+          throw await serializer.hydrate(exceeded, run.runId)
         }
 
         attempt += 1
         continue
       }
 
-      if (fatal || attempt >= maxAttempts) throw await serializer.hydrate(stored.bytes, run.runId)
+      if (fatal || exhausted) throw await serializer.hydrate(bytes, run.runId)
 
-      lastStoredError = stored.bytes
       attempt += 1
     }
   }

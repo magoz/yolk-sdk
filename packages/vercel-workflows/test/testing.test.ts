@@ -314,7 +314,7 @@ describe('TestWorkflowWorld step executor', () => {
     expect(runError).not.toHaveProperty('cause')
   })
 
-  it('keeps the last stored error as the cause when only the final attempt cannot be stored', async () => {
+  it('fails without a cause when only the final attempt cannot be stored', async () => {
     const world = new TestWorkflowWorld()
     let attempts = 0
 
@@ -334,11 +334,74 @@ describe('TestWorkflowWorld step executor', () => {
 
     const { runError, unstorableStepErrors } = world.inspect(runId)
 
+    // The platform fails the redelivery past the budget before reading any stored attempt.
     expect(unstorableStepErrors.map(entry => entry.attempt)).toEqual([2])
     expect(runError).toMatchObject({
       name: 'FatalError',
-      message: 'Step "model" exceeded max retries (1 retry)',
-      cause: { message: 'transient' }
+      message: 'Step "model" exceeded max retries (1 retry)'
+    })
+    expect(runError).not.toHaveProperty('cause')
+  })
+
+  it.each([
+    ['an error named FatalError', Object.assign(new Error('stop'), { name: 'FatalError' })],
+    ['an error with fatal: true', Object.assign(new Error('stop'), { fatal: true })],
+    ['a plain FatalError-shaped object', { name: 'FatalError', message: 'stop' }]
+  ])('never retries %s', async (_, fatal) => {
+    const world = new TestWorkflowWorld()
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        throw fatal
+      },
+      { maxRetries: 3 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'refused'), [])
+    await world.settled(runId)
+
+    expect(world.inspect(runId).stepAttempts.get('refused')).toBe(1)
+    expect(world.inspect(runId).runError).toMatchObject({ message: 'stop' })
+  })
+
+  it('promotes an aborted step to a FatalError, like the platform', async () => {
+    const world = new TestWorkflowWorld()
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        throw new DOMException('signal fired', 'AbortError')
+      },
+      { maxRetries: 3 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'aborted'), [])
+    await world.settled(runId)
+
+    expect(world.inspect(runId).stepAttempts.get('aborted')).toBe(1)
+    expect(world.inspect(runId).runError).toMatchObject({
+      name: 'FatalError',
+      message: 'Aborted: signal fired'
+    })
+  })
+
+  it('names a thrown non-error in the exhausted message as the platform does', async () => {
+    const world = new TestWorkflowWorld()
+
+    const step = Object.assign(
+      async (): Promise<never> => {
+        // oxlint-disable-next-line no-throw-literal -- a thrown plain object is the case under test
+        throw { reason: 'failed' }
+      },
+      { maxRetries: 0 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'plain'), [])
+    await world.settled(runId)
+
+    expect(world.inspect(runId).runError).toMatchObject({
+      name: 'FatalError',
+      message: 'Step "plain" failed after 0 retries: {"reason":"failed"}',
+      cause: { reason: 'failed' }
     })
   })
 
