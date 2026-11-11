@@ -1126,7 +1126,7 @@ decoding `parameters` through its JSON codec (validate and execute). The decode 
 through unwrapped. Default text is `Invalid ${name} arguments: ${String(error)}`, which keeps the
 `SchemaError(...)` wrapper, followed by one line per object (path and allowed-key set) naming its unknown keys and
 listing the allowed keys, and one line per number or boolean argument the model sent as a JSON string
-(`Argument "offset" must be a JSON number, but it was the string "120": send 120 without quotes.`). Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native `Error`, but the
+(`Argument "offset" must be a JSON number, but it was the string "120": send 120 without quotes.`). Custom callbacks can append the same hint with `withToolArgumentsErrorHint(message, error)`; the wrong-type lines appear only for the error Yolk passed to the callback, not for one from your own decode. In Effect 4, `SchemaError` extends native `Error`, but the
 wrapper remains part of this tool-message contract; do not default to `.message`.
 Existing `(error: unknown) => string` callbacks remain assignable.
 

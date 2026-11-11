@@ -389,7 +389,10 @@ export const toolArgumentsErrorHint = (error: Schema.SchemaError): string | unde
   return lines.length === 0 ? undefined : lines.join('\n')
 }
 
-/** Appends {@link toolArgumentsErrorHint} to an argument-validation message when available. */
+/** Appends model-facing hints to an argument-validation message: one line per object naming its
+ * unknown keys with the keys allowed there, and, for the error Yolk's argument decoding passed to
+ * `invalidParamsMessage` (or the loop produced), one line per number or boolean sent as a JSON
+ * string with the literal to send. Returns the message unchanged when there is nothing to add. */
 export const withToolArgumentsErrorHint = (message: string, error: unknown): string => {
   const hint = error instanceof Schema.SchemaError ? toolArgumentsErrorHint(error) : undefined
 
