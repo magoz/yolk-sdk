@@ -278,6 +278,59 @@ For legacy HTTP requests, an unreadable or already consumed body produces a JSON
 invalid-request error (`-32600`) rather than an Effect defect. Malformed JSON remains a parse error
 (`-32700`).
 
+A tool may carry `annotations` (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`,
+`openWorldHint`), listed as the MCP tool annotations.
+
+### Ask the user before a tool runs
+
+An approval tool (`McpServerApprovalTool`) runs only after the user accepts the call through MCP
+form elicitation over multi round-trip requests (`2026-07-28`). Give the server `approvals`:
+
+```ts
+import { Effect } from 'effect'
+import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeMcpToolServer, type McpServerTool } from '@yolk-sdk/mcp/server'
+
+declare const signingKey: string // at least 32 bytes, the same on every instance
+declare const tokenId: string // the authenticated principal of this request
+
+const send: McpServerTool = {
+  def: ToolDef.make({
+    name: 'send',
+    description: 'Send a message',
+    parameters: { type: 'object' }
+  }),
+  annotations: { destructiveHint: false },
+  approval: { message: call => Effect.succeed(`Send ${JSON.stringify(call.params)}?`) },
+  execute: (call, approved) =>
+    // Run the call at most once per `approved.approvalId`.
+    Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'sent' }))
+}
+
+const server = makeMcpToolServer({
+  name: 'my-server',
+  version: '1.0.0',
+  tools: [send],
+  approvals: { key: signingKey, principal: tokenId }
+})
+```
+
+- The first call answers an `input_required` result: one form elicitation under
+  `approvalInputKey` (`'approval'`, no fields: the client offers accept, decline and cancel) with
+  the policy's `message`, and a `requestState` signed by the SDK's `createRequestStateCodec`
+  (HMAC-SHA256, `ttlSeconds` default 600) and bound to `principal` and `tools/call`. Its payload
+  names the tool, the digest of the arguments (`mcpArgumentsDigest`) and a fresh `approvalId`.
+- Only a retry that answers `accept` with a state that verifies for the same principal, tool and
+  arguments runs the tool, with `{ approvalId }`. A decline or a cancel answers an error result.
+  A state that fails verification, belongs to another call, or arrives without a decision asks
+  again with a new state.
+- The server keeps no state, so an accepted retry replays until the state expires: key once-only
+  execution on `approvalId`.
+- A request that does not declare form elicitation gets an error result and nothing runs.
+  Approval tools are not offered on 2025-era requests (stateless serving cannot route the
+  client's answer back to the open call) or on the header-less JSON path, and not at all without
+  `approvals`. A key shorter than 32 bytes leaves them listed but answering an error result.
+
 ## Conformance cases (experimental)
 
 `@yolk-sdk/mcp/conformance` holds nine `read` conformance cases for `@yolk-sdk/conformance/runner`,
