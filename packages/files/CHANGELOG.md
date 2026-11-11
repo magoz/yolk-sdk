@@ -1,5 +1,11 @@
 # @yolk-sdk/files
 
+## 0.1.0-canary.132
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.132
+
 ## 0.1.0-canary.131
 
 ### Patch Changes

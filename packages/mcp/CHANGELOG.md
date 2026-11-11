@@ -1,5 +1,20 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.132
+
+### Minor Changes
+
+- d8ad571: `makeMcpToolServer` serves elicited tools: a tool built with `makeMcpServerElicitedTool` asks the user a form through MCP form elicitation (`2026-07-28`) before it runs, and `execute` gets the answer decoded with the form's Effect Schema plus a per-prompt `elicitationId` for once-only execution. Forms (`mcpServerForm`) hold required yes/no (`mcpFormBoolean`), single-choice (`mcpFormChoice`) and multi-select (`mcpFormMultiSelect`, at least one value, optional `maxItems`) fields, built only by these functions; an answer that does not fit (a value not offered, a duplicate, an empty or too long selection, a missing field) asks again and runs nothing. A form that cannot be shown faithfully (repeated option values, a default the field would not accept, a `maxItems` out of range, a field named `__proto__`) lists its `problems`, and the tool answers an error result instead of asking. Approval tools are the empty-form case and keep their wire shape and API.
+
+  Every asking tool (approval or elicited) now rebuilds its prompt on the answering round and binds the signed `requestState` to a digest of the prompt shown: an accept of a prompt whose message or form changed answers `changedPromptMessage` and runs nothing. Build approval messages and forms deterministically from the call and current data (no clocks or random ids), or every accept is refused. A prompt over `mcpServerMaxPromptBytes` (64 KiB) answers `oversizedPromptMessage` and is never cut. The state payload changed (`formDigest`, `elicitationId`), so a prompt signed by an earlier version is asked again.
+
+  New exports: `makeMcpServerElicitedTool`, `mcpServerForm`, `mcpFormBoolean`, `mcpFormChoice`, `mcpFormMultiSelect`, `changedPromptMessage`, `oversizedPromptMessage`, `mcpServerMaxPromptBytes`, and the types `McpServerElicitedTool`, `McpServerElicitation`, `McpServerToolAnswered`, `McpServerForm`, `McpServerFormField`, `McpServerFormFieldOf`, `McpServerFormOption`. `McpServerTool` gains the `McpServerElicitedTool` member: code that narrows the union on `approval` alone must also handle `prompt`.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.132
+- @yolk-sdk/conformance@0.1.0-canary.132
+
 ## 0.1.0-canary.131
 
 ### Patch Changes
