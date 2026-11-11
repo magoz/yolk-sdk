@@ -12,7 +12,13 @@
  * `approvalId`. A state that fails verification, belongs to another call, or arrives without a
  * decision is never an approval: the server asks again with a new state. The server does not
  * enforce once-only execution: an accepted state replays until it expires, so the host keys
- * once-only execution on `approvalId` (MRTR server requirement 5).
+ * once-only execution on `approvalId` (MRTR: signing, binding and expiry "do not by themselves
+ * guarantee single-use"; the server must enforce it).
+ *
+ * A request that does not declare form elicitation gets a tool error result, not the SDK's
+ * `-32021` missing-capability error: the calling agent reads why nothing ran, and nothing is
+ * signed. The SDK's own capability gate still refuses an elicitation it would send to such a
+ * client.
  */
 import { Data, Effect, Option, Result } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -40,7 +46,7 @@ export type McpServerApprovalOptions = {
    * minted for one principal is never an approval for another.
    */
   readonly principal: string
-  /** How long the user has to decide, in seconds. Default `600`. */
+  /** How long the user has to decide, in seconds (a positive integer). Default `600`. */
   readonly ttlSeconds?: number
 }
 
@@ -110,19 +116,36 @@ export type McpServerApprovals = Data.TaggedEnum<{
 
 export const McpServerApprovals = Data.taggedEnum<McpServerApprovals>()
 
+/**
+ * The approvals of one server instance, bound to the server's `name`, the host's principal and the
+ * method, so a state minted for one is never an approval on another sharing the key. A key under
+ * 32 bytes, an empty principal or a `ttlSeconds` that is not a positive integer is `Misconfigured`.
+ */
 export const makeMcpServerApprovals = (
+  serverName: string,
   options: McpServerApprovalOptions | undefined
 ): McpServerApprovals => {
   if (options === undefined) return McpServerApprovals.Unconfigured()
 
   const principal = options.principal
+  const ttlSeconds = options.ttlSeconds ?? 600
+
+  if (principal.length === 0) {
+    return McpServerApprovals.Misconfigured({ message: 'approvals.principal is empty' })
+  }
+
+  if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0) {
+    return McpServerApprovals.Misconfigured({
+      message: 'approvals.ttlSeconds must be a positive integer'
+    })
+  }
 
   const codec = Result.try({
     try: () =>
       createRequestStateCodec<ApprovalState>({
         key: options.key,
-        ttlSeconds: options.ttlSeconds ?? 600,
-        bind: ctx => `${principal}\0${ctx.mcpReq.method}`
+        ttlSeconds,
+        bind: ctx => `${serverName}\0${principal}\0${ctx.mcpReq.method}`
       }),
     catch: error => (error instanceof Error ? error.message : String(error))
   })
@@ -178,8 +201,9 @@ export const approvalRound = <R>(input: {
   McpServerApprovals.$match(input.approvals, {
     Unconfigured: () =>
       answer("This tool needs the user's approval, which this server does not offer."),
-    Misconfigured: () =>
-      answer("This tool needs the user's approval, which is misconfigured here."),
+    // The reason names a configuration field or the SDK's key-length check, never the key.
+    Misconfigured: ({ message }) =>
+      answer(`This tool needs the user's approval, which is misconfigured here (${message}).`),
     Configured: ({ codec }) => configuredRound({ ...input, codec })
   })
 

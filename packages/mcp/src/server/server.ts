@@ -269,6 +269,7 @@ type ToolListItem = {
   readonly name: string
   readonly description: string
   readonly inputSchema: ToolDef['parameters']
+  title?: string
   annotations?: McpServerToolAnnotations
 }
 
@@ -279,7 +280,11 @@ const toolListItem = <R>(tool: McpServerTool<R>) => {
     inputSchema: tool.def.parameters
   }
 
-  if (tool.annotations !== undefined) item.annotations = tool.annotations
+  if (tool.annotations !== undefined) {
+    item.annotations = tool.annotations
+
+    if (tool.annotations.title !== undefined) item.title = tool.annotations.title
+  }
 
   return item
 }
@@ -477,7 +482,7 @@ export const makeMcpToolServer = <R>(input: {
   readonly allowedOriginHostnames?: ReadonlyArray<string>
   readonly approvals?: McpServerApprovalOptions
 }): McpToolServer<R> => {
-  const approvals = makeMcpServerApprovals(input.approvals)
+  const approvals = makeMcpServerApprovals(input.name, input.approvals)
 
   const offersApprovals = !Predicate.isTagged(approvals, 'Unconfigured')
 

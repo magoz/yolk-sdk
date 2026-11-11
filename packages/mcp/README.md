@@ -324,12 +324,16 @@ const server = makeMcpToolServer({
   arguments runs the tool, with `{ approvalId }`. A decline or a cancel answers an error result.
   A state that fails verification, belongs to another call, or arrives without a decision asks
   again with a new state.
+- Build the server per request: `principal` is fixed when it is built. The state is also bound to
+  the server's `name`.
 - The server keeps no state, so an accepted retry replays until the state expires: key once-only
   execution on `approvalId`.
 - A request that does not declare form elicitation gets an error result and nothing runs.
   Approval tools are not offered on 2025-era requests (stateless serving cannot route the
   client's answer back to the open call) or on the header-less JSON path, and not at all without
-  `approvals`. A key shorter than 32 bytes leaves them listed but answering an error result.
+  `approvals`. Unusable `approvals` (a key under 32 bytes, an empty `principal`, a `ttlSeconds`
+  that is not a positive integer) leave them listed but answering an error result that names the
+  problem.
 
 ## Conformance cases (experimental)
 

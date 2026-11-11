@@ -2,7 +2,7 @@
  * Server-sent event reading shared by the MCP conformance cases and the observer (internal).
  *
  * It does not mirror the SSE grammar by hand: it runs the SDK's own parser, `eventsource-parser`,
- * declared with the same range the client declares (`^3.0.0`), so a package manager resolves the
+ * declared with the same range the client declares (`^3.0.8`), so a package manager resolves the
  * same copy the client uses; in this repository a parity test verifies that both resolve the same
  * version (3.0.8). A consumer whose package manager does not dedupe could still end up with two
  * copies; the parity test cannot see that.

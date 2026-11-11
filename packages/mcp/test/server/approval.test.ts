@@ -343,8 +343,8 @@ describe('MCP tool server approvals', () => {
 
       const listed = yield* respond(unconfigured, modernRequest({ method: 'tools/list' }))
 
+      // An array matches only at its exact length: `send` is not listed.
       expect(listed).toMatchObject({ result: { tools: [{ name: 'echo' }] } })
-      expect(listed).not.toMatchObject({ result: { tools: [{}, { name: 'send' }] } })
 
       const json = yield* respond(
         approvalServer({ runs, approvals: configured }),
@@ -371,15 +371,123 @@ describe('MCP tool server approvals', () => {
 
       const result = yield* callResult(server, callSend({}))
 
-      expect(result.result).toEqual({
-        content: [
-          {
-            type: 'text',
-            text: "This tool needs the user's approval, which is misconfigured here."
-          }
-        ],
-        isError: true
+      expect(result.result.isError).toBe(true)
+      expect(result.result.content[0]?.text).toMatch(
+        /^This tool needs the user's approval, which is misconfigured here \(.+\)\.$/u
+      )
+
+      const misconfigurations: ReadonlyArray<McpServerApprovalOptions> = [
+        { key, principal: '' },
+        { key, principal: 'token-1', ttlSeconds: 0 },
+        { key, principal: 'token-1', ttlSeconds: 1.5 }
+      ]
+
+      for (const approvals of misconfigurations) {
+        const misconfigured = yield* callResult(approvalServer({ runs, approvals }), callSend({}))
+
+        expect(misconfigured.result.isError).toBe(true)
+        expect(misconfigured.result.content[0]?.text).toContain('approvals.')
+      }
+
+      expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('offers no approval tool to SDK-routed 2025-era requests', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const server = approvalServer({ runs, approvals: configured })
+
+      const legacy = (body: Schema.JsonObject) =>
+        Effect.gen(function* () {
+          const response = yield* server.handleHttpRequest(
+            new Request('https://example.com/mcp', {
+              method: 'POST',
+              headers: {
+                accept: 'application/json, text/event-stream',
+                'content-type': 'application/json',
+                'mcp-protocol-version': '2025-06-18'
+              },
+              body: JSON.stringify(body)
+            })
+          )
+
+          const text = yield* Effect.promise(() => response.text())
+
+          return yield* Effect.forEach(
+            text.split('\n').flatMap(line => (line.startsWith('data: ') ? [line.slice(6)] : [])),
+            data => decodeJson(data)
+          )
+        })
+
+      const listed = yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+
+      expect(listed).toMatchObject([{ id: 1, result: { tools: [{ name: 'echo' }] } }])
+
+      const called = yield* legacy({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'send', arguments: { to: 'ada' } }
       })
+
+      expect(called).toHaveLength(1)
+      expect(called).not.toMatchObject([{ result: { content: [{ text: 'sent' }] } }])
+      expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('asks again for a state minted for another tool or another server', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const pause = yield* ask(approvalServer({ runs, approvals: configured }))
+      const accept = { requestState: pause.result.requestState, response: { action: 'accept' } }
+
+      const renamed = (name: string, toolName: string) =>
+        makeMcpToolServer({
+          name,
+          version: '0',
+          tools: [
+            {
+              def: ToolDef.make({
+                name: toolName,
+                description: 'Send',
+                parameters: { type: 'object' }
+              }),
+              approval: { message: () => Effect.succeed('Send?') },
+              execute: (call, approved) =>
+                Ref.update(runs, current => [...current, approved.approvalId]).pipe(
+                  Effect.as(ToolResult.make({ toolCallId: call.id, content: 'sent' }))
+                )
+            }
+          ],
+          approvals: configured
+        })
+
+      const otherServer = yield* respond(
+        renamed('another-server', 'send'),
+        callSend({ id: 2, retry: accept })
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(InputRequired)))
+
+      expect(otherServer.result.requestState).not.toBe(pause.result.requestState)
+
+      const otherTool = yield* respond(
+        renamed('approval-server', 'post'),
+        modernRequest({
+          method: 'tools/call',
+          id: 3,
+          toolName: 'post',
+          capabilities: formCapabilities,
+          params: jsonObject({
+            name: 'post',
+            arguments: { to: 'ada' },
+            requestState: accept.requestState,
+            inputResponses: { [approvalInputKey]: accept.response }
+          })
+        })
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(InputRequired)))
+
+      expect(otherTool.result.requestState).not.toBe(pause.result.requestState)
       expect(yield* Ref.get(runs)).toEqual([])
     })
   )

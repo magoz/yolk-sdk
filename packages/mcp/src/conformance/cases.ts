@@ -31,7 +31,7 @@
  * are marked "(unverified: ...)" in their `wire`. `mcp.modern.*` and `mcp.legacy.*` cases apply to
  * one era only: pass them through `selectMcpConformanceCases`.
  *
- * Pinned real-code facts the cases follow (`@modelcontextprotocol/client` 2.0.0):
+ * Pinned real-code facts the cases follow (`@modelcontextprotocol/client` 2.4.0):
  *
  * - Era negotiation (`negotiateEra`, auto mode): 401 and 403 abort; 5xx aborts; a discover result
  *   valid for the client's loose discover dispatch schema (it ignores `resultType`, and catches a
@@ -57,7 +57,8 @@
  *   resumed by a GET with `last-event-id`, and the SDK accepts the response delivered there. The
  *   cases do NOT accept that delivery (the call gate treats any GET-delivered message as
  *   uncertainty); their wire texts mark it "(unverified: ...)".
- * - `listTools(undefined)` follows `nextCursor` (stopping silently on a repeated cursor), lists
+ * - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
+ *   repeated page: the same items under the same `nextCursor`, not added twice), lists
  *   nothing without `capabilities.tools`, and on modern connections drops tools with an invalid
  *   `x-mcp-header`. The tool schema keeps only the five annotation keys (`title`, `readOnlyHint`,
  *   `destructiveHint`, `idempotentHint`, `openWorldHint`), keeps `outputSchema` as received, and in
@@ -462,12 +463,12 @@ const classifyProbeError = (error: JsonObject): ProbeVerdict => {
  * Whether a discover result passes the pinned client's validation. `classifyResult` validates it
  * with `codecForVersion("2026-07-28").validateResult("server/discover", ...)`, which uses the
  * loose post-lift DISPATCH schema (`dispatchResultSchemas["server/discover"]`, a `liftedResult`
- * in `@modelcontextprotocol/client` 2.0.0 `dist/src-D_zzAWoS.mjs:3127`): it does not read
+ * in `@modelcontextprotocol/client` 2.4.0 `dist/src-CeKsbNLO.mjs:3157`): it does not read
  * `resultType` at all; `ttlMs` and `cacheScope` fall back to defaults (`.catch`); it requires
  * `supportedVersions: string[]` and `capabilities` (`ServerCapabilities2026Schema`, which strips
  * `tasks`); `instructions` is an optional string. An invalid result falls back to legacy. That
  * schema is not exported, so this uses the exported `DiscoverResultSchema` of
- * `@modelcontextprotocol/core` 2.0.0 (`dist/auth-CUe6YdwF.mjs:369`), which requires the same
+ * `@modelcontextprotocol/core` 2.4.0 (`dist/schemas-DscsoNZN.mjs:369`), which requires the same
  * fields with the same capability shapes and is loose elsewhere, after leaving out
  * `capabilities.tasks` (stripped, never validated, by the client).
  */
@@ -926,7 +927,7 @@ export const mcpToolsListCase: McpConformanceCase = defineConformanceCase({
   title:
     'the listing advertises tools, pages cleanly, and every tool reaches the adapter one to one',
   safety: 'read',
-  docs: '`listRemoteMcpServerTools` calls the SDK `listTools(undefined)`, which returns an empty listing WITHOUT a request when the server does not advertise `capabilities.tools`, follows `nextCursor` across pages (it stops silently on a repeated cursor and fails after `listMaxPages`, default 64), and on modern connections silently drops tools whose `x-mcp-header` declarations are invalid. The SDK tool schema keeps only the five annotation keys (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) and keeps `outputSchema` as received; in the legacy era it rejects the whole listing when an `inputSchema` or `outputSchema` root is not `type: "object"` (SDK servers wrap non-object output roots for legacy clients). `decodeToolsListResult` and `mcpToolToToolDef` then adapt each tool (`<server>_<sanitizeMcpName(tool)>`), and `listMcpTools` rejects duplicate adapted names.',
+  docs: '`listRemoteMcpServerTools` calls the SDK `listTools(undefined)`, which returns an empty listing WITHOUT a request when the server does not advertise `capabilities.tools`, follows `nextCursor` across pages, a repeated cursor included (it stops silently only on a repeated page, the same items under the same `nextCursor`, and fails after `listMaxPages`, default 64), and on modern connections silently drops tools whose `x-mcp-header` declarations are invalid. The SDK tool schema keeps only the five annotation keys (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) and keeps `outputSchema` as received; in the legacy era it rejects the whole listing when an `inputSchema` or `outputSchema` root is not `type: "object"` (SDK servers wrap non-object output roots for legacy clients). `decodeToolsListResult` and `mcpToolToToolDef` then adapt each tool (`<server>_<sanitizeMcpName(tool)>`), and `listMcpTools` rejects duplicate adapted names.',
   wire: 'The server advertises `capabilities.tools` (in the discover result, or the `initialize` result). Every tools/list page holds tools with a non-empty `name` and an object `inputSchema` with `type: "object"` (legacy: an `outputSchema`, when present, also has `type: "object"`). Any `nextCursor` is followed: each page after the first sends the previous cursor, no cursor repeats, and the last page has none (paging allowed). Listed tools and `McpResolvedTool`s correspond one to one (as many resolved as listed; none silently dropped), with `title`, `outputSchema` and the modeled annotation keys unchanged (other annotation keys are stripped by the SDK and not compared). Adapted names stay unique after `sanitizeMcpName`. `expectedTools` are listed, and no `notReadOnly` tool has `readOnlyHint: true`. Every page arrives on its own POST answer (unverified: SEP-1699 resumption on a `last-event-id` GET, which the SDK accepts, is not accepted).',
   fixtures: [mcpToolsListModernFixture.id, mcpToolsListLegacyFixture.id],
   run: Effect.gen(function* () {
