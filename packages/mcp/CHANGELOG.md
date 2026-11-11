@@ -1,5 +1,17 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.129
+
+### Minor Changes
+
+- 1ad3071: Upgrade the official MCP SDK (`@modelcontextprotocol/client`, `core` and `server`) from 2.0.0 to 2.4.0, and require `eventsource-parser` 3.0.8 or later (the range the 2.4.0 client declares). Behavior changes that reach Yolk hosts: request bodies on `createMcpHandler` are capped at 4 MiB and batches at 100 messages; the server converts tool schemas when it lists them instead of at registration, so a server built per request no longer converts every tool on every request; request id `0` is a real id; the HTTP client follows only same-origin redirects that keep the method (a remote server whose URL redirects to another origin now fails: configure the final URL); a listing without a cursor follows `nextCursor` until the server stops sending one, and ends only on a repeated page (same items and cursor), no longer on a repeated cursor; the bundled Ajv validator rejects a `$id` or `$ref` whose text before the first colon is not a valid URI scheme (`my_tool:output`), so a remote tool whose `outputSchema` uses one fails before its call.
+- 1ad3071: `makeMcpToolServer` can ask the user before a tool runs, through MCP form elicitation over multi round-trip requests (`2026-07-28`). A tool with an `approval` policy (`McpServerApprovalTool`; `McpServerTool` is now `McpServerDirectTool | McpServerApprovalTool`) answers its first call with an `input_required` result: one form elicitation under `approvalInputKey` (`'approval'`, no fields, the policy's `message`) and a `requestState` signed with the SDK's `createRequestStateCodec`, bound to the server's `name`, the new `approvals.principal` and the method, and expiring after `approvals.ttlSeconds` (default 600). Only a retry that accepts a state verified for the same principal, tool and arguments runs `execute(call, { approvalId })`; a decline or a cancel answers an error result, and a state that does not verify, belongs to another call, or comes without a decision asks again. The server keeps no state, so hosts key once-only execution on `approvalId`. Approval tools are offered only on `2026-07-28` requests and only with `approvals` (`key`: at least 32 bytes, the same on every instance); a request that does not declare form elicitation gets a tool error result (not `-32021`), and unusable `approvals` (a short key, an empty principal, a `ttlSeconds` that is not a positive integer) leave approval tools listed but answering an error result that names the problem. Tools may also carry `annotations` (`McpServerToolAnnotations`: `title` and the four hints), now listed on both the SDK and the header-less JSON paths. New exports: `approvalInputKey`, `declaresFormElicitation`, and the types `McpServerApprovalOptions`, `McpServerToolApprovalPolicy`, `McpServerToolApproved`, `McpServerApprovalTool`, `McpServerDirectTool` and `McpServerToolAnnotations`.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.129
+- @yolk-sdk/conformance@0.1.0-canary.129
+
 ## 0.1.0-canary.128
 
 ### Patch Changes
