@@ -10,6 +10,7 @@ import {
 } from '../../src/client'
 import {
   approvalInputKey,
+  changedPromptMessage,
   declaresFormElicitation,
   staleApprovalMessage,
   makeMcpToolServer,
@@ -32,7 +33,10 @@ import {
 const approvalServer = (options: {
   readonly runs: Ref.Ref<ReadonlyArray<string>>
   readonly approvals?: McpServerApprovalOptions
+  readonly greeting?: Ref.Ref<string>
 }) => {
+  const { greeting } = options
+
   const send: McpServerTool = {
     def: ToolDef.make({
       name: 'send',
@@ -41,7 +45,11 @@ const approvalServer = (options: {
     }),
     annotations: { title: 'Send', readOnlyHint: false, destructiveHint: false },
     approval: {
-      message: call => Effect.succeed(`Send to ${JSON.stringify(call.params)}?`)
+      message: call =>
+        Effect.map(
+          greeting === undefined ? Effect.succeed('') : Ref.get(greeting),
+          prefix => `${prefix}Send to ${JSON.stringify(call.params)}?`
+        )
     },
     execute: (call, approved) =>
       Ref.update(options.runs, runs => [...runs, approved.approvalId]).pipe(
@@ -203,6 +211,31 @@ describe('MCP tool server approvals', () => {
         expect(result.result).toEqual({ content: [{ type: 'text', text }], isError: true })
       }
 
+      expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('refuses an accept of a prompt whose message changed since it was shown', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const greeting = yield* Ref.make('')
+      const server = approvalServer({ runs, approvals: configured, greeting })
+      const pause = yield* ask(server)
+
+      yield* Ref.set(greeting, 'Urgent! ')
+
+      const result = yield* callResult(
+        server,
+        callSend({
+          id: 2,
+          retry: { requestState: pause.result.requestState, response: { action: 'accept' } }
+        })
+      )
+
+      expect(result.result).toEqual({
+        content: [{ type: 'text', text: changedPromptMessage }],
+        isError: true
+      })
       expect(yield* Ref.get(runs)).toEqual([])
     })
   )

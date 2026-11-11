@@ -12,7 +12,6 @@ export {
 export type {
   McpServerApprovalOptions,
   McpServerElicitation,
-  McpServerPrompt,
   McpServerToolAnswered,
   McpServerToolApprovalPolicy,
   McpServerToolApproved

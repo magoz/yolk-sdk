@@ -320,11 +320,12 @@ const server = makeMcpToolServer({
   the policy's `message`, and a `requestState` signed by the SDK's `createRequestStateCodec`
   (HMAC-SHA256, `ttlSeconds` default 600) and bound to `principal` and `tools/call`. Its payload
   names the tool, the digest of the arguments (`mcpArgumentsDigest`), the digest of the prompt
-  (message and form) and a fresh `approvalId`.
+  (message and form) and a fresh `elicitationId`, which `execute` receives as `approvalId`.
 - Only a retry that answers `accept` with a state that verifies for the same principal, tool,
   arguments and prompt runs the tool, with `{ approvalId }`. The prompt is built again on that
   retry: if the message changed since the user saw it, the call answers `changedPromptMessage` and
-  nothing runs. A decline or a cancel answers an error result.
+  nothing runs. So build the message deterministically from the call and current data (no clocks
+  or random ids), or every accept is refused. A decline or a cancel answers an error result.
   A state that fails verification, belongs to another call, or arrives without a decision asks
   again with a new state.
 - Build the server per request: `principal` is fixed when it is built. The state is also bound to
@@ -350,7 +351,8 @@ An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choi
 (`mcpFormChoice`) or several choices (`mcpFormMultiSelect`), every field required. An approval tool
 is the same tool with an empty form. `execute` gets the answer decoded with the form's schema; an
 answer that does not fit (a value not offered, a duplicate, an empty or too long selection, a
-missing field) asks again and runs nothing.
+missing field) asks again and runs nothing. Fields come only from these builders, and elicited
+tools only from `makeMcpServerElicitedTool`, so every answer is decoded before `execute`.
 
 ```ts
 import { Effect } from 'effect'
@@ -380,17 +382,25 @@ const apply = makeMcpServerElicitedTool({
       })
     }),
   execute: (call, answered) =>
-    // `answered.answer` is `{ steps: Array<'s1' | 's2'>, notify: boolean }`; run at most once per
-    // `answered.elicitationId`.
+    // `answered.answer` is `{ steps: ReadonlyArray<'s1' | 's2'>, notify: boolean }`; run at
+    // most once per `answered.elicitationId`.
     Effect.succeed(
       ToolResult.make({ toolCallId: call.id, content: answered.answer.steps.join(',') })
     )
 })
 ```
 
-- `elicit` runs on every round, so build the prompt from current data: when it changed between the
-  question and the answer (a plan item edited meanwhile), the accept answers
+- `elicit` runs on every round, a decline's and a cancel's included, so build the prompt
+  deterministically from the call and current data (no clocks or random ids): when it changed
+  between the question and the answer (a plan item edited meanwhile), the accept answers
   `changedPromptMessage` and nothing runs.
+- A multi-select needs at least one value; `maxItems` (an integer from 1 to the number of options)
+  caps it.
+- A form that cannot be shown faithfully (repeated option values, a default that is not an option
+  or not itself a fitting answer, a `maxItems` out of range, a field named `__proto__`) lists why
+  in `form.problems`; the tool then answers an error result naming them and asks nothing. Options
+  often come from data, so check `problems` when building forms from it.
+- A `default` only preselects in the client: a missing field is never filled from it.
 - Everything else (signing, binding, era and capability rules, once-only on `elicitationId`) is as
   for approval tools above.
 

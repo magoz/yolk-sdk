@@ -41,7 +41,9 @@ import { mcpArgumentsDigest } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
 import { mcpServerForm, type McpServerForm } from './form.ts'
 
-/** Host configuration for approval tools. Without it no approval tool is offered. */
+/**
+ * Host configuration for asking tools (approval and elicited tools). Without it none is offered.
+ */
 export type McpServerApprovalOptions = {
   /**
    * The HMAC key that signs `requestState`: at least 32 bytes (a string is UTF-8 encoded), the same
@@ -211,7 +213,7 @@ interface McpApprovalRoundDefinition extends Data.TaggedEnum.WithGenerics<1> {
 
 export const McpApprovalRound = Data.taggedEnum<McpApprovalRoundDefinition>()
 
-const answer = <R>(message: string): Effect.Effect<McpApprovalRound<R>> =>
+const answer = (message: string): Effect.Effect<McpApprovalRound<never>> =>
   Effect.succeed(McpApprovalRound.Answer({ message }))
 
 const decodeRawState = Schema.decodeUnknownOption(Schema.String)
@@ -283,14 +285,23 @@ export const elicitedPrompt = <A, R>(input: {
   ) => Effect.Effect<ToolResult, McpServerError, R>
   readonly call: ToolCall
 }): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
-  Effect.map(input.elicit(input.call), elicitation => ({
-    message: elicitation.message,
-    requestedSchema: elicitation.form.requestedSchema,
-    run: (content, elicitationId) =>
-      Option.map(elicitation.form.decode(content), answer =>
-        input.execute(input.call, { elicitationId, answer })
-      )
-  }))
+  Effect.flatMap(input.elicit(input.call), elicitation =>
+    elicitation.form.problems.length > 0
+      ? Effect.fail(
+          new McpServerError({
+            message: `This form cannot be shown (${elicitation.form.problems.join('; ')}). Nothing ran.`,
+            cause: 'validation'
+          })
+        )
+      : Effect.succeed({
+          message: elicitation.message,
+          requestedSchema: elicitation.form.requestedSchema,
+          run: (content: unknown, elicitationId: string) =>
+            Option.map(elicitation.form.decode(content), answer =>
+              input.execute(input.call, { elicitationId, answer })
+            )
+        })
+  )
 
 /**
  * One round of an asking tool's call (an approval or elicited tool). Never runs the call without an
@@ -305,10 +316,10 @@ export const approvalRound = <R>(input: {
 }): Effect.Effect<McpApprovalRound<R>, McpServerError, R> =>
   McpServerApprovals.$match(input.approvals, {
     Unconfigured: () =>
-      answer<R>("This tool needs the user's approval, which this server does not offer."),
+      answer("This tool needs the user's approval, which this server does not offer."),
     // The reason names a configuration field or the SDK's key-length check, never the key.
     Misconfigured: ({ message }) =>
-      answer<R>(`This tool needs the user's approval, which is misconfigured here (${message}).`),
+      answer(`This tool needs the user's approval, which is misconfigured here (${message}).`),
     Configured: ({ codec }) => configuredRound({ ...input, codec })
   })
 
@@ -322,7 +333,7 @@ const configuredRound = <R>(input: {
     const { codec, call, ctx } = input
 
     if (!declaresFormElicitation(ctx.mcpReq.envelope)) {
-      return yield* answer<R>(
+      return yield* answer(
         'This tool runs only after the user approves it, and this MCP client does not support ' +
           'form elicitation (protocol 2026-07-28). Nothing ran.'
       )
@@ -341,8 +352,7 @@ const configuredRound = <R>(input: {
     // Built on every round: an accept is checked against the prompt as it is now.
     const prompt = yield* input.prompt(call)
 
-    if (promptBytes(prompt) > mcpServerMaxPromptBytes)
-      return yield* answer<R>(oversizedPromptMessage)
+    if (promptBytes(prompt) > mcpServerMaxPromptBytes) return yield* answer(oversizedPromptMessage)
 
     const formDigest = yield* mcpArgumentsDigest({
       message: prompt.message,
@@ -367,7 +377,7 @@ const configuredRound = <R>(input: {
     if (Option.isSome(state) && Option.isSome(decision)) {
       switch (decision.value.action) {
         case 'accept': {
-          if (state.value.formDigest !== formDigest) return yield* answer<R>(changedPromptMessage)
+          if (state.value.formDigest !== formDigest) return yield* answer(changedPromptMessage)
 
           const execution = prompt.run(decision.value.content ?? {}, state.value.elicitationId)
 
@@ -380,9 +390,9 @@ const configuredRound = <R>(input: {
         }
 
         case 'decline':
-          return yield* answer<R>('The user declined this call. Nothing ran.')
+          return yield* answer('The user declined this call. Nothing ran.')
         case 'cancel':
-          return yield* answer<R>('The user dismissed the approval request. Nothing ran.')
+          return yield* answer('The user dismissed the approval request. Nothing ran.')
       }
     }
 

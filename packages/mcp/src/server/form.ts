@@ -1,8 +1,14 @@
 /**
  * Forms an elicited tool shows the user through MCP form elicitation (`2026-07-28`): a flat object
  * of fields, each a decoder (Effect Schema, applied to the client's untrusted answer) paired with
- * the restricted JSON Schema the client renders. Only three field kinds: a yes/no checkbox, one
- * choice among titled options, and a multi-select of titled options. Every field is required.
+ * the restricted JSON Schema the client renders. Only three field kinds, built only here: a yes/no
+ * checkbox, one choice among titled options, and a multi-select of titled options. Every field is
+ * required; a `default` only preselects in the client and never stands in for a missing answer.
+ *
+ * Options often come from data (plan items), so a form that cannot be shown faithfully (repeated
+ * option values, a default the field would not accept, impossible selection bounds, a field named
+ * `__proto__`) is not thrown: it lists its `problems`, and the tool answers an error instead of
+ * asking.
  */
 import { Array as Arr, type Option } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -25,13 +31,20 @@ type FieldText = {
   readonly description?: string
 }
 
+/** Set only by this module's field builders, so no other schema is a form field. */
+export const mcpFormFieldBrand: unique symbol = Symbol('@yolk-sdk/mcp/McpServerFormField')
+
 /**
- * A form field: the schema that decodes the user's answer (it needs no services), carrying the
- * field's JSON Schema as the client renders it (`mcpFormField`).
+ * A form field, built only by `mcpFormBoolean`, `mcpFormChoice` or `mcpFormMultiSelect`: the
+ * schema that decodes the user's answer (it needs no services), carrying the field's JSON Schema
+ * as the client renders it (`mcpFormField`) and why it cannot be shown (`mcpFormProblems`, empty
+ * when it can).
  */
 export type McpServerFormField = Schema.Top & {
   readonly DecodingServices: never
+  readonly [mcpFormFieldBrand]: true
   readonly mcpFormField: PrimitiveSchemaDefinition
+  readonly mcpFormProblems: ReadonlyArray<string>
 }
 
 const describe = (input: FieldText) =>
@@ -40,16 +53,25 @@ const describe = (input: FieldText) =>
     : { title: input.title, description: input.description }
 
 // `annotate` returns a fresh schema, so the JSON is attached to this field's instance only.
-const field = <S extends Schema.Top>(schema: S, json: PrimitiveSchemaDefinition) =>
-  Object.assign(schema.annotate({}), { mcpFormField: json })
+const field = <S extends Schema.Top>(
+  schema: S,
+  json: PrimitiveSchemaDefinition & FieldText,
+  problems: ReadonlyArray<string>
+) =>
+  Object.assign(schema.annotate({}), {
+    [mcpFormFieldBrand]: true as const,
+    mcpFormField: json,
+    mcpFormProblems: problems.map(problem => `${json.title}: ${problem}`)
+  })
 
 /** A yes/no checkbox; the answer is a boolean. */
 export const mcpFormBoolean = (input: FieldText & { readonly default?: boolean }) => {
-  const json: BooleanSchema = { type: 'boolean', ...describe(input) }
+  const json: BooleanSchema & FieldText = { type: 'boolean', ...describe(input) }
 
   return field(
     Schema.Boolean,
-    input.default === undefined ? json : { ...json, default: input.default }
+    input.default === undefined ? json : { ...json, default: input.default },
+    []
   )
 }
 
@@ -62,6 +84,17 @@ const optionValues = <V extends string>(
   options: Arr.NonEmptyReadonlyArray<McpServerFormOption<V>>
 ) => Arr.map(options, option => option.value)
 
+const repeated = (values: ReadonlyArray<string>) =>
+  Arr.dedupe(values.filter((value, index) => values.indexOf(value) !== index))
+
+// Two options with one value would be two `oneOf` / `anyOf` branches matching the same answer.
+const optionProblems = (values: ReadonlyArray<string>, defaults: ReadonlyArray<string>) => [
+  ...repeated(values).map(value => `option value ${JSON.stringify(value)} is repeated`),
+  ...defaults.flatMap(value =>
+    values.includes(value) ? [] : [`default ${JSON.stringify(value)} is not an option`]
+  )
+]
+
 /** One choice among titled options; the answer is the chosen option's value. */
 export const mcpFormChoice = <const V extends string>(
   input: FieldText & {
@@ -69,74 +102,102 @@ export const mcpFormChoice = <const V extends string>(
     readonly default?: V
   }
 ) => {
-  const json: TitledSingleSelectEnumSchema = {
+  const values = optionValues(input.options)
+
+  const json: TitledSingleSelectEnumSchema & FieldText = {
     type: 'string',
     ...describe(input),
     oneOf: input.options.map(optionJson)
   }
 
   return field(
-    Schema.Literals(optionValues(input.options)),
-    input.default === undefined ? json : { ...json, default: input.default }
+    Schema.Literals(values),
+    input.default === undefined ? json : { ...json, default: input.default },
+    optionProblems(values, input.default === undefined ? [] : [input.default])
   )
 }
 
+const selectionProblems = (input: {
+  readonly options: number
+  readonly maxItems: number | undefined
+  readonly defaults: ReadonlyArray<string> | undefined
+}) => {
+  const { options, maxItems, defaults } = input
+  const most = maxItems ?? options
+
+  return [
+    ...(Number.isInteger(most) && most >= 1 && most <= options
+      ? []
+      : ['maxItems must be an integer from 1 to the number of options']),
+    ...(defaults === undefined
+      ? []
+      : [
+          ...repeated(defaults).map(value => `default ${JSON.stringify(value)} is repeated`),
+          ...(defaults.length === 0 ? ['default selects nothing'] : []),
+          ...(defaults.length > most ? ['default selects more than maxItems'] : [])
+        ])
+  ]
+}
+
 /**
- * Several titled options; the answer lists the chosen values, at least `minItems` (default 1) and
- * at most `maxItems`, without duplicates. `default` preselects options (all of them for an "untick
- * what you do not want" review).
+ * Several titled options; the answer lists the chosen values, at least one (an empty selection is
+ * no answer) and at most `maxItems`, without duplicates. `default` preselects options (all of them
+ * for an "untick what you do not want" review) and must itself be such an answer.
  */
 export const mcpFormMultiSelect = <const V extends string>(
   input: FieldText & {
     readonly options: Arr.NonEmptyReadonlyArray<McpServerFormOption<V>>
-    readonly minItems?: number
     readonly maxItems?: number
     readonly default?: ReadonlyArray<V>
   }
 ) => {
-  const minItems = input.minItems ?? 1
+  const values = optionValues(input.options)
+  const { maxItems } = input
   const items = { anyOf: input.options.map(optionJson) }
 
-  const json: TitledMultiSelectEnumSchema =
-    input.maxItems === undefined
-      ? { type: 'array', ...describe(input), minItems, items }
-      : { type: 'array', ...describe(input), minItems, maxItems: input.maxItems, items }
+  const json: TitledMultiSelectEnumSchema & FieldText =
+    maxItems === undefined
+      ? { type: 'array', ...describe(input), minItems: 1, items }
+      : { type: 'array', ...describe(input), minItems: 1, maxItems, items }
 
-  const values = Schema.Array(Schema.Literals(optionValues(input.options)))
-
-  const bounded =
-    input.maxItems === undefined
-      ? values.check(Schema.isMinLength(minItems), Schema.isUnique())
-      : values.check(
-          Schema.isMinLength(minItems),
-          Schema.isMaxLength(input.maxItems),
-          Schema.isUnique()
-        )
+  const answer = Schema.Array(Schema.Literals(values)).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(maxItems ?? values.length),
+    Schema.isUnique()
+  )
 
   return field(
-    bounded,
-    input.default === undefined ? json : { ...json, default: [...input.default] }
+    answer,
+    input.default === undefined ? json : { ...json, default: [...input.default] },
+    [
+      ...optionProblems(values, input.default ?? []),
+      ...selectionProblems({ options: values.length, maxItems, defaults: input.default })
+    ]
   )
 }
 
-/** A form: the decoder of a whole answer and the `requestedSchema` the client renders. */
+/**
+ * A form: the decoder of a whole answer, the `requestedSchema` the client renders, and why it
+ * cannot be shown (`problems`, empty when it can).
+ */
 export type McpServerForm<A> = {
   readonly decode: (content: unknown) => Option.Option<A>
   readonly requestedSchema: ElicitRequestFormParams['requestedSchema']
+  readonly problems: ReadonlyArray<string>
 }
 
 /**
  * A form of the given fields, all required. `mcpServerForm({})` is a plain accept/decline: its
- * answer is `{}`.
+ * answer is `{}`. Keys the answer has beyond the fields are dropped.
  */
 export const mcpServerForm = <const F extends Readonly<Record<string, McpServerFormField>>>(
   fields: F
 ): McpServerForm<Schema.Struct<F>['Type']> => {
-  const properties: Record<string, PrimitiveSchemaDefinition> = {}
+  const entries = Object.entries(fields)
+  const keys = entries.map(([key]) => key)
 
-  for (const [key, entry] of Object.entries(fields)) properties[key] = entry.mcpFormField
-
-  const keys = Object.keys(fields)
+  // `fromEntries` defines own properties, so no key can reach the prototype.
+  const properties = Object.fromEntries(entries.map(([key, entry]) => [key, entry.mcpFormField]))
 
   // No `required` without fields: the plain accept/decline prompt keeps its exact wire shape.
   const requestedSchema: ElicitRequestFormParams['requestedSchema'] =
@@ -144,5 +205,12 @@ export const mcpServerForm = <const F extends Readonly<Record<string, McpServerF
       ? { type: 'object', properties }
       : { type: 'object', properties, required: keys }
 
-  return { decode: Schema.decodeUnknownOption(Schema.Struct(fields)), requestedSchema }
+  return {
+    decode: Schema.decodeUnknownOption(Schema.Struct(fields)),
+    requestedSchema,
+    problems: [
+      ...(keys.includes('__proto__') ? ['a field is named __proto__'] : []),
+      ...entries.flatMap(([, entry]) => entry.mcpFormProblems)
+    ]
+  }
 }

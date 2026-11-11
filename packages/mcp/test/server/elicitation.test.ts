@@ -97,6 +97,8 @@ describe('MCP server forms', () => {
       { selected: ['s1'], notify: 'yes', urgency: 'low' },
       { selected: ['s1'], notify: true, urgency: 'urgent' },
       { selected: ['s1'], notify: true },
+      // `notify` defaults to false in the client; a missing answer is still no answer.
+      { selected: ['s1'], urgency: 'low' },
       undefined
     ]
 
@@ -116,6 +118,53 @@ describe('MCP server forms', () => {
     expect(capped.requestedSchema).toMatchObject({ properties: { picks: { maxItems: 1 } } })
     expect(capped.decode({ picks: ['a', 'b'] })).toEqual(Option.none())
     expect(mcpServerForm({}).decode({})).toEqual(Option.some({}))
+
+    expect(
+      reviewForm.decode({ selected: ['s2'], notify: false, urgency: 'low', extra: 1 })
+    ).toEqual(Option.some({ selected: ['s2'], notify: false, urgency: 'low' }))
+  })
+
+  it('lists the problems of a form that cannot be shown faithfully', () => {
+    const options = [
+      { value: 'a', title: 'A' },
+      { value: 'b', title: 'B' }
+    ] as const
+
+    expect(reviewForm.problems).toEqual([])
+
+    const problems = (field: Parameters<typeof mcpServerForm>[0][string]) =>
+      mcpServerForm({ field }).problems
+
+    expect(
+      problems(
+        mcpFormChoice({
+          title: 'Pick',
+          options: [...options, { value: 'a', title: 'A again' }],
+          default: 'a'
+        })
+      )
+    ).toEqual(['Pick: option value "a" is repeated'])
+
+    expect(
+      problems(
+        mcpFormMultiSelect({ title: 'Picks', options, default: ['a', 'a', 'b'], maxItems: 2 })
+      )
+    ).toEqual(['Picks: default "a" is repeated', 'Picks: default selects more than maxItems'])
+
+    for (const maxItems of [0, 1.5, 3]) {
+      expect(problems(mcpFormMultiSelect({ title: 'Picks', options, maxItems }))).toEqual([
+        'Picks: maxItems must be an integer from 1 to the number of options'
+      ])
+    }
+
+    expect(problems(mcpFormMultiSelect({ title: 'Picks', options, default: [] }))).toEqual([
+      'Picks: default selects nothing'
+    ])
+
+    const proto = mcpServerForm({ ['__proto__']: mcpFormBoolean({ title: 'Proto' }) })
+
+    expect(proto.problems).toEqual(['a field is named __proto__'])
+    expect(Object.keys(proto.requestedSchema.properties)).toEqual(['__proto__'])
   })
 })
 
@@ -132,6 +181,7 @@ const reviewServer = (input: {
   readonly runs: Ref.Ref<ReadonlyArray<Answered>>
   readonly title?: Ref.Ref<string>
   readonly message?: string
+  readonly maxItems?: number
 }) =>
   makeMcpToolServer({
     name: 'review-server',
@@ -157,7 +207,8 @@ const reviewServer = (input: {
                     { value: 's1', title: first },
                     { value: 's2', title: 'Delete' }
                   ],
-                  default: ['s1', 's2']
+                  default: ['s1'],
+                  maxItems: input.maxItems ?? 2
                 })
               })
             }
@@ -215,7 +266,7 @@ describe('MCP elicited tools', () => {
         message: 'Apply which calls?',
         requestedSchema: {
           type: 'object',
-          properties: { selected: { type: 'array', default: ['s1', 's2'] } },
+          properties: { selected: { type: 'array', default: ['s1'] } },
           required: ['selected']
         }
       })
@@ -309,6 +360,88 @@ describe('MCP elicited tools', () => {
         content: [{ type: 'text', text: oversizedPromptMessage }],
         isError: true
       })
+    })
+  )
+
+  it.effect('a decline answers an error and runs nothing', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<Answered>>([])
+      const server = reviewServer({ runs })
+      const pause = yield* ask(server)
+
+      const result = yield* respond(
+        server,
+        callApply({
+          id: 2,
+          retry: { requestState: pause.result.requestState, response: { action: 'decline' } }
+        })
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(CallResult)))
+
+      expect(result.result).toEqual({
+        content: [{ type: 'text', text: 'The user declined this call. Nothing ran.' }],
+        isError: true
+      })
+      expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('refuses a form that cannot be shown faithfully, asking nothing', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<Answered>>([])
+      const server = reviewServer({ runs, maxItems: 5 })
+
+      const result = yield* respond(server, callApply({})).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(CallResult))
+      )
+
+      expect(result.result).toEqual({
+        content: [
+          {
+            type: 'text',
+            text:
+              'MCP tool failed: This form cannot be shown (Calls: maxItems must be an integer ' +
+              'from 1 to the number of options). Nothing ran.'
+          }
+        ],
+        isError: true
+      })
+      expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('is never offered to SDK-routed 2025-era requests', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<Answered>>([])
+      const server = reviewServer({ runs })
+
+      const legacy = (body: Schema.JsonObject) =>
+        Effect.flatMap(
+          server.handleHttpRequest(
+            new Request('https://example.com/mcp', {
+              method: 'POST',
+              headers: {
+                accept: 'application/json, text/event-stream',
+                'content-type': 'application/json',
+                'mcp-protocol-version': '2025-06-18'
+              },
+              body: JSON.stringify(body)
+            })
+          ),
+          response => Effect.promise(() => response.text())
+        )
+
+      expect(yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).not.toContain('apply')
+
+      const called = yield* legacy({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'apply', arguments: { planId: 'p1' } }
+      })
+
+      expect(called).not.toContain('requestState')
+      expect(called).not.toContain('applied')
+      expect(yield* Ref.get(runs)).toEqual([])
     })
   )
 

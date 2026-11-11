@@ -35,17 +35,22 @@
 - Server `handleHttpRequest` lets no tool call outlive its Effect: tools run with the caller's context, whose scope (a host's request layer) closes on return, and the SDK fills SSE answers after returning the `Response` (always for 2025-era requests; for `2026-07-28` once a handler sends a related message). So an SSE answer is read to its end and re-answered with the same status, headers and events (a read failure answers 500 `-32603`), and tool calls run as fibers of a request-scoped `FiberSet` that interrupts and awaits any still running (a cancelled call's finalizers) before return. Only `subscriptions/listen` is returned unread: it runs no tool, and its stream ends only when the per-request handler closes, so it answers the acknowledgement plus `complete`. It is identified by `Mcp-Method` plus the SDK's own era routing (`isLegacyRequest` on a body clone, only when that header claims listen): the SDK checks `Mcp-Method` against the body only on requests it routes as modern, and a 2025-era request may carry any. Only the SDK branch is scoped; the header-less JSON path keeps the caller's scope. Tool Effects run with the SDK's `ctx.mcpReq.signal`, so cancelling an SDK-routed request (on Streamable HTTP, a closed response stream) interrupts the tool; the header-less JSON path runs tools inside the caller's Effect, whose interruption the host owns. Tests: `test/server/server.test.ts` (scoped resource incl. a 2025-era request claiming listen, cancellation finalizers in both eras, listen, 202 notification).
 - Server approvals and elicited tools (`src/server/approval.ts`, forms in `src/server/form.ts`):
   `McpServerTool` is `McpServerDirectTool | McpServerApprovalTool | McpServerElicitedTool`
-  (discriminated by `approval` / `elicit`; "asking" tools are the last two). An approval tool is the
+  (discriminated by `approval` / `prompt`; "asking" tools are the last two). An approval tool is the
   empty-form case of an elicited tool (`approvalPrompt` over `elicitedPrompt`); an elicited tool is
-  built by `makeMcpServerElicitedTool`, whose `elicit` returns a type-erased `McpServerPrompt`
-  (`run` decodes the answer with the form's Effect Schema, untrusted, then executes). Forms have
-  only boolean, single-choice and multi-select fields, all required (`mcpServerForm({})` omits
-  `required`, keeping the approval wire shape). An asking tool answers its first call with an MRTR
+  built only by `makeMcpServerElicitedTool` (branded `mcpElicitedToolBrand`, not exported from the
+  entry), whose `prompt` returns a type-erased `McpServerPrompt` (`run` decodes the answer with the
+  form's Effect Schema, untrusted, then executes). Forms have only boolean, single-choice and
+  multi-select (at least one value) fields, all required and built only by `form.ts`
+  (`mcpFormFieldBrand`); `mcpServerForm({})` omits `required`, keeping the approval wire shape. A
+  form built from bad data (repeated option values, defaults the field would not accept, `maxItems`
+  out of range, a `__proto__` key) carries `problems`, and `elicitedPrompt` fails with them before
+  anything is signed. An asking tool answers its first call with an MRTR
   `InputRequiredResult` (one form elicitation under `approvalInputKey`) and a `requestState` minted
   by the SDK's `createRequestStateCodec` (HMAC, TTL, bound to the server `name`, the host's
   `approvals.principal` and the method; payload: tool, `mcpArgumentsDigest` of the arguments,
   `formDigest` of the prompt's message and form, a fresh `elicitationId`). The prompt is rebuilt
-  every round: an accept whose `formDigest` no longer matches answers `changedPromptMessage`, and a
+  every round (so hosts must build it deterministically, decline and cancel rounds included): an
+  accept whose `formDigest` no longer matches answers `changedPromptMessage`, and a
   prompt over `mcpServerMaxPromptBytes` answers `oversizedPromptMessage` (never cut). The handler
   verifies the state itself (no `ServerOptions.requestState.verify` hook), so a state that fails
   verification, belongs to another tool or arguments, comes without a decision, or accepts an
