@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/sandbox",
-  "version": "0.1.0-canary.133",
+  "version": "0.1.0-canary.134",
   "description": "Effect-native sandbox execution contracts, an agent tool, testing fakes, and a Vercel Sandbox adapter.",
   "license": "MIT",
   "type": "module",
