@@ -409,7 +409,8 @@ Scripts can only use what a tool declares and returns. For each tool scripts may
   namespace heading, from `describeNamespace()`, and through `searchTools()`.
 - Custom `invalidParamsMessage` callbacks should end with
   `withToolArgumentsErrorHint(message, error)` from `@yolk-sdk/agent/tools`, so an unknown key names
-  the allowed keys (the default message already does).
+  the allowed keys and a number or boolean sent as a string names the literal to send (the default
+  message already does).
 - Keep polling, outbound-message, and human-in-the-loop tools `callableBy: 'model'`.
 
 Package tools follow these rules: connector modules take the connector `description` (override with

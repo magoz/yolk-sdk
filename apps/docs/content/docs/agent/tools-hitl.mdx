@@ -29,11 +29,12 @@ Optional `invalidParamsMessage: (error: Schema.SchemaError) => string` customize
 model-visible validation text. Only decoding `parameters` (through its JSON codec) invokes it, and
 the decode error is passed through unwrapped. Default:
 `Invalid ${name} arguments: ${String(error)}`, followed by one line per object that names its
-unknown keys and lists the allowed keys. Custom callbacks can keep that hint with
-`withToolArgumentsErrorHint(message, error)`. In Effect 4, `SchemaError` extends native
-`Error`, but do not default to `.message`: that drops the `SchemaError(...)` wrapper required by
-this tool-message contract. Existing
-`(error: unknown) => string` callbacks remain assignable.
+unknown keys and lists the allowed keys, and one line per number or boolean argument sent as a JSON
+string, naming the string and, when it is one, the literal to send. Custom callbacks can keep that
+hint with `withToolArgumentsErrorHint(message, error)`; the wrong-type lines need the error Yolk
+passed in, not one from your own decode. In Effect 4, `SchemaError` extends native `Error`, but do
+not default to `.message`: that drops the `SchemaError(...)` wrapper required by this tool-message
+contract. Existing `(error: unknown) => string` callbacks remain assignable.
 
 ### Typed outputs and file fields
 
@@ -89,12 +90,14 @@ arguments decode through `Schema.toCodecJson(parameters)`:
 - Required non-nullable fields still reject `null` with a model-visible validation error.
 - Non-finite numbers (`"NaN"`, `"Infinity"`, `"-Infinity"`) are rejected. Declare number
   parameters as `Schema.Finite` or `Schema.Int`: a bare `Schema.Number` advertises those strings.
+- Where the wire schema takes only a number or boolean, a value sent as a JSON string is rejected,
+  and the error names the string and, when the schema takes it, the unquoted literal to send. No
+  line is added for a string the schema could take. For example:
+  `Argument "offset" must be a JSON number, but it was the string "120": send 120 without quotes.`
 - Unknown keys are rejected at any depth with a model-visible validation error. Parameters are
   advertised as closed objects, and silently dropping a key would let the model believe it set
   something (a filter, a start time) that was ignored. The error names the key and lists the
-  allowed ones, for example `Unknown argument "start". Allowed arguments: id, note.` A number or
-  boolean sent as a JSON string is named too, for example `Argument "offset" must be a JSON number,
-but it was the string "120": send 120 without quotes.` One
+  allowed ones, for example `Unknown argument "start". Allowed arguments: id, note.` One
   exception: Effect parses `Schema.Struct({})` as any object, so only a root empty struct is
   checked. Nested, use `EmptyToolParams` or a declared struct.
 
