@@ -535,10 +535,9 @@ const sdkToolCall = <R>(input: {
 
 /**
  * A Yolk tool set as an MCP server. Asking tools (`McpServerApprovalTool`, `McpServerElicitedTool`)
- * are offered only on
- * `2026-07-28` requests and only with `approvals`: the stateless 2025-era serving cannot carry an
- * elicitation (the client's answer would reach another instance), and the header-less JSON path
- * neither lists nor runs them.
+ * are offered only on `2026-07-28` requests and only with `approvals`: the stateless 2025-era
+ * serving cannot carry an elicitation (the client's answer would reach another instance), and the
+ * header-less JSON path neither lists nor runs them.
  */
 export const makeMcpToolServer = <R>(input: {
   readonly name: string

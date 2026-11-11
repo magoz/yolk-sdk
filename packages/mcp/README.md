@@ -351,8 +351,9 @@ An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choi
 (`mcpFormChoice`) or several choices (`mcpFormMultiSelect`), every field required. An approval tool
 is the same tool with an empty form. `execute` gets the answer decoded with the form's schema; an
 answer that does not fit (a value not offered, a duplicate, an empty or too long selection, a
-missing field) asks again and runs nothing. Fields come only from these builders, and elicited
-tools only from `makeMcpServerElicitedTool`, so every answer is decoded before `execute`.
+missing field) asks again and runs nothing. The types accept only fields and forms from these
+builders and elicited tools from `makeMcpServerElicitedTool`, so every answer is decoded before
+`execute`.
 
 ```ts
 import { Effect } from 'effect'

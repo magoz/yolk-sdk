@@ -31,8 +31,14 @@ type FieldText = {
   readonly description?: string
 }
 
-/** Set only by this module's field builders, so no other schema is a form field. */
+/**
+ * Set only by this module's builders, so the types accept no hand-made field or form (a host can
+ * still forge one by spreading; it is trusted code, and the brand guards against mistakes).
+ */
 export const mcpFormFieldBrand: unique symbol = Symbol('@yolk-sdk/mcp/McpServerFormField')
+
+/** Set only by `mcpServerForm`. */
+export const mcpServerFormBrand: unique symbol = Symbol('@yolk-sdk/mcp/McpServerForm')
 
 /**
  * A form field, built only by `mcpFormBoolean`, `mcpFormChoice` or `mcpFormMultiSelect`: the
@@ -40,8 +46,9 @@ export const mcpFormFieldBrand: unique symbol = Symbol('@yolk-sdk/mcp/McpServerF
  * as the client renders it (`mcpFormField`) and why it cannot be shown (`mcpFormProblems`, empty
  * when it can).
  */
-export type McpServerFormField = Schema.Top & {
-  readonly DecodingServices: never
+export type McpServerFormField = Schema.Top & { readonly DecodingServices: never } & FieldParts
+
+type FieldParts = {
   readonly [mcpFormFieldBrand]: true
   readonly mcpFormField: PrimitiveSchemaDefinition
   readonly mcpFormProblems: ReadonlyArray<string>
@@ -52,12 +59,15 @@ const describe = (input: FieldText) =>
     ? { title: input.title }
     : { title: input.title, description: input.description }
 
+/** A field built from schema `S`: its exported name, so a host's declarations can name it. */
+export type McpServerFormFieldOf<S extends Schema.Top> = S['Rebuild'] & FieldParts
+
 // `annotate` returns a fresh schema, so the JSON is attached to this field's instance only.
 const field = <S extends Schema.Top>(
   schema: S,
   json: PrimitiveSchemaDefinition & FieldText,
   problems: ReadonlyArray<string>
-) =>
+): McpServerFormFieldOf<S> =>
   Object.assign(schema.annotate({}), {
     [mcpFormFieldBrand]: true as const,
     mcpFormField: json,
@@ -117,6 +127,9 @@ export const mcpFormChoice = <const V extends string>(
   )
 }
 
+const isSelectionBound = (maxItems: number, options: number) =>
+  Number.isInteger(maxItems) && maxItems >= 1 && maxItems <= options
+
 const selectionProblems = (input: {
   readonly options: number
   readonly maxItems: number | undefined
@@ -126,7 +139,7 @@ const selectionProblems = (input: {
   const most = maxItems ?? options
 
   return [
-    ...(Number.isInteger(most) && most >= 1 && most <= options
+    ...(isSelectionBound(most, options)
       ? []
       : ['maxItems must be an integer from 1 to the number of options']),
     ...(defaults === undefined
@@ -160,9 +173,14 @@ export const mcpFormMultiSelect = <const V extends string>(
       ? { type: 'array', ...describe(input), minItems: 1, items }
       : { type: 'array', ...describe(input), minItems: 1, maxItems, items }
 
+  // An out-of-range `maxItems` is a problem, never thrown: Effect's length check throws on a
+  // non-finite bound, so the decoder of a form that will not be shown caps at the options.
+  const most =
+    maxItems !== undefined && isSelectionBound(maxItems, values.length) ? maxItems : values.length
+
   const answer = Schema.Array(Schema.Literals(values)).check(
     Schema.isMinLength(1),
-    Schema.isMaxLength(maxItems ?? values.length),
+    Schema.isMaxLength(most),
     Schema.isUnique()
   )
 
@@ -181,6 +199,7 @@ export const mcpFormMultiSelect = <const V extends string>(
  * cannot be shown (`problems`, empty when it can).
  */
 export type McpServerForm<A> = {
+  readonly [mcpServerFormBrand]: true
   readonly decode: (content: unknown) => Option.Option<A>
   readonly requestedSchema: ElicitRequestFormParams['requestedSchema']
   readonly problems: ReadonlyArray<string>
@@ -206,6 +225,7 @@ export const mcpServerForm = <const F extends Readonly<Record<string, McpServerF
       : { type: 'object', properties, required: keys }
 
   return {
+    [mcpServerFormBrand]: true,
     decode: Schema.decodeUnknownOption(Schema.Struct(fields)),
     requestedSchema,
     problems: [

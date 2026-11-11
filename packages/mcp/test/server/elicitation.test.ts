@@ -22,6 +22,7 @@ import {
 } from '../../src/server'
 import {
   CallResult,
+  decodeJson,
   InputRequired,
   jsonObject,
   key,
@@ -151,7 +152,7 @@ describe('MCP server forms', () => {
       )
     ).toEqual(['Picks: default "a" is repeated', 'Picks: default selects more than maxItems'])
 
-    for (const maxItems of [0, 1.5, 3]) {
+    for (const maxItems of [0, 1.5, 3, -1, Number.NaN, Infinity, -Infinity]) {
       expect(problems(mcpFormMultiSelect({ title: 'Picks', options, maxItems }))).toEqual([
         'Picks: maxItems must be an integer from 1 to the number of options'
       ])
@@ -160,6 +161,16 @@ describe('MCP server forms', () => {
     expect(problems(mcpFormMultiSelect({ title: 'Picks', options, default: [] }))).toEqual([
       'Picks: default selects nothing'
     ])
+
+    expect(
+      problems(
+        mcpFormChoice<'a' | 'z'>({
+          title: 'Pick',
+          options: [{ value: 'a', title: 'A' }],
+          default: 'z'
+        })
+      )
+    ).toEqual(['Pick: default "z" is not an option'])
 
     const proto = mcpServerForm({ ['__proto__']: mcpFormBoolean({ title: 'Proto' }) })
 
@@ -415,8 +426,8 @@ describe('MCP elicited tools', () => {
       const server = reviewServer({ runs })
 
       const legacy = (body: Schema.JsonObject) =>
-        Effect.flatMap(
-          server.handleHttpRequest(
+        Effect.gen(function* () {
+          const response = yield* server.handleHttpRequest(
             new Request('https://example.com/mcp', {
               method: 'POST',
               headers: {
@@ -426,11 +437,20 @@ describe('MCP elicited tools', () => {
               },
               body: JSON.stringify(body)
             })
-          ),
-          response => Effect.promise(() => response.text())
-        )
+          )
 
-      expect(yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).not.toContain('apply')
+          const text = yield* Effect.promise(() => response.text())
+
+          return yield* Effect.forEach(
+            text.split('\n').flatMap(line => (line.startsWith('data: ') ? [line.slice(6)] : [])),
+            data => decodeJson(data)
+          )
+        })
+
+      // Its only tool unregistered, the 2025-era server has no tools at all.
+      expect(yield* legacy({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toEqual([
+        { jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } }
+      ])
 
       const called = yield* legacy({
         jsonrpc: '2.0',
@@ -439,8 +459,7 @@ describe('MCP elicited tools', () => {
         params: { name: 'apply', arguments: { planId: 'p1' } }
       })
 
-      expect(called).not.toContain('requestState')
-      expect(called).not.toContain('applied')
+      expect(called).toMatchObject([{ jsonrpc: '2.0', id: 2, error: { code: -32601 } }])
       expect(yield* Ref.get(runs)).toEqual([])
     })
   )

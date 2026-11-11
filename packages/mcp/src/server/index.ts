@@ -19,7 +19,12 @@ export type {
 
 export { mcpFormBoolean, mcpFormChoice, mcpFormMultiSelect, mcpServerForm } from './form.ts'
 
-export type { McpServerForm, McpServerFormField, McpServerFormOption } from './form.ts'
+export type {
+  McpServerForm,
+  McpServerFormField,
+  McpServerFormFieldOf,
+  McpServerFormOption
+} from './form.ts'
 
 export { McpServerError } from './errors.ts'
 
