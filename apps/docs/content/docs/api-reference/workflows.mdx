@@ -132,16 +132,16 @@ Every Effect operation on `VercelWorkflows` and `VercelWorkflowRun` fails with
 
 Import from `@yolk-sdk/vercel-workflows/testing`.
 
-| Export                                                                                                                               | Purpose                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `TestWorkflowWorld`                                                                                                                  | behavioral emulator for lifecycle, streams, steps, hooks, and cancellation   |
-| `testWorkflowModule`                                                                                                                 | ambient `workflow` module surface for `vi.mock`                              |
-| `defaultTestWorkflowStepMaxRetries`                                                                                                  | emulated platform default retry budget                                       |
-| `TestWorkflowStreamConflictError`, `TestWorkflowRunConflictError`                                                                    | close-once and run-state conflict errors                                     |
-| `TestWorkflowHookNotFoundError`, `TestWorkflowHookConflictError`, `TestWorkflowRunNotFoundError`, `TestWorkflowRunCancelledError`    | hook/run lookup and cancellation errors                                      |
-| `TestWorkflowRunStatus`, `TestWorkflowRunInspection`, `TestWorkflowMetadata`, `TestWorkflowStepMetadata`, `TestWorkflowStepFunction` | test-world status, inspection, and step contracts                            |
-| `TestWorkflowHook`                                                                                                                   | disposable promise returned by emulated `createHook`                         |
-| `TestWorkflowUnstorableStepError`                                                                                                    | a step error the platform could not store (`inspect().unstorableStepErrors`) |
+| Export                                                                                                                               | Purpose                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `TestWorkflowWorld`                                                                                                                  | behavioral emulator for lifecycle, streams, steps, hooks, and cancellation        |
+| `testWorkflowModule`                                                                                                                 | ambient `workflow` module surface for `vi.mock`                                   |
+| `defaultTestWorkflowStepMaxRetries`                                                                                                  | emulated platform default retry budget                                            |
+| `TestWorkflowStreamConflictError`, `TestWorkflowRunConflictError`                                                                    | close-once and run-state conflict errors                                          |
+| `TestWorkflowHookNotFoundError`, `TestWorkflowHookConflictError`, `TestWorkflowRunNotFoundError`, `TestWorkflowRunCancelledError`    | hook/run lookup and cancellation errors                                           |
+| `TestWorkflowRunStatus`, `TestWorkflowRunInspection`, `TestWorkflowMetadata`, `TestWorkflowStepMetadata`, `TestWorkflowStepFunction` | test-world status, inspection, and step contracts                                 |
+| `TestWorkflowHook`                                                                                                                   | disposable promise returned by emulated `createHook`                              |
+| `TestWorkflowUnstorableStepError`                                                                                                    | a step error the platform could not store (`inspect(runId).unstorableStepErrors`) |
 
 Executing steps loads the installed workflow runtime's step-error serializer, so tests that run steps
 need Vitest's Node environment ([Step errors](../vercel-workflows/testing#step-errors)).
