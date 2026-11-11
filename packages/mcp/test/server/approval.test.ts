@@ -11,6 +11,7 @@ import {
 import {
   approvalInputKey,
   declaresFormElicitation,
+  staleApprovalMessage,
   makeMcpToolServer,
   type McpServerApprovalOptions,
   type McpServerTool
@@ -434,6 +435,55 @@ describe('MCP tool server approvals', () => {
       expect(called).toHaveLength(1)
       expect(called).not.toMatchObject([{ result: { content: [{ text: 'sent' }] } }])
       expect(yield* Ref.get(runs)).toEqual([])
+    })
+  )
+
+  it.effect('a tool that stopped asking runs no call that answers its old prompt', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const pause = yield* ask(approvalServer({ runs, approvals: configured }))
+
+      // The host's policy changed: `send` now runs without asking.
+      const direct = makeMcpToolServer({
+        name: 'approval-server',
+        version: '0',
+        tools: [
+          {
+            def: ToolDef.make({
+              name: 'send',
+              description: 'Send',
+              parameters: { type: 'object' }
+            }),
+            execute: call =>
+              Ref.update(runs, current => [...current, call.id]).pipe(
+                Effect.as(ToolResult.make({ toolCallId: call.id, content: 'sent' }))
+              )
+          }
+        ],
+        approvals: configured
+      })
+
+      for (const action of ['decline', 'accept'] as const) {
+        const result = yield* callResult(
+          direct,
+          callSend({
+            id: 2,
+            retry: { requestState: pause.result.requestState, response: { action } }
+          })
+        )
+
+        expect(result.result).toEqual({
+          content: [{ type: 'text', text: staleApprovalMessage }],
+          isError: true
+        })
+      }
+
+      expect(yield* Ref.get(runs)).toEqual([])
+
+      // A plain call still runs.
+      yield* callResult(direct, callSend({ id: 3 }))
+
+      expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )
 

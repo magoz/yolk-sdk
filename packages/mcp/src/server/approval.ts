@@ -182,6 +182,20 @@ const verifiedState = (
       )
   })
 
+/**
+ * Whether a call answers an approval prompt: it carries a `requestState` or an answer under
+ * `approvalInputKey`. A direct tool never asks, so such a call answers a prompt from when the tool
+ * was an approval tool (the host's policy changed in between) and must not run: neither a declined
+ * answer nor a replayed accept may become a plain call.
+ */
+export const answersApproval = (ctx: ServerContext) =>
+  Option.isSome(decodeRawState(ctx.mcpReq.requestState<unknown>())) ||
+  ctx.mcpReq.inputResponses?.[approvalInputKey] !== undefined
+
+/** The answer to a call that answers a prompt its tool no longer shows. */
+export const staleApprovalMessage =
+  'This call answers an approval prompt this tool no longer shows. Nothing ran; call it again.'
+
 const decisionOf = (ctx: ServerContext) =>
   Option.map(
     decodeDecision(ctx.mcpReq.inputResponses?.[approvalInputKey]),

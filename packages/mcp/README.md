@@ -328,6 +328,10 @@ const server = makeMcpToolServer({
   the server's `name`.
 - The server keeps no state, so an accepted retry replays until the state expires: key once-only
   execution on `approvalId`.
+- A direct tool refuses a call that answers an approval prompt (a `requestState` or an answer under
+  `approvalInputKey`, `staleApprovalMessage`): when the host's policy turned an approval tool into a
+  direct one between the prompt and the answer, neither a decline nor a replayed accept becomes a
+  plain call.
 - A request that does not declare form elicitation gets an error result and nothing runs.
   Approval tools are not offered on 2025-era requests (stateless serving cannot route the
   client's answer back to the open call) or on the header-less JSON path, and not at all without

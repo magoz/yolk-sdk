@@ -23,13 +23,15 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import {
+  answersApproval,
   approvalRound,
   McpApprovalRound,
   makeMcpServerApprovals,
   type McpServerApprovalOptions,
   type McpServerApprovals,
   type McpServerToolApprovalPolicy,
-  type McpServerToolApproved
+  type McpServerToolApproved,
+  staleApprovalMessage
 } from './approval.ts'
 import { McpServerError } from './errors.ts'
 
@@ -449,7 +451,11 @@ const sdkToolCall = <R>(input: {
 }): Effect.Effect<ToolCallOutcome, McpServerError, R> => {
   const { tool, call } = input
 
-  if (tool.approval === undefined) return tool.execute(call)
+  if (tool.approval === undefined) {
+    return answersApproval(input.ctx)
+      ? Effect.succeed(mcpErrorResult(staleApprovalMessage))
+      : tool.execute(call)
+  }
 
   const execute = tool.execute
 
