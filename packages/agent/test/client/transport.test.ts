@@ -426,6 +426,59 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
   })
 
+  it('keeps a quiet durable run connected while the server sends blank lines', async () => {
+    const requests: Array<CapturedRequest> = []
+    const encoder = new TextEncoder()
+    let heartbeats: ReturnType<typeof setInterval> | undefined
+
+    // Quiet for three idle timeouts, with a blank line well inside each one. A reconnect would
+    // find no second response configured.
+    const quietRun = new Response(
+      new ReadableStream<Uint8Array>({
+        start: controller => {
+          controller.enqueue(encoder.encode(`\n${encodeEvents([AgentStart.make({})])}\n`))
+          heartbeats = setInterval(() => controller.enqueue(encoder.encode('\n')), 50)
+          setTimeout(() => {
+            clearInterval(heartbeats)
+            controller.enqueue(
+              encoder.encode(
+                `${encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])}\n`
+              )
+            )
+            controller.close()
+          }, 750)
+        },
+        cancel: () => clearInterval(heartbeats)
+      })
+    )
+
+    const events = await collectEventStream(
+      streamAgentRunEventStreamUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        idleReconnect: { idleTimeoutMs: 250, maxAttempts: 1 },
+        httpClientLayer: makeHttpClientLayerFromResponses([quietRun], requests)
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual(['/api/agent/run_1'])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
+  it('reads blank lines as no events', async () => {
+    const body = `\n${encodeEvents([AgentStart.make({})])}\n\n\n${encodeEvents([
+      AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })
+    ])}\n\n`
+
+    const events = await collectEventStream(
+      streamAgentRunEventStream({
+        endpoint: '/api/agent/run_1',
+        httpClientLayer: makeHttpClientLayer(new Response(body), [])
+      })
+    )
+
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
   it('reconnects idle newly started durable runs by run id', async () => {
     const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
     const requests: Array<CapturedRequest> = []
