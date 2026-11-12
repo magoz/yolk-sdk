@@ -2,6 +2,7 @@ export {
   isVercelMissingSandboxError,
   VercelSandboxClient,
   VercelSandboxClientLive,
+  VercelSandboxEnvironment,
   VercelSandboxFileTooLargeError
 } from './client.ts'
 

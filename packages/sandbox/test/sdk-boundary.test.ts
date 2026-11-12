@@ -13,6 +13,7 @@ import {
 import {
   VercelSandboxClient,
   VercelSandboxClientLive,
+  VercelSandboxEnvironment,
   type VercelSandboxCreateInput
 } from '../src/vercel/client.ts'
 
@@ -34,7 +35,7 @@ const baseInput = (
   ports: [3000],
   timeoutMs: 60_000,
   resources: SandboxResources.make({ vcpus: 2 }),
-  runtime: 'node24',
+  environment: VercelSandboxEnvironment.Runtime({ runtime: 'node24' }),
   persistent: false,
   ...overrides
 })
@@ -140,6 +141,41 @@ describe('live Vercel client request construction', () => {
     const tarball = capturedCreate(spy.mock.calls)
     expect(Object.keys(tarball)).toEqual([...commonKeys, 'runtime', 'source'])
     expect(tarball.source).toEqual({ type: 'tarball', url: 'https://example.test/bundle.tgz' })
+  })
+
+  it('sends an image in place of the runtime, before the source; a snapshot ignores it', async () => {
+    const sentinel = new Error('create sentinel')
+    const spy = vi.spyOn(VercelSdkSandbox, 'create').mockRejectedValue(sentinel)
+    const image = 'acme/tools/browser@sha256:abc'
+    const environment = VercelSandboxEnvironment.Image({ image })
+
+    expect(await createError(baseInput({ environment }))).toBe(sentinel)
+    const empty = capturedCreate(spy.mock.calls)
+    expect(Object.keys(empty)).toEqual([...commonKeys, 'image'])
+    expect(empty.image).toBe(image)
+    expect(Object.hasOwn(empty, 'runtime')).toBe(false)
+
+    spy.mockClear()
+    expect(
+      await createError(
+        baseInput({
+          environment,
+          source: TarballSandboxInitialSource.make({ url: 'https://example.test/bundle.tgz' })
+        })
+      )
+    ).toBe(sentinel)
+    expect(Object.keys(capturedCreate(spy.mock.calls))).toEqual([...commonKeys, 'image', 'source'])
+
+    spy.mockClear()
+    expect(
+      await createError(
+        baseInput({
+          environment,
+          source: SnapshotSandboxInitialSource.make({ snapshotId: 'snap_fixture' })
+        })
+      )
+    ).toBe(sentinel)
+    expect(Object.keys(capturedCreate(spy.mock.calls))).toEqual([...commonKeys, 'source'])
   })
 
   it('preserves git omission and auth/depth/revision evaluation order', async () => {

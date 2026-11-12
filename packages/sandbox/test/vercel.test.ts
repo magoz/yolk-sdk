@@ -11,8 +11,11 @@ import {
 import { makeInMemorySandboxStateStoreLayer } from '../src/testing/index.ts'
 import {
   VercelSandboxClient,
+  VercelSandboxEnvironment,
   VercelSandboxFileTooLargeError,
   makeVercelSandboxLayerWithClient,
+  type VercelSandboxCreateInput,
+  type VercelSandboxLayerConfig,
   type VercelDetachedCommand,
   type VercelFinishedCommand,
   type VercelRunCommandInput,
@@ -161,6 +164,55 @@ describe('vercel sandbox layer', () => {
       expect(files.map(file => file.path).some(path => path.endsWith('/wrapper.sh'))).toBe(true)
       expect(commands[0]?.cmd).toBe('bash')
       expect(commands[0]?.cwd).toBe('/vercel/sandbox/packages/sandbox')
+    })
+  )
+
+  it.effect('creates on the image the config names, else the default runtime', () =>
+    Effect.gen(function* () {
+      const environments: Array<VercelSandboxCreateInput['environment']> = []
+
+      const run = (config: VercelSandboxLayerConfig) => {
+        const handle = makeHandle({
+          name: makeVercelSandboxName('session_1'),
+          files: [],
+          commands: [],
+          deleted: []
+        })
+
+        const clientLayer = Layer.succeed(
+          VercelSandboxClient,
+          VercelSandboxClient.of({
+            get: () => Effect.succeed(null),
+            create: input => {
+              environments.push(input.environment)
+
+              return Effect.succeed(handle)
+            }
+          })
+        )
+
+        return Effect.gen(function* () {
+          const sandbox = yield* Sandbox
+
+          return yield* sandbox.run(SandboxCommandInput.make({ command: 'true' }))
+        }).pipe(
+          Effect.provide(
+            makeVercelSandboxLayerWithClient(config).pipe(
+              Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
+            )
+          )
+        )
+      }
+
+      yield* run({ sandboxSessionId: 'session_1', image: 'acme/tools/browser:v1' })
+      yield* run({ sandboxSessionId: 'session_1' })
+      yield* run({ sandboxSessionId: 'session_1', runtime: 'node26' })
+
+      expect(environments).toEqual([
+        VercelSandboxEnvironment.Image({ image: 'acme/tools/browser:v1' }),
+        VercelSandboxEnvironment.Runtime({ runtime: 'node24' }),
+        VercelSandboxEnvironment.Runtime({ runtime: 'node26' })
+      ])
     })
   )
 

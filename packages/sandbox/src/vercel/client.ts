@@ -10,6 +10,18 @@ import type { SandboxInitialSource, SandboxResources, SandboxSnapshotRetention }
 
 export type VercelSandboxRuntime = 'node22' | 'node24' | 'node26' | 'python3.13'
 
+/**
+ * What a new sandbox runs on: a Vercel-managed runtime, or a Vercel Container Registry image (the
+ * project's own, or one another team shares: `team/project/repo:tag`, `repo@sha256:…`). A snapshot
+ * source boots its own saved environment and ignores this.
+ */
+export type VercelSandboxEnvironment = Data.TaggedEnum<{
+  Runtime: { readonly runtime: VercelSandboxRuntime }
+  Image: { readonly image: string }
+}>
+
+export const VercelSandboxEnvironment = Data.taggedEnum<VercelSandboxEnvironment>()
+
 export type VercelNetworkPolicy = NetworkPolicy
 
 export type VercelCommandOutput = {
@@ -56,7 +68,7 @@ export type VercelSandboxCreateInput = {
   readonly ports: ReadonlyArray<number>
   readonly timeoutMs: number
   readonly resources: SandboxResources
-  readonly runtime: VercelSandboxRuntime
+  readonly environment: VercelSandboxEnvironment
   readonly env?: Readonly<Record<string, string>>
   readonly persistent: boolean
   readonly snapshotExpirationMs?: number
@@ -324,6 +336,12 @@ const gitSource = (
   return git
 }
 
+const environmentOptions = (environment: VercelSandboxEnvironment) =>
+  VercelSandboxEnvironment.$match(environment, {
+    Runtime: ({ runtime }) => ({ runtime }),
+    Image: ({ image }) => ({ image })
+  })
+
 const createSandbox = (input: VercelSandboxCreateInput) => {
   const common = commonCreateOptions(input)
 
@@ -331,7 +349,7 @@ const createSandbox = (input: VercelSandboxCreateInput) => {
     Match.tag('Empty', () =>
       VercelSdkSandbox.create({
         ...common,
-        runtime: input.runtime
+        ...environmentOptions(input.environment)
       })
     ),
     Match.tag('Snapshot', source =>
@@ -343,14 +361,14 @@ const createSandbox = (input: VercelSandboxCreateInput) => {
     Match.tag('Git', source =>
       VercelSdkSandbox.create({
         ...common,
-        runtime: input.runtime,
+        ...environmentOptions(input.environment),
         source: gitSource(source)
       })
     ),
     Match.tag('Tarball', source =>
       VercelSdkSandbox.create({
         ...common,
-        runtime: input.runtime,
+        ...environmentOptions(input.environment),
         source: { type: 'tarball', url: source.url }
       })
     ),

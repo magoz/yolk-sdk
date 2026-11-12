@@ -44,6 +44,7 @@ import type { SandboxError } from '../errors.ts'
 import {
   VercelSandboxClient,
   VercelSandboxClientLive,
+  VercelSandboxEnvironment,
   VercelSandboxFileTooLargeError,
   type VercelDetachedCommand,
   type VercelNetworkPolicy,
@@ -51,17 +52,26 @@ import {
   type VercelSandboxRuntime
 } from './client.ts'
 
-export type VercelSandboxLayerConfig = {
+type VercelSandboxLayerBaseConfig = {
   readonly sandboxSessionId: string
   readonly lifecycle?: SandboxLifecycle
   readonly source?: SandboxInitialSource
   readonly env?: Readonly<Record<string, string>>
   readonly ports?: ReadonlyArray<number>
   readonly resources?: SandboxResources
-  readonly runtime?: VercelSandboxRuntime
   readonly networkPolicy?: VercelNetworkPolicy
   readonly workspaceRoot?: string
 }
+
+/**
+ * A managed `runtime` (default `node24`) or a Vercel Container Registry `image`, never both. A
+ * snapshot `source` ignores either: it boots the environment it saved.
+ */
+export type VercelSandboxLayerConfig = VercelSandboxLayerBaseConfig &
+  (
+    | { readonly runtime?: VercelSandboxRuntime; readonly image?: never }
+    | { readonly image: string; readonly runtime?: never }
+  )
 
 type ActiveSandbox = {
   readonly handle: VercelSandboxHandle
@@ -276,7 +286,12 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
       const source = sandboxSourceOrDefault(config.source)
       const ports = config.ports ?? defaultSandboxPorts
       const resources = config.resources ?? defaultVercelResources
-      const runtime = config.runtime ?? defaultVercelRuntime
+
+      const environment =
+        config.image === undefined
+          ? VercelSandboxEnvironment.Runtime({ runtime: config.runtime ?? defaultVercelRuntime })
+          : VercelSandboxEnvironment.Image({ image: config.image })
+
       const workspaceRoot = config.workspaceRoot ?? defaultSandboxWorkspaceRoot
       const name = makeVercelSandboxName(config.sandboxSessionId)
 
@@ -297,7 +312,7 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
               ports,
               timeoutMs: lifecycleTimeoutMs(lifecycle),
               resources,
-              runtime,
+              environment,
               env: config.env,
               persistent: persistentFlag(lifecycle),
               snapshotExpirationMs: snapshotExpirationMs(lifecycle),
