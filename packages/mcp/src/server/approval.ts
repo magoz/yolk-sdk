@@ -261,7 +261,6 @@ const encoder = new TextEncoder()
 const promptBytes = (prompt: McpServerPrompt<unknown>) =>
   encoder.encode(JSON.stringify({ message: prompt.message, form: prompt.requestedSchema })).length
 
-/** An approval tool's prompt: its policy's message and the approve/deny choice (`approvalForm`). */
 /** What a declined approval answers (a `deny` choice, or a declined form). */
 export const declinedApprovalMessage = 'The user declined this call. Nothing ran.'
 
@@ -280,6 +279,7 @@ export const approvalForm = mcpServerForm({
   })
 })
 
+/** An approval tool's prompt: its policy's message and the approve/deny choice (`approvalForm`). */
 export const approvalPrompt = <R>(input: {
   readonly policy: McpServerToolApprovalPolicy<R>
   readonly execute: (

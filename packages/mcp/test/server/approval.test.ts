@@ -270,7 +270,10 @@ describe('MCP tool server approvals', () => {
         server,
         callSend({
           id: 2,
-          retry: { requestState: pause.result.requestState, response: { action: 'accept' } }
+          retry: {
+            requestState: pause.result.requestState,
+            response: { action: 'accept', content: { decision: 'approve' } }
+          }
         })
       )
 
@@ -287,7 +290,8 @@ describe('MCP tool server approvals', () => {
       const runs = yield* Ref.make<ReadonlyArray<string>>([])
       const server = approvalServer({ runs, approvals: configured })
       const pause = yield* ask(server)
-      const accept = { action: 'accept' }
+      // A real approve: only the state's binding can make these ask again.
+      const accept = { action: 'accept', content: { decision: 'approve' } }
       const state = pause.result.requestState
 
       const otherPrincipal = approvalServer({ runs, approvals: { key, principal: 'token-2' } })
@@ -317,6 +321,14 @@ describe('MCP tool server approvals', () => {
       }
 
       expect(yield* Ref.get(runs)).toEqual([])
+
+      // The same accept with the right state, server and arguments runs.
+      yield* callResult(
+        server,
+        callSend({ id: 7, retry: { requestState: state, response: accept } })
+      )
+
+      expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )
 
@@ -492,7 +504,10 @@ describe('MCP tool server approvals', () => {
     Effect.gen(function* () {
       const runs = yield* Ref.make<ReadonlyArray<string>>([])
       const pause = yield* ask(approvalServer({ runs, approvals: configured }))
-      const accept = { requestState: pause.result.requestState, response: { action: 'accept' } }
+      const accept = {
+        requestState: pause.result.requestState,
+        response: { action: 'accept', content: { decision: 'approve' } }
+      }
 
       const renamed = (name: string, toolName: string) =>
         makeMcpToolServer({
