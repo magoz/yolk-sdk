@@ -44,7 +44,7 @@
   entry), whose `prompt` returns a type-erased `McpServerPrompt` (`run` decodes the answer with the
   form's Effect Schema, untrusted, then executes). Forms have only boolean, single-choice and
   multi-select (at least one value) fields, all required and built only by `form.ts`
-  (`mcpFormFieldBrand`, forms `mcpServerFormBrand`); Every form lists `required`. A form built from
+  (`mcpFormFieldBrand`, forms `mcpServerFormBrand`); every form lists `required`. A form built from
   bad data (repeated option values, defaults the field would not accept, `maxItems` out of range, a
   `__proto__` key) carries `problems`, and `elicitedPrompt` fails with them before anything is
   signed. An asking tool answers its first call with an MRTR `InputRequiredResult` (one form

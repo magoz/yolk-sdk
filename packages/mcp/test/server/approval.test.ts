@@ -504,6 +504,7 @@ describe('MCP tool server approvals', () => {
     Effect.gen(function* () {
       const runs = yield* Ref.make<ReadonlyArray<string>>([])
       const pause = yield* ask(approvalServer({ runs, approvals: configured }))
+
       const accept = {
         requestState: pause.result.requestState,
         response: { action: 'accept', content: { decision: 'approve' } }
@@ -635,6 +636,26 @@ describe('MCP tool server approvals through the Yolk client', () => {
       }
 
       expect(resumed.result.content).toBe('sent')
+      expect(yield* Ref.get(runs)).toHaveLength(1)
+
+      // A deny chosen in the form runs nothing.
+      const second = yield* callRemoteMcpServerToolResumable(call).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(second, 'InputRequired')) {
+        return expect.fail(`Expected InputRequired, got ${second._tag}`)
+      }
+
+      const denied = yield* resumeRemoteMcpServerToolCall({
+        ...call,
+        inputRequired: second.inputRequired,
+        responses: { [approvalInputKey]: { action: 'accept', content: { decision: 'deny' } } }
+      }).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(denied, 'Complete')) {
+        return expect.fail(`Expected Complete, got ${denied._tag}`)
+      }
+
+      expect(denied.result.content).toBe(declinedApprovalMessage)
       expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )

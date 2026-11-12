@@ -349,14 +349,14 @@ const server = makeMcpToolServer({
 
 ### Ask the user a form
 
-An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choice
-(`mcpFormChoice`) or several choices (`mcpFormMultiSelect`), every field required. An approval tool
-is the same tool with one required approve/deny choice. A form without fields is never asked
-(it lists a problem): a client may accept an empty form without showing it. `execute` gets the answer decoded with the form's schema; an
-answer that does not fit (a value not offered, a duplicate, an empty or too long selection, a
-missing field) asks again and runs nothing. The types accept only fields and forms from these
-builders and elicited tools from `makeMcpServerElicitedTool`, so every answer is decoded before
-`execute`.
+An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choice (`mcpFormChoice`)
+or several choices (`mcpFormMultiSelect`), every field required. An approval tool is the same tool
+with one required approve/deny choice. A form without fields is never asked (it lists a problem): a
+client may accept an empty form without showing it. `execute` gets the answer decoded with the
+form's schema; an answer that does not fit (a value not offered, a duplicate, an empty or too long
+selection, a missing field) asks again and runs nothing. The types accept only fields and forms from
+these builders and elicited tools from `makeMcpServerElicitedTool`, so every answer is decoded
+before `execute`.
 
 ```ts
 import { Effect } from 'effect'

@@ -265,7 +265,8 @@ const promptBytes = (prompt: McpServerPrompt<unknown>) =>
 export const declinedApprovalMessage = 'The user declined this call. Nothing ran.'
 
 /**
- * The approval form: one required choice. Never an empty form, which a client may accept without
+ * The approval form (shared by every approval prompt: read it, never change it): one required
+ * choice. Never an empty form, which a client may accept without
  * showing it (OpenCode does), so the user always makes the choice; a `deny` is answered like a
  * declined form and runs nothing.
  */
