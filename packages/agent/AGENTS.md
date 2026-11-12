@@ -110,6 +110,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - HTTP callback producers forward failed exits to their output queues with the original Cause. Typed-only catches strand consumers when host callbacks or cleanup defect; preserve defects rather than wrapping them as recoverable transport errors.
 - Use `isTerminalAgentEvent` as the canonical protocol helper for `AgentEnd`/`AgentError`/`AgentAwaitingInput` checks.
 - Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, poll empty non-terminal chunks without advancing `startIndex`, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
+- Blank NDJSON lines are heartbeats (`AgentStreamSignal.Heartbeat` in `src/client/transport.ts`): never events, never counted toward `startIndex`, but each restarts the `idleReconnect` wait, so a server that sends them while its run is quiet keeps one connection instead of reconnecting every `idleTimeoutMs`. Public stream helpers emit events only. The route side (a leading blank line commits Next.js response headers; periodic ones under `idleTimeoutMs`) is documented in `apps/docs/content/docs/vercel-workflows/routes.mdx` (Quiet runs).
 - Client public helpers are Effect-native: stream helpers return `Stream`; `cancelAgentRun`, `collectAgentEvents`, `textFromBlob`, and `documentPartFromTextFile` return `Effect`; HTTP helpers accept `httpClientLayer`.
 
 ## Agent status

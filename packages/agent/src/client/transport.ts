@@ -703,16 +703,28 @@ const responseToLineStream = (response: HttpClientResponse.HttpClientResponse) =
     Stream.mapError(toHttpClientTransportError('Could not read agent response body')),
     Stream.decodeText,
     Stream.splitLines,
-    Stream.map(line => line.trim()),
-    Stream.filter(line => line.length > 0)
+    Stream.map(line => line.trim())
   )
+
+/**
+ * What an NDJSON agent response body carries. Besides events a server may send blank lines at any
+ * time: a leading one commits the response headers before the first event (Next.js sends a streamed
+ * response's headers only with its first body chunk), and periodic ones keep a quiet run's
+ * connection alive. A blank line is no event, but it proves the connection is alive, so the idle
+ * reconnect waits for silence rather than for the next event.
+ */
+type AgentStreamSignal =
+  | { readonly _tag: 'Event'; readonly event: AgentEventType }
+  | { readonly _tag: 'Heartbeat' }
+
+const AgentStreamSignal = Data.taggedEnum<AgentStreamSignal>()
 
 const closeScope = (scope: Scope.Closeable) => Scope.close(scope, Exit.succeed(undefined))
 
 // Protocol-terminal events finish the consumer stream, but HTTP bodies must still
 // drain to EOF so server runtimes do not observe client-side response aborts.
-const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) =>
-  Stream.callback<AgentEventType, AgentTransportError>(queue =>
+const responseToSignalStream = (response: HttpClientResponse.HttpClientResponse) =>
+  Stream.callback<AgentStreamSignal, AgentTransportError>(queue =>
     Effect.gen(function* () {
       const callbackScope = yield* Scope.Scope
       // Own the response stream in a scope that can outlive the consumer after a
@@ -761,9 +773,15 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
       const emitLines = (lines: ReadonlyArray<string>): Effect.Effect<void, AgentTransportError> =>
         Effect.gen(function* () {
           for (const line of lines) {
+            if (line.length === 0) {
+              yield* Queue.offer(queue, AgentStreamSignal.Heartbeat())
+
+              continue
+            }
+
             const event = yield* parseAgentEventLine(line)
 
-            yield* Queue.offer(queue, event)
+            yield* Queue.offer(queue, AgentStreamSignal.Event({ event }))
 
             if (isTerminalAgentEvent(event)) {
               yield* startTerminalDrain
@@ -828,27 +846,43 @@ const applyAbortSignal = <A, E, R>(
   signal: AbortSignal | undefined
 ) => (signal === undefined ? stream : stream.pipe(Stream.interruptWhen(abortSignalEffect(signal))))
 
-export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
+const agentEvents = <E, R>(signals: Stream.Stream<AgentStreamSignal, E, R>) =>
+  signals.pipe(
+    Stream.filterMap(signal =>
+      AgentStreamSignal.$is('Event')(signal) ? Result.succeed(signal.event) : Result.fail(signal)
+    )
+  )
+
+const streamAgentSignals = <E>(
+  request: {
+    readonly signal?: AbortSignal
+    readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  },
+  response: Effect.Effect<HttpClientResponse.HttpClientResponse, E, HttpClient.HttpClient>
+) =>
   applyAbortSignal(
-    Stream.fromEffect(requestAgentResponse(request)).pipe(Stream.flatMap(responseToEventStream)),
+    Stream.fromEffect(response).pipe(Stream.flatMap(responseToSignalStream)),
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
+const streamAgentEventSignals = (request: StreamAgentEventsRequest) =>
+  streamAgentSignals(request, requestAgentResponse(request))
+
+const streamAgentRunEventSignals = (request: StreamAgentRunEventsRequest) =>
+  streamAgentSignals(request, requestAgentRunResponse(request))
+
+const streamAgentRunHitlResponseEventSignals = (request: StreamAgentRunHitlResponseEventsRequest) =>
+  streamAgentSignals(request, requestAgentRunHitlResponse(request))
+
+export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
+  agentEvents(streamAgentEventSignals(request))
+
 export const streamAgentRunEventStream = (request: StreamAgentRunEventsRequest) =>
-  applyAbortSignal(
-    Stream.fromEffect(requestAgentRunResponse(request)).pipe(Stream.flatMap(responseToEventStream)),
-    request.signal
-  ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
+  agentEvents(streamAgentRunEventSignals(request))
 
 export const streamAgentRunHitlResponseEventStream = (
   request: StreamAgentRunHitlResponseEventsRequest
-) =>
-  applyAbortSignal(
-    Stream.fromEffect(requestAgentRunHitlResponse(request)).pipe(
-      Stream.flatMap(responseToEventStream)
-    ),
-    request.signal
-  ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
+) => agentEvents(streamAgentRunHitlResponseEventSignals(request))
 
 export const streamToolApprovalResponseEventStream = (request: SubmitToolApprovalResponseRequest) =>
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
@@ -869,7 +903,7 @@ type AgentEventChunkResult = {
 }
 
 type AgentEventPullResult =
-  | { readonly _tag: 'Events'; readonly events: Iterable<AgentEventType> }
+  | { readonly _tag: 'Signals'; readonly signals: Iterable<AgentStreamSignal> }
   | { readonly _tag: 'Done' }
   | { readonly _tag: 'Idle' }
 
@@ -929,13 +963,13 @@ const missingAgentRunTailIndexError = () =>
     cause: 'missing_tail_index'
   })
 
-const pullAgentEventChunk = <A extends Iterable<AgentEventType>>(
+const pullAgentEventChunk = <A extends Iterable<AgentStreamSignal>>(
   pull: Pull.Pull<A, AgentTransportError, void, never>,
   idleReconnect: AgentRunIdleReconnectOptions | undefined
 ) => {
   const pullEvents: Effect.Effect<AgentEventPullResult, AgentTransportError, never> =
     Pull.matchEffect(pull, {
-      onSuccess: events => Effect.succeed(AgentEventPullResult.Events({ events })),
+      onSuccess: signals => Effect.succeed(AgentEventPullResult.Signals({ signals })),
       onFailure: cause => Effect.failCause(cause),
       onDone: () => Effect.succeed(AgentEventPullResult.Done())
     })
@@ -953,7 +987,7 @@ const pullAgentEventChunk = <A extends Iterable<AgentEventType>>(
 
 const drainAgentEventStream = (input: {
   readonly queue: Queue.Enqueue<AgentEventType>
-  readonly stream: Stream.Stream<AgentEventType, AgentTransportError, never>
+  readonly stream: Stream.Stream<AgentStreamSignal, AgentTransportError, never>
   readonly countOffset: number
   readonly idleReconnect?: AgentRunIdleReconnectOptions
   readonly onEvent?: StreamAgentEventHandler
@@ -976,12 +1010,16 @@ const drainAgentEventStream = (input: {
           Match.tag('Done', () =>
             Effect.succeed({ count: state.count, terminal: state.terminal, idle: false })
           ),
-          Match.tag('Events', current =>
+          Match.tag('Signals', current =>
             Effect.gen(function* () {
               let count = state.count
               let terminal = state.terminal
 
-              for (const event of current.events) {
+              // A heartbeat only restarts the idle wait: the next pull races a fresh timeout.
+              for (const signal of current.signals) {
+                if (AgentStreamSignal.$is('Heartbeat')(signal)) continue
+
+                const event = signal.event
                 count += 1
                 terminal = terminal || isTerminalAgentEvent(event)
                 yield* Effect.sync(() => input.onEvent?.(event, input.countOffset + count))
@@ -1015,7 +1053,7 @@ const streamAgentRunContinuationChunk = (input: {
 }): Effect.Effect<AgentEventChunkResult, AgentTransportError, Scope.Scope> =>
   drainAgentEventStream({
     queue: input.queue,
-    stream: streamAgentRunEventStream({
+    stream: streamAgentRunEventSignals({
       endpoint: input.endpoint,
       startIndex: input.startIndex,
       signal: input.signal,
@@ -1116,7 +1154,7 @@ export const streamAgentEventStreamUntilTerminal = (
 
       const firstChunk = yield* drainAgentEventStream({
         queue,
-        stream: streamAgentEventStream({
+        stream: streamAgentEventSignals({
           ...request,
           onResponse: response => {
             startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
@@ -1216,7 +1254,7 @@ const streamAgentRunHitlResponseInitialChunk = (
 ): Effect.Effect<AgentEventChunkResult, AgentTransportError, Scope.Scope> =>
   drainAgentEventStream({
     queue,
-    stream: streamAgentRunHitlResponseEventStream({
+    stream: streamAgentRunHitlResponseEventSignals({
       ...request,
       onResponse: response => {
         setStartIndex(agentRunStreamStartIndexFromHeaders(response.headers))

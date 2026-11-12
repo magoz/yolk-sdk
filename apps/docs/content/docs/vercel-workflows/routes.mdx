@@ -65,6 +65,81 @@ At `AgentAwaitingInput`, clients reach a logical terminal boundary and should dr
 body without cancellation. The underlying Workflow writable remains open. After resume, tail from
 the saved Workflow stream index so continued tool/model events append to the same run.
 
+### Quiet runs
+
+A run writes nothing while its model thinks or a tool runs, and a client that resumes at the tail
+reads nothing until the next event. Next.js sends a streamed response's headers only with its first
+body chunk, so until then the client cannot even tell the route answered. The Yolk client reads
+blank lines as heartbeats: they are not events and do not move the stream index, but they prove the
+connection is alive, so the `idleReconnect: { idleTimeoutMs, maxAttempts }` option of the
+`*UntilTerminal` helpers reconnects only after `idleTimeoutMs` of silence. Start the body with one
+blank line and send another whenever the run has been quiet for well under the client's
+`idleTimeoutMs` (a third of it leaves room for a late one). Insert them only between whole lines:
+`writeDurableAgentEvent` writes one NDJSON line per chunk, so a stream of its chunks qualifies.
+
+Heartbeats prove the route is alive, not that the run makes progress: if the Workflow readable
+stalls while the route keeps beating, the client waits until the response ends (at the function's
+maximum duration, for example) and then continues from its index. Without heartbeats it reconnects
+every `idleTimeoutMs` instead, healthy quiet runs included.
+
+```ts
+const blankLine = new TextEncoder().encode('\n')
+
+const withHeartbeats = (readable: ReadableStream<Uint8Array>, intervalMs: number) => {
+  const reader = readable.getReader()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let open = true
+
+  const stop = () => {
+    open = false
+    clearTimeout(timer)
+  }
+
+  const beatAfterQuiet = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      // A connection still busy with earlier bytes needs no heartbeat.
+      if (open && (controller.desiredSize ?? 0) > 0) controller.enqueue(blankLine)
+      beatAfterQuiet(controller)
+    }, intervalMs)
+  }
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(blankLine)
+      beatAfterQuiet(controller)
+    },
+    async pull(controller) {
+      try {
+        const result = await reader.read()
+
+        if (!open) return
+
+        if (result.done) {
+          stop()
+          controller.close()
+        } else {
+          controller.enqueue(result.value)
+          beatAfterQuiet(controller)
+        }
+      } catch (error) {
+        stop()
+        controller.error(error)
+      }
+    },
+    cancel(reason) {
+      stop()
+
+      return reader.cancel(reason)
+    }
+  })
+}
+```
+
+Return `new Response(withHeartbeats(readable, intervalMs), { headers })`. Validate access and the
+run before building it, so refusals keep their status: once the blank line is sent the status is
+200, and a later failure can only end the body early.
+
 ## Resume HITL
 
 ```ts
