@@ -1,6 +1,6 @@
 # Sandbox Package
 
-`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, and the Vercel Sandbox adapter over `@vercel/sandbox` 2.x.
+`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, and the Vercel Sandbox adapter over `@vercel/sandbox` 3.x.
 
 ## Subpaths
 
@@ -33,7 +33,10 @@
 - Persistent lifecycle is modeled but dogfood should stay disposable until stable.
 - Initial source is an ADT: empty, snapshot, git, or tarball. Git basic auth is an all-or-nothing
   nested value. Snapshot replaces separate base-snapshot fields and determines runtime.
-- Hosts choose Vercel env, ports, resources, runtime, and network policy; package stores no secrets.
+- Hosts choose Vercel env, ports, resources, runtime or image, and network policy; package stores
+  no secrets. The layer config takes `runtime` or `image`, never both; the client's create input
+  carries the choice as the `VercelSandboxEnvironment` ADT (`Runtime | Image`), and a snapshot
+  source ignores it.
 - Vercel state store is a fast path: if empty, `get(name)` before `create(name)` and save reattached state.
 - Use `makeVercelSandboxLayerWithClient` for tests/custom SDK seams; use `makeVercelSandboxLayer` for live client wiring. Hosts still provide `SandboxStateStore`.
 - Stale or max-expired disposable state recreates before command and reports `workspaceReset: true`.

@@ -151,6 +151,8 @@ session records or logs.
 - Core is provider-SDK-free and app-free; it includes Vercel-compatible state and naming contracts but not the live SDK.
 - Vercel SDK imports live only under `@yolk-sdk/sandbox/vercel`. That adapter is Node/server-only
   because `@vercel/sandbox` imports Node built-ins; browser/Worker code must call a host endpoint.
-- `runtime` applies to empty, Git, and tarball creation. Snapshot creation inherits the snapshot's
-  runtime.
+- The Vercel layer creates on a managed `runtime` (default `node24`) or on a Vercel Container
+  Registry `image` (`image: 'team/project/repo@sha256:…'`, the project's own or a shared one),
+  never both. Either applies to empty, Git, and tarball creation; snapshot creation boots the
+  snapshot's own environment.
 - The package exposes one destructive agent tool; hosts decide where to enable it and how to approve it.

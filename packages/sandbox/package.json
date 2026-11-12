@@ -84,7 +84,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@vercel/sandbox": "2.2.1",
+    "@vercel/sandbox": "3.9.1",
     "@yolk-sdk/agent": "workspace:^",
     "effect": "catalog:"
   }

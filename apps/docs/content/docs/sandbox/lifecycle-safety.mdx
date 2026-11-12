@@ -61,7 +61,10 @@ persisted filesystem; it recreates only when the provider no longer has that san
 
 Choose source per trusted server policy, not from raw client input.
 Git credentials use optional `GitSandboxBasicAuth`, so username/password are always supplied
-together. `runtime` applies to empty, Git, and tarball creation; snapshots inherit their runtime.
+together. The Vercel layer runs on a managed `runtime` (default `node24`) or a Vercel Container
+Registry `image` (the project's own, or one another team shares, such as
+`team/project/repo@sha256:…`), never both; either applies to empty, Git, and tarball creation, and
+snapshots boot their own saved environment.
 
 ## Agent tool
 
