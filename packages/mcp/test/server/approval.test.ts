@@ -656,6 +656,7 @@ describe('MCP tool server approvals through the Yolk client', () => {
       }
 
       expect(denied.result.content).toBe(declinedApprovalMessage)
+      expect(denied.result.isError).toBe(true)
       expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )
