@@ -206,8 +206,9 @@ export type McpServerForm<A> = {
 }
 
 /**
- * A form of the given fields, all required. `mcpServerForm({})` is a plain accept/decline: its
- * answer is `{}`. Keys the answer has beyond the fields are dropped.
+ * A form of the given fields, all required. A form without fields lists a problem and is never
+ * asked: a client may accept an empty form without showing it (OpenCode does), so the user would
+ * never choose. Keys the answer has beyond the fields are dropped.
  */
 export const mcpServerForm = <const F extends Readonly<Record<string, McpServerFormField>>>(
   fields: F
@@ -218,17 +219,12 @@ export const mcpServerForm = <const F extends Readonly<Record<string, McpServerF
   // `fromEntries` defines own properties, so no key can reach the prototype.
   const properties = Object.fromEntries(entries.map(([key, entry]) => [key, entry.mcpFormField]))
 
-  // No `required` without fields: the plain accept/decline prompt keeps its exact wire shape.
-  const requestedSchema: ElicitRequestFormParams['requestedSchema'] =
-    keys.length === 0
-      ? { type: 'object', properties }
-      : { type: 'object', properties, required: keys }
-
   return {
     [mcpServerFormBrand]: true,
     decode: Schema.decodeUnknownOption(Schema.Struct(fields)),
-    requestedSchema,
+    requestedSchema: { type: 'object', properties, required: keys },
     problems: [
+      ...(keys.length === 0 ? ['a form needs a field: an empty one may be accepted unseen'] : []),
       ...(keys.includes('__proto__') ? ['a field is named __proto__'] : []),
       ...entries.flatMap(([, entry]) => entry.mcpFormProblems)
     ]

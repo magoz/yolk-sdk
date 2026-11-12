@@ -36,38 +36,40 @@
 - Server `handleHttpRequest` lets no tool call outlive its Effect: tools run with the caller's context, whose scope (a host's request layer) closes on return, and the SDK fills SSE answers after returning the `Response` (always for 2025-era requests; for `2026-07-28` once a handler sends a related message). So an SSE answer is read to its end and re-answered with the same status, headers and events (a read failure answers 500 `-32603`), and tool calls run as fibers of a request-scoped `FiberSet` that interrupts and awaits any still running (a cancelled call's finalizers) before return. Only `subscriptions/listen` is returned unread: it runs no tool, and its stream ends only when the per-request handler closes, so it answers the acknowledgement plus `complete`. It is identified by `Mcp-Method` plus the SDK's own era routing (`isLegacyRequest` on a body clone, only when that header claims listen): the SDK checks `Mcp-Method` against the body only on requests it routes as modern, and a 2025-era request may carry any. Only the SDK branch is scoped; the header-less JSON path keeps the caller's scope. Tool Effects run with the SDK's `ctx.mcpReq.signal`, so cancelling an SDK-routed request (on Streamable HTTP, a closed response stream) interrupts the tool; the header-less JSON path runs tools inside the caller's Effect, whose interruption the host owns. Tests: `test/server/server.test.ts` (scoped resource incl. a 2025-era request claiming listen, cancellation finalizers in both eras, listen, 202 notification).
 - Server approvals and elicited tools (`src/server/approval.ts`, forms in `src/server/form.ts`):
   `McpServerTool` is `McpServerDirectTool | McpServerApprovalTool | McpServerElicitedTool`
-  (discriminated by `approval` / `prompt`; "asking" tools are the last two). An approval tool is the
-  empty-form case of an elicited tool (`approvalPrompt` over `elicitedPrompt`); an elicited tool is
+  (discriminated by `approval` / `prompt`; "asking" tools are the last two). An approval tool is an
+  elicited tool asking `approvalForm`, one required approve/deny choice (`approvalPrompt` over
+  `elicitedPrompt`; a deny answers `declinedApprovalMessage`). A form without fields is a problem
+  and is never asked: a client may accept an empty form unseen (OpenCode does); an elicited tool is
   built only by `makeMcpServerElicitedTool` (branded `mcpElicitedToolBrand`, not exported from the
   entry), whose `prompt` returns a type-erased `McpServerPrompt` (`run` decodes the answer with the
   form's Effect Schema, untrusted, then executes). Forms have only boolean, single-choice and
   multi-select (at least one value) fields, all required and built only by `form.ts`
-  (`mcpFormFieldBrand`, forms `mcpServerFormBrand`); `mcpServerForm({})` omits `required`, keeping
-  the approval wire shape. A form built from bad data (repeated option values, defaults the field
-  would not accept, `maxItems` out of range, a `__proto__` key) carries `problems`, and
-  `elicitedPrompt` fails with them before anything is signed. An asking tool answers its first call
-  with an MRTR `InputRequiredResult` (one form elicitation under `approvalInputKey`) and a
-  `requestState` minted by the SDK's `createRequestStateCodec` (HMAC, TTL, bound to the server
-  `name`, the host's `approvals.principal` and the method; payload: tool, `mcpArgumentsDigest` of
-  the arguments, `formDigest` of the prompt's message and form, a fresh `elicitationId`). The prompt
-  is rebuilt every round (so hosts must build it deterministically, decline and cancel rounds
-  included): an accept whose `formDigest` no longer matches answers `changedPromptMessage`, and a
-  prompt over `mcpServerMaxPromptBytes` answers `oversizedPromptMessage` (never cut). The handler
-  verifies the state itself (no `ServerOptions.requestState.verify` hook), so a state that fails
-  verification, belongs to another tool or arguments, comes without a decision, or accepts an answer
-  that does not fit the form asks again instead of answering the SDK's `-32602`; only a fitting
-  `accept` runs `execute` (approval tools get `{ approvalId }`, the `elicitationId`). Once-only is
-  the host's (key it on that id). A direct tool refuses a call that carries a `requestState` or an
-  `approvalInputKey` answer (`answersApproval`, `staleApprovalMessage`): the host's policy changed
-  since the prompt, and a decline or replayed accept must not run as a plain call. Requests that do
-  not declare form elicitation in their envelope get a tool error result (not `-32021`: the agent
-  reads why nothing ran) before anything is signed. Asking tools are registered only on `modern`
-  factory instances with `approvals`: the stateless legacy fallback builds one instance per request
-  and holds no initialize-declared capabilities, and `completedExchange` buffers SSE answers to
-  their end, so the SDK's legacy shim could never deliver a pushed elicitation. The header-less JSON
-  path neither lists nor runs them. Configuration that cannot be used (a key under 32 bytes, an
-  empty principal, a non-positive or fractional `ttlSeconds`) leaves them listed, answering an error
-  result that names the field. Tool `annotations` (and `title`) are listed on both paths. Tests:
+  (`mcpFormFieldBrand`, forms `mcpServerFormBrand`); Every form lists `required`. A form built from
+  bad data (repeated option values, defaults the field would not accept, `maxItems` out of range, a
+  `__proto__` key) carries `problems`, and `elicitedPrompt` fails with them before anything is
+  signed. An asking tool answers its first call with an MRTR `InputRequiredResult` (one form
+  elicitation under `approvalInputKey`) and a `requestState` minted by the SDK's
+  `createRequestStateCodec` (HMAC, TTL, bound to the server `name`, the host's `approvals.principal`
+  and the method; payload: tool, `mcpArgumentsDigest` of the arguments, `formDigest` of the prompt's
+  message and form, a fresh `elicitationId`). The prompt is rebuilt every round (so hosts must build
+  it deterministically, decline and cancel rounds included): an accept whose `formDigest` no longer
+  matches answers `changedPromptMessage`, and a prompt over `mcpServerMaxPromptBytes` answers
+  `oversizedPromptMessage` (never cut). The handler verifies the state itself (no
+  `ServerOptions.requestState.verify` hook), so a state that fails verification, belongs to another
+  tool or arguments, comes without a decision, or accepts an answer that does not fit the form asks
+  again instead of answering the SDK's `-32602`; only a fitting `accept` runs `execute` (approval
+  tools get `{ approvalId }`, the `elicitationId`). Once-only is the host's (key it on that id). A
+  direct tool refuses a call that carries a `requestState` or an `approvalInputKey` answer
+  (`answersApproval`, `staleApprovalMessage`): the host's policy changed since the prompt, and a
+  decline or replayed accept must not run as a plain call. Requests that do not declare form
+  elicitation in their envelope get a tool error result (not `-32021`: the agent reads why nothing
+  ran) before anything is signed. Asking tools are registered only on `modern` factory instances
+  with `approvals`: the stateless legacy fallback builds one instance per request and holds no
+  initialize-declared capabilities, and `completedExchange` buffers SSE answers to their end, so the
+  SDK's legacy shim could never deliver a pushed elicitation. The header-less JSON path neither
+  lists nor runs them. Configuration that cannot be used (a key under 32 bytes, an empty principal,
+  a non-positive or fractional `ttlSeconds`) leaves them listed, answering an error result that
+  names the field. Tool `annotations` (and `title`) are listed on both paths. Tests:
   `test/server/approval.test.ts` (including SDK-routed 2025-era requests and the real resumable
   client against this server) and `test/server/elicitation.test.ts` (forms, changed and oversized
   prompts, a multi-select through the resumable client); shared builders in

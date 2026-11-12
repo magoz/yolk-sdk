@@ -9,8 +9,10 @@ import {
   type McpRemoteServerConfig
 } from '../../src/client'
 import {
+  approvalForm,
   approvalInputKey,
   changedPromptMessage,
+  declinedApprovalMessage,
   declaresFormElicitation,
   staleApprovalMessage,
   makeMcpToolServer,
@@ -164,14 +166,23 @@ describe('MCP tool server approvals', () => {
       const pause = yield* ask(server)
       const request = pause.result.inputRequests[approvalInputKey]
 
+      // One required choice, never an empty form: a client may accept an empty one unseen.
       expect(request?.params).toEqual({
         mode: 'form',
         message: 'Send to {"to":"ada"}?',
-        requestedSchema: { type: 'object', properties: {} }
+        requestedSchema: approvalForm.requestedSchema
+      })
+      expect(approvalForm.requestedSchema).toMatchObject({
+        properties: { decision: { oneOf: [{ const: 'approve' }, { const: 'deny' }] } },
+        required: ['decision']
       })
       expect(yield* Ref.get(runs)).toEqual([])
 
-      const retry = { requestState: pause.result.requestState, response: { action: 'accept' } }
+      const retry = {
+        requestState: pause.result.requestState,
+        response: { action: 'accept', content: { decision: 'approve' } }
+      }
+
       const result = yield* callResult(server, callSend({ id: 2, retry }))
 
       expect(result.result.content).toEqual([{ type: 'text', text: 'sent' }])
@@ -187,6 +198,37 @@ describe('MCP tool server approvals', () => {
       const second = yield* ask(server)
 
       expect(second.result.requestState).not.toBe(pause.result.requestState)
+    })
+  )
+
+  it.effect('runs nothing for a deny choice, or for an accept that carries no choice', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const server = approvalServer({ runs, approvals: configured })
+      const pause = yield* ask(server)
+
+      const answer = (response: Schema.JsonObject) =>
+        respond(
+          server,
+          callSend({ id: 2, retry: { requestState: pause.result.requestState, response } })
+        )
+
+      const denied = yield* answer({ action: 'accept', content: { decision: 'deny' } }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(CallResult))
+      )
+
+      expect(denied.result).toEqual({
+        content: [{ type: 'text', text: declinedApprovalMessage }],
+        isError: true
+      })
+
+      // What a client that auto-accepts an empty form would send: not an approval, so it asks again.
+      const again = yield* answer({ action: 'accept', content: {} }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(InputRequired))
+      )
+
+      expect(again.result.requestState).not.toBe(pause.result.requestState)
+      expect(yield* Ref.get(runs)).toEqual([])
     })
   )
 
@@ -570,7 +612,7 @@ describe('MCP tool server approvals through the Yolk client', () => {
       const resumed = yield* resumeRemoteMcpServerToolCall({
         ...call,
         inputRequired: first.inputRequired,
-        responses: { [approvalInputKey]: { action: 'accept', content: {} } }
+        responses: { [approvalInputKey]: { action: 'accept', content: { decision: 'approve' } } }
       }).pipe(Effect.provide(layer))
 
       if (!Predicate.isTagged(resumed, 'Complete')) {

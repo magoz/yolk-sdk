@@ -82,7 +82,10 @@ describe('MCP server forms', () => {
       required: ['selected', 'notify', 'urgency']
     })
 
-    expect(mcpServerForm({}).requestedSchema).toEqual({ type: 'object', properties: {} })
+    // Never asked: a client may accept an empty form without showing it.
+    expect(mcpServerForm({}).problems).toEqual([
+      'a form needs a field: an empty one may be accepted unseen'
+    ])
   })
 
   it('decodes a fitting answer and rejects every answer the form does not offer', () => {
@@ -118,7 +121,6 @@ describe('MCP server forms', () => {
 
     expect(capped.requestedSchema).toMatchObject({ properties: { picks: { maxItems: 1 } } })
     expect(capped.decode({ picks: ['a', 'b'] })).toEqual(Option.none())
-    expect(mcpServerForm({}).decode({})).toEqual(Option.some({}))
 
     expect(
       reviewForm.decode({ selected: ['s2'], notify: false, urgency: 'low', extra: 1 })
