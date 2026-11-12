@@ -36,6 +36,7 @@
     "agent-read-calls",
     "agent-status",
     "agent-steering",
+    "agent-stream-heartbeats",
     "agent-tool-argument-type-hint",
     "agent-tool-schema-object-root",
     "align-canary-install-docs",
