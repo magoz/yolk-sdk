@@ -430,6 +430,7 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
     const encoder = new TextEncoder()
     let heartbeats: ReturnType<typeof setInterval> | undefined
+    let runEnd: ReturnType<typeof setTimeout> | undefined
 
     // Quiet for three idle timeouts, with a blank line well inside each one. A reconnect would
     // find no second response configured.
@@ -438,7 +439,7 @@ describe('collectAgentEvents', () => {
         start: controller => {
           controller.enqueue(encoder.encode(`\n${encodeEvents([AgentStart.make({})])}\n`))
           heartbeats = setInterval(() => controller.enqueue(encoder.encode('\n')), 50)
-          setTimeout(() => {
+          runEnd = setTimeout(() => {
             clearInterval(heartbeats)
             controller.enqueue(
               encoder.encode(
@@ -448,7 +449,10 @@ describe('collectAgentEvents', () => {
             controller.close()
           }, 750)
         },
-        cancel: () => clearInterval(heartbeats)
+        cancel: () => {
+          clearInterval(heartbeats)
+          clearTimeout(runEnd)
+        }
       })
     )
 
@@ -464,7 +468,44 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
   })
 
-  it('reads blank lines as no events', async () => {
+  it('never counts blank lines toward the resumed stream index', async () => {
+    const requests: Array<CapturedRequest> = []
+    const counts: Array<number> = []
+
+    const events = await collectEventStream(
+      streamAgentRunEventStreamUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        idleReconnect: { idleTimeoutMs: 250, maxAttempts: 1 },
+        onEvent: (_event, count) => counts.push(count),
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start: controller => {
+                  controller.enqueue(
+                    new TextEncoder().encode(`\n${encodeEvents([AgentStart.make({})])}\n\n\n`)
+                  )
+                }
+              })
+            ),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=1'
+    ])
+    expect(counts).toEqual([1, 2])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
+  it('reads blank lines as nothing but heartbeats', async () => {
     const body = `\n${encodeEvents([AgentStart.make({})])}\n\n\n${encodeEvents([
       AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })
     ])}\n\n`
@@ -638,7 +679,8 @@ describe('collectAgentEvents', () => {
             new Response('', {
               headers: { 'x-workflow-stream-tail-index': '3' }
             }),
-            new Response(''),
+            // Heartbeats alone are no progress: the next poll keeps the same index.
+            new Response('\n\n'),
             new Response(
               encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
             )

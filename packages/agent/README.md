@@ -780,6 +780,10 @@ continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` he
 fail with `AgentTransportError` if no terminal event is reached before the continuation limit.
 Empty non-terminal continuation chunks are polling gaps: the client waits briefly, retries from the
 same `startIndex`, and respects the request `signal` while waiting.
+Blank lines in a body are heartbeats: never events, never counted toward `startIndex`. With
+`idleReconnect: { idleTimeoutMs, maxAttempts }` each one restarts the idle wait, so a server that
+sends them while its run is quiet keeps one connection (see the Workflow routes guide, "Quiet
+runs").
 Outbound `startIndex` values must be non-negative safe integers; invalid values fail before the
 HTTP request is sent.
 For HITL resume responses, `x-workflow-stream-tail-index` means the stream tail before the returned
