@@ -1,9 +1,11 @@
 export * from '@modelcontextprotocol/server'
 
 export {
+  approvalForm,
   approvalInputKey,
   changedPromptMessage,
   declaresFormElicitation,
+  declinedApprovalMessage,
   mcpServerMaxPromptBytes,
   oversizedPromptMessage,
   staleApprovalMessage

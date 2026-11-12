@@ -316,7 +316,7 @@ const server = makeMcpToolServer({
 ```
 
 - The first call answers an `input_required` result: one form elicitation under
-  `approvalInputKey` (`'approval'`, no fields: the client offers accept, decline and cancel) with
+  `approvalInputKey` (`'approval'`, one required choice, `approvalForm`: approve or deny) with
   the policy's `message`, and a `requestState` signed by the SDK's `createRequestStateCodec`
   (HMAC-SHA256, `ttlSeconds` default 600) and bound to `principal` and `tools/call`. Its payload
   names the tool, the digest of the arguments (`mcpArgumentsDigest`), the digest of the prompt
@@ -325,7 +325,9 @@ const server = makeMcpToolServer({
   arguments and prompt runs the tool, with `{ approvalId }`. The prompt is built again on that
   retry: if the message changed since the user saw it, the call answers `changedPromptMessage` and
   nothing runs. So build the message deterministically from the call and current data (no clocks
-  or random ids), or every accept is refused. A decline or a cancel answers an error result.
+  or random ids), or every accept is refused. A deny choice, a decline or a cancel answers an error
+  result. The form is never empty: some clients accept an empty form without showing it, so an
+  accept without the choice is no approval and asks again.
   A state that fails verification, belongs to another call, or arrives without a decision asks
   again with a new state.
 - Build the server per request: `principal` is fixed when it is built. The state is also bound to
@@ -347,13 +349,14 @@ const server = makeMcpToolServer({
 
 ### Ask the user a form
 
-An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choice
-(`mcpFormChoice`) or several choices (`mcpFormMultiSelect`), every field required. An approval tool
-is the same tool with an empty form. `execute` gets the answer decoded with the form's schema; an
-answer that does not fit (a value not offered, a duplicate, an empty or too long selection, a
-missing field) asks again and runs nothing. The types accept only fields and forms from these
-builders and elicited tools from `makeMcpServerElicitedTool`, so every answer is decoded before
-`execute`.
+An elicited tool asks a form before it runs: yes/no (`mcpFormBoolean`), one choice (`mcpFormChoice`)
+or several choices (`mcpFormMultiSelect`), every field required. An approval tool is the same tool
+with one required approve/deny choice. A form without fields is never asked (it lists a problem): a
+client may accept an empty form without showing it. `execute` gets the answer decoded with the
+form's schema; an answer that does not fit (a value not offered, a duplicate, an empty or too long
+selection, a missing field) asks again and runs nothing. The types accept only fields and forms from
+these builders and elicited tools from `makeMcpServerElicitedTool`, so every answer is decoded
+before `execute`.
 
 ```ts
 import { Effect } from 'effect'

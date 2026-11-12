@@ -3,8 +3,9 @@
  * requests (MRTR, protocol `2026-07-28`). The server never blocks on a human and keeps no state:
  * the first `tools/call` of an asking tool answers an `InputRequiredResult` holding one form
  * elicitation (`approvalInputKey`) and a signed `requestState`; the client re-sends the same call
- * with the user's answer and that state. An approval tool asks with an empty form (the client
- * offers accept, decline and cancel); an elicited tool asks with a form (`form.ts`) whose answer
+ * with the user's answer and that state. An approval tool asks one required approve/deny choice
+ * (`approvalForm`), never an empty form, which a client may accept without showing it; a deny
+ * runs nothing, like a declined form. An elicited tool asks with a form (`form.ts`) whose answer
  * is decoded as untrusted input. Only an `accept` bound to the same principal, tool, arguments and
  * prompt, with an answer that fits the form, runs the call.
  *
@@ -36,10 +37,10 @@ import {
   type RequestStateCodec,
   type ServerContext
 } from '@modelcontextprotocol/server'
-import type { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
+import { type ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import { mcpArgumentsDigest } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
-import { mcpServerForm, type McpServerForm } from './form.ts'
+import { mcpFormChoice, mcpServerForm, type McpServerForm } from './form.ts'
 
 /**
  * Host configuration for asking tools (approval and elicited tools). Without it none is offered.
@@ -260,7 +261,25 @@ const encoder = new TextEncoder()
 const promptBytes = (prompt: McpServerPrompt<unknown>) =>
   encoder.encode(JSON.stringify({ message: prompt.message, form: prompt.requestedSchema })).length
 
-/** An approval tool's prompt: its policy's message and a plain accept/decline form. */
+/** What a declined approval answers (a `deny` choice, or a declined form). */
+export const declinedApprovalMessage = 'The user declined this call. Nothing ran.'
+
+/**
+ * The approval form (shared by every approval prompt: read it, never change it): one required
+ * choice. Never an empty form, which a client may accept without showing it (OpenCode does), so the
+ * user always makes the choice; a `deny` is answered like a declined form and runs nothing.
+ */
+export const approvalForm = mcpServerForm({
+  decision: mcpFormChoice({
+    title: 'Decision',
+    options: [
+      { value: 'approve', title: 'Approve: run this call' },
+      { value: 'deny', title: 'Deny: do not run it' }
+    ]
+  })
+})
+
+/** An approval tool's prompt: its policy's message and the approve/deny choice (`approvalForm`). */
 export const approvalPrompt = <R>(input: {
   readonly policy: McpServerToolApprovalPolicy<R>
   readonly execute: (
@@ -271,8 +290,17 @@ export const approvalPrompt = <R>(input: {
 }): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
   elicitedPrompt({
     elicit: call =>
-      Effect.map(input.policy.message(call), message => ({ message, form: mcpServerForm({}) })),
-    execute: (call, answered) => input.execute(call, { approvalId: answered.elicitationId }),
+      Effect.map(input.policy.message(call), message => ({ message, form: approvalForm })),
+    execute: (call, answered) =>
+      answered.answer.decision === 'approve'
+        ? input.execute(call, { approvalId: answered.elicitationId })
+        : Effect.succeed(
+            ToolResult.make({
+              toolCallId: call.id,
+              content: declinedApprovalMessage,
+              isError: true
+            })
+          ),
     call: input.call
   })
 
@@ -390,7 +418,7 @@ const configuredRound = <R>(input: {
         }
 
         case 'decline':
-          return yield* answer('The user declined this call. Nothing ran.')
+          return yield* answer(declinedApprovalMessage)
         case 'cancel':
           return yield* answer('The user dismissed the approval request. Nothing ran.')
       }

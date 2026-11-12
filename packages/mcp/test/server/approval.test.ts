@@ -9,8 +9,10 @@ import {
   type McpRemoteServerConfig
 } from '../../src/client'
 import {
+  approvalForm,
   approvalInputKey,
   changedPromptMessage,
+  declinedApprovalMessage,
   declaresFormElicitation,
   staleApprovalMessage,
   makeMcpToolServer,
@@ -164,14 +166,23 @@ describe('MCP tool server approvals', () => {
       const pause = yield* ask(server)
       const request = pause.result.inputRequests[approvalInputKey]
 
+      // One required choice, never an empty form: a client may accept an empty one unseen.
       expect(request?.params).toEqual({
         mode: 'form',
         message: 'Send to {"to":"ada"}?',
-        requestedSchema: { type: 'object', properties: {} }
+        requestedSchema: approvalForm.requestedSchema
+      })
+      expect(approvalForm.requestedSchema).toMatchObject({
+        properties: { decision: { oneOf: [{ const: 'approve' }, { const: 'deny' }] } },
+        required: ['decision']
       })
       expect(yield* Ref.get(runs)).toEqual([])
 
-      const retry = { requestState: pause.result.requestState, response: { action: 'accept' } }
+      const retry = {
+        requestState: pause.result.requestState,
+        response: { action: 'accept', content: { decision: 'approve' } }
+      }
+
       const result = yield* callResult(server, callSend({ id: 2, retry }))
 
       expect(result.result.content).toEqual([{ type: 'text', text: 'sent' }])
@@ -187,6 +198,37 @@ describe('MCP tool server approvals', () => {
       const second = yield* ask(server)
 
       expect(second.result.requestState).not.toBe(pause.result.requestState)
+    })
+  )
+
+  it.effect('runs nothing for a deny choice, or for an accept that carries no choice', () =>
+    Effect.gen(function* () {
+      const runs = yield* Ref.make<ReadonlyArray<string>>([])
+      const server = approvalServer({ runs, approvals: configured })
+      const pause = yield* ask(server)
+
+      const answer = (response: Schema.JsonObject) =>
+        respond(
+          server,
+          callSend({ id: 2, retry: { requestState: pause.result.requestState, response } })
+        )
+
+      const denied = yield* answer({ action: 'accept', content: { decision: 'deny' } }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(CallResult))
+      )
+
+      expect(denied.result).toEqual({
+        content: [{ type: 'text', text: declinedApprovalMessage }],
+        isError: true
+      })
+
+      // What a client that auto-accepts an empty form would send: not an approval, so it asks again.
+      const again = yield* answer({ action: 'accept', content: {} }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(InputRequired))
+      )
+
+      expect(again.result.requestState).not.toBe(pause.result.requestState)
+      expect(yield* Ref.get(runs)).toEqual([])
     })
   )
 
@@ -228,7 +270,10 @@ describe('MCP tool server approvals', () => {
         server,
         callSend({
           id: 2,
-          retry: { requestState: pause.result.requestState, response: { action: 'accept' } }
+          retry: {
+            requestState: pause.result.requestState,
+            response: { action: 'accept', content: { decision: 'approve' } }
+          }
         })
       )
 
@@ -245,7 +290,8 @@ describe('MCP tool server approvals', () => {
       const runs = yield* Ref.make<ReadonlyArray<string>>([])
       const server = approvalServer({ runs, approvals: configured })
       const pause = yield* ask(server)
-      const accept = { action: 'accept' }
+      // A real approve: only the state's binding can make these ask again.
+      const accept = { action: 'accept', content: { decision: 'approve' } }
       const state = pause.result.requestState
 
       const otherPrincipal = approvalServer({ runs, approvals: { key, principal: 'token-2' } })
@@ -275,6 +321,14 @@ describe('MCP tool server approvals', () => {
       }
 
       expect(yield* Ref.get(runs)).toEqual([])
+
+      // The same accept with the right state, server and arguments runs.
+      yield* callResult(
+        server,
+        callSend({ id: 7, retry: { requestState: state, response: accept } })
+      )
+
+      expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )
 
@@ -450,7 +504,11 @@ describe('MCP tool server approvals', () => {
     Effect.gen(function* () {
       const runs = yield* Ref.make<ReadonlyArray<string>>([])
       const pause = yield* ask(approvalServer({ runs, approvals: configured }))
-      const accept = { requestState: pause.result.requestState, response: { action: 'accept' } }
+
+      const accept = {
+        requestState: pause.result.requestState,
+        response: { action: 'accept', content: { decision: 'approve' } }
+      }
 
       const renamed = (name: string, toolName: string) =>
         makeMcpToolServer({
@@ -570,7 +628,7 @@ describe('MCP tool server approvals through the Yolk client', () => {
       const resumed = yield* resumeRemoteMcpServerToolCall({
         ...call,
         inputRequired: first.inputRequired,
-        responses: { [approvalInputKey]: { action: 'accept', content: {} } }
+        responses: { [approvalInputKey]: { action: 'accept', content: { decision: 'approve' } } }
       }).pipe(Effect.provide(layer))
 
       if (!Predicate.isTagged(resumed, 'Complete')) {
@@ -578,6 +636,27 @@ describe('MCP tool server approvals through the Yolk client', () => {
       }
 
       expect(resumed.result.content).toBe('sent')
+      expect(yield* Ref.get(runs)).toHaveLength(1)
+
+      // A deny chosen in the form runs nothing.
+      const second = yield* callRemoteMcpServerToolResumable(call).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(second, 'InputRequired')) {
+        return expect.fail(`Expected InputRequired, got ${second._tag}`)
+      }
+
+      const denied = yield* resumeRemoteMcpServerToolCall({
+        ...call,
+        inputRequired: second.inputRequired,
+        responses: { [approvalInputKey]: { action: 'accept', content: { decision: 'deny' } } }
+      }).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(denied, 'Complete')) {
+        return expect.fail(`Expected Complete, got ${denied._tag}`)
+      }
+
+      expect(denied.result.content).toBe(declinedApprovalMessage)
+      expect(denied.result.isError).toBe(true)
       expect(yield* Ref.get(runs)).toHaveLength(1)
     })
   )
