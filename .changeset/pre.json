@@ -39,6 +39,7 @@
     "agent-stream-heartbeats",
     "agent-tool-argument-type-hint",
     "agent-tool-schema-object-root",
+    "agent-undecodable-calls-unledgered",
     "align-canary-install-docs",
     "anthropic-reasoning-effort",
     "approval-binds-call",
