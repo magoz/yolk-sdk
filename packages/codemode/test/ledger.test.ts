@@ -451,6 +451,30 @@ describe('code mode with a tool ledger', () => {
     })
   )
 
+  it.effect('answers a nested call whose arguments do not decode as an unledgered read', () =>
+    Effect.gen(function* () {
+      const log: WriteLog = []
+      const store = makeInMemoryToolLedgerStore()
+
+      const { executor } = scriptedExecutor(async call => {
+        await call('sales_manage', { note: 1 }).catch(() => undefined)
+
+        return { ok: true }
+      })
+
+      const result = yield* runLedgered(
+        codeModeModules(executor, [salesManage(log, { readNotes: true })]),
+        { store }
+      )
+
+      expect(log).toEqual([])
+      expect((yield* store.entries).map(entry => entry.key)).toEqual(['call_1'])
+      expect(result.nestedCalls?.calls.map(call => [call.id, call.access, call.status])).toEqual([
+        ['call_1/1', 'read', 'error']
+      ])
+    })
+  )
+
   it.effect('records the access of a nested call the host rejects before execution', () =>
     Effect.gen(function* () {
       const log: WriteLog = []

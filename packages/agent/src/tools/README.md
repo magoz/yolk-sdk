@@ -190,8 +190,10 @@ const resolveStepTools = Effect.gen(function* () {
   clock, such as a database `now()`, which avoids skew between instances) and the caller's
   `Clock` times `nowMs`/`leaseExpiresAtMs` (clock-agnostic stores, such as the in-memory one).
 - A non-`read` tool with read-only calls (for example list operations of a `write` tool) declares
-  them with `makeTool({ isReadCall: params => ... })` over the decoded arguments (arguments that
-  do not decode are not reads). Those calls have effective access `read` (`toolCallAccess`): the
+  them with `makeTool({ isReadCall: params => ... })` over the decoded arguments (a call whose
+  arguments do not decode is a read: it runs nothing and answers its validation error, which no
+  ledger refuses; a host that replaces such a registration's `execute` must replace or drop its
+  `isReadCall` too). Those calls have effective access `read` (`toolCallAccess`): the
   policy input carries `readCall: true`, `defaultToolLedgerPolicy` does not ledger them (a crashed
   read stays retryable instead of being refused as possibly applied), and code mode records their
   `NestedToolCallRecord.access` as `read`. It sees the call as the handler does (strict-mode

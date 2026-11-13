@@ -643,7 +643,7 @@ describe('tool ledger', () => {
       })
   )
 
-  it.effect('ledgers a call whose arguments do not decode or whose isReadCall dies', () =>
+  it.effect('ledgers a call whose isReadCall dies', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
       const store = makeInMemoryToolLedgerStore()
@@ -654,19 +654,45 @@ describe('tool ledger', () => {
         }
       })
 
-      const lenient = noteTool(probe, { isReadCall: () => true })
-
       yield* execute([dying], noteCall('call_1', 'read:list'), { store })
 
-      const invalid = yield* execute(
-        [lenient],
-        ToolCall.make({ id: 'call_2', name: 'append_note', params: { note: 1 } }),
-        { store }
-      )
-
-      expect(invalid.isError).toBe(true)
-      expect((yield* store.entries).map(entry => entry.key)).toEqual(['call_1', 'call_2'])
+      expect((yield* store.entries).map(entry => entry.key)).toEqual(['call_1'])
     })
+  )
+
+  it.effect(
+    'answers a call whose arguments do not decode with its validation error, unledgered',
+    () =>
+      Effect.gen(function* () {
+        const probe = makeProbe()
+        const store = makeInMemoryToolLedgerStore()
+        const policyInputs: Array<ToolLedgerPolicyInput> = []
+        const tool = noteTool(probe, { isReadCall: params => params.note.startsWith('read:') })
+        const invalid = ToolCall.make({ id: 'call_1', name: 'append_note', params: { note: 1 } })
+
+        // A host ledger that refuses every write still gets the tool's own answer: nothing runs.
+        const refusing: ToolLedgerOptions = {
+          store: {
+            ...store,
+            claim: () => Effect.fail(new ToolLedgerError({ message: 'refused' }))
+          },
+          isLedgered: input => {
+            policyInputs.push(input)
+
+            return defaultToolLedgerPolicy(input)
+          }
+        }
+
+        const result = yield* execute([tool], invalid, refusing)
+
+        expect(result.isError).toBe(true)
+        expect(result.content).toContain('note')
+        expect(result.content).not.toContain('refused')
+        expect(yield* toolCallAccess(tool, invalid)).toBe('read')
+        expect(policyInputs.map(input => input.readCall)).toEqual([true])
+        expect(probe.runs).toEqual([])
+        expect(yield* store.entries).toEqual([])
+      })
   )
 
   it.effect('reports a call’s effective access (toolCallAccess)', () =>

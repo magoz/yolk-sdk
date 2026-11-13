@@ -402,7 +402,9 @@ export type ToolRegistration<Context> = {
    * optional properties omitted, arguments not yet validated); must be pure and deterministic, must
    * not fail, and answers `false` when unsure. Applied plan calls and background activations (an
    * execution envelope, not the tool's arguments) keep the registration's access. `makeTool`
-   * builds it from its typed `isReadCall`.
+   * builds it from its typed `isReadCall` and answers `true` for arguments that do not decode,
+   * because its own `execute` then runs nothing: a host that replaces a `makeTool` registration's
+   * `execute` (for example to repair arguments) must replace or drop its `isReadCall` too.
    */
   readonly isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
 }
@@ -511,7 +513,8 @@ type MakeToolBaseOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   /** See `ToolRegistration.abandonedResult`. */
   readonly abandonedResult?: (input: ToolLedgerAbandonedInput) => ToolResult
   /** For a non-`read` tool, whether a call only reads (see `ToolRegistration.isReadCall`), over
-   * the decoded arguments. Arguments that do not decode are not a read.
+   * the decoded arguments. A call whose arguments do not decode is a read: it runs nothing, and
+   * `execute` answers the validation error.
    */
   readonly isReadCall?: (params: ParamsSchema['Type']) => boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
@@ -1231,10 +1234,12 @@ export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
   const isReadCall = options.isReadCall
 
   if (isReadCall !== undefined) {
+    // Arguments that do not decode run nothing (`execute` answers the validation error), so the
+    // call is a read: neither the ledger nor a host's write check refuses it before that answer.
     registration.isReadCall = call =>
       decodeParams(call.params).pipe(
         Effect.map(params => isReadCall(params)),
-        Effect.orElseSucceed(() => false)
+        Effect.orElseSucceed(() => true)
       )
   }
 

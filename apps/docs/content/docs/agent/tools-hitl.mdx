@@ -185,7 +185,8 @@ receipts.
 A `write` tool that also reads (one tool with `list` and `update` operations, say) can mark its
 read-only calls with `isReadCall`. Those calls are not ledgered: re-running a read is safe, while a
 ledgered read that crashed before recording its outcome would be refused on every retry as possibly
-applied. Code mode records their access as `read`.
+applied. Code mode records their access as `read`. A call whose arguments do not decode counts as
+a read too: it runs nothing and answers with its validation error, never a ledger refusal.
 
 ```ts
 makeTool({
