@@ -402,7 +402,9 @@ export type ToolRegistration<Context> = {
    * optional properties omitted, arguments not yet validated); must be pure and deterministic, must
    * not fail, and answers `false` when unsure. Applied plan calls and background activations (an
    * execution envelope, not the tool's arguments) keep the registration's access. `makeTool`
-   * builds it from its typed `isReadCall`.
+   * builds it from its typed `isReadCall` and answers `true` for arguments that do not decode,
+   * because its own `execute` then runs nothing: a host that replaces a `makeTool` registration's
+   * `execute` (for example to repair arguments) must replace or drop its `isReadCall` too.
    */
   readonly isReadCall?: (call: ToolCall) => Effect.Effect<boolean>
 }

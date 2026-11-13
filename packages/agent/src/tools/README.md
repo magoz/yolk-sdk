@@ -192,7 +192,8 @@ const resolveStepTools = Effect.gen(function* () {
 - A non-`read` tool with read-only calls (for example list operations of a `write` tool) declares
   them with `makeTool({ isReadCall: params => ... })` over the decoded arguments (a call whose
   arguments do not decode is a read: it runs nothing and answers its validation error, which no
-  ledger refuses). Those calls have effective access `read` (`toolCallAccess`): the
+  ledger refuses; a host that replaces such a registration's `execute` must replace or drop its
+  `isReadCall` too). Those calls have effective access `read` (`toolCallAccess`): the
   policy input carries `readCall: true`, `defaultToolLedgerPolicy` does not ledger them (a crashed
   read stays retryable instead of being refused as possibly applied), and code mode records their
   `NestedToolCallRecord.access` as `read`. It sees the call as the handler does (strict-mode
