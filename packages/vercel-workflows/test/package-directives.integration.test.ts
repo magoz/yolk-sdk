@@ -2,6 +2,7 @@ import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { getRun } from 'workflow/api'
 import { WorkflowRunCancelledError } from 'workflow/errors'
+import { getWorld } from 'workflow/runtime'
 import { waitForHook, waitForSleep } from '@workflow/vitest'
 import { VercelAgentWorkflowRunResult } from '@yolk-sdk/vercel-workflows'
 import {
@@ -69,6 +70,22 @@ describe('package-owned workflow directives', () => {
     expect(run.runId).toMatch(/^wrun_/)
     await expect(Effect.runPromise(run.returnValue)).resolves.toBe('workflow-complete')
     await expect(Effect.runPromise(run.status)).resolves.toBe('completed')
+  })
+
+  it('seeds start attributes on the created run', async () => {
+    const run = await workflowsEffect(api =>
+      api.start(
+        packageOwnedDirectiveWorkflow,
+        [{ request: 'request-attributes', context: 'context-attributes' }],
+        { attributes: { sessionId: 'session-1', kind: 'chat' } }
+      )
+    )
+
+    await Effect.runPromise(run.returnValue)
+    const world = await getWorld()
+    const stored = await world.runs.get(run.runId)
+
+    expect(stored.attributes).toEqual({ sessionId: 'session-1', kind: 'chat' })
   })
 
   it('streams package-owned step output and resumes by run id', async () => {

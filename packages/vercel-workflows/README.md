@@ -61,6 +61,10 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(VercelWorkflows.layer))
 ```
 
+`start` takes optional `{ attributes }`: plaintext, searchable run metadata seeded at creation
+(Workflow run attributes). The platform validates them before the run exists and an invalid one fails
+the start, so use identifiers, never secrets or content.
+
 The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP,
 queues, hooks, or stream storage.
 

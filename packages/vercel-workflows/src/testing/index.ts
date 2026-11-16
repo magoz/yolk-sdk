@@ -9,7 +9,8 @@ import type {
   VercelWorkflowsSdkRun,
   VercelWorkflowReadableOptions,
   VercelWorkflowReadableStream,
-  VercelWorkflowRunStatus
+  VercelWorkflowRunStatus,
+  VercelWorkflowStartOptions
 } from '../effect.ts'
 
 // Behavioral emulator of the Vercel Workflow platform for tests: run lifecycle,
@@ -116,6 +117,7 @@ type HookRecord = {
 
 type TestWorkflowRunRecord = {
   readonly runId: string
+  readonly attributes: Readonly<Record<string, string>>
   status: TestWorkflowRunStatus
   returnValue: unknown
   runError: unknown
@@ -300,6 +302,8 @@ const retriesLabel = (count: number) => (count === 1 ? 'retry' : 'retries')
 
 export type TestWorkflowRunInspection = {
   readonly runId: string
+  /** The `attributes` the run was started with, recorded as given (the platform validates them). */
+  readonly attributes: Readonly<Record<string, string>>
   readonly status: TestWorkflowRunStatus
   readonly chunks: ReadonlyArray<unknown>
   readonly streamClosed: boolean
@@ -321,13 +325,15 @@ export class TestWorkflowWorld {
 
   start<TArgs extends ReadonlyArray<unknown>, TResult>(
     workflowFn: (...args: TArgs) => Promise<TResult>,
-    args: TArgs
+    args: TArgs,
+    options?: VercelWorkflowStartOptions
   ): TestWorkflowWorldStartResult {
     this.runSequence += 1
     const runId = `twr_${this.runSequence}`
 
     const run: TestWorkflowRunRecord = {
       runId,
+      attributes: { ...options?.attributes },
       status: 'pending',
       returnValue: undefined,
       runError: undefined,
@@ -383,6 +389,7 @@ export class TestWorkflowWorld {
 
     return {
       runId: run.runId,
+      attributes: { ...run.attributes },
       status: run.status,
       chunks: [...run.chunks],
       streamClosed: run.streamClosed,
@@ -708,8 +715,8 @@ export class TestWorkflowWorld {
   }
 
   readonly sdk: VercelWorkflowsSdkClient = {
-    start: async (workflowFn, args) => {
-      const { runId } = this.start(workflowFn, args)
+    start: async (workflowFn, args, options) => {
+      const { runId } = this.start(workflowFn, args, options)
 
       return this.sdkRun(this.requireRun(runId))
     },

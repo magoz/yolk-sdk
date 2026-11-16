@@ -52,6 +52,18 @@ describe('TestWorkflowWorld run lifecycle', () => {
     await expect(run.returnValue).resolves.toBe(42)
   })
 
+  it('records the attributes a run was started with', async () => {
+    const world = new TestWorkflowWorld()
+    const plain = world.start(async () => 'done', [])
+
+    const tagged = await world.sdk.start(async () => 'done', [], {
+      attributes: { sessionId: 'session-1' }
+    })
+
+    expect(world.inspect(plain.runId).attributes).toEqual({})
+    expect(world.inspect(tagged.runId).attributes).toEqual({ sessionId: 'session-1' })
+  })
+
   it('marks a rejecting workflow as failed and keeps the error', async () => {
     const world = new TestWorkflowWorld()
     const boom = new Error('boom')
