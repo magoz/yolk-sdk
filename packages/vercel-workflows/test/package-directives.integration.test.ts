@@ -88,6 +88,21 @@ describe('package-owned workflow directives', () => {
     expect(stored.attributes).toEqual({ sessionId: 'session-1', kind: 'chat' })
   })
 
+  it('fails a start whose attributes the platform rejects', async () => {
+    const failure = await workflowsEffect(api =>
+      api
+        .start(
+          packageOwnedDirectiveWorkflow,
+          [{ request: 'request-rejected', context: 'context-rejected' }],
+          { attributes: { $reserved: 'x' } }
+        )
+        .pipe(Effect.flip)
+    )
+
+    expect(failure.operation).toBe('start')
+    expect(failure.cause).toMatchObject({ name: 'FatalError' })
+  })
+
   it('streams package-owned step output and resumes by run id', async () => {
     const run = await startWorkflow(packageStreamWorkflow, [])
 

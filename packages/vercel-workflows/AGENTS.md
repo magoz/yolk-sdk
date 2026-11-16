@@ -21,7 +21,8 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Effect-native Workflow client/layer lives under `./effect`: `VercelWorkflows.layer` wraps public `workflow/api`; `VercelWorkflows.layerFromSdk` is the fake SDK seam. `start` forwards only `attributes` from the SDK's start options (`VercelWorkflowStartOptions`); add others there when a host needs them, never as a pass-through of the SDK type.
 - `./testing` ships `TestWorkflowWorld`: a behavioral platform emulator (run lifecycle,
   append-only durable streams with close-once -> 409 conflicts, retrying step executor,
-  hooks/resume, cancellation, start attributes recorded unvalidated in `inspect`) plus
+  hooks/resume, cancellation, `sdk.start` attributes checked with the installed `@workflow/world` validator and shown in
+  `inspect`) plus
   `testWorkflowModule` for mocking the ambient `workflow` module.
   Its step executor stores every step error with the installed `workflow` runtime's own serializer
   (`@workflow/core/serialization`, resolved through `workflow` natively so `vi.mock('workflow')`

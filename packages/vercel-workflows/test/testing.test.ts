@@ -64,6 +64,20 @@ describe('TestWorkflowWorld run lifecycle', () => {
     expect(world.inspect(tagged.runId).attributes).toEqual({ sessionId: 'session-1' })
   })
 
+  it('refuses a start with attributes the platform rejects, before any run exists', async () => {
+    const world = new TestWorkflowWorld()
+
+    const start = (attributes: Record<string, string>) =>
+      world.sdk.start(async () => 'done', [], { attributes })
+
+    await expect(start({ $reserved: 'x' })).rejects.toMatchObject({ name: 'FatalError' })
+    await expect(start({ value: 'x'.repeat(257) })).rejects.toMatchObject({ name: 'FatalError' })
+
+    const accepted = await start({ value: 'x'.repeat(256) })
+
+    expect(accepted.runId).toBe('twr_1')
+  })
+
   it('marks a rejecting workflow as failed and keeps the error', async () => {
     const world = new TestWorkflowWorld()
     const boom = new Error('boom')
