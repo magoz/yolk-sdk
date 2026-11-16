@@ -110,9 +110,9 @@ Layers:
 | `cancel(runId)`                | cancel a run                                            |
 
 `start`'s optional `attributes` seed the run's searchable metadata (Workflow run attributes) at
-creation, without an extra event. They are plaintext and the platform validates them before the
-run exists, so an invalid one fails the start: keys of 1-256 characters not starting with `$`, values
-of at most 256 UTF-8 bytes, at most 64 per run. Use identifiers, never secrets or content. A run
+creation, without an extra event. They are plaintext and the platform validates them before the run
+exists, so an invalid one fails the start: keys of 1-256 characters not starting with `$`, values of
+at most 256 UTF-8 bytes, at most 64 per run. Use identifiers, never secrets or content. A run
 started from inside a workflow or step also gets the reserved `$parentRunId` and `$rootRunId`.
 
 `VercelWorkflowRun` members:

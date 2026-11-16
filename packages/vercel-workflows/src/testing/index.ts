@@ -780,7 +780,8 @@ export class TestWorkflowWorld {
 
   readonly sdk: VercelWorkflowsSdkClient = {
     start: async (workflowFn, args, options) => {
-      const attributes = options?.attributes ?? {}
+      // One snapshot is validated and stored, as the platform stores its validated changes.
+      const attributes = { ...options?.attributes }
 
       await validateStartAttributes(attributes)
 

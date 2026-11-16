@@ -78,6 +78,19 @@ describe('TestWorkflowWorld run lifecycle', () => {
     expect(accepted.runId).toBe('twr_1')
   })
 
+  it('stores the attributes it validated, not a later change to the caller object', async () => {
+    const world = new TestWorkflowWorld()
+    const attributes = { sessionId: 'session-1' }
+    const started = world.sdk.start(async () => 'done', [], { attributes })
+
+    // Too long for the platform: it would fail validation had it been the value checked.
+    attributes.sessionId = 'x'.repeat(257)
+
+    const run = await started
+
+    expect(world.inspect(run.runId).attributes).toEqual({ sessionId: 'session-1' })
+  })
+
   it('marks a rejecting workflow as failed and keeps the error', async () => {
     const world = new TestWorkflowWorld()
     const boom = new Error('boom')
