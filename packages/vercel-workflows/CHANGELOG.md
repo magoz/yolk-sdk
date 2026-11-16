@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.138
+
+### Patch Changes
+
+- 7b60208: `VercelWorkflows.start` takes optional `{ attributes }` (new `VercelWorkflowStartOptions`), seeding Workflow run attributes at creation. `TestWorkflowWorld`'s `sdk.start` checks them with the installed runtime's validator (an invalid one rejects with a FatalError and creates no run) and shows them in `inspect(runId).attributes`.
+
 ## 0.1.0-canary.137
 
 ## 0.1.0-canary.136
