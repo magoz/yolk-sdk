@@ -34,6 +34,16 @@ export type VercelWorkflowReadableStream<Chunk> = WorkflowReadableStream<Chunk>
 
 export type VercelWorkflowRunStatus = WorkflowRun['status']
 
+/**
+ * Options for starting a run. `attributes` seeds the run's plaintext, searchable metadata at
+ * creation (no extra event). The platform validates them before creating the run and the start
+ * fails on an invalid one: keys of 1-256 characters not starting with `$` (reserved), values of at
+ * most 256 UTF-8 bytes, at most 64 per run. Never put secrets or content in them.
+ */
+export type VercelWorkflowStartOptions = {
+  readonly attributes?: Readonly<Record<string, string>>
+}
+
 export type VercelWorkflowsSdkRun<TResult> = {
   readonly runId: string
   readonly getReadable: <Chunk>(
@@ -47,7 +57,8 @@ export type VercelWorkflowsSdkRun<TResult> = {
 export type VercelWorkflowsSdkClient = {
   readonly start: <TArgs extends unknown[], TResult>(
     workflow: VercelWorkflowFunction<TArgs, TResult>,
-    args: TArgs
+    args: TArgs,
+    options?: VercelWorkflowStartOptions
   ) => Promise<VercelWorkflowsSdkRun<TResult>>
   readonly getRun: <TResult>(runId: string) => VercelWorkflowsSdkRun<TResult>
   readonly resumeHook: (token: string, payload: unknown) => Promise<void>
@@ -66,7 +77,8 @@ export type VercelWorkflowRun<TResult> = {
 export type VercelWorkflowsClient = {
   readonly start: <TArgs extends unknown[], TResult>(
     workflow: VercelWorkflowFunction<TArgs, TResult>,
-    args: TArgs
+    args: TArgs,
+    options?: VercelWorkflowStartOptions
   ) => Effect.Effect<VercelWorkflowRun<TResult>, VercelWorkflowsError>
   readonly getRun: <TResult>(
     runId: string
@@ -136,8 +148,12 @@ const makeWorkflowRun = <TResult>(
 const VercelWorkflowsSdkLive = Layer.succeed(VercelWorkflowsSdk, {
   start: <TArgs extends unknown[], TResult>(
     workflow: VercelWorkflowFunction<TArgs, TResult>,
-    args: TArgs
-  ) => workflowStart(workflow, args),
+    args: TArgs,
+    options?: VercelWorkflowStartOptions
+  ) =>
+    options?.attributes === undefined
+      ? workflowStart(workflow, args)
+      : workflowStart(workflow, args, { attributes: { ...options.attributes } }),
   getRun: <TResult>(runId: string) => workflowGetRun<TResult>(runId),
   resumeHook: async (token: string, payload: unknown) => {
     await workflowResumeHook<unknown>(token, payload)
@@ -166,9 +182,10 @@ export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWork
       return {
         start: <TArgs extends unknown[], TResult>(
           workflow: VercelWorkflowFunction<TArgs, TResult>,
-          args: TArgs
+          args: TArgs,
+          options?: VercelWorkflowStartOptions
         ): Effect.Effect<VercelWorkflowRun<TResult>, VercelWorkflowsError> =>
-          trySdkPromise('start', () => sdk.start(workflow, args)).pipe(
+          trySdkPromise('start', () => sdk.start(workflow, args, options)).pipe(
             Effect.map(makeWorkflowRun),
             Effect.withSpan('VercelWorkflows.start')
           ),

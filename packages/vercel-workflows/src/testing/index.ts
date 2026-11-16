@@ -116,6 +116,7 @@ type HookRecord = {
 
 type TestWorkflowRunRecord = {
   readonly runId: string
+  readonly attributes: Readonly<Record<string, string>>
   status: TestWorkflowRunStatus
   returnValue: unknown
   runError: unknown
@@ -158,18 +159,76 @@ type StepErrorSerializer = {
 
 let stepErrorSerializer: Promise<StepErrorSerializer> | undefined
 
-const workflowPackageDir = (require: NodeJS.Require) => {
-  let dir = path.dirname(require.resolve('workflow'))
+const packageDirOf = (entry: string, name: string) => {
+  let dir = path.dirname(entry)
 
   while (!fs.existsSync(path.join(dir, 'package.json'))) {
     const parent = path.dirname(dir)
 
-    if (parent === dir) throw new Error('Cannot locate the installed workflow package')
+    if (parent === dir) throw new Error(`Cannot locate the installed ${name} package`)
 
     dir = parent
   }
 
   return dir
+}
+
+const workflowPackageDir = (require: NodeJS.Require) =>
+  packageDirOf(require.resolve('workflow'), 'workflow')
+
+type AttributeChange = { readonly key: string; readonly value: string }
+
+let attributeValidator: Promise<(changes: ReadonlyArray<AttributeChange>) => void> | undefined
+
+// The installed runtime's own attribute check (`@workflow/world`, as the installed `@workflow/core`
+// resolves it), which the platform's `start()` runs before creating a run.
+const loadAttributeValidator = () =>
+  (attributeValidator ??= (async () => {
+    const require = createRequire(import.meta.url)
+
+    const coreDir = packageDirOf(
+      require.resolve('@workflow/core/serialization', { paths: [workflowPackageDir(require)] }),
+      '@workflow/core'
+    )
+
+    const world: unknown = await import(require.resolve('@workflow/world', { paths: [coreDir] }))
+
+    if (
+      !Predicate.hasProperty(world, 'validateAttributeChanges') ||
+      !Predicate.isFunction(world.validateAttributeChanges)
+    ) {
+      throw new Error('The installed workflow runtime has no attribute validator')
+    }
+
+    const { validateAttributeChanges } = world
+
+    return (changes: ReadonlyArray<AttributeChange>) => {
+      validateAttributeChanges(changes)
+    }
+  })())
+
+// A start whose attributes the platform refuses fails with its FatalError before any run exists.
+const validateStartAttributes = async (attributes: Readonly<Record<string, string>>) => {
+  const changes = Object.entries(attributes).map(([key, value]) => ({ key, value }))
+
+  if (changes.length === 0) return
+
+  const validate = await loadAttributeValidator()
+
+  try {
+    validate(changes)
+  } catch (failure) {
+    if (
+      Predicate.hasProperty(failure, 'name') &&
+      failure.name === 'AttributeValidationError' &&
+      Predicate.hasProperty(failure, 'message') &&
+      Predicate.isString(failure.message)
+    ) {
+      throw platformFatalError(failure.message, undefined)
+    }
+
+    throw failure
+  }
 }
 
 // The installed `workflow` runtime's own step-error serializer (`@workflow/core`, resolved
@@ -300,6 +359,8 @@ const retriesLabel = (count: number) => (count === 1 ? 'retry' : 'retries')
 
 export type TestWorkflowRunInspection = {
   readonly runId: string
+  /** The `attributes` the run was started with through `sdk.start` (`{}` without any). */
+  readonly attributes: Readonly<Record<string, string>>
   readonly status: TestWorkflowRunStatus
   readonly chunks: ReadonlyArray<unknown>
   readonly streamClosed: boolean
@@ -323,11 +384,20 @@ export class TestWorkflowWorld {
     workflowFn: (...args: TArgs) => Promise<TResult>,
     args: TArgs
   ): TestWorkflowWorldStartResult {
+    return this.startRun(workflowFn, args, {})
+  }
+
+  private startRun<TArgs extends ReadonlyArray<unknown>, TResult>(
+    workflowFn: (...args: TArgs) => Promise<TResult>,
+    args: TArgs,
+    attributes: Readonly<Record<string, string>>
+  ): TestWorkflowWorldStartResult {
     this.runSequence += 1
     const runId = `twr_${this.runSequence}`
 
     const run: TestWorkflowRunRecord = {
       runId,
+      attributes: { ...attributes },
       status: 'pending',
       returnValue: undefined,
       runError: undefined,
@@ -383,6 +453,7 @@ export class TestWorkflowWorld {
 
     return {
       runId: run.runId,
+      attributes: { ...run.attributes },
       status: run.status,
       chunks: [...run.chunks],
       streamClosed: run.streamClosed,
@@ -708,8 +779,13 @@ export class TestWorkflowWorld {
   }
 
   readonly sdk: VercelWorkflowsSdkClient = {
-    start: async (workflowFn, args) => {
-      const { runId } = this.start(workflowFn, args)
+    start: async (workflowFn, args, options) => {
+      // One snapshot is validated and stored, as the platform stores its validated changes.
+      const attributes = { ...options?.attributes }
+
+      await validateStartAttributes(attributes)
+
+      const { runId } = this.startRun(workflowFn, args, attributes)
 
       return this.sdkRun(this.requireRun(runId))
     },

@@ -52,6 +52,45 @@ describe('TestWorkflowWorld run lifecycle', () => {
     await expect(run.returnValue).resolves.toBe(42)
   })
 
+  it('records the attributes a run was started with', async () => {
+    const world = new TestWorkflowWorld()
+    const plain = world.start(async () => 'done', [])
+
+    const tagged = await world.sdk.start(async () => 'done', [], {
+      attributes: { sessionId: 'session-1' }
+    })
+
+    expect(world.inspect(plain.runId).attributes).toEqual({})
+    expect(world.inspect(tagged.runId).attributes).toEqual({ sessionId: 'session-1' })
+  })
+
+  it('refuses a start with attributes the platform rejects, before any run exists', async () => {
+    const world = new TestWorkflowWorld()
+
+    const start = (attributes: Record<string, string>) =>
+      world.sdk.start(async () => 'done', [], { attributes })
+
+    await expect(start({ $reserved: 'x' })).rejects.toMatchObject({ name: 'FatalError' })
+    await expect(start({ value: 'x'.repeat(257) })).rejects.toMatchObject({ name: 'FatalError' })
+
+    const accepted = await start({ value: 'x'.repeat(256) })
+
+    expect(accepted.runId).toBe('twr_1')
+  })
+
+  it('stores the attributes it validated, not a later change to the caller object', async () => {
+    const world = new TestWorkflowWorld()
+    const attributes = { sessionId: 'session-1' }
+    const started = world.sdk.start(async () => 'done', [], { attributes })
+
+    // Too long for the platform: it would fail validation had it been the value checked.
+    attributes.sessionId = 'x'.repeat(257)
+
+    const run = await started
+
+    expect(world.inspect(run.runId).attributes).toEqual({ sessionId: 'session-1' })
+  })
+
   it('marks a rejecting workflow as failed and keeps the error', async () => {
     const world = new TestWorkflowWorld()
     const boom = new Error('boom')

@@ -86,6 +86,7 @@ Import from `@yolk-sdk/vercel-workflows/effect`.
 | `VercelWorkflowFunction`        | Workflow function type accepted by `start`                    |
 | `VercelWorkflowRun`             | Effect-native run handle returned by `start`/`getRun`         |
 | `VercelWorkflowRunStatus`       | native Workflow run status type                               |
+| `VercelWorkflowStartOptions`    | `start` options: plaintext run `attributes`                   |
 | `VercelWorkflowReadableOptions` | readable stream options, including `startIndex`               |
 | `VercelWorkflowReadableStream`  | native Workflow readable stream type                          |
 | `VercelWorkflowsOperation`      | operation names carried by `VercelWorkflowsError`             |
@@ -101,12 +102,18 @@ Layers:
 
 | Method                         | Purpose                                                 |
 | ------------------------------ | ------------------------------------------------------- |
-| `start(workflow, args)`        | start a Workflow and return an Effect-native run handle |
+| `start(workflow, args, opts?)` | start a Workflow and return an Effect-native run handle |
 | `getRun(runId)`                | create an Effect-native handle for an existing run      |
 | `getReadable(runId, options?)` | read/replay a run stream                                |
 | `tailIndex(runId)`             | read current stream tail index                          |
 | `resumeHook(token, payload)`   | resume a pending Workflow hook                          |
 | `cancel(runId)`                | cancel a run                                            |
+
+`start`'s optional `attributes` seed the run's searchable metadata (Workflow run attributes) at
+creation, without an extra event. They are plaintext and the platform validates them before the run
+exists, so an invalid one fails the start: keys of 1-256 characters not starting with `$`, values of
+at most 256 UTF-8 bytes, at most 64 per run. Use identifiers, never secrets or content. A run
+started from inside a workflow or step also gets the reserved `$parentRunId` and `$rootRunId`.
 
 `VercelWorkflowRun` members:
 

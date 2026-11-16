@@ -6,6 +6,7 @@ import {
   type VercelWorkflowFunction,
   type VercelWorkflowReadableOptions,
   type VercelWorkflowRunStatus,
+  type VercelWorkflowStartOptions,
   type VercelWorkflowsSdkClient,
   type VercelWorkflowsSdkRun
 } from '../src/effect.ts'
@@ -56,15 +57,18 @@ class FakeSdkRun<TResult> implements VercelWorkflowsSdkRun<TResult> {
 
 class RecordingWorkflowSdk implements VercelWorkflowsSdkClient {
   readonly startedArgs: Array<ReadonlyArray<unknown>> = []
+  readonly startedOptions: Array<VercelWorkflowStartOptions | undefined> = []
   readonly reads: Array<RecordedRead> = []
   readonly cancelledRunIds: Array<string> = []
   readonly resumedHooks: Array<{ readonly token: string; readonly payload: unknown }> = []
 
   start<TArgs extends unknown[], TResult>(
     workflow: VercelWorkflowFunction<TArgs, TResult>,
-    args: TArgs
+    args: TArgs,
+    options?: VercelWorkflowStartOptions
   ) {
     this.startedArgs.push(args)
+    this.startedOptions.push(options)
     const runId = `wrun_${this.startedArgs.length}`
 
     const run = new FakeSdkRun(
@@ -132,6 +136,24 @@ describe('VercelWorkflows', () => {
 
     expect(result).toEqual({ runId: 'wrun_1', status: 'completed', returnValue: 'done:request-1' })
     expect(sdk.startedArgs).toEqual([[{ id: 'request-1' }]])
+    expect(sdk.startedOptions).toEqual([undefined])
+  })
+
+  it('passes start attributes to the SDK', async () => {
+    const sdk = new RecordingWorkflowSdk()
+
+    await runWithSdk(
+      Effect.gen(function* () {
+        const workflows = yield* VercelWorkflows
+
+        yield* workflows.start(async () => 'done', [], {
+          attributes: { sessionId: 'session-1', kind: 'chat' }
+        })
+      }),
+      sdk
+    )
+
+    expect(sdk.startedOptions).toEqual([{ attributes: { sessionId: 'session-1', kind: 'chat' } }])
   })
 
   it('reads streams by run id and resolves tail index', async () => {

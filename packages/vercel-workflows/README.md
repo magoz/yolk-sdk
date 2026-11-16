@@ -61,6 +61,11 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(VercelWorkflows.layer))
 ```
 
+`start` takes optional `{ attributes }`: plaintext, searchable run metadata seeded at creation
+(Workflow run attributes). The platform validates them before the run exists and an invalid one
+fails the start, so use identifiers, never secrets or content. A run started from inside a workflow
+or step also gets the reserved `$parentRunId` and `$rootRunId` automatically.
+
 The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP,
 queues, hooks, or stream storage.
 
@@ -76,8 +81,11 @@ FatalError (named `FatalError`, or with `fatal: true`; an `AbortError` is promot
 retried, an exhausted step fails with the platform's FatalError wrapping the last error, and a
 thrown value the platform cannot store (a class instance anywhere in its `cause` chain) is
 redelivered like the platform does until the step exceeds its retries;
-`world.inspect(runId).unstorableStepErrors` lists those values. Executing a step loads the workflow
-runtime, so it needs the Node test environment. Ambient module mocks do not apply retry policy by
+`world.inspect(runId).unstorableStepErrors` lists those values. `world.sdk.start` checks start
+`attributes` with the installed runtime's validator (an invalid one rejects with a FatalError and
+creates no run) and `world.inspect(runId).attributes` shows them (`{}` without any; the emulator
+adds no `$parentRunId`/`$rootRunId`). Executing a step loads the workflow runtime, so it needs the
+Node test environment. Ambient module mocks do not apply retry policy by
 themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly
 when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
 
