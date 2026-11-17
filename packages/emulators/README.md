@@ -30,10 +30,10 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add -D @yolk-sdk/emulators@canary effect@4.1.2
+pnpm add -D @yolk-sdk/emulators@canary effect@4.1.4
 ```
 
-Use the SDK's matching Effect version (`4.1.2`) in host code.
+Use the SDK's matching Effect version (`4.1.4`) in host code.
 
 ## Subpaths
 

@@ -5,11 +5,11 @@ Vercel Workflow agent-loop contracts, durable stream helpers, and an Effect-nati
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/vercel-workflows@canary effect@4.1.2 workflow@^5.0.0-beta.42
+pnpm add @yolk-sdk/vercel-workflows@canary effect@4.1.4 workflow@^5.0.0-beta.42
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.1.2`) in host code.
+Use the SDK's matching Effect version (`4.1.4`) in host code.
 Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
 Keep one `ws` version installed (`@effect/platform-node` 4.1 needs ^8.22.1): two copies install
 `@workflow/core` twice and the Workflow build fails with duplicate step ids.
