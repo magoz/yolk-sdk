@@ -30,6 +30,25 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.143: non-empty harness pause
+
+`Driver.pause` and `Inbox.park` from `@yolk-sdk/harness` take a non-empty request id list
+(`Array.NonEmptyReadonlyArray<string>` from `effect`). An empty pause was Ready at once, so the
+drain kept its claim and nothing woke the run. `StepOutcome.AwaitingInput` `requests` and
+`ParkedState.requestIds` are non-empty too. Map a tool batch's requests with Effect's `Array.map`,
+which keeps the list non-empty (the native `.map` returns `string[]`). Fragment, inside a drain:
+
+```ts
+import { Array as Arr } from 'effect'
+
+const requestIds = Arr.map(outcome.requests, request => request.requestId)
+const decision = yield * inbox.park(runId, requestIds, context.drainToken)
+```
+
+Check a host-built list with `Arr.isReadonlyArrayNonEmpty` and do not pause when it is empty.
+Custom `InboxApi` / `DriverApi` implementations take the narrower parameter
+([Harness API](./api-reference/harness#inbox)).
+
 ### Canary.141: idempotent stream close
 
 `TestWorkflowWorld` now treats closing an already closed stream as Vercel does: the close succeeds

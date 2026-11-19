@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Ref } from 'effect'
+import { Array as Arr, Effect, Layer, Predicate, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   QuestionAnswer,
@@ -110,7 +110,7 @@ describe('HITL loop bridge', () => {
             yield* Ref.set(pending, outcome.requests)
             yield* inbox.park(
               runId,
-              outcome.requests.map(request => request.requestId),
+              Arr.map(outcome.requests, request => request.requestId),
               context.drainToken
             )
           })
