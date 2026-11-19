@@ -162,10 +162,12 @@ export const defaultMaxWorkflowTurns = 500
 export const noWorkflowStepRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 1 }
 
 /**
- * The close step retries by default: closing a Vercel Workflow stream is idempotent, so a retry
- * cannot write anything, and a close the platform applied before its step failed (the function
- * died, or the step's completion was lost) then completes the run instead of reporting
- * `CloseStreamFailed` for a stream the client saw end cleanly.
+ * The close step retries by default. Closing a Vercel Workflow stream is idempotent, so a retry of
+ * a close-only step (`AgentEnd` is written before it) writes nothing. The platform redelivers a
+ * step whose function died; this retry matters after a close step's platform attempts are used up,
+ * when the close was applied but the step still failed: a later attempt that succeeds completes the
+ * run instead of reporting `CloseStreamFailed` for a stream the client saw end cleanly. It retries
+ * any rejection, a `FatalError` too; pass `closeStreamRetry: noWorkflowStepRetry` to close once.
  */
 export const defaultCloseStreamRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 3 }
 

@@ -14,7 +14,8 @@ Workflow 5 captures Node `URL` intrinsics when the module loads.
 
 `@yolk-sdk/vercel-workflows/testing` exports `TestWorkflowWorld`. Use it to exercise host code
 against run lifecycle, append-only stream replay, HTTP 409-style conflicts for writes after close
-(closing again succeeds, as on Vercel), step retry attempts, hooks/resume, cancellation, and the SDK seam consumed by `VercelWorkflows.layerFromSdk`.
+(closing again succeeds, as on Vercel), step retry attempts, hooks/resume, cancellation, and the
+SDK seam consumed by `VercelWorkflows.layerFromSdk`.
 
 This is a test fragment; initialize one world per test and mock the ambient module before importing
 the host Workflow under test:

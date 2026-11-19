@@ -7,14 +7,14 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 
 ## Loop exports
 
-| Export                    | Purpose                                                                                                                                                    |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runVercelAgentWorkflow`  | orchestrate model/tool/HITL/close callbacks                                                                                                                |
-| `defaultMaxWorkflowTurns` | default max turns, currently `500`                                                                                                                         |
-| `noWorkflowStepRetry`     | default retry policy, `{ maxAttempts: 1 }`; queue redelivery still happens ([at-least-once](../integrations/vercel-workflow#tool-steps-run-at-least-once)) |
-| `defaultCloseStreamRetry` | default `closeStreamRetry`, `{ maxAttempts: 3 }`; a Vercel stream close is idempotent                                                                      |
-| `retryWorkflowStep`       | retry helper for Workflow callback promises                                                                                                                |
-| `settleWorkflowStep`      | convert a promise into `Success` / `Failure` result                                                                                                        |
+| Export                    | Purpose                                                                                                                                                                                |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runVercelAgentWorkflow`  | orchestrate model/tool/HITL/close callbacks                                                                                                                                            |
+| `defaultMaxWorkflowTurns` | default max turns, currently `500`                                                                                                                                                     |
+| `noWorkflowStepRetry`     | default retry policy (except `closeStreamRetry`), `{ maxAttempts: 1 }`; queue redelivery still happens ([at-least-once](../integrations/vercel-workflow#tool-steps-run-at-least-once)) |
+| `defaultCloseStreamRetry` | default `closeStreamRetry`, `{ maxAttempts: 3 }`; a Vercel stream close is idempotent                                                                                                  |
+| `retryWorkflowStep`       | retry helper for Workflow callback promises                                                                                                                                            |
+| `settleWorkflowStep`      | convert a promise into `Success` / `Failure` result                                                                                                                                    |
 
 `WorkflowStepResult` and `VercelAgentWorkflowRunResult` are both types and constructor values
 on the package root and `@yolk-sdk/vercel-workflows/workflow`. Use

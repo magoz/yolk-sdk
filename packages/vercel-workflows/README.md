@@ -246,11 +246,15 @@ Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`) for model, tool
 await-input steps. Their retries are opt-in because streamed retries can duplicate chunks unless
 host/client de-dupe is ready.
 
-The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`): closing a Workflow stream
-is idempotent on Vercel, so a retry writes nothing, and a close the platform applied before its step
-failed (the function died, or the step's completion was lost) completes the run instead of
-reporting `CloseStreamFailed` for a stream the client saw end. Keep `closeStream` safe to repeat;
-pass `closeStreamRetry: noWorkflowStepRetry` to close once.
+The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`). `closeStream` only closes
+the writer (`AgentEnd` is written before it, by the final model step), and closing a Workflow stream
+is idempotent on Vercel, so a close-only step's retry writes nothing. The platform already
+redelivers a close step whose function died; the loop retry matters after the step's platform
+attempts are used up, when the close was applied but the step still failed (for example its
+completion was lost): a later attempt that succeeds completes the run instead of reporting
+`CloseStreamFailed` for a stream the client saw end. The loop retries any rejection, a `FatalError`
+thrown by `closeStream` too. Keep `closeStream` close-only and safe to repeat; pass
+`closeStreamRetry: noWorkflowStepRetry` to close once.
 
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
@@ -352,7 +356,8 @@ tool, await-input, or max-turn failure it calls `writeError` best-effort and ret
 `closeStream`; `writeError` must write a safe run-final error and attempt to close that failure path.
 Never close on resumable `AgentAwaitingInput`. `CloseStreamFailed` means every close attempt failed,
 but a close can be applied while its step still fails: the stream may already carry the committed
-`AgentEnd`, so a `writeError` that records a failure should not replace a committed completion.
+`AgentEnd`, so a `writeError` that records a failure must not replace a committed completion. Check
+for the run's committed completion (or compare-and-set against it) before recording the failure.
 
 ## Host responsibilities
 
