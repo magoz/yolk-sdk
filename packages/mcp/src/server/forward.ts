@@ -9,13 +9,16 @@
  * the host's principal, the method and the forward purpose) but not encrypted: the client can read
  * the remote pause (its forms and the remote `requestState`), so a remote `requestState` must not
  * be secret from this server's client. It names the tool, the arguments digest, a `roundId`, the
- * remote pause and its expiry (`ttlSeconds` after the remote pause was first forwarded). Only a
- * round whose verified, unexpired state matches the call and answers every forwarded form resumes
- * the remote call; a round that misses an answer is asked the same forms again under the same
+ * remote pause and its expiry (`ttlSeconds` after the remote pause was forwarded). Only a round
+ * whose verified, unexpired state matches the call and answers every forwarded form resumes the
+ * remote call; a round that misses an answer is asked the same forms again under the same
  * `roundId` and expiry, so asking again neither opens a second resume nor keeps the pause alive.
- * The server does not enforce once-only resumption: a replayed answered round arrives again with
- * the same `roundId`, so the host keys once-only execution on it (MRTR's single-use is the server's
- * duty).
+ * A new remote pause's `roundId` is derived from where it came from (the approval or the resumed
+ * round) and the pause, so a host that answers a retried round with the outcome it stored asks the
+ * same pause in the same round. A replay is accepted only while its origin (the approval or round
+ * state) is still valid, and the replayed pause then gets a fresh expiry. The server does not
+ * enforce once-only resumption: a replayed answered round arrives again with the same `roundId`,
+ * so the host keys once-only execution on it (MRTR's single-use is the server's duty).
  */
 import { Clock, Data, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -47,8 +50,9 @@ import { McpServerError } from './errors.ts'
  *   pause to its client (a `2026-07-28` request declaring form elicitation, with approvals
  *   configured): opt the remote call into elicitation only then, so a remote server that needs
  *   input answers that it cannot run instead of pausing a call nobody can answer.
- * - `Resume`: resume the remote pause with the client's answers. `roundId` is unique per forwarded
- *   prompt: key once-only resumption on it.
+ * - `Resume`: resume the remote pause with the client's answers. `roundId` names one forwarded
+ *   remote pause: key once-only resumption on it. A retried round answered with the outcome the
+ *   host stored forwards that pause again under the same `roundId`.
  *
  * `approvalId` is set when the tool also asks this server's approval first (an approval forwarding
  * tool): it names the approval the call runs under, on every later round too.
@@ -180,12 +184,63 @@ const answersOf = (state: ForwardState, ctx: ServerContext) =>
   })
 
 /**
- * The round a forwarded prompt belongs to: a new remote pause opens one (fresh `roundId`, expiry
- * `ttlSeconds` from now); asking a pause's forms again keeps its round.
+ * What a remote pause came from, by the host's once-only key of the round that answered it: the
+ * approval (`Initial` of an approval forwarding tool), the forwarded round it resumed (`Resume`), or
+ * a first round without approval (`call`), which has no key.
+ */
+type ForwardOrigin =
+  | { readonly kind: 'approval'; readonly approvalId: string }
+  | { readonly kind: 'round'; readonly roundId: string }
+  | { readonly kind: 'call' }
+
+/**
+ * The round a forwarded prompt belongs to: a new remote pause opens one (expiry `ttlSeconds` from
+ * now); asking a pause's forms again keeps its round.
  */
 type ForwardRound =
-  | { readonly kind: 'new' }
+  | { readonly kind: 'new'; readonly origin: ForwardOrigin }
   | { readonly kind: 'again'; readonly roundId: string; readonly expiresAtMs: number }
+
+/** What names a remote pause: its forms, remote `requestState` and binding (not `tool`). */
+const PauseIdentity = Schema.Struct({
+  elicitations: McpInputRequired.fields.elicitations,
+  requestState: McpInputRequired.fields.requestState,
+  mcpToolName: McpInputRequired.fields.mcpToolName,
+  argumentsDigest: McpInputRequired.fields.argumentsDigest
+})
+
+const encodePauseIdentity = Schema.encodeUnknownEffect(Schema.toCodecJson(PauseIdentity))
+
+/**
+ * The `roundId` of a new remote pause: the digest of its origin and the pause (its forms, remote
+ * `requestState` and binding; not the listed tool definition). The pause is encoded as a JSON value
+ * and `mcpArgumentsDigest` hashes canonical JSON (keys sorted at every level), so a host store that
+ * reorders keys (JSONB) keeps the round. A host that answers a retried round (an accepted
+ * approval, a `Resume`) with the outcome it stored forwards the same pause from the same origin,
+ * so it is asked in the same round, and the host's once-only key on `roundId` still resumes it
+ * once. A fresh `roundId` there would open a second resume of one remote pause. A first
+ * round without approval has no once-only key, so its round is random.
+ */
+const newRoundId = (origin: ForwardOrigin, pause: McpInputRequired) => {
+  if (origin.kind === 'call') return Effect.sync(() => crypto.randomUUID())
+
+  return encodePauseIdentity(pause).pipe(
+    Effect.flatMap(identity =>
+      mcpArgumentsDigest({
+        origin:
+          origin.kind === 'approval' ? `approval:${origin.approvalId}` : `round:${origin.roundId}`,
+        pause: identity
+      })
+    ),
+    Effect.mapError(
+      error =>
+        new McpServerError({
+          message: `Could not encode the forwarded prompt: ${error.message}`,
+          cause: 'encoding'
+        })
+    )
+  )
+}
 
 /** Asks the client the remote pause's forms under a signed forward state of its round. */
 const ask = (input: {
@@ -208,7 +263,10 @@ const ask = (input: {
     const round =
       input.round.kind === 'again'
         ? { roundId: input.round.roundId, expiresAtMs: input.round.expiresAtMs }
-        : { roundId: crypto.randomUUID(), expiresAtMs: now + approvals.ttlSeconds * 1000 }
+        : {
+            roundId: yield* newRoundId(input.round.origin, pause),
+            expiresAtMs: now + approvals.ttlSeconds * 1000
+          }
 
     const base = {
       kind: 'forward' as const,
@@ -270,6 +328,7 @@ const outcomeOf = (input: {
   readonly argumentsDigest: string
   readonly outcome: McpToolCallOutcome
   readonly approvalId: string | undefined
+  readonly origin: ForwardOrigin
   readonly clientElicitation: boolean
   readonly ctx: ServerContext | undefined
 }): Effect.Effect<McpServerCallOutcome, McpServerError> => {
@@ -289,7 +348,7 @@ const outcomeOf = (input: {
     argumentsDigest: input.argumentsDigest,
     pause: outcome.inputRequired,
     approvalId: input.approvalId,
-    round: { kind: 'new' },
+    round: { kind: 'new', origin: input.origin },
     ctx: input.ctx
   })
 }
@@ -349,6 +408,10 @@ export const forwardInitialRound = <R>(input: {
       argumentsDigest,
       outcome,
       approvalId: input.approvalId,
+      origin:
+        input.approvalId === undefined
+          ? { kind: 'call' }
+          : { kind: 'approval', approvalId: input.approvalId },
       clientElicitation,
       ctx
     })
@@ -409,6 +472,7 @@ export const forwardAnswerRound = <R>(input: {
         argumentsDigest,
         outcome,
         approvalId: forward.approvalId,
+        origin: { kind: 'round', roundId: forward.roundId },
         clientElicitation: clientElicits({ approvals, ctx, modern: true }),
         ctx
       })

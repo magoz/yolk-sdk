@@ -72,11 +72,11 @@ queues, hooks, or stream storage.
 ## Test Workflow behavior
 
 `@yolk-sdk/vercel-workflows/testing` provides `TestWorkflowWorld`, a behavioral emulator for host
-tests. It covers run lifecycle, append-only streams with close-once conflicts, step retries and
-attempt metadata, hooks/resume, cancellation, and the SDK seam used by
-`VercelWorkflows.layerFromSdk`. Step errors cross the platform boundary as in a deployment: each is
-stored with the installed `workflow` runtime's step-error serializer and the workflow body sees only
-the value read back (error tags, prototypes and custom fields are lost; `cause` survives). A
+tests. It covers run lifecycle, append-only streams (a write after close conflicts; closing again
+succeeds, as on Vercel), step retries and attempt metadata, hooks/resume, cancellation, and the SDK
+seam used by `VercelWorkflows.layerFromSdk`. Step errors cross the platform boundary as in a
+deployment: each is stored with the installed `workflow` runtime's step-error serializer and the
+workflow body sees only the value read back (error tags, prototypes and custom fields are lost; `cause` survives). A
 FatalError (named `FatalError`, or with `fatal: true`; an `AbortError` is promoted to one) is never
 retried, an exhausted step fails with the platform's FatalError wrapping the last error, and a
 thrown value the platform cannot store (a class instance anywhere in its `cause` chain) is
@@ -84,7 +84,12 @@ redelivered like the platform does until the step exceeds its retries;
 `world.inspect(runId).unstorableStepErrors` lists those values. `world.sdk.start` checks start
 `attributes` with the installed runtime's validator (an invalid one rejects with a FatalError and
 creates no run) and `world.inspect(runId).attributes` shows them (`{}` without any; the emulator
-adds no `$parentRunId`/`$rootRunId`). Executing a step loads the workflow runtime, so it needs the
+adds no `$parentRunId`/`$rootRunId`). Hooks follow the platform too: `resumeHook` succeeds for
+every payload sent to a live hook, `await hook` reads the first, the rest are dropped when the hook
+is disposed, and a token whose hook was disposed (or whose run ended) answers
+`TestWorkflowHookNotFoundError` until a hook of any run takes it again. The emulator does not model
+the platform's `HookConflictError` for a token another live hook holds, nor reading a hook more than
+once. Executing a step loads the workflow runtime, so it needs the
 Node test environment. Ambient module mocks do not apply retry policy by
 themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly
 when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
@@ -237,13 +242,49 @@ approval then stays pending even when its tool's policy changed since the pause.
 The loop owns its accumulator: host mutation of a supplied array cannot affect a later batch.
 Response order and element identity are preserved; response objects are not deep-cloned.
 
-The host owns `hookToken` construction, auth, resume routes, and response decoding. Use stable
-tokens that the resume side can reconstruct or store.
+The host owns `hookToken` construction, auth, resume routes, and response decoding. Two platform
+rules shape them:
+
+- **One token per pause.** A disposed hook's token is free again, and `resumeHook` routes by token
+  alone. A token that several pauses share (one per run or session) delivers a late duplicate of
+  an earlier answer (a client retry, a double submit) to the next pause as its answer. Give every
+  `awaitingInput` a token no earlier pause of the run used, for example
+  `hitl:${runId}:${input.turn ?? 0}:${input.hitlResponses?.length ?? 0}` (the turn and how many
+  answers the batch already took; a token built only from pending request ids repeats when a
+  request re-pends after an invalid answer). Store it with the pending state you persist before
+  `AgentAwaitingInput`, and resume the stored pause that holds the request being answered. The loop
+  does not check tokens. Filtering answers by request id inside `awaitInput` (discard one no
+  pending request matches and wait again) also keeps a late duplicate out of the batch, but answers
+  that reached the hook behind the discarded one are dropped with it, so the rule still applies.
+- **`resumeHook` success does not mean the answer was used.** A hook accepts every payload until
+  the workflow disposes it, and `resumeHook` succeeds for each; the `awaitInput` above reads the
+  first, and the rest are dropped with the hook. So before resuming, admit only an answer to a
+  request the stored pause still holds and record it durably for that pause (an identical retry
+  reuses the record; a different answer is refused), then report what was recorded, not what
+  `resumeHook` returned. Give each payload the request id it answers.
+- **`HookNotFoundError` means no hook is resumable under that token now.** The hook may not exist
+  yet (the tool step writes `AgentAwaitingInput` before the workflow replays and calls
+  `createHook`, so a fast client can get there first), the token may be wrong, or the hook was
+  disposed (its answer used, perhaps by an earlier attempt of this same resume) or its run ended.
+  While the stored pause is still pending, retry resuming the recorded answer a bounded number of
+  times; once the pause has moved on, report the recorded answer as delivered, not as an error.
 
 ## Retry policy
 
-Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because
-streamed retries can duplicate chunks unless host/client de-dupe is ready.
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`) for model, tool-batch and
+await-input steps. Their retries are opt-in because streamed retries can duplicate chunks unless
+host/client de-dupe is ready.
+
+The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`). `closeStream` only closes
+the writer (`AgentEnd` is written before it, by the final model step), and closing a Workflow stream
+is idempotent on Vercel, so a close-only step's retry writes nothing. The platform already
+redelivers a close step whose function died; the loop retry matters after the step's platform
+attempts are used up, when the close was applied but the step still failed (for example its
+completion was lost): a later attempt that succeeds completes the run instead of reporting
+`CloseStreamFailed` for a stream the client saw end. The loop retries any rejection, a `FatalError`
+thrown by `closeStream` too. Keep `closeStream` close-only and safe to repeat; pass
+`closeStreamRetry: noWorkflowStepRetry` to close once.
+
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
 
@@ -342,7 +383,10 @@ Existing `(error: unknown) => …` callbacks remain assignable.
 `runVercelAgentWorkflow` calls `closeStream` only after `runModelStep` returns `done: true`. On model,
 tool, await-input, or max-turn failure it calls `writeError` best-effort and returns without calling
 `closeStream`; `writeError` must write a safe run-final error and attempt to close that failure path.
-Never close on resumable `AgentAwaitingInput`.
+Never close on resumable `AgentAwaitingInput`. `CloseStreamFailed` means every close attempt failed,
+but a close can be applied while its step still fails: the stream may already carry the committed
+`AgentEnd`, so a `writeError` that records a failure must not replace a committed completion. Check
+for the run's committed completion (or compare-and-set against it) before recording the failure.
 
 ## Host responsibilities
 
