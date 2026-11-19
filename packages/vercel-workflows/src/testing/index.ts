@@ -67,6 +67,8 @@ export class TestWorkflowHookNotFoundError extends Error {
  * Not thrown by `resumeHook`: like the platform, it accepts every payload sent to a live hook. The
  * platform's `HookConflictError` comes from creating a hook whose token another live hook holds,
  * which this world does not emulate.
+ *
+ * @deprecated Nothing throws it any more; it will be removed in a later minor release.
  */
 export class TestWorkflowHookConflictError extends Error {
   override readonly name = 'HookConflictError'

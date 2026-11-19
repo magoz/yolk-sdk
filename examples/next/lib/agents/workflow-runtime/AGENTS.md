@@ -28,6 +28,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 - Failed tools still append `ToolResultMessage.isError`; never resume the model with dangling host tool calls.
 - HITL tool step writes `AgentAwaitingInput`, returns hook metadata, and the workflow waits on `createHook` before rerunning the tool step with the response. Approval, question, and typed input pauses all flow through the same hook; the tool step passes `runtime.config.inputs` into `prepareToolBatch`/`runToolBatch` so input validators survive durable resume.
 - Before adding a hook response to batch history, `matchesWorkflowHitlResponseStep` checks its request id, call id, and semantic type against the current pending requests. Stale/duplicate responses are discarded and the durable hook reopens; schema-invalid current responses re-pend through loop validation. First valid input/cancellation wins when preflight replays a sibling batch.
+- Known exception, not the pattern to copy: `agentWorkflowHitlHookToken` (`workflow-contract.ts`) is one token per run, reused by every pause, and the resume route calls `resumeHook` without recording the answer first. The SDK rule is one token per pause plus a durable answer record before resuming (`apps/docs/content/docs/vercel-workflows/hitl-resume.mdx`); the request-id filter above only keeps late duplicates out of the batch.
 - Close/error steps own final stream closure; `workflow-error.ts` maps typed route/loop/runtime errors to in-band `AgentError` codes.
 
 ## Tests

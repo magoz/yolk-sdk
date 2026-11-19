@@ -740,8 +740,13 @@ Your host owns hook tokens, route auth, run ownership, and pending request match
 An answer that `resumeHook` accepted but the run never used went to a hook that had already taken
 another answer (a live hook accepts every payload and the workflow reads the first), or to the next
 pause through a token several pauses share. Use one token per pause and record answers durably before
-resuming ([HITL resume](./vercel-workflows/hitl-resume)). `HookNotFoundError` means the pause's hook
-was already disposed or its run ended.
+resuming ([HITL resume](./vercel-workflows/hitl-resume)).
+
+`HookNotFoundError` means no hook is resumable under that token right now: the workflow has not
+created it yet (a client faster than the replay after `AgentAwaitingInput`), the token is wrong, the
+hook was disposed (its answer already used, possibly by an earlier attempt of the same resume), or
+the run ended. While the stored pause is still pending, retry resuming the recorded answer a bounded
+number of times; once the pause has moved on, report the recorded answer as delivered.
 
 ### Terminal event missing
 
