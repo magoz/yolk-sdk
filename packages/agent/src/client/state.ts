@@ -571,8 +571,8 @@ const executionOutput = (
 
 /**
  * A superseded execution's output, or one the step did not commit, is provisional: its live
- * messages, and the tool runs it touched that no other event acknowledged (restored to the run they
- * replaced, else removed).
+ * messages, and the tool runs it touched that no other event acknowledged and only the model's
+ * stream changed (restored to the run they replaced, else removed).
  */
 const discardExecutionOutput = (
   state: AgentClientState,
@@ -603,10 +603,17 @@ const discardExecutionOutput = (
     toolRuns: state.toolRuns.flatMap(run => {
       const prior = runs.get(toolRunId(run))
 
-      return prior === undefined ? [run] : Option.toArray(prior)
+      // A run a host event set belongs to a later call that reused the id: it stays.
+      return prior === undefined || !isModelToolRun(run) ? [run] : Option.toArray(prior)
     })
   }
 }
+
+/** A run only the model's stream produced (its input, a call, a provider result). */
+const isModelToolRun = (run: AgentToolRun) =>
+  Predicate.isTagged(run, 'InputStreaming') ||
+  Predicate.isTagged(run, 'InputReady') ||
+  Predicate.isTagged(run, 'ProviderCompleted')
 
 const applyAgentEventRouted = (
   state: AgentClientState,

@@ -804,20 +804,37 @@ export const editChatUserMessage = (
   })
 }
 
-const lastAssistantIndex = (messages: ReadonlyArray<AgentChatMessage>) => {
+/**
+ * Chat messages an event may not change: those another model-step execution still holds as its
+ * output (`applyExecutionEventToChatMessages`). Its own output then goes to a new message.
+ */
+type ForeignMessages = ReadonlySet<string>
+
+const noForeignMessages: ForeignMessages = new Set()
+
+const lastAssistantIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  foreign: ForeignMessages = noForeignMessages
+) => {
   const index = findLastMessageIndex(messages, message => message.role === 'assistant')
 
-  return index === -1 ? Option.none<number>() : Option.some(index)
+  return index === -1 || foreign.has(messages[index]?.id ?? '')
+    ? Option.none<number>()
+    : Option.some(index)
 }
 
-const targetAssistantIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
-  Option.filter(lastAssistantIndex(messages), index => hasStreamingPart(messages[index]))
+const targetAssistantIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  foreign: ForeignMessages
+) =>
+  Option.filter(lastAssistantIndex(messages, foreign), index => hasStreamingPart(messages[index]))
 
 const appendAssistantPart = (
   messages: ReadonlyArray<AgentChatMessage>,
-  part: AgentChatPart
+  part: AgentChatPart,
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> =>
-  Option.match(targetAssistantIndex(messages), {
+  Option.match(targetAssistantIndex(messages, foreign), {
     onNone: () => {
       const sequence = nextMessageSequence(messages)
       const currentTurnId = lastTurnId(messages) ?? turnId(sequence)
@@ -841,9 +858,10 @@ const appendAssistantPart = (
 
 const appendAssistantTextDelta = (
   messages: ReadonlyArray<AgentChatMessage>,
-  input: { readonly delta: string; readonly textSoFar?: string }
+  input: { readonly delta: string; readonly textSoFar?: string },
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = targetAssistantIndex(messages)
+  const index = targetAssistantIndex(messages, foreign)
   const content = input.textSoFar ?? input.delta
 
   if (Option.isNone(index)) {
@@ -855,7 +873,8 @@ const appendAssistantTextDelta = (
         id: `message-${sequence}-assistant-text`,
         content,
         state: 'streaming'
-      })
+      }),
+      foreign
     )
   }
 
@@ -887,9 +906,10 @@ const appendAssistantTextDelta = (
 
 const appendAssistantReasoningDelta = (
   messages: ReadonlyArray<AgentChatMessage>,
-  input: { readonly delta: string; readonly reasoningSoFar?: string }
+  input: { readonly delta: string; readonly reasoningSoFar?: string },
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = targetAssistantIndex(messages)
+  const index = targetAssistantIndex(messages, foreign)
   const text = input.reasoningSoFar ?? input.delta
 
   if (Option.isNone(index)) {
@@ -901,7 +921,8 @@ const appendAssistantReasoningDelta = (
         id: `message-${sequence}-reasoning`,
         text,
         state: 'streaming'
-      })
+      }),
+      foreign
     )
   }
 
@@ -1010,9 +1031,10 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
 const appendToolCallPart = (
   messages: ReadonlyArray<AgentChatMessage>,
   call: ToolCall,
-  state: ChatToolState
+  state: ChatToolState,
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = Option.filter(lastAssistantIndex(messages), assistantIndex => {
+  const index = Option.filter(lastAssistantIndex(messages, foreign), assistantIndex => {
     const message = messages[assistantIndex]
 
     return hasStreamingPart(message) || hasOpenToolCall(message)
@@ -1052,9 +1074,13 @@ const appendToolCallPart = (
 const upsertToolCallPart = (
   messages: ReadonlyArray<AgentChatMessage>,
   call: ToolCall,
-  state: ChatToolState
+  state: ChatToolState,
+  foreign: ForeignMessages = noForeignMessages
 ): ReadonlyArray<AgentChatMessage> => {
-  const existingIndex = findLastMessageIndex(messages, message => hasToolCall(message, call.id))
+  const existingIndex = findLastMessageIndex(
+    messages,
+    message => !foreign.has(message.id) && hasToolCall(message, call.id)
+  )
 
   if (existingIndex !== -1) {
     return messages.map((message, messageIndex) =>
@@ -1073,7 +1099,7 @@ const upsertToolCallPart = (
     )
   }
 
-  return appendToolCallPart(messages, call, state)
+  return appendToolCallPart(messages, call, state, foreign)
 }
 
 const inputStreamingToolCall = (id: string, name: string | undefined) =>
@@ -1082,17 +1108,20 @@ const inputStreamingToolCall = (id: string, name: string | undefined) =>
 const appendToolInputDelta = (
   messages: ReadonlyArray<AgentChatMessage>,
   id: string,
-  delta: string
+  delta: string,
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> =>
   messages.map(message => ({
     ...message,
-    parts: message.parts.map(part =>
-      Predicate.isTagged(part, 'ToolCall') &&
-      part.call.id === id &&
-      Predicate.isTagged(part.state, 'InputStreaming')
-        ? { ...part, state: { ...part.state, input: `${part.state.input}${delta}` } }
-        : part
-    )
+    parts: foreign.has(message.id)
+      ? message.parts
+      : message.parts.map(part =>
+          Predicate.isTagged(part, 'ToolCall') &&
+          part.call.id === id &&
+          Predicate.isTagged(part.state, 'InputStreaming')
+            ? { ...part, state: { ...part.state, input: `${part.state.input}${delta}` } }
+            : part
+        )
   }))
 
 const finalizeAssistantParts = (
@@ -1179,7 +1208,8 @@ const isHostToolState = (state: ChatToolState) =>
 
 const appendOrReplaceAssistantMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
-  message: AssistantAgentMessage
+  message: AssistantAgentMessage,
+  foreign: ForeignMessages
 ) => {
   const acceptedCallIds = new Set(
     messages.flatMap(current =>
@@ -1209,6 +1239,7 @@ const appendOrReplaceAssistantMessage = (
         messages,
         current =>
           current.role === 'assistant' &&
+          !foreign.has(current.id) &&
           messageToolCallIds.some(callId => hasToolCall(current, callId))
       )
     : -1
@@ -1216,7 +1247,7 @@ const appendOrReplaceAssistantMessage = (
   const index =
     replayIndex !== -1
       ? Option.some(replayIndex)
-      : Option.filter(lastAssistantIndex(messages), assistantIndex => {
+      : Option.filter(lastAssistantIndex(messages, foreign), assistantIndex => {
           const current = messages[assistantIndex]
 
           return (
@@ -1338,18 +1369,54 @@ export type AgentChatExecutionOutput = Data.TaggedEnum<{
    * at its start, from the execution it superseded when there is one.
    */
   After: { readonly messageId: Option.Option<string> }
+  /**
+   * Where its turn's output ends: this chat message was the last when a later turn of its run
+   * started (none: the chat was empty). Recorded on an execution kept for reconciling.
+   */
+  Until: { readonly messageId: Option.Option<string> }
 }>
 
 export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
 
 const toolPartKey = (messageId: string, callId: string) => JSON.stringify([messageId, callId])
 
+const anchorOf = (outputs: ReadonlyArray<AgentChatExecutionOutput>) =>
+  outputs.flatMap(output => (Predicate.isTagged(output, 'After') ? [output.messageId] : []))[0]
+
+const indexOfMessage = (messages: ReadonlyArray<AgentChatMessage>, id: Option.Option<string>) =>
+  Option.match(id, {
+    onNone: () => -1,
+    onSome: messageId => messages.findIndex(message => message.id === messageId)
+  })
+
+const lastUserIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
+  findLastMessageIndex(messages, message => message.role === 'user')
+
 /**
- * Removes a model-step execution's provisional output after the last user message: the text and
- * reasoning of the chat messages it created, and each tool part it touched whose call no other
- * event acknowledged (`unacknowledged`), restored to the part it replaced (providers reuse call
- * ids across turns) or else removed. Only its own parts are touched; a message left with no parts
- * goes too.
+ * The anchor of an execution's turn in `messages`: the index of the message its output follows
+ * (`-1`: the chat was empty), or `undefined` when its output has no `After` (states built before
+ * it) or that message is gone.
+ */
+const anchorIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  outputs: ReadonlyArray<AgentChatExecutionOutput>
+) => {
+  const after = anchorOf(outputs)
+
+  if (after === undefined) return undefined
+
+  const index = indexOfMessage(messages, after)
+
+  return Option.isSome(after) && index === -1 ? undefined : index
+}
+
+/**
+ * Removes a model-step execution's provisional output: the text and reasoning of the chat messages
+ * it created, and each tool part it touched whose call no other event acknowledged
+ * (`unacknowledged`), restored to the part it replaced (providers reuse call ids across turns) or
+ * else removed. Only its own parts are touched, and nothing up to the user message its turn
+ * answers (the last one at its anchor; without one, the last user message); a user message that
+ * followed the turn does not protect it. A message left with no parts goes too.
  */
 export const discardChatExecutionOutput = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -1376,10 +1443,13 @@ export const discardChatExecutionOutput = (
     )
   )
 
-  const lastUser = findLastMessageIndex(messages, message => message.role === 'user')
+  const anchor = anchorIndex(messages, outputs)
+
+  const kept =
+    anchor === undefined ? lastUserIndex(messages) : lastUserIndex(messages.slice(0, anchor + 1))
 
   return messages.flatMap((current, index) => {
-    if (index <= lastUser) return [current]
+    if (index <= kept) return [current]
 
     const message = replaced.get(current.id) ?? current
     const owned = created.has(message.id)
@@ -1411,11 +1481,13 @@ export const discardChatExecutionOutput = (
 /**
  * Shows a turn's committed answer instead of the one its shown execution produced (`AgentEnd` /
  * `AgentAwaitingInput` messages, for a turn that ran more than once): removes the execution's
- * output, takes the part of each committed tool call from the turn's messages (the first after
- * where the turn starts, keeping its state, such as a completed call or a pending question), and
- * puts the committed message where the turn starts. A message left with no parts goes. Output
- * recorded without `After` (states built before it) starts the turn after the last user message
- * and appends the answer; when its message is gone, nothing changes.
+ * output, takes the part of each committed tool call from the turn's messages (keeping its state,
+ * such as a completed call or a pending question), and puts the committed message where the turn
+ * starts. The turn's messages are those after its anchor (`After`) through the last one before a
+ * later turn started (`Until`; the chat's end while none did), so a later turn's call or committed
+ * answer is never taken. A message left with no parts goes. Without its anchor (states built
+ * before it, or a host removed that message) the turn starts after the last user message and the
+ * answer goes where the execution's first message was, else last.
  */
 export const replaceWithCommittedAnswer = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -1423,25 +1495,33 @@ export const replaceWithCommittedAnswer = (
   calls: ReadonlySet<string>,
   answer: AssistantAgentMessage
 ): ReadonlyArray<AgentChatMessage> => {
-  const after = outputs.flatMap(output =>
-    Predicate.isTagged(output, 'After') ? [output.messageId] : []
+  const anchor = anchorIndex(messages, outputs)
+  const start = anchor === undefined ? lastUserIndex(messages) + 1 : anchor + 1
+
+  const until = outputs.flatMap(output =>
+    Predicate.isTagged(output, 'Until') ? [output.messageId] : []
   )[0]
 
-  const discarded = discardChatExecutionOutput(messages, outputs, calls)
+  const untilIndex = until === undefined ? -1 : indexOfMessage(messages, until)
 
-  const start =
-    after === undefined
-      ? findLastMessageIndex(discarded, message => message.role === 'user') + 1
-      : Option.match(after, {
-          onNone: () => 0,
-          onSome: id => {
-            const index = discarded.findIndex(message => message.id === id)
+  // A later turn's start that the chat no longer shows bounds nothing: the turn runs to the end.
+  const end =
+    until === undefined || (Option.isSome(until) && untilIndex === -1)
+      ? messages.length - 1
+      : untilIndex
 
-            return index === -1 ? undefined : index + 1
-          }
-        })
+  const turn = new Set(messages.slice(start, end + 1).map(message => message.id))
+  const position = new Map(messages.map((message, index) => [message.id, index]))
 
-  if (start === undefined) return messages
+  const created = new Set(
+    outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
+  )
+
+  const firstCreated = messages.findIndex(
+    (message, index) => index >= start && created.has(message.id)
+  )
+
+  const at = anchor !== undefined ? start : firstCreated === -1 ? messages.length : firstCreated
 
   const answerCalls = new Set(
     answer.parts.flatMap(part =>
@@ -1453,8 +1533,8 @@ export const replaceWithCommittedAnswer = (
 
   const states = new Map<string, ChatToolState>()
 
-  const taken = discarded.flatMap((message, index) => {
-    if (index < start) return [message]
+  const taken = discardChatExecutionOutput(messages, outputs, calls).flatMap(message => {
+    if (!turn.has(message.id)) return [message]
 
     const parts = message.parts.filter(part => {
       if (
@@ -1474,8 +1554,10 @@ export const replaceWithCommittedAnswer = (
     return parts.length === 0 ? [] : [{ ...message, parts }]
   })
 
-  const sequence = nextMessageSequence(taken)
-  const neighbour = taken[start - 1] ?? taken[start]
+  const found = taken.findIndex(message => (position.get(message.id) ?? 0) >= at)
+  const insert = found === -1 ? taken.length : found
+  const sequence = nextMessageSequence(messages)
+  const neighbour = taken[insert - 1] ?? taken[insert]
   const shown = assistantChatMessage(answer, sequence, neighbour?.turnId ?? turnId(sequence))
 
   const committed = {
@@ -1487,9 +1569,7 @@ export const replaceWithCommittedAnswer = (
     )
   }
 
-  return after === undefined
-    ? [...taken, committed]
-    : [...taken.slice(0, start), committed, ...taken.slice(start)]
+  return [...taken.slice(0, insert), committed, ...taken.slice(insert)]
 }
 
 /**
@@ -1625,6 +1705,19 @@ export const applyAgentEventToChatMessages = (
   messages: ReadonlyArray<AgentChatMessage>,
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions = {}
+): ReadonlyArray<AgentChatMessage> =>
+  applyExecutionEventToChatMessages(messages, event, options, noForeignMessages)
+
+/**
+ * Applies one event of a model-step execution: its stream's output never changes a message in
+ * `foreign`, another execution's output (an earlier turn's answer kept for reconciling), even
+ * through a call id a provider reused; it goes to a message of its own.
+ */
+export const applyExecutionEventToChatMessages = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions,
+  foreign: ForeignMessages
 ): ReadonlyArray<AgentChatMessage> => {
   const eventTimeMs = event.createdAtMs ?? options.nowMs ?? 0
 
@@ -1632,33 +1725,39 @@ export const applyAgentEventToChatMessages = (
     .pipe(
       Match.tag('AgentStart', () => clearTransientParts(messages)),
       Match.tag('LLMTextDelta', current =>
-        appendAssistantTextDelta(messages, { delta: current.text, textSoFar: current.textSoFar })
+        appendAssistantTextDelta(
+          messages,
+          { delta: current.text, textSoFar: current.textSoFar },
+          foreign
+        )
       ),
       Match.tag('LLMReasoningDelta', current =>
-        appendAssistantReasoningDelta(messages, {
-          delta: current.text,
-          reasoningSoFar: current.reasoningSoFar
-        })
+        appendAssistantReasoningDelta(
+          messages,
+          { delta: current.text, reasoningSoFar: current.reasoningSoFar },
+          foreign
+        )
       ),
       // The live projection keeps one reasoning part per streaming message; the final
       // `AssistantMessage` brings the replay state and one part per block.
       Match.tag('LLMReasoningReplay', () => messages),
       Match.tag('ToolInputEnd', current =>
-        upsertToolCallPart(messages, current.call, ChatToolState.Called())
+        upsertToolCallPart(messages, current.call, ChatToolState.Called(), foreign)
       ),
       Match.tag('UserMessage', current => appendProtocolMessage(messages, current.message)),
       Match.tag('AssistantMessage', current =>
-        appendOrReplaceAssistantMessage(messages, current.message)
+        appendOrReplaceAssistantMessage(messages, current.message, foreign)
       ),
       Match.tag('ToolInputStart', current =>
         upsertToolCallPart(
           messages,
           inputStreamingToolCall(current.id, current.name),
-          ChatToolState.InputStreaming({ input: '' })
+          ChatToolState.InputStreaming({ input: '' }),
+          foreign
         )
       ),
       Match.tag('ToolInputDelta', current =>
-        appendToolInputDelta(messages, current.id, current.delta)
+        appendToolInputDelta(messages, current.id, current.delta, foreign)
       ),
       Match.tag('ToolApprovalRequested', current =>
         upsertToolCallPart(
@@ -1824,7 +1923,8 @@ export const applyAgentEventToChatMessages = (
         upsertToolCallPart(
           messages,
           current.call,
-          ChatToolState.ProviderCompleted({ result: current.result })
+          ChatToolState.ProviderCompleted({ result: current.result }),
+          foreign
         )
       ),
       Match.tag('AgentError', current => markChatError(messages, current.message)),

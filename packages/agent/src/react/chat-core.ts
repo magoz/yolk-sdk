@@ -25,6 +25,7 @@ import {
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
+  applyExecutionEventToChatMessages,
   AgentChatExecutionOutput,
   discardChatExecutionOutput,
   replaceWithCommittedAnswer,
@@ -206,12 +207,22 @@ const projectExecutionEvent = (
       ? route.started
       : undefined
 
-  const chatMessages = applyAgentEventToChatMessages(committed, event, options)
+  const chatMessages =
+    owner === undefined
+      ? applyAgentEventToChatMessages(committed, event, options)
+      : applyExecutionEventToChatMessages(
+          committed,
+          event,
+          options,
+          foreignMessages(executions, owner)
+        )
 
   const anchor = Predicate.isTagged(route, 'Start') ? [turnAnchor(route.superseded, started)] : []
 
   const after = recordAgentExecutionEvent(
-    Predicate.isTagged(route, 'Start') ? route.executions : executions,
+    Predicate.isTagged(route, 'Start')
+      ? endEarlierTurns(route.executions, route.started, event.streamId ?? '', started)
+      : executions,
     event,
     route,
     owner === undefined
@@ -236,6 +247,58 @@ const turnAnchor = (
     .flatMap(execution => execution.output)
     .find(output => Predicate.isTagged(output, 'After')) ??
   AgentChatExecutionOutput.After({ messageId: Option.fromNullishOr(messages.at(-1)?.id) })
+
+/**
+ * The chat messages other executions still hold as their output (an earlier turn's answer kept
+ * for reconciling): the owner's events never change them.
+ */
+const foreignMessages = (
+  executions: AgentExecutions<AgentChatExecutionOutput>,
+  owner: AgentExecution<AgentChatExecutionOutput>
+): ReadonlySet<string> =>
+  new Set(
+    executions.flatMap(run =>
+      run.executions.flatMap(execution =>
+        execution.executionId === owner.executionId
+          ? []
+          : execution.output.flatMap(output =>
+              Predicate.isTagged(output, 'Message') ? [output.messageId] : []
+            )
+      )
+    )
+  )
+
+/**
+ * When a later turn of a run starts, the executions of its earlier turns kept for reconciling
+ * record where their turn's output ends (`Until`): the last chat message before the new turn.
+ */
+const endEarlierTurns = (
+  runs: AgentExecutions<AgentChatExecutionOutput>,
+  started: AgentExecution<AgentChatExecutionOutput>,
+  streamId: string,
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentExecutions<AgentChatExecutionOutput> => {
+  const until = AgentChatExecutionOutput.Until({
+    messageId: Option.fromNullishOr(messages.at(-1)?.id)
+  })
+
+  const ends = (execution: AgentExecution<AgentChatExecutionOutput>) =>
+    execution.status === 'Settled' &&
+    execution.turn < started.turn &&
+    execution.output.length > 0 &&
+    !execution.output.some(output => Predicate.isTagged(output, 'Until'))
+
+  return runs.map(run =>
+    run.streamId !== streamId || run.retired || !run.executions.some(ends)
+      ? run
+      : {
+          ...run,
+          executions: run.executions.map(execution =>
+            ends(execution) ? { ...execution, output: [...execution.output, until] } : execution
+          )
+        }
+  )
+}
 
 const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
   messages

@@ -335,6 +335,20 @@ const retireRuns = <Output>(
   )
 
 /**
+ * A host event acts on the calls of a live execution, or of one kept for reconciling when it is of
+ * its run's latest turn (that turn's tool batch). A kept earlier turn's call is never acknowledged
+ * by a later turn's event about a call that reuses its id.
+ */
+const acknowledges = <Output>(
+  run: AgentExecutionRun<Output>,
+  execution: AgentExecution<Output>,
+  event: AgentEvent
+) =>
+  execution.status === 'Live' ||
+  ((event.streamId === undefined || event.streamId === run.streamId) &&
+    execution.turn === latestRunTurn(run))
+
+/**
  * A dropped `AssistantMessage` of a superseded execution, or of the shown execution of a turn that
  * ran more than once, is still a candidate for the committed answer (a losing execution keeps
  * streaming after the newer one started).
@@ -391,7 +405,8 @@ export const recordAgentExecutionEvent = <Output>(
     ...run,
     executions: run.executions.map(execution => {
       if (!owned) {
-        return execution.calls.some(call => calls.includes(call))
+        return acknowledges(run, execution, event) &&
+          execution.calls.some(call => calls.includes(call))
           ? { ...execution, calls: execution.calls.filter(call => !calls.includes(call)) }
           : execution
       }

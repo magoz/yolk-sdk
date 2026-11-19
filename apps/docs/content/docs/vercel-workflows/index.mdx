@@ -93,7 +93,10 @@ id and sets it on the event with the `streamId`. Leave it off host events (a pro
 the terminal event written after the commit); a receipt replay rewrites only that terminal event.
 Yolk clients then remove a superseded execution's output, drop its later events and late starts,
 and, at `AgentEnd` or `AgentAwaitingInput`, show the committed answer and the calls the tool batch
-ran for every turn that ran more than once. Tool-batch steps are out of scope (read calls are
+ran for each turn in which a newer execution superseded an older one (limits: a turn retried after a
+user message shows both answers; a client that connects mid-turn sees the earlier execution as
+plain events; the committed answer is matched by value across the run; call ids reused across turns
+can mix calls). Tool-batch steps are out of scope (read calls are
 not ledgered and can rerun differently). Upgrade clients with the server: older clients show both
 executions back to back.
 

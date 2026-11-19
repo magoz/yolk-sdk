@@ -734,11 +734,13 @@ and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.
   `AgentStart` begins a fresh run.
 - A later turn, another run, a terminal event, a user message or `AgentStart` settles executions
   (output kept, later events dropped).
-- At `AgentEnd` and `AgentAwaitingInput`, every turn of the run that ran more than once shows the
-  committed answer from the event's messages, with the state of its tool calls; the uncommitted
-  execution's calls no host event acted on are removed. Before that event, a non-final turn whose
-  older execution committed shows the newer answer (see the vercel-workflows README, "One step,
-  several executions").
+- At `AgentEnd` and `AgentAwaitingInput`, each turn of the run in which a newer execution
+  superseded an older one shows the committed answer from the event's messages in its place, with
+  the state of its tool calls; the uncommitted execution's calls no host event acted on are removed,
+  and a later turn's output never changes it. Before that event, a non-final turn whose older
+  execution committed shows the newer answer. A turn retried after a user message, a client that
+  connected mid-turn and call ids reused across turns have limits (the vercel-workflows README,
+  "One step, several executions", open cases).
 
 Carry `executions` along with `seenEventIds` when you keep projection state yourself, and reset it
 to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
