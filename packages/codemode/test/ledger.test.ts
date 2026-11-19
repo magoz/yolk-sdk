@@ -9,12 +9,16 @@ import {
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxTotalArgsBytes,
   TextPart,
+  ToolApprovalPolicy,
   ToolCall,
-  ToolResult
+  ToolResult,
+  type InteractionHost
 } from '@yolk-sdk/agent/protocol'
 import {
   EmptyToolParams,
   makeInMemoryToolLedgerStore,
+  makeInMemoryToolPlanStore,
+  makePlanReviewTool,
   makeTool,
   resolveTools,
   toolLedgerArgs,
@@ -39,8 +43,8 @@ import { context, moduleOf, queryTool, text, type TestContext } from './fixtures
 
 type CallTool = (name: string, args?: unknown) => Promise<unknown>
 
-/** A fake engine running a host-side script over the executor's tools. */
-const scriptedExecutor = (script: (call: CallTool) => Promise<unknown>) => {
+/** A fake engine running a host-side script over the executor's tools and its `stage` global. */
+const scriptedExecutor = (script: (call: CallTool, stage: CallTool) => Promise<unknown>) => {
   const state = { runs: 0 }
 
   const executor: CodeModeExecutor = {
@@ -55,7 +59,15 @@ const scriptedExecutor = (script: (call: CallTool) => Promise<unknown>) => {
           : tool.execute(args, { signal: options.signal })
       }
 
-      return script(call).then(
+      const stage: CallTool = (name, args) => {
+        const global = options.globals.find(candidate => candidate.name === 'stage')
+
+        return global === undefined
+          ? Promise.reject(new Error('stage is not defined'))
+          : global.execute([name, args], { signal: options.signal })
+      }
+
+      return script(call, stage).then(
         value => ({ ok: true, value, output: [] }),
         (error: unknown) => ({
           ok: false,
@@ -123,6 +135,55 @@ const codeModeModules = (
   moduleOf('host', [makeCodeModeTool<TestContext>({ ...options, executor })]),
   moduleOf('crm', tools)
 ]
+
+/** `crm_link`: a stageable approval tool (scripts only stage it). */
+const stageableLink = makeTool<TestContext, typeof NoteParams>({
+  name: 'crm_link',
+  description: 'Link a deal',
+  parameters: NoteParams,
+  access: 'write',
+  approval: ToolApprovalPolicy.make({ mode: 'manual' }),
+  staging: true,
+  execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'linked' }))
+})
+
+/** `crm_lookup`: a read tool whose calls pause for a person's input (ADR 0014). */
+const pausedLookup = makeTool<TestContext, typeof NoteParams>({
+  name: 'crm_lookup',
+  description: 'Look up a deal',
+  parameters: NoteParams,
+  access: 'read',
+  execute: ({ call }) =>
+    Effect.succeed(
+      makeInputRequiredToolResult({
+        toolCallId: call.id,
+        content: 'The CRM asks to sign in.',
+        reviewToolName: 'review_input',
+        pauseIds: ['p1']
+      })
+    )
+})
+
+// Staging needs a receipt port; these tests never open a review, so it is never called.
+const unusedInteractionHost: InteractionHost = {
+  read: () => Effect.succeed(undefined),
+  claim: () => Effect.die('unused'),
+  settle: () => Effect.die('unused')
+}
+
+const decodeStagedPlan = (structuredContent: unknown) =>
+  Schema.decodeUnknownEffect(
+    Schema.Struct({
+      codemode: Schema.Struct({
+        plan: Schema.Struct({
+          id: Schema.String,
+          digest: Schema.String,
+          count: Schema.Number,
+          reviewToolName: Schema.String
+        })
+      })
+    })
+  )(structuredContent).pipe(Effect.orDie)
 
 // Real event-loop turns let promise-based scripts progress while the test clock stands still.
 const waitUntil = (condition: () => boolean) =>
@@ -455,6 +516,69 @@ describe('code mode with a tool ledger', () => {
       )
       expect(text(replayed.content)).toContain(`${notice}\n\n[The stored copy of this result`)
     })
+  )
+
+  // Regression: the stored copy once dropped `codemode.plan` and cut the plan notice off the end of
+  // a long result, so a replayed script no longer named the plan id and digest `review_plan` needs.
+  it.effect.each([
+    { name: 'plan', paused: false },
+    { name: 'plan and nested pauses', paused: true }
+  ])(
+    "keeps a replayed script's staged $name when its stored result is over the bound",
+    ({ paused }) =>
+      Effect.gen(function* () {
+        const store = makeInMemoryToolLedgerStore()
+        const plans = makeInMemoryToolPlanStore()
+
+        const { executor, state } = scriptedExecutor(async (call, stage) => {
+          // A read call may run after staging; this one paused for a person's input.
+          if (paused) await call('crm_lookup', { note: 'deal_1' }).catch(() => undefined)
+
+          await stage('crm_link', { note: 'deal_1' })
+
+          return 'report '.repeat(1_000)
+        })
+
+        const toolSet = yield* resolveTools(
+          [
+            moduleOf('host', [
+              makeCodeModeTool<TestContext>({ executor }),
+              makePlanReviewTool<TestContext>()
+            ]),
+            moduleOf('crm', [stageableLink, pausedLookup])
+          ],
+          context,
+          {
+            ledger: { store, maxResultBytes: 2_000 },
+            plans: { store: plans },
+            interactionHost: unusedInteractionHost
+          }
+        )
+
+        const run = toolSet.execute(
+          ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } })
+        )
+
+        const first = yield* run
+        const replayed = yield* run
+        const { plan } = (yield* decodeStagedPlan(first.structuredContent)).codemode
+        const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+        const reviewCall = `review_plan(${JSON.stringify({ planId: 'call_1', planDigest: plan.digest })})`
+        const pauseNotice = "\n\n1 call needs a person's input and has not completed."
+
+        expect(state.runs).toBe(1)
+        expect(plan).toMatchObject({ id: 'call_1', count: 1, reviewToolName: 'review_plan' })
+        expect(new TextEncoder().encode(JSON.stringify(first)).length).toBeGreaterThan(2_000)
+        expect(new TextEncoder().encode(JSON.stringify(replayed)).length).toBeLessThanOrEqual(2_000)
+        expect(replayed.structuredContent).toEqual({
+          codemode: paused ? { ok: true, plan, inputRequired: pauses } : { ok: true, plan }
+        })
+        expect(text(replayed.content)).toMatch(/^Script completed[\s\S]*…\n\nStaged 1 call as plan/)
+        expect(text(replayed.content)).toContain(
+          `${reviewCall}: a person reviews the plan and selects the calls to apply.${paused ? pauseNotice : ''}`
+        )
+        expect(text(replayed.content)).toMatch(/\n\n\[The stored copy of this result[^\n]*\]$/)
+      })
   )
 
   it.effect('marks interrupted calls incomplete when the ledger already cut their arguments', () =>

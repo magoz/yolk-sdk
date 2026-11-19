@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore } from 'effect'
+import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore, type Array as Arr } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { CapturedRun, Promotable } from './coordinator.ts'
 
@@ -29,7 +29,7 @@ export type ParkedResponse = {
 
 export type ParkedState = {
   readonly generation: ParkGeneration
-  readonly requestIds: ReadonlyArray<string>
+  readonly requestIds: Arr.NonEmptyReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly ready: boolean
 }
@@ -89,9 +89,13 @@ export type InboxApi = {
   ) => Effect.Effect<InboxItem | undefined>
   readonly pending: (runId: string) => Effect.Effect<ReadonlyArray<InboxItem>>
   readonly parked: (runId: string) => Effect.Effect<ParkedState | undefined>
+  /**
+   * Parks the run on these HITL request ids. The list is non-empty: a park with nothing to wait
+   * for would count as Ready at once and keep the claim with nothing left to wake the run.
+   */
   readonly park: (
     runId: string,
-    requestIds: ReadonlyArray<string>,
+    requestIds: Arr.NonEmptyReadonlyArray<string>,
     drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly acceptHitl: (
@@ -155,7 +159,7 @@ const isPromotableAt = (item: InboxItem, scope: Promotable) => {
 
 type Park = {
   readonly generation: ParkGeneration
-  readonly requestIds: ReadonlyArray<string>
+  readonly requestIds: Arr.NonEmptyReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly readyWoken: boolean
 }
@@ -195,6 +199,10 @@ const parkedState = (park: Park): ParkedState => ({
   responses: park.responses,
   ready: parkComplete(park)
 })
+
+const emptyParkMessage =
+  'Inbox.park needs at least one request id: an empty park would be Ready at once and keep the ' +
+  'claim with nothing to wake the run'
 
 const isPrunable = (control: RunControl) =>
   control.pending === undefined &&
@@ -301,6 +309,9 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
+                  // The type is non-empty, so an untyped caller's empty list is a defect, refused
+                  // before any state changes: an empty park would be Ready at once (#321).
+                  if (requestIds.length === 0) return yield* Effect.die(new Error(emptyParkMessage))
                   const control = yield* getControl(runId)
 
                   if (control.liveToken !== drainToken) return PauseDecision.Stale()

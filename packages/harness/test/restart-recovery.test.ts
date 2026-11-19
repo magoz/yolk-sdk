@@ -1,4 +1,5 @@
 import {
+  Array as Arr,
   Cause,
   Context,
   Deferred,
@@ -2284,7 +2285,7 @@ describe('host-owned waiting checkpoint restoration', () => {
 
       const host = yield* Ref.make<
         | {
-            readonly requestIds: ReadonlyArray<string>
+            readonly requestIds: Arr.NonEmptyReadonlyArray<string>
             readonly requests: ReadonlyArray<HitlRequest>
             readonly payloads: ReadonlyMap<string, HitlResponse>
             readonly completed: boolean
@@ -2375,7 +2376,7 @@ describe('host-owned waiting checkpoint restoration', () => {
 
             const parked = yield* inbox.park(
               runId,
-              outcome.requests.map(request => request.requestId),
+              Arr.map(outcome.requests, request => request.requestId),
               context.drainToken
             )
 
@@ -2386,7 +2387,7 @@ describe('host-owned waiting checkpoint restoration', () => {
             }
 
             yield* Ref.set(host, {
-              requestIds: outcome.requests.map(request => request.requestId),
+              requestIds: Arr.map(outcome.requests, request => request.requestId),
               requests: outcome.requests,
               payloads: new Map(),
               completed: false

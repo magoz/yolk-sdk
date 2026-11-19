@@ -52,7 +52,7 @@ The snapshot stores claimed ids and resume counts. It is not transcript storage 
 | `InboxItem`              | Queued input/HITL item (`id`, `runId`, `delivery`, `kind`)            |
 | `InboxKind`              | `'input' \| 'hitl'`                                                   |
 | `ParkedResponse`         | `{ itemId, requestId }`                                               |
-| `ParkedState`            | Generation, request ids, responses, ready                             |
+| `ParkedState`            | Generation, non-empty request ids, responses, ready                   |
 | `HitlAdmission`          | `{ itemId, requestId, generation }`                                   |
 | `HitlDecision`           | Accepted / Ready / Duplicate / Stale / UnknownRequest / NotParked     |
 | `PauseDecision`          | `Parked` or `Stale`                                                   |
@@ -67,6 +67,13 @@ not token format, freshness, or authorization.
 
 `Inbox.layer()` owns a fresh process-local queue, admission gate, and HITL generations with no
 service dependencies. `makeInMemoryInboxLayer` delegates to it.
+
+`park(runId, requestIds, drainToken)` (and `Driver.pause`) takes a non-empty
+`Array.NonEmptyReadonlyArray<string>`: a park with no request ids would be Ready at once and keep
+the claim with nothing to wake the run. Map `StepOutcome.AwaitingInput` `requests` (non-empty) with
+Effect's `Array.map`; check a host-built list with `Array.isReadonlyArrayNonEmpty`. The type
+enforces this; an empty list at runtime (an untyped caller) is a defect that dies before any park
+state changes.
 
 `takePromotable(runId, scope, drainToken)` requires the live `beginDrain` token. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and do not dequeue.
 
@@ -154,7 +161,7 @@ That adapter does not persist Inbox, closures, or automatically reconstruct work
 | `attemptModelTurn`    | Classify one `runModelTurn` after that stream's inner retries    |
 | `attemptToolBatch`    | Classify one `runToolBatch`; pending HITL fences the whole batch |
 | `ModelTurnOutcome`    | `Completed` / `Retry` / `Continue` / `RecoverFull` / `Compacted` |
-| `ToolBatchOutcome`    | `Completed` / `AwaitingInput`                                    |
+| `ToolBatchOutcome`    | `Completed` / `AwaitingInput` (non-empty `requests`)             |
 | `StepOutcome`         | Model or tool-batch outcome                                      |
 | `matchHitlResponse`   | Protocol identity match for a HITL response                      |
 | `resumeHitlIfMatched` | Resume only when kind/request/tool-call identity matches         |

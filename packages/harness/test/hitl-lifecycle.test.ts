@@ -1,11 +1,86 @@
-import { Deferred, Effect, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref, type Array as Arr } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { admit, Driver, makeDriverLayer, StopDecision } from '../src/driver.ts'
+import { expectTypeOf } from 'vitest'
+import type { HitlRequest } from '@yolk-sdk/agent/protocol'
+import { admit, Driver, makeDriverLayer, StopDecision, type DriverApi } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
-import { DrainToken, Inbox, makeInMemoryInboxLayer, ParkGeneration } from '../src/inbox.ts'
+import {
+  DrainToken,
+  Inbox,
+  makeInMemoryInboxLayer,
+  ParkGeneration,
+  type InboxApi,
+  type ParkedState,
+  type PauseDecision
+} from '../src/inbox.ts'
+import type { ToolBatchOutcome } from '../src/outcome.ts'
 import { makeInMemoryRunStoreLayer, RunStore } from '../src/store.ts'
 
 describe('HITL park lifecycle', () => {
+  // Issue #321: a park with no request ids was Ready at once, so the drain that paused kept the
+  // claim (keepClaimOnSettle) and nothing woke the run. A pause names at least one request.
+  it('refuses an empty pause request list (checked by pnpm tsc)', () => {
+    type PauseRequestIds = Parameters<InboxApi['park']>[1]
+
+    expectTypeOf<PauseRequestIds>().toEqualTypeOf<Arr.NonEmptyReadonlyArray<string>>()
+    expectTypeOf<Parameters<DriverApi['pause']>[1]>().toEqualTypeOf<PauseRequestIds>()
+    expectTypeOf<readonly []>().not.toExtend<PauseRequestIds>()
+    expectTypeOf<ReadonlyArray<string>>().not.toExtend<PauseRequestIds>()
+    expectTypeOf<ParkedState['requestIds']>().toEqualTypeOf<PauseRequestIds>()
+    // A tool batch's requests map straight to a pause.
+    expectTypeOf<
+      Extract<ToolBatchOutcome, { readonly _tag: 'AwaitingInput' }>['requests']
+    >().toEqualTypeOf<Arr.NonEmptyReadonlyArray<HitlRequest>>()
+  })
+
+  it.effect('dies on an empty park from an untyped caller, leaving no park or claim', () =>
+    Effect.gen(function* () {
+      // Parsed from JSON, as an untyped JavaScript caller would pass it.
+      const noRequestIds: Arr.NonEmptyReadonlyArray<string> = JSON.parse('[]')
+      const parkExit = yield* Ref.make<Exit.Exit<PauseDecision> | undefined>(undefined)
+
+      const layer = makeInMemoryHarnessLayer({
+        drain: (runId, _force, _scope, context) =>
+          Effect.gen(function* () {
+            const inbox = yield* Inbox
+            const exit = yield* Effect.exit(inbox.park(runId, noRequestIds, context.drainToken))
+            yield* Ref.set(parkExit, exit)
+
+            // The defect reaches the driver as the host's drain would let it.
+            if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
+          })
+      })
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        const store = yield* RunStore
+
+        yield* driver.wake('run_1')
+        yield* driver.awaitIdle('run_1')
+
+        const exit = yield* Ref.get(parkExit)
+        expect(exit !== undefined && Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+
+        if (exit === undefined || Exit.isSuccess(exit)) return
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          message: expect.stringContaining('Inbox.park needs at least one request id')
+        })
+        expect(yield* inbox.parked('run_1')).toBeUndefined()
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+
+        // Driver.pause reaches the same guard, before any token check.
+        const paused = yield* Effect.exit(
+          driver.pause('run_1', noRequestIds, DrainToken.make('d-untyped'))
+        )
+
+        expect(Exit.isFailure(paused) && Cause.hasDies(paused.cause)).toBe(true)
+        expect(yield* inbox.parked('run_1')).toBeUndefined()
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
   it.effect('parks two siblings, accepts partial without wake, then Ready wakes once', () =>
     Effect.gen(function* () {
       const drains = yield* Ref.make(0)

@@ -511,24 +511,42 @@ const isExecutable = (file: string) => {
 }
 
 /**
+ * `EVERYSTATE_BINARY` as the file to run. A relative path is resolved against the working directory
+ * (the repository root under `pnpm models:check`) before it is checked, since each configuration runs in its model's folder. A bare name is
+ * refused rather than looked up on `PATH`: the variable names a file.
+ */
+const everystateOverride = (override: string): EverystateChecker => {
+  if (basename(override) === override) {
+    return EverystateChecker.Unusable({
+      message:
+        `EVERYSTATE_BINARY (${override}) is a bare name, not a path; set it to the checker's ` +
+        'absolute path, or a path relative to where the command runs (the repository root for pnpm)'
+    })
+  }
+
+  const file = resolve(override)
+
+  return isExecutable(file)
+    ? EverystateChecker.Native({ file })
+    : EverystateChecker.Unusable({
+        message: `EVERYSTATE_BINARY (${file}) is not an executable file`
+      })
+}
+
+/**
  * Selects the checker as the launcher would, without running the launcher in front of a native
- * checker: `EVERYSTATE_BINARY` when set (the launcher's override), else the prebuilt binary beside
- * the `launcher` for this platform, made executable when installed without its executable bit (the
- * launcher repairs it the same way), else the WebAssembly build through the launcher.
+ * checker: `EVERYSTATE_BINARY` from `environment` when set (the launcher's override; resolved to
+ * an absolute path, bare names refused), else the prebuilt binary beside the `launcher` for this
+ * platform, made executable when installed without its executable bit (the launcher repairs it the
+ * same way), else the WebAssembly build through the launcher.
  */
 export const everystateChecker = (
   launcher: string,
-  environment: EverystateEnvironment = process.env
+  environment: EverystateEnvironment
 ): EverystateChecker => {
   const override = environment['EVERYSTATE_BINARY']
 
-  if (override !== undefined && override !== '') {
-    return isExecutable(override)
-      ? EverystateChecker.Native({ file: override })
-      : EverystateChecker.Unusable({
-          message: `EVERYSTATE_BINARY (${override}) is not an executable file`
-        })
-  }
+  if (override !== undefined && override !== '') return everystateOverride(override)
 
   const native = join(
     dirname(launcher),
@@ -641,13 +659,13 @@ const runEverystateProgram = (
 /**
  * The working tree under `root`, checked with the everystate `launcher`
  * (`node_modules/everystate/bin/everystate.mjs`; the checker it selects: `everystateChecker`).
- * `timeoutMs` (default ten minutes) bounds each configuration; `environment` (default
- * `process.env`) is what the selection reads.
+ * `environment` is what the selection reads (`process.env` only in `ModelsCheckLive`); `timeoutMs`
+ * (default ten minutes) bounds each configuration.
  */
 export const ModelsCheckAt = (
   root: string,
   launcher: string,
-  options: { readonly timeoutMs?: number; readonly environment?: EverystateEnvironment } = {}
+  options: { readonly environment: EverystateEnvironment; readonly timeoutMs?: number }
 ) =>
   Layer.mergeAll(
     Layer.succeed(ModelFiles, modelFilesAt(root)),
@@ -670,7 +688,9 @@ const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const everystateLauncher = (root: string) =>
   join(root, 'node_modules', 'everystate', 'bin', 'everystate.mjs')
 
-export const ModelsCheckLive = ModelsCheckAt(repositoryRoot, everystateLauncher(repositoryRoot))
+export const ModelsCheckLive = ModelsCheckAt(repositoryRoot, everystateLauncher(repositoryRoot), {
+  environment: process.env
+})
 
 // ---------------------------------------------------------------------------------------------
 // CLI boundary

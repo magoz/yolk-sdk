@@ -78,6 +78,17 @@ for that call. A failed script's staged calls are discarded: a partial plan is n
 text tells the model `review_plan({ planId, planDigest })`; hosts get
 `structuredContent.codemode.plan: { id, digest, count, reviewToolName }`.
 
+The plan notice (`stagedToolPlanNotice`) follows the bounded script output, before any
+input-required notice ([ADR 0014](0014-input-required-tool-calls.md)), each after a blank line. A
+redelivered step replays the tool ledger's stored copy, so the ledger's bounding
+(`toolLedgerResult`) keeps the plan the way it keeps pauses: over `maxResultBytes` it keeps
+`{ codemode: { ok, plan } }` (with `inputRequired` when that is kept too), drops the other fields,
+and cuts the text before the plan notice, never the notice. It keeps the plan only when the text
+ends with that notice where code mode writes it (last, or followed by the kept input-required
+notice). Any tool can return that shape, so the ledger never writes the notice from the plan's
+fields: another tool's result with the shape and no notice has its plan dropped. Entries recorded
+before this rule are not repaired.
+
 ## Review phase
 
 `makePlanReviewTool` (default name `review_plan`, renderer `tool_plan_review`, one action `apply`):
@@ -245,4 +256,6 @@ deliveries reporting the winner's outcome, redeliveries during an in-flight appl
 real outcome, the wait-deadline fallback listing unknown calls, the no-ledger listing, and a fence
 held first proving nothing ran), argument snapshots, bounded precheck concurrency, host
 plan ids, nested ledger keys, cancel, paged stored previews with Schema decoding, and the pi
-executor end to end.
+executor end to end. `packages/agent/test/tools/ledger.test.ts` and
+`packages/codemode/test/ledger.test.ts`: a stored copy over the ledger bound keeps the plan and its
+notice (with a paused nested call too), and only with the notice where code mode writes it.

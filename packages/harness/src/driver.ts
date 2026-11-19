@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Exit, Layer, Predicate, Semaphore } from 'effect'
+import { Context, Data, Effect, Exit, Layer, Predicate, Semaphore, type Array as Arr } from 'effect'
 import { StopDecision as stopDecision } from './outcome-constructors-internal.ts'
 import { RunCoordinator, type InterruptReason, type Promotable } from './coordinator.ts'
 import {
@@ -66,9 +66,10 @@ export type DriverApi = {
   readonly awaitIdle: (runId: string) => Effect.Effect<void>
   readonly resumeSuspended: Effect.Effect<ResumeSuspendedResult>
   readonly admit: (item: InboxItem) => Effect.Effect<void>
+  /** Parks on a non-empty request list (see `InboxApi.park`) and returns `Parked` or `Stale`. */
   readonly pause: (
     runId: string,
-    requestIds: ReadonlyArray<string>,
+    requestIds: Arr.NonEmptyReadonlyArray<string>,
     drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly resumeHitl: (runId: string, admission: HitlAdmission) => Effect.Effect<HitlDecision>

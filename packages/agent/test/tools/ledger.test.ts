@@ -32,6 +32,7 @@ import {
   makeInMemoryToolLedgerStore,
   makeTool,
   resolveTools,
+  stagedToolPlanNotice,
   ToolAccess,
   toolCallAccess,
   toolIdempotencyKey,
@@ -1655,6 +1656,77 @@ describe('tool ledger', () => {
     expect(other.structuredContent).toBeUndefined()
     expect(resultText(other)).not.toContain('review_input')
     expect(resultText(other)).toMatch(/^x+…\n\n\[The stored copy/)
+  })
+
+  it('keeps a code mode staged plan only with the notice code mode wrote, before its pauses', () => {
+    const plan = { id: 'call_1', digest: 'd1', count: 2, reviewToolName: 'review_plan' }
+    const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+    const planNotice = `Staged 2 calls as plan call_1; nothing was applied yet. To apply them, call review_plan({"planId":"call_1","planDigest":"d1"}): a person reviews the plan and selects the calls to apply.`
+    const pauseNotice = `1 call needs a person's input and has not completed. To continue, call:\n- review_input({"pauseIds":["p1"]})`
+    const output = 'x'.repeat(2_000)
+    const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
+
+    const stored = (content: string, withPauses: boolean, maxBytes = 1_000) =>
+      toolLedgerResult(
+        ToolResult.make({
+          toolCallId: 'call_1',
+          content,
+          structuredContent: {
+            codemode: withPauses
+              ? { ok: true, storeWrites: { set: {}, delete: ['k'] }, plan, inputRequired: pauses }
+              : { ok: true, storeWrites: { set: {}, delete: ['k'] }, plan }
+          }
+        }),
+        maxBytes
+      )
+
+    expect(stagedToolPlanNotice(plan)).toBe(planNotice)
+
+    const staged = stored(`${output}\n\n${planNotice}`, false)
+
+    expect(bytes(staged)).toBeLessThanOrEqual(1_000)
+    expect(staged.structuredContent).toEqual({ codemode: { ok: true, plan } })
+    expect(resultText(staged)).toMatch(/^x+…\n\nStaged 2 calls/)
+    expect(resultText(staged)).toContain(`${planNotice}\n\n[The stored copy`)
+
+    // Below the plan tail's own size, the content is the plan notice alone.
+    const tiny = stored(`${output}\n\n${planNotice}`, false, 10)
+
+    expect(tiny.structuredContent).toEqual({ codemode: { ok: true, plan } })
+    expect(tiny.content).toBe(planNotice)
+
+    // Code mode writes the plan notice, then the pause notice: both stay, in that order.
+    const both = stored(`${output}\n\n${planNotice}\n\n${pauseNotice}`, true)
+
+    expect(both.structuredContent).toEqual({ codemode: { ok: true, plan, inputRequired: pauses } })
+    expect(resultText(both)).toContain(`…\n\n${planNotice}\n\n${pauseNotice}\n\n[The stored copy`)
+
+    const tinyBoth = stored(`${output}\n\n${planNotice}\n\n${pauseNotice}`, true, 10)
+
+    expect(tinyBoth.structuredContent).toEqual({
+      codemode: { ok: true, plan, inputRequired: pauses }
+    })
+    expect(tinyBoth.content).toBe(`${planNotice}\n\n${pauseNotice}`)
+
+    // A plan notice last while the result names pauses without their notice: code mode never
+    // writes that layout (its pause notice follows the plan notice), so nothing is kept.
+    const pausesUnnoticed = stored(`${output}\n\n${planNotice}`, true)
+
+    expect(pausesUnnoticed.structuredContent).toBeUndefined()
+    expect(resultText(pausesUnnoticed)).toMatch(/^x+…\n\n\[The stored copy/)
+
+    // A plan notice that is not where code mode writes it does not keep the plan: the notice is
+    // only part of the text that is cut, never a kept tail.
+    const misplaced = stored(`${planNotice}\n\n${output}\n\n${pauseNotice}`, true)
+
+    expect(misplaced.structuredContent).toEqual({ codemode: { ok: true, inputRequired: pauses } })
+    expect(resultText(misplaced)).toMatch(/^Staged 2 calls[\s\S]*x…\n\n1 call needs/)
+
+    // The shape without the notice (another tool's result): no plan, and no notice written.
+    const other = stored(output, false)
+
+    expect(other.structuredContent).toBeUndefined()
+    expect(resultText(other)).not.toContain('review_plan')
   })
 
   it.effect('replays a large input-required result as input-required', () =>

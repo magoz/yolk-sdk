@@ -143,6 +143,8 @@ export type {
   ToolStagingHandlers
 } from './plan.ts'
 
+export { StagedToolPlanRef, stagedToolPlanNotice } from './plan-notice.ts'
+
 export {
   makePlanReviewTool,
   previewStoredToolPlan,

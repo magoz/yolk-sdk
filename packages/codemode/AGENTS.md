@@ -165,8 +165,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   gets a `stage(name, args)` global (spread args, fibers of a scoped `FiberSet`, not recorded as
   nested calls) over one `ToolPlanBuilder` per script; every nested call goes through
   `builder.admit` after `beforeNestedCall` (a rejection is recorded `error` and never runs). Only a
-  successful script saves its plan (`finish`); a failed one discards it. The plan notice is appended
-  after bounding (never cut) and `structuredContent.codemode.plan` carries
+  successful script saves its plan (`finish`); a failed one discards it. The plan notice
+  (`stagedToolPlanNotice` from `@yolk-sdk/agent/tools`, never a copy of its text) is appended after
+  bounding (never cut) and `structuredContent.codemode.plan` carries
   `{ id, digest, count, reviewToolName }`; a failed save makes the result `isError` with
   `{ ok: false }`. The description lists `stage` and the stageable tool names only when staging is
   offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
@@ -175,9 +176,11 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   also collected, so `structuredContent.codemode.inputRequired` (merged per review tool) and a
   notice appended after bounding name the review call even when the script caught the rejection.
   An abandoned script's listing does the same for its ledgered nested calls that paused (listed
-  `failed`, "paused for input"). The input-required notice must stay the last text and
-  `codemode.{ok,inputRequired}` must keep its shape: the agent ledger's `toolLedgerResult` matches
-  them to keep a stored result's pauses over the bound (ADR 0014).
+  `failed`, "paused for input"). Ledger contract: the notices stay the last text, in this order,
+  each after a blank line: the plan notice, then the input-required notice; and
+  `codemode.{ok,plan,inputRequired}` keep their shapes. The agent ledger's `toolLedgerResult`
+  matches them (each ref only with its notice where code mode writes it) to keep a stored result's
+  plan and pauses over the bound (ADR 0005, ADR 0014).
 - Stageable tools (ADR 0007; approval-gated, so scripts only stage them whatever their
   `callableBy`; stage-only ones are `callableBy: 'codemode'`): while the script may stage,
   `codeModeStageOnlyCatalog` adds every one to the discovery catalog only (`exposure: 'stage'`, no
@@ -225,8 +228,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - `test/ledger.test.ts`: the tool ledger through code mode (crash then re-execution returns the
   interrupted listing and `interruptedCalls` and runs nothing, a failing `list`, arguments the
   ledger already cut, `interruptedCalls` bounds, long-script conflicts, completed replay,
-  concurrent duplicates wait), records past
-  256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
+  concurrent duplicates wait, replays over the bound keeping pauses and the staged plan), records
+  past 256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/plan.test.ts`: staging through code mode (saved plan, nothing applied, description,
   fail-closed direct calls, failed scripts discard, ordering guardrails, invalid/duplicate/limit
   stages, ledgered replay, save conflicts, and the pi executor end to end).
