@@ -38,6 +38,7 @@ and execution outcomes.
 
 | Pattern                                                            | Purpose                                                          |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| [FORMAL_VERIFICATION.md](./FORMAL_VERIFICATION.md)                 | TLA+ models of concurrency protocols, `pnpm models:check`        |
 | [SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md) | Deterministic simulation seams, property tests, model invariants |
 | [TYPESCRIPT_CONVENTIONS.md](./TYPESCRIPT_CONVENTIONS.md)           | Code style, file naming, type safety rules                       |
 | [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                       | Test seams, organization, and behavior-first strategy            |

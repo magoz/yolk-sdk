@@ -35,6 +35,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Agent HITL semantics: `patterns/AGENT_HITL.md`.
 - Interaction terminology: `CONTEXT.md`; accepted architecture decisions: `docs/adr/`.
 - Provider-facing tool schema compatibility: `patterns/AI_TOOL_SCHEMAS.md`.
+- Formal models of concurrency protocols (optional; `pnpm models:check`, part of `pnpm check`): `patterns/FORMAL_VERIFICATION.md`.
 - Next-only patterns: `examples/next/patterns/README.md`.
 - Patterns describe intent; code describes reality. Check code before assuming.
 

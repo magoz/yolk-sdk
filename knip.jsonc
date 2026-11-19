@@ -1,5 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  // `scripts/check-formal-models.ts` runs everystate's launcher by path (its `exports` map hides
+  // it from module resolution), which knip cannot see.
+  "ignoreDependencies": ["everystate"],
   "workspaces": {
     "apps/docs": {
       // Loading next.config.ts runs fumadocs-mdx's createMDX, whose esbuild bundle of

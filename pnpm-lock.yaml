@@ -90,6 +90,9 @@ importers:
       eslint-plugin-react-hooks:
         specifier: 7.0.1
         version: 7.0.1(eslint@9.39.2(jiti@2.7.0))
+      everystate:
+        specifier: 0.3.1
+        version: 0.3.1
       jsdom:
         specifier: ^27.4.0
         version: 27.4.0
@@ -6265,6 +6268,11 @@ packages:
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
+
+  everystate@0.3.1:
+    resolution: {integrity: sha512-QDKtxCgyIV6TqM9InEOdIJD+t6Mk6c84jQHId3Z6RRDVqd9P4Y/YspGXkY7XSQqGTn8IO1jRM5Y5ubU7ybw9UA==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   execa@5.1.1:
     resolution: {integrity: sha512-8uSpZZocAZRBAPIEINJj3Lo9HyGitllczc27Eh5YYojjMFMn8yHMDMaUHE2Jqfq05D/wucwI4JGURyXt1vchyg==}
@@ -15528,6 +15536,8 @@ snapshots:
   eventsource@3.0.7:
     dependencies:
       eventsource-parser: 3.0.8
+
+  everystate@0.3.1: {}
 
   execa@5.1.1:
     dependencies:
