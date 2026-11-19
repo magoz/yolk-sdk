@@ -117,7 +117,10 @@ const sweep = async (steer: boolean) => {
 describe('interrupt racing beginDrain (#295)', () => {
   // Budget 11 with one caller turn is the issue's `c2c-one.ts 11 1`: on the old
   // code the owner consumed the steer's intent, the successor skipped, `s1`
-  // stayed queued and drain token `d1` stayed live.
+  // stayed queued and drain token `d1` stayed live. This is a fixture tied to that
+  // replay: the exact outcome depends on Effect's op counts and the harness's
+  // code path, so it may need retuning after an Effect or harness change. The
+  // invariant sweeps below are the authority.
   it('budget 11, one turn: the steer admitted after interrupt drains', async () => {
     const outcome = await autoYieldScenario({
       budget: 11,

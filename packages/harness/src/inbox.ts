@@ -103,7 +103,9 @@ export type InboxApi = {
   /**
    * Consumes this drain's pending intent and issues the live drain token. When
    * `stopping` (the owner's stopping flag, read under the admission gate) is true,
-   * returns `Skip` and leaves the intent for the successor.
+   * returns `Skip` and leaves the intent for the successor. Implementations read
+   * `stopping` under the same lock that consumes intent. Driver runs this
+   * uninterruptibly, so keep it short and non-blocking.
    */
   readonly beginDrain: (
     runId: string,
@@ -379,9 +381,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
-                  // Re-check under the gate: an interrupt plus an admit can land
-                  // after the owner's own check, and that admit's intent belongs
-                  // to the successor, not to this stopping owner.
+                  // Under the gate, before consuming intent: see `InboxApi.beginDrain`.
                   if (stopping !== undefined && (yield* stopping)) return DrainBegin.Skip()
                   const control = yield* getControl(runId)
                   const pending = control.pending
