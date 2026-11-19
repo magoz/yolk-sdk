@@ -31,7 +31,24 @@ export class VercelSandboxState extends Schema.TaggedClass<VercelSandboxState>()
   maxExpiresAtMs: NonNegativeInteger
 }) {}
 
-export const SandboxState = Schema.Union([VercelSandboxState])
+/**
+ * A Cloudflare Containers sandbox: the Durable Object `name` and the `bootId` of the container the
+ * workspace lives in. A container that stopped or restarted has a new `bootId`, and its workspace
+ * started over.
+ */
+export class CloudflareSandboxState extends Schema.TaggedClass<CloudflareSandboxState>()(
+  'Cloudflare',
+  {
+    name: NonEmptyTrimmedString,
+    bootId: NonEmptyTrimmedString,
+    createdAtMs: NonNegativeInteger,
+    lastUsedAtMs: NonNegativeInteger,
+    expiresAtMs: NonNegativeInteger,
+    maxExpiresAtMs: NonNegativeInteger
+  }
+) {}
+
+export const SandboxState = Schema.Union([VercelSandboxState, CloudflareSandboxState])
 
 export type SandboxState = typeof SandboxState.Type
 

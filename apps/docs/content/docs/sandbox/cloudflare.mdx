@@ -1,0 +1,97 @@
+---
+title: Cloudflare Containers
+description: Run the Sandbox service on Cloudflare Containers through a Durable Object.
+---
+
+`@yolk-sdk/sandbox/cloudflare` provides the same `Sandbox` service as the Vercel layer on
+Cloudflare Containers. The agent's Worker calls `CloudflareSandbox`, a Durable Object class your
+Worker exports and binds to a container application, over RPC. Each object runs one container;
+every sandbox command and file transfer is an `exec` in it.
+
+## Configure the Worker
+
+Export the class from the Worker entry:
+
+```ts
+export { CloudflareSandbox } from '@yolk-sdk/sandbox/cloudflare'
+```
+
+Then, in Alchemy or wrangler:
+
+- declare `CloudflareSandbox` as a SQLite Durable Object class and bind it (e.g. as `SANDBOX`);
+- attach it to a container application with the `durable_object` scheduling policy;
+- give each image an id. `ctx.container.images` maps those ids to digest-pinned references, and
+  the layer's `image` names one of them. One class can carry several images, such as a
+  `SessionSandbox` workspace image and a `Browser` image.
+
+The image's own command should keep the container alive (`CMD ["sleep", "infinity"]`). It needs
+`bash` and `sh`, and `git` for a Git source.
+
+## Provide the layer
+
+```ts
+import { Layer } from 'effect'
+import { DisposableSandboxLifecycle, SandboxResources } from '@yolk-sdk/sandbox'
+import { makeCloudflareSandboxLayer } from '@yolk-sdk/sandbox/cloudflare'
+
+const SandboxLayer = makeCloudflareSandboxLayer({
+  sandboxSessionId: 'user_123:session_456',
+  namespace: () => env.SANDBOX,
+  image: 'SessionSandbox',
+  resources: SandboxResources.make({ vcpus: 2 }),
+  lifecycle: DisposableSandboxLifecycle.make({
+    idleTtlMs: 30 * 60_000,
+    maxLifetimeMs: 45 * 60_000
+  }),
+  env: { NODE_ENV: 'development' },
+  internet: true
+}).pipe(Layer.provide(HostSandboxStateStoreLayer))
+```
+
+| Option           | Default            | Meaning                                        |
+| ---------------- | ------------------ | ---------------------------------------------- |
+| `image`          | required           | Image id (key of `ctx.container.images`)       |
+| `resources`      | 2 vCPUs            | `vcpu`, with 2 GiB memory per vCPU             |
+| `diskMb`         | `16384`            | Container disk                                 |
+| `lifecycle`      | disposable 30m/45m | Idle TTL and, when disposable, max lifetime    |
+| `source`         | empty              | `Empty`, `Git`, or `Tarball` (no snapshots)    |
+| `env`            | none               | Set on the container and on every command      |
+| `internet`       | `true`             | Outbound internet access (`enableInternet`)    |
+| `workspaceRoot`  | `/workspace`       | Absolute workspace directory                   |
+| `maxOutputBytes` | `1048576`          | Bytes of stdout and of stderr kept per command |
+
+The object is engine-only: these settings travel with every call and apply when it starts a
+container. A running container keeps its settings, except that another `image` restarts it, so
+give each image its own `sandboxSessionId`.
+
+Commands run through `exec`, which does not see the image's Dockerfile `ENV`. Set the environment
+commands need in `env`.
+
+## Workspace lifetime
+
+The workspace lives only while the container runs. Every start gets a boot id, stored in
+`CloudflareSandboxState.bootId`; when a later call is answered by another boot (the container
+stopped, idled out, passed its max lifetime, or was destroyed) the result reports
+`workspaceReset: true`.
+
+- Disposable: the object's alarm destroys the container after `idleTtlMs` without calls (never
+  while a command runs) or at `maxLifetimeMs` after its start.
+- Persistent: idle stop only. Files still do not survive a stop: this adapter takes no snapshots.
+
+The platform inactivity timeout is set to the idle TTL too; if the platform stops the container
+sooner, the next call starts a new one and reports the reset.
+
+## Differences from the Vercel adapter
+
+- No preview URLs: `previewUrls` is always `[]`.
+- No snapshot source (`CloudflareSandboxInitialSource` excludes it).
+- Git sources clone inside the container; credentials reach only that `git` process's
+  environment. Tarball sources (`.tar.gz`) are downloaded by the object and unpacked from stdin,
+  so the container needs no internet access for them.
+- No allow/deny network policy: `internet: false` turns outbound internet off entirely. To filter
+  HTTP egress, subclass `CloudflareSandbox` and route the container's outbound HTTP through a
+  Worker you control in `containerStarted` (for example with
+  `this.ctx.container.interceptAllOutboundHttp(...)`).
+- A timeout SIGKILLs the command and, best effort, its process tree.
+- Bytes cross Workers RPC, so keep file transfers and `maxOutputBytes` well under the RPC message
+  limit (32 MiB).

@@ -278,6 +278,18 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/sandbox/src/agent.ts']
   },
   {
+    // workerd's `cloudflare:workers` stays behind `@yolk-sdk/sandbox/cloudflare` (the Durable
+    // Object class); the rest of the package never imports it.
+    packageDir: 'packages/sandbox/src',
+    forbiddenImports: ['cloudflare:workers', '@yolk-sdk/sandbox/cloudflare'],
+    excludedDirs: ['packages/sandbox/src/cloudflare']
+  },
+  {
+    // The Cloudflare adapter runs in Workers: no Node builtins and no Vercel SDK or adapter.
+    packageDir: 'packages/sandbox/src/cloudflare',
+    forbiddenImports: ['node:', '@vercel/sandbox', '@yolk-sdk/sandbox/vercel']
+  },
+  {
     // Agent never imports code mode: code mode builds on the agent tool contract.
     packageDir: 'packages/agent/src',
     forbiddenImports: ['@yolk-sdk/codemode']

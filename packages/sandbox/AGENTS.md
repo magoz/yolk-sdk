@@ -1,15 +1,16 @@
 # Sandbox Package
 
-`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, and the Vercel Sandbox adapter over `@vercel/sandbox` 3.x.
+`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, the Vercel Sandbox adapter over `@vercel/sandbox` 3.x, and the Cloudflare Containers adapter (a Durable Object class plus its layer).
 
 ## Subpaths
 
-| Subpath                     | Source         | Role                                                           |
-| --------------------------- | -------------- | -------------------------------------------------------------- |
-| `@yolk-sdk/sandbox`         | `src/index.ts` | Core service, state, lifecycle, source, errors                 |
-| `@yolk-sdk/sandbox/agent`   | `src/agent.ts` | One trusted `sandbox` tool module over `@yolk-sdk/agent/tools` |
-| `@yolk-sdk/sandbox/vercel`  | `src/vercel`   | Effect-native Vercel Sandbox client/layer and test seam        |
-| `@yolk-sdk/sandbox/testing` | `src/testing`  | Fake sandbox and in-memory state store layers                  |
+| Subpath                        | Source           | Role                                                                    |
+| ------------------------------ | ---------------- | ----------------------------------------------------------------------- |
+| `@yolk-sdk/sandbox`            | `src/index.ts`   | Core service, state, lifecycle, source, errors                          |
+| `@yolk-sdk/sandbox/agent`      | `src/agent.ts`   | One trusted `sandbox` tool module over `@yolk-sdk/agent/tools`          |
+| `@yolk-sdk/sandbox/vercel`     | `src/vercel`     | Effect-native Vercel Sandbox client/layer and test seam                 |
+| `@yolk-sdk/sandbox/cloudflare` | `src/cloudflare` | `CloudflareSandbox` Durable Object, its engine, RPC protocol, and layer |
+| `@yolk-sdk/sandbox/testing`    | `src/testing`    | Fake sandbox and in-memory state store layers                           |
 
 ## Boundaries
 
@@ -18,6 +19,12 @@
 - `@yolk-sdk/sandbox/vercel` is Node/server-only because `@vercel/sandbox` imports Node built-ins;
   browser and Worker code use core contracts through a host execution endpoint.
 - `src/vercel/client.ts` is the only live `@vercel/sandbox` SDK boundary; `src/vercel/layer.ts` consumes `VercelSandboxClient` for fakeable Effect layers.
+- Only `src/cloudflare/*` may import `cloudflare:workers`, and only `durable-object.ts` does; the
+  engine (`engine.ts`) takes `ctx.container`/`ctx.storage` as structural ports so Node tests drive
+  it with fakes (`test/cloudflare-fakes.ts`). `cloudflare-workers.d.ts` is the package-local ambient
+  type (not shipped; the root `tsconfig.json` excludes it because `@yolk-sdk/vercel-workflows`
+  declares the same class there, so the object reads `this.ctx` as `unknown` and parses it).
+  No Node builtins or Vercel code under `src/cloudflare`.
 - `src/agent.ts` may depend on `@yolk-sdk/agent/tools`, `@yolk-sdk/agent/protocol`, and `@yolk-sdk/agent/loop`; core must not.
 - Hosts own identity, auth, storage adapters, lifecycle cleanup scans, env/secrets, snapshots, git policy, approvals, and UI.
 - SDK only marks the `sandbox` tool destructive; hosts enforce safety/approval policy.
@@ -51,3 +58,14 @@
   matches the declared `SandboxToolOutput` (including the same bounded `stdout`/`stderr` slices as
   the text); the module has a `description`.
 - Live Vercel smoke is manual/opt-in only; default tests use fakes/seams.
+- Cloudflare: the object is engine-only (image id, resources, env, internet, root, source and
+  lifecycle arrive with every RPC). One container per object; a boot id (Durable Object storage
+  plus `/tmp/yolk-sandbox/boot-id` in the container) identifies each start, and the stored
+  `CloudflareSandboxState.bootId` differing from the answering boot means `workspaceReset: true`.
+  The layer passes `fresh: true` when the stored state expired (or belongs to another provider).
+  Lifecycle is enforced by the object's alarm (idle deadline, disposable max lifetime; in-flight
+  commands defer idle stops) with the platform inactivity timeout as a backstop. Config `env` goes
+  to `start` and to every `exec` (image `ENV` does not reach `exec`). No snapshots, no preview
+  URLs, no host/CIDR network policy (only `internet`); hosts subclass `containerStarted` for
+  outbound interception. RPC replies are `{ ok }` unions (config vs provider failures), never
+  thrown errors.

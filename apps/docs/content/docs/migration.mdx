@@ -30,6 +30,19 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.144: Cloudflare sandbox state
+
+`@yolk-sdk/sandbox` adds a Cloudflare Containers adapter
+([Cloudflare Containers](./sandbox/cloudflare)), and with it a second sandbox state:
+
+- `SandboxState` gains `CloudflareSandboxState` (`_tag: 'Cloudflare'`, with `bootId`). Exhaustive
+  matches over `SandboxState` need a `Cloudflare` case; a host state store that decodes stored
+  state with the `SandboxState` schema accepts both.
+- `SandboxProviderError.provider` is `'vercel' | 'cloudflare'`.
+- The `sandbox` tool's `SandboxToolOutput.state` is a union of the Vercel and Cloudflare shapes.
+- `sandboxStateDecision` takes an optional `provider`; the Vercel layer passes `'Vercel'`, so a
+  stored Cloudflare state for the same session recreates (`reason: 'provider_mismatch'`).
+
 ### Canary.143: non-empty harness pause
 
 `Driver.pause` and `Inbox.park` from `@yolk-sdk/harness` take a non-empty request id list
