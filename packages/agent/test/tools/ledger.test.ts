@@ -1241,10 +1241,13 @@ describe('tool ledger', () => {
     })
   )
 
-  // Ledger.tla replays (yolk-sdk #299, #300): one hung or failed heartbeat must not let the lease
-  // of a running call lapse, so a duplicate claiming right after the claim lease waits and replays
-  // instead of reporting the call as abandoned while it runs and then succeeds.
-  const firstHeartbeatFaulty = (fault: 'hangs' | 'fails after 1 s') => {
+  // yolk-sdk #299, #300: one hung or failed heartbeat must not let the lease of a running call
+  // lapse, so a duplicate claiming right after the claim lease waits and replays instead of
+  // reporting the call as abandoned while it runs and then succeeds.
+  const firstHeartbeatFaulty = (
+    fault: 'hangs' | 'fails after 1 s',
+    renewalLatency: Duration.Input = 0
+  ) => {
     const memory = makeInMemoryToolLedgerStore()
     let heartbeats = 0
 
@@ -1253,7 +1256,11 @@ describe('tool ledger', () => {
       heartbeat: request => {
         heartbeats += 1
 
-        if (heartbeats > 1) return memory.heartbeat(request)
+        if (heartbeats === 2) {
+          return Effect.sleep(renewalLatency).pipe(Effect.andThen(memory.heartbeat(request)))
+        }
+
+        if (heartbeats > 2) return memory.heartbeat(request)
 
         return fault === 'hangs'
           ? Effect.never
@@ -1269,13 +1276,15 @@ describe('tool ledger', () => {
   const duplicateAfterFaultyHeartbeat = (input: {
     readonly ledger: Omit<ToolLedgerOptions, 'store'>
     readonly fault: 'hangs' | 'fails after 1 s'
+    /** How long the heartbeat after the faulty one takes to land. Default 0. */
+    readonly renewalLatency?: Duration.Input
     readonly runFor: Duration.Input
     readonly duplicateAt: Duration.Input
     readonly thenWait: Duration.Input
   }) =>
     Effect.gen(function* () {
       const probe = makeProbe()
-      const { memory, store } = firstHeartbeatFaulty(input.fault)
+      const { memory, store } = firstHeartbeatFaulty(input.fault, input.renewalLatency)
       const tools = [noteTool(probe, { sleep: input.runFor })]
       const ledger: ToolLedgerOptions = { ...input.ledger, store }
 
@@ -1337,6 +1346,32 @@ describe('tool ledger', () => {
       fault: 'fails after 1 s',
       runFor: '40 seconds',
       duplicateAt: '30500 millis',
+      thenWait: '11 seconds'
+    })
+  )
+
+  it.effect('keeps a 6 s lease when the heartbeat after a hung one is slow', () =>
+    // Interval 2 s, timeout 1 s: the heartbeat hung at 2 s ends at 3 s, the next one starts at 5 s
+    // and lands 999 ms later, 1 ms before the claim lease ends; the duplicate claims at 6 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 6_000 },
+      fault: 'hangs',
+      renewalLatency: '999 millis',
+      runFor: '10 seconds',
+      duplicateAt: '6 seconds',
+      thenWait: '5 seconds'
+    })
+  )
+
+  it.effect('keeps the default lease when the heartbeat after a hung one is slow', () =>
+    // Zero margin at the defaults: the heartbeat hung at 10 s ends at 15 s, the next one starts at
+    // 25 s and lands 4999 ms later, 1 ms before the claim lease ends; the duplicate claims at 30 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: {},
+      fault: 'hangs',
+      renewalLatency: `${toolLedgerCompleteTimeoutMs - 1} millis`,
+      runFor: '40 seconds',
+      duplicateAt: '30 seconds',
       thenWait: '11 seconds'
     })
   )

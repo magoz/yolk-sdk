@@ -275,13 +275,19 @@ export type ToolLedgerOptions = {
    * built-in `subagent` tool).
    */
   readonly isLedgered?: (input: ToolLedgerPolicyInput) => boolean
-  /** Lease of a running call. Default 30000. */
+  /**
+   * Lease of a running call. Default 30000. Each heartbeat is cut at the shorter of
+   * `toolLedgerCompleteTimeoutMs` and a sixth of the lease, so heartbeat (and claim) latency must
+   * stay under `min(5000, leaseMs / 6)`: a slower store needs a longer lease, or every heartbeat
+   * times out and the lease of a running call lapses.
+   */
   readonly leaseMs?: number
   /**
    * Heartbeat interval while a call runs. Default a third of `leaseMs`. Longer values are clamped
    * to half the lease minus the heartbeat timeout (the shorter of `toolLedgerCompleteTimeoutMs` and
    * a sixth of `leaseMs`), so a heartbeat that fails at its timeout and the next one both land
-   * within the lease.
+   * within the lease. A margin for one late heartbeat with a fast claim and fast store (latency
+   * under that timeout; see `leaseMs`), not a guarantee: it is zero at the defaults.
    */
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */

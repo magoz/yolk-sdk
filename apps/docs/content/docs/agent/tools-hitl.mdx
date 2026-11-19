@@ -263,8 +263,14 @@ const resolveStepTools = Effect.gen(function* () {
   bounded to 5 s; an outcome that cannot be recorded reads as abandoned. Each `heartbeat` is
   bounded to 5 s or a sixth of `leaseMs`, whichever is shorter, and `heartbeatIntervalMs` is
   clamped to half the lease minus that bound, so one failed or hung heartbeat does not let the
-  lease of a running call lapse. That is a margin for one late heartbeat, not a guarantee: a stalled
-  process can still let the lease lapse.
+  lease of a running call lapse, provided the claim and the other heartbeats are fast and `leaseMs`
+  is at least 4 ms. That is a margin for one late heartbeat, not a guarantee: at the defaults
+  (2 × 10 s + 2 × 5 s = 30 s) it is exactly zero, and a stalled process, a slow claim, or several
+  slow heartbeats (one slow but successful, then a hung one) can still let the lease lapse.
+- Store latency: each `heartbeat`, and the `claim`, must answer in less than
+  `min(5 s, leaseMs / 6)`. On a short lease a slower store has every heartbeat cut at that bound
+  (a 6 s lease with 1.2 s heartbeats is cut at 1 s each time) and the lease lapses; give a slow
+  store a longer lease.
 - `deadline` bounds only waiting for a duplicate. A call that runs is not cut at it, and recording
   its outcome can take up to about 15 s (three 5 s attempts) after the call returns, so reserve
   that finalization time before the platform stops the step.

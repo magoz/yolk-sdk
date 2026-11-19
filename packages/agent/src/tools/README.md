@@ -216,10 +216,16 @@ const resolveStepTools = Effect.gen(function* () {
 - Renewal margin: a heartbeat starts one interval after the previous one ends, and each is bounded
   by the shorter of `toolLedgerCompleteTimeoutMs` (5 s) and a sixth of `leaseMs`. A longer
   `heartbeatIntervalMs` is clamped to half the lease minus that timeout, so after one heartbeat
-  fails or hangs until its timeout, the next one still lands within the lease (at the defaults:
-  10 s interval, 5 s timeout, 30 s lease). This holds for any `leaseMs`, but it is a margin for one
-  late heartbeat, not a guarantee: a stalled process, or several slow heartbeats, can still let the
-  lease lapse, and a duplicate then reports the running call as abandoned.
+  fails or hangs until its timeout, the next one still lands within the lease. It covers one late
+  heartbeat only, when the claim and the other heartbeats are fast, and for `leaseMs` of at least
+  4 ms (smaller leases hit the 1 ms floors). It is not a guarantee: at the defaults (10 s interval,
+  5 s timeout, 30 s lease) the margin is exactly zero (2 × 10 s + 2 × 5 s = 30 s), so a stalled
+  process, a slow claim, or several slow heartbeats (one slow but successful, then a hung one) can
+  still let the lease lapse, and a duplicate then reports the running call as abandoned.
+- Store latency: every `heartbeat`, and the `claim`, must answer in less than that timeout
+  (`min(5 s, leaseMs / 6)`). On a short lease a slower store has each heartbeat cut at the timeout
+  (for example a 6 s lease with 1.2 s heartbeats: every heartbeat is cut at 1 s), so the lease of a
+  running call lapses; give a slow store a longer lease.
 - Each `complete` attempt is bounded (`toolLedgerCompleteTimeoutMs`, 5 s; three attempts), and so is
   each `heartbeat` (as above; a timed-out or failed heartbeat is logged; the next one still runs).
   A result or `ToolError` the call returned is recorded before an interruption takes effect (a
