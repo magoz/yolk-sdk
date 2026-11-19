@@ -1399,14 +1399,24 @@ export const discardChatExecutionOutput = (
   })
 }
 
-/** The messages and tool parts an execution produced: what a committed answer may replace. */
-const executionToolParts = (outputs: ReadonlyArray<AgentChatExecutionOutput>) => ({
+/**
+ * The messages and tool parts an execution produced that survive its discard: what a committed
+ * answer may take over. A part it overwrote that the discard restored to its prior (an earlier
+ * turn's call with a reused id, its call unacknowledged) is not the execution's, so it never moves.
+ */
+const executionToolParts = (
+  outputs: ReadonlyArray<AgentChatExecutionOutput>,
+  unacknowledged: ReadonlySet<string>
+) => ({
   messages: new Set(
     outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
   ),
   parts: new Set(
     outputs.flatMap(output =>
-      Predicate.isTagged(output, 'ToolPart') ? [toolPartKey(output.messageId, output.callId)] : []
+      Predicate.isTagged(output, 'ToolPart') &&
+      !(Option.isSome(output.prior) && unacknowledged.has(output.callId))
+        ? [toolPartKey(output.messageId, output.callId)]
+        : []
     )
   )
 })
@@ -1437,7 +1447,7 @@ export const replaceWithCommittedAnswer = (
   )
 
   const states = new Map<string, ChatToolState>()
-  const own = executionToolParts(outputs)
+  const own = executionToolParts(outputs, calls)
   const lastUser = findLastMessageIndex(discarded, message => message.role === 'user')
 
   const moved = discarded.flatMap((message, index) => {

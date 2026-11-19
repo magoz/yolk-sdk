@@ -395,17 +395,27 @@ Host duties:
 
 - Upgrade clients and server together: a client before this release ignores the fields and shows
   both executions' output back to back.
-- Projection hosts that keep one state across runs need nothing more when events carry `streamId`;
-  without it every run shares one scope, so reset `executions` to `[]` when a new run starts.
+- Use a `streamId` unique per workflow run (for example `workflow:${runId}`), unless the stream
+  emits `AgentStart` at each run: a run's ended state sticks to its `streamId`, so a later run that
+  reuses it without `AgentStart` has every start dropped. With unique `streamId`s, projection hosts
+  that keep one state across runs need nothing more; without `streamId` every run shares one scope,
+  so reset `executions` to `[]` when a new run starts.
+- Write `AgentError` only from the final failure path (`writeError`), never before a retry: an
+  `AgentError` ends its run for good, and every later start in it is dropped.
 - Feed one state one run at a time: two runs streaming tagged events into one state at once are
   unsupported (each run's start settles the other's live execution).
 - `reduceAgentEvents` keeps a single draft buffer (`text`, `reasoning`): every `LLMStreamStart`
   clears it, so a stopped run's unfinished draft is not kept there (the chat projections keep it).
 
-Open case: a non-final turn whose older execution committed while the newer one streamed. The
-chat keeps the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran
-the older execution's calls, so the shown calls and the executed ones differ. Only the final turn
-is reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
+Open cases:
+
+- A non-final turn whose older execution committed while the newer one streamed. The chat keeps
+  the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran the older
+  execution's calls, so the shown calls and the executed ones differ. Only the final turn is
+  reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
+- A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
+  only that stream's run, not the main run's turns. A late start from a losing execution of the
+  main run's paused turn is then not fenced by that terminal.
 
 ## Terminal barriers
 

@@ -391,6 +391,66 @@ describe('model-step executions', () => {
     expectBothChats(result, ['Turn one | call_1:Completed', 'Sorry'])
   })
 
+  it.each(['pause', 'end'] as const)(
+    'keeps a restored earlier-turn call in place when the committed answer reuses its id (%s)',
+    terminal => {
+      const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
+      const turnOne = answer('Turn one', [call])
+      const result0 = ToolResult.make({ toolCallId: call.id, content: '72F' })
+      const asked = answer('Asking', [call])
+
+      const request = QuestionRequest.make({
+        requestId: 'question:call_1',
+        toolCallId: call.id,
+        call,
+        questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+      })
+
+      const committed =
+        terminal === 'pause'
+          ? plain(
+              identity =>
+                AgentAwaitingInput.make({
+                  ...identity,
+                  requests: [request],
+                  messages: [turnOne, asked],
+                  turns: 2,
+                  usage: zeroAgentUsage
+                }),
+              'pause'
+            )
+          : end('end', [turnOne, asked])
+
+      const result = project([
+        start('step-0:1', 1),
+        delta('step-0:1', 'Turn one'),
+        live(identity => ToolInputEnd.make({ ...identity, call }), 'step-0:1'),
+        message('step-0:1', turnOne),
+        plain(identity => ToolExecutionStarted.make({ ...identity, call }), 'tool:0'),
+        plain(
+          identity => ToolExecutionCompleted.make({ ...identity, call, result: result0 }),
+          'tool:1'
+        ),
+        start(A, 2),
+        delta(A, 'Asking'),
+        message(A, asked),
+        start(B, 2),
+        live(identity => ToolInputStart.make({ ...identity, id: call.id }), B),
+        delta(B, 'Sorry'),
+        committed
+      ])
+
+      const expected =
+        terminal === 'pause'
+          ? ['Turn one | call_1:Completed', 'Asking | call_1:QuestionRequested']
+          : ['Turn one | call_1:Completed', 'Asking | call_1:Called']
+
+      expect(result.client.messages).toEqual([turnOne, asked])
+      expect(result.client.text).toBe('')
+      expectBothChats(result, expected)
+    }
+  )
+
   it('fences a run by its terminal event even when no execution of it was seen', () => {
     const hello = answer('Hello')
 
