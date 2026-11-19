@@ -410,6 +410,23 @@ describe('staleQuotaCooldowns', () => {
     expect(stale(entries, t0 + 12 * minute, again)).toEqual([])
   })
 
+  it('waits for an absorbed auth failure to end', () => {
+    const absorbed = PoolQuotaCooldown.make({
+      accountId: 'backup',
+      startedAtMs: t0,
+      untilMs: until,
+      authUntilMs: t0 + 30 * minute
+    })
+
+    const reading = (fetchedAtMs: number) => ({
+      backup: { fetchedAtMs, windows: [weekly(0, until)] }
+    })
+
+    // A reading proves nothing about the rejected credential while its auth cooldown lasts.
+    expect(stale(reading(t0 + 10 * minute), t0 + 11 * minute, absorbed)).toEqual([])
+    expect(stale(reading(t0 + 31 * minute), t0 + 32 * minute, absorbed)).toEqual([absorbed])
+  })
+
   const fresh = (windows: ReadonlyArray<PoolWindow>): PoolReading => ({
     fetchedAtMs: t0 + minute,
     windows

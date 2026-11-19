@@ -18,13 +18,19 @@ export class PoolPin extends Schema.Class<PoolPin>('PoolPin')({
   pinnedAtMs: EpochMs
 }) {}
 
-/** The account's subscription quota is exhausted until `untilMs` (a provider quota reset). */
+/**
+ * The account's subscription quota is exhausted until `untilMs` (a provider quota reset).
+ * `authUntilMs` is set when the cooldown absorbed an auth failure that ends sooner (see
+ * `PoolStoreApi.putCooldown`): until then no reading clears it, since a reading proves nothing
+ * about the credential that was rejected.
+ */
 export class PoolQuotaCooldown extends Schema.TaggedClass<PoolQuotaCooldown>()(
   'PoolQuotaCooldown',
   {
     accountId: PoolAccountId,
     startedAtMs: EpochMs,
-    untilMs: EpochMs
+    untilMs: EpochMs,
+    authUntilMs: Schema.optional(EpochMs)
   }
 ) {}
 
@@ -36,9 +42,11 @@ export class PoolAuthCooldown extends Schema.TaggedClass<PoolAuthCooldown>()('Po
 }) {}
 
 /**
- * Why an account sits out. One cooldown per account: writing keeps the one that ends later (on a
- * tie, the one that started later; see `PoolStoreApi.putCooldown`), and a reading can clear only a
- * quota cooldown it postdates.
+ * Why an account sits out. One cooldown per account: an ended one gives way to the next, and
+ * overlapping ones merge into the later end and its kind with the newest failure's `startedAtMs`
+ * (and a quota cooldown keeps an absorbed auth failure's end as `authUntilMs`; see
+ * `PoolStoreApi.putCooldown`). A reading can clear only a quota cooldown it postdates, once any
+ * absorbed auth failure has ended.
  */
 export const PoolCooldown = Schema.Union([PoolQuotaCooldown, PoolAuthCooldown])
 

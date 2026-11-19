@@ -280,7 +280,8 @@ const hasQuotaLeft = (reading: PoolReading, nowMs: number) => {
 /**
  * Active quota cooldowns that a fresh reading taken after they began shows to be over (a limit
  * reset was spent, or the provider reset early). A reading from before the lockout never clears
- * one, and auth cooldowns are never cleared by readings.
+ * one, nor one whose absorbed auth failure (`authUntilMs`) is still active, and auth cooldowns are
+ * never cleared by readings: a reading proves nothing about a rejected credential.
  */
 export const staleQuotaCooldowns = (input: {
   readonly cooldowns: ReadonlyArray<PoolCooldown>
@@ -291,7 +292,8 @@ export const staleQuotaCooldowns = (input: {
   input.cooldowns.filter(cooldown => {
     if (
       !Predicate.isTagged(cooldown, 'PoolQuotaCooldown') ||
-      !isCooldownActive(cooldown, input.nowMs)
+      !isCooldownActive(cooldown, input.nowMs) ||
+      (cooldown.authUntilMs !== undefined && cooldown.authUntilMs > input.nowMs)
     ) {
       return false
     }

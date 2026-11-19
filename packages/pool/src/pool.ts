@@ -449,7 +449,13 @@ export const makePool = (options: PoolOptions): Effect.Effect<Pool, PoolConfigEr
             stale,
             cooldown =>
               store
-                .clearCooldown({ accountId: cooldown.accountId, startedAtMs: cooldown.startedAtMs })
+                .clearCooldown({
+                  accountId: cooldown.accountId,
+                  startedAtMs: cooldown.startedAtMs,
+                  authUntilMs: Predicate.isTagged(cooldown, 'PoolQuotaCooldown')
+                    ? cooldown.authUntilMs
+                    : undefined
+                })
                 .pipe(
                   Effect.flatMap(cleared =>
                     cleared

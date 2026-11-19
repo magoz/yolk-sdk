@@ -58,18 +58,38 @@ export type PoolStoreApi = {
     readonly pin: PoolPin
   }) => Effect.Effect<boolean, PoolStoreError>
   /**
-   * Records a cooldown; when the account already has one, the one that ends later stays, and of two
-   * that end together the one that started later (a newer failure must not be cleared by a reading
-   * taken before it).
+   * Records a cooldown. When the account already has one:
+   *
+   * - one that ended before the other began is replaced by the other (an expired cooldown never
+   *   shapes a later one);
+   * - two that overlap merge into one: the later end and its kind (of two that end together, the
+   *   later-started one's kind; of two that also start together, quota), with the later
+   *   `startedAtMs` of the two, so the kept cooldown carries the newest failure's time and a
+   *   reading taken before that failure never clears it;
+   * - a kept quota cooldown records the latest end of any auth failure it absorbed as
+   *   `authUntilMs` (omitted when that ended by the kept start), so no reading clears it before
+   *   then.
+   *
+   * Concurrent writes for one account are the normal case, so merge atomically: one statement,
+   * never a read followed by a write. For example an upsert that sets the start to the greatest
+   * start, picks the end and kind with a `CASE` on which ends later (then which started later,
+   * then quota), and sets `authUntilMs` to the greatest auth end of the two (an auth cooldown's
+   * end, a quota cooldown's `authUntilMs`) when the kept one is quota and that end is after the
+   * merged start, else null.
    */
   readonly putCooldown: (cooldown: PoolCooldown) => Effect.Effect<void, PoolStoreError>
   /**
-   * Removes the account's cooldown only when it is the one observed (same `startedAtMs`). Returns
-   * whether it removed one.
+   * Removes the account's quota cooldown only when it is the one observed (same `startedAtMs` and
+   * `authUntilMs`). Never removes an auth cooldown. Two failures in the same millisecond share a
+   * start, so the start alone cannot tell a quota cooldown from what it became after absorbing an
+   * auth failure: that merge either made it an auth cooldown or set `authUntilMs`, and both make
+   * a clear observed before it fail. Returns whether it removed one.
    */
   readonly clearCooldown: (input: {
     readonly accountId: string
     readonly startedAtMs: number
+    /** The observed cooldown's `authUntilMs` (`undefined` when it had none). */
+    readonly authUntilMs: number | undefined
   }) => Effect.Effect<boolean, PoolStoreError>
   /** Records a reading unless the stored one was fetched later. */
   readonly putReading: (reading: PoolStoredReading) => Effect.Effect<void, PoolStoreError>
@@ -83,6 +103,60 @@ export type PoolStoreApi = {
 const pinKey = (poolId: string, route: string) => JSON.stringify([poolId, route])
 
 const fetchedAtMs = (reading: PoolStoredReading) => Date.parse(reading.snapshot.fetchedAt)
+
+/** Until when a cooldown stands for a rejected credential, if it does. */
+const authUntilOf = (cooldown: PoolCooldown) =>
+  Predicate.isTagged(cooldown, 'PoolAuthCooldown') ? cooldown.untilMs : cooldown.authUntilMs
+
+/**
+ * The account's cooldown after `next` is written over `current` (`putCooldown`): a cooldown that
+ * ended before the other began gives way to it; overlapping ones keep the later end and its kind,
+ * dated to the newer failure, and a kept quota cooldown keeps the end of an auth failure it
+ * absorbed.
+ */
+const mergeCooldowns = (current: PoolCooldown, next: PoolCooldown): PoolCooldown => {
+  if (current.untilMs <= next.startedAtMs) {
+    return next
+  }
+
+  if (next.untilMs <= current.startedAtMs) {
+    return current
+  }
+
+  // The later end, then the later start, then quota: "auth" means rejected credentials only.
+  const nextWins =
+    next.untilMs !== current.untilMs
+      ? next.untilMs > current.untilMs
+      : next.startedAtMs !== current.startedAtMs
+        ? next.startedAtMs > current.startedAtMs
+        : Predicate.isTagged(next, 'PoolQuotaCooldown')
+
+  const kept = nextWins ? next : current
+
+  const fields = {
+    accountId: kept.accountId,
+    startedAtMs: Math.max(current.startedAtMs, next.startedAtMs),
+    untilMs: kept.untilMs
+  }
+
+  if (Predicate.isTagged(kept, 'PoolAuthCooldown')) {
+    return PoolAuthCooldown.make(fields)
+  }
+
+  const authEnds = [current, next].flatMap(cooldown => {
+    const until = authUntilOf(cooldown)
+
+    return until === undefined ? [] : [until]
+  })
+
+  const authUntilMs = authEnds.length === 0 ? undefined : Math.max(...authEnds)
+
+  return PoolQuotaCooldown.make(
+    authUntilMs !== undefined && authUntilMs > fields.startedAtMs
+      ? { ...fields, authUntilMs }
+      : fields
+  )
+}
 
 /**
  * An in-memory `PoolStoreApi`: state lives in this process only, so it suits tests and hosts that
@@ -123,19 +197,20 @@ export const makeMemoryPoolStore = (): PoolStoreApi => {
       Effect.sync(() => {
         const current = cooldowns.get(cooldown.accountId)
 
-        if (
-          current === undefined ||
-          cooldown.untilMs > current.untilMs ||
-          (cooldown.untilMs === current.untilMs && cooldown.startedAtMs > current.startedAtMs)
-        ) {
-          cooldowns.set(cooldown.accountId, cooldown)
-        }
+        cooldowns.set(
+          cooldown.accountId,
+          current === undefined ? cooldown : mergeCooldowns(current, cooldown)
+        )
       }),
     clearCooldown: input =>
       Effect.sync(() => {
         const current = cooldowns.get(input.accountId)
 
-        if (current === undefined || current.startedAtMs !== input.startedAtMs) {
+        if (
+          !Predicate.isTagged(current, 'PoolQuotaCooldown') ||
+          current.startedAtMs !== input.startedAtMs ||
+          current.authUntilMs !== input.authUntilMs
+        ) {
           return false
         }
 
@@ -205,6 +280,91 @@ const contractReading = (accountId: string, fetchedAt: string) =>
       windows: Chunk.empty()
     })
   })
+
+type ContractCooldown = {
+  readonly kind: 'quota' | 'auth'
+  readonly startedAtMs: number
+  readonly untilMs: number
+  readonly authUntilMs?: number
+}
+
+const contractCooldown = (accountId: string, cooldown: ContractCooldown): PoolCooldown => {
+  const fields = { accountId, startedAtMs: cooldown.startedAtMs, untilMs: cooldown.untilMs }
+
+  if (cooldown.kind === 'auth') {
+    return PoolAuthCooldown.make(fields)
+  }
+
+  return PoolQuotaCooldown.make(
+    cooldown.authUntilMs === undefined ? fields : { ...fields, authUntilMs: cooldown.authUntilMs }
+  )
+}
+
+/** Two failures of one account and the cooldown `putCooldown` keeps, in either write order. */
+const contractMerges: ReadonlyArray<{
+  readonly id: string
+  readonly name: string
+  readonly first: ContractCooldown
+  readonly second: ContractCooldown
+  readonly kept: ContractCooldown
+}> = [
+  {
+    id: 'ended',
+    name: 'an auth cooldown that ended before a quota failure gives way to it',
+    first: { kind: 'auth', startedAtMs: 1, untilMs: 10 },
+    second: { kind: 'quota', startedAtMs: 20, untilMs: 100 },
+    kept: { kind: 'quota', startedAtMs: 20, untilMs: 100 }
+  },
+  {
+    id: 'quota-auth',
+    name: 'a longer quota cooldown absorbs a newer, shorter auth failure: its start and its end',
+    first: { kind: 'quota', startedAtMs: 1, untilMs: 100 },
+    second: { kind: 'auth', startedAtMs: 5, untilMs: 50 },
+    kept: { kind: 'quota', startedAtMs: 5, untilMs: 100, authUntilMs: 50 }
+  },
+  {
+    id: 'same-ms',
+    name: 'a quota cooldown absorbs an auth failure of the same millisecond and keeps its end',
+    first: { kind: 'quota', startedAtMs: 5, untilMs: 100 },
+    second: { kind: 'auth', startedAtMs: 5, untilMs: 50 },
+    kept: { kind: 'quota', startedAtMs: 5, untilMs: 100, authUntilMs: 50 }
+  },
+  {
+    id: 'full-tie',
+    name: 'of a quota and an auth cooldown that start and end together, quota stays with the auth end',
+    first: { kind: 'quota', startedAtMs: 5, untilMs: 100 },
+    second: { kind: 'auth', startedAtMs: 5, untilMs: 100 },
+    kept: { kind: 'quota', startedAtMs: 5, untilMs: 100, authUntilMs: 100 }
+  },
+  {
+    id: 'auth-quota',
+    name: 'a longer auth cooldown absorbs a newer, shorter quota failure and stays auth',
+    first: { kind: 'auth', startedAtMs: 1, untilMs: 100 },
+    second: { kind: 'quota', startedAtMs: 5, untilMs: 50 },
+    kept: { kind: 'auth', startedAtMs: 5, untilMs: 100 }
+  },
+  {
+    id: 'quota-quota',
+    name: 'a longer quota cooldown absorbs a newer, shorter quota failure and takes its start',
+    first: { kind: 'quota', startedAtMs: 1, untilMs: 100 },
+    second: { kind: 'quota', startedAtMs: 5, untilMs: 50 },
+    kept: { kind: 'quota', startedAtMs: 5, untilMs: 100 }
+  },
+  {
+    id: 'absorbed-ended',
+    name: 'an absorbed auth failure that ended by the newest failure is dropped',
+    first: { kind: 'quota', startedAtMs: 1, untilMs: 100, authUntilMs: 10 },
+    second: { kind: 'quota', startedAtMs: 20, untilMs: 50 },
+    kept: { kind: 'quota', startedAtMs: 20, untilMs: 100 }
+  },
+  {
+    id: 'absorbed-carried',
+    name: 'an absorbed auth failure still active is carried into a later-ending cooldown',
+    first: { kind: 'quota', startedAtMs: 1, untilMs: 100, authUntilMs: 50 },
+    second: { kind: 'quota', startedAtMs: 20, untilMs: 200 },
+    kept: { kind: 'quota', startedAtMs: 20, untilMs: 200, authUntilMs: 50 }
+  }
+]
 
 /** The `PoolStoreApi` contract. Hosts run every case against a fresh store of their implementation. */
 export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
@@ -289,9 +449,7 @@ export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
       const kept = (yield* load).cooldowns
 
       yield* expect(
-        kept.length === 1 &&
-          Predicate.isTagged(kept[0], 'PoolQuotaCooldown') &&
-          kept[0].untilMs === 100,
+        kept.length === 1 && kept[0]?.untilMs === 100,
         'an earlier-ending cooldown does not replace a later one'
       )
 
@@ -307,35 +465,106 @@ export const poolStoreContract: ReadonlyArray<PoolStoreContractCase> = [
           replaced[0].startedAtMs === 3,
         'a later-ending cooldown replaces the current one'
       )
-
-      yield* store.putCooldown(
-        PoolQuotaCooldown.make({ accountId: 'a', startedAtMs: 4, untilMs: 200 })
+      yield* expect(
+        !(yield* store.clearCooldown({ accountId: 'a', startedAtMs: 3, authUntilMs: undefined })),
+        'an auth cooldown is never cleared, even with its start'
       )
 
-      yield* store.putCooldown(
-        PoolQuotaCooldown.make({ accountId: 'a', startedAtMs: 2, untilMs: 200 })
-      )
+      const quotaOfB = (startedAtMs: number) =>
+        store.putCooldown(PoolQuotaCooldown.make({ accountId: 'b', startedAtMs, untilMs: 200 }))
 
-      const renewed = (yield* load).cooldowns
+      yield* quotaOfB(3)
+      yield* quotaOfB(4)
+      yield* quotaOfB(2)
+
+      const renewed = (yield* load).cooldowns.filter(cooldown => cooldown.accountId === 'b')
 
       yield* expect(
         renewed.length === 1 && renewed[0]?.startedAtMs === 4,
         'of two cooldowns that end together, the later-started one stays, whatever the write order'
       )
       yield* expect(
-        !(yield* store.clearCooldown({ accountId: 'a', startedAtMs: 3 })),
+        !(yield* store.clearCooldown({ accountId: 'b', startedAtMs: 3, authUntilMs: undefined })),
         'clearing a cooldown that is no longer current is refused'
       )
       yield* expect(
-        yield* store.clearCooldown({ accountId: 'a', startedAtMs: 4 }),
+        yield* store.clearCooldown({ accountId: 'b', startedAtMs: 4, authUntilMs: undefined }),
         'clearing the observed cooldown succeeds'
       )
-      yield* expect((yield* load).cooldowns.length === 0, 'a cleared cooldown is gone')
       yield* expect(
-        !(yield* store.clearCooldown({ accountId: 'b', startedAtMs: 3 })),
+        (yield* load).cooldowns.every(cooldown => cooldown.accountId !== 'b'),
+        'a cleared cooldown is gone'
+      )
+      yield* expect(
+        !(yield* store.clearCooldown({ accountId: 'c', startedAtMs: 3, authUntilMs: undefined })),
         'clearing an account without a cooldown is refused'
       )
     })
+  ),
+  contractCase(
+    'a cooldown that ended gives way; overlapping ones keep the later end with the newest start',
+    (store, expect) =>
+      Effect.gen(function* () {
+        for (const merge of contractMerges) {
+          for (const [order, writes] of [
+            ['forward', [merge.first, merge.second]],
+            ['reversed', [merge.second, merge.first]]
+          ] as const) {
+            const accountId = `${merge.id}-${order}`
+
+            for (const write of writes) {
+              yield* store.putCooldown(contractCooldown(accountId, write))
+            }
+
+            const kept = (yield* store.load({
+              poolId: 'pool',
+              route: 'model',
+              accountIds: [accountId]
+            })).cooldowns
+
+            const cooldown = kept[0]
+
+            yield* expect(
+              kept.length === 1 &&
+                cooldown !== undefined &&
+                cooldown._tag ===
+                  (merge.kept.kind === 'quota' ? 'PoolQuotaCooldown' : 'PoolAuthCooldown') &&
+                cooldown.startedAtMs === merge.kept.startedAtMs &&
+                cooldown.untilMs === merge.kept.untilMs &&
+                (Predicate.isTagged(cooldown, 'PoolQuotaCooldown')
+                  ? cooldown.authUntilMs
+                  : undefined) === merge.kept.authUntilMs,
+              `${merge.name} (${order})`
+            )
+
+            const clear = (startedAtMs: number, authUntilMs: number | undefined) =>
+              store.clearCooldown({ accountId, startedAtMs, authUntilMs })
+
+            yield* expect(
+              !(yield* clear(
+                Math.min(merge.first.startedAtMs, merge.second.startedAtMs),
+                merge.first.authUntilMs
+              )),
+              `clearing with the older failure’s start is refused (${order})`
+            )
+
+            if (merge.kept.authUntilMs !== undefined) {
+              yield* expect(
+                !(yield* clear(merge.kept.startedAtMs, undefined)),
+                `clearing without the absorbed auth failure’s end is refused (${order})`
+              )
+            }
+
+            yield* expect(
+              (yield* clear(merge.kept.startedAtMs, merge.kept.authUntilMs)) ===
+                (merge.kept.kind === 'quota'),
+              merge.kept.kind === 'quota'
+                ? `a kept quota cooldown clears when observed as it is (${order})`
+                : `a kept auth cooldown is never cleared (${order})`
+            )
+          }
+        }
+      })
   ),
   contractCase(
     'cooldowns and readings are returned for the requested accounts only',

@@ -99,9 +99,23 @@ errors itself, so attempts never multiply. A request without a model id fails `v
 ## Store
 
 `PoolStoreApi` holds pins (per pool and route), one cooldown per account, and the latest reading
-per account. Implementations must be atomic per key (`movePin` is a compare-and-set). Run every
-case of `poolStoreContract` against a fresh store of your implementation in your tests. Store
-failures never fail a request: the pool routes fill-first without state and logs a warning.
+per account. Implementations must be atomic per key (`movePin` is a compare-and-set).
+
+`putCooldown` over an existing cooldown: one that ended before the other began gives way to it;
+two that overlap merge into the later end and its kind (on a tie, the later start's; on a full tie,
+quota), with the later `startedAtMs` of the two (the newest failure), so a reading taken before
+that failure never clears it. A kept quota
+cooldown records the end of an auth failure it absorbed as `authUntilMs`; readings do not clear it
+before then (a reading cannot vouch for the rejected credential). `clearCooldown` removes only the
+observed `PoolQuotaCooldown` (same `startedAtMs` and `authUntilMs`), never a `PoolAuthCooldown`.
+Two requests failing on one account write concurrently, so merge in one atomic statement, not a
+read followed by a write: for example an upsert that sets the greatest start, picks the end and
+kind with a `CASE` on which ends later (then which started later, then quota), and sets
+`authUntilMs` to the greatest auth end of the two (an auth cooldown's end, a quota cooldown's
+`authUntilMs`) when the kept one is quota and that end is after the merged start, else null.
+
+Run every case of `poolStoreContract` against a fresh store of your implementation in your tests.
+Store failures never fail a request: the pool routes fill-first without state and logs a warning.
 
 ## What you own
 

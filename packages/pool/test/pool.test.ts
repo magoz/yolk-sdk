@@ -1,4 +1,15 @@
-import { Chunk, Effect, Layer, Logger, Predicate, References, Result, Stream } from 'effect'
+import {
+  Chunk,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Logger,
+  Predicate,
+  References,
+  Result,
+  Stream
+} from 'effect'
 import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -47,6 +58,8 @@ type Outcome =
   | { readonly kind: 'fail_after_event'; readonly error: LLMError }
   /** Moves the test clock forward, then fails before any event. */
   | { readonly kind: 'fail_later'; readonly afterMs: number; readonly error: LLMError }
+  /** Runs `gate` (the call is in flight until it completes), then fails before any event. */
+  | { readonly kind: 'fail_after'; readonly gate: Effect.Effect<void>; readonly error: LLMError }
 
 const reply: Outcome = { kind: 'reply' }
 
@@ -99,6 +112,13 @@ const scripted = (id: string, priority: number, outcomes: ReadonlyArray<Outcome>
 
           if (outcome.kind === 'fail_later') {
             return Stream.fromEffect(TestClock.adjust(outcome.afterMs)).pipe(
+              Stream.drain,
+              Stream.concat(Stream.fail(outcome.error))
+            )
+          }
+
+          if (outcome.kind === 'fail_after') {
+            return Stream.fromEffect(outcome.gate).pipe(
               Stream.drain,
               Stream.concat(Stream.fail(outcome.error))
             )
@@ -381,6 +401,194 @@ describe('makePool', () => {
         'from primary'
       ])
       expect((yield* pool.state).accounts[0]?.cooldown).toBeUndefined()
+    })
+  )
+
+  // Issue #301: a longer cooldown absorbs a newer, shorter failure; a reading taken between the two
+  // must not clear the cooldown, or the next request goes straight back to the failed account. A
+  // reading taken after a newer quota failure may clear it; an absorbed auth failure blocks readings
+  // until it ends, since a reading proves nothing about the rejected credential.
+  it.effect.each([
+    {
+      failure: 'quota',
+      newer: quotaExhausted(t0 + 5 * hour),
+      authUntilMs: undefined,
+      afterNewerReading: 'from primary'
+    },
+    {
+      failure: 'auth',
+      newer: llmError({ kind: 'auth' }),
+      authUntilMs: t0 + 2 * minute + poolAuthCooldownMs,
+      afterNewerReading: 'from backup'
+    }
+  ] as const)(
+    'keeps a newer $failure failure from concurrent requests that a longer cooldown absorbed',
+    ({ newer, authUntilMs, afterNewerReading }) =>
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+
+        const primary = scripted('primary', 10, [
+          {
+            kind: 'fail_after',
+            gate: Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release))
+            ),
+            error: newer
+          },
+          fail(quotaExhausted(t0 + 3 * day))
+        ])
+
+        const backup = scripted('backup', 0)
+        const { pool } = yield* setup({ accounts: [primary.account, backup.account] })
+
+        // R2 picks primary; its call stays in flight.
+        const second = yield* Effect.forkChild(Stream.runCollect(pool.provider.stream(request)))
+
+        yield* Deferred.await(entered)
+
+        // R1 picks primary too, cools it down for three days and fails over.
+        expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+          'from backup'
+        ])
+
+        // The host records a reading taken after that cooldown began, showing quota left.
+        yield* TestClock.adjust(minute)
+        yield* pool.recordReading('primary', snapshot(t0 + minute, weekly(0, t0 + 6 * day)))
+
+        // R2's call fails after the reading; its failover must not clear primary's cooldown.
+        yield* TestClock.adjust(minute)
+        yield* Deferred.succeed(release, undefined)
+        expect(texts(yield* Fiber.join(second))).toEqual(['from backup'])
+
+        const kept = { accountId: 'primary', startedAtMs: t0 + 2 * minute, untilMs: t0 + 3 * day }
+
+        expect((yield* pool.state).accounts[0]?.cooldown).toEqual(
+          PoolQuotaCooldown.make(authUntilMs === undefined ? kept : { ...kept, authUntilMs })
+        )
+
+        // The next request skips primary: it failed after the reading.
+        expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+          'from backup'
+        ])
+        expect(primary.calls).toHaveLength(2)
+
+        // A reading taken after the newer failure clears a quota failure, not an active auth one.
+        yield* TestClock.adjust(minute)
+        yield* pool.recordReading('primary', snapshot(t0 + 3 * minute, weekly(0, t0 + 6 * day)))
+        expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+          afterNewerReading
+        ])
+
+        // Once the auth failure has ended, a fresh reading clears it too.
+        yield* TestClock.adjust(poolAuthCooldownMs)
+
+        const later = t0 + 3 * minute + poolAuthCooldownMs
+
+        yield* pool.recordReading('primary', snapshot(later, weekly(0, t0 + 6 * day)))
+        expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+          'from primary'
+        ])
+      })
+  )
+
+  it.effect('lets a quota cooldown after an ended auth cooldown clear on a newer reading', () =>
+    Effect.gen(function* () {
+      const primary = scripted('primary', 10, [
+        fail(llmError({ kind: 'auth' })),
+        fail(quotaExhausted(t0 + 3 * day))
+      ])
+
+      const backup = scripted('backup', 0)
+      const { pool } = yield* setup({ accounts: [primary.account, backup.account] })
+
+      const record = (fetchedAtMs: number) =>
+        Effect.all([
+          pool.recordReading('primary', snapshot(fetchedAtMs, weekly(10, t0 + 2 * day))),
+          pool.recordReading('backup', snapshot(fetchedAtMs, weekly(10, t0 + 5 * day)))
+        ])
+
+      // Readings rank primary first; its credentials are rejected once.
+      yield* record(t0)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+
+      // After the auth cooldown ends, primary hits its quota: a quota cooldown, not an auth one.
+      yield* TestClock.adjust(poolAuthCooldownMs + minute)
+      yield* record(t0 + poolAuthCooldownMs + minute)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+      expect((yield* pool.state).accounts[0]?.cooldown).toEqual(
+        PoolQuotaCooldown.make({
+          accountId: 'primary',
+          startedAtMs: t0 + poolAuthCooldownMs + minute,
+          untilMs: t0 + 3 * day
+        })
+      )
+
+      // A newer reading shows quota left, so it clears.
+      yield* TestClock.adjust(minute)
+      yield* record(t0 + poolAuthCooldownMs + 2 * minute)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from primary'
+      ])
+      expect(primary.calls).toHaveLength(3)
+    })
+  )
+
+  it.effect('keeps a newer failure from the loop’s retry after a store read failed', () =>
+    Effect.gen(function* () {
+      const memory = makeMemoryPoolStore()
+      let failNextLoad = false
+
+      const store: PoolStoreApi = {
+        ...memory,
+        load: input =>
+          Effect.suspend(() => {
+            if (!failNextLoad) {
+              return memory.load(input)
+            }
+
+            failNextLoad = false
+
+            return Effect.fail(new PoolStoreError({ operation: 'load', message: 'down' }))
+          })
+      }
+
+      const overloaded = llmError({ kind: 'overloaded' })
+
+      const primary = scripted('primary', 10, [
+        fail(quotaExhausted(t0 + 3 * day)),
+        fail(quotaExhausted(t0 + 5 * hour))
+      ])
+
+      const backup = scripted('backup', 0, [fail(overloaded)])
+      const { pool } = yield* setup({ accounts: [primary.account, backup.account], store })
+
+      // Primary cools down for three days; backup then fails transiently.
+      expect(yield* Stream.runCollect(pool.provider.stream(request)).pipe(Effect.flip)).toBe(
+        overloaded
+      )
+
+      // The host records a reading taken after that cooldown began, showing quota left.
+      yield* TestClock.adjust(minute)
+      yield* pool.recordReading('primary', snapshot(t0 + minute, weekly(0, t0 + 6 * day)))
+
+      // The loop's retry calls the pool again; the store read fails, so fill-first picks primary,
+      // which fails after the reading. Its failover must not clear primary's cooldown.
+      yield* TestClock.adjust(minute)
+      failNextLoad = true
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+
+      // The next request skips primary: it failed after the reading.
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+      expect(primary.calls).toHaveLength(2)
     })
   )
 
