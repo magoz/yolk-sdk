@@ -218,6 +218,7 @@
     "harness-inbox-hitl",
     "harness-interaction-matching",
     "harness-interrupt-begin-race",
+    "harness-non-empty-pause",
     "harness-owner-layers",
     "harness-park-wake",
     "harness-pr49-lifecycle",
@@ -231,6 +232,7 @@
     "kie-connector",
     "knowledge-tool-output",
     "ledger-input-required-marker",
+    "ledger-staged-plan-over-bound",
     "linkedin-search-conformance-cases",
     "mcp-approval-choice",
     "mcp-conformance-cases",
@@ -268,6 +270,7 @@
     "quiet-owls-approve",
     "quiet-timers-jump",
     "r2-port-emulator",
+    "reconcile-every-disputed-turn",
     "refresh-package-docs",
     "rename-public-shape-types",
     "rename-task-subagent",
@@ -323,6 +326,7 @@
     "workflow-close-idempotent",
     "workflow-five-beta",
     "workflow-hitl-hook-answers",
+    "workflow-hook-token-conflict",
     "workflow-runtime-factory"
   ]
 }
