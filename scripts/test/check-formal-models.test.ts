@@ -496,7 +496,7 @@ describe.skipIf(process.platform === 'win32')('everystateChecker', () => {
       EverystateChecker.Unusable({
         message:
           'EVERYSTATE_BINARY (everystate) is a bare name, not a path; set it to the ' +
-          "checker's absolute path, or a path relative to where the command runs"
+          "checker's absolute path, or a path relative to where the command runs (the repository root for pnpm)"
       })
     )
   })

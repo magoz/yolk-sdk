@@ -512,7 +512,7 @@ const isExecutable = (file: string) => {
 
 /**
  * `EVERYSTATE_BINARY` as the file to run. A relative path is resolved against the working directory
- * before it is checked, since each configuration runs in its model's folder. A bare name is
+ * (the repository root under `pnpm models:check`) before it is checked, since each configuration runs in its model's folder. A bare name is
  * refused rather than looked up on `PATH`: the variable names a file.
  */
 const everystateOverride = (override: string): EverystateChecker => {
@@ -520,7 +520,7 @@ const everystateOverride = (override: string): EverystateChecker => {
     return EverystateChecker.Unusable({
       message:
         `EVERYSTATE_BINARY (${override}) is a bare name, not a path; set it to the checker's ` +
-        'absolute path, or a path relative to where the command runs'
+        'absolute path, or a path relative to where the command runs (the repository root for pnpm)'
     })
   }
 
