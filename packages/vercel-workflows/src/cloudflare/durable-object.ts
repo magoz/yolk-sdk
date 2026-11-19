@@ -20,6 +20,8 @@ export class WorkflowRun extends DurableObject {
   private executionInstance: WorkflowExecution | undefined
   private readonly readers = new Set<Reader>()
   private readonly settledWaiters = new Set<() => void>()
+  /** On a hook index: the claim decided last, which the next one waits for. */
+  private hookClaims: Promise<unknown> = Promise.resolve()
 
   private get store(): RunStore {
     this.storeInstance ??= makeSqliteRunStore(this.ctx.storage.sql)
@@ -155,40 +157,46 @@ export class WorkflowRun extends DurableObject {
     })
   }
 
-  /** Whether a live hook of this run holds `token` (it was neither disposed nor did its run end). */
+  /**
+   * Whether this run holds `token` (a live hook of the run, neither disposed nor ended with the
+   * run) or awaits the answer to its own claim on it.
+   */
   async hookHeld(token: string): Promise<boolean> {
-    return this.execution.holdsHook(token)
+    return this.execution.claimsHook(token)
   }
 
   /**
    * On a hook index: routes `token` to `runId` unless a live hook of another run holds it. The
    * index names the run that took the token last; a disposed hook or an ended run frees it without
-   * telling the index, so the index asks that run whether it still holds the token.
+   * telling the index, so the index asks that run whether it still holds the token. Claims are
+   * decided one at a time: while the index awaits that answer its input gate is open, and a claim
+   * the named run made meanwhile would otherwise be granted beside this one. `hookHeld` never calls
+   * an index, so a claim never waits on itself.
    */
   async hookClaim(token: string, runId: string): Promise<HookClaim> {
+    const claim = this.hookClaims.then(() => this.decideHookClaim(token, runId))
+
+    this.hookClaims = claim.catch(() => undefined)
+
+    return claim
+  }
+
+  private async decideHookClaim(token: string, runId: string): Promise<HookClaim> {
     const index = makeHookIndex(this.ctx.storage.sql)
+    const holder = index.read()
 
-    for (;;) {
-      const holder = index.read()
-
-      // The claiming run has no live hook on the token: an entry naming it is stale.
-      if (holder === undefined || holder === runId) {
-        index.write(runId)
-
-        return { claimed: true }
-      }
-
-      if (await runNamespace().getByName(holder).hookHeld(token)) {
-        return { claimed: false, holderRunId: holder }
-      }
-
-      // Another claim may have taken the token while the holder answered.
-      if (index.read() === holder) {
-        index.write(runId)
-
-        return { claimed: true }
-      }
+    // The run claiming again (its earlier hook freed the token, or a replay asks again) takes it.
+    if (
+      holder !== undefined &&
+      holder !== runId &&
+      (await runNamespace().getByName(holder).hookHeld(token))
+    ) {
+      return { claimed: false, holderRunId: holder }
     }
+
+    index.write(runId)
+
+    return { claimed: true }
   }
 
   async hookRun(): Promise<string | undefined> {

@@ -45,6 +45,15 @@ Hosts that drive `WorkflowExecution` themselves pass `claimHook` (returning a `H
 of `registerHook`; custom `WorkflowRunStub` namespaces implement `hookClaim` and `hookHeld` instead
 of `hookRegister` ([Cloudflare runtime](./vercel-workflows/cloudflare)).
 
+Runs in flight at the upgrade keep what the earlier build left. A run waiting on a token that the
+earlier build let a newer run take stays unreachable: the index names the newer run, and its
+`resumeHook` calls reach the newer run. Before upgrading, drain or cancel runs waiting on tokens
+that several runs share. Earlier builds also kept the token entry of a hook that was disposed but
+never answered. A run that replays after the upgrade (after an eviction, or on its next `resumeHook`)
+repairs both: disposing that hook again deletes its entry, and a hook that still has an entry asks
+the index for its token again (it is refused if another live hook holds it). A run that does not
+replay keeps that entry until it ends, and the token stays taken until then.
+
 ### Canary.143: non-empty harness pause
 
 `Driver.pause` and `Inbox.park` from `@yolk-sdk/harness` take a non-empty request id list

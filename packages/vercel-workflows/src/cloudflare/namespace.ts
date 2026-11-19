@@ -30,7 +30,7 @@ export interface WorkflowRunStub {
   resumeHook(token: string, payload: string): Promise<boolean>
   tailIndex(): Promise<number>
   readable(startIndex?: number): Promise<ReadableStream<Uint8Array>>
-  /** Whether a live hook of the run holds `token`. */
+  /** Whether a live hook of the run holds `token`, or the run's claim on it awaits an answer. */
   hookHeld(token: string): Promise<boolean>
   /** On a hook index: route `token` to `runId`, unless another run's live hook holds it. */
   hookClaim(token: string, runId: string): Promise<HookClaim>

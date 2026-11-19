@@ -15,7 +15,7 @@ import { deserialize, serialize } from '../src/cloudflare/serialization.ts'
 import { makeSqliteRunStore } from '../src/cloudflare/sqlite-store.ts'
 import { compileWorkflowDirectives, workflowDirectivesRuntime } from '../src/cloudflare/vite.ts'
 import { createHook, getWritable, sleep } from '../src/cloudflare/workflow.ts'
-import { makeFakeWorkflowRuns, makeSqliteSql } from './cloudflare-fakes.ts'
+import { makeFakeWorkflowRuns, makeGate, makeSqliteSql } from './cloudflare-fakes.ts'
 
 const readText = async (stream: ReadableStream<Uint8Array>) => {
   const decoder = new TextDecoder()
@@ -26,8 +26,8 @@ const readText = async (stream: ReadableStream<Uint8Array>) => {
   return text + decoder.decode()
 }
 
-const waitFor = async (condition: () => Promise<boolean> | boolean) => {
-  for (let tries = 0; tries < 200; tries++) {
+const waitFor = async (condition: () => Promise<boolean> | boolean, timeoutMs = 1000) => {
+  for (let tries = 0; tries < timeoutMs / 5; tries++) {
     if (await condition()) return
 
     await new Promise(resolve => setTimeout(resolve, 5))
@@ -36,6 +36,14 @@ const waitFor = async (condition: () => Promise<boolean> | boolean) => {
   throw new Error('condition not met')
 }
 
+/** What a workflow body sees of a refused hook. */
+const refusalOf = (error: unknown) => ({
+  name: Predicate.hasProperty(error, 'name') ? error.name : undefined,
+  conflictingRunId: Predicate.hasProperty(error, 'conflictingRunId')
+    ? error.conflictingRunId
+    : undefined
+})
+
 describe('WorkflowRun and the workflow/api module', () => {
   let runs = makeFakeWorkflowRuns()
 
@@ -43,6 +51,78 @@ describe('WorkflowRun and the workflow/api module', () => {
     runs = makeFakeWorkflowRuns()
     runs.install()
   })
+
+  // A run (the returner) freed `token` and the index still names it. Another run (the arriver)
+  // claims it: the index asks the returner, whose answer (it holds nothing) is held at a gate while
+  // the returner creates a new hook on the token and claims it again. The test opens the gate.
+  const returnWhileAnswerIsLate = async (token: string) => {
+    const gate = makeGate()
+    let gated = ''
+
+    runs.installWith((name, stub) =>
+      name === gated
+        ? {
+            ...stub,
+            hookHeld: async held => {
+              const answer = await stub.hookHeld(held)
+
+              await gate.wait()
+
+              return answer
+            }
+          }
+        : stub
+    )
+
+    let reclaim: () => void = () => undefined
+
+    const reclaimed = new Promise<void>(resolve => {
+      reclaim = resolve
+    })
+
+    async function returning() {
+      const first = createHook({ token })
+
+      await sleep(10)
+      first.dispose()
+      await sleep(10)
+      // Not durable: the test lets the run go on once the arriver's claim waits on the gate.
+      await reclaimed
+
+      using second = createHook({ token })
+
+      try {
+        return { answer: await second }
+      } catch (error) {
+        return refusalOf(error)
+      }
+    }
+
+    async function arriving() {
+      using hook = createHook({ token })
+
+      return { answer: await hook }
+    }
+
+    workflowEntry(returning, `runtime#returning-${token}`)
+    workflowEntry(arriving, `runtime#arriving-${token}`)
+
+    const returner = await start(returning)
+    const index = runs.namespace.getByName(`hook:${token}`)
+    const returnerObject = runs.namespace.getByName(returner.runId)
+
+    await waitFor(async () => (await index.hookRun()) === returner.runId)
+    await waitFor(async () => !(await returnerObject.hookHeld(token)))
+    gated = returner.runId
+
+    const arriver = await start(arriving)
+
+    await waitFor(() => gate.reached)
+    reclaim()
+    await waitFor(() => returnerObject.hookHeld(token))
+
+    return { gate, index, returner, arriver }
+  }
 
   it('starts a run, streams its chunks, and returns its result', async () => {
     async function emit(text: string) {
@@ -190,6 +270,159 @@ describe('WorkflowRun and the workflow/api module', () => {
 
     await resumeHook('runtime-after', 'done')
     expect(await abandoned.returnValue).toBe('done')
+  })
+
+  it('gives a token to one run when its last holder claims it again during a late answer', async () => {
+    const { gate, index, returner, arriver } = await returnWhileAnswerIsLate('runtime-aba')
+
+    gate.open()
+
+    // The arriver took the token; the returner's new hook is refused instead of holding it too.
+    await waitFor(async () => (await returner.status) === 'completed')
+    expect(await returner.returnValue).toEqual({
+      name: 'HookConflictError',
+      conflictingRunId: arriver.runId
+    })
+    expect(await index.hookRun()).toBe(arriver.runId)
+    await resumeHook('runtime-aba', 'arrived')
+    expect(await arriver.returnValue).toEqual({ answer: 'arrived' })
+  })
+
+  it('delivers no payload to a hook whose claim is still undecided', async () => {
+    const { gate, returner, arriver } = await returnWhileAnswerIsLate('runtime-undecided')
+
+    // The index still names the returner, but its new hook has not taken the token.
+    await expect(resumeHook('runtime-undecided', 'early')).rejects.toSatisfy(HookNotFoundError.is)
+    gate.open()
+    await waitFor(async () => (await returner.status) === 'completed')
+    expect(await returner.returnValue).toEqual({
+      name: 'HookConflictError',
+      conflictingRunId: arriver.runId
+    })
+    await resumeHook('runtime-undecided', 'arrived')
+    expect(await arriver.returnValue).toEqual({ answer: 'arrived' })
+  })
+
+  it('claims a hook again when its object restarted during the claim', async () => {
+    const gate = makeGate()
+    let first = true
+
+    runs.installWith((name, stub) =>
+      name === 'hook:runtime-cut'
+        ? {
+            ...stub,
+            hookClaim: async (token, runId) => {
+              // The first claim never returns: its object restarts meanwhile.
+              if (first) {
+                first = false
+                await gate.wait()
+              }
+
+              return stub.hookClaim(token, runId)
+            }
+          }
+        : stub
+    )
+
+    async function cut() {
+      using hook = createHook({ token: 'runtime-cut' })
+
+      return await hook
+    }
+
+    workflowEntry(cut, 'runtime#cut')
+
+    const run = await start(cut)
+
+    await waitFor(() => gate.reached)
+    await runs.settleBackground()
+    runs.evict(run.runId)
+    await runs.fireAlarm(run.runId)
+    await waitFor(
+      async () => (await runs.namespace.getByName('hook:runtime-cut').hookRun()) === run.runId
+    )
+    await resumeHook('runtime-cut', 'after restart')
+    expect(await run.returnValue).toBe('after restart')
+    // The claim armed the guard alarm that replayed the run.
+    expect(runs.alarmOf(run.runId)).toBeTypeOf('number')
+  })
+
+  it('retries a hook claim the index failed', async () => {
+    let failures = 1
+
+    runs.installWith((name, stub) =>
+      name === 'hook:runtime-flaky'
+        ? {
+            ...stub,
+            hookClaim: async (token, runId) => {
+              if (failures > 0) {
+                failures -= 1
+
+                throw new Error('index reset')
+              }
+
+              return stub.hookClaim(token, runId)
+            }
+          }
+        : stub
+    )
+
+    async function flaky() {
+      using hook = createHook({ token: 'runtime-flaky' })
+
+      return await hook
+    }
+
+    workflowEntry(flaky, 'runtime#flaky')
+
+    const run = await start(flaky)
+
+    await waitFor(
+      async () => (await runs.namespace.getByName('hook:runtime-flaky').hookRun()) === run.runId,
+      3000
+    )
+    await resumeHook('runtime-flaky', 'retried')
+    expect(await run.returnValue).toBe('retried')
+  })
+
+  it('replays a refused hook as refused after an eviction', async () => {
+    async function keeping() {
+      const hook = createHook({ token: 'runtime-replayed' })
+
+      return await hook
+    }
+
+    async function refusedThenWaiting() {
+      const refusal = await createHook({ token: 'runtime-replayed' }).then(
+        () => undefined,
+        refusalOf
+      )
+
+      return { refusal, next: await createHook({ token: 'runtime-replayed-next' }) }
+    }
+
+    workflowEntry(keeping, 'runtime#keeping')
+    workflowEntry(refusedThenWaiting, 'runtime#refused-then-waiting')
+
+    const holder = await start(keeping)
+
+    await waitFor(
+      async () =>
+        (await runs.namespace.getByName('hook:runtime-replayed').hookRun()) === holder.runId
+    )
+
+    const refused = await start(refusedThenWaiting)
+
+    await waitFor(
+      async () =>
+        (await runs.namespace.getByName('hook:runtime-replayed-next').hookRun()) === refused.runId
+    )
+    runs.evict(refused.runId)
+    await resumeHook('runtime-replayed-next', 'next')
+    expect(await refused.returnValue).toEqual({
+      refusal: { name: 'HookConflictError', conflictingRunId: holder.runId },
+      next: 'next'
+    })
   })
 
   it('replays a run after its object was evicted without re-running finished steps', async () => {

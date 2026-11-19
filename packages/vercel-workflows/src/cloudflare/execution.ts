@@ -116,6 +116,10 @@ class LiveRun {
   private hookChanges: Array<HookChange> = []
   private hookTimer: ReturnType<typeof setTimeout> | undefined
   private hookChangesApplied: Promise<void> = Promise.resolve()
+  /** Tokens whose claim waits for the index's answer. */
+  private readonly claiming = new Set<string>()
+  /** Journal keys of the hooks the body disposed. */
+  private readonly disposedHooks = new Set<string>()
   private readonly sleepTimers = new Set<ReturnType<typeof setTimeout>>()
 
   private readonly run: RunRecord
@@ -336,14 +340,16 @@ class LiveRun {
       change => change.kind === 'claim' && change.key === key
     )
 
+    this.disposedHooks.add(key)
+
     // Disposed before the run waited: it never takes the token.
     if (unclaimed !== -1) {
       this.hookChanges.splice(unclaimed, 1)
       this.hookWaiters.delete(key)
-
-      return
     }
 
+    // Released even then: a replay disposes a hook whose row an earlier execution kept when the
+    // object went away before applying the disposal. A release frees only this hook's row.
     this.changeHook({ kind: 'release', token, key })
   }
 
@@ -381,43 +387,77 @@ class LiveRun {
     }
   }
 
+  private isLive(): boolean {
+    const run = this.host.store.readRun()
+
+    return !this.halted && run !== undefined && !isTerminal(run)
+  }
+
+  // The row of a hook (its token's `wf_hook` entry) is written only once the index granted the
+  // claim, so a resume never reaches a hook that may still lose it; until then a resume answers
+  // `HookNotFoundError`, which callers retry. While the claim is undecided, `isClaiming` tells the
+  // index the token is taken, so the grant it may already have sent is not given to another run.
   private async claimHook(token: string, key: string) {
     const store = this.host.store
-    const run = store.readRun()
 
-    if (this.halted || run === undefined || isTerminal(run)) return
+    if (!this.isLive()) return
 
     const held = store.readPendingHook(token)
 
-    // A replay re-creating the hook that holds the token.
-    if (held === key) return
-
-    if (held !== undefined) {
+    if (held !== undefined && held !== key) {
       this.refuseHook(token, key, this.run.runId)
 
       return
     }
 
-    // Held here first, so a resume the index routes here before the claim returns finds it.
-    store.writePendingHook(token, key)
-
-    let claim: HookClaim
+    // `held === key`: a replay re-creating a hook with a row. Its claim is asked again: the row
+    // may predate the grant (builds before this one wrote it before claiming).
+    this.claiming.add(token)
 
     try {
-      claim = await this.host.claimHook(token)
-    } catch (error) {
+      const claim = await this.requestClaim(token, key)
+
+      if (claim === undefined || !this.isLive()) return
+
+      if (claim.claimed) {
+        store.writePendingHook(token, key)
+
+        return
+      }
+
       if (store.readPendingHook(token) === key) store.deletePendingHook(token)
 
-      this.host.log(`Could not register workflow hook ${token}`, error)
-
-      return
+      this.refuseHook(token, key, claim.holderRunId)
+    } finally {
+      this.claiming.delete(token)
     }
+  }
 
-    if (claim.claimed || this.halted) return
+  // The index is another object: a failed call (a reset, an overload) is retried with the step
+  // backoff and never journaled. The guard alarm, armed while a claim is in flight, replays the run
+  // if this object goes away meanwhile. Undefined once the run ended or the hook was disposed.
+  private async requestClaim(token: string, key: string): Promise<HookClaim | undefined> {
+    for (let attempt = 1; ; attempt++) {
+      if (!this.isLive() || this.disposedHooks.has(key)) return undefined
 
-    if (store.readPendingHook(token) === key) store.deletePendingHook(token)
+      this.host.wakeAt(Date.now() + stepGuardIntervalMs)
 
-    this.refuseHook(token, key, claim.holderRunId)
+      try {
+        return await this.host.claimHook(token)
+      } catch (error) {
+        this.host.log(`Could not claim workflow hook ${token}; retrying`, error)
+        await delay(retryDelayMs(attempt, error))
+      }
+    }
+  }
+
+  /** Whether a claim on `token` is waiting for the index's answer. */
+  isClaiming(token: string): boolean {
+    return this.claiming.has(token)
+  }
+
+  get claimsInFlight(): number {
+    return this.claiming.size
   }
 
   private refuseHook(token: string, key: string, holderRunId: string) {
@@ -520,12 +560,26 @@ export class WorkflowExecution {
       })
   }
 
-  /** Whether a live hook of this run holds `token`: neither disposed nor ended with its run. */
+  /**
+   * Whether a live hook of this run holds `token`: granted by the index, neither disposed nor ended
+   * with its run. Only such a hook takes payloads.
+   */
   holdsHook(token: string): boolean {
     const run = this.host.store.readRun()
 
     return (
       run !== undefined && !isTerminal(run) && this.host.store.readPendingHook(token) !== undefined
+    )
+  }
+
+  /** What the index asks: this run holds `token`, or a claim of its own on it awaits an answer. */
+  claimsHook(token: string): boolean {
+    const run = this.host.store.readRun()
+
+    if (run === undefined || isTerminal(run)) return false
+
+    return (
+      this.host.store.readPendingHook(token) !== undefined || this.live?.isClaiming(token) === true
     )
   }
 
@@ -559,10 +613,15 @@ export class WorkflowExecution {
     this.host.runSettled()
   }
 
-  /** An alarm: re-arm while a step runs here, or replay a run lost with an earlier instance. */
+  /**
+   * An alarm: re-arm while a step or a hook claim runs here, or replay a run lost with an earlier
+   * instance.
+   */
   wake(): void {
     if (this.live !== undefined) {
-      if (this.live.stepsInFlight > 0) this.host.wakeAt(Date.now() + stepGuardIntervalMs)
+      if (this.live.stepsInFlight > 0 || this.live.claimsInFlight > 0) {
+        this.host.wakeAt(Date.now() + stepGuardIntervalMs)
+      }
 
       return
     }

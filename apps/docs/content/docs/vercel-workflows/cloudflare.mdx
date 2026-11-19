@@ -27,7 +27,8 @@ Each run lives in its own `WorkflowRun` Durable Object, named by its run id.
   `HookConflictError` (`token`, `conflictingRunId`) while the holder keeps the token. A token is
   free again once its hook is disposed or its run ends. `resumeHook` succeeds for every payload
   sent to a live hook (`await hook` reads the first) and rejects with `HookNotFoundError` when no
-  live hook holds the token.
+  live hook holds the token, including a new hook the index has not granted yet: retry while the
+  pause is pending.
 - Unlike Vercel, which decides at the run's next durable suspension, the runtime decides at the
   next macrotask, so dispose the previous hook before any `await` that yields to the event loop. A
   hook is read once (awaiting it again gives the first payload), and `getConflict()` is not

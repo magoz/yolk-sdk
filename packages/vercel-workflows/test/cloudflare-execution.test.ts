@@ -218,6 +218,39 @@ describe('WorkflowExecution', () => {
     })
   })
 
+  it('frees a token on replay when an eviction lost its disposal', async () => {
+    async function relayWorkflow() {
+      const first = createHook({ token: 'relay' })
+
+      await sleep(1)
+      first[Symbol.dispose]()
+
+      using second = createHook({ token: 'relay' })
+
+      return await second
+    }
+
+    workflowEntry(relayWorkflow, 'test#relay')
+
+    const store = makeMemoryRunStore()
+    const { host, settled } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+    const done = settled()
+
+    startRun(store, 'test#relay', [])
+    // An earlier execution: the first hook took the token and the sleep fired, then the object went
+    // away before the disposal that followed was applied.
+    store.writePendingHook('relay', 'hook:relay#0')
+    store.writeSleep('sleep#0', Date.now())
+    store.writeJournal('sleep#0', { ok: true, value: serialize(undefined) })
+    execution.kick()
+    await waitFor(() => store.readPendingHook('relay') === 'hook:relay#1')
+    execution.deliverHook('relay', serialize('relayed'))
+    await done
+
+    expect(outcome(store)).toEqual({ status: 'completed', value: 'relayed' })
+  })
+
   it('retries a failing step, stops on a fatal error, and wraps an exhausted one', async () => {
     let flaky = 0
     let fatal = 0

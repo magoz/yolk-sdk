@@ -16,7 +16,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | `fixtures/workflow-fixture.ts`           | Test-only workflow/step directive fixture; not published          |
 | `cloudflare-execution.test.ts`           | Cloudflare runtime execution over the memory run store            |
 | `cloudflare-runtime.test.ts`             | `WorkflowRun` on `node:sqlite` through the `workflow/api` drop-in |
-| `cloudflare-fakes.ts`                    | Fake `WORKFLOW_RUNS` namespace and Durable Object SQL             |
+| `cloudflare-fakes.ts`                    | Fake `WORKFLOW_RUNS` namespace, Durable Object SQL, RPC gates     |
 | `cloudflare-workers-stub.ts`             | `cloudflare:workers` stub the package Vitest aliases              |
 
 ## Rules
