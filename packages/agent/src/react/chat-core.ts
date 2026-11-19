@@ -1,4 +1,4 @@
-import { Match, Predicate } from 'effect'
+import { Match, Option, Predicate } from 'effect'
 import {
   AgentFailed,
   hitlResponseEvent,
@@ -15,8 +15,19 @@ import {
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
+  agentEventToolCallIds,
+  disputedAgentExecution,
+  recordAgentExecutionEvent,
+  routeAgentExecutionEvent,
+  type AgentExecution,
+  type AgentExecutions
+} from '../client/executions.ts'
+import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
+  AgentChatExecutionOutput,
+  discardChatExecutionOutput,
+  replaceWithCommittedAnswer,
   deleteChatTurn,
   editChatUserMessage,
   markChatError,
@@ -41,11 +52,19 @@ export type AgentChatState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
   readonly seenEventIds: ReadonlyArray<string>
+  /** Model-step executions seen on this stream; see `AgentChatEventProjectionState`. */
+  readonly executions?: AgentExecutions<AgentChatExecutionOutput>
 }
 
 export type AgentChatEventProjectionState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly seenEventIds: ReadonlyArray<string>
+  /**
+   * Model-step executions seen on this stream (events carrying `executionId`), with the chat
+   * message ids and tool calls each produced. Carry it with `seenEventIds` between events; absent
+   * in states built before it.
+   */
+  readonly executions?: AgentExecutions<AgentChatExecutionOutput>
 }
 
 export const initialAgentChatState: AgentChatState = {
@@ -115,10 +134,164 @@ export const applyAgentEventToChatProjection = (
     return state
   }
 
-  return {
-    chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, options),
-    seenEventIds: rememberEventId(state.seenEventIds, event)
+  const seenEventIds = rememberEventId(state.seenEventIds, event)
+  const projected = projectExecutionEvent(state, event, options)
+
+  return projected.executions === undefined
+    ? { chatMessages: projected.chatMessages, seenEventIds }
+    : { chatMessages: projected.chatMessages, seenEventIds, executions: projected.executions }
+}
+
+type ExecutionProjection = {
+  readonly chatMessages: ReadonlyArray<AgentChatMessage>
+  readonly executions?: AgentExecutions<AgentChatExecutionOutput>
+}
+
+type ProjectedExecutionEvent = ExecutionProjection & {
+  /** False when the event belonged to a superseded, settled or stale execution. */
+  readonly applied: boolean
+}
+
+/**
+ * Applies one event with model-step execution routing (`executionId`): drops a superseded,
+ * settled or stale execution's events, removes a superseded execution's provisional output when a
+ * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` replaces a disputed
+ * turn's answer with the committed one.
+ */
+const projectExecutionEvent = (
+  projection: ExecutionProjection,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions
+): ProjectedExecutionEvent => {
+  const executions = projection.executions ?? []
+  const route = routeAgentExecutionEvent(executions, event)
+
+  if (Predicate.isTagged(route, 'Drop')) return { ...projection, applied: false }
+
+  if (Predicate.isTagged(route, 'Stale')) {
+    return { chatMessages: projection.chatMessages, executions: route.executions, applied: false }
   }
+
+  const started = Predicate.isTagged(route, 'Start')
+    ? discardChatExecutionOutput(
+        projection.chatMessages,
+        route.superseded.flatMap(execution => execution.output),
+        new Set(route.superseded.flatMap(execution => execution.calls))
+      )
+    : projection.chatMessages
+
+  const disputed = disputedAgentExecution(executions)
+
+  const committed =
+    disputed !== undefined &&
+    (Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput'))
+      ? replaceWithCommittedAnswer(
+          started,
+          disputed.output,
+          new Set(disputed.calls),
+          event.messages
+        )
+      : started
+
+  const owner = Predicate.isTagged(route, 'Owned')
+    ? route.execution
+    : Predicate.isTagged(route, 'Start')
+      ? route.started
+      : undefined
+
+  const chatMessages = applyAgentEventToChatMessages(committed, event, options)
+
+  const after = recordAgentExecutionEvent(
+    Predicate.isTagged(route, 'Start') ? route.executions : executions,
+    event,
+    route,
+    owner === undefined ? [] : chatExecutionOutput(owner, event, committed, chatMessages)
+  )
+
+  return after === executions
+    ? { ...projection, chatMessages, applied: true }
+    : { chatMessages, executions: after, applied: true }
+}
+
+const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
+  messages
+    .filter(message =>
+      message.parts.some(part => Predicate.isTagged(part, 'ToolCall') && part.call.id === callId)
+    )
+    .at(-1)
+
+/**
+ * What an execution's event produced: the chat messages it created, and each tool part it touched
+ * first, with the part it replaced (providers reuse call ids across turns) so removal can restore it.
+ */
+const chatExecutionOutput = (
+  execution: AgentExecution<AgentChatExecutionOutput>,
+  event: AgentEvent,
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatExecutionOutput> => {
+  const known = new Set(before.map(message => message.id))
+
+  const touched = new Set(
+    execution.output.flatMap(output =>
+      Predicate.isTagged(output, 'ToolPart') ? [output.callId] : []
+    )
+  )
+
+  const created = after.flatMap(message =>
+    known.has(message.id) ? [] : [AgentChatExecutionOutput.Message({ messageId: message.id })]
+  )
+
+  const parts = agentEventToolCallIds(event).flatMap(callId => {
+    if (touched.has(callId)) return []
+
+    const prior = messageWithToolCall(before, callId)
+    const current = messageWithToolCall(after, callId)
+    const holder = prior ?? current
+
+    if (holder === undefined) return []
+
+    const priorPart = Option.fromNullishOr(
+      prior?.parts.find(part => Predicate.isTagged(part, 'ToolCall') && part.call.id === callId)
+    )
+
+    return [AgentChatExecutionOutput.ToolPart({ callId, messageId: holder.id, prior: priorPart })]
+  })
+
+  return [...created, ...replacedMessages(execution, event, before, after), ...parts]
+}
+
+/**
+ * Messages an execution's `AssistantMessage` replaced without having created them (an earlier
+ * turn's message matched by a reused call id), recorded once with how they were.
+ */
+const replacedMessages = (
+  execution: AgentExecution<AgentChatExecutionOutput>,
+  event: AgentEvent,
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatExecutionOutput> => {
+  if (!Predicate.isTagged(event, 'AssistantMessage')) return []
+
+  const recorded = new Set(
+    execution.output.flatMap(output =>
+      Predicate.isTagged(output, 'Message')
+        ? [output.messageId]
+        : Predicate.isTagged(output, 'ReplacedMessage')
+          ? [output.prior.id]
+          : []
+    )
+  )
+
+  const current = new Map(after.map(message => [message.id, message]))
+
+  return before.flatMap(prior => {
+    const next = current.get(prior.id)
+
+    return next === undefined || next === prior || recorded.has(prior.id)
+      ? []
+      : [AgentChatExecutionOutput.ReplacedMessage({ prior })]
+  })
 }
 
 export type AgentChatAction =
@@ -152,6 +325,7 @@ export const reduceAgentChatState = (
       started(state, {
         ...state,
         seenEventIds: [],
+        executions: [],
         chatMessages: appendProtocolMessage(state.chatMessages, current.message),
         sessionEvents: [
           ...state.sessionEvents,
@@ -173,6 +347,7 @@ export const reduceAgentChatState = (
       started(state, {
         ...state,
         seenEventIds: [],
+        executions: [],
         // User data is not a validated tool result until the server accepts it. Keep the
         // form mounted while submitting and never replay an optimistic invalid payload.
         chatMessages:
@@ -210,6 +385,7 @@ export const reduceAgentChatState = (
           started(state, {
             ...state,
             seenEventIds: [],
+            executions: [],
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -231,6 +407,7 @@ export const reduceAgentChatState = (
           started(state, {
             ...state,
             seenEventIds: [],
+            executions: [],
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -250,10 +427,14 @@ export const reduceAgentChatState = (
         return state
       }
 
-      const projected = {
-        ...state,
-        chatMessages: applyAgentEventToChatMessages(state.chatMessages, current.event, current)
-      }
+      const routed = projectExecutionEvent(state, current.event, current)
+
+      const projected =
+        routed.executions === undefined
+          ? { ...state, chatMessages: routed.chatMessages }
+          : { ...state, chatMessages: routed.chatMessages, executions: routed.executions }
+
+      if (!routed.applied) return rememberEvent(projected, current.event)
 
       // A replayed start of an already settled call must not reopen the run.
       const fenced =

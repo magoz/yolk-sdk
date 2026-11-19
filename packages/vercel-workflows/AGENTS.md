@@ -53,6 +53,16 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Durable event helpers are pure/Effect-native: `sequenceDurableAgentEvent`, `writeDurableAgentEvent`, and `commitThenWriteTerminalEvent`; hosts own storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.
+- Every execution of a step starts from the same `eventSequence`, so every event a model call
+  produces (`LLMStreamStart` through `AssistantMessage`/`UsageUpdate`) needs an `executionId`
+  unique per execution (`${stepId}:${attempt}` from `getStepMetadata()`; non-empty, trimmed, or
+  sequencing throws). The sequencer appends it to the id and sets the event's `executionId` field
+  (removed without it) and, on every event, `streamId` (so a terminal event closes its own run),
+  which `@yolk-sdk/agent` clients route by; without it a re-execution's different answer reuses the first one's ids and de-dupe splices
+  them. Host events (promoted user messages, the terminal event written after the commit) never
+  carry it, and a receipt replay rewrites only that terminal event. Without it ids are unchanged.
+  Tool-batch steps are out of scope: their ids stay plain; only ledgered calls replay identically
+  (read calls rerun).
 - Terminal durable event helpers model commit-before-write ordering only; they never infer closure
   from an event tag or close writers. `closeStream` owns successful `AgentEnd` closure;
   `writeError` owns safe `AgentError` write plus failure closure; successful
@@ -63,7 +73,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
-- Model/tool/await-input step retries are opt-in; their default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks. The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`, any rejection including `FatalError`): a Vercel close is idempotent, so a close-only step's retry writes nothing, and a close applied by an attempt that then failed ends `Completed` when a later attempt succeeds (`CloseStreamFailed` only once every attempt failed).
+- Model/tool/await-input step retries are opt-in; their default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries replay chunks. `eventId` de-dupe alone never makes a retried model step safe; its live events need an `executionId`. The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`, any rejection including `FatalError`): a Vercel close is idempotent, so a close-only step's retry writes nothing, and a close applied by an attempt that then failed ends `Completed` when a later attempt succeeds (`CloseStreamFailed` only once every attempt failed).
 - Steps are still at-least-once (queue redelivery re-executes a step, also concurrently with a running first execution). Document that hosts must supply a durable tool ledger (`resolveTools(..., { ledger })` from `@yolk-sdk/agent/tools`) in their tool-batch steps; this package never builds tool sets or imports agent protocol, so it carries no ledger wiring.
 - `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `AwaitInputFailed`, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
 - Destructure callback config before invoking workflow steps/hooks; hook suspension may serialize functions otherwise.

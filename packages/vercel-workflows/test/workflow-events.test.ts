@@ -19,6 +19,90 @@ describe('durable workflow agent events', () => {
     )
   })
 
+  it('appends an execution id so two executions of one step never share an id', () => {
+    const sequenced = (executionId: string | undefined) =>
+      sequenceDurableAgentEvent({
+        state: makeDurableAgentEventSequencerState(3),
+        streamId: 'workflow:run-1',
+        turn: 2,
+        executionId,
+        event: { _tag: 'LLMTextDelta', text: 'hej' }
+      })
+
+    expect(sequenced('step-1:1').event).toEqual({
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      eventId: 'workflow:run-1:2:3:step-1:1',
+      executionId: 'step-1:1',
+      streamId: 'workflow:run-1'
+    })
+    expect(sequenced('step-1:2').event.eventId).toBe('workflow:run-1:2:3:step-1:2')
+    expect(sequenced(undefined).event.eventId).toBe('workflow:run-1:2:3')
+    expect(Object.hasOwn(sequenced(undefined).event, 'executionId')).toBe(false)
+    expect(sequenced('step-1:1').nextEventSequence).toBe(4)
+  })
+
+  it('keeps the execution fields in step with the id and rejects a blank execution or stream id', () => {
+    const stale = { _tag: 'LLMTextDelta', text: 'hej', executionId: 'old', streamId: 'other' }
+
+    const plain = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(0),
+      streamId: 'workflow:run-1',
+      turn: 1,
+      event: stale
+    })
+
+    expect(plain.event).toEqual({
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      eventId: 'workflow:run-1:1:0',
+      streamId: 'workflow:run-1'
+    })
+
+    const tagged = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(0),
+      streamId: 'workflow:run-1',
+      turn: 1,
+      executionId: 'step-1:2',
+      event: stale
+    })
+
+    expect(tagged.event.executionId).toBe('step-1:2')
+    expect(tagged.event.streamId).toBe('workflow:run-1')
+
+    expect(() =>
+      sequenceDurableAgentEvent({
+        state: makeDurableAgentEventSequencerState(0),
+        streamId: ' workflow:run-1',
+        turn: 1,
+        executionId: 'step-1:1',
+        event: { _tag: 'LLMTextDelta', text: 'hej' }
+      })
+    ).toThrow(TypeError)
+
+    // Without an execution a padded stream id only leaves the field off; the id is unchanged.
+    expect(
+      sequenceDurableAgentEvent({
+        state: makeDurableAgentEventSequencerState(0),
+        streamId: ' workflow:run-1',
+        turn: 1,
+        event: { _tag: 'LLMTextDelta', text: 'hej' }
+      }).event
+    ).toEqual({ _tag: 'LLMTextDelta', text: 'hej', eventId: ' workflow:run-1:1:0' })
+
+    for (const executionId of ['', ' ', ' step-1:1']) {
+      expect(() =>
+        sequenceDurableAgentEvent({
+          state: makeDurableAgentEventSequencerState(0),
+          streamId: 'workflow:run-1',
+          turn: 1,
+          executionId,
+          event: { _tag: 'LLMTextDelta', text: 'hej' }
+        })
+      ).toThrow(TypeError)
+    }
+  })
+
   it('sequences normal events monotonically', () => {
     const first = sequenceDurableAgentEvent({
       state: makeDurableAgentEventSequencerState(4),
@@ -39,13 +123,15 @@ describe('durable workflow agent events', () => {
       _tag: 'LLMTextDelta',
       text: 'hej',
       eventId: 'workflow:run-1:2:4',
+      streamId: 'workflow:run-1',
       createdAtMs: 123
     })
     expect(first.nextEventSequence).toBe(5)
     expect(second.event).toEqual({
       _tag: 'LLMTextDelta',
       text: ' då',
-      eventId: 'workflow:run-1:2:5'
+      eventId: 'workflow:run-1:2:5',
+      streamId: 'workflow:run-1'
     })
     expect(Object.hasOwn(second.event, 'createdAtMs')).toBe(false)
     expect(second.nextEventSequence).toBe(6)
@@ -59,9 +145,11 @@ describe('durable workflow agent events', () => {
       event: { text: 'hej' }
     })
 
-    expect(Object.keys(omitted.event)).toEqual(['text', 'eventId'])
+    expect(Object.keys(omitted.event)).toEqual(['text', 'eventId', 'streamId'])
     expect(Object.hasOwn(omitted.event, 'createdAtMs')).toBe(false)
-    expect(JSON.stringify(omitted.event)).toBe('{"text":"hej","eventId":"workflow:run-1:2:4"}')
+    expect(JSON.stringify(omitted.event)).toBe(
+      '{"text":"hej","eventId":"workflow:run-1:2:4","streamId":"workflow:run-1"}'
+    )
 
     const present = sequenceDurableAgentEvent({
       state: makeDurableAgentEventSequencerState(4),
@@ -71,9 +159,9 @@ describe('durable workflow agent events', () => {
       createdAtMs: 123
     })
 
-    expect(Object.keys(present.event)).toEqual(['text', 'eventId', 'createdAtMs'])
+    expect(Object.keys(present.event)).toEqual(['text', 'eventId', 'createdAtMs', 'streamId'])
     expect(JSON.stringify(present.event)).toBe(
-      '{"text":"hej","eventId":"workflow:run-1:2:4","createdAtMs":123}'
+      '{"text":"hej","eventId":"workflow:run-1:2:4","createdAtMs":123,"streamId":"workflow:run-1"}'
     )
 
     const kept = sequenceDurableAgentEvent({
@@ -84,7 +172,7 @@ describe('durable workflow agent events', () => {
     })
 
     expect(kept.event.createdAtMs).toBe(5)
-    expect(Object.keys(kept.event)).toEqual(['text', 'createdAtMs', 'eventId'])
+    expect(Object.keys(kept.event)).toEqual(['text', 'createdAtMs', 'eventId', 'streamId'])
 
     const overwritten = sequenceDurableAgentEvent({
       state: makeDurableAgentEventSequencerState(4),
@@ -94,7 +182,7 @@ describe('durable workflow agent events', () => {
     })
 
     expect(overwritten.event.eventId).toBe('workflow:run-1:2:4')
-    expect(Object.keys(overwritten.event)).toEqual(['eventId', 'text'])
+    expect(Object.keys(overwritten.event)).toEqual(['eventId', 'text', 'streamId'])
   })
 
   it('sequences error events through the same path', () => {
@@ -110,7 +198,8 @@ describe('durable workflow agent events', () => {
       code: 'unknown',
       message: 'Nope',
       retryable: false,
-      eventId: 'workflow:run-1:1:0'
+      eventId: 'workflow:run-1:1:0',
+      streamId: 'workflow:run-1'
     })
     expect(result.nextState).toEqual({ eventSequence: 1 })
   })
@@ -170,12 +259,13 @@ describe('durable workflow agent events', () => {
     expect(result.event).toEqual({
       _tag: 'LLMTextDelta',
       text: 'hej',
-      eventId: 'workflow:run-1:1:0'
+      eventId: 'workflow:run-1:1:0',
+      streamId: 'workflow:run-1'
     })
     expect(result.nextEventSequence).toBe(1)
     expect(chunks).toHaveLength(1)
     expect(new TextDecoder().decode(firstChunk)).toBe(
-      '{"_tag":"LLMTextDelta","text":"hej","eventId":"workflow:run-1:1:0"}\n'
+      '{"_tag":"LLMTextDelta","text":"hej","eventId":"workflow:run-1:1:0","streamId":"workflow:run-1"}\n'
     )
   })
 

@@ -80,9 +80,23 @@ Use `sequenceDurableAgentEvent` to add deterministic ids without writing. Use
 
 ```txt
 ${streamId}:${turn}:${eventSequence}
+${streamId}:${turn}:${eventSequence}:${executionId}
 ```
 
 Clients should de-dupe by `eventId` during resume/reconnect.
+
+Every execution of a step starts from the same `eventSequence`, and a step can run more than once
+(loop retries, platform retries, queue redelivery). Pass an `executionId` unique per execution, such
+as `${stepId}:${attempt}` from `getStepMetadata()`, on every event the model call produces, from
+`LLMStreamStart` (required) through `AssistantMessage`/`UsageUpdate`. The sequencer appends it to the
+id and sets it on the event with the `streamId`. Leave it off host events (a promoted user message,
+the terminal event written after the commit); a receipt replay rewrites only that terminal event.
+Yolk clients then remove a superseded execution's output, drop its later events and late starts,
+and show the committed answer for a final turn that ran more than once. Open case: a non-final turn
+whose older execution committed keeps the newer execution's answer and tool calls until reload,
+though the tool batch ran the older one's calls. Tool-batch steps are out of scope (read calls are
+not ledgered and can rerun differently). Upgrade clients with the server: older clients show both
+executions back to back.
 
 ## Commit before protocol terminal events
 

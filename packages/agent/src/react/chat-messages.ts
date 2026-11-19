@@ -1288,6 +1288,219 @@ const clearTransientParts = (
     return parts.length > 0 ? [{ ...message, parts }] : []
   })
 
+const isUnfinishedStreamPart = (part: AgentChatPart) =>
+  ((Predicate.isTagged(part, 'Text') || Predicate.isTagged(part, 'Reasoning')) &&
+    part.state === 'streaming') ||
+  (Predicate.isTagged(part, 'ToolCall') && Predicate.isTagged(part.state, 'InputStreaming'))
+
+/**
+ * A model response ends with its `AssistantMessage`, so a response still streaming at the tail
+ * when the next one starts belongs to a superseded execution (a retried or redelivered model
+ * step): drop its unfinished parts, and the message when nothing else remains.
+ */
+const discardUnfinishedStream = (
+  messages: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatMessage> => {
+  const last = messages.at(-1)
+
+  if (last === undefined || last.role !== 'assistant') return messages
+
+  const parts = last.parts.filter(part => !isUnfinishedStreamPart(part))
+
+  if (parts.length === last.parts.length) return messages
+
+  const kept = messages.slice(0, -1)
+
+  return parts.length === 0 ? kept : [...kept, { ...last, parts }]
+}
+
+/** What a model-step execution produced in the chat, for removal when it is superseded. */
+export type AgentChatExecutionOutput = Data.TaggedEnum<{
+  /** A chat message it created. */
+  Message: { readonly messageId: string }
+  /** A tool part it touched first, in `messageId`; `prior` is the part it replaced, if any. */
+  ToolPart: {
+    readonly callId: string
+    readonly messageId: string
+    readonly prior: Option.Option<AgentChatPart>
+  }
+  /**
+   * A message it did not create that its `AssistantMessage` replaced (an earlier turn's message
+   * holding a call id a provider reused), with the message as it was.
+   */
+  ReplacedMessage: { readonly prior: AgentChatMessage }
+}>
+
+export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
+
+const toolPartKey = (messageId: string, callId: string) => JSON.stringify([messageId, callId])
+
+/**
+ * Removes a model-step execution's provisional output after the last user message: the text and
+ * reasoning of the chat messages it created, and each tool part it touched whose call no other
+ * event acknowledged (`unacknowledged`), restored to the part it replaced (providers reuse call
+ * ids across turns) or else removed. Only its own parts are touched; a message left with no parts
+ * goes too.
+ */
+export const discardChatExecutionOutput = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  outputs: ReadonlyArray<AgentChatExecutionOutput>,
+  unacknowledged: ReadonlySet<string>
+): ReadonlyArray<AgentChatMessage> => {
+  if (outputs.length === 0) return messages
+
+  const created = new Set(
+    outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
+  )
+
+  const touched = new Map<string, Option.Option<AgentChatPart>>()
+
+  for (const output of outputs) {
+    if (Predicate.isTagged(output, 'ToolPart') && unacknowledged.has(output.callId)) {
+      touched.set(toolPartKey(output.messageId, output.callId), output.prior)
+    }
+  }
+
+  const replaced = new Map(
+    outputs.flatMap(output =>
+      Predicate.isTagged(output, 'ReplacedMessage') ? [[output.prior.id, output.prior]] : []
+    )
+  )
+
+  const lastUser = findLastMessageIndex(messages, message => message.role === 'user')
+
+  return messages.flatMap((current, index) => {
+    if (index <= lastUser) return [current]
+
+    const message = replaced.get(current.id) ?? current
+    const owned = created.has(message.id)
+
+    const parts = message.parts.flatMap((part): ReadonlyArray<AgentChatPart> => {
+      if (Predicate.isTagged(part, 'ToolCall')) {
+        const prior = touched.get(toolPartKey(message.id, part.call.id))
+
+        if (prior !== undefined) return Option.toArray(prior)
+
+        return owned && unacknowledged.has(part.call.id) ? [] : [part]
+      }
+
+      return owned && (Predicate.isTagged(part, 'Text') || Predicate.isTagged(part, 'Reasoning'))
+        ? []
+        : [part]
+    })
+
+    if (
+      parts.length === message.parts.length &&
+      parts.every((part, i) => part === message.parts[i])
+    )
+      return [message]
+
+    return parts.length === 0 ? [] : [{ ...message, parts }]
+  })
+}
+
+/**
+ * The messages and tool parts an execution produced that survive its discard: what a committed
+ * answer may take over. A part it overwrote that the discard restored to its prior (an earlier
+ * turn's call with a reused id, its call unacknowledged) is not the execution's, so it never moves.
+ */
+const executionToolParts = (
+  outputs: ReadonlyArray<AgentChatExecutionOutput>,
+  unacknowledged: ReadonlySet<string>
+) => ({
+  messages: new Set(
+    outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
+  ),
+  parts: new Set(
+    outputs.flatMap(output =>
+      Predicate.isTagged(output, 'ToolPart') &&
+      !(Option.isSome(output.prior) && unacknowledged.has(output.callId))
+        ? [toolPartKey(output.messageId, output.callId)]
+        : []
+    )
+  )
+})
+
+/**
+ * Replaces a disputed turn's shown answer with the committed one (`AgentEnd` /
+ * `AgentAwaitingInput` messages): removes the live execution's output, moves the committed answer's
+ * tool calls from the execution's own messages and parts (keeping their current state, such as a
+ * pending question) into the committed message, and appends it.
+ */
+export const replaceWithCommittedAnswer = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  outputs: ReadonlyArray<AgentChatExecutionOutput>,
+  calls: ReadonlySet<string>,
+  committed: ReadonlyArray<AgentMessage>
+): ReadonlyArray<AgentChatMessage> => {
+  const answer = committed.filter(message => Predicate.isTagged(message, 'Assistant')).at(-1)
+  const discarded = discardChatExecutionOutput(messages, outputs, calls)
+
+  if (answer === undefined || !Predicate.isTagged(answer, 'Assistant')) return discarded
+
+  const answerCalls = new Set(
+    answer.parts.flatMap(part =>
+      Predicate.isTagged(part, 'HostToolCall') || Predicate.isTagged(part, 'ProviderToolCall')
+        ? [part.call.id]
+        : []
+    )
+  )
+
+  const states = new Map<string, ChatToolState>()
+  const own = executionToolParts(outputs, calls)
+  const lastUser = findLastMessageIndex(discarded, message => message.role === 'user')
+
+  const moved = discarded.flatMap((message, index) => {
+    if (index <= lastUser) return [message]
+
+    const parts = message.parts.filter(part => {
+      if (!Predicate.isTagged(part, 'ToolCall') || !answerCalls.has(part.call.id)) return true
+
+      // Only the disputed execution's own parts move; another turn's call with a reused id stays.
+      if (!own.messages.has(message.id) && !own.parts.has(toolPartKey(message.id, part.call.id)))
+        return true
+
+      states.set(part.call.id, part.state)
+
+      return false
+    })
+
+    if (parts.length === message.parts.length) return [message]
+
+    return parts.length === 0 ? [] : [{ ...message, parts }]
+  })
+
+  const appended = appendProtocolMessage(moved, answer)
+
+  return appended.map((message, index) =>
+    index !== appended.length - 1
+      ? message
+      : {
+          ...message,
+          parts: message.parts.map(part =>
+            Predicate.isTagged(part, 'ToolCall')
+              ? { ...part, state: states.get(part.call.id) ?? part.state }
+              : part
+          )
+        }
+  )
+}
+
+/**
+ * Ends every assistant message's streaming text and reasoning (a settled or other run's draft, or
+ * one a user message followed), so a new stream starts its own message and never appends to it.
+ */
+const finalizeUnfinishedStream = (
+  messages: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatMessage> =>
+  messages.some(message => message.role === 'assistant' && hasStreamingPart(message))
+    ? messages.map(message =>
+        message.role === 'assistant' && hasStreamingPart(message)
+          ? { ...message, parts: finalizeAssistantParts(message.parts) }
+          : message
+      )
+    : messages
+
 const finalizeStreamingParts = (
   messages: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatMessage> =>
@@ -1635,12 +1848,18 @@ export const applyAgentEventToChatMessages = (
           appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
         )
       ),
+      // A tagged start's predecessor output is handled by execution routing (chat-core); a draft
+      // still streaming then belongs to another run or a settled execution, so it is kept as done.
+      Match.tag('LLMStreamStart', current =>
+        current.executionId === undefined
+          ? discardUnfinishedStream(messages)
+          : finalizeUnfinishedStream(messages)
+      ),
       Match.tag(
         'AgentRetry',
         'CompactionEnd',
         'CompactionStart',
         'LLMStreamEnd',
-        'LLMStreamStart',
         'SubagentCompleted',
         'SubagentStarted',
         'TurnEnd',

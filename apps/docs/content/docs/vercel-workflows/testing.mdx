@@ -147,7 +147,8 @@ Cover:
 - HITL reruns the same tool batch with accumulated responses.
 - Event sequence advances across model, tool, and HITL resume.
 - Default retries are disabled, except the close step's (`defaultCloseStreamRetry`).
-- Retried streamed steps have de-dupe-ready event ids.
+- Retried streamed steps have de-dupe-ready event ids; a model step's live events carry an
+  `executionId` per execution, so a retry never reuses an earlier execution's ids.
 - Terminal write happens only after durable commit succeeds.
 - `AgentEnd` closes through `closeStream`, and only there; a retried close re-closes harmlessly.
 - Failure paths use `writeError`, not `closeStream`; a `writeError` rejection preserves the original

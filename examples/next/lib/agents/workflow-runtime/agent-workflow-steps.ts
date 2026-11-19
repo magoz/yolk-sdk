@@ -1,4 +1,4 @@
-import { getWorkflowMetadata, getWritable } from 'workflow'
+import { getStepMetadata, getWorkflowMetadata, getWritable } from 'workflow'
 import { Cause, Clock, Effect, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -79,6 +79,8 @@ const writeSequencedWorkflowEvent = (input: {
   readonly workflowRunId: string
   readonly turn: number
   readonly eventSequence: Ref.Ref<number>
+  /** Set on the model call's live events only; host and tool-batch events stay plain. */
+  readonly executionId?: string
 }) =>
   Effect.gen(function* () {
     const sequence = yield* Ref.get(input.eventSequence)
@@ -88,11 +90,19 @@ const writeSequencedWorkflowEvent = (input: {
       event: input.event,
       streamId: workflowEventStreamId(input.workflowRunId),
       turn: input.turn,
+      executionId: input.executionId,
       state: makeDurableAgentEventSequencerState(sequence)
     })
 
     yield* Ref.set(input.eventSequence, result.nextEventSequence)
   })
+
+/** `<stepId>:<attempt>` of the running step: unique per execution of it. */
+const stepExecutionId = () => {
+  const { stepId, attempt } = getStepMetadata()
+
+  return `${stepId}:${attempt}`
+}
 
 const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
   Effect.promise(() => writer.close())
@@ -195,6 +205,9 @@ export async function runAgentWorkflowModelStep(input: {
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
   const workflowRunId = getWorkflowMetadata().workflowRunId
+  // Every execution of this step (loop retry: new step id; platform retry or redelivery: new
+  // attempt) streams from the same `eventSequence`, so its live events carry their own execution.
+  const executionId = stepExecutionId()
 
   return await Effect.runPromise(
     Effect.gen(function* () {
@@ -239,7 +252,8 @@ export async function runAgentWorkflowModelStep(input: {
               event,
               workflowRunId,
               turn: input.state.turn,
-              eventSequence
+              eventSequence,
+              executionId
             })
         }
       ).pipe(

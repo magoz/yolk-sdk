@@ -272,8 +272,10 @@ rules shape them:
 ## Retry policy
 
 Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`) for model, tool-batch and
-await-input steps. Their retries are opt-in because streamed retries can duplicate chunks unless
-host/client de-dupe is ready.
+await-input steps. Their retries are opt-in because a retried step streams its events again.
+`eventId` de-dupe alone does not make that safe: a retried model step writes a different answer from
+the same `eventSequence`, so give its live events an `executionId`
+([Durable stream events](#durable-stream-events)).
 
 The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`). `closeStream` only closes
 the writer (`AgentEnd` is written before it, by the final model step), and closing a Workflow stream
@@ -288,8 +290,9 @@ thrown by `closeStream` too. Keep `closeStream` close-only and safe to repeat; p
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
 
-One attempt does not stop queue redelivery: a step can still run again after a crash or
-concurrently. See [Tool steps are at-least-once](#tool-steps-are-at-least-once).
+One attempt does not stop queue redelivery or platform step retries (`fn.maxRetries`): a step can
+still run again after a failure or crash, or concurrently. See
+[Tool steps are at-least-once](#tool-steps-are-at-least-once).
 
 `maxTurns` follows the same positive-integer boundary: finite values are floored and clamped to at
 least one. Omitted or non-finite values use `defaultMaxWorkflowTurns`.
@@ -321,12 +324,98 @@ eventSequence = sequenced.nextEventSequence
 A rejected write fails with `DurableAgentEventWriteError`: its `message` is the rejection's message
 (or `String(rejection)`), and `cause` is the rejection itself.
 
-The id format is `${streamId}:${turn}:${eventSequence}`. Scope `streamId` to one logical durable
-run (for example `workflow:${runId}`), not just one route or feature. Replay-safe clients de-dupe by
-`eventId`; reusing a stream id across independent runs can make a follow-up run's live deltas look
-like old replayed events. Keep `eventSequence` in Workflow state and reset it when starting a fresh
-logical stream. Resume route reads should use `startIndex` when available. Host apps still own
-active-run locking, stale-run guards, and cancellation behavior.
+The id format is `${streamId}:${turn}:${eventSequence}`, or
+`${streamId}:${turn}:${eventSequence}:${executionId}` when `executionId` is set. Scope `streamId` to
+one logical durable run (for example `workflow:${runId}`), not just one route or feature.
+Replay-safe clients de-dupe by `eventId`; reusing a stream id across independent runs can make a
+follow-up run's live deltas look like old replayed events. Keep `eventSequence` in Workflow state
+and reset it when starting a fresh logical stream. Resume route reads should use `startIndex` when
+available. Host apps still own active-run locking, stale-run guards, and cancellation behavior.
+
+### One step, several executions
+
+A step can run more than once: opt-in loop retries (`modelStepRetry`), platform retries
+(`fn.maxRetries`), and queue redelivery, which can run beside an execution that is still streaming.
+Every execution starts from the same `eventSequence`. A model step's second execution calls the
+model again and streams a different answer, so without more the same ids carry different events and
+a client de-duping by `eventId` keeps the first execution's early deltas plus the second's tail.
+
+Pass an `executionId` unique per execution, and pass it on exactly the events the model call
+produces: every event from `LLMStreamStart` through `AssistantMessage`/`UsageUpdate` (deltas, tool
+input, provider tool results). `LLMStreamStart` must carry it: it is identical in every execution,
+so with a plain id the second start would be de-duped and the client could not tell the executions
+apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is unique per execution: a loop
+retry is a new step id, and each platform retry or redelivery a new attempt. The sequencer appends
+it to the id and sets it as the event's `executionId` field (removed without it). Every written event
+also carries the `streamId` field, so clients keep each run's turns apart and a terminal event
+closes its own run (never parse either from the id: both contain `:`). Both must be non-empty
+without surrounding whitespace when `executionId` is set, or sequencing throws; without it, a blank
+or padded `streamId` is only left off the event.
+
+Leave it off host events every execution writes identically: a promoted user message, and the
+terminal event written after the host commits (`commitThenWriteTerminalEvent`). A re-execution that
+finds a committed receipt replays only that terminal event (same plain id, so the client drops the
+repeat); it never rewrites the live events, whose ids carried the original execution. Without
+`executionId` ids keep the plain format, so stored ids and events written before do not change.
+Tool-batch steps are out of scope: their events keep plain ids, which is safe only where every
+execution writes the same events. Ledgered tool calls replay their recorded result; read calls are
+not ledgered and run again, so a re-executed batch can write a different result under the same id.
+
+```ts
+const { stepId, attempt } = getStepMetadata()
+const executionId = `${stepId}:${attempt}`
+
+yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, state })
+```
+
+`@yolk-sdk/agent` clients (`reduceAgentEvents`, `applyAgentEventToChatProjection`, the
+`useAgentChat` reducer) route events by those fields, per run (`streamId`) and turn
+(`LLMStreamStart.turn`):
+
+- When a newer execution of the same turn starts, the older one is superseded: its output is
+  provisional and removed (streaming text, its `AssistantMessage`, and each tool call it touched
+  that no host event acted on yet), and its later events are dropped. A call or earlier message it
+  overwrote through a provider's reused call id is restored.
+- A later turn's start, another run's start, a terminal event, a user message or `AgentStart`
+  settles executions: their output stays and their later events (a losing concurrent execution)
+  are dropped. Only executions of earlier turns or other runs are settled by a start.
+- Only terminal events close a run: after `AgentEnd` or `AgentError` every start in it is stale,
+  and after `AgentAwaitingInput` a start at or below the paused turn is (the resumed run starts a
+  higher one). A start for a turn older than one its run already started is stale too. A stale
+  start and its later events are dropped. The client records a terminal's run from its `streamId`
+  even when it saw no execution of that run; a terminal without `streamId` closes the runs still
+  streaming. `AgentStart` begins a fresh run, even under a reused `streamId`.
+- At `AgentEnd` and `AgentAwaitingInput`, if the final turn ran more than once, its shown answer is
+  replaced by the committed assistant message from the event's `messages`, keeping the state of its
+  tool calls (a pending question stays pending).
+- Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
+  output still streaming.
+
+Host duties:
+
+- Upgrade clients and server together: a client before this release ignores the fields and shows
+  both executions' output back to back.
+- Use a `streamId` unique per workflow run (for example `workflow:${runId}`), unless the stream
+  emits `AgentStart` at each run: a run's ended state sticks to its `streamId`, so a later run that
+  reuses it without `AgentStart` has every start dropped. With unique `streamId`s, projection hosts
+  that keep one state across runs need nothing more; without `streamId` every run shares one scope,
+  so reset `executions` to `[]` when a new run starts.
+- Write `AgentError` only from the final failure path (`writeError`), never before a retry: an
+  `AgentError` ends its run for good, and every later start in it is dropped.
+- Feed one state one run at a time: two runs streaming tagged events into one state at once are
+  unsupported (each run's start settles the other's live execution).
+- `reduceAgentEvents` keeps a single draft buffer (`text`, `reasoning`): every `LLMStreamStart`
+  clears it, so a stopped run's unfinished draft is not kept there (the chat projections keep it).
+
+Open cases:
+
+- A non-final turn whose older execution committed while the newer one streamed. The chat keeps
+  the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran the older
+  execution's calls, so the shown calls and the executed ones differ. Only the final turn is
+  reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
+- A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
+  only that stream's run, not the main run's turns. A late start from a losing execution of the
+  main run's paused turn is then not fenced by that terminal.
 
 ## Terminal barriers
 
@@ -395,8 +484,8 @@ for the run's committed completion (or compare-and-set against it) before record
 - Preserve tool result order and never advance the next model step with dangling host tool calls.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
-- Emit replay-safe event ids for durable streams; scope stream ids per independent run and de-dupe
-  by `eventId` client-side.
+- Emit replay-safe event ids for durable streams; scope stream ids per independent run, give a
+  model step's live events an `executionId` per execution, and de-dupe by `eventId` client-side.
 - Write durable terminal events only after host persistence has settled.
 - Implement `closeStream` for successful final closure and `writeError` for safe final error write
   plus failure closure. Release, but do not close, the writer after `AgentAwaitingInput`.

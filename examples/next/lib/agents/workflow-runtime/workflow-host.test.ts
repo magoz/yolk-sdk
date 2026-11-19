@@ -106,6 +106,8 @@ vi.mock('./text-response', () => ({
     runtimeFactory(...args)
 }))
 
+let inlineStepExecutions = 0
+
 vi.mock('workflow', async () => {
   const { testWorkflowModule } = await import('@yolk-sdk/vercel-workflows/testing')
 
@@ -132,6 +134,17 @@ vi.mock('workflow', async () => {
       hitlEntered.release()
 
       return hook
+    },
+    // Steps run inline here, outside a platform step context: each call is a fresh execution.
+    getStepMetadata: () => {
+      inlineStepExecutions += 1
+
+      return {
+        stepName: 'inline-step',
+        stepId: `inline-step-${inlineStepExecutions}`,
+        stepStartedAt: new Date(0),
+        attempt: 1
+      }
     },
     sleep
   }

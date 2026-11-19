@@ -27,7 +27,19 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 
 const EventIdentity = {
   eventId: Schema.optional(NonEmptyTrimmedString),
-  createdAtMs: Schema.optional(Schema.Number)
+  createdAtMs: Schema.optional(Schema.Number),
+  /**
+   * The execution of a model step that produced this live event, when the step can run more than
+   * once (retry, redelivery). Clients route by it: once a newer execution of the same turn starts
+   * (its `LLMStreamStart`), the older one's provisional output is removed and its later events are
+   * dropped. Absent on host events every execution writes identically.
+   */
+  executionId: Schema.optional(NonEmptyTrimmedString),
+  /**
+   * The durable stream (one run) the event belongs to. Clients group executions and their turns by
+   * it, and a terminal event closes its run, so turn numbers of different runs never meet.
+   */
+  streamId: Schema.optional(NonEmptyTrimmedString)
 }
 
 export const SubagentStatus = Schema.Literals(['running', 'completed', 'error'])

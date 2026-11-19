@@ -7,12 +7,21 @@ export type DurableAgentEventSequencerState = {
 export type DurableAgentEvent<Event extends object = object> = Event & {
   readonly eventId: string
   readonly createdAtMs?: number
+  /** Set from `SequenceDurableAgentEventInput.executionId`; clients route live events by it. */
+  readonly executionId?: string
+  /**
+   * The `streamId`, set on every event (omitted when blank or padded, which clients reject) so
+   * clients group executions per run and a terminal event closes its run.
+   */
+  readonly streamId?: string
 }
 
 export type DurableAgentEventIdInput = {
   readonly streamId: string
   readonly turn: number
   readonly eventSequence: number
+  /** See `SequenceDurableAgentEventInput.executionId`. */
+  readonly executionId?: string
 }
 
 export type SequenceDurableAgentEventInput<Event extends object = object> = {
@@ -26,6 +35,22 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
    */
   readonly streamId: string
   readonly turn: number
+  /**
+   * Identifies one execution of a model step. It is appended to the id and set as the event's
+   * `executionId` field (removed without it), which `@yolk-sdk/agent` clients route by, per run
+   * (the event's `streamId` field, set on every event) and turn. It and `streamId` must be
+   * non-empty without surrounding whitespace (clients reject anything else); otherwise sequencing
+   * throws a `TypeError` (a defect in `writeDurableAgentEvent`).
+   *
+   * Every execution of a step starts from the same `eventSequence`, and a step runs more than
+   * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).
+   * Set it, unique per execution (for example `${stepId}:${attempt}` from `getStepMetadata()`), on
+   * every event the model call produces, from `LLMStreamStart` through `AssistantMessage` and
+   * `UsageUpdate`; `LLMStreamStart` must carry it. Leave it off host events (a promoted user
+   * message, the terminal event written after the commit). A receipt replay writes only that
+   * terminal event, never the live events again.
+   */
+  readonly executionId?: string
   readonly event: Event
   readonly createdAtMs?: number
 }
@@ -90,7 +115,11 @@ export const makeDurableAgentEventSequencerState = (
 ): DurableAgentEventSequencerState => ({ eventSequence })
 
 export const durableAgentEventId = (input: DurableAgentEventIdInput) =>
-  `${input.streamId}:${input.turn}:${input.eventSequence}`
+  input.executionId === undefined
+    ? `${input.streamId}:${input.turn}:${input.eventSequence}`
+    : `${input.streamId}:${input.turn}:${input.eventSequence}:${input.executionId}`
+
+const isNonBlankTrimmed = (value: string) => value.length > 0 && value.trim() === value
 
 export const sequenceDurableAgentEvent = <Event extends object>(
   input: SequenceDurableAgentEventInput<Event>
@@ -101,6 +130,17 @@ export const sequenceDurableAgentEvent = <Event extends object>(
   type SequencedDurableAgentEventFields = Event & {
     eventId: string
     createdAtMs?: number
+    executionId?: string
+    streamId?: string
+  }
+
+  // A host bug: clients reject a blank or padded id, so fail loudly (a defect in an Effect).
+  if (input.executionId !== undefined && !isNonBlankTrimmed(input.executionId)) {
+    throw new TypeError('executionId must be non-empty, without surrounding whitespace')
+  }
+
+  if (input.executionId !== undefined && !isNonBlankTrimmed(input.streamId)) {
+    throw new TypeError('streamId must be non-empty, without surrounding whitespace')
   }
 
   const event: SequencedDurableAgentEventFields = {
@@ -108,12 +148,27 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     eventId: durableAgentEventId({
       streamId: input.streamId,
       turn: input.turn,
-      eventSequence
+      eventSequence,
+      executionId: input.executionId
     })
   }
 
   if (input.createdAtMs !== undefined) {
     event.createdAtMs = input.createdAtMs
+  }
+
+  // The fields always agree with the id: set from the input, or removed when it has none. Every
+  // event carries its `streamId` (when clients can decode it), so a terminal event closes its run.
+  if (input.executionId === undefined) {
+    delete event.executionId
+  } else {
+    event.executionId = input.executionId
+  }
+
+  if (isNonBlankTrimmed(input.streamId)) {
+    event.streamId = input.streamId
+  } else {
+    delete event.streamId
   }
 
   return {

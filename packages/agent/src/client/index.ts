@@ -1,6 +1,7 @@
 export { BlobTextReadError, documentPartFromTextFile, textFromBlob } from './attachments.ts'
 
 export {
+  AgentClientExecutionOutput,
   appendAgentMessage,
   applyAgentEvent,
   completedToolRuns,
@@ -12,6 +13,8 @@ export {
   submitAgentUserMessage,
   toolRunsFromHitlRequests
 } from './state.ts'
+
+export type { AgentExecution, AgentExecutionRun, AgentExecutions } from './executions.ts'
 
 export type {
   AgentClientState,

@@ -720,6 +720,30 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
+A retried or redelivered model step streams a second answer for the same turn. Events carry
+optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
+execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
+and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.turn`):
+
+- A newer execution's `LLMStreamStart` supersedes the older one of that turn: its provisional
+  output (streaming text, its `AssistantMessage`, tool calls no host event acted on, restored to a
+  call whose id it reused) is removed and its later events are dropped.
+- Only terminal events close a run: a start after its `AgentEnd`/`AgentError`, at or below the turn
+  an `AgentAwaitingInput` paused, or for a turn older than one its run already started is dropped
+  with its later events (known from the terminal's `streamId` even when no execution was seen).
+  `AgentStart` begins a fresh run.
+- A later turn, another run, a terminal event, a user message or `AgentStart` settles executions
+  (output kept, later events dropped).
+- At `AgentEnd` and `AgentAwaitingInput`, a final turn that ran more than once shows the committed
+  answer from the event's messages; a non-final one keeps the newer answer until reload (see the
+  vercel-workflows README, "One step, several executions").
+
+Carry `executions` along with `seenEventIds` when you keep projection state yourself, and reset it
+to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
+streaming into it at once are unsupported). `reduceAgentEvents` keeps one draft buffer (`text`,
+`reasoning`) that every `LLMStreamStart` clears. Without `executionId`, the next
+`LLMStreamStart` only discards output still streaming.
+
 When the host promotes queued user input into a durable stream, emit a replay-safe user event:
 
 ```ts

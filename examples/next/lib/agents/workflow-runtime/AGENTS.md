@@ -13,7 +13,13 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 ## Stream/event rules
 
 - Steps write protocol events to `getWritable<Uint8Array>()` as NDJSON.
-- App steps use `writeDurableAgentEvent`; normal ids are `workflow:<runId>:<turn>:<sequence>`.
+- App steps use `writeDurableAgentEvent`; normal ids are `workflow:<runId>:<turn>:<sequence>`. The
+  model step's live events (everything `runModelTurn` emits, `LLMStreamStart` included) also carry
+  `executionId` `<stepId>:<attempt>` from `getStepMetadata()`, appended to the id
+  (`workflow:<runId>:<turn>:<sequence>:<stepId>:<attempt>`) and set on the event, so a retried or
+  redelivered model step never reuses an earlier execution's ids. `AgentEnd` and tool-batch events
+  stay plain. Tests that run steps inline (no platform step context) fake `getStepMetadata` in
+  their `workflow` module mock (`workflow-host.test.ts`).
 - Error events use run-scoped stream ids: `workflow:<runId>:error:<turn>:<sequence>`.
 - Carry `eventSequence` through model/tool step results so retries/replay can de-dupe; reset it for
   fresh independent streams.
