@@ -292,7 +292,7 @@ const proxyDelete: McpServerTool = {
 - A remote pause is answered as this server's own `InputRequiredResult` (the remote forms under
   their keys) with a `requestState` signed (not encrypted) by the approvals key under its own
   binding. It holds the tool, the arguments digest, the pause's `roundId` and expiry (`ttlSeconds`
-  after it was first forwarded), the approval id, and the remote pause, at most
+  after it was forwarded), the approval id, and the remote pause, at most
   `mcpForwardMaxStateBytes` (64 KiB) of JSON. The client can read the remote forms and
   `requestState`.
 - `McpForwardRound.Resume({ roundId, inputRequired, responses, approvalId })` runs only for a round
@@ -301,6 +301,11 @@ const proxyDelete: McpServerTool = {
   does not verify, or expired, answers `forwardStaleMessage` and calls nothing (with `approval`, the
   approval is asked again). The server keeps no state, so a replayed answered round arrives again
   with the same `roundId`: key once-only resumption on it.
+- The host may answer a duplicate key (a retried accept on `approvalId`, a retried `Resume` on
+  `roundId`) with the outcome it stored. A remote pause's `roundId` is derived from the approval or
+  round it came from and the pause itself, so a replayed pause is forwarded again under the same
+  `roundId` (with a new expiry) and still resumes once. A first round without `approval` has no
+  key, and its pause gets a random `roundId`.
 - With `approval`, the tool is offered like an approval tool: the approval round runs first and
   every forward round carries its `approvalId`. Without it, the tool is listed everywhere; 2025-era
   requests and the header-less JSON path run only `Initial` with `clientElicitation: false`.

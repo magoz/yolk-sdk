@@ -87,11 +87,15 @@
   this server's `InputRequiredResult` (the remote forms, typed again with the SDK's
   `isSpecType.ElicitRequestFormParams`) under a `requestState` signed by `forwardCodec` (the
   approvals key; binding adds `\0forward`; signed, not encrypted), holding tool, arguments digest,
-  the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was first forwarded),
-  the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. Only a verified, unexpired
-  state for the same call whose answers fit every form (`toMcpInputResponses`) resumes; otherwise
-  the server asks again under the same `roundId` and expiry (never a fresh round: that would open a
-  second resume of one remote pause). A state that does not verify answers `forwardStaleMessage`
+  the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was forwarded),
+  the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. A new pause's `roundId`
+  (`newRoundId`) is the digest of its origin (the `approvalId`, or the `roundId` it resumed) and
+  the pause (forms, remote `requestState`, binding; not `tool`), so a host that answers a retried
+  accept or `Resume` with its stored outcome forwards that pause again in the same round (a new
+  expiry); a first round without approval has no once-only key and gets a random one. Only a
+  verified, unexpired state for the same call whose answers fit every form (`toMcpInputResponses`)
+  resumes; otherwise the server asks again under the same `roundId` and expiry. Never a fresh
+  round for one remote pause: that would open a second resume of it (issue #297). A state that does not verify answers `forwardStaleMessage`
   without calling the remote tool; on an `approval` tool it falls to the approval round, which asks
   again. With `approval`, the approval round runs first and the forward rounds carry its
   `approvalId`. `Resume` re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only `Initial` with
