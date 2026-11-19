@@ -1,5 +1,14 @@
 // @vitest-environment node
-import { Effect, Layer, Predicate } from 'effect'
+import { Effect, Layer, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
+import {
+  InputDescriptor,
+  InputRequest,
+  InputResponse,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall
+} from '@yolk-sdk/agent/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowRunNotFoundError } from 'workflow/errors'
 import {
@@ -13,8 +22,13 @@ import { readWorkflowChild } from './read-child'
 import { maxWorkflowChildren } from './policy'
 import {
   emptyWorkflowRegistry,
+  isHitlPausePending,
+  recordedHitlPause,
   transitionWorkflowRegistry,
   WorkflowChildRecord,
+  WorkflowHitlAnswer,
+  WorkflowHitlPause,
+  WorkflowRegistry,
   type RegistryCommand
 } from './registry'
 
@@ -111,6 +125,104 @@ describe('durable host registry (transactional behavioral fake)', () => {
       expect(store.read().children[0]?.workflowRunId).toBe(admitted ? 'child-a' : null)
       expect(store.read().children[0]?.result).toBeNull()
     }
+  })
+
+  it('records one answer per pause, only to a request it holds, and forgets replaced pauses', () => {
+    const store = fakeStore()
+
+    const pause = (hookToken: string, toolCallId: string) =>
+      WorkflowHitlPause.make({
+        hookToken,
+        requests: [
+          ToolApprovalRequest.make({
+            requestId: `approval:${toolCallId}`,
+            toolCallId,
+            call: ToolCall.make({ id: toolCallId, name: 'write', params: {} })
+          })
+        ],
+        answer: null,
+        delivered: false
+      })
+
+    const approve = (toolCallId: string, decision: 'approved' | 'denied' = 'approved') =>
+      ToolApprovalResponse.make({
+        requestId: `approval:${toolCallId}`,
+        toolCallId,
+        decision,
+        source: 'user'
+      })
+
+    const record = (response: ReturnType<typeof approve>) =>
+      recordedHitlPause(
+        store.change({
+          type: 'answer',
+          answer: WorkflowHitlAnswer.make({ response, tailIndex: 3 })
+        }),
+        response
+      )
+
+    store.change({ type: 'pause', pause: pause('pause-1', 'a') })
+    expect(Option.isNone(record(approve('b')))).toBe(true)
+    expect(Option.isSome(record(approve('a')))).toBe(true)
+    // An identical retry reuses the record; a different answer to the pause is refused.
+    expect(Option.isSome(record(approve('a')))).toBe(true)
+    expect(Option.isNone(record(approve('a', 'denied')))).toBe(true)
+    // A redelivered tool step records the same pause again without losing its answer.
+    store.change({ type: 'pause', pause: pause('pause-1', 'a') })
+    expect(isHitlPausePending(store.read(), 'pause-1')).toBe(true)
+    store.change({ type: 'deliver', hookToken: 'pause-1' })
+    expect(isHitlPausePending(store.read(), 'pause-1')).toBe(false)
+    expect(Option.isSome(record(approve('a')))).toBe(true)
+    store.change({ type: 'pause', pause: pause('pause-2', 'b') })
+    expect(Option.isNone(record(approve('a')))).toBe(true)
+    expect(isHitlPausePending(store.read(), 'pause-1')).toBe(false)
+    expect(Option.isSome(record(approve('b')))).toBe(true)
+  })
+
+  it('matches a recorded answer after the registry row round-trips through JSON', async () => {
+    const response = InputResponse.make({
+      requestId: 'input:nickname:call',
+      toolCallId: 'call',
+      outcome: 'submitted',
+      source: 'user',
+      data: { name: 'Ada', tags: ['a', 'b'] }
+    })
+
+    const state = transitionWorkflowRegistry(
+      transitionWorkflowRegistry(emptyWorkflowRegistry(), {
+        type: 'pause',
+        pause: WorkflowHitlPause.make({
+          hookToken: 'pause-1',
+          requests: [
+            InputRequest.make({
+              requestId: 'input:nickname:call',
+              toolCallId: 'call',
+              call: ToolCall.make({ id: 'call', name: 'nickname', params: {} }),
+              input: InputDescriptor.make({ kind: 'nickname-field', title: 'Nickname' })
+            })
+          ],
+          answer: null,
+          delivered: false
+        })
+      }),
+      { type: 'answer', answer: WorkflowHitlAnswer.make({ response, tailIndex: 0 }) }
+    )
+
+    const stored = await Effect.runPromise(
+      Schema.encodeEffect(Schema.fromJsonString(WorkflowRegistry))(state).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(WorkflowRegistry)))
+      )
+    )
+
+    const retried = InputResponse.make({
+      toolCallId: 'call',
+      requestId: 'input:nickname:call',
+      outcome: 'submitted',
+      source: 'user',
+      data: { tags: ['a', 'b'], name: 'Ada' }
+    })
+
+    expect(Option.isSome(recordedHitlPause(stored, retried))).toBe(true)
   })
 
   it('enforces the bounded lifetime fanout including pending reservations', () => {

@@ -53,7 +53,11 @@ import {
   validateAgentRouteImages
 } from '@/lib/agents/route-handler'
 
-import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
+import {
+  AgentWorkflowStore,
+  decodeWorkflowOwnership
+} from '@/lib/services/agent-workflow/live-layer'
+import { answersHitlRequest, WorkflowHitlPause } from '@/lib/services/agent-workflow/registry'
 
 import { addWorkflowToolResultUsage } from './workflow-tool-usage'
 
@@ -136,20 +140,78 @@ export const matchesWorkflowHitlResponse = (
 
   const current = decodedResponse.success
 
-  return decodedRequests.success.some(
-    request =>
-      request.requestId === current.requestId &&
-      request.toolCallId === current.toolCallId &&
-      ((Predicate.isTagged(request, 'InputRequest') &&
-        Predicate.isTagged(current, 'InputResponse')) ||
-        (Predicate.isTagged(request, 'InteractionRequest') &&
-          Predicate.isTagged(current, 'InteractionResponse')) ||
-        (Predicate.isTagged(request, 'QuestionRequest') &&
-          Predicate.isTagged(current, 'QuestionResponse')) ||
-        (Predicate.isTagged(request, 'ToolApprovalRequest') &&
-          Predicate.isTagged(current, 'ToolApprovalResponse')))
-  )
+  return decodedRequests.success.some(request => answersHitlRequest(request, current))
 }
+
+/**
+ * Filters a hook payload like `matchesWorkflowHitlResponse`; when the workflow takes it, marks
+ * the pause delivered so the resume route reports a retried answer as delivered instead of
+ * waiting for a hook that is gone. A failed mark is reported, not fatal: the next pause or the
+ * route's bounded retry still settles that answer.
+ */
+export async function acceptWorkflowHitlResponse(input: {
+  readonly userId: string
+  readonly hookToken: string
+  readonly requests: ReadonlyArray<unknown>
+  readonly response: unknown
+}): Promise<boolean> {
+  if (!matchesWorkflowHitlResponse(input.requests, input.response)) return false
+
+  const runId = getWorkflowMetadata().workflowRunId
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* AgentWorkflowStore
+      const ownership = yield* decodeWorkflowOwnership({ runId, userId: input.userId })
+      yield* store.change(ownership.runId, ownership.userId, {
+        type: 'deliver',
+        hookToken: input.hookToken
+      })
+    }).pipe(
+      Effect.catch(error =>
+        reportError(
+          new AgentWorkflowStepError({
+            message: 'Workflow HITL delivery mark failed',
+            cause: error
+          }),
+          { operation: 'agent.workflow.hitl_deliver', runId }
+        )
+      ),
+      Effect.provide(AgentWorkflowStore.layer.pipe(Layer.provideMerge(AppLayer)))
+    )
+  )
+
+  return true
+}
+
+/** Records the pause before its `AgentAwaitingInput` reaches the client: the route resumes it. */
+const recordWorkflowHitlPause = (input: {
+  readonly context: WorkflowAgentContext
+  readonly workflowRunId: string
+  readonly hookToken: string
+  readonly requests: ReadonlyArray<HitlRequest>
+}) =>
+  Effect.gen(function* () {
+    // Children never pause for a person (no HITL tools, no awaitInput) and own no registry row.
+    if (input.context.parentRunId !== undefined) return
+
+    const store = yield* AgentWorkflowStore
+
+    const ownership = yield* decodeWorkflowOwnership({
+      runId: input.workflowRunId,
+      userId: input.context.userId
+    })
+
+    yield* store.change(ownership.runId, ownership.userId, {
+      type: 'pause',
+      pause: WorkflowHitlPause.make({
+        hookToken: input.hookToken,
+        requests: input.requests,
+        answer: null,
+        delivered: false
+      })
+    })
+  })
 
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 
@@ -173,7 +235,7 @@ const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessa
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
 const workflowAwaitingInput = (input: {
-  readonly runId: string
+  readonly hookToken: string
   readonly event: AgentAwaitingInput
   readonly eventSequence: number
 }) =>
@@ -187,9 +249,7 @@ const workflowAwaitingInput = (input: {
     }
 
     return {
-      hookToken: agentWorkflowHitlHookToken({
-        runId: input.runId
-      }),
+      hookToken: input.hookToken,
       requests: yield* Effect.forEach(input.event.requests, request => encodeHitlRequest(request)),
       messages: yield* Effect.forEach(input.event.messages, message => encodeMessage(message)),
       usage: yield* encodeUsage(input.event.usage),
@@ -364,6 +424,13 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const createdMessages = yield* decodeMessages(input.createdMessages)
       const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
 
+      // Unique per pause: a batch pauses again only after it took one more answer.
+      const hookToken = agentWorkflowHitlHookToken({
+        runId: workflowRunId,
+        turn: input.turn ?? 0,
+        answers: hitlResponses.length
+      })
+
       // The pause being resumed: an unanswered approval stays pending even after a policy change.
       const awaitingRequests =
         input.awaitingRequests === undefined
@@ -488,13 +555,24 @@ export async function runAgentWorkflowToolBatchStep(input: {
             : event
         ),
         Stream.runForEach(event =>
-          writeSequencedWorkflowEvent({
-            writer,
-            event,
-            workflowRunId: eventRunId,
-            turn: input.turn ?? 0,
-            eventSequence
-          }).pipe(
+          (Predicate.isTagged(event, 'AgentAwaitingInput')
+            ? recordWorkflowHitlPause({
+                context,
+                workflowRunId,
+                hookToken,
+                requests: event.requests
+              }).pipe(Effect.provideService(AgentWorkflowStore, store))
+            : Effect.void
+          ).pipe(
+            Effect.andThen(
+              writeSequencedWorkflowEvent({
+                writer,
+                event,
+                workflowRunId: eventRunId,
+                turn: input.turn ?? 0,
+                eventSequence
+              })
+            ),
             Effect.tap(() =>
               Ref.get(eventSequence).pipe(
                 Effect.tap(sequence =>
@@ -564,7 +642,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
           currentAwaitingInput === undefined
             ? undefined
             : yield* workflowAwaitingInput({
-                runId: workflowRunId,
+                hookToken,
                 event: currentAwaitingInput,
                 eventSequence: nextEventSequence
               }),

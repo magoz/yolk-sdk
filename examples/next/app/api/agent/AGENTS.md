@@ -29,8 +29,9 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 - `workflow/[runId]/route.ts` uses `VercelWorkflows.getReadable`, `tailIndex`, `resumeHook`, and `cancel` for replay, HITL resume, and cancellation.
 - GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index` for the stream tail before the returned body.
 - HITL resume body is `{ hitlResponses: [response] }`; route/workflow own hook-token routing, not the SDK client.
-- Current hook token is run-scoped; persisted registry ownership is enforced on replay/resume/Stop, and loop response matching validates `requestId`/`toolCallId`.
-- HITL resume captures `VercelWorkflows.tailIndex(runId)` before `resumeHook`, then returns replay after that tail index.
+- Hook tokens are per pause; persisted registry ownership is enforced on replay/resume/Stop, and loop response matching validates `requestId`/`toolCallId`.
+- HITL resume (`resumeWorkflowHitlAnswer`, `examples/next/lib/services/agent-workflow/hitl-resume.ts`) records the answer for the stored pause holding its request before `resumeHook` (one answer per pause; an identical retry reuses it), then resumes that pause's token. 409 refuses a different answer or a request no pending pause holds; `HookNotFoundError` retries (bounded) while the pause is pending and counts as delivered once it moved on; 503 means the hook never opened, retry.
+- HITL resume captures `VercelWorkflows.tailIndex(runId)` before recording; replay starts after the recorded answer's tail index, so a retry replays the same continuation.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 

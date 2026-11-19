@@ -29,8 +29,6 @@ import {
 } from './workflow-child-steps'
 import * as Predicate from 'effect/Predicate'
 
-export { agentWorkflowHitlHookToken } from './workflow-contract'
-
 export type { AgentWorkflowInput } from './workflow-contract'
 
 // These wrappers are the durable boundaries; runtime imports belong inside them.
@@ -54,13 +52,13 @@ export async function runAgentWorkflowToolBatchStep(
   return await runtime.runAgentWorkflowToolBatchStep(...args)
 }
 
-export async function matchesWorkflowHitlResponseStep(
-  ...args: Parameters<StepRuntime['matchesWorkflowHitlResponse']>
-): Promise<boolean> {
+export async function acceptWorkflowHitlResponseStep(
+  ...args: Parameters<StepRuntime['acceptWorkflowHitlResponse']>
+): ReturnType<StepRuntime['acceptWorkflowHitlResponse']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
 
-  return runtime.matchesWorkflowHitlResponse(...args)
+  return await runtime.acceptWorkflowHitlResponse(...args)
 }
 
 export async function closeAgentWorkflowStream(
@@ -272,11 +270,20 @@ export async function runAgentWorkflow(input: AgentWorkflowInput) {
     closeStream: closeAgentWorkflowStream,
     writeError: writeWorkflowErrorStep,
     awaitInput: async awaitingInput => {
+      // The token is this pause's own. `using` disposes each hook before the next one opens, so
+      // one token never has two live hooks.
       for (;;) {
         using hook = createHook<unknown>({ token: awaitingInput.hookToken })
         const response = await hook
 
-        if (await matchesWorkflowHitlResponseStep(awaitingInput.requests, response)) return response
+        const accepted = await acceptWorkflowHitlResponseStep({
+          userId: input.userId,
+          hookToken: awaitingInput.hookToken,
+          requests: awaitingInput.requests,
+          response
+        })
+
+        if (accepted) return response
       }
     }
   })

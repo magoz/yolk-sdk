@@ -6,9 +6,9 @@ import {
   AgentWorkflowStore,
   decodeWorkflowOwnership
 } from '@/lib/services/agent-workflow/live-layer'
+import { resumeWorkflowHitlAnswer } from '@/lib/services/agent-workflow/hitl-resume'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { AppLayer } from '@/lib/layers'
-import { agentWorkflowHitlHookToken } from '@/lib/agents/workflow-runtime/run-agent-workflow'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {
@@ -82,11 +82,6 @@ const decodeHitlRequest = (request: Request) =>
     Effect.mapError(error => invalidHitlRequest('Invalid HITL request body', error))
   )
 
-const encodeHitlResponse = (response: HitlResponse) =>
-  Schema.encodeUnknownEffect(HitlResponse)(response).pipe(
-    Effect.mapError(error => invalidHitlRequest('Invalid HITL response', error))
-  )
-
 const parseStartIndex = (request: Request) => {
   const result = workflowResumeStartIndexFromUrl(request.url)
 
@@ -158,22 +153,28 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
     yield* store.read(ownership.runId, ownership.userId)
     const body = yield* decodeHitlRequest(request)
     const response = yield* hitlResponse(body)
-    const encodedResponse = yield* encodeHitlResponse(response)
     const tailIndex = yield* workflows.tailIndex(runId)
 
-    yield* workflows.resumeHook(agentWorkflowHitlHookToken({ runId }), encodedResponse)
+    // Record the answer for its pause before resuming: report the record, not `resumeHook`.
+    const answer = yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex })
 
     const readable = yield* workflows.getReadable<Uint8Array>(runId, {
-      startIndex: tailIndex + 1
+      startIndex: answer.tailIndex + 1
     })
 
     return workflowResumeReadableResponse(runId, readable, {
-      tailIndex
+      tailIndex: answer.tailIndex
     })
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.post'),
     Effect.catchTag('WorkflowRunForbidden', () =>
       Effect.succeed(Response.json({ error: 'Not found' }, { status: 404 }))
+    ),
+    Effect.catchTag('WorkflowHitlAnswerRefused', error =>
+      Effect.succeed(Response.json({ error: error.message }, { status: 409 }))
+    ),
+    Effect.catchTag('WorkflowHitlHookPending', error =>
+      Effect.succeed(Response.json({ error: error.message }, { status: 503 }))
     ),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))

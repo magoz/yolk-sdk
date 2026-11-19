@@ -37,7 +37,11 @@ import { makeInputTool, makeSubagentToolRegistration, makeTool } from '@yolk-sdk
 import { TestWorkflowWorld } from '@yolk-sdk/vercel-workflows/testing'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { agentTextCapabilities } from '@/lib/agents/text-agent-config'
-import { AgentWorkflowStore, WorkflowRunForbidden } from '@/lib/services/agent-workflow/live-layer'
+import {
+  AgentWorkflowStore,
+  decodeWorkflowOwnership,
+  WorkflowRunForbidden
+} from '@/lib/services/agent-workflow/live-layer'
 import {
   emptyWorkflowRegistry,
   transitionWorkflowRegistry,
@@ -45,13 +49,14 @@ import {
   type WorkflowRegistry
 } from '@/lib/services/agent-workflow/registry'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
+import { resumeWorkflowHitlAnswer } from '@/lib/services/agent-workflow/hitl-resume'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { reportWarning } from '@/lib/services/telemetry/report-warning'
 import { admitTelemetryLogContext } from '@/lib/services/telemetry/telemetry-context'
 import type { makeAgentTextRuntime } from './text-response'
-import { agentWorkflowHitlHookToken, runAgentWorkflow } from './run-agent-workflow'
+import { runAgentWorkflow } from './run-agent-workflow'
 import { readChildWorkflowStep } from './workflow-child-steps'
 
 type CapturedLogEntry = {
@@ -130,10 +135,20 @@ vi.mock('workflow', async () => {
   return {
     ...testWorkflowModule,
     createHook: <T>(input: { token: string }) => {
-      const hook = testWorkflowModule.createHook<T>(input)
       hitlEntered.release()
 
-      return hook
+      if (hookGate === undefined) return testWorkflowModule.createHook<T>(input)
+
+      // The workflow has reached its hook, but the platform opens it only after the gate.
+      let opened: ReturnType<typeof testWorkflowModule.createHook<T>> | undefined
+
+      const hook = hookGate.promise.then(() => {
+        opened = testWorkflowModule.createHook<T>(input)
+
+        return opened
+      })
+
+      return Object.assign(hook, { [Symbol.dispose]: () => opened?.[Symbol.dispose]() })
     },
     // Steps run inline here, outside a platform step context: each call is a fresh execution.
     getStepMetadata: () => {
@@ -182,7 +197,14 @@ vi.mock('workflow/api', () => ({
       }
     }
   },
-  resumeHook: async (token: string, payload: unknown) => await world.sdk.resumeHook(token, payload)
+  resumeHook: async (token: string, payload: unknown) => {
+    try {
+      await world.sdk.resumeHook(token, payload)
+    } catch (error) {
+      hookMisses++
+      throw error
+    }
+  }
 }))
 
 const latch = () => {
@@ -204,6 +226,10 @@ let childEntered = latch()
 let childGate = latch()
 
 let hitlEntered = latch()
+
+let hookGate: ReturnType<typeof latch> | undefined
+
+let hookMisses = 0
 
 let sleepers: Array<() => void> = []
 
@@ -477,6 +503,8 @@ beforeEach(() => {
   childEntered = latch()
   childGate = latch()
   hitlEntered = latch()
+  hookGate = undefined
+  hookMisses = 0
   sleepers = []
   sleepDurations = []
   autoSleep = false
@@ -613,6 +641,28 @@ const childId = (parent: string) => {
   return id
 }
 
+/** The hook token of the run's current pause, as the tool step recorded it. */
+const pauseToken = (runId: string) => {
+  const token = registries.get(runId)?.state.hitlPause?.hookToken
+
+  if (token === undefined) throw new Error('Expected a recorded HITL pause')
+
+  return token
+}
+
+/** The resume route's record-then-resume program, against the fake store and platform. */
+const answer = (runId: string, response: HitlResponse) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const ownership = yield* decodeWorkflowOwnership({ runId, userId: 'owner' })
+
+      return yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex: 0 })
+    }).pipe(
+      Effect.result,
+      Effect.provide(Layer.merge(AgentWorkflowStore.layer, VercelWorkflows.layer))
+    )
+  )
+
 const events = (runId: string) =>
   Effect.runPromise(
     Effect.forEach(world.inspect(runId).chunks, chunk => {
@@ -704,7 +754,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       false
     )
     await world.sdk.resumeHook(
-      agentWorkflowHitlHookToken({ runId: parent }),
+      pauseToken(parent),
       ToolApprovalResponse.make({
         requestId: 'approval:gated',
         toolCallId: 'gated',
@@ -731,7 +781,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(paused.some(event => Predicate.isTagged(event, 'InputRequested'))).toBe(true)
     expect(paused.some(event => Predicate.isTagged(event, 'AgentAwaitingInput'))).toBe(true)
     await world.sdk.resumeHook(
-      agentWorkflowHitlHookToken({ runId: parent }),
+      pauseToken(parent),
       InputResponse.make({
         requestId: 'input:nickname:nick-call',
         toolCallId: 'nick-call',
@@ -774,7 +824,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
 
       const resumeAndAwait = async (value: HitlResponse) => {
         hitlEntered = latch()
-        await world.sdk.resumeHook(agentWorkflowHitlHookToken({ runId: parent }), value)
+        await world.sdk.resumeHook(pauseToken(parent), value)
         await hitlEntered.promise
       }
 
@@ -796,10 +846,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       // Stale/duplicate submissions are discarded by hook admission, not added to batch history.
       expect(await events(parent)).toEqual(beforeStale)
       await resumeAndAwait(response('nick-sibling', ''))
-      await world.sdk.resumeHook(
-        agentWorkflowHitlHookToken({ runId: parent }),
-        response('nick-sibling', 'Grace')
-      )
+      await world.sdk.resumeHook(pauseToken(parent), response('nick-sibling', 'Grace'))
       await world.settled(parent)
       expect(world.inspect(parent).status).toBe('completed')
 
@@ -818,6 +865,74 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       })
     }
   )
+
+  it('refuses a late duplicate answer to pause 1 so it cannot answer pause 2', async () => {
+    parentInputCall = true
+    siblingInputCall = true
+    const parent = await launch()
+    await hitlEntered.promise
+    const firstToken = pauseToken(parent)
+
+    const response = (id: string, data: string) =>
+      InputResponse.make({
+        requestId: `input:nickname:${id}`,
+        toolCallId: id,
+        outcome: 'submitted',
+        source: 'user',
+        data
+      })
+
+    hitlEntered = latch()
+    expect(Result.isSuccess(await answer(parent, response('nick-call', 'Ada')))).toBe(true)
+    await hitlEntered.promise
+    expect(pauseToken(parent)).not.toBe(firstToken)
+
+    // Both reach the route while pause 2 waits: the duplicate first, the real answer behind it.
+    const [duplicate, sibling] = await Promise.all([
+      answer(parent, response('nick-call', 'Ada')),
+      answer(parent, response('nick-sibling', 'Grace'))
+    ])
+
+    expect(duplicate).toMatchObject({ failure: { _tag: 'WorkflowHitlAnswerRefused' } })
+    expect(Result.isSuccess(sibling)).toBe(true)
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+
+    const results = requests
+      .at(-1)
+      ?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+
+    expect(results).toMatchObject([
+      { toolCallId: 'nick-call', structuredContent: { data: 'Ada' } },
+      { toolCallId: 'nick-sibling', structuredContent: { data: 'Grace' } }
+    ])
+  })
+
+  it('retries a recorded answer that arrives before its pause hook exists', async () => {
+    parentInputCall = true
+    hookGate = latch()
+    const parent = await launch()
+    await hitlEntered.promise
+
+    const resumed = answer(
+      parent,
+      InputResponse.make({
+        requestId: 'input:nickname:nick-call',
+        toolCallId: 'nick-call',
+        outcome: 'submitted',
+        source: 'user',
+        data: 'Ada'
+      })
+    )
+
+    await vi.waitFor(() => expect(hookMisses).toBe(1))
+    hookGate.release()
+    expect(await resumed).toMatchObject({ success: { response: { data: 'Ada' } } })
+    expect(hookMisses).toBe(1)
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(registries.get(parent)?.state.hitlPause).toMatchObject({ delivered: true })
+  })
 
   it('keeps a lost reservation response recoverably uncertain without releasing the logical slot', async () => {
     loseReservationResponse = true
