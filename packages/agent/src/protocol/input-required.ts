@@ -107,21 +107,17 @@ export const mergeInputRequiredRefs = (
   )
 }
 
-const maxListedReviews = 5
-
-/** Model-visible lines naming the review calls that finish the given pauses (at most five). */
+/**
+ * Model-visible lines naming every review call that finishes the given pauses. Not capped: the
+ * model reads only content, and the list is already bounded by the calls that paused (one review
+ * per `maxInputReviewPauses`).
+ */
 export const inputRequiredNotice = (refs: ReadonlyArray<ToolInputRequiredRef>): string => {
   const merged = mergeInputRequiredRefs(refs)
   const count = merged.reduce((total, ref) => total + ref.pauseIds.length, 0)
 
-  const listed = merged.slice(0, maxListedReviews)
-  const rest = merged.length - listed.length
-
   return [
     `${count} call${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} a person's input and ${count === 1 ? 'has' : 'have'} not completed. To continue, call${merged.length > 1 ? ' each in turn' : ''}:`,
-    ...listed.map(ref => `- ${inputReviewCallText(ref)}`),
-    ...(rest > 0
-      ? [`- … and ${rest} more review${rest === 1 ? '' : 's'} (see structuredContent)`]
-      : [])
+    ...merged.map(ref => `- ${inputReviewCallText(ref)}`)
   ].join('\n')
 }

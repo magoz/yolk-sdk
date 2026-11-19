@@ -765,8 +765,8 @@ records it (it never runs again), [code mode](../integrations/code-mode#what-scr
 the nested call with `error.code === 'input_required'`, and a staged plan reports it
 `input_required`. `toolInputRequired(result)` reads the ref back (`Option<ToolInputRequiredRef>`);
 `mergeInputRequiredRefs` merges refs per review tool and splits them into reviews of at most
-`maxInputReviewPauses` (50); `inputRequiredNotice` renders the model-visible notice, listing at
-most five reviews to call in turn. A remote MCP error result never carries the marker: Yolk's MCP
+`maxInputReviewPauses` (50); `inputRequiredNotice` renders the model-visible notice, listing every
+review to call in turn. A remote MCP error result never carries the marker: Yolk's MCP
 client keeps such content under `remoteStructuredContent`.
 
 Register one input review tool next to your other interactions. Fragment: the `pauseStore` methods

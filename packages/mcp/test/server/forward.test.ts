@@ -6,12 +6,16 @@ import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
+  McpFormElicitation,
   McpInputRequired,
+  McpToolCallInputRequired,
+  type McpClientOptions,
   type McpElicitationResponses,
   type McpRemoteServerConfig
 } from '../../src/client'
 import {
   approvalInputKey,
+  forwardEmptyPauseMessage,
   forwardStaleMessage,
   forwardUnsupportedMessage,
   makeMcpToolServer,
@@ -139,6 +143,21 @@ const proxyServer = (input: {
         tools: [forwarding],
         approvals: input.approvals
       })
+}
+
+const StateEnvelope = Schema.fromJsonString(
+  Schema.Struct({ p: Schema.Struct({ roundId: Schema.String, expiresAtMs: Schema.Number }) })
+)
+
+/** The forward state a signed `requestState` holds (`mcp1.<base64url body>.<mac>`). */
+const statePayload = (requestState: string | undefined) => {
+  const state = requestState ?? ''
+  const body = state.slice(state.indexOf('.') + 1, state.lastIndexOf('.'))
+
+  return Schema.decodeUnknownEffect(StateEnvelope)(Buffer.from(body, 'base64url').toString()).pipe(
+    Effect.map(envelope => envelope.p),
+    Effect.orDie
+  )
 }
 
 /** A raw round answering `requestState` (answers optional), expecting another prompt. */
@@ -388,6 +407,13 @@ describe('forwarding a remote elicitation', () => {
 
       expect(roundIds).toHaveLength(2)
       expect(roundIds[1]).toBe(roundIds[0])
+
+      // The state is signed, not encrypted: the re-asked one keeps the round and its first expiry.
+      const asked = yield* statePayload(first.inputRequired.requestState)
+      const reasked = yield* statePayload(again.result.requestState)
+
+      expect(reasked.roundId).toBe(asked.roundId)
+      expect(reasked.expiresAtMs).toBe(asked.expiresAtMs)
     })
   )
 
@@ -457,4 +483,97 @@ describe('forwarding a remote elicitation', () => {
       expect(forwardUnsupportedMessage).toContain('did not complete')
     })
   )
+
+  describe('a scripted remote', () => {
+    const okForm = McpInputRequired.make({
+      elicitations: [
+        McpFormElicitation.make({
+          key: 'ok',
+          message: 'Sure?',
+          requestedSchema: {
+            type: 'object',
+            properties: { ok: { type: 'boolean' } },
+            required: ['ok']
+          }
+        })
+      ],
+      requestState: 'remote-1',
+      mcpToolName: 'delete',
+      argumentsDigest: 'sha256:0'
+    })
+
+    const retryLater = McpInputRequired.make({
+      elicitations: [],
+      requestState: 'later',
+      mcpToolName: 'delete',
+      argumentsDigest: 'sha256:0'
+    })
+
+    /** A forwarding tool whose remote answers `initial`, then `resumed` on every resume. */
+    const scripted = (initial: McpInputRequired, resumed: McpInputRequired) =>
+      makeMcpToolServer({
+        name: 'proxy',
+        version: '0',
+        approvals: { key, principal: 'proxy-token' },
+        tools: [
+          {
+            def: ToolDef.make({ name: 'proxy_delete', description: 'Delete remotely', parameters }),
+            forward: true,
+            execute: (_, round) =>
+              Effect.succeed(
+                McpToolCallInputRequired.make({
+                  inputRequired: McpForwardRound.$is('Initial')(round) ? initial : resumed
+                })
+              )
+          }
+        ]
+      })
+
+    it.effect('answers a remote retry request as such, whatever the client declares', () =>
+      Effect.gen(function* () {
+        const layer = inProcess(scripted(retryLater, retryLater))
+
+        for (const options of [{}, proxyCall.options] satisfies Array<McpClientOptions>) {
+          const outcome = yield* callRemoteMcpServerToolResumable({ ...proxyCall, options }).pipe(
+            Effect.provide(layer)
+          )
+
+          if (!Predicate.isTagged(outcome, 'Complete'))
+            return expect.fail(`Expected Complete, got ${outcome._tag}`)
+
+          expect(outcome.result.content).toBe(forwardEmptyPauseMessage)
+        }
+      })
+    )
+
+    it.effect('never forwards a new remote prompt to a client that stopped declaring forms', () =>
+      Effect.gen(function* () {
+        const proxy = scripted(okForm, okForm)
+
+        const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(
+          Effect.provide(inProcess(proxy))
+        )
+
+        if (!Predicate.isTagged(first, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+        const answer = yield* respond(
+          proxy,
+          modernRequest({
+            method: 'tools/call',
+            toolName: 'proxy_delete',
+            capabilities: {},
+            params: jsonObject({
+              name: 'proxy_delete',
+              arguments: { id: 'e1' },
+              requestState: first.inputRequired.requestState,
+              inputResponses: { ok: { action: 'accept', content: { ok: true } } }
+            })
+          })
+        ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(CallResult)))
+
+        expect(answer.result.content[0]?.text).toBe(forwardUnsupportedMessage)
+      })
+    )
+  })
 })

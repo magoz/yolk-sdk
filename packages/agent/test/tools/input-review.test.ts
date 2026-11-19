@@ -196,7 +196,7 @@ describe('input-required results', () => {
     )
   })
 
-  it("splits a tool's pauses into reviews the review tool accepts, listing at most five", () => {
+  it("splits a tool's pauses into reviews the review tool accepts, listing every one", () => {
     const ids = Array.from({ length: 6 * maxInputReviewPauses + 1 }, (_, index) => `p${index}`)
     const [first, ...rest] = ids
 
@@ -211,8 +211,7 @@ describe('input-required results', () => {
     const notice = inputRequiredNotice(merged)
 
     expect(notice).toContain('301 calls need')
-    expect(notice.split('\n').filter(line => line.startsWith('- review_input('))).toHaveLength(5)
-    expect(notice).toContain('and 2 more reviews')
+    expect(notice.split('\n').filter(line => line.startsWith('- review_input('))).toHaveLength(7)
   })
 
   it('merges refs per review tool without repeating pauses', () => {
