@@ -7,6 +7,8 @@ export type DurableAgentEventSequencerState = {
 export type DurableAgentEvent<Event extends object = object> = Event & {
   readonly eventId: string
   readonly createdAtMs?: number
+  /** Set from `SequenceDurableAgentEventInput.executionId`; clients route live events by it. */
+  readonly executionId?: string
 }
 
 export type DurableAgentEventIdInput = {
@@ -29,15 +31,16 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
   readonly streamId: string
   readonly turn: number
   /**
-   * Identifies one execution of the step that writes the event; it becomes the id's last part.
+   * Identifies one execution of a model step. It is appended to the id and set as the event's
+   * `executionId` field, which `@yolk-sdk/agent` clients route by.
    *
    * Every execution of a step starts from the same `eventSequence`, and a step runs more than
    * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).
-   * Set it, unique per execution (for example `${stepId}:${attempt}` from `getStepMetadata()`),
-   * on live events a re-execution can write differently, such as a model step's deltas: without
-   * it, two executions write different events under one id and `eventId` de-dupe keeps parts of
-   * both. Omit it on events every execution writes identically (a committed terminal event, a
-   * receipt replay), so a client drops the repeat.
+   * Set it, unique per execution (for example `${stepId}:${attempt}` from `getStepMetadata()`), on
+   * every event the model call produces, from `LLMStreamStart` through `AssistantMessage` and
+   * `UsageUpdate`; `LLMStreamStart` must carry it. Leave it off host events (a promoted user
+   * message, the terminal event written after the commit). A receipt replay writes only that
+   * terminal event, never the live events again.
    */
   readonly executionId?: string
   readonly event: Event
@@ -117,6 +120,7 @@ export const sequenceDurableAgentEvent = <Event extends object>(
   type SequencedDurableAgentEventFields = Event & {
     eventId: string
     createdAtMs?: number
+    executionId?: string
   }
 
   const event: SequencedDurableAgentEventFields = {
@@ -131,6 +135,10 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 
   if (input.createdAtMs !== undefined) {
     event.createdAtMs = input.createdAtMs
+  }
+
+  if (input.executionId !== undefined) {
+    event.executionId = input.executionId
   }
 
   return {

@@ -720,11 +720,17 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
-A model response ends with its `AssistantMessage`, so output still streaming when the next
-`LLMStreamStart` arrives belongs to a superseded execution of a retried or redelivered model step
-(each execution's live events carry their own `eventId`s, for example `@yolk-sdk/vercel-workflows`'
-`executionId`). The chat projection and `reduceAgentEvents` discard it then: streaming text,
-reasoning and tool input. Settled messages and tool runs stay.
+A retried or redelivered model step streams a second answer for the same turn. Events carry an
+optional `executionId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the execution that
+produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection` and the `useAgentChat`
+reducer route by it, per turn (`LLMStreamStart.turn`). A newer execution's `LLMStreamStart`
+supersedes the older one of that turn: its provisional output (streaming text, its
+`AssistantMessage`, tool calls no host event acted on) is removed and its later events are dropped.
+A later turn, a terminal event, a user message or `AgentStart` settles executions (output kept,
+later events dropped), and at `AgentEnd` a final turn that had more than one execution shows the
+committed answer from `AgentEnd.messages`. Carry `executions` along with `seenEventIds` when you
+keep projection state yourself. Without `executionId`, the next `LLMStreamStart` only discards output
+still streaming.
 
 When the host promotes queued user input into a durable stream, emit a replay-safe user event:
 

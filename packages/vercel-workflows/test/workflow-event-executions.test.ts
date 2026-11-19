@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Effect, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import {
   makeDurableAgentEventSequencerState,
   runVercelAgentWorkflow,
@@ -10,7 +10,7 @@ import {
 } from '../src/workflow.ts'
 import { TestWorkflowWorld } from '../src/testing/index.ts'
 
-// Regression for #305: every execution of a model step starts from the same `eventSequence`, so
+// Every execution of a model step starts from the same `eventSequence`, so
 // without an execution id a retried step wrote different events under the first execution's ids
 // and a client de-duping by `eventId` showed a splice of both answers ("Hello w cannot").
 
@@ -19,6 +19,7 @@ const streamId = 'workflow:run-1'
 const WrittenEvent = Schema.Struct({
   _tag: Schema.String,
   eventId: Schema.String,
+  executionId: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String)
 })
 
@@ -65,7 +66,11 @@ const dedupeByEventId = (events: ReadonlyArray<WrittenEvent>) => {
 
 const textsOf = (events: ReadonlyArray<WrittenEvent>, executionId: string | undefined) =>
   events.flatMap(event =>
-    executionId !== undefined && event.eventId.endsWith(`:${executionId}`) ? [event.text] : []
+    executionId !== undefined &&
+    event.executionId === executionId &&
+    Predicate.isTagged(event, 'LLMTextDelta')
+      ? [event.text]
+      : []
   )
 
 const runRetriedModelStep = async (input: {
@@ -97,6 +102,20 @@ const runRetriedModelStep = async (input: {
       executionIds.push(executionId)
 
       try {
+        // Every event the model call produces carries the execution, `LLMStreamStart` included.
+        const started = await Effect.runPromise(
+          writeDurableAgentEvent({
+            writer,
+            event: { _tag: 'LLMStreamStart', turn },
+            streamId,
+            turn,
+            executionId,
+            state: makeDurableAgentEventSequencerState(eventSequence)
+          })
+        )
+
+        eventSequence = started.nextEventSequence
+
         for (const text of deltas) {
           const written = await Effect.runPromise(
             writeDurableAgentEvent({
@@ -184,6 +203,12 @@ describe('model-step executions write distinct durable event ids (#305)', () => 
     expect(textsOf(events, executionIds[0])).toEqual(['Hel', 'lo w'])
     expect(textsOf(events, executionIds[1])).toEqual(['Sorry', ', I', ' cannot'])
     // The committed terminal event keeps the deterministic id a replay writes again.
-    expect(events.at(-1)).toEqual({ _tag: 'AgentEnd', eventId: `${streamId}:1:3` })
+    expect(events.at(-1)).toEqual({ _tag: 'AgentEnd', eventId: `${streamId}:1:4` })
+    // Each execution starts with its own `LLMStreamStart`, so clients can tell them apart.
+    expect(
+      events.flatMap(event =>
+        Predicate.isTagged(event, 'LLMStreamStart') ? [event.executionId] : []
+      )
+    ).toEqual(executionIds)
   })
 })

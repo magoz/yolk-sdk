@@ -84,12 +84,13 @@ ${streamId}:${turn}:${eventSequence}:${executionId}
 Clients should de-dupe by `eventId` during resume/reconnect.
 
 Every execution of a step starts from the same `eventSequence`, and a step can run more than once
-(loop retries, platform retries, queue redelivery). Give a model step's live events an
-`executionId` unique per execution, such as `${stepId}:${attempt}` from `getStepMetadata()`, so a
-re-execution's different answer never reuses the first execution's ids. Omit it on events every
-execution writes identically (the terminal event written after the commit, receipt replays), so the
-repeat is dropped. Yolk clients discard a superseded execution's unfinished output at the next
-`LLMStreamStart`.
+(loop retries, platform retries, queue redelivery). Pass an `executionId` unique per execution, such
+as `${stepId}:${attempt}` from `getStepMetadata()`, on every event the model call produces, from
+`LLMStreamStart` (required) through `AssistantMessage`/`UsageUpdate`. The sequencer appends it to the
+id and sets it on the event. Leave it off host events (a promoted user message, the terminal event
+written after the commit); a receipt replay rewrites only that terminal event. Yolk clients then
+remove a superseded execution's output and drop its later events. Tool-batch steps are out of
+scope. Upgrade clients with the server: older clients show both executions back to back.
 
 ## Commit before protocol terminal events
 

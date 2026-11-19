@@ -1314,6 +1314,38 @@ const discardUnfinishedStream = (
   return parts.length === 0 ? kept : [...kept, { ...last, parts }]
 }
 
+/**
+ * Removes a model-step execution's provisional output after the last user message: the model
+ * output (text, reasoning, tool calls no host step acted on) of the chat messages it produced
+ * (`messageIds`), and its unacknowledged tool calls (`callIds`) wherever they sit. A message left
+ * with no parts goes too; acknowledged tool calls stay.
+ */
+export const discardChatExecutionOutput = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  messageIds: ReadonlySet<string>,
+  callIds: ReadonlySet<string>
+): ReadonlyArray<AgentChatMessage> => {
+  if (messageIds.size === 0 && callIds.size === 0) return messages
+
+  const lastUser = findLastMessageIndex(messages, message => message.role === 'user')
+
+  return messages.flatMap((message, index) => {
+    if (index <= lastUser) return [message]
+
+    const owned = messageIds.has(message.id)
+
+    const parts = message.parts.filter(part =>
+      Predicate.isTagged(part, 'ToolCall')
+        ? !callIds.has(part.call.id)
+        : !(owned && (Predicate.isTagged(part, 'Text') || Predicate.isTagged(part, 'Reasoning')))
+    )
+
+    if (parts.length === message.parts.length) return [message]
+
+    return parts.length === 0 ? [] : [{ ...message, parts }]
+  })
+}
+
 const finalizeStreamingParts = (
   messages: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatMessage> =>

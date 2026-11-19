@@ -23,6 +23,12 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { Data, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
+import {
+  recordAgentExecutionEvent,
+  routeAgentExecutionEvent,
+  supersededAgentExecutionCalls,
+  type AgentExecutions
+} from './executions.ts'
 
 export type AgentToolRun =
   | {
@@ -117,6 +123,11 @@ export type AgentClientState = {
   readonly reasoning: string
   readonly toolRuns: ReadonlyArray<AgentToolRun>
   readonly seenEventIds: ReadonlyArray<string>
+  /**
+   * Model-step executions seen on this stream (events carrying `executionId`); a superseded one's
+   * live messages and unacknowledged tool runs are removed. Absent in states built before it.
+   */
+  readonly executions?: AgentExecutions<AgentMessage>
 }
 
 export type ApplyAgentEventOptions = {
@@ -144,7 +155,8 @@ export const initialAgentClientState: AgentClientState = {
   text: '',
   reasoning: '',
   toolRuns: [],
-  seenEventIds: []
+  seenEventIds: [],
+  executions: []
 }
 
 const statusTree = (state: AgentClientState): AgentStatusTree => ({
@@ -465,6 +477,52 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
+  const executions = state.executions ?? []
+  const route = routeAgentExecutionEvent(executions, event)
+
+  if (Predicate.isTagged(route, 'Drop')) return rememberEvent(state, event)
+
+  const routed = Predicate.isTagged(route, 'Start')
+    ? discardSupersededExecutions(state, route.superseded)
+    : state
+
+  const applied = applyAgentEventRouted(routed, event, nowMs)
+  const before = Predicate.isTagged(route, 'Start') ? route.executions : executions
+
+  const after = recordAgentExecutionEvent(
+    before,
+    event,
+    route,
+    Predicate.isTagged(event, 'AssistantMessage') ? [event.message] : []
+  )
+
+  return after === executions ? applied : { ...applied, executions: after }
+}
+
+/** A superseded execution's output is provisional: its live messages and unacknowledged runs. */
+const discardSupersededExecutions = (
+  state: AgentClientState,
+  superseded: AgentExecutions<AgentMessage>
+): AgentClientState => {
+  if (superseded.length === 0) return state
+
+  const calls = supersededAgentExecutionCalls(superseded)
+  const messages = new Set(superseded.flatMap(execution => execution.output))
+
+  return {
+    ...state,
+    text: '',
+    reasoning: '',
+    liveMessages: state.liveMessages.filter(message => !messages.has(message)),
+    toolRuns: state.toolRuns.filter(run => !calls.has(toolRunId(run)))
+  }
+}
+
+const applyAgentEventRouted = (
+  state: AgentClientState,
+  event: AgentEvent,
+  nowMs: number
+): AgentClientState => {
   const activeCallId = activeEventToolCallId(event)
 
   if (activeCallId !== undefined && isAcknowledgedCall(state, activeCallId)) {
@@ -773,7 +831,8 @@ export const submitAgentUserMessage = (
       text: '',
       reasoning: '',
       toolRuns: retainedSettledToolRuns(state.toolRuns),
-      seenEventIds: []
+      seenEventIds: [],
+      executions: []
     },
     startAgentStatusTree(statusTree(state))
   )

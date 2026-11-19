@@ -29,9 +29,15 @@ describe('durable workflow agent events', () => {
         event: { _tag: 'LLMTextDelta', text: 'hej' }
       })
 
-    expect(sequenced('step-1:1').event.eventId).toBe('workflow:run-1:2:3:step-1:1')
+    expect(sequenced('step-1:1').event).toEqual({
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      eventId: 'workflow:run-1:2:3:step-1:1',
+      executionId: 'step-1:1'
+    })
     expect(sequenced('step-1:2').event.eventId).toBe('workflow:run-1:2:3:step-1:2')
     expect(sequenced(undefined).event.eventId).toBe('workflow:run-1:2:3')
+    expect(Object.hasOwn(sequenced(undefined).event, 'executionId')).toBe(false)
     expect(sequenced('step-1:1').nextEventSequence).toBe(4)
   })
 

@@ -15,8 +15,16 @@ import {
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
+  recordAgentExecutionEvent,
+  routeAgentExecutionEvent,
+  supersededAgentExecutionCalls,
+  disputedFinalTurnExecutions,
+  type AgentExecutions
+} from '../client/executions.ts'
+import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
+  discardChatExecutionOutput,
   deleteChatTurn,
   editChatUserMessage,
   markChatError,
@@ -41,11 +49,19 @@ export type AgentChatState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
   readonly seenEventIds: ReadonlyArray<string>
+  /** Model-step executions seen on this stream; see `AgentChatEventProjectionState`. */
+  readonly executions?: AgentExecutions<string>
 }
 
 export type AgentChatEventProjectionState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly seenEventIds: ReadonlyArray<string>
+  /**
+   * Model-step executions seen on this stream (events carrying `executionId`), with the chat
+   * message ids and tool calls each produced. Carry it with `seenEventIds` between events; absent
+   * in states built before it.
+   */
+  readonly executions?: AgentExecutions<string>
 }
 
 export const initialAgentChatState: AgentChatState = {
@@ -115,10 +131,87 @@ export const applyAgentEventToChatProjection = (
     return state
   }
 
-  return {
-    chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, options),
-    seenEventIds: rememberEventId(state.seenEventIds, event)
-  }
+  const seenEventIds = rememberEventId(state.seenEventIds, event)
+  const projected = projectExecutionEvent(state, event, options)
+
+  if (projected === undefined) return { ...state, seenEventIds }
+
+  return projected.executions === undefined
+    ? { chatMessages: projected.chatMessages, seenEventIds }
+    : { chatMessages: projected.chatMessages, seenEventIds, executions: projected.executions }
+}
+
+type ExecutionProjection = {
+  readonly chatMessages: ReadonlyArray<AgentChatMessage>
+  readonly executions?: AgentExecutions<string>
+}
+
+/**
+ * Applies one event with model-step execution routing (`executionId`): drops a superseded or
+ * settled execution's events, removes a superseded execution's provisional output when a newer
+ * one of the same turn starts, and at `AgentEnd` replaces a disputed final turn's answer with the
+ * committed one. `undefined` means dropped.
+ */
+const projectExecutionEvent = (
+  projection: ExecutionProjection,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions
+): ExecutionProjection | undefined => {
+  const executions = projection.executions ?? []
+  const route = routeAgentExecutionEvent(executions, event)
+
+  if (Predicate.isTagged(route, 'Drop')) return undefined
+
+  const started = Predicate.isTagged(route, 'Start')
+    ? discardExecutions(projection.chatMessages, route.superseded)
+    : projection.chatMessages
+
+  const committed = Predicate.isTagged(event, 'AgentEnd')
+    ? replaceDisputedFinalTurn(started, disputedFinalTurnExecutions(executions), event.messages)
+    : started
+
+  const chatMessages = applyAgentEventToChatMessages(committed, event, options)
+  const owned = Predicate.isTagged(route, 'Owned') || Predicate.isTagged(route, 'Start')
+  const known = new Set(committed.map(message => message.id))
+
+  const output = owned
+    ? chatMessages.flatMap(message => (known.has(message.id) ? [] : [message.id]))
+    : []
+
+  const after = recordAgentExecutionEvent(
+    Predicate.isTagged(route, 'Start') ? route.executions : executions,
+    event,
+    route,
+    output
+  )
+
+  return after === executions
+    ? { ...projection, chatMessages }
+    : { chatMessages, executions: after }
+}
+
+const discardExecutions = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  executions: AgentExecutions<string>
+) =>
+  discardChatExecutionOutput(
+    messages,
+    new Set(executions.flatMap(execution => execution.output)),
+    supersededAgentExecutionCalls(executions)
+  )
+
+/** The committed final answer replaces whatever a disputed final turn showed. */
+const replaceDisputedFinalTurn = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  disputed: AgentExecutions<string>,
+  committed: ReadonlyArray<AgentMessage>
+) => {
+  if (disputed.length === 0) return messages
+
+  const answer = committed.filter(message => Predicate.isTagged(message, 'Assistant')).at(-1)
+  const discarded = discardExecutions(messages, disputed)
+
+  return answer === undefined ? discarded : appendProtocolMessage(discarded, answer)
 }
 
 export type AgentChatAction =
@@ -152,6 +245,7 @@ export const reduceAgentChatState = (
       started(state, {
         ...state,
         seenEventIds: [],
+        executions: [],
         chatMessages: appendProtocolMessage(state.chatMessages, current.message),
         sessionEvents: [
           ...state.sessionEvents,
@@ -173,6 +267,7 @@ export const reduceAgentChatState = (
       started(state, {
         ...state,
         seenEventIds: [],
+        executions: [],
         // User data is not a validated tool result until the server accepts it. Keep the
         // form mounted while submitting and never replay an optimistic invalid payload.
         chatMessages:
@@ -210,6 +305,7 @@ export const reduceAgentChatState = (
           started(state, {
             ...state,
             seenEventIds: [],
+            executions: [],
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -231,6 +327,7 @@ export const reduceAgentChatState = (
           started(state, {
             ...state,
             seenEventIds: [],
+            executions: [],
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -250,10 +347,14 @@ export const reduceAgentChatState = (
         return state
       }
 
-      const projected = {
-        ...state,
-        chatMessages: applyAgentEventToChatMessages(state.chatMessages, current.event, current)
-      }
+      const routed = projectExecutionEvent(state, current.event, current)
+
+      if (routed === undefined) return rememberEvent(state, current.event)
+
+      const projected =
+        routed.executions === undefined
+          ? { ...state, chatMessages: routed.chatMessages }
+          : { ...state, chatMessages: routed.chatMessages, executions: routed.executions }
 
       // A replayed start of an already settled call must not reopen the run.
       const fenced =

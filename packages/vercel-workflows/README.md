@@ -299,12 +299,21 @@ Every execution starts from the same `eventSequence`. A model step's second exec
 model again and streams a different answer, so without more the same ids carry different events and
 a client de-duping by `eventId` keeps the first execution's early deltas plus the second's tail.
 
-Pass an `executionId` unique per execution on a model step's live events (deltas, tool input,
-messages before the commit). `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is one:
-a loop retry is a new step id, and each platform retry or redelivery a new attempt. Omit it on events
-every execution writes identically, so a client drops the repeat: the terminal event written after
-the host commits (`commitThenWriteTerminalEvent`) and anything replayed from a committed receipt.
-Leaving it out keeps the plain format, so stored ids and events written before do not change.
+Pass an `executionId` unique per execution, and pass it on exactly the events the model call
+produces: every event from `LLMStreamStart` through `AssistantMessage`/`UsageUpdate` (deltas, tool
+input, provider tool results). `LLMStreamStart` must carry it: it is identical in every execution,
+so with a plain id the second start would be de-duped and the client could not tell the executions
+apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is unique per execution: a loop
+retry is a new step id, and each platform retry or redelivery a new attempt. The sequencer appends
+it to the id and also sets it as the event's `executionId` field (never parse it from the id: both
+parts contain `:`).
+
+Leave it off host events every execution writes identically: a promoted user message, and the
+terminal event written after the host commits (`commitThenWriteTerminalEvent`). A re-execution that
+finds a committed receipt replays only that terminal event (same plain id, so the client drops the
+repeat); it never rewrites the live events, whose ids carried the original execution. Without
+`executionId` ids keep the plain format, so stored ids and events written before do not change.
+Tool-batch steps are out of scope: their events stay deterministic (ledger replays).
 
 ```ts
 const { stepId, attempt } = getStepMetadata()
@@ -313,11 +322,24 @@ const executionId = `${stepId}:${attempt}`
 yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, state })
 ```
 
-`@yolk-sdk/agent` clients (`reduceAgentEvents`, `applyAgentEventToChatProjection`) then discard a
-superseded execution's unfinished output when the next execution's `LLMStreamStart` arrives (a model
-response ends with its `AssistantMessage`, so anything still streaming then was abandoned). Two
-executions streaming at the same time can still interleave in the live view until the committed
-messages arrive; none of their events is dropped.
+`@yolk-sdk/agent` clients (`reduceAgentEvents`, `applyAgentEventToChatProjection`, the
+`useAgentChat` reducer) route events by that field, per turn (`LLMStreamStart.turn`):
+
+- When a newer execution of the same turn starts, the older one is superseded: its output is
+  provisional and removed (streaming text, its `AssistantMessage`, and every tool call it produced
+  that no host event acted on yet), and its later events are dropped.
+- A later turn's start, a terminal event, a user message or `AgentStart` settles every execution so
+  far: its output stays, and its later events (a losing concurrent execution) are dropped.
+- At `AgentEnd`, if the final turn had more than one execution, its shown answer is replaced by the
+  committed final assistant message from `AgentEnd.messages`, so the answer that was committed shows
+  even when the older execution committed while the newer one streamed.
+- Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
+  output still streaming.
+
+Upgrade clients and server together: a client before this release ignores the field and shows both
+executions' output back to back. Left open: a superseded non-final turn whose older execution
+committed (the client shows the newer text until reload), and an execution whose `LLMStreamStart`
+is written after the terminal event.
 
 ## Terminal barriers
 

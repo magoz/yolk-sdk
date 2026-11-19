@@ -75,7 +75,10 @@ const projection = events.reduce(
 
 Use append-only projection for durable logs. Use simpler message reducers only for ephemeral local streams.
 
-A model response ends with its `AssistantMessage`, so output still streaming when the next
-`LLMStreamStart` arrives belongs to a superseded execution of a retried or redelivered model step.
-Both the chat projection and `reduceAgentEvents` discard it then (streaming text, reasoning and tool
-input); settled messages and tool runs stay.
+A retried or redelivered model step streams a second answer for the same turn. Events from a
+model call can carry `executionId`; the chat projection, the `useAgentChat` reducer and
+`reduceAgentEvents` route by it. When a newer execution of a turn starts, the older one's output
+(streaming text, its assistant message, tool calls nothing acted on) is removed and its later events
+are dropped; at `AgentEnd` a turn that ran more than once shows the committed answer. Keep the
+projection's `executions` with its `seenEventIds`. Events without `executionId` only discard output
+still streaming at the next `LLMStreamStart`.

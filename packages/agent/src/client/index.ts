@@ -13,6 +13,8 @@ export {
   toolRunsFromHitlRequests
 } from './state.ts'
 
+export type { AgentExecution, AgentExecutions } from './executions.ts'
+
 export type {
   AgentClientState,
   AgentToolRun,
