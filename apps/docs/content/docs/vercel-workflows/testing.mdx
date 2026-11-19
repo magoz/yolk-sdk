@@ -60,8 +60,24 @@ payload sent to a live hook; `await hook` reads the first, and the rest are drop
 disposes the hook. Once the hook is disposed, or its run ended, resuming its token fails with
 `TestWorkflowHookNotFoundError` until a hook of any run takes the token again. So a test can show a
 second answer being accepted and never used, or a late duplicate reaching the next pause that
-reuses a token ([HITL resume](./hitl-resume)). The world does not model the platform's
-`HookConflictError` for a token another live hook holds, nor reading one hook more than once.
+reuses a token ([HITL resume](./hitl-resume)).
+
+A token is held by one live hook at a time. The platform creates a hook when its run next
+suspends, applying the disposals the run made since first; the world decides once the code that
+created the hook yields (for example at its first `await`). If another live hook, in another run or
+the same one, still holds the token then, the new hook is refused: awaiting it fails with
+`TestWorkflowHookConflictError` (named `HookConflictError`, with `token`, `conflictingRunId`, and
+the platform's message without its docs link), disposing it changes nothing, and the holder keeps
+the token and its answers. So creating the next hook and then disposing the previous one before
+awaiting works, while a step or other suspension in between leaves the next hook refused. Once the
+holder is disposed or its run ends, a new hook takes the token.
+
+The world differs from Vercel in two ways: a non-suspending `await` (such as
+`await Promise.resolve()`) between creating the next hook and disposing the previous one refuses
+the next hook here while Vercel accepts it, and a disposed hook frees its token (and answers
+`TestWorkflowHookNotFoundError`) at once, while Vercel records the disposal at the run's next
+suspension. The world does not model reading one hook more than once, nor the platform hook's
+`getConflict()`.
 
 ### Step errors
 

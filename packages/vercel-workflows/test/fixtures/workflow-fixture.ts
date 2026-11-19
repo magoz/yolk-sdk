@@ -109,6 +109,67 @@ export async function packageHookOnceWorkflow(token: string): Promise<string> {
   return await hook
 }
 
+// Creates a hook whose token another hook may hold; returns its answer or the failure awaiting it
+// reports.
+export async function packageHookConflictWorkflow(token: string): Promise<string> {
+  'use workflow'
+
+  using hook = createHook<string>({ token })
+
+  return await hook.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+}
+
+// Two live hooks of one run share a token: the second is refused, the first still answers.
+export async function packageHookSameRunConflictWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  using first = createHook<string>({ token })
+  using second = createHook<string>({ token })
+
+  const refused = await second.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+
+  return [refused, await first]
+}
+
+// Creates the next hook before disposing the one holding its token: the run applies the disposal
+// first when it suspends, so the next hook takes the token.
+export async function packageHookDisposeAfterCreateWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  const previous = createHook<string>({ token })
+  const first = await previous
+  using next = createHook<string>({ token })
+
+  previous[Symbol.dispose]()
+
+  return [first, await next]
+}
+
+// As above, but the run suspends on a step before the disposal, while the token is still held.
+export async function packageHookDisposeAfterStepWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  const previous = createHook<string>({ token })
+  const first = await previous
+  using next = createHook<string>({ token })
+
+  await packageWriteStreamStep('between hooks')
+  previous[Symbol.dispose]()
+
+  const refused = await next.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+
+  return [first, refused]
+}
+
 export async function packageCancellableWorkflow(): Promise<string> {
   'use workflow'
 

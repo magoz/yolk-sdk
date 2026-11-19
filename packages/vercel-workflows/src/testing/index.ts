@@ -67,17 +67,24 @@ export class TestWorkflowHookNotFoundError extends Error {
 }
 
 /**
- * Not thrown by `resumeHook`: like the platform, it accepts every payload sent to a live hook. The
- * platform's `HookConflictError` comes from creating a hook whose token another live hook holds,
- * which this world does not emulate.
- *
- * @deprecated Nothing throws it any more; it will be removed in a later minor release.
+ * The platform's `HookConflictError` (its message, without the platform's docs link): awaiting a
+ * hook fails with it when another live hook (of any run, this one included) still held its token
+ * once the code that created it yielded. The refused hook never takes the token.
  */
 export class TestWorkflowHookConflictError extends Error {
   override readonly name = 'HookConflictError'
+  readonly token: string
+  /** The run whose live hook holds the token. */
+  readonly conflictingRunId: string | undefined
 
-  constructor(token: string) {
-    super(`Workflow hook "${token}" was already resumed`)
+  constructor(token: string, conflictingRunId?: string) {
+    super(
+      `Hook token "${token}" is already in use by another workflow${
+        conflictingRunId === undefined ? '' : ` (run "${conflictingRunId}")`
+      }`
+    )
+    this.token = token
+    this.conflictingRunId = conflictingRunId
   }
 }
 
@@ -503,6 +510,19 @@ export class TestWorkflowWorld {
   // the first; later payloads stay unread (a settled promise ignores them) and are dropped with
   // the hook. A disposed hook's token is free again, for a later hook of any run.
   async resumeHook(token: string, payload: unknown): Promise<void> {
+    const live = this.liveHook(token)
+
+    if (live === undefined) throw new TestWorkflowHookNotFoundError(token)
+
+    live.run.resumedHookTokens.add(token)
+    live.hook.resolve(payload)
+  }
+
+  // The one hook holding `token`: undisposed, in a run that has not ended. `makeHook` refuses a
+  // second, so there is at most one.
+  private liveHook(
+    token: string
+  ): { readonly run: TestWorkflowRunRecord; readonly hook: HookRecord } | undefined {
     for (const run of this.runs.values()) {
       if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
         continue
@@ -510,15 +530,10 @@ export class TestWorkflowWorld {
 
       const hook = run.hooks.get(token)
 
-      if (hook !== undefined) {
-        run.resumedHookTokens.add(token)
-        hook.resolve(payload)
-
-        return
-      }
+      if (hook !== undefined) return { run, hook }
     }
 
-    throw new TestWorkflowHookNotFoundError(token)
+    return undefined
   }
 
   hasResumedHook(token: string): boolean {
@@ -679,10 +694,15 @@ export class TestWorkflowWorld {
     })
   }
 
+  // The platform creates a hook when its run next suspends, applying the run's disposals since
+  // first (in creation order), and refuses a token another live hook holds then (of any run, this
+  // one included). The emulator decides once the code that created the hook yields: a hook of the
+  // same run disposed before that frees the token first. A refused hook rejects when awaited, never
+  // takes the token, and left unawaited fails nothing.
   private makeHook<T>(run: TestWorkflowRunRecord, token: string): TestWorkflowHook<T> {
     let resolveHook: (payload: unknown) => void = () => {}
 
-    let rejectHook: (error: TestWorkflowRunCancelledError) => void = () => {}
+    let rejectHook: (error: Error) => void = () => {}
 
     const promise = new Promise<T>((resolve, reject) => {
       // SAFETY: Hook payloads are caller-typed on the platform (`createHook<T>`).
@@ -691,11 +711,41 @@ export class TestWorkflowWorld {
       rejectHook = reject
     })
 
-    run.hooks.set(token, { resolve: resolveHook, reject: rejectHook })
+    const hook: HookRecord = { resolve: resolveHook, reject: rejectHook }
+    let disposed = false
+
+    queueMicrotask(() => {
+      // Created and disposed before it was created: it never holds the token.
+      if (disposed) return
+
+      // A run cancelled before then rejects it, as `cancel` rejects its registered hooks; a run
+      // that ended otherwise never creates it.
+      if (run.status === 'cancelled') {
+        rejectHook(new TestWorkflowRunCancelledError(run.runId))
+
+        return
+      }
+
+      if (run.status === 'completed' || run.status === 'failed') return
+
+      const holder = this.liveHook(token)
+
+      if (holder === undefined) {
+        run.hooks.set(token, hook)
+
+        return
+      }
+
+      promise.catch(() => {})
+      rejectHook(new TestWorkflowHookConflictError(token, holder.run.runId))
+    })
 
     return Object.assign(promise, {
       [Symbol.dispose]: () => {
-        run.hooks.delete(token)
+        disposed = true
+
+        // Frees the token only while this hook holds it, never a later hook that took it since.
+        if (run.hooks.get(token) === hook) run.hooks.delete(token)
       }
     })
   }

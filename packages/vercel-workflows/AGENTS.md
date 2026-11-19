@@ -49,7 +49,12 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   that today only risk a late duplicate.
 - `TestWorkflowWorld` hooks match the platform: every resume of a live hook succeeds, `await hook`
   reads the first payload, a disposed hook or ended run answers `HookNotFoundError`, and a freed
-  token can be taken by a later hook of any run.
+  token can be taken by a later hook of any run. The platform creates a hook at its run's next
+  suspension, after the run's disposals since; the emulator decides once the creating code yields.
+  A token another live hook (any run, its own included) still holds then is refused: awaiting the
+  new hook fails with `TestWorkflowHookConflictError`, and its dispose never frees the holder's
+  token. Unlike Vercel, a non-suspending `await` before the holder's disposal still refuses, and a
+  dispose frees the token at once (Vercel records it at the next suspension).
 - Durable event helpers are pure/Effect-native: `sequenceDurableAgentEvent`, `writeDurableAgentEvent`, and `commitThenWriteTerminalEvent`; hosts own storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.

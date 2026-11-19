@@ -93,12 +93,22 @@ creates no run) and `world.inspect(runId).attributes` shows them (`{}` without a
 adds no `$parentRunId`/`$rootRunId`). Hooks follow the platform too: `resumeHook` succeeds for
 every payload sent to a live hook, `await hook` reads the first, the rest are dropped when the hook
 is disposed, and a token whose hook was disposed (or whose run ended) answers
-`TestWorkflowHookNotFoundError` until a hook of any run takes it again. The emulator does not model
-the platform's `HookConflictError` for a token another live hook holds, nor reading a hook more than
-once. Executing a step loads the workflow runtime, so it needs the
-Node test environment. Ambient module mocks do not apply retry policy by
-themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly
-when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
+`TestWorkflowHookNotFoundError` until a hook of any run takes it again. A token is held by one
+live hook at a time. The platform creates a hook when its run next suspends, after the disposals
+the run made since; the emulator decides once the code that created the hook yields. A hook whose
+token another live hook (of any run, its own included) still holds then is refused: awaiting it
+fails with `TestWorkflowHookConflictError` (the platform's `HookConflictError` and its message,
+without the platform's docs link, with `token` and `conflictingRunId`), and the holder keeps the
+token. Disposing the holder right after creating the next hook, before yielding, frees the token
+for it. The emulator differs from Vercel in two ways: a non-suspending `await` (such as
+`await Promise.resolve()`) between creating the next hook and disposing the previous one refuses
+the next hook here while Vercel accepts it, and a disposed hook frees its token (and answers
+`TestWorkflowHookNotFoundError`) at once, while Vercel records the disposal at the run's next
+suspension. The emulator does not model reading a hook more than once, nor the platform hook's
+`getConflict()`. Executing a step loads the workflow runtime, so it needs the Node test
+environment. Ambient module mocks do not apply retry policy by themselves: wrap host step callbacks
+with `world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise platform
+retry attempts and `getStepMetadata().attempt`.
 
 Mock the ambient `workflow` module so production orchestration runs against the active test world:
 
