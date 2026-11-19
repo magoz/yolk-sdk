@@ -1471,6 +1471,31 @@ describe('tool ledger', () => {
     )
   })
 
+  it('keeps code mode pause refs only with the notice code mode wrote', () => {
+    const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+    const notice = `1 call needs a person's input and has not completed. To continue, call:\n- review_input({"pauseIds":["p1"]})`
+
+    const result = (content: string) =>
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content,
+        structuredContent: { codemode: { ok: true, inputRequired: pauses, extra: 'e'.repeat(500) } }
+      })
+
+    const codeMode = toolLedgerResult(result(`${'x'.repeat(2_000)}\n\n${notice}`), 1_000)
+
+    expect(codeMode.structuredContent).toEqual({ codemode: { ok: true, inputRequired: pauses } })
+    expect(resultText(codeMode)).toContain(`…\n\n${notice}\n\n[The stored copy`)
+
+    // Another tool (a remote MCP tool, say) returning the same shape without the notice: the
+    // ledger neither keeps its refs nor writes a notice from its data.
+    const other = toolLedgerResult(result('x'.repeat(2_000)), 1_000)
+
+    expect(other.structuredContent).toBeUndefined()
+    expect(resultText(other)).not.toContain('review_input')
+    expect(resultText(other)).toMatch(/^x+…\n\n\[The stored copy/)
+  })
+
   it.effect('replays a large input-required result as input-required', () =>
     Effect.gen(function* () {
       const probe = makeProbe()

@@ -558,14 +558,16 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * parts, so their labels never become text a code mode script reads; only a bound too small for
  * them leaves the note alone. A result that names pauses (ADR 0014) keeps them through every
  * step, with the text that tells the model to review them after the cut text (rebuilt from the
- * kept refs when the text does not end with it), so a replay still names its pauses: an
+ * marker when the text does not end with it), so a replay still names its pauses: an
  * input-required error result keeps its marker `{ code, inputRequired }` and its review call
  * (`inputRequiredInstruction`); a code mode result keeps `{ codemode: { ok, inputRequired } }` and
- * its notice (`inputRequiredNotice`). Their other `structuredContent` fields are dropped. The
- * kept refs and their text are never cut, so with many pause ids they can exceed `maxBytes`. A
- * bound smaller than the identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, kept
- * pause refs) leaves an empty content, or only the review text. The live call still returns the
- * original result; only replays see the stored copy.
+ * its notice (`inputRequiredNotice`) only when its text ends with that notice (never rebuilt, so
+ * another tool returning that shape gets no notice the ledger wrote; its refs are dropped). Their
+ * other `structuredContent` fields are dropped. The kept refs and their text are never cut, so
+ * with many pause ids they can exceed `maxBytes`. A bound smaller than the identifying fields
+ * (`toolCallId`, `isError`, `acceptance`, `usage`, kept pause refs) leaves an empty content, or
+ * only the review text. The live call still returns the original result; only replays see the
+ * stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,
@@ -621,15 +623,15 @@ export const toolLedgerResult = (
 
   delete withoutStructured.structuredContent
 
+  const reduced = cutContent(result.content)
+
   // Pause refs (ADR 0014) are how every replay finds paused calls: like `files`, they stay, and
   // the cut keeps the text that tells the model to review them.
-  const pauses = keptPauses(full)
+  const pauses = keptPauses(full, reduced.text)
 
   if (pauses !== undefined) withoutStructured.structuredContent = pauses.structuredContent
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
-
-  const reduced = cutContent(result.content)
 
   return fitText(
     withoutStructured,
@@ -640,7 +642,7 @@ export const toolLedgerResult = (
 
 // A code mode result's pauses (ADR 0014; `@yolk-sdk/codemode`, which this package never
 // imports): `structuredContent.codemode.inputRequired`, with `inputRequiredNotice` of them at the
-// end of its content. Decoding keeps only these fields.
+// end of its content (code mode always writes it there). Decoding keeps only these fields.
 const CodeModePauses = Schema.Struct({
   codemode: Schema.Struct({
     ok: Schema.Boolean,
@@ -658,8 +660,10 @@ type KeptPauses = {
 }
 
 // What a result that names pauses keeps through every reduction: an input-required error result's
-// marker and review call, or a code mode result's pause list and notice.
-const keptPauses = (full: StoredResultFields): KeptPauses | undefined => {
+// marker and review call (rebuilt when missing), or a code mode result's pause list and notice.
+// The shape alone does not prove a code mode result (any tool can return it), so code mode refs
+// are kept only when `text` already ends with their notice, which the ledger never writes itself.
+const keptPauses = (full: StoredResultFields, text: string): KeptPauses | undefined => {
   const marker = toolInputRequired(full)
 
   if (Option.isSome(marker)) {
@@ -670,10 +674,13 @@ const keptPauses = (full: StoredResultFields): KeptPauses | undefined => {
   }
 
   return Option.getOrUndefined(
-    Option.map(decodeCodeModePauses(full.structuredContent), codeMode => ({
-      structuredContent: codeMode,
-      tail: { separator: '\n\n', text: inputRequiredNotice(codeMode.codemode.inputRequired) }
-    }))
+    Option.flatMap(decodeCodeModePauses(full.structuredContent), codeMode => {
+      const notice = inputRequiredNotice(codeMode.codemode.inputRequired)
+
+      return text.endsWith(notice)
+        ? Option.some({ structuredContent: codeMode, tail: { separator: '\n\n', text: notice } })
+        : Option.none()
+    })
   )
 }
 
@@ -728,7 +735,8 @@ const cutContent = (content: Content): CutContent =>
       }
 
 // Moves `tail` out of the text that is cut: taken off its end (with its separator) when the text
-// ends with it, as `makeInputRequiredToolResult` and code mode write it, else added after it.
+// ends with it, as `makeInputRequiredToolResult` and code mode write it, else added after it (an
+// input-required marker's review call only; code mode notices are kept only when present).
 const withTail = (reduced: CutContent, tail: Tail): CutContent => {
   const before = reduced.text.endsWith(tail.text)
     ? reduced.text.slice(0, reduced.text.length - tail.text.length)

@@ -40,12 +40,14 @@ Every replay (a redelivered step, an interrupted plan apply's listing, code mode
 listing) reads the ledger's stored copy, so the ledger's bounding (`toolLedgerResult`) keeps the
 pause refs of two kinds of results through every reduction, the way it keeps `files`. Over
 `maxResultBytes`, other `structuredContent` fields are dropped and the text is cut before the review
-text, never the review text itself (rebuilt from the kept refs when the text does not end with it):
+text, never the review text itself:
 
 - An input-required error result keeps its marker `{ code, inputRequired }` and its review call
-  (`inputRequiredInstruction`).
+  (`inputRequiredInstruction`, rebuilt from the marker when the text does not end with it).
 - A code mode result keeps `{ codemode: { ok, inputRequired } }` and its notice
-  (`inputRequiredNotice`).
+  (`inputRequiredNotice`), only when its text ends with that notice. Any tool can return that shape,
+  so the ledger never writes this notice itself: another tool's result with the shape and no notice
+  has its refs dropped like any other `structuredContent`.
 
 Other results' pause refs are not kept. A plan apply's stored outcome (its fence entry) is reduced
 like any result; over the bound its replay lists the applied calls' own ledger entries instead,
