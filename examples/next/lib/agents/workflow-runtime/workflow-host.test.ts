@@ -2,7 +2,7 @@
 import { Effect, Layer, Predicate, Result, Stream, type LogLevel, type References } from 'effect'
 import { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { getWorkflowMetadata, type sleep as workflowSleep } from 'workflow'
-import { WorkflowRunNotFoundError } from 'workflow/errors'
+import { HookNotFoundError, WorkflowRunNotFoundError } from 'workflow/errors'
 import * as Schema from 'effect/Schema'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -47,6 +47,7 @@ import {
 } from '@/lib/services/agent-workflow/live-layer'
 import {
   emptyWorkflowRegistry,
+  isHitlPausePending,
   transitionWorkflowRegistry,
   WorkflowHitlAnswer,
   WorkflowHitlPause,
@@ -665,6 +666,9 @@ const nickname = (id: string, data: string) =>
     data
   })
 
+// Bounds `resumePauseHook`: the hook opens within a task of the workflow reaching it.
+const maxHookOpenAttempts = 20
+
 /** The hook token of the run's current pause, as the tool step recorded it. */
 const pauseToken = (runId: string) => {
   const token = registries.get(runId)?.state.hitlPause?.hookToken
@@ -672,6 +676,31 @@ const pauseToken = (runId: string) => {
   if (token === undefined) throw new Error('Expected a recorded HITL pause')
 
   return token
+}
+
+/**
+ * Resumes the current pause's hook directly, bypassing the route's answer record (to reach the
+ * workflow's hook-boundary filter), but as a real host must: the hook opens only once the
+ * workflow suspends after creating it, so retry `HookNotFoundError` while the pause is still
+ * pending, as `resumeWorkflowHitlAnswer` does.
+ */
+const resumePauseHook = async (runId: string, payload: HitlResponse) => {
+  const token = pauseToken(runId)
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await world.sdk.resumeHook(token, payload)
+    } catch (error) {
+      const state = registries.get(runId)?.state
+
+      const pending =
+        HookNotFoundError.is(error) && state !== undefined && isHitlPausePending(state, token)
+
+      if (!pending || attempt >= maxHookOpenAttempts) throw error
+
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+  }
 }
 
 /** The resume route's record-then-resume program, against the fake store and platform. */
@@ -788,8 +817,8 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect((await events(parent)).some(event => Predicate.isTagged(event, 'SubagentStarted'))).toBe(
       false
     )
-    await world.sdk.resumeHook(
-      pauseToken(parent),
+    await resumePauseHook(
+      parent,
       ToolApprovalResponse.make({
         requestId: 'approval:gated',
         toolCallId: 'gated',
@@ -815,8 +844,8 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const paused = await events(parent)
     expect(paused.some(event => Predicate.isTagged(event, 'InputRequested'))).toBe(true)
     expect(paused.some(event => Predicate.isTagged(event, 'AgentAwaitingInput'))).toBe(true)
-    await world.sdk.resumeHook(
-      pauseToken(parent),
+    await resumePauseHook(
+      parent,
       InputResponse.make({
         requestId: 'input:nickname:nick-call',
         toolCallId: 'nick-call',
@@ -859,7 +888,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
 
       const resumeAndAwait = async (value: HitlResponse) => {
         hitlEntered = latch()
-        await world.sdk.resumeHook(pauseToken(parent), value)
+        await resumePauseHook(parent, value)
         await hitlEntered.promise
       }
 
@@ -881,7 +910,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       // Stale/duplicate submissions are discarded by hook admission, not added to batch history.
       expect(await events(parent)).toEqual(beforeStale)
       await resumeAndAwait(response('nick-sibling', ''))
-      await world.sdk.resumeHook(pauseToken(parent), response('nick-sibling', 'Grace'))
+      await resumePauseHook(parent, response('nick-sibling', 'Grace'))
       await world.settled(parent)
       expect(world.inspect(parent).status).toBe('completed')
 
