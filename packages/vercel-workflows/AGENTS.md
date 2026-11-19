@@ -43,6 +43,13 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
+  Document that each pause needs its own token and that `resumeHook` success does not mean the
+  payload was read (a live hook accepts every payload; the rest drop on dispose). The loop does not
+  refuse a reused token: hosts that key tokens per run or by pending request id would fail runs
+  that today only risk a late duplicate.
+- `TestWorkflowWorld` hooks match the platform: every resume of a live hook succeeds, `await hook`
+  reads the first payload, a disposed hook or ended run answers `HookNotFoundError`, and a freed
+  token can be taken by a later hook of any run.
 - Durable event helpers are pure/Effect-native: `sequenceDurableAgentEvent`, `writeDurableAgentEvent`, and `commitThenWriteTerminalEvent`; hosts own storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.

@@ -84,7 +84,12 @@ redelivered like the platform does until the step exceeds its retries;
 `world.inspect(runId).unstorableStepErrors` lists those values. `world.sdk.start` checks start
 `attributes` with the installed runtime's validator (an invalid one rejects with a FatalError and
 creates no run) and `world.inspect(runId).attributes` shows them (`{}` without any; the emulator
-adds no `$parentRunId`/`$rootRunId`). Executing a step loads the workflow runtime, so it needs the
+adds no `$parentRunId`/`$rootRunId`). Hooks follow the platform too: `resumeHook` succeeds for
+every payload sent to a live hook, `await hook` reads the first, the rest are dropped when the hook
+is disposed, and a token whose hook was disposed (or whose run ended) answers
+`TestWorkflowHookNotFoundError` until a hook of any run takes it again. The emulator does not model
+the platform's `HookConflictError` for a token another live hook holds, nor reading a hook more than
+once. Executing a step loads the workflow runtime, so it needs the
 Node test environment. Ambient module mocks do not apply retry policy by
 themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly
 when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
@@ -237,8 +242,32 @@ approval then stays pending even when its tool's policy changed since the pause.
 The loop owns its accumulator: host mutation of a supplied array cannot affect a later batch.
 Response order and element identity are preserved; response objects are not deep-cloned.
 
-The host owns `hookToken` construction, auth, resume routes, and response decoding. Use stable
-tokens that the resume side can reconstruct or store.
+The host owns `hookToken` construction, auth, resume routes, and response decoding. Two platform
+rules shape them:
+
+- **One token per pause.** A disposed hook's token is free again, and `resumeHook` routes by token
+  alone. A token that several pauses share (one per run or session) delivers a late duplicate of
+  an earlier answer (a client retry, a double submit) to the next pause as its answer. Give every
+  `awaitingInput` a token no earlier pause of the run used, for example
+  `hitl:${runId}:${input.turn ?? 0}:${input.hitlResponses?.length ?? 0}` (the turn and how many
+  answers the batch already took; a token built only from pending request ids repeats when a
+  request re-pends after an invalid answer). Store it with the pending state you persist before
+  `AgentAwaitingInput`, and resume the stored pause that holds the request being answered. The loop
+  does not check tokens. Filtering answers by request id inside `awaitInput` (discard one no
+  pending request matches and wait again) also keeps a late duplicate out of the batch, but answers
+  that reached the hook behind the discarded one are dropped with it, so the rule still applies.
+- **`resumeHook` success does not mean the answer was used.** A hook accepts every payload until
+  the workflow disposes it, and `resumeHook` succeeds for each; the `awaitInput` above reads the
+  first, and the rest are dropped with the hook. So before resuming, admit only an answer to a
+  request the stored pause still holds and record it durably for that pause (an identical retry
+  reuses the record; a different answer is refused), then report what was recorded, not what
+  `resumeHook` returned. Give each payload the request id it answers.
+- **`HookNotFoundError` means no hook is resumable under that token now.** The hook may not exist
+  yet (the tool step writes `AgentAwaitingInput` before the workflow replays and calls
+  `createHook`, so a fast client can get there first), the token may be wrong, or the hook was
+  disposed (its answer used, perhaps by an earlier attempt of this same resume) or its run ended.
+  While the stored pause is still pending, retry resuming the recorded answer a bounded number of
+  times; once the pause has moved on, report the recorded answer as delivered, not as an error.
 
 ## Retry policy
 

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   defaultTestWorkflowStepMaxRetries,
-  TestWorkflowHookConflictError,
   TestWorkflowHookNotFoundError,
   TestWorkflowRunConflictError,
   TestWorkflowStreamConflictError,
@@ -650,7 +649,19 @@ describe('TestWorkflowWorld step executor', () => {
 })
 
 describe('TestWorkflowWorld hooks', () => {
-  it('resumes a registered hook exactly once', async () => {
+  const nextTask = () => new Promise(resolve => setTimeout(resolve, 0))
+
+  const gate = () => {
+    let open = () => {}
+
+    const opened = new Promise<void>(resolve => {
+      open = resolve
+    })
+
+    return { open, opened }
+  }
+
+  it('resumes a registered hook, which is gone once its workflow disposed it', async () => {
     const world = new TestWorkflowWorld()
     let received: unknown
 
@@ -660,15 +671,143 @@ describe('TestWorkflowWorld hooks', () => {
       received = await hook
     }, [])
 
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTask()
     await world.resumeHook('hook-a', { answer: 42 })
     await world.settled(runId)
 
     expect(received).toEqual({ answer: 42 })
     expect(world.hasResumedHook('hook-a')).toBe(true)
     await expect(world.resumeHook('hook-a', {})).rejects.toBeInstanceOf(
-      TestWorkflowHookConflictError
+      TestWorkflowHookNotFoundError
     )
+  })
+
+  // Issue #304: the platform appends every payload sent to a live hook and `resumeHook` succeeds
+  // for each; the workflow reads only the first.
+  it('accepts a second answer to a live hook but delivers only the first', async () => {
+    const world = new TestWorkflowWorld()
+    const received: Array<string> = []
+
+    const { runId } = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      received.push(await hook)
+    }, [])
+
+    await nextTask()
+    // Two tabs answer before the workflow reads the hook.
+    await expect(
+      Promise.all([
+        world.resumeHook('pause-1', 'answer-A'),
+        world.resumeHook('pause-1', 'answer-B')
+      ])
+    ).resolves.toEqual([undefined, undefined])
+    await world.settled(runId)
+
+    expect(received).toEqual(['answer-A'])
+  })
+
+  it('accepts answers until the hook is disposed, then answers HookNotFoundError', async () => {
+    const world = new TestWorkflowWorld()
+    const received: Array<string> = []
+    const holdHook = gate()
+    const holdRun = gate()
+
+    const { runId } = world.start(async () => {
+      {
+        using hook = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+        received.push(await hook)
+        await holdHook.opened
+      }
+
+      await holdRun.opened
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('pause-1', 'first')
+    await nextTask()
+    expect(received).toEqual(['first'])
+    // Read once but not yet disposed: accepted, never read.
+    await world.resumeHook('pause-1', 'second')
+
+    holdHook.open()
+    await nextTask()
+    // Disposed while the run is still running.
+    expect(world.status(runId)).toBe('running')
+    await expect(world.resumeHook('pause-1', 'third')).rejects.toBeInstanceOf(
+      TestWorkflowHookNotFoundError
+    )
+
+    holdRun.open()
+    await world.settled(runId)
+    expect(received).toEqual(['first'])
+  })
+
+  it('answers HookNotFoundError for a hook whose run ended without disposing it', async () => {
+    const world = new TestWorkflowWorld()
+
+    const { runId } = world.start(async () => {
+      void TestWorkflowWorld.createHook<string>({ token: 'abandoned' })
+    }, [])
+
+    await world.settled(runId)
+
+    await expect(world.resumeHook('abandoned', 'late')).rejects.toBeInstanceOf(
+      TestWorkflowHookNotFoundError
+    )
+  })
+
+  it('lets a later run reuse the token of an earlier run that was resumed', async () => {
+    const world = new TestWorkflowWorld()
+
+    const first = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+      return await hook
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('session-hitl', 'run-1 answer')
+    await world.settled(first.runId)
+
+    const received: Array<string> = []
+
+    const second = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+      received.push(await hook)
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('session-hitl', 'run-2 answer')
+    await world.settled(second.runId)
+
+    expect(received).toEqual(['run-2 answer'])
+    expect(world.status(second.runId)).toBe('completed')
+  })
+
+  // Issue #306: a token reused by the next pause routes a late duplicate of the earlier answer to
+  // the next pause, on the platform as here. Hosts give every pause its own token.
+  it('delivers a late duplicate to the next pause that reuses the token', async () => {
+    const world = new TestWorkflowWorld()
+    const received: Array<string> = []
+
+    const { runId } = world.start(async () => {
+      for (let pause = 1; pause <= 2; pause++) {
+        using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+        received.push(await hook)
+      }
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('session-hitl', 'answer-for-pause-1')
+    await nextTask()
+    await world.resumeHook('session-hitl', 'answer-for-pause-1')
+    await world.settled(runId)
+
+    expect(received).toEqual(['answer-for-pause-1', 'answer-for-pause-1'])
   })
 
   it('fails resuming an unknown hook token', async () => {
