@@ -34,7 +34,12 @@ const EventIdentity = {
    * (its `LLMStreamStart`), the older one's provisional output is removed and its later events are
    * dropped. Absent on host events every execution writes identically.
    */
-  executionId: Schema.optional(NonEmptyTrimmedString)
+  executionId: Schema.optional(NonEmptyTrimmedString),
+  /**
+   * The durable stream (one run) an `executionId` belongs to; clients group executions and their
+   * turns by it, so turn numbers of different runs never meet. Set with `executionId`.
+   */
+  streamId: Schema.optional(NonEmptyTrimmedString)
 }
 
 export const SubagentStatus = Schema.Literals(['running', 'completed', 'error'])

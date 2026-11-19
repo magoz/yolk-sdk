@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Predicate } from 'effect'
 import {
+  AgentAwaitingInput,
   AgentEnd,
   AssistantAgentMessage,
   AssistantMessageEvent,
@@ -8,6 +9,9 @@ import {
   HostToolCallPart,
   LLMStreamStart,
   LLMTextDelta,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionRequested,
   ToolCall,
   ToolExecutionCompleted,
   ToolExecutionStarted,
@@ -40,14 +44,21 @@ const B = 'step-1:2'
 let sequence = 0
 
 /** A live event of one execution; ids are unique per execution, as the sequencer writes them. */
-const live = <Event extends AgentEvent>(make: (identity: Identity) => Event, executionId: string) =>
-  make({ eventId: `run:${(sequence += 1)}:${executionId}`, executionId })
+const live = <Event extends AgentEvent>(
+  make: (identity: Identity) => Event,
+  executionId: string,
+  streamId = 'run-1'
+) => make({ eventId: `${streamId}:${(sequence += 1)}:${executionId}`, executionId, streamId })
 
 /** A host event every execution writes identically (plain id, no execution). */
 const plain = <Event extends AgentEvent>(make: (identity: PlainIdentity) => Event, id: string) =>
   make({ eventId: `run:${id}` })
 
-type Identity = { readonly eventId: string; readonly executionId: string }
+type Identity = {
+  readonly eventId: string
+  readonly executionId: string
+  readonly streamId: string
+}
 
 type PlainIdentity = { readonly eventId: string }
 
@@ -59,14 +70,18 @@ const answer = (content: string, calls: ReadonlyArray<ToolCall> = []) =>
     ]
   })
 
-const start = (executionId: string, turn: number) =>
-  live(identity => LLMStreamStart.make({ ...identity, turn }), executionId)
+const start = (executionId: string, turn: number, streamId?: string) =>
+  live(identity => LLMStreamStart.make({ ...identity, turn }), executionId, streamId)
 
-const delta = (executionId: string, text: string) =>
-  live(identity => LLMTextDelta.make({ ...identity, text }), executionId)
+const delta = (executionId: string, text: string, streamId?: string) =>
+  live(identity => LLMTextDelta.make({ ...identity, text }), executionId, streamId)
 
-const message = (executionId: string, value: AssistantAgentMessage) =>
-  live(identity => AssistantMessageEvent.make({ ...identity, message: value }), executionId)
+const message = (executionId: string, value: AssistantAgentMessage, streamId?: string) =>
+  live(
+    identity => AssistantMessageEvent.make({ ...identity, message: value }),
+    executionId,
+    streamId
+  )
 
 const end = (id: string, messages: ReadonlyArray<AgentMessage>) =>
   plain(identity => AgentEnd.make({ ...identity, messages, turns: 1, usage: zeroAgentUsage }), id)
@@ -209,6 +224,133 @@ describe('model-step executions', () => {
 
     expect(result.client.messages).toEqual([committed])
     expectBothChats(result, ['Hello world'])
+  })
+
+  it('drops a late start of an older turn, keeping the newer turn and its committed answer', () => {
+    const checking = answer('Checking')
+    const done = answer('Done!')
+
+    const result = project([
+      start(A, 1),
+      delta(A, 'Checking'),
+      message(A, checking),
+      start('step-2:1', 2),
+      start(B, 1),
+      delta(B, 'stray'),
+      delta('step-2:1', 'Done!'),
+      message('step-2:1', done),
+      end('end', [checking, done])
+    ])
+
+    expect(result.client.messages).toEqual([checking, done])
+    expect(result.client.text).toBe('')
+    expectBothChats(result, ['Checking', 'Done!'])
+  })
+
+  it('drops an execution that starts after its run ended', () => {
+    const hello = answer('Hello')
+
+    const result = project([
+      start(A, 1),
+      delta(A, 'Hello'),
+      message(A, hello),
+      end('end', [hello]),
+      start(B, 1),
+      delta(B, 'Sorry')
+    ])
+
+    expect(result.client.messages).toEqual([hello])
+    expect(result.client.text).toBe('')
+    expectBothChats(result, ['Hello'])
+  })
+
+  it("keeps a stopped run's answer when a later run reuses its turn numbers", () => {
+    const partial = answer('Partial answer')
+
+    const result = project([
+      start(A, 1, 'run-1'),
+      delta(A, 'Partial answer', 'run-1'),
+      message(A, partial, 'run-1'),
+      start('step-9:1', 1, 'run-2'),
+      delta('step-9:1', 'Next', 'run-2')
+    ])
+
+    expect(result.client.liveMessages).toEqual([partial])
+    expect(result.client.text).toBe('Next')
+    expectBothChats(result, ['Partial answer', 'Next'])
+  })
+
+  it('restores a settled tool call whose id a superseded execution reused', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+    const turnOne = answer('Turn one', [call])
+    const result0 = ToolResult.make({ toolCallId: call.id, content: '72F' })
+
+    const result = project([
+      start('step-0:1', 1),
+      delta('step-0:1', 'Turn one'),
+      live(identity => ToolInputEnd.make({ ...identity, call }), 'step-0:1'),
+      message('step-0:1', turnOne),
+      plain(identity => ToolExecutionStarted.make({ ...identity, call }), 'tool:0'),
+      plain(
+        identity => ToolExecutionCompleted.make({ ...identity, call, result: result0 }),
+        'tool:1'
+      ),
+      start(A, 2),
+      live(identity => ToolInputStart.make({ ...identity, id: call.id }), A),
+      live(identity => ToolInputEnd.make({ ...identity, call }), A),
+      start(B, 2),
+      delta(B, 'Sorry')
+    ])
+
+    expect(result.client.toolRuns.map(run => run._tag)).toEqual(['Completed'])
+    expectBothChats(result, ['Turn one | call_1:Completed', 'Sorry'])
+  })
+
+  it('shows the committed answer at a pause when the newer execution streamed', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
+
+    const request = QuestionRequest.make({
+      requestId: 'question:call_1',
+      toolCallId: call.id,
+      call,
+      questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+    })
+
+    const asked = answer('Let me ask', [call])
+
+    const result = project([
+      start(A, 1),
+      delta(A, 'Let me ask'),
+      message(A, asked),
+      start(B, 1),
+      delta(B, 'Sorry'),
+      plain(identity => QuestionRequested.make({ ...identity, request }), 'question'),
+      plain(
+        identity =>
+          AgentAwaitingInput.make({
+            ...identity,
+            requests: [request],
+            messages: [asked],
+            turns: 1,
+            usage: zeroAgentUsage
+          }),
+        'pause'
+      )
+    ])
+
+    expect(result.client.messages).toEqual([asked])
+    expect(result.client.text).toBe('')
+    expectBothChats(result, ['Let me ask | call_1:QuestionRequested'])
+  })
+
+  it('keeps only identity once an execution settles', () => {
+    const hello = answer('Hello')
+
+    const result = project([start(A, 1), delta(A, 'Hello'), message(A, hello), end('end', [hello])])
+
+    expect(result.client.executions).toEqual([
+      { executionId: A, streamId: 'run-1', turn: 1, status: 'Settled', calls: [], output: [] }
+    ])
   })
 
   it('keeps events without an execution on the plain path', () => {

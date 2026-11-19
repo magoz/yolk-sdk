@@ -1,6 +1,7 @@
 export { BlobTextReadError, documentPartFromTextFile, textFromBlob } from './attachments.ts'
 
 export {
+  AgentClientExecutionOutput,
   appendAgentMessage,
   applyAgentEvent,
   completedToolRuns,

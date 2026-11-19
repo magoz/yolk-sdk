@@ -9,6 +9,8 @@ export type DurableAgentEvent<Event extends object = object> = Event & {
   readonly createdAtMs?: number
   /** Set from `SequenceDurableAgentEventInput.executionId`; clients route live events by it. */
   readonly executionId?: string
+  /** The `streamId`, set with `executionId` so clients group executions per run. */
+  readonly streamId?: string
 }
 
 export type DurableAgentEventIdInput = {
@@ -32,7 +34,10 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
   readonly turn: number
   /**
    * Identifies one execution of a model step. It is appended to the id and set as the event's
-   * `executionId` field, which `@yolk-sdk/agent` clients route by.
+   * `executionId` field, with `streamId` beside it, which `@yolk-sdk/agent` clients route by (per
+   * run and turn). Without it both fields are removed from the written event. It must be
+   * non-empty without surrounding whitespace (clients reject anything else); otherwise sequencing
+   * throws a `TypeError` (a defect in `writeDurableAgentEvent`).
    *
    * Every execution of a step starts from the same `eventSequence`, and a step runs more than
    * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).
@@ -111,6 +116,8 @@ export const durableAgentEventId = (input: DurableAgentEventIdInput) =>
     ? `${input.streamId}:${input.turn}:${input.eventSequence}`
     : `${input.streamId}:${input.turn}:${input.eventSequence}:${input.executionId}`
 
+const isNonBlankTrimmed = (value: string) => value.length > 0 && value.trim() === value
+
 export const sequenceDurableAgentEvent = <Event extends object>(
   input: SequenceDurableAgentEventInput<Event>
 ): SequencedDurableAgentEvent<Event> => {
@@ -121,6 +128,12 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     eventId: string
     createdAtMs?: number
     executionId?: string
+    streamId?: string
+  }
+
+  if (input.executionId !== undefined && !isNonBlankTrimmed(input.executionId)) {
+    // A host bug: clients reject a blank or padded id, so fail loudly (a defect in an Effect).
+    throw new TypeError('executionId must be non-empty, without surrounding whitespace')
   }
 
   const event: SequencedDurableAgentEventFields = {
@@ -137,8 +150,13 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     event.createdAtMs = input.createdAtMs
   }
 
-  if (input.executionId !== undefined) {
+  // The fields always agree with the id: set from the input, or removed when it has none.
+  if (input.executionId === undefined) {
+    delete event.executionId
+    delete event.streamId
+  } else {
     event.executionId = input.executionId
+    event.streamId = input.streamId
   }
 
   return {

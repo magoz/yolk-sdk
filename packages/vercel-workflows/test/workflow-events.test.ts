@@ -33,12 +33,53 @@ describe('durable workflow agent events', () => {
       _tag: 'LLMTextDelta',
       text: 'hej',
       eventId: 'workflow:run-1:2:3:step-1:1',
-      executionId: 'step-1:1'
+      executionId: 'step-1:1',
+      streamId: 'workflow:run-1'
     })
     expect(sequenced('step-1:2').event.eventId).toBe('workflow:run-1:2:3:step-1:2')
     expect(sequenced(undefined).event.eventId).toBe('workflow:run-1:2:3')
     expect(Object.hasOwn(sequenced(undefined).event, 'executionId')).toBe(false)
     expect(sequenced('step-1:1').nextEventSequence).toBe(4)
+  })
+
+  it('keeps the execution fields in step with the id and rejects a blank execution id', () => {
+    const stale = { _tag: 'LLMTextDelta', text: 'hej', executionId: 'old', streamId: 'other' }
+
+    const plain = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(0),
+      streamId: 'workflow:run-1',
+      turn: 1,
+      event: stale
+    })
+
+    expect(plain.event).toEqual({
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      eventId: 'workflow:run-1:1:0'
+    })
+
+    const tagged = sequenceDurableAgentEvent({
+      state: makeDurableAgentEventSequencerState(0),
+      streamId: 'workflow:run-1',
+      turn: 1,
+      executionId: 'step-1:2',
+      event: stale
+    })
+
+    expect(tagged.event.executionId).toBe('step-1:2')
+    expect(tagged.event.streamId).toBe('workflow:run-1')
+
+    for (const executionId of ['', ' ', ' step-1:1']) {
+      expect(() =>
+        sequenceDurableAgentEvent({
+          state: makeDurableAgentEventSequencerState(0),
+          streamId: 'workflow:run-1',
+          turn: 1,
+          executionId,
+          event: { _tag: 'LLMTextDelta', text: 'hej' }
+        })
+      ).toThrow(TypeError)
+    }
   })
 
   it('sequences normal events monotonically', () => {

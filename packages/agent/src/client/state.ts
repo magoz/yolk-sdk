@@ -21,12 +21,13 @@ import {
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { Data, Match, Predicate } from 'effect'
+import { Data, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  agentEventToolCallIds,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
-  supersededAgentExecutionCalls,
+  type AgentExecution,
   type AgentExecutions
 } from './executions.ts'
 
@@ -108,6 +109,15 @@ export type AgentToolRun =
 
 export const AgentToolRun = Data.taggedEnum<AgentToolRun>()
 
+/** What a model-step execution produced in client state, for removal when it is superseded. */
+export type AgentClientExecutionOutput = Data.TaggedEnum<{
+  LiveMessage: { readonly message: AgentMessage }
+  /** A tool run it touched first; `prior` is the run it replaced, if any. */
+  ToolRun: { readonly callId: string; readonly prior: Option.Option<AgentToolRun> }
+}>
+
+export const AgentClientExecutionOutput = Data.taggedEnum<AgentClientExecutionOutput>()
+
 type StartedAgentToolRun = Extract<
   AgentToolRun,
   { readonly _tag: 'Executing' | 'Accepted' | 'Completed' }
@@ -127,7 +137,7 @@ export type AgentClientState = {
    * Model-step executions seen on this stream (events carrying `executionId`); a superseded one's
    * live messages and unacknowledged tool runs are removed. Absent in states built before it.
    */
-  readonly executions?: AgentExecutions<AgentMessage>
+  readonly executions?: AgentExecutions<AgentClientExecutionOutput>
 }
 
 export type ApplyAgentEventOptions = {
@@ -482,9 +492,19 @@ export const applyAgentEventWithOptions = (
 
   if (Predicate.isTagged(route, 'Drop')) return rememberEvent(state, event)
 
+  if (Predicate.isTagged(route, 'Stale')) {
+    return rememberEvent({ ...state, executions: route.executions }, event)
+  }
+
   const routed = Predicate.isTagged(route, 'Start')
     ? discardSupersededExecutions(state, route.superseded)
     : state
+
+  const owner = Predicate.isTagged(route, 'Owned')
+    ? route.execution
+    : Predicate.isTagged(route, 'Start')
+      ? route.executions.at(-1)
+      : undefined
 
   const applied = applyAgentEventRouted(routed, event, nowMs)
   const before = Predicate.isTagged(route, 'Start') ? route.executions : executions
@@ -493,28 +513,79 @@ export const applyAgentEventWithOptions = (
     before,
     event,
     route,
-    Predicate.isTagged(event, 'AssistantMessage') ? [event.message] : []
+    owner === undefined ? [] : executionOutput(owner, event, routed, applied)
   )
 
   return after === executions ? applied : { ...applied, executions: after }
 }
 
-/** A superseded execution's output is provisional: its live messages and unacknowledged runs. */
+/**
+ * What an execution's event produced: its `AssistantMessage`, and each tool run it touched first,
+ * with the run it replaced (providers reuse call ids across turns), so removal can restore it.
+ */
+const executionOutput = (
+  execution: AgentExecution<AgentClientExecutionOutput>,
+  event: AgentEvent,
+  before: AgentClientState,
+  after: AgentClientState
+): ReadonlyArray<AgentClientExecutionOutput> => {
+  const touched = new Set(
+    execution.output.flatMap(output =>
+      Predicate.isTagged(output, 'ToolRun') ? [output.callId] : []
+    )
+  )
+
+  const runs = agentEventToolCallIds(event).flatMap(callId => {
+    if (touched.has(callId)) return []
+
+    const prior = Option.fromNullishOr(before.toolRuns.find(run => toolRunId(run) === callId))
+    const exists = after.toolRuns.some(run => toolRunId(run) === callId)
+
+    return Option.isSome(prior) || exists
+      ? [AgentClientExecutionOutput.ToolRun({ callId, prior })]
+      : []
+  })
+
+  return Predicate.isTagged(event, 'AssistantMessage')
+    ? [AgentClientExecutionOutput.LiveMessage({ message: event.message }), ...runs]
+    : runs
+}
+
+/**
+ * A superseded execution's output is provisional: its live messages, and the tool runs it touched
+ * that no other event acknowledged (restored to the run they replaced, else removed).
+ */
 const discardSupersededExecutions = (
   state: AgentClientState,
-  superseded: AgentExecutions<AgentMessage>
+  superseded: AgentExecutions<AgentClientExecutionOutput>
 ): AgentClientState => {
   if (superseded.length === 0) return state
 
-  const calls = supersededAgentExecutionCalls(superseded)
-  const messages = new Set(superseded.flatMap(execution => execution.output))
+  const unacknowledged = new Set(superseded.flatMap(execution => execution.calls))
+  const outputs = superseded.flatMap(execution => execution.output)
+
+  const messages = new Set(
+    outputs.flatMap(output => (Predicate.isTagged(output, 'LiveMessage') ? [output.message] : []))
+  )
+
+  const runs = new Map<string, Option.Option<AgentToolRun>>()
+
+  for (const output of outputs) {
+    if (Predicate.isTagged(output, 'ToolRun') && unacknowledged.has(output.callId)) {
+      runs.set(output.callId, output.prior)
+    }
+  }
 
   return {
     ...state,
     text: '',
     reasoning: '',
     liveMessages: state.liveMessages.filter(message => !messages.has(message)),
-    toolRuns: state.toolRuns.filter(run => !calls.has(toolRunId(run)))
+    toolRuns: state.toolRuns.flatMap(run => {
+      const prior = runs.get(toolRunId(run))
+
+      return prior === undefined ? [run] : Option.toArray(prior)
+    })
   }
 }
 

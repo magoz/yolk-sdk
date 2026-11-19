@@ -305,15 +305,19 @@ input, provider tool results). `LLMStreamStart` must carry it: it is identical i
 so with a plain id the second start would be de-duped and the client could not tell the executions
 apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is unique per execution: a loop
 retry is a new step id, and each platform retry or redelivery a new attempt. The sequencer appends
-it to the id and also sets it as the event's `executionId` field (never parse it from the id: both
-parts contain `:`).
+it to the id and sets it as the event's `executionId` field, with the `streamId` beside it so clients
+keep each run's turns apart (never parse either from the id: both contain `:`). It must be non-empty
+without surrounding whitespace; sequencing throws otherwise. Without it, both fields are removed
+from the written event.
 
 Leave it off host events every execution writes identically: a promoted user message, and the
 terminal event written after the host commits (`commitThenWriteTerminalEvent`). A re-execution that
 finds a committed receipt replays only that terminal event (same plain id, so the client drops the
 repeat); it never rewrites the live events, whose ids carried the original execution. Without
 `executionId` ids keep the plain format, so stored ids and events written before do not change.
-Tool-batch steps are out of scope: their events stay deterministic (ledger replays).
+Tool-batch steps are out of scope: their events keep plain ids, which is safe only where every
+execution writes the same events. Ledgered tool calls replay their recorded result; read calls are
+not ledgered and run again, so a re-executed batch can write a different result under the same id.
 
 ```ts
 const { stepId, attempt } = getStepMetadata()
@@ -323,23 +327,33 @@ yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, sta
 ```
 
 `@yolk-sdk/agent` clients (`reduceAgentEvents`, `applyAgentEventToChatProjection`, the
-`useAgentChat` reducer) route events by that field, per turn (`LLMStreamStart.turn`):
+`useAgentChat` reducer) route events by those fields, per run (`streamId`) and turn
+(`LLMStreamStart.turn`):
 
 - When a newer execution of the same turn starts, the older one is superseded: its output is
-  provisional and removed (streaming text, its `AssistantMessage`, and every tool call it produced
-  that no host event acted on yet), and its later events are dropped.
-- A later turn's start, a terminal event, a user message or `AgentStart` settles every execution so
-  far: its output stays, and its later events (a losing concurrent execution) are dropped.
-- At `AgentEnd`, if the final turn had more than one execution, its shown answer is replaced by the
-  committed final assistant message from `AgentEnd.messages`, so the answer that was committed shows
-  even when the older execution committed while the newer one streamed.
+  provisional and removed (streaming text, its `AssistantMessage`, and each tool call it touched
+  that no host event acted on yet, restored to the call it replaced when a provider reused the
+  id), and its later events are dropped.
+- A later turn's start, another run's start, a terminal event, a user message or `AgentStart`
+  settles executions: their output stays and their later events (a losing concurrent execution)
+  are dropped. Only executions of earlier turns or other runs are settled by a start.
+- A start for a turn older than one its run already started, or for a turn its run already closed
+  with a terminal event, is stale: it and its later events are dropped.
+- At `AgentEnd` and `AgentAwaitingInput`, if the final turn ran more than once, its shown answer is
+  replaced by the committed assistant message from the event's `messages`, keeping the state of its
+  tool calls (a pending question stays pending).
 - Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
   output still streaming.
 
-Upgrade clients and server together: a client before this release ignores the field and shows both
-executions' output back to back. Left open: a superseded non-final turn whose older execution
-committed (the client shows the newer text until reload), and an execution whose `LLMStreamStart`
-is written after the terminal event.
+Upgrade clients and server together: a client before this release ignores the fields and shows
+both executions' output back to back. Projection hosts that keep one state across runs need nothing
+more when events carry `streamId`; without it every run shares one scope, so reset `executions` to
+`[]` when a new run starts.
+
+Open case: a non-final turn whose older execution committed while the newer one streamed. The
+chat keeps the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran
+the older execution's calls, so the shown calls and the executed ones differ. Only the final turn
+is reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
 
 ## Terminal barriers
 

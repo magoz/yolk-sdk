@@ -97,18 +97,11 @@ const writeSequencedWorkflowEvent = (input: {
     yield* Ref.set(input.eventSequence, result.nextEventSequence)
   })
 
-/**
- * `<stepId>:<attempt>` of the running step. Undefined outside a step context (tests that call the
- * step inline), where events keep plain ids.
- */
-const stepExecutionId = (): string | undefined => {
-  try {
-    const { stepId, attempt } = getStepMetadata()
+/** `<stepId>:<attempt>` of the running step: unique per execution of it. */
+const stepExecutionId = () => {
+  const { stepId, attempt } = getStepMetadata()
 
-    return `${stepId}:${attempt}`
-  } catch {
-    return undefined
-  }
+  return `${stepId}:${attempt}`
 }
 
 const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>

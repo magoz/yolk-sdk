@@ -720,17 +720,25 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
-A retried or redelivered model step streams a second answer for the same turn. Events carry an
-optional `executionId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the execution that
-produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection` and the `useAgentChat`
-reducer route by it, per turn (`LLMStreamStart.turn`). A newer execution's `LLMStreamStart`
-supersedes the older one of that turn: its provisional output (streaming text, its
-`AssistantMessage`, tool calls no host event acted on) is removed and its later events are dropped.
-A later turn, a terminal event, a user message or `AgentStart` settles executions (output kept,
-later events dropped), and at `AgentEnd` a final turn that had more than one execution shows the
-committed answer from `AgentEnd.messages`. Carry `executions` along with `seenEventIds` when you
-keep projection state yourself. Without `executionId`, the next `LLMStreamStart` only discards output
-still streaming.
+A retried or redelivered model step streams a second answer for the same turn. Events carry
+optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
+execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
+and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.turn`):
+
+- A newer execution's `LLMStreamStart` supersedes the older one of that turn: its provisional
+  output (streaming text, its `AssistantMessage`, tool calls no host event acted on, restored to a
+  call whose id it reused) is removed and its later events are dropped.
+- A start for a turn older than one its run already started, or after the run's terminal event, is
+  dropped with its later events.
+- A later turn, another run, a terminal event, a user message or `AgentStart` settles executions
+  (output kept, later events dropped).
+- At `AgentEnd` and `AgentAwaitingInput`, a final turn that ran more than once shows the committed
+  answer from the event's messages; a non-final one keeps the newer answer until reload (see the
+  vercel-workflows README, "One step, several executions").
+
+Carry `executions` along with `seenEventIds` when you keep projection state yourself, and reset it
+to `[]` per run if your events carry no `streamId`. Without `executionId`, the next
+`LLMStreamStart` only discards output still streaming.
 
 When the host promotes queued user input into a durable stream, emit a replay-safe user event:
 

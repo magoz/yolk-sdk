@@ -48,12 +48,13 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   by `eventId`, so duplicate ids across runs drop legitimate live events.
 - Every execution of a step starts from the same `eventSequence`, so every event a model call
   produces (`LLMStreamStart` through `AssistantMessage`/`UsageUpdate`) needs an `executionId`
-  unique per execution (`${stepId}:${attempt}` from `getStepMetadata()`). The sequencer appends it
-  to the id and sets it as the event's `executionId` field, which `@yolk-sdk/agent` clients route
-  by; without it a re-execution's different answer reuses the first one's ids and de-dupe splices
+  unique per execution (`${stepId}:${attempt}` from `getStepMetadata()`; non-empty, trimmed, or
+  sequencing throws). The sequencer appends it to the id and sets the event's `executionId` and
+  `streamId` fields (or removes both without it), which `@yolk-sdk/agent` clients route by; without it a re-execution's different answer reuses the first one's ids and de-dupe splices
   them. Host events (promoted user messages, the terminal event written after the commit) never
   carry it, and a receipt replay rewrites only that terminal event. Without it ids are unchanged.
-  Tool-batch steps are out of scope: their events stay deterministic (ledger replays).
+  Tool-batch steps are out of scope: their ids stay plain; only ledgered calls replay identically
+  (read calls rerun).
 - Terminal durable event helpers model commit-before-write ordering only; they never infer closure
   from an event tag or close writers. `closeStream` owns successful `AgentEnd` closure;
   `writeError` owns safe `AgentError` write plus failure closure; successful

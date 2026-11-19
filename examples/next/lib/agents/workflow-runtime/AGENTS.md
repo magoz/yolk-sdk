@@ -18,7 +18,8 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
   `executionId` `<stepId>:<attempt>` from `getStepMetadata()`, appended to the id
   (`workflow:<runId>:<turn>:<sequence>:<stepId>:<attempt>`) and set on the event, so a retried or
   redelivered model step never reuses an earlier execution's ids. `AgentEnd` and tool-batch events
-  stay plain.
+  stay plain. Tests that run steps inline (no platform step context) fake `getStepMetadata` in
+  their `workflow` module mock (`workflow-host.test.ts`).
 - Error events use run-scoped stream ids: `workflow:<runId>:error:<turn>:<sequence>`.
 - Carry `eventSequence` through model/tool step results so retries/replay can de-dupe; reset it for
   fresh independent streams.
