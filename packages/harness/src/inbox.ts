@@ -200,6 +200,10 @@ const parkedState = (park: Park): ParkedState => ({
   ready: parkComplete(park)
 })
 
+const emptyParkMessage =
+  'Inbox.park needs at least one request id: an empty park would be Ready at once and keep the ' +
+  'claim with nothing to wake the run'
+
 const isPrunable = (control: RunControl) =>
   control.pending === undefined &&
   control.liveToken === undefined &&
@@ -305,6 +309,9 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
+                  // The type is non-empty, so an untyped caller's empty list is a defect, refused
+                  // before any state changes: an empty park would be Ready at once (#321).
+                  if (requestIds.length === 0) return yield* Effect.die(new Error(emptyParkMessage))
                   const control = yield* getControl(runId)
 
                   if (control.liveToken !== drainToken) return PauseDecision.Stale()

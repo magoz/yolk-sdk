@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Layer, Ref, type Array as Arr } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref, type Array as Arr } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { expectTypeOf } from 'vitest'
 import type { HitlRequest } from '@yolk-sdk/agent/protocol'
@@ -10,7 +10,8 @@ import {
   makeInMemoryInboxLayer,
   ParkGeneration,
   type InboxApi,
-  type ParkedState
+  type ParkedState,
+  type PauseDecision
 } from '../src/inbox.ts'
 import type { ToolBatchOutcome } from '../src/outcome.ts'
 import { makeInMemoryRunStoreLayer, RunStore } from '../src/store.ts'
@@ -31,6 +32,54 @@ describe('HITL park lifecycle', () => {
       Extract<ToolBatchOutcome, { readonly _tag: 'AwaitingInput' }>['requests']
     >().toEqualTypeOf<Arr.NonEmptyReadonlyArray<HitlRequest>>()
   })
+
+  it.effect('dies on an empty park from an untyped caller, leaving no park or claim', () =>
+    Effect.gen(function* () {
+      // Parsed from JSON, as an untyped JavaScript caller would pass it.
+      const noRequestIds: Arr.NonEmptyReadonlyArray<string> = JSON.parse('[]')
+      const parkExit = yield* Ref.make<Exit.Exit<PauseDecision> | undefined>(undefined)
+
+      const layer = makeInMemoryHarnessLayer({
+        drain: (runId, _force, _scope, context) =>
+          Effect.gen(function* () {
+            const inbox = yield* Inbox
+            const exit = yield* Effect.exit(inbox.park(runId, noRequestIds, context.drainToken))
+            yield* Ref.set(parkExit, exit)
+
+            // The defect reaches the driver as the host's drain would let it.
+            if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
+          })
+      })
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        const store = yield* RunStore
+
+        yield* driver.wake('run_1')
+        yield* driver.awaitIdle('run_1')
+
+        const exit = yield* Ref.get(parkExit)
+        expect(exit !== undefined && Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+
+        if (exit === undefined || Exit.isSuccess(exit)) return
+        expect(Cause.squash(exit.cause)).toMatchObject({
+          message: expect.stringContaining('Inbox.park needs at least one request id')
+        })
+        expect(yield* inbox.parked('run_1')).toBeUndefined()
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+
+        // Driver.pause reaches the same guard, before any token check.
+        const paused = yield* Effect.exit(
+          driver.pause('run_1', noRequestIds, DrainToken.make('d-untyped'))
+        )
+
+        expect(Exit.isFailure(paused) && Cause.hasDies(paused.cause)).toBe(true)
+        expect(yield* inbox.parked('run_1')).toBeUndefined()
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+      }).pipe(Effect.provide(layer))
+    })
+  )
 
   it.effect('parks two siblings, accepts partial without wake, then Ready wakes once', () =>
     Effect.gen(function* () {
