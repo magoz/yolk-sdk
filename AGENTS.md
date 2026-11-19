@@ -11,6 +11,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Run `pnpm packages:check` when touching `packages/*`.
 - Run `pnpm docs:check` when touching `apps/docs`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
+- Run `pnpm models:check` (part of `pnpm check`) when touching a file a `formal/*.model.json` covers: there is no CI to run its drift check.
 - Follow local `AGENTS.md` before editing scoped app/package areas; root owns repo-wide boundaries only.
 - Never commit ignored generated/dev artifacts (`.next`, `.turbo`, `.source`, package `dist`, `.alchemy`, `.workflow-*`, `playwright-report`, `test-results`, coverage, `*.tsbuildinfo`, `next-env.d.ts`) or env files; tracked generated fallbacks need owning docs.
 
@@ -35,6 +36,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Agent HITL semantics: `patterns/AGENT_HITL.md`.
 - Interaction terminology: `CONTEXT.md`; accepted architecture decisions: `docs/adr/`.
 - Provider-facing tool schema compatibility: `patterns/AI_TOOL_SCHEMAS.md`.
+- Formal models of concurrency protocols (optional; `pnpm models:check`, part of `pnpm check`): `patterns/FORMAL_VERIFICATION.md`.
 - Next-only patterns: `examples/next/patterns/README.md`.
 - Patterns describe intent; code describes reality. Check code before assuming.
 
