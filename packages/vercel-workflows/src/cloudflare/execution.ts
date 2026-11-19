@@ -30,7 +30,7 @@ export interface ExecutionHost {
   readonly wakeAt: (time: number) => void
   /**
    * Route `token` to this run from outside (`resumeHook`), unless a live hook of another run holds
-   * it. The run itself has no live hook on `token` when it claims.
+   * it. A run may claim a token it already holds (a replay asks again): that claim is granted.
    */
   readonly claimHook: (token: string) => Promise<HookClaim>
   readonly chunkAppended: (index: number, chunk: Uint8Array) => void
@@ -115,9 +115,12 @@ class LiveRun {
   private readonly hookWaiters = new Map<string, HookWaiter>()
   private hookChanges: Array<HookChange> = []
   private hookTimer: ReturnType<typeof setTimeout> | undefined
-  private hookChangesApplied: Promise<void> = Promise.resolve()
-  /** Tokens whose claim waits for the index's answer. */
-  private readonly claiming = new Set<string>()
+  /** Per token, the claim decided last, which the token's next claim waits for. */
+  private readonly claimChains = new Map<string, Promise<void>>()
+  /** Per token, the journal key of the undisposed hook whose claim awaits the index's answer. */
+  private readonly claiming = new Map<string, string>()
+  /** Per journal key, what ends a claim's wait to retry early. */
+  private readonly claimWakers = new Map<string, () => void>()
   /** Journal keys of the hooks the body disposed. */
   private readonly disposedHooks = new Set<string>()
   private readonly sleepTimers = new Set<ReturnType<typeof setTimeout>>()
@@ -142,6 +145,8 @@ class LiveRun {
 
     this.hookTimer = undefined
     this.hookChanges = []
+
+    for (const wake of [...this.claimWakers.values()]) wake()
   }
 
   resolveHook(key: string, payload: unknown): boolean {
@@ -342,6 +347,11 @@ class LiveRun {
 
     this.disposedHooks.add(key)
 
+    // A claim still waiting for its answer, or to retry, no longer makes the index refuse others.
+    if (this.claiming.get(token) === key) this.claiming.delete(token)
+
+    this.claimWakers.get(key)?.()
+
     // Disposed before the run waited: it never takes the token.
     if (unclaimed !== -1) {
       this.hookChanges.splice(unclaimed, 1)
@@ -365,15 +375,16 @@ class LiveRun {
 
       this.hookTimer = undefined
       this.hookChanges = []
-      this.hookChangesApplied = this.hookChangesApplied
-        .then(() => this.applyHookChanges(changes))
-        .catch(error => this.host.log('Could not apply workflow hook changes', error))
+      this.applyHookChanges(changes)
     }, 0)
   }
 
   // Disposals first: they are of hooks created before this batch's new ones, and the platform
-  // frees a disposed hook's token before a later hook of the run claims it.
-  private async applyHookChanges(changes: ReadonlyArray<HookChange>) {
+  // frees a disposed hook's token before a later hook of the run claims it. A release is
+  // synchronous and frees only its hook's row, so it never waits for a claim; a claim waits only
+  // for earlier claims on its token (the platform decides each token on its own), so an index that
+  // keeps failing holds up no other token.
+  private applyHookChanges(changes: ReadonlyArray<HookChange>) {
     const store = this.host.store
 
     for (const change of changes) {
@@ -382,8 +393,17 @@ class LiveRun {
       }
     }
 
-    for (const change of changes) {
-      if (change.kind === 'claim') await this.claimHook(change.token, change.key)
+    for (const { kind, token, key } of changes) {
+      if (kind !== 'claim') continue
+
+      const decided: Promise<void> = (this.claimChains.get(token) ?? Promise.resolve())
+        .then(() => this.claimHook(token, key))
+        .catch(error => this.host.log(`Could not claim workflow hook ${token}`, error))
+        .finally(() => {
+          if (this.claimChains.get(token) === decided) this.claimChains.delete(token)
+        })
+
+      this.claimChains.set(token, decided)
     }
   }
 
@@ -400,7 +420,7 @@ class LiveRun {
   private async claimHook(token: string, key: string) {
     const store = this.host.store
 
-    if (!this.isLive()) return
+    if (!this.isLive() || this.disposedHooks.has(key)) return
 
     const held = store.readPendingHook(token)
 
@@ -412,7 +432,7 @@ class LiveRun {
 
     // `held === key`: a replay re-creating a hook with a row. Its claim is asked again: the row
     // may predate the grant (builds before this one wrote it before claiming).
-    this.claiming.add(token)
+    this.claiming.set(token, key)
 
     try {
       const claim = await this.requestClaim(token, key)
@@ -420,7 +440,8 @@ class LiveRun {
       if (claim === undefined || !this.isLive()) return
 
       if (claim.claimed) {
-        store.writePendingHook(token, key)
+        // Disposed meanwhile: it never holds the token (the index asks `hookHeld` next time).
+        if (!this.disposedHooks.has(key)) store.writePendingHook(token, key)
 
         return
       }
@@ -429,13 +450,14 @@ class LiveRun {
 
       this.refuseHook(token, key, claim.holderRunId)
     } finally {
-      this.claiming.delete(token)
+      if (this.claiming.get(token) === key) this.claiming.delete(token)
     }
   }
 
   // The index is another object: a failed call (a reset, an overload) is retried with the step
   // backoff and never journaled. The guard alarm, armed while a claim is in flight, replays the run
-  // if this object goes away meanwhile. Undefined once the run ended or the hook was disposed.
+  // if this object goes away meanwhile. Undefined once the run ended or the hook was disposed (the
+  // disposal, or the run's halt, ends the wait to retry at once).
   private async requestClaim(token: string, key: string): Promise<HookClaim | undefined> {
     for (let attempt = 1; ; attempt++) {
       if (!this.isLive() || this.disposedHooks.has(key)) return undefined
@@ -446,14 +468,30 @@ class LiveRun {
         return await this.host.claimHook(token)
       } catch (error) {
         this.host.log(`Could not claim workflow hook ${token}; retrying`, error)
-        await delay(retryDelayMs(attempt, error))
+
+        await new Promise<void>(resolve => {
+          const wake = () => {
+            clearTimeout(timer)
+            this.claimWakers.delete(key)
+            resolve()
+          }
+
+          const timer = setTimeout(wake, retryDelayMs(attempt, error))
+
+          this.claimWakers.set(key, wake)
+        })
       }
     }
   }
 
-  /** Whether a claim on `token` is waiting for the index's answer. */
+  /** Whether an undisposed hook's claim on `token` is waiting for the index's answer. */
   isClaiming(token: string): boolean {
     return this.claiming.has(token)
+  }
+
+  /** Whether the body disposed the hook journaled under `key`. */
+  hasDisposed(key: string): boolean {
+    return this.disposedHooks.has(key)
   }
 
   get claimsInFlight(): number {
@@ -593,7 +631,9 @@ export class WorkflowExecution {
 
     if (key === undefined || !this.holdsHook(token)) throw new HookNotFoundError(token)
 
-    if (store.readJournal(key) !== undefined) return
+    // Disposed, its release not applied yet: accepted and dropped, never journaled, so a replay
+    // sees the hook unanswered as the body did.
+    if (this.live?.hasDisposed(key) === true || store.readJournal(key) !== undefined) return
 
     store.writeJournal(key, { ok: true, value: payloadText })
 

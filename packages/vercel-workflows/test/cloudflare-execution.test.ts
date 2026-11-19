@@ -251,6 +251,35 @@ describe('WorkflowExecution', () => {
     expect(outcome(store)).toEqual({ status: 'completed', value: 'relayed' })
   })
 
+  it('drops a payload sent to a disposed hook before its disposal applies', async () => {
+    const store = makeMemoryRunStore()
+    const { host, settled } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+
+    async function lateWorkflow() {
+      const hook = createHook({ token: 'late' })
+
+      await sleep(20)
+      hook[Symbol.dispose]()
+      // A resume that arrives before the disposal applies (when the run next waits).
+      execution.deliverHook('late', serialize('late'))
+
+      return 'done'
+    }
+
+    workflowEntry(lateWorkflow, 'test#late')
+
+    const done = settled()
+
+    startRun(store, 'test#late', [])
+    execution.kick()
+    await done
+
+    expect(outcome(store)).toEqual({ status: 'completed', value: 'done' })
+    // Journaled, a replay would hand the payload to the hook it disposed unanswered.
+    expect(store.readJournal('hook:late#0')).toBeUndefined()
+  })
+
   it('retries a failing step, stops on a fatal error, and wraps an exhausted one', async () => {
     let flaky = 0
     let fatal = 0

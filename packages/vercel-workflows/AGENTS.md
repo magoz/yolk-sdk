@@ -115,17 +115,20 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   decides once the creating code yields (a microtask) and frees a token at dispose; this runtime
   applies a run's disposals, then its new hooks' claims, once the body is idle (the next
   macrotask). README "Cloudflare runtime" lists what differs from Vercel.
-- A run's `wf_hook` row (token -> journal key) is written once the index granted the claim and
-  deleted when the hook is disposed (a replayed dispose deletes it again); it counts as held only
-  while the run has not ended. Rows from builds before canary.144 may predate a grant, so a replay
-  claims again for a hook that has a row. Only a held hook takes payloads; `hookHeld` also answers
-  true while the run's own claim on the token awaits the index's answer.
+- A run's `wf_hook` row (token -> journal key) is written once the index granted the claim (never
+  for a hook disposed meanwhile) and deleted when the hook's disposal applies (a replayed dispose
+  deletes it again); it counts as held only while the run has not ended. Rows from builds before
+  canary.145 may predate a grant, so a replay claims again for a hook that has a row. Only a held
+  hook takes payloads (a payload for a hook disposed in memory is dropped, never journaled);
+  `hookHeld` also answers true while an undisposed hook of the run awaits the index's answer to its
+  claim.
 - The `hook:<token>` index decides claims one at a time (an in-memory chain; `hookHeld` never calls
-  an index) and asks the run it names last (`hookHeld`) before letting another run take the token,
-  so a disposal or a run's end never has to reach the index. A failed claim is retried with the step
-  backoff under the step guard alarm, never journaled. Each of three rules carries the one-holder
-  promise (a model check of the protocol broke without each): one claim at a time per index, the
-  row only after the grant, and `hookHeld` counting an undecided claim.
+  an index) and asks the run it names last (`hookHeld`, answered within 10 s or the claim fails
+  undecided) before letting another run take the token, so a disposal or a run's end never has to
+  reach the index. A failed claim is retried with the step backoff under the step guard alarm, never
+  journaled; a disposal ends its wait. A run applies releases at once and chains claims per token,
+  so a failing index holds up only its own token. Keep three rules together: one claim at a time
+  per index, the row only after the grant, and `hookHeld` counting an undecided claim.
 - All `./cloudflare*` modules share module state (`AsyncLocalStorage` scopes, the registry): one
   copy per Worker.
 - Tests: `test/cloudflare-execution.test.ts` (execution over the memory store) and

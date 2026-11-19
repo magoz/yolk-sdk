@@ -385,6 +385,96 @@ describe('WorkflowRun and the workflow/api module', () => {
     expect(await run.returnValue).toBe('retried')
   })
 
+  it('lets another run take a token whose hook was disposed while its claim waited to retry', async () => {
+    let first = true
+
+    runs.installWith((name, stub) =>
+      name === 'hook:runtime-backoff'
+        ? {
+            ...stub,
+            hookClaim: async (token, runId) => {
+              const claim = await stub.hookClaim(token, runId)
+
+              // Granted, but the answer never reaches the run, which waits to retry.
+              if (first) {
+                first = false
+
+                throw new Error('answer lost')
+              }
+
+              return claim
+            }
+          }
+        : stub
+    )
+
+    async function abandoningDuringBackoff() {
+      const hook = createHook({ token: 'runtime-backoff' })
+
+      await sleep(50)
+      hook.dispose()
+
+      return await createHook({ token: 'runtime-backoff-next' })
+    }
+
+    async function takingAfterBackoff() {
+      using hook = createHook({ token: 'runtime-backoff' })
+
+      return await hook
+    }
+
+    workflowEntry(abandoningDuringBackoff, 'runtime#abandoning-during-backoff')
+    workflowEntry(takingAfterBackoff, 'runtime#taking-after-backoff')
+
+    const abandoned = await start(abandoningDuringBackoff)
+    const index = runs.namespace.getByName('hook:runtime-backoff')
+
+    await waitFor(async () => (await index.hookRun()) === abandoned.runId)
+    // The run disposed its hook at 50 ms; its claim would retry only after a second.
+    await new Promise(resolve => setTimeout(resolve, 150))
+
+    const taker = await start(takingAfterBackoff)
+
+    await waitFor(async () => (await index.hookRun()) === taker.runId)
+    await resumeHook('runtime-backoff', 'taken')
+    expect(await taker.returnValue).toBe('taken')
+  })
+
+  it('claims a token while the index of another token of the run keeps failing', async () => {
+    const gate = makeGate()
+
+    runs.installWith((name, stub) =>
+      name === 'hook:runtime-stuck'
+        ? {
+            ...stub,
+            hookClaim: async () => {
+              await gate.wait()
+
+              throw new Error('index unreachable')
+            }
+          }
+        : stub
+    )
+
+    async function twoTokens() {
+      createHook({ token: 'runtime-stuck' })
+
+      using hook = createHook({ token: 'runtime-free' })
+
+      return await hook
+    }
+
+    workflowEntry(twoTokens, 'runtime#two-tokens')
+
+    const run = await start(twoTokens)
+
+    await waitFor(
+      async () => (await runs.namespace.getByName('hook:runtime-free').hookRun()) === run.runId
+    )
+    await resumeHook('runtime-free', 'free')
+    expect(await run.returnValue).toBe('free')
+  })
+
   it('replays a refused hook as refused after an eviction', async () => {
     async function keeping() {
       const hook = createHook({ token: 'runtime-replayed' })

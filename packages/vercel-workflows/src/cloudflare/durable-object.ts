@@ -9,6 +9,27 @@ type Reader = {
 }
 
 /**
+ * How long a hook index waits for the run it names to say whether it holds the token. Past it the
+ * claim fails without a decision (the claiming run retries), so a hung run holds up its token's
+ * claims for this long at most, and the token is never granted on a missing answer.
+ */
+const hookHeldTimeoutMs = 10_000
+
+const answerWithin = async <A>(answer: Promise<A>, ms: number, message: string): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+
+  try {
+    return await Promise.race([answer, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * The Durable Object class behind the `WORKFLOW_RUNS` binding (SQLite-backed). One workflow run
  * per instance (named by its run id), or one hook index per instance (named `hook:<token>`). The
  * run executes in this object (`./execution.ts`); its stream lives here too, so readers follow it
@@ -171,7 +192,8 @@ export class WorkflowRun extends DurableObject {
    * telling the index, so the index asks that run whether it still holds the token. Claims are
    * decided one at a time: while the index awaits that answer its input gate is open, and a claim
    * the named run made meanwhile would otherwise be granted beside this one. `hookHeld` never calls
-   * an index, so a claim never waits on itself.
+   * an index, so a claim never waits on itself, and an unanswered `hookHeld` fails the claim after
+   * `hookHeldTimeoutMs` instead of holding up the token's later claims.
    */
   async hookClaim(token: string, runId: string): Promise<HookClaim> {
     const claim = this.hookClaims.then(() => this.decideHookClaim(token, runId))
@@ -189,7 +211,11 @@ export class WorkflowRun extends DurableObject {
     if (
       holder !== undefined &&
       holder !== runId &&
-      (await runNamespace().getByName(holder).hookHeld(token))
+      (await answerWithin(
+        runNamespace().getByName(holder).hookHeld(token),
+        hookHeldTimeoutMs,
+        `Workflow run ${holder} did not say whether it holds hook ${token}`
+      ))
     ) {
       return { claimed: false, holderRunId: holder }
     }

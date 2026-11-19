@@ -27,6 +27,10 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 - Assert observable workflow contract: stream chunks, replay/cancel behavior, terminal status.
 - Use `waitForHook` + `resumeHook` for real `awaitInput` directive coverage.
 - Do not assert Vercel SDK internals.
+- The fake namespace's `evict` only drops the object: the old instance's pending code keeps running
+  and may still write the shared storage (Cloudflare discards an evicted instance). Do not build
+  tests on an old instance's late writes, such as an evicted index's decision landing after its
+  restart; hold such code at a `makeGate` that is never opened instead.
 
 ## Anti-Patterns
 

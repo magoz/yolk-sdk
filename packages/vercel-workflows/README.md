@@ -538,8 +538,9 @@ own `WorkflowRun` Durable Object:
   `resumeHook` succeeds for every payload sent to a live hook (`await hook` reads the first; later
   ones are dropped) and rejects with `HookNotFoundError` when no live hook holds the token,
   including a new hook whose claim the index has not answered yet: retry while the pause is
-  pending. A failed call to the index is retried with backoff, and a run whose object restarted
-  during a claim claims again when it replays. A conflict caught inside the workflow keeps its
+  pending. A failed call to the index is retried with backoff (an index waits at most 10 s for the
+  holder's answer, then fails the claim undecided), and a run whose object restarted during a
+  claim claims again when it replays. A conflict caught inside the workflow keeps its
   `token` and `conflictingRunId`; an uncaught one fails the run, and the run's error (devalue)
   keeps only its name, message, stack and cause.
 - Where hooks still differ from Vercel: the decision comes at the next macrotask, not at a durable
