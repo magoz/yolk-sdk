@@ -503,7 +503,7 @@ export const applyAgentEventWithOptions = (
   const owner = Predicate.isTagged(route, 'Owned')
     ? route.execution
     : Predicate.isTagged(route, 'Start')
-      ? route.executions.at(-1)
+      ? route.started
       : undefined
 
   const applied = applyAgentEventRouted(routed, event, nowMs)
@@ -557,7 +557,7 @@ const executionOutput = (
  */
 const discardSupersededExecutions = (
   state: AgentClientState,
-  superseded: AgentExecutions<AgentClientExecutionOutput>
+  superseded: ReadonlyArray<AgentExecution<AgentClientExecutionOutput>>
 ): AgentClientState => {
   if (superseded.length === 0) return state
 

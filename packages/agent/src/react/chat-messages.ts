@@ -1324,6 +1324,11 @@ export type AgentChatExecutionOutput = Data.TaggedEnum<{
     readonly messageId: string
     readonly prior: Option.Option<AgentChatPart>
   }
+  /**
+   * A message it did not create that its `AssistantMessage` replaced (an earlier turn's message
+   * holding a call id a provider reused), with the message as it was.
+   */
+  ReplacedMessage: { readonly prior: AgentChatMessage }
 }>
 
 export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
@@ -1356,11 +1361,18 @@ export const discardChatExecutionOutput = (
     }
   }
 
+  const replaced = new Map(
+    outputs.flatMap(output =>
+      Predicate.isTagged(output, 'ReplacedMessage') ? [[output.prior.id, output.prior]] : []
+    )
+  )
+
   const lastUser = findLastMessageIndex(messages, message => message.role === 'user')
 
-  return messages.flatMap((message, index) => {
-    if (index <= lastUser) return [message]
+  return messages.flatMap((current, index) => {
+    if (index <= lastUser) return [current]
 
+    const message = replaced.get(current.id) ?? current
     const owned = created.has(message.id)
 
     const parts = message.parts.flatMap((part): ReadonlyArray<AgentChatPart> => {
@@ -1387,11 +1399,23 @@ export const discardChatExecutionOutput = (
   })
 }
 
+/** The messages and tool parts an execution produced: what a committed answer may replace. */
+const executionToolParts = (outputs: ReadonlyArray<AgentChatExecutionOutput>) => ({
+  messages: new Set(
+    outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
+  ),
+  parts: new Set(
+    outputs.flatMap(output =>
+      Predicate.isTagged(output, 'ToolPart') ? [toolPartKey(output.messageId, output.callId)] : []
+    )
+  )
+})
+
 /**
  * Replaces a disputed turn's shown answer with the committed one (`AgentEnd` /
  * `AgentAwaitingInput` messages): removes the live execution's output, moves the committed answer's
- * tool calls (keeping their current state, such as a pending question) into the committed message,
- * and appends it.
+ * tool calls from the execution's own messages and parts (keeping their current state, such as a
+ * pending question) into the committed message, and appends it.
  */
 export const replaceWithCommittedAnswer = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -1413,6 +1437,7 @@ export const replaceWithCommittedAnswer = (
   )
 
   const states = new Map<string, ChatToolState>()
+  const own = executionToolParts(outputs)
   const lastUser = findLastMessageIndex(discarded, message => message.role === 'user')
 
   const moved = discarded.flatMap((message, index) => {
@@ -1420,6 +1445,10 @@ export const replaceWithCommittedAnswer = (
 
     const parts = message.parts.filter(part => {
       if (!Predicate.isTagged(part, 'ToolCall') || !answerCalls.has(part.call.id)) return true
+
+      // Only the disputed execution's own parts move; another turn's call with a reused id stays.
+      if (!own.messages.has(message.id) && !own.parts.has(toolPartKey(message.id, part.call.id)))
+        return true
 
       states.set(part.call.id, part.state)
 
@@ -1447,16 +1476,20 @@ export const replaceWithCommittedAnswer = (
   )
 }
 
-/** Ends the tail assistant message's streaming text and reasoning, so a new stream starts apart. */
+/**
+ * Ends every assistant message's streaming text and reasoning (a settled or other run's draft, or
+ * one a user message followed), so a new stream starts its own message and never appends to it.
+ */
 const finalizeUnfinishedStream = (
   messages: ReadonlyArray<AgentChatMessage>
-): ReadonlyArray<AgentChatMessage> => {
-  const last = messages.at(-1)
-
-  if (last === undefined || last.role !== 'assistant' || !hasStreamingPart(last)) return messages
-
-  return [...messages.slice(0, -1), { ...last, parts: finalizeAssistantParts(last.parts) }]
-}
+): ReadonlyArray<AgentChatMessage> =>
+  messages.some(message => message.role === 'assistant' && hasStreamingPart(message))
+    ? messages.map(message =>
+        message.role === 'assistant' && hasStreamingPart(message)
+          ? { ...message, parts: finalizeAssistantParts(message.parts) }
+          : message
+      )
+    : messages
 
 const finalizeStreamingParts = (
   messages: ReadonlyArray<AgentChatMessage>

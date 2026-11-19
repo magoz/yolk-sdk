@@ -3,6 +3,7 @@ import { Predicate } from 'effect'
 import {
   AgentAwaitingInput,
   AgentEnd,
+  AgentStart,
   AssistantAgentMessage,
   AssistantMessageEvent,
   AssistantTextPart,
@@ -19,6 +20,8 @@ import {
   ToolInputStart,
   ToolResult,
   ToolResultMessage,
+  UserMessage,
+  UserMessageEvent,
   zeroAgentUsage,
   type AgentEvent,
   type AgentMessage
@@ -51,8 +54,11 @@ const live = <Event extends AgentEvent>(
 ) => make({ eventId: `${streamId}:${(sequence += 1)}:${executionId}`, executionId, streamId })
 
 /** A host event every execution writes identically (plain id, no execution). */
-const plain = <Event extends AgentEvent>(make: (identity: PlainIdentity) => Event, id: string) =>
-  make({ eventId: `run:${id}` })
+const plain = <Event extends AgentEvent>(
+  make: (identity: PlainIdentity) => Event,
+  id: string,
+  streamId = 'run-1'
+) => make({ eventId: `${streamId}:${id}`, streamId })
 
 type Identity = {
   readonly eventId: string
@@ -60,7 +66,7 @@ type Identity = {
   readonly streamId: string
 }
 
-type PlainIdentity = { readonly eventId: string }
+type PlainIdentity = { readonly eventId: string; readonly streamId: string }
 
 const answer = (content: string, calls: ReadonlyArray<ToolCall> = []) =>
   AssistantAgentMessage.make({
@@ -349,8 +355,99 @@ describe('model-step executions', () => {
     const result = project([start(A, 1), delta(A, 'Hello'), message(A, hello), end('end', [hello])])
 
     expect(result.client.executions).toEqual([
-      { executionId: A, streamId: 'run-1', turn: 1, status: 'Settled', calls: [], output: [] }
+      {
+        streamId: 'run-1',
+        ended: true,
+        closedThroughTurn: 0,
+        retired: false,
+        executions: [{ executionId: A, turn: 1, status: 'Settled', calls: [], output: [] }]
+      }
     ])
+  })
+
+  it("restores an earlier turn's message that a superseded answer replaced by a reused call id", () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+    const turnOne = answer('Turn one', [call])
+    const result0 = ToolResult.make({ toolCallId: call.id, content: '72F' })
+
+    const result = project([
+      start('step-0:1', 1),
+      delta('step-0:1', 'Turn one'),
+      live(identity => ToolInputEnd.make({ ...identity, call }), 'step-0:1'),
+      message('step-0:1', turnOne),
+      plain(identity => ToolExecutionStarted.make({ ...identity, call }), 'tool:0'),
+      plain(
+        identity => ToolExecutionCompleted.make({ ...identity, call, result: result0 }),
+        'tool:1'
+      ),
+      start(A, 2),
+      message(A, answer('Wrong', [call])),
+      start(B, 2),
+      delta(B, 'Sorry')
+    ])
+
+    expect(result.client.liveMessages).toEqual([turnOne])
+    expect(result.client.toolRuns.map(run => run._tag)).toEqual(['Completed'])
+    expectBothChats(result, ['Turn one | call_1:Completed', 'Sorry'])
+  })
+
+  it('fences a run by its terminal event even when no execution of it was seen', () => {
+    const hello = answer('Hello')
+
+    const replayed = project([end('end', [hello]), start(B, 1), delta(B, 'Sorry')])
+
+    expect(replayed.client.messages).toEqual([hello])
+    expect(replayed.client.text).toBe('')
+    expectBothChats(replayed, ['Hello'])
+
+    const later = project([
+      start(A, 1),
+      delta(A, 'Hello'),
+      message(A, hello),
+      end('end', [hello]),
+      start('step-2:1', 2),
+      delta('step-2:1', 'More')
+    ])
+
+    expect(later.client.text).toBe('')
+    expectBothChats(later, ['Hello'])
+  })
+
+  it('admits a retry of a turn after a user message: only terminal events close a turn', () => {
+    const result = project([
+      start(A, 1),
+      delta(A, 'Hel'),
+      plain(
+        identity =>
+          UserMessageEvent.make({ ...identity, message: UserMessage.make({ content: 'and?' }) }),
+        'steer'
+      ),
+      start(B, 1),
+      delta(B, 'Sorry')
+    ])
+
+    expect(result.client.text).toBe('Sorry')
+    expect(shown(result.projection).at(-1)).toBe('Sorry')
+    expect(shown(result.chat).at(-1)).toBe('Sorry')
+  })
+
+  it('starts a fresh run after AgentStart when a host reuses a stream id', () => {
+    const next = answer('New answer')
+
+    const result = project([
+      plain(identity => AgentStart.make(identity), 'start-1'),
+      start(A, 1),
+      delta(A, 'Stopped par'),
+      plain(identity => AgentStart.make(identity), 'start-2'),
+      start(B, 1),
+      delta(B, 'New answer'),
+      message(B, next),
+      end('end', [next])
+    ])
+
+    expect(result.client.messages).toEqual([next])
+    expect(shown(result.projection).at(-1)).toBe('New answer')
+    expect(shown(result.chat).at(-1)).toBe('New answer')
   })
 
   it('keeps events without an execution on the plain path', () => {

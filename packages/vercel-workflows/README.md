@@ -346,10 +346,11 @@ input, provider tool results). `LLMStreamStart` must carry it: it is identical i
 so with a plain id the second start would be de-duped and the client could not tell the executions
 apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is unique per execution: a loop
 retry is a new step id, and each platform retry or redelivery a new attempt. The sequencer appends
-it to the id and sets it as the event's `executionId` field, with the `streamId` beside it so clients
-keep each run's turns apart (never parse either from the id: both contain `:`). It must be non-empty
-without surrounding whitespace; sequencing throws otherwise. Without it, both fields are removed
-from the written event.
+it to the id and sets it as the event's `executionId` field (removed without it). Every written event
+also carries the `streamId` field, so clients keep each run's turns apart and a terminal event
+closes its own run (never parse either from the id: both contain `:`). Both must be non-empty
+without surrounding whitespace when `executionId` is set, or sequencing throws; without it, a blank
+or padded `streamId` is only left off the event.
 
 Leave it off host events every execution writes identically: a promoted user message, and the
 terminal event written after the host commits (`commitThenWriteTerminalEvent`). A re-execution that
@@ -373,23 +374,33 @@ yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, sta
 
 - When a newer execution of the same turn starts, the older one is superseded: its output is
   provisional and removed (streaming text, its `AssistantMessage`, and each tool call it touched
-  that no host event acted on yet, restored to the call it replaced when a provider reused the
-  id), and its later events are dropped.
+  that no host event acted on yet), and its later events are dropped. A call or earlier message it
+  overwrote through a provider's reused call id is restored.
 - A later turn's start, another run's start, a terminal event, a user message or `AgentStart`
   settles executions: their output stays and their later events (a losing concurrent execution)
   are dropped. Only executions of earlier turns or other runs are settled by a start.
-- A start for a turn older than one its run already started, or for a turn its run already closed
-  with a terminal event, is stale: it and its later events are dropped.
+- Only terminal events close a run: after `AgentEnd` or `AgentError` every start in it is stale,
+  and after `AgentAwaitingInput` a start at or below the paused turn is (the resumed run starts a
+  higher one). A start for a turn older than one its run already started is stale too. A stale
+  start and its later events are dropped. The client records a terminal's run from its `streamId`
+  even when it saw no execution of that run; a terminal without `streamId` closes the runs still
+  streaming. `AgentStart` begins a fresh run, even under a reused `streamId`.
 - At `AgentEnd` and `AgentAwaitingInput`, if the final turn ran more than once, its shown answer is
   replaced by the committed assistant message from the event's `messages`, keeping the state of its
   tool calls (a pending question stays pending).
 - Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
   output still streaming.
 
-Upgrade clients and server together: a client before this release ignores the fields and shows
-both executions' output back to back. Projection hosts that keep one state across runs need nothing
-more when events carry `streamId`; without it every run shares one scope, so reset `executions` to
-`[]` when a new run starts.
+Host duties:
+
+- Upgrade clients and server together: a client before this release ignores the fields and shows
+  both executions' output back to back.
+- Projection hosts that keep one state across runs need nothing more when events carry `streamId`;
+  without it every run shares one scope, so reset `executions` to `[]` when a new run starts.
+- Feed one state one run at a time: two runs streaming tagged events into one state at once are
+  unsupported (each run's start settles the other's live execution).
+- `reduceAgentEvents` keeps a single draft buffer (`text`, `reasoning`): every `LLMStreamStart`
+  clears it, so a stopped run's unfinished draft is not kept there (the chat projections keep it).
 
 Open case: a non-final turn whose older execution committed while the newer one streamed. The
 chat keeps the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran

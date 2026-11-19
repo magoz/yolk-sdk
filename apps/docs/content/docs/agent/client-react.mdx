@@ -79,7 +79,8 @@ A retried or redelivered model step streams a second answer for the same turn. E
 model call can carry `executionId` and `streamId` (its run); the chat projection, the `useAgentChat`
 reducer and `reduceAgentEvents` route by them, per run and turn. When a newer execution of a turn
 starts, the older one's output (streaming text, its assistant message, tool calls nothing acted on)
-is removed and its later events are dropped; a late start for an older or closed turn is dropped.
+is removed and its later events are dropped; a start for an older turn, or after its run's
+terminal event, is dropped.
 At `AgentEnd` and `AgentAwaitingInput`, a final turn that ran more than once shows the committed
 answer; a non-final one keeps the newer execution's answer until reload
 ([open case](../vercel-workflows#emit-replay-safe-stream-events)). Keep the projection's

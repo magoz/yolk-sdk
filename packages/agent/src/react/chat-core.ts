@@ -196,7 +196,7 @@ const projectExecutionEvent = (
   const owner = Predicate.isTagged(route, 'Owned')
     ? route.execution
     : Predicate.isTagged(route, 'Start')
-      ? route.executions.at(-1)
+      ? route.started
       : undefined
 
   const chatMessages = applyAgentEventToChatMessages(committed, event, options)
@@ -258,7 +258,40 @@ const chatExecutionOutput = (
     return [AgentChatExecutionOutput.ToolPart({ callId, messageId: holder.id, prior: priorPart })]
   })
 
-  return [...created, ...parts]
+  return [...created, ...replacedMessages(execution, event, before, after), ...parts]
+}
+
+/**
+ * Messages an execution's `AssistantMessage` replaced without having created them (an earlier
+ * turn's message matched by a reused call id), recorded once with how they were.
+ */
+const replacedMessages = (
+  execution: AgentExecution<AgentChatExecutionOutput>,
+  event: AgentEvent,
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatExecutionOutput> => {
+  if (!Predicate.isTagged(event, 'AssistantMessage')) return []
+
+  const recorded = new Set(
+    execution.output.flatMap(output =>
+      Predicate.isTagged(output, 'Message')
+        ? [output.messageId]
+        : Predicate.isTagged(output, 'ReplacedMessage')
+          ? [output.prior.id]
+          : []
+    )
+  )
+
+  const current = new Map(after.map(message => [message.id, message]))
+
+  return before.flatMap(prior => {
+    const next = current.get(prior.id)
+
+    return next === undefined || next === prior || recorded.has(prior.id)
+      ? []
+      : [AgentChatExecutionOutput.ReplacedMessage({ prior })]
+  })
 }
 
 export type AgentChatAction =

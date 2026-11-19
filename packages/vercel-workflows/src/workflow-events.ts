@@ -9,7 +9,10 @@ export type DurableAgentEvent<Event extends object = object> = Event & {
   readonly createdAtMs?: number
   /** Set from `SequenceDurableAgentEventInput.executionId`; clients route live events by it. */
   readonly executionId?: string
-  /** The `streamId`, set with `executionId` so clients group executions per run. */
+  /**
+   * The `streamId`, set on every event (omitted when blank or padded, which clients reject) so
+   * clients group executions per run and a terminal event closes its run.
+   */
   readonly streamId?: string
 }
 
@@ -34,8 +37,8 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
   readonly turn: number
   /**
    * Identifies one execution of a model step. It is appended to the id and set as the event's
-   * `executionId` field, with `streamId` beside it, which `@yolk-sdk/agent` clients route by (per
-   * run and turn). Without it both fields are removed from the written event. It must be
+   * `executionId` field (removed without it), which `@yolk-sdk/agent` clients route by, per run
+   * (the event's `streamId` field, set on every event) and turn. It and `streamId` must be
    * non-empty without surrounding whitespace (clients reject anything else); otherwise sequencing
    * throws a `TypeError` (a defect in `writeDurableAgentEvent`).
    *
@@ -131,9 +134,13 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     streamId?: string
   }
 
+  // A host bug: clients reject a blank or padded id, so fail loudly (a defect in an Effect).
   if (input.executionId !== undefined && !isNonBlankTrimmed(input.executionId)) {
-    // A host bug: clients reject a blank or padded id, so fail loudly (a defect in an Effect).
     throw new TypeError('executionId must be non-empty, without surrounding whitespace')
+  }
+
+  if (input.executionId !== undefined && !isNonBlankTrimmed(input.streamId)) {
+    throw new TypeError('streamId must be non-empty, without surrounding whitespace')
   }
 
   const event: SequencedDurableAgentEventFields = {
@@ -150,13 +157,18 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     event.createdAtMs = input.createdAtMs
   }
 
-  // The fields always agree with the id: set from the input, or removed when it has none.
+  // The fields always agree with the id: set from the input, or removed when it has none. Every
+  // event carries its `streamId` (when clients can decode it), so a terminal event closes its run.
   if (input.executionId === undefined) {
     delete event.executionId
-    delete event.streamId
   } else {
     event.executionId = input.executionId
+  }
+
+  if (isNonBlankTrimmed(input.streamId)) {
     event.streamId = input.streamId
+  } else {
+    delete event.streamId
   }
 
   return {

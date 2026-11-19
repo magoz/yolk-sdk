@@ -36,8 +36,8 @@ const EventIdentity = {
    */
   executionId: Schema.optional(NonEmptyTrimmedString),
   /**
-   * The durable stream (one run) an `executionId` belongs to; clients group executions and their
-   * turns by it, so turn numbers of different runs never meet. Set with `executionId`.
+   * The durable stream (one run) the event belongs to. Clients group executions and their turns by
+   * it, and a terminal event closes its run, so turn numbers of different runs never meet.
    */
   streamId: Schema.optional(NonEmptyTrimmedString)
 }

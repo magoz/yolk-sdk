@@ -56,8 +56,9 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Every execution of a step starts from the same `eventSequence`, so every event a model call
   produces (`LLMStreamStart` through `AssistantMessage`/`UsageUpdate`) needs an `executionId`
   unique per execution (`${stepId}:${attempt}` from `getStepMetadata()`; non-empty, trimmed, or
-  sequencing throws). The sequencer appends it to the id and sets the event's `executionId` and
-  `streamId` fields (or removes both without it), which `@yolk-sdk/agent` clients route by; without it a re-execution's different answer reuses the first one's ids and de-dupe splices
+  sequencing throws). The sequencer appends it to the id and sets the event's `executionId` field
+  (removed without it) and, on every event, `streamId` (so a terminal event closes its own run),
+  which `@yolk-sdk/agent` clients route by; without it a re-execution's different answer reuses the first one's ids and de-dupe splices
   them. Host events (promoted user messages, the terminal event written after the commit) never
   carry it, and a receipt replay rewrites only that terminal event. Without it ids are unchanged.
   Tool-batch steps are out of scope: their ids stay plain; only ledgered calls replay identically
