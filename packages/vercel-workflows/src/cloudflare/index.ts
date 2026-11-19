@@ -8,6 +8,7 @@ export { WorkflowRun } from './durable-object.ts'
 
 export {
   FatalError,
+  HookConflictError,
   HookNotFoundError,
   parseDuration,
   RetryableError,
@@ -16,7 +17,7 @@ export {
 
 export { defaultStepMaxRetries, stepGuardIntervalMs, WorkflowExecution } from './execution.ts'
 
-export type { ExecutionHost } from './execution.ts'
+export type { ExecutionHost, HookClaim } from './execution.ts'
 
 export { runNamespace, workflowRunsBinding } from './namespace.ts'
 

@@ -188,7 +188,10 @@ export const makeSqliteRunStore = (sql: DurableObjectSql): RunStore => {
   }
 }
 
-/** A hook-index instance (named `hook:<token>`) maps its token to the run that waits on it. */
+/**
+ * A hook-index instance (named `hook:<token>`) maps its token to the run that took it last; that
+ * run's hook may have freed it since (`WorkflowRun.hookClaim` asks).
+ */
 export const makeHookIndex = (sql: DurableObjectSql) => {
   sql.exec(
     'CREATE TABLE IF NOT EXISTS wf_hook_run (id INTEGER PRIMARY KEY CHECK (id = 1), run_id TEXT NOT NULL)'

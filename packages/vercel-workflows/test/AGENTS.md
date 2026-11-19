@@ -16,7 +16,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | `fixtures/workflow-fixture.ts`           | Test-only workflow/step directive fixture; not published          |
 | `cloudflare-execution.test.ts`           | Cloudflare runtime execution over the memory run store            |
 | `cloudflare-runtime.test.ts`             | `WorkflowRun` on `node:sqlite` through the `workflow/api` drop-in |
-| `cloudflare-fakes.ts`                    | Fake `WORKFLOW_RUNS` namespace and Durable Object SQL             |
+| `cloudflare-fakes.ts`                    | Fake `WORKFLOW_RUNS` namespace, Durable Object SQL, RPC gates     |
 | `cloudflare-workers-stub.ts`             | `cloudflare:workers` stub the package Vitest aliases              |
 
 ## Rules
@@ -27,6 +27,10 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 - Assert observable workflow contract: stream chunks, replay/cancel behavior, terminal status.
 - Use `waitForHook` + `resumeHook` for real `awaitInput` directive coverage.
 - Do not assert Vercel SDK internals.
+- The fake namespace's `evict` only drops the object: the old instance's pending code keeps running
+  and may still write the shared storage (Cloudflare discards an evicted instance). Do not build
+  tests on an old instance's late writes, such as an evicted index's decision landing after its
+  restart; hold such code at a `makeGate` that is never opened instead.
 
 ## Anti-Patterns
 

@@ -30,6 +30,30 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.145: Cloudflare runtime hook token conflicts
+
+The Cloudflare runtime (`@yolk-sdk/vercel-workflows/cloudflare*`) now refuses a hook whose token
+another live hook holds, in another run or the same one, as Vercel does. Before, the newest hook
+took the token and `resumeHook` reached it instead of the live holder. Now creating it succeeds,
+but awaiting it rejects with `HookConflictError` (`token`, `conflictingRunId`, exported from
+`./cloudflare`), and the holder keeps the token. Disposing a hook (`using` or `dispose()`) now frees
+its token, and so does its run's end; an answered hook keeps its token until then. Give each pause
+its own token, or dispose the previous hook before the run waits again (a loop with
+`using hook = createHook({ token })` per round keeps working). A second `resumeHook` to a live,
+answered hook now succeeds (the payload is dropped) instead of failing with `HookNotFoundError`.
+Hosts that drive `WorkflowExecution` themselves pass `claimHook` (returning a `HookClaim`) instead
+of `registerHook`; custom `WorkflowRunStub` namespaces implement `hookClaim` and `hookHeld` instead
+of `hookRegister` ([Cloudflare runtime](./vercel-workflows/cloudflare)).
+
+Runs in flight at the upgrade keep what the earlier build left. A run waiting on a token that the
+earlier build let a newer run take stays unreachable: the index names the newer run, and its
+`resumeHook` calls reach the newer run. Before upgrading, drain or cancel runs waiting on tokens
+that several runs share. Earlier builds also kept the token entry of a hook that was disposed but
+never answered. A run that replays after the upgrade (after an eviction, or on its next `resumeHook`)
+repairs both: disposing that hook again deletes its entry, and a hook that still has an entry asks
+the index for its token again (it is refused if another live hook holds it). A run that does not
+replay keeps that entry until it ends, and the token stays taken until then.
+
 ### Canary.144: Cloudflare sandbox state
 
 `@yolk-sdk/sandbox` adds a Cloudflare Containers adapter

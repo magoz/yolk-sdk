@@ -556,9 +556,28 @@ own `WorkflowRun` Durable Object:
   bounds retries with exponential backoff (1 s doubling, at most 30 s); `RetryableError` waits until
   its `retryAfter`; `FatalError` is never retried; an exhausted step throws a `FatalError` with the
   last error as `cause`, as the platform does.
-- `createHook({ token })` registers the token in a hook-index instance (`hook:<token>`) that
-  `resumeHook` reads. Without a token, the token is `<runId>:hook#<n>`, the same on every replay.
-  `resumeHook` rejects with `HookNotFoundError` when no run waits on the token.
+- Hooks follow the platform's token rules. One live hook holds a token at a time, and a hook-index
+  instance (`hook:<token>`) routes `resumeHook` to the run whose live hook holds it. As the platform
+  creates a hook at its run's next suspension, after the run's disposals since, this runtime decides
+  once the body is idle (the next macrotask), applying the run's disposals first: a hook whose token
+  another live hook (of any run, its own included) still holds then is refused. Awaiting it rejects
+  with `HookConflictError` (`token`, `conflictingRunId`; exported from `./cloudflare`), the holder
+  keeps the token and its answers, and disposing the refused hook frees nothing. A token is free
+  again once its hook is disposed (`using`, `dispose()`) or its run ends; an answered hook holds its
+  token until then. Without a token, the token is `<runId>:hook#<n>`, the same on every replay.
+  `resumeHook` succeeds for every payload sent to a live hook (`await hook` reads the first; later
+  ones are dropped) and rejects with `HookNotFoundError` when no live hook holds the token,
+  including a new hook whose claim the index has not answered yet: retry while the pause is
+  pending. A failed call to the index is retried with backoff (an index waits at most 10 s for the
+  holder's answer, then fails the claim undecided), and a run whose object restarted during a
+  claim claims again when it replays. A conflict caught inside the workflow keeps its
+  `token` and `conflictingRunId`; an uncaught one fails the run, and the run's error (devalue)
+  keeps only its name, message, stack and cause.
+- Where hooks still differ from Vercel: the decision comes at the next macrotask, not at a durable
+  suspension, so a disposal made after an `await` that yields to the event loop without suspending
+  the run on Vercel (a timer, non-durable I/O) comes too late for a hook created before it. A hook
+  is read once: awaiting it again gives its first payload again, where Vercel gives the next one
+  (so `for await` over a hook does not work), and `getConflict()` is not provided.
 - `sleep(duration)` is durable: its wake time is stored on first execution and armed as the
   object's alarm.
 - `getWritable()` inside a step appends to the run's stream, stored in the object;
@@ -634,7 +653,7 @@ one of them).
 
 `WorkflowExecution`, `makeMemoryRunStore`, and `makeSqliteRunStore` are exported for hosts that
 drive a run themselves (tests, another single-writer host): `WorkflowExecution` runs one run over
-a `RunStore` and an `ExecutionHost` (alarms, hook registration, stream fan-out, settlement).
+a `RunStore` and an `ExecutionHost` (alarms, hook claims, stream fan-out, settlement).
 
 ## Host responsibilities
 

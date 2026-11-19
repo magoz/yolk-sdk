@@ -60,15 +60,16 @@ const requireWorkflow = (name: string) => {
 export const createHook = (options?: { readonly token?: string }) => {
   const workflow = requireWorkflow('createHook')
   const token = options?.token ?? workflow.hookToken()
-  const payload = workflow.hook(token)
+  const hook = workflow.hook(token)
 
   return {
     token,
     then: <A = unknown, B = never>(
       onFulfilled?: ((value: unknown) => A | PromiseLike<A>) | null,
       onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null
-    ) => payload.then(onFulfilled, onRejected),
-    [Symbol.dispose]: () => undefined
+    ) => hook.payload.then(onFulfilled, onRejected),
+    dispose: hook.dispose,
+    [Symbol.dispose]: hook.dispose
   }
 }
 

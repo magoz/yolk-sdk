@@ -59,6 +59,26 @@ export const makeSqliteSql = (database: DatabaseSync): DurableObjectSql => ({
   }
 })
 
+/** A point a faked RPC waits at: `reached` once something waits, until the test calls `open`. */
+export const makeGate = () => {
+  let open: () => void = () => undefined
+
+  const opened = new Promise<void>(resolve => {
+    open = resolve
+  })
+
+  const gate = {
+    reached: false,
+    open: () => open(),
+    wait: async () => {
+      gate.reached = true
+      await opened
+    }
+  }
+
+  return gate
+}
+
 type Instance = {
   readonly database: DatabaseSync
   object: WorkflowRun | undefined
@@ -118,7 +138,8 @@ export const makeFakeWorkflowRuns = () => {
       resumeHook: (token, payload) => objectOf(name).resumeHook(token, payload),
       tailIndex: () => objectOf(name).tailIndex(),
       readable: startIndex => objectOf(name).readable(startIndex),
-      hookRegister: runId => objectOf(name).hookRegister(runId),
+      hookHeld: token => objectOf(name).hookHeld(token),
+      hookClaim: (token, runId) => objectOf(name).hookClaim(token, runId),
       hookRun: () => objectOf(name).hookRun()
     })
   }
@@ -127,6 +148,17 @@ export const makeFakeWorkflowRuns = () => {
     namespace,
     install: () => {
       Reflect.set(env, workflowRunsBinding, namespace)
+    },
+    /**
+     * Installs the namespace with `wrap` around every stub the runtime gets, so a test can hold an
+     * RPC at an await point (`makeGate`) or fail it. `namespace` itself stays unwrapped.
+     */
+    installWith: (wrap: (name: string, stub: WorkflowRunStub) => WorkflowRunStub) => {
+      const wrapped: WorkflowRunNamespace = {
+        getByName: name => wrap(name, namespace.getByName(name))
+      }
+
+      Reflect.set(env, workflowRunsBinding, wrapped)
     },
     /** Drops the live object; the next call builds a new one over the same storage. */
     evict: (name: string) => {

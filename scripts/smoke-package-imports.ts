@@ -483,7 +483,7 @@ const main = async () => {
           'workflowsCloudflareDirectives.workflowEntry(smokeWorkflow, "smoke#workflow")',
           'const smokeRunStore = workflowsCloudflare.makeMemoryRunStore()',
           'smokeRunStore.createRun({ runId: "wrun_smoke", workflowId: "smoke#workflow", args: workflowsCloudflare.serialize([21]), status: "pending", outcome: undefined, createdAt: Date.now(), completedAt: undefined })',
-          'await new Promise(resolve => new workflowsCloudflare.WorkflowExecution({ store: smokeRunStore, wakeAt: () => undefined, registerHook: async () => undefined, chunkAppended: () => undefined, streamClosed: () => undefined, runSettled: resolve, log: () => undefined }).kick())',
+          'await new Promise(resolve => new workflowsCloudflare.WorkflowExecution({ store: smokeRunStore, wakeAt: () => undefined, claimHook: async () => ({ claimed: true }), chunkAppended: () => undefined, streamClosed: () => undefined, runSettled: resolve, log: () => undefined }).kick())',
           'if (smokeRunStore.readRun()?.status !== "completed" || workflowsCloudflare.deserialize(smokeRunStore.readRun().outcome) !== 42) throw new Error("Cloudflare workflow execution smoke failed")',
           'const extractors = await import("@yolk-sdk/extractors")',
           'if (typeof extractors.fileFormatFor !== "function" || extractors.fileFormatFor({ filename: "a.xlsx", mediaType: "" }) !== "xlsx" || extractors.defaultFileExtractorLimits.maxXlsxHyperlinks !== 10000 || typeof extractors.SheetJsUnavailableError !== "function") throw new Error("Missing extractors root exports")',

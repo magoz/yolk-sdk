@@ -37,7 +37,10 @@ export interface RunStore {
   readonly writeSleep: (key: string, wakeAt: number) => void
   readonly earliestPendingSleep: () => number | undefined
 
-  /** Hooks the run waits on: the journal key each token's payload goes to. */
+  /**
+   * The run's live hooks: the journal key of the hook holding each token, kept from when the hook
+   * takes the token until it is disposed (after its payload, too).
+   */
   readonly readPendingHook: (token: string) => string | undefined
   readonly writePendingHook: (token: string, key: string) => void
   readonly deletePendingHook: (token: string) => void

@@ -1,11 +1,32 @@
 import { DurableObject } from 'cloudflare:workers'
-import { WorkflowExecution, type ExecutionHost } from './execution.ts'
+import { WorkflowExecution, type ExecutionHost, type HookClaim } from './execution.ts'
 import { runNamespace, type RunOutcome, type StartRunInput } from './namespace.ts'
 import { makeHookIndex, makeSqliteRunStore } from './sqlite-store.ts'
 import type { RunStore } from './store.ts'
 
 type Reader = {
   readonly controller: ReadableStreamDefaultController<Uint8Array>
+}
+
+/**
+ * How long a hook index waits for the run it names to say whether it holds the token. Past it the
+ * claim fails without a decision (the claiming run retries), so a hung run holds up its token's
+ * claims for this long at most, and the token is never granted on a missing answer.
+ */
+const hookHeldTimeoutMs = 10_000
+
+const answerWithin = async <A>(answer: Promise<A>, ms: number, message: string): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+
+  try {
+    return await Promise.race([answer, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -20,6 +41,8 @@ export class WorkflowRun extends DurableObject {
   private executionInstance: WorkflowExecution | undefined
   private readonly readers = new Set<Reader>()
   private readonly settledWaiters = new Set<() => void>()
+  /** On a hook index: the claim decided last, which the next one waits for. */
+  private hookClaims: Promise<unknown> = Promise.resolve()
 
   private get store(): RunStore {
     this.storeInstance ??= makeSqliteRunStore(this.ctx.storage.sql)
@@ -35,12 +58,12 @@ export class WorkflowRun extends DurableObject {
       wakeAt: time => {
         this.ctx.waitUntil(this.armAlarm(time))
       },
-      registerHook: async token => {
+      claimHook: async token => {
         const runId = this.store.readRun()?.runId
 
-        if (runId === undefined) return
+        if (runId === undefined) throw new Error('Workflow run not found')
 
-        await runNamespace().getByName(`hook:${token}`).hookRegister(runId)
+        return runNamespace().getByName(`hook:${token}`).hookClaim(token, runId)
       },
       chunkAppended: (_index, chunk) => {
         for (const reader of this.readers) reader.controller.enqueue(new Uint8Array(chunk))
@@ -113,9 +136,9 @@ export class WorkflowRun extends DurableObject {
     this.execution.cancel()
   }
 
-  /** Delivers a hook payload (devalue text); false when this run does not wait on `token`. */
+  /** Delivers a hook payload (devalue text); false when no live hook of this run holds `token`. */
   async resumeHook(token: string, payload: string): Promise<boolean> {
-    if (this.store.readPendingHook(token) === undefined) return false
+    if (!this.execution.holdsHook(token)) return false
 
     this.execution.deliverHook(token, payload)
 
@@ -155,8 +178,51 @@ export class WorkflowRun extends DurableObject {
     })
   }
 
-  async hookRegister(runId: string): Promise<void> {
-    makeHookIndex(this.ctx.storage.sql).write(runId)
+  /**
+   * Whether this run holds `token` (a live hook of the run, neither disposed nor ended with the
+   * run) or awaits the answer to its own claim on it.
+   */
+  async hookHeld(token: string): Promise<boolean> {
+    return this.execution.claimsHook(token)
+  }
+
+  /**
+   * On a hook index: routes `token` to `runId` unless a live hook of another run holds it. The
+   * index names the run that took the token last; a disposed hook or an ended run frees it without
+   * telling the index, so the index asks that run whether it still holds the token. Claims are
+   * decided one at a time: while the index awaits that answer its input gate is open, and a claim
+   * the named run made meanwhile would otherwise be granted beside this one. `hookHeld` never calls
+   * an index, so a claim never waits on itself, and an unanswered `hookHeld` fails the claim after
+   * `hookHeldTimeoutMs` instead of holding up the token's later claims.
+   */
+  async hookClaim(token: string, runId: string): Promise<HookClaim> {
+    const claim = this.hookClaims.then(() => this.decideHookClaim(token, runId))
+
+    this.hookClaims = claim.catch(() => undefined)
+
+    return claim
+  }
+
+  private async decideHookClaim(token: string, runId: string): Promise<HookClaim> {
+    const index = makeHookIndex(this.ctx.storage.sql)
+    const holder = index.read()
+
+    // The run claiming again (its earlier hook freed the token, or a replay asks again) takes it.
+    if (
+      holder !== undefined &&
+      holder !== runId &&
+      (await answerWithin(
+        runNamespace().getByName(holder).hookHeld(token),
+        hookHeldTimeoutMs,
+        `Workflow run ${holder} did not say whether it holds hook ${token}`
+      ))
+    ) {
+      return { claimed: false, holderRunId: holder }
+    }
+
+    index.write(runId)
+
+    return { claimed: true }
   }
 
   async hookRun(): Promise<string | undefined> {

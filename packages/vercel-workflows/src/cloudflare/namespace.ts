@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { Predicate } from 'effect'
+import type { HookClaim } from './execution.ts'
 import type { RunStatus } from './store.ts'
 
 /** The `WorkflowRun` Durable Object binding every Worker that starts or reads runs declares. */
@@ -25,11 +26,15 @@ export interface WorkflowRunStub {
   status(): Promise<RunOutcome>
   settled(): Promise<RunOutcome>
   cancel(): Promise<void>
-  /** False when the run does not wait on `token` (any more). */
+  /** False when no live hook of the run holds `token` (any more). */
   resumeHook(token: string, payload: string): Promise<boolean>
   tailIndex(): Promise<number>
   readable(startIndex?: number): Promise<ReadableStream<Uint8Array>>
-  hookRegister(runId: string): Promise<void>
+  /** Whether a live hook of the run holds `token`, or the run's claim on it awaits an answer. */
+  hookHeld(token: string): Promise<boolean>
+  /** On a hook index: route `token` to `runId`, unless another run's live hook holds it. */
+  hookClaim(token: string, runId: string): Promise<HookClaim>
+  /** On a hook index: the run that took the token last (its hook may since have freed it). */
   hookRun(): Promise<string | undefined>
 }
 
