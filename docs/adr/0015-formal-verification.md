@@ -44,8 +44,9 @@ a file to maintain.
 - `everystate` is a young, single-maintainer native binary, so it is pinned exactly (`0.3.1`), at
   a release that was more than a day old when adopted, so it meets pnpm 11's default minimum
   release age (one day; `pnpm-workspace.yaml` sets no other) without an exception. Move it
-  deliberately, to a release that has aged. It has no install script and runs only in `pnpm models:check`: not in the
-  Vercel builds and not in the package publish workflow.
+  deliberately, to a release that has aged. It has no install script and runs only in
+  `pnpm models:check` and in its own tests under `pnpm test:tooling` (which run the real checker
+  on temporary models): not in the Vercel builds and not in the package publish workflow.
 
 ## Alternatives
 

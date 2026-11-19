@@ -6,7 +6,8 @@ on fiber interleavings, the stores hosts implement, and platform delivery rules,
 only the orders someone thought to write. A TLA+ model of such a protocol, checked by
 `everystate`, checks every order of its steps at small bounds. Why and how this was chosen:
 [ADR 0015](../docs/adr/0015-formal-verification.md). The method is the global
-`formal-verification` skill; this guide is the repository's part of it.
+`formal-verification` agent skill (installed for the coding agent, not the skill of the same name
+bundled in the `everystate` package); this guide is the repository's part of it.
 
 ## When to model
 
@@ -22,11 +23,11 @@ Modelling is optional. It pays off when a change adds or changes:
 - one logical write across a host store and an external call (a tool's effect and the ledger entry
   that records it).
 
-The usual place is review: a reviewer running the `formal-verification` skill beside the code
-reviewers models what the diff adds or changes in scratch, in minutes, and reports findings like
-any reviewer. Commit a model (below) only for a subtle protocol whose code is fairly stable, where
-the drift check is worth its upkeep; a protocol that keeps drawing race findings in review is the
-signal. Pure functions stay with property tests
+The usual place is review: a reviewer running the global `formal-verification` skill beside the
+code reviewers models what the diff adds or changes in scratch, in minutes, and reports findings
+like any reviewer. Commit a model (below) only for a subtle protocol whose code is fairly stable,
+where the drift check is worth its upkeep; a protocol that keeps drawing race findings in review is
+the signal. Pure functions stay with property tests
 ([SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md)); in-process timing stays with
 `TestClock` tests ([EFFECT_TESTING.md](./EFFECT_TESTING.md)).
 
@@ -106,32 +107,40 @@ file needs `covers` edited by hand; `--sync` refuses it.
 
 Yolk is an SDK: hosts supply the stores and run it on their platform. A model assumes only what
 the code below and its documented contracts guarantee, and states any other assumption in the
-change. A model of `examples/next` or `cloudflare/agent` code adds the guarantees of the database
-or platform that code uses, cited from that code.
+change. A model of code that runs on a concrete platform adds the guarantees of the database or
+platform that code uses, cited from that code: `examples/next` and `cloudflare/agent`, and a
+package's own platform adapter (for example the harness's Durable Object driver,
+`packages/harness/src/driver/durable-object.ts`).
 
 - **Effect fibers** interleave at every `yield*`: a fiber suspends at each asynchronous step, and
   the scheduler also switches fibers after an operation budget (`MaxOpsBeforeYield` in
   `effect/Scheduler`). Concurrent fibers are ordinary in the SDK: the agent loop runs one turn's
   sibling tool calls concurrently up to `toolConcurrency` (`packages/agent/AGENTS.md`). Only
-  synchronous code between two yields, one `Ref` update, or a section a `Semaphore` serializes is
-  one step; a `Ref.get` and a later `Ref.set` are two (`RunStore.snapshotLayer` in
-  `packages/harness/src/store.ts` serializes its read-modify-save with a `Semaphore` for this
-  reason). `Effect.uninterruptible` stops interruption, not interleaving.
+  synchronous code between two yields or one `Ref` update is one step; a `Ref.get` and a later
+  `Ref.set` are two. A `Semaphore` excludes only the fibers that take the same permit: fibers and
+  readers that do not take it still interleave with the section (`RunStore.snapshotLayer` in
+  `packages/harness/src/store.ts` serializes `claim`, `release` and `incrementResumeCount` with
+  one, while `isClaimed`, `claimed` and `resumeCount` read without it). Model a locked section as
+  one step only after establishing that every actor touching its state takes the same lock;
+  otherwise model the acquisition and each step inside it separately. `Effect.uninterruptible`
+  stops interruption, not interleaving.
 - **Host stores** give only the guarantees their interfaces document; model every other operation
   as a plain read or write that can interleave with any other:
   - `ToolLedgerStore` (`packages/agent/src/tools/ledger.ts`): `claim` is one atomic
     insert-if-absent that otherwise classifies the stored entry without changing it; `heartbeat`
     extends the lease of an entry without an outcome, never shortening it, and never changes a
     completed entry; `complete` records the outcome once and ignores a later one; a claim is never
-    handed to another execution. `list` is a plain read. Leases use one clock per store, the caller's (`nowMs`) or the store's own (`leaseMs`),
-    so a model says which clock each step reads and fires lease expiry as a step of its own.
+    handed to another execution. `list` is a plain read. Leases use one clock per store, the
+    caller's (`nowMs`) or the store's own (`leaseMs`), so a model says which clock each step reads
+    and fires lease expiry as a step of its own.
   - `ToolPlanStore` (`packages/agent/src/tools/plan.ts`): `put` inserts or compares atomically and
     never overwrites; `claim` is one conditional update that is never released; submission ids
     are unique within the store's scope.
   - `PoolStoreApi` (`packages/pool/src/store.ts`): each operation is atomic per key only;
     `movePin` is a compare-and-set, `clearCooldown` removes only the cooldown observed,
     `putCooldown` keeps the cooldown that ends later, and `putReading` the reading fetched later.
-    Nothing makes a `load` across keys one snapshot. Store failures never fail a request (`packages/pool/AGENTS.md`).
+    Nothing makes a `load` across keys one snapshot. Store failures never fail a request
+    (`packages/pool/AGENTS.md`).
   - `RunStore` (`packages/harness/src/store.ts`): `claim` returns nothing, so it is a set insert,
     not a compare-and-set. Claims are owned per shared `Driver` instance; the host or platform
     supplies cross-process exclusivity (`packages/harness/README.md`, "Restart contract").

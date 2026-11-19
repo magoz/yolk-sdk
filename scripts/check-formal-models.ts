@@ -9,13 +9,15 @@
  *   or one that must fail;
  * - a file the model covers changed (its SHA-256 differs from the manifest's) or is gone.
  *
- * No manifest at all passes: committed models are optional (`docs/adr/0015-formal-verification.md`).
+ * With no manifest, it passes: committed models are optional
+ * (`docs/adr/0015-formal-verification.md`).
  *
  * `--sync <manifest>` records the covered files' current hashes in that manifest, only while every
  * configuration still answers as declared; run it after re-checking the model against the changed
  * code. It writes only that manifest.
  */
 import { execFile } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
 import { glob, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve } from 'node:path'
 import process from 'node:process'
@@ -47,10 +49,9 @@ export type ModelsCheckCommand =
 
 export const ModelsCheckCommand = Data.taggedEnum<ModelsCheckCommand>()
 
-export class ModelsCheckUsageError extends Schema.TaggedError<ModelsCheckUsageError>()(
-  'ModelsCheckUsageError',
-  { message: Schema.String }
-) {}
+export class ModelsCheckUsageError extends Data.TaggedError('ModelsCheckUsageError')<{
+  readonly message: string
+}> {}
 
 export const modelsCheckUsage = [
   'Usage: pnpm models:check [--sync <path to *.model.json>]',
@@ -119,20 +120,17 @@ export const parseModelsCheckArgs = (argv: ReadonlyArray<string>) =>
 // Services
 // ---------------------------------------------------------------------------------------------
 
-export class ModelsCheckReadError extends Schema.TaggedError<ModelsCheckReadError>()(
-  'ModelsCheckReadError',
-  { message: Schema.String }
-) {}
+export class ModelsCheckReadError extends Data.TaggedError('ModelsCheckReadError')<{
+  readonly message: string
+}> {}
 
-export class ModelsCheckWriteError extends Schema.TaggedError<ModelsCheckWriteError>()(
-  'ModelsCheckWriteError',
-  { message: Schema.String }
-) {}
+export class ModelsCheckWriteError extends Data.TaggedError('ModelsCheckWriteError')<{
+  readonly message: string
+}> {}
 
-export class EverystateRunError extends Schema.TaggedError<EverystateRunError>()(
-  'EverystateRunError',
-  { message: Schema.String }
-) {}
+export class EverystateRunError extends Data.TaggedError('EverystateRunError')<{
+  readonly message: string
+}> {}
 
 /** The repository's files, by repository-relative `/`-separated path. */
 export class ModelFiles extends Context.Service<
@@ -146,7 +144,6 @@ export class ModelFiles extends Context.Service<
   }
 >()('@yolk/scripts/ModelFiles') {}
 
-/** The everystate model checker. */
 export class Everystate extends Context.Service<
   Everystate,
   {
@@ -477,21 +474,62 @@ const modelFilesAt = (root: string) => {
 // A model that runs this long is too large for the check; keep checked configurations small.
 const everystateTimeoutMs = 10 * 60_000
 
+/** How a configuration is run: the program and the arguments before everystate's own. */
+type EverystateCommand = { readonly file: string; readonly args: ReadonlyArray<string> }
+
+/**
+ * The prebuilt native checker beside the `launcher` when this platform has one, else the launcher
+ * (which then runs everystate's WebAssembly build in its own process). The launcher starts the
+ * native checker with `spawnSync` and forwards no signal to it, so killing the launcher would leave
+ * the checker running: run the checker directly, so a kill reaches the process doing the work.
+ */
+const everystateCommand = (launcher: string): EverystateCommand => {
+  const native = join(
+    dirname(launcher),
+    '..',
+    'native',
+    `${process.platform}-${process.arch}`,
+    process.platform === 'win32' ? 'everystate.exe' : 'everystate'
+  )
+
+  try {
+    accessSync(native, constants.X_OK)
+
+    return { file: native, args: [] }
+  } catch {
+    return { file: process.execPath, args: [launcher] }
+  }
+}
+
 const runEverystate = (
   root: string,
-  launcher: string,
+  command: EverystateCommand,
+  timeoutMs: number,
   input: { readonly directory: string; readonly spec: string; readonly config: string }
 ) =>
   Effect.callback<string, EverystateRunError>(resume => {
     const child = execFile(
-      process.execPath,
-      [launcher, '-json', '-config', input.config, input.spec],
+      command.file,
+      [...command.args, '-json', '-config', input.config, input.spec],
       {
         cwd: join(root, ...input.directory.split('/')),
         maxBuffer: 1 << 26,
-        timeout: everystateTimeoutMs
+        timeout: timeoutMs
       },
       (error, stdout) => {
+        // `killed` is set only when this process killed the checker: here, at the time limit.
+        if (error !== null && error.killed === true) {
+          resume(
+            Effect.fail(
+              new EverystateRunError({
+                message: `everystate did not finish within ${timeoutMs / 1000} s`
+              })
+            )
+          )
+
+          return
+        }
+
         const line = stdout
           .split('\n')
           .map(part => part.trim())
@@ -510,6 +548,7 @@ const runEverystate = (
       }
     )
 
+    // Interrupted (a failed sibling, Ctrl+C handling, a caller's timeout): stop the checker too.
     return Effect.sync(() => {
       child.kill()
     })
@@ -517,13 +556,26 @@ const runEverystate = (
 
 /**
  * The working tree under `root`, checked with the everystate `launcher`
- * (`node_modules/everystate/bin/everystate.mjs`: it runs the prebuilt native binary for this
- * platform, or its WebAssembly build).
+ * (`node_modules/everystate/bin/everystate.mjs`): the native checker beside it runs directly when
+ * this platform has one, else the launcher runs its WebAssembly build. `timeoutMs` (default ten
+ * minutes) bounds each configuration.
  */
-export const ModelsCheckAt = (root: string, launcher: string) =>
+export const ModelsCheckAt = (
+  root: string,
+  launcher: string,
+  options: { readonly timeoutMs?: number } = {}
+) =>
   Layer.mergeAll(
     Layer.succeed(ModelFiles, modelFilesAt(root)),
-    Layer.succeed(Everystate, Everystate.of({ run: input => runEverystate(root, launcher, input) }))
+    Layer.effect(
+      Everystate,
+      Effect.sync(() => {
+        const command = everystateCommand(launcher)
+        const timeoutMs = options.timeoutMs ?? everystateTimeoutMs
+
+        return Everystate.of({ run: input => runEverystate(root, command, timeoutMs, input) })
+      })
+    )
   )
 
 // This file is `scripts/check-formal-models.ts`: the repository root is one level up, wherever

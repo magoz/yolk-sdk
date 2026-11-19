@@ -11,6 +11,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Run `pnpm packages:check` when touching `packages/*`.
 - Run `pnpm docs:check` when touching `apps/docs`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
+- Run `pnpm models:check` (part of `pnpm check`) when touching a file a `formal/*.model.json` covers: there is no CI to run its drift check.
 - Follow local `AGENTS.md` before editing scoped app/package areas; root owns repo-wide boundaries only.
 - Never commit ignored generated/dev artifacts (`.next`, `.turbo`, `.source`, package `dist`, `.alchemy`, `.workflow-*`, `playwright-report`, `test-results`, coverage, `*.tsbuildinfo`, `next-env.d.ts`) or env files; tracked generated fallbacks need owning docs.
 

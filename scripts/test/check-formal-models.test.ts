@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Exit, Layer } from 'effect'
+import { Effect, Exit, Fiber, Layer } from 'effect'
 import { sha256 } from '../formal-model-manifest.ts'
 import {
   Everystate,
@@ -370,6 +372,149 @@ describe('ModelsCheckAt', () => {
           counterManifest(sha256(counterCode))
         )
       }).pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+    )
+  )
+})
+
+// ---------------------------------------------------------------------------------------------
+// Stopping the checker: a model that never finishes must not leave a checker process behind
+// ---------------------------------------------------------------------------------------------
+
+type RunningProcess = { readonly pid: number; readonly args: string }
+
+/** Processes whose command line holds `marker` (`ps` works on Linux and macOS). */
+const processesWith = (marker: string) =>
+  Effect.promise(
+    () =>
+      new Promise<ReadonlyArray<RunningProcess>>(settle => {
+        execFile('ps', ['-eo', 'pid=,args='], (error, stdout) => {
+          settle(
+            error === null
+              ? stdout
+                  .split('\n')
+                  .filter(line => line.includes(marker))
+                  .map(line => ({ pid: Number.parseInt(line.trim(), 10), args: line.trim() }))
+              : []
+          )
+        })
+      })
+  )
+
+/** Polls `processesWith(marker)` until `done` holds or `timeoutMs` passes; returns the last list. */
+const pollProcesses = (
+  marker: string,
+  done: (running: ReadonlyArray<RunningProcess>) => boolean,
+  timeoutMs: number
+): Effect.Effect<ReadonlyArray<RunningProcess>> => {
+  const deadline = Date.now() + timeoutMs
+
+  const poll: Effect.Effect<ReadonlyArray<RunningProcess>> = processesWith(marker).pipe(
+    Effect.flatMap(running =>
+      done(running) || Date.now() > deadline
+        ? Effect.succeed(running)
+        : Effect.sleep('100 millis').pipe(Effect.andThen(Effect.suspend(() => poll)))
+    )
+  )
+
+  return poll
+}
+
+// The prebuilt checker everystate ships for this platform; the launcher runs it as a child.
+const nativeChecker = join(
+  repositoryRoot,
+  'node_modules',
+  'everystate',
+  'native',
+  `${process.platform}-${process.arch}`
+)
+
+const hasNativeChecker = existsSync(nativeChecker)
+
+const nativeCheckerRunning = (running: ReadonlyArray<RunningProcess>) =>
+  running.some(entry => entry.args.includes(`${sep}native${sep}`))
+
+const killAll = (running: ReadonlyArray<RunningProcess>) =>
+  Effect.sync(() => {
+    for (const { pid } of running) {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
+  })
+
+/**
+ * A model whose passing configuration explores an unbounded state space, so everystate runs until
+ * it is stopped. The spec name is unique, so its processes can be found by command line; any left
+ * over are killed after the test.
+ */
+const withSpinningModel = <A, E>(test: (root: string, marker: string) => Effect.Effect<A, E>) => {
+  const marker = `Spin${randomUUID().replaceAll('-', '')}`
+
+  const files = {
+    'packages/spin/formal/spin.model.json': JSON.stringify({
+      spec: `${marker}.tla`,
+      promise: 'Never finishes.',
+      covers: [{ path: 'packages/spin/src/spin.ts', sha256: sha256(counterCode) }],
+      checks: [{ config: `${marker}.cfg` }, { config: 'Breaks.cfg', violates: 'Tiny' }]
+    }),
+    [`packages/spin/formal/${marker}.tla`]: [
+      `---- MODULE ${marker} ----`,
+      'EXTENDS Naturals',
+      'VARIABLES x, y',
+      'Init == x = 0 /\\ y = 0',
+      "Next == (x' = x + 1 /\\ y' = y) \\/ (y' = y + 1 /\\ x' = x)",
+      'Spec == Init /\\ [][Next]_<<x, y>>',
+      'Natural == x >= 0',
+      'Tiny == x < 1',
+      '===='
+    ].join('\n'),
+    [`packages/spin/formal/${marker}.cfg`]:
+      'SPECIFICATION Spec\nINVARIANT Natural\nCHECK_DEADLOCK FALSE\n',
+    'packages/spin/formal/Breaks.cfg': 'SPECIFICATION Spec\nINVARIANT Tiny\nCHECK_DEADLOCK FALSE\n',
+    'packages/spin/src/spin.ts': counterCode
+  }
+
+  return withRepository(files, root =>
+    test(root, marker).pipe(Effect.ensuring(processesWith(marker).pipe(Effect.flatMap(killAll))))
+  )
+}
+
+// Without a prebuilt checker for this platform, everystate runs its WebAssembly build in-process.
+describe.skipIf(!hasNativeChecker)('stopping everystate', () => {
+  it.live('kills the checker when the check is interrupted', () =>
+    withSpinningModel((root, marker) =>
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          runModelsCheck.pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+        )
+
+        // Wait until the native checker itself runs, not only the launcher that starts it.
+        expect(
+          nativeCheckerRunning(yield* pollProcesses(marker, nativeCheckerRunning, 20_000))
+        ).toBe(true)
+
+        yield* Fiber.interrupt(fiber)
+
+        expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
+      })
+    )
+  )
+
+  it.live('kills the checker when it runs past its time limit', () =>
+    withSpinningModel((root, marker) =>
+      Effect.gen(function* () {
+        const outcome = yield* runModelsCheck.pipe(
+          Effect.provide(ModelsCheckAt(root, launcher, { timeoutMs: 2_000 }))
+        )
+
+        expect(modelsCheckSucceeded(outcome)).toBe(false)
+        expect(renderModelsCheckOutcome(outcome)).toContain(
+          `${marker}.cfg: everystate did not finish within 2 s`
+        )
+        expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
+      })
     )
   )
 })
