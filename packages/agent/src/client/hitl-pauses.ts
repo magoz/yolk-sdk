@@ -20,7 +20,9 @@ export const emptyHitlPauses: HitlPauses = new Map()
  * returns `pauses` unchanged. Feed it every event of every stream that reads the run (start, HITL
  * resume, replay), in stream order: the latest pause wins per request. Feed pauses you already saw
  * too (never skip them by `eventId`): a replay from an earlier index re-applies the later pauses
- * after the earlier ones, so it ends at the latest. A pause without an
+ * after the earlier ones, so it ends at the latest. Stream order decides: a replay that stops
+ * partway, or a late duplicate of an earlier pause (a step the platform ran twice), leaves the
+ * earlier pause; the route refuses that answer, and a full replay recovers. A pause without an
  * `eventId` names nothing, so its requests forget the earlier pause that held them (an answer then
  * names no pause instead of a stale one).
  */

@@ -23,7 +23,8 @@ Framework-agnostic client transport and state helpers for Yolk agents.
   `rememberHitlPause` (fold every event of every stream that reads the run: start, HITL resume,
   replay) and read it with `hitlPauseFor` (below). A blank `pause` fails before the POST.
 - Endpoints the client rewrites (`startIndex` reads, the `pause` POST, the run id path) keep how
-  they were written: absolute (`https://host/path`), network-path (`//host/path`) or `/path`. A
+  they were written: absolute (`https://host/path`), network-path (`//host/path`; it keeps the
+  host but not an explicit `:80` or userinfo) or `/path`. A
   path-relative endpoint resolves against the root (`../run` becomes `run`), and the query is
   re-serialized (`%20` becomes `+`), so put only values the route decodes as form data there.
 
