@@ -3,7 +3,7 @@ title: Workflow APIs
 description: Public Vercel Workflow orchestration exports.
 ---
 
-Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath for orchestration. Use `@yolk-sdk/vercel-workflows/effect` for Effect-native host route wrappers around public `workflow/api` calls, and `@yolk-sdk/vercel-workflows/testing` for host tests.
+Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath for orchestration. Use `@yolk-sdk/vercel-workflows/effect` for Effect-native host route wrappers around public `workflow/api` calls, and `@yolk-sdk/vercel-workflows/testing` for host tests. The `./cloudflare*` subpaths run the same Workflow code on Cloudflare Durable Objects ([Cloudflare runtime](../vercel-workflows/cloudflare)).
 
 ## Loop exports
 
@@ -153,6 +153,18 @@ Import from `@yolk-sdk/vercel-workflows/testing`.
 
 Executing steps loads the installed workflow runtime's step-error serializer, so tests that run steps
 need Vitest's Node environment ([Step errors](../vercel-workflows/testing#step-errors)).
+
+## Cloudflare runtime exports
+
+See [Cloudflare runtime](../vercel-workflows/cloudflare) for wiring.
+
+| Subpath                                            | Main exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/vercel-workflows/cloudflare`            | `WorkflowRun` (Durable Object class), `registerWorkflowModules`, `WorkflowExecution`, `ExecutionHost`, `makeMemoryRunStore`, `makeSqliteRunStore`, `makeHookIndex`, `RunStore`, `RunRecord`, `RunStatus`, `JournalEntry`, `workflowRunsBinding`, `runNamespace`, `WorkflowRunStub`, `WorkflowRunNamespace`, `StartRunInput`, `RunOutcome`, `WorkflowFunction`, `serialize`, `deserialize`, `FatalError`, `RetryableError`, `HookNotFoundError`, `WorkflowRunCancelledError`, `parseDuration`, `defaultStepMaxRetries`, `stepGuardIntervalMs` |
+| `@yolk-sdk/vercel-workflows/cloudflare/workflow`   | drop-in `workflow`: `createHook`, `sleep`, `getWritable`, `getStepMetadata`, `getWorkflowMetadata`, `FatalError`, `RetryableError`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `@yolk-sdk/vercel-workflows/cloudflare/api`        | drop-in `workflow/api`: `start`, `getRun`, `resumeHook`, `WorkflowRun`, `WorkflowReadableStream`, `WorkflowReadableStreamOptions`, `HookNotFoundError`, `WorkflowRunCancelledError`                                                                                                                                                                                                                                                                                                                                                          |
+| `@yolk-sdk/vercel-workflows/cloudflare/directives` | `workflowStep`, `workflowEntry` (imported by compiled directives)                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `@yolk-sdk/vercel-workflows/cloudflare/vite`       | `workflowDirectives`, `WorkflowDirectivesOptions`, `workflowDirectivesRuntime`, `compileWorkflowDirectives`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## Callback types
 

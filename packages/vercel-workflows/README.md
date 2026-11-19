@@ -1,6 +1,7 @@
 # @yolk-sdk/vercel-workflows
 
-Vercel Workflow agent-loop contracts, durable stream helpers, and an Effect-native Workflow client/layer.
+Vercel Workflow agent-loop contracts, durable stream helpers, an Effect-native Workflow client/layer,
+and a Workflow-compatible runtime on Cloudflare Durable Objects.
 
 ## Install
 
@@ -21,12 +22,17 @@ streaming from other regions arrive in multi-second bursts. Host apps must resol
 
 ## Subpaths
 
-| Subpath                               | Purpose                                                 |
-| ------------------------------------- | ------------------------------------------------------- |
-| `@yolk-sdk/vercel-workflows`          | Workflow-safe agent loop orchestration APIs             |
-| `@yolk-sdk/vercel-workflows/workflow` | Explicit equivalent subpath                             |
-| `@yolk-sdk/vercel-workflows/effect`   | Effect-native wrapper around public `workflow/api` APIs |
-| `@yolk-sdk/vercel-workflows/testing`  | `TestWorkflowWorld` behavioral platform emulator        |
+| Subpath                                            | Purpose                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/vercel-workflows`                       | Workflow-safe agent loop orchestration APIs                                                |
+| `@yolk-sdk/vercel-workflows/workflow`              | Explicit equivalent subpath                                                                |
+| `@yolk-sdk/vercel-workflows/effect`                | Effect-native wrapper around public `workflow/api` APIs                                    |
+| `@yolk-sdk/vercel-workflows/testing`               | `TestWorkflowWorld` behavioral platform emulator                                           |
+| `@yolk-sdk/vercel-workflows/cloudflare`            | Workflow-compatible runtime on Durable Objects ([Cloudflare runtime](#cloudflare-runtime)) |
+| `@yolk-sdk/vercel-workflows/cloudflare/workflow`   | Drop-in `workflow` module for Workers (alias `workflow` to it)                             |
+| `@yolk-sdk/vercel-workflows/cloudflare/api`        | Drop-in `workflow/api` module for Workers: `start`, `getRun`, `resumeHook`                 |
+| `@yolk-sdk/vercel-workflows/cloudflare/directives` | `workflowStep` / `workflowEntry`, imported by compiled directive code                      |
+| `@yolk-sdk/vercel-workflows/cloudflare/vite`       | `workflowDirectives` Vite plugin that compiles `'use step'` / `'use workflow'`             |
 
 ## Imports
 
@@ -477,6 +483,102 @@ but a close can be applied while its step still fails: the stream may already ca
 `AgentEnd`, so a `writeError` that records a failure must not replace a committed completion. Check
 for the run's committed completion (or compare-and-set against it) before recording the failure.
 
+## Cloudflare runtime
+
+The `./cloudflare*` subpaths run code written for Vercel Workflow (`'use workflow'`, `'use step'`,
+`workflow`, `workflow/api`) on Cloudflare Workers, with no Vercel backend. Each run executes in its
+own `WorkflowRun` Durable Object:
+
+- The workflow body runs in memory in the run's object. Every step outcome, hook payload, and fired
+  sleep is journaled in the object's SQLite storage under its id and call count, so after an
+  eviction the body replays to where it was without re-running finished steps. Values cross as
+  devalue text (as on Vercel: `Date`, `Map`, `Set`, typed arrays, `undefined`, and errors with name,
+  message, stack, cause, `fatal`, and `retryAfter`).
+- Steps are at-least-once: a step cut off by an eviction runs again when the object's step guard
+  alarm (every 30 s while a step runs) replays the run. A step function's `maxRetries` (default 3)
+  bounds retries with exponential backoff (1 s doubling, at most 30 s); `RetryableError` waits until
+  its `retryAfter`; `FatalError` is never retried; an exhausted step throws a `FatalError` with the
+  last error as `cause`, as the platform does.
+- `createHook({ token })` registers the token in a hook-index instance (`hook:<token>`) that
+  `resumeHook` reads. Without a token, the token is `<runId>:hook#<n>`, the same on every replay.
+  `resumeHook` rejects with `HookNotFoundError` when no run waits on the token.
+- `sleep(duration)` is durable: its wake time is stored on first execution and armed as the
+  object's alarm.
+- `getWritable()` inside a step appends to the run's stream, stored in the object;
+  `getRun(id).getReadable({ startIndex })` follows it live, and its `getTailIndex()` is the last
+  chunk's index. A negative `startIndex` counts from the end.
+- `run.cancel()` ends the run where it waits; `returnValue` then rejects with
+  `WorkflowRunCancelledError`.
+
+Supported `workflow` surface: `createHook`, `sleep`, `getWritable`, `getStepMetadata`,
+`getWorkflowMetadata`, `FatalError`, `RetryableError`. `workflow/api`: `start`, `getRun`,
+`resumeHook` (`start` accepts and ignores `attributes`). Other Vercel Workflow APIs (`defineHook`,
+webhooks, `fetch`) are not provided.
+
+### Wire a Worker
+
+The Worker needs the `nodejs_compat` compatibility flag (the runtime uses `AsyncLocalStorage`), a
+Durable Object binding named `WORKFLOW_RUNS` (`workflowRunsBinding`) to the `WorkflowRun` class,
+declared as a SQLite class in its migrations (`new_sqlite_classes: ["WorkflowRun"]`), and its
+Worker entry must export the class:
+
+```ts
+// worker.ts
+import { registerWorkflowModules } from '@yolk-sdk/vercel-workflows/cloudflare'
+
+export { WorkflowRun } from '@yolk-sdk/vercel-workflows/cloudflare'
+
+// Workflow modules load when a run needs them: evaluating a large runtime in the Worker's global
+// scope can exceed its startup CPU limit. Keys are module paths relative to the Vite root.
+registerWorkflowModules({
+  'app/agent-workflow.ts': () => import('./app/agent-workflow.ts')
+})
+```
+
+Compile the directives and point `workflow` and `workflow/api` at the Cloudflare modules in every
+server environment (host code and packages, this one included, import them):
+
+```ts
+// vite.config.ts
+import { fileURLToPath } from 'node:url'
+import { defineConfig, type Plugin } from 'vite'
+import { workflowDirectives } from '@yolk-sdk/vercel-workflows/cloudflare/vite'
+
+const cloudflareModule = (subpath: string) =>
+  fileURLToPath(import.meta.resolve(`@yolk-sdk/vercel-workflows/cloudflare/${subpath}`))
+
+const workflowModules = new Map([
+  ['workflow', cloudflareModule('workflow')],
+  ['workflow/api', cloudflareModule('api')]
+])
+
+const cloudflareWorkflow = (): Plugin => ({
+  name: 'app:cloudflare-workflow',
+  enforce: 'pre',
+  resolveId(source) {
+    return this.environment.name === 'client' ? null : (workflowModules.get(source) ?? null)
+  }
+})
+
+export default defineConfig({
+  plugins: [cloudflareWorkflow(), workflowDirectives() /* , your Cloudflare/framework plugins */]
+})
+```
+
+`workflowDirectives({ root, runtime })` compiles top-level `async function` declarations whose
+body starts with `'use step'` or `'use workflow'` in every environment but `client`, outside
+`node_modules`. A workflow's id is `<module path relative to root>#<name>` (`root` defaults to
+Vite's root): runs store it, so renaming or moving a workflow module strands its in-flight runs.
+`runtime` defaults to `@yolk-sdk/vercel-workflows/cloudflare/directives`.
+
+All `./cloudflare*` modules share the run context and the workflow registry, so a Worker must load
+each of them once: resolve them to the same package files (do not let a dependency pre-bundle copy
+one of them).
+
+`WorkflowExecution`, `makeMemoryRunStore`, and `makeSqliteRunStore` are exported for hosts that
+drive a run themselves (tests, another single-writer host): `WorkflowExecution` runs one run over
+a `RunStore` and an `ExecutionHost` (alarms, hook registration, stream fan-out, settlement).
+
 ## Host responsibilities
 
 - Own Next/Vercel routes, auth, providers, tools, persistence, and telemetry.
@@ -496,3 +598,7 @@ for the run's committed completion (or compare-and-set against it) before record
 
 - No Next routes, server actions, auth, app tools, DB, UI, or provider SDKs.
 - Effect may run inside host/package step callbacks; workflow orchestration keeps plain data contracts.
+- The `./cloudflare*` runtime never imports the `workflow` packages (hosts alias them to it).
+  `./cloudflare` and `./cloudflare/api` import `cloudflare:workers`, so they load only in a Worker;
+  `./cloudflare/workflow` and `./cloudflare/directives` need `node:async_hooks` (`nodejs_compat`);
+  `./cloudflare/vite` runs in Vite on Node.

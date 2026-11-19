@@ -216,7 +216,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/codemode',
     packageName: '@yolk-sdk/codemode',
-    expectedExports: ['./package.json', '.', './node'],
+    expectedExports: ['./package.json', '.', './cloudflare', './node'],
     root: 'full'
   },
   {
@@ -228,7 +228,18 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
-    expectedExports: ['./package.json', '.', './effect', './testing', './workflow'],
+    expectedExports: [
+      './package.json',
+      '.',
+      './cloudflare',
+      './cloudflare/api',
+      './cloudflare/directives',
+      './cloudflare/vite',
+      './cloudflare/workflow',
+      './effect',
+      './testing',
+      './workflow'
+    ],
     root: 'full'
   },
   {

@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { register } from 'node:module'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import process from 'node:process'
@@ -124,12 +125,25 @@ const packages: ReadonlyArray<PackageManifest> = [
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
   { name: '@yolk-sdk/files', exports: ['.'] },
   { name: '@yolk-sdk/pool', exports: ['.', './store'] },
-  { name: '@yolk-sdk/codemode', exports: ['.', './node'] },
+  { name: '@yolk-sdk/codemode', exports: ['.', './cloudflare', './node'] },
   {
     name: '@yolk-sdk/extractors',
     exports: ['.', './knowledge', './node', './node/extraction-worker']
   },
-  { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] },
+  {
+    name: '@yolk-sdk/vercel-workflows',
+    exports: [
+      '.',
+      './cloudflare',
+      './cloudflare/api',
+      './cloudflare/directives',
+      './cloudflare/vite',
+      './cloudflare/workflow',
+      './effect',
+      './testing',
+      './workflow'
+    ]
+  },
   {
     name: '@yolk-sdk/harness',
     exports: [
@@ -223,6 +237,8 @@ const main = async () => {
         '@modelcontextprotocol/core': '2.0.0',
         '@modelcontextprotocol/server': '2.0.0',
         '@vercel/sandbox': '2.2.1',
+        // Dependency of @yolk-sdk/vercel-workflows (./cloudflare).
+        devalue: '^6.0.3',
         effect: '4.1.4',
         // Dependency of @yolk-sdk/mcp (./conformance), with the MCP client's own range.
         'eventsource-parser': '^3.0.0',
@@ -234,6 +250,8 @@ const main = async () => {
         xlsx: 'https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
+        // Dependency of @yolk-sdk/codemode (./cloudflare).
+        sucrase: '^3.35.1',
         workflow: '5.0.0-beta.42'
       }
     }
@@ -274,6 +292,26 @@ const main = async () => {
         exportPath === '.' ? packageManifest.name : `${packageManifest.name}/${exportPath.slice(2)}`
       )
     )
+
+    // The `./cloudflare` subpaths import workerd's `cloudflare:workers`; Node resolves it to a
+    // stub with what they import (a Worker's runtime provides the real module).
+    const cloudflareStub = join(fixtureDir, 'cloudflare-workers-stub.mjs')
+    writeFileSync(
+      cloudflareStub,
+      [
+        'export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env } }',
+        'export class RpcTarget {}',
+        'export const env = {}'
+      ].join('\n')
+    )
+
+    const cloudflareHooks = [
+      `const stub = ${JSON.stringify(pathToFileURL(cloudflareStub).href)}`,
+      'export const resolve = (specifier, context, next) =>',
+      "  specifier === 'cloudflare:workers' ? { url: stub, shortCircuit: true } : next(specifier, context)"
+    ].join('\n')
+
+    register(`data:text/javascript,${encodeURIComponent(cloudflareHooks)}`)
 
     const smokeFile = join(fixtureDir, 'smoke.mjs')
     writeFileSync(
@@ -420,6 +458,27 @@ const main = async () => {
           'const codemodeNode = await import("@yolk-sdk/codemode/node")',
           'const codemodeResult = await codemodeNode.makePiCodeModeExecutor().execute("const n: number = 2; return n * 21", { tools: [], globals: [], timeoutMs: 10000, memoryLimitBytes: 64 * 1024 * 1024, store: {}, signal: new AbortController().signal })',
           'if (!codemodeResult.ok || codemodeResult.value !== 42) throw new Error(`Code mode executor smoke failed: ${JSON.stringify(codemodeResult)}`)',
+          'const codemodeCloudflare = await import("@yolk-sdk/codemode/cloudflare")',
+          'const smokeLoaded = []',
+          'const cloudflareExecutor = codemodeCloudflare.makeDynamicWorkerCodeModeExecutor({ loader: () => ({ load: code => { smokeLoaded.push(code); return { getEntrypoint: () => ({ run: async () => ({ ok: true, payload: "42", writes: "[[\\"k\\",\\"1\\"]]", output: [] }) }) } } }) })',
+          'const cloudflareResult = await cloudflareExecutor.execute("const n: number = 2; return n * 21", { tools: [], globals: [], timeoutMs: 10000, memoryLimitBytes: 64 * 1024 * 1024, store: {}, signal: new AbortController().signal })',
+          'if (!cloudflareResult.ok || cloudflareResult.value !== 42 || cloudflareResult.storeWrites.set.k !== 1 || smokeLoaded[0]?.globalOutbound !== null || !smokeLoaded[0].modules["script.js"].includes("const n = 2")) throw new Error(`Dynamic Worker executor smoke failed: ${JSON.stringify(cloudflareResult)}`)',
+          'const workflowsCloudflare = await import("@yolk-sdk/vercel-workflows/cloudflare")',
+          'for (const symbol of ["WorkflowRun", "WorkflowExecution", "registerWorkflowModules", "makeMemoryRunStore", "makeSqliteRunStore", "serialize", "deserialize"]) { if (typeof workflowsCloudflare[symbol] !== "function") throw new Error(`Missing Cloudflare workflow export: ${symbol}`) }',
+          'if (workflowsCloudflare.workflowRunsBinding !== "WORKFLOW_RUNS" || !(workflowsCloudflare.deserialize(workflowsCloudflare.serialize(new Map([[1, 2]]))) instanceof Map)) throw new Error("Cloudflare workflow runtime smoke failed")',
+          'const workflowsCloudflareWorkflow = await import("@yolk-sdk/vercel-workflows/cloudflare/workflow")',
+          'for (const symbol of ["createHook", "sleep", "getWritable", "getStepMetadata", "getWorkflowMetadata", "FatalError", "RetryableError"]) { if (typeof workflowsCloudflareWorkflow[symbol] !== "function") throw new Error(`Missing Cloudflare workflow module export: ${symbol}`) }',
+          'const workflowsCloudflareApi = await import("@yolk-sdk/vercel-workflows/cloudflare/api")',
+          'for (const symbol of ["start", "getRun", "resumeHook"]) { if (typeof workflowsCloudflareApi[symbol] !== "function") throw new Error(`Missing Cloudflare workflow API export: ${symbol}`) }',
+          'const workflowsCloudflareDirectives = await import("@yolk-sdk/vercel-workflows/cloudflare/directives")',
+          'const workflowsCloudflareVite = await import("@yolk-sdk/vercel-workflows/cloudflare/vite")',
+          'if (typeof workflowsCloudflareDirectives.workflowStep !== "function" || typeof workflowsCloudflareDirectives.workflowEntry !== "function" || workflowsCloudflareVite.workflowDirectives().name !== "yolk:workflow-directives" || !import.meta.resolve(workflowsCloudflareVite.workflowDirectivesRuntime).endsWith("/cloudflare/directives.mjs")) throw new Error("Cloudflare workflow directives smoke failed")',
+          'async function smokeWorkflow(value) { return value * 2 }',
+          'workflowsCloudflareDirectives.workflowEntry(smokeWorkflow, "smoke#workflow")',
+          'const smokeRunStore = workflowsCloudflare.makeMemoryRunStore()',
+          'smokeRunStore.createRun({ runId: "wrun_smoke", workflowId: "smoke#workflow", args: workflowsCloudflare.serialize([21]), status: "pending", outcome: undefined, createdAt: Date.now(), completedAt: undefined })',
+          'await new Promise(resolve => new workflowsCloudflare.WorkflowExecution({ store: smokeRunStore, wakeAt: () => undefined, registerHook: async () => undefined, chunkAppended: () => undefined, streamClosed: () => undefined, runSettled: resolve, log: () => undefined }).kick())',
+          'if (smokeRunStore.readRun()?.status !== "completed" || workflowsCloudflare.deserialize(smokeRunStore.readRun().outcome) !== 42) throw new Error("Cloudflare workflow execution smoke failed")',
           'const extractors = await import("@yolk-sdk/extractors")',
           'if (typeof extractors.fileFormatFor !== "function" || extractors.fileFormatFor({ filename: "a.xlsx", mediaType: "" }) !== "xlsx" || extractors.defaultFileExtractorLimits.maxXlsxHyperlinks !== 10000 || typeof extractors.SheetJsUnavailableError !== "function") throw new Error("Missing extractors root exports")',
           'const extractorsNode = await import("@yolk-sdk/extractors/node")',

@@ -1,0 +1,113 @@
+---
+title: Cloudflare runtime
+description: Run Vercel Workflow code on Cloudflare Workers with one Durable Object per run.
+---
+
+The `@yolk-sdk/vercel-workflows/cloudflare*` subpaths run code written for Vercel Workflow
+(`'use workflow'`, `'use step'`, `workflow`, `workflow/api`) on Cloudflare Workers without a Vercel
+backend. `runVercelAgentWorkflow` and your own workflow and step functions run unchanged.
+
+## How a run executes
+
+Each run lives in its own `WorkflowRun` Durable Object, named by its run id.
+
+- The workflow body runs in memory in the run's object. Step outcomes, hook payloads, and fired
+  sleeps are journaled in the object's SQLite storage, so after an eviction the body replays to
+  where it was without re-running finished steps.
+- Values cross durable boundaries as devalue text, as on Vercel: `Date`, `Map`, `Set`, typed
+  arrays, `undefined`, and errors with their name, message, stack, cause, `fatal`, and `retryAfter`.
+- Steps are at-least-once. A step cut off by an eviction runs again when the object's step guard
+  alarm replays the run. A step's `maxRetries` (default 3) bounds retries with exponential backoff;
+  `RetryableError` waits for its `retryAfter`; `FatalError` is never retried; an exhausted step
+  throws a `FatalError` whose `cause` is the last error.
+- `createHook({ token })` registers the token in a hook-index object (`hook:<token>`) that
+  `resumeHook` reads; `resumeHook` rejects with `HookNotFoundError` when no run waits on the token.
+- `sleep(duration)` stores its wake time and arms the object's alarm.
+- `getWritable()` in a step appends to the run's stream; `getRun(runId).getReadable({ startIndex })`
+  follows it live and `getTailIndex()` returns the last chunk's index.
+- `run.cancel()` stops the run where it waits; `returnValue` rejects with
+  `WorkflowRunCancelledError`.
+
+The drop-in modules cover `createHook`, `sleep`, `getWritable`, `getStepMetadata`,
+`getWorkflowMetadata`, `FatalError`, and `RetryableError` (`workflow`), and `start`, `getRun`, and
+`resumeHook` (`workflow/api`). `defineHook`, webhooks, and `fetch` are not provided; `start` ignores
+`attributes`.
+
+## Configure the Worker
+
+The Worker needs:
+
+- the `nodejs_compat` compatibility flag (the runtime uses `AsyncLocalStorage`);
+- a Durable Object binding named `WORKFLOW_RUNS` to the `WorkflowRun` class, declared as a SQLite
+  class in its migrations (`new_sqlite_classes: ["WorkflowRun"]`);
+- the class exported from its entry module.
+
+```ts title="worker.ts"
+import { registerWorkflowModules } from '@yolk-sdk/vercel-workflows/cloudflare'
+
+export { WorkflowRun } from '@yolk-sdk/vercel-workflows/cloudflare'
+
+// Load workflow modules when a run needs them, not at startup: evaluating a large runtime in the
+// Worker's global scope can exceed its startup CPU limit. Keys are paths relative to the Vite root.
+registerWorkflowModules({
+  'app/agent-workflow.ts': () => import('./app/agent-workflow.ts')
+})
+```
+
+`app/agent-workflow.ts` stands for your module with `'use workflow'` functions.
+
+## Configure Vite
+
+Compile the directives with `workflowDirectives`, and resolve `workflow` and `workflow/api` to the
+Cloudflare modules in every server environment, for your code and for packages (this one included)
+that import them:
+
+```ts title="vite.config.ts"
+import { fileURLToPath } from 'node:url'
+import { defineConfig, type Plugin } from 'vite'
+import { workflowDirectives } from '@yolk-sdk/vercel-workflows/cloudflare/vite'
+
+const cloudflareModule = (subpath: string) =>
+  fileURLToPath(import.meta.resolve(`@yolk-sdk/vercel-workflows/cloudflare/${subpath}`))
+
+const workflowModules = new Map([
+  ['workflow', cloudflareModule('workflow')],
+  ['workflow/api', cloudflareModule('api')]
+])
+
+const cloudflareWorkflow = (): Plugin => ({
+  name: 'app:cloudflare-workflow',
+  enforce: 'pre',
+  resolveId(source) {
+    return this.environment.name === 'client' ? null : (workflowModules.get(source) ?? null)
+  }
+})
+
+export default defineConfig({
+  plugins: [cloudflareWorkflow(), workflowDirectives() /* , your Cloudflare/framework plugins */]
+})
+```
+
+`workflowDirectives` compiles top-level `async function` declarations whose body starts with
+`'use step'` or `'use workflow'`, in every environment but `client` and outside `node_modules`. A
+workflow's id is `<module path>#<function name>`, relative to `root` (default: Vite's root). Runs
+store the id, so moving or renaming a workflow module strands its in-flight runs.
+
+All `./cloudflare*` modules share the run context and the workflow registry: load each of them once
+per Worker (one resolved copy of the package).
+
+## Start and read runs
+
+Host code keeps using `workflow/api` (or `VercelWorkflows.layer` from
+`@yolk-sdk/vercel-workflows/effect`, which calls it):
+
+```ts
+import { getRun, resumeHook, start } from 'workflow/api'
+
+const run = await start(agentWorkflow, [input])
+const stream = getRun(run.runId).getReadable({ startIndex: 0 })
+
+await resumeHook(token, answer)
+```
+
+`agentWorkflow`, `input`, `token`, and `answer` are host-owned values.

@@ -7,21 +7,30 @@ the other code-mode-callable tools of the same `resolveTools` resolution. The ag
 
 ## Subpaths
 
-| Subpath                   | Source         | Role                                                                                      |
-| ------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`      | `src/index.ts` | Executor interface, `makeCodeModeTool`, catalog, search, bounding, store, classifier tool |
-| `@yolk-sdk/codemode/node` | `src/node.ts`  | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                 |
+| Subpath                         | Source              | Role                                                                                      |
+| ------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`            | `src/index.ts`      | Executor interface, `makeCodeModeTool`, catalog, search, bounding, store, classifier tool |
+| `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                 |
+| `@yolk-sdk/codemode/cloudflare` | `src/cloudflare.ts` | `makeDynamicWorkerCodeModeExecutor` on Cloudflare Dynamic Workers (Worker Loader)         |
 
 Files: `executor.ts` (engine-neutral `CodeModeExecutor` types), `catalog.ts` (nested tool catalog,
 fair listing, description), `search.ts` (BM25 `searchTools`), `output.ts` (result text, head-and-tail
 bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
-(`makeCodeModeTool`), `classifier-tool.ts` (`makeClassifierTool`), `node.ts` (pi executor).
+(`makeCodeModeTool`), `classifier-tool.ts` (`makeClassifierTool`), `node.ts` (pi executor),
+`guard.ts` (the in-VM tools guard and tool-rejection encoding both executors share),
+`cloudflare.ts` (Dynamic Worker executor), `pi-prelude.ts` (pi's in-VM prelude, vendored: pi does
+not export it; `test/pi-prelude.test.ts` fails when the installed pi's copy differs, so a pi
+upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:workers` stand-in).
 
 ## Boundaries
 
 - Root code is runtime-neutral: no Node builtins, no pi runtime (`@earendil-works/pi-codemode` root
   or `/worker`, `quickjs-wasi`), and no `./node` import. Only the pure
   `@earendil-works/pi-codemode/declarations` (and `/source`) subpaths are allowed. Boundary-enforced.
+- `cloudflare:workers` and Sucrase stay in `src/cloudflare.ts` (boundary-enforced); the package's
+  Vitest aliases `cloudflare:workers` to `test/cloudflare-workers-stub.ts`. Type `cloudflare:workers`
+  only through `src/cloudflare-workers.d.ts`, never `@cloudflare/workers-types` (its globals clash
+  with the DOM library).
 - Among Yolk packages, code mode depends only on `@yolk-sdk/agent` (`protocol`, `loop`, `tools`,
   `classification`); `@yolk-sdk/agent` never imports code mode.
 - The executor interface is Promise-based on purpose: engines (pi, a Workers executor) plug in
@@ -125,7 +134,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   `JSON.stringify` would). Rejected calls are never sent to the host or recorded. Every key of pi's
   `tools` is wrapped; unknown members fall through to pi's proxy (suggestions). It is not a
   security boundary (`globalThis.tools` is unguarded); the registry still decodes. Other executors
-  must apply the same rules (`CodeModeExecutorTool` docs).
+  must apply the same rules (`CodeModeExecutorTool` docs): the guard source, `guardPrefix`,
+  `guardSuffix`, and `encodedRejection` live in `guard.ts`, shared by both executors; never copy
+  them.
 - Call labels come from `codeModeCallLabels` (`catalog.ts`), shared by the guard (injected as
   `[name, label]` pairs in tool order, never derived from `Object.keys` order) and the host prefix
   (`CodeModeCatalogTool.callLabel`): pi binds `tools[identifier]` for the first tool with that
@@ -202,6 +213,11 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   table-driven case per rejection and allowed shape, snapshot semantics for getters and `toJSON`,
   value and depth limits; never executed or recorded), the unknown-key hint, call labels from the
   guard and the host (`"123"`, identifier collisions), line numbers, `return`, and `exit()`.
+- `test/cloudflare-executor.test.ts`: the Dynamic Worker executor with fake Worker Loaders: the
+  built module evaluated in a fresh `node:vm` context (tools, globals, output, store writes, the
+  guard, unbound tools, script and parse errors, timeout aborting tool calls), a loader whose `run`
+  the test controls (abort, malformed replies, output decoding), and code mode end to end.
+- `test/pi-prelude.test.ts`: the vendored prelude equals the installed pi's.
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search, call labels.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
