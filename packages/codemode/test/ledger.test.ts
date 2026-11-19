@@ -21,15 +21,22 @@ import {
   makePlanReviewTool,
   makeTool,
   resolveTools,
+  StagedCall,
+  stagedToolPlanNotice,
   toolLedgerArgs,
   ToolLedgerError,
   ToolLedgerFailed,
+  toolLedgerResult,
   ToolLedgerSucceeded,
+  ToolPlan,
+  toolPlanDigest,
+  ToolPlanStoreError,
   type FileStoreApi,
   type ToolLedgerArgs,
   type ToolLedgerOptions,
   type ToolLedgerStore,
   type ToolModule,
+  type ToolPlanStore,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
@@ -578,6 +585,203 @@ describe('code mode with a tool ledger', () => {
           `${reviewCall}: a person reviews the plan and selects the calls to apply.${paused ? pauseNotice : ''}`
         )
         expect(text(replayed.content)).toMatch(/\n\n\[The stored copy of this result[^\n]*\]$/)
+      })
+  )
+
+  // Regression (#330): a script abandoned after it saved its plan returned an interrupted listing
+  // that never named the plan, so the model could not review it and the plan was orphaned.
+  it.effect.each([
+    { name: 'plan', paused: false },
+    { name: 'plan and nested pauses', paused: true }
+  ])('names the staged $name an abandoned script saved before it crashed', ({ paused }) =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const memory = makeInMemoryToolPlanStore()
+      const crash = { armed: true, saved: false }
+
+      // The process dies right after the plan is saved, before the script's result is recorded.
+      const plans: ToolPlanStore = {
+        ...memory,
+        put: plan =>
+          memory.put(plan).pipe(
+            Effect.andThen(
+              Effect.suspend(() => {
+                crash.saved = true
+
+                return crash.armed ? Effect.never : Effect.void
+              })
+            )
+          )
+      }
+
+      const { executor, state } = scriptedExecutor(async (call, stage) => {
+        if (paused) await call('crm_lookup', { note: 'deal_1' }).catch(() => undefined)
+
+        await stage('crm_link', { note: 'deal_1' })
+
+        return 'done'
+      })
+
+      const run = Effect.gen(function* () {
+        const toolSet = yield* resolveTools(
+          [
+            moduleOf('host', [
+              makeCodeModeTool<TestContext>({ executor }),
+              makePlanReviewTool<TestContext>()
+            ]),
+            moduleOf('crm', [stageableLink, pausedLookup])
+          ],
+          context,
+          {
+            // Ledgering the read too lists its pause in the abandoned result.
+            ledger: paused ? { store, isLedgered: () => true } : { store },
+            plans: { store: plans },
+            interactionHost: unusedInteractionHost
+          }
+        )
+
+        return yield* toolSet.execute(
+          ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } })
+        )
+      })
+
+      const crashed = yield* Effect.forkChild(run)
+
+      yield* waitUntil(() => crash.saved)
+      yield* Fiber.interrupt(crashed)
+      crash.armed = false
+      yield* TestClock.adjust('1 minute')
+
+      const result = yield* run
+      const [stored] = yield* memory.plans
+      const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+
+      const plan = {
+        id: 'call_1',
+        digest: stored?.plan.digest ?? '',
+        count: 1,
+        reviewToolName: 'review_plan'
+      }
+
+      const notices = [
+        stagedToolPlanNotice(plan),
+        ...(paused ? ["1 call needs a person's input and has not completed."] : [])
+      ].join('\n\n')
+
+      expect(state.runs).toBe(1)
+      expect(stored?.claimedBy).toBeUndefined()
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toMatchObject({
+        codemode: paused
+          ? { ok: false, interrupted: true, plan, inputRequired: pauses }
+          : { ok: false, interrupted: true, plan }
+      })
+      expect(text(result.content)).toContain('Script interrupted:')
+      // The plan notice is where code mode writes it: after the listing, before any pause notice.
+      expect(text(result.content)).toContain(`\n\n${notices}`)
+      expect(text(result.content)).toMatch(
+        paused ? /\n- review_input\(\{"pauseIds":\["p1"\]\}\)$/ : /selects the calls to apply\.$/
+      )
+
+      // A stored copy over the bound keeps the plan, as for a finished script.
+      expect(toolLedgerResult(result, 200).structuredContent).toEqual({
+        codemode: paused ? { ok: false, plan, inputRequired: pauses } : { ok: false, plan }
+      })
+    })
+  )
+
+  it.effect(
+    'reads the plan under the host plan id and names none it cannot read or that was claimed',
+    () =>
+      Effect.gen(function* () {
+        const store = makeInMemoryToolLedgerStore()
+        const memory = makeInMemoryToolPlanStore()
+        const { executor, state } = scriptedExecutor(async () => 'never runs')
+        const lease = { nowMs: 0, leaseExpiresAtMs: 1_000, leaseMs: 1_000 }
+
+        yield* store.claim({
+          key: 'call_1',
+          toolName: 'codemode',
+          ...toolLedgerArgs({ code: 'script' }),
+          ...lease
+        })
+
+        // The abandoned execution saved this plan under the host's plan id for its call.
+        const staged = StagedCall.make({
+          key: 'turn_1:call_1/s1',
+          toolName: 'crm_link',
+          params: { note: 'deal_1' },
+          argsDigest: toolLedgerArgs({ note: 'deal_1' }).argsDigest
+        })
+
+        yield* memory.put(
+          ToolPlan.make({
+            id: 'turn_1:call_1',
+            scope: memory.scope,
+            digest: toolPlanDigest([staged]),
+            calls: [staged]
+          })
+        )
+
+        yield* TestClock.adjust('2 seconds')
+
+        const runWith = (plans: ToolPlanStore) =>
+          Effect.gen(function* () {
+            const toolSet = yield* resolveTools(
+              [
+                moduleOf('host', [
+                  makeCodeModeTool<TestContext>({ executor }),
+                  makePlanReviewTool<TestContext>()
+                ]),
+                moduleOf('crm', [stageableLink])
+              ],
+              context,
+              {
+                ledger: { store },
+                plans: { store: plans, planId: ({ call }) => `turn_1:${call.id}` },
+                interactionHost: unusedInteractionHost
+              }
+            )
+
+            return yield* toolSet.execute(
+              ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } })
+            )
+          })
+
+        const named = yield* runWith(memory)
+
+        const unreadable = yield* runWith({
+          ...memory,
+          get: () => Effect.fail(new ToolPlanStoreError({ cause: 'storage', message: 'down' }))
+        })
+
+        yield* memory.claim({ planId: 'turn_1:call_1', submissionId: 'submission_1' })
+
+        const claimed = yield* runWith(memory)
+
+        const unnamed = {
+          codemode: {
+            ok: false,
+            interrupted: true,
+            interruptedCalls: {
+              calls: [],
+              complete: true,
+              counts: { applied: 0, failed: 0, unknown: 0 }
+            }
+          }
+        }
+
+        expect(state.runs).toBe(0)
+        expect(named.structuredContent).toMatchObject({
+          codemode: { plan: { id: 'turn_1:call_1', count: 1, reviewToolName: 'review_plan' } }
+        })
+        expect(text(named.content)).toContain('as plan turn_1:call_1')
+
+        for (const result of [unreadable, claimed]) {
+          expect(result.isError).toBe(true)
+          expect(result.structuredContent).toEqual(unnamed)
+          expect(text(result.content)).not.toContain('Staged')
+        }
       })
   )
 

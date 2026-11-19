@@ -148,7 +148,9 @@ Hosts that re-execute steps (Vercel Workflow's queue is at-least-once) pass a du
   every entry. Types: `CodeModeInterruptedCalls`, `CodeModeInterruptedCall`,
   `CodeModeInterruptedCallStatus`. When the ledger cannot list the nested calls, the result stays
   interrupted, says they may already have been applied, and sets
-  `interruptedCallsUnavailable: true` instead of `interruptedCalls`.
+  `interruptedCallsUnavailable: true` instead of `interruptedCalls`. When the script had already
+  saved its staged plan (see Staged writes), the result names it as a finished script would
+  (`codemode.plan` and the plan notice), read from the plan store under the call's plan id.
 
 Nested write calls are ledgered under `<toolCallId>/<seq>` and receive a stable `idempotencyKey`.
 Calls the ledger policy skips (by default read-only calls) are not listed.

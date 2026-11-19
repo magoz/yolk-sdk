@@ -972,12 +972,13 @@ const interruptedCalls = (
  * by `maxOutputChars`; `structuredContent.codemode.interruptedCalls` carries the same entries for
  * hosts, bounded like `nestedCalls`. When the ledger cannot list them, the result stays
  * interrupted, says they may have been applied, and sets `interruptedCallsUnavailable` instead.
- * Nested calls that paused for input are listed `failed` and, as for a finished script, named in
- * `codemode.inputRequired` and a notice after the bounded text.
+ * A plan the execution saved before it was abandoned (`plan`, from the plan store) and nested calls
+ * that paused for input (listed `failed`) are named as for a finished script: `codemode.plan` and
+ * `codemode.inputRequired`, with their notices after the bounded text, in that order.
  */
 const abandonedScriptResult =
   (limits: Required<CodeModeLimits>) =>
-  ({ call, nested }: ToolLedgerAbandonedInput): ToolResult => {
+  ({ call, nested, plan }: ToolLedgerAbandonedInput): ToolResult => {
     const maxChars = limits.maxOutputChars
 
     const listing =
@@ -1013,14 +1014,17 @@ const abandonedScriptResult =
             )
           }
 
+    const withPlan = plan === undefined ? listed : { ...listed, plan }
+
     const structuredContent: CodeModeStructuredContent = {
-      codemode: inputRequired.length === 0 ? listed : { ...listed, inputRequired }
+      codemode: inputRequired.length === 0 ? withPlan : { ...withPlan, inputRequired }
     }
 
-    const notices: ReadonlyArray<CodeModeResultSegment> =
-      inputRequired.length === 0
-        ? []
-        : [{ type: 'text', text: `\n\n${inputRequiredNotice(inputRequired)}` }]
+    // Where a finished script writes them, so the ledger's bounding keeps them (ADR 0005, 0014).
+    const notices: ReadonlyArray<CodeModeResultSegment> = [
+      plan === undefined ? undefined : `\n\n${stagedToolPlanNotice(plan)}`,
+      inputRequired.length === 0 ? undefined : `\n\n${inputRequiredNotice(inputRequired)}`
+    ].flatMap(text => (text === undefined ? [] : [{ type: 'text', text }]))
 
     return ToolResult.make({
       toolCallId: call.id,

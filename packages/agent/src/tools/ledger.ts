@@ -237,6 +237,14 @@ export type ToolLedgerAbandonedInput = {
    * the listing as unavailable, never as empty.
    */
   readonly nested: ReadonlyArray<ToolLedgerEntry> | undefined
+  /**
+   * The staged tool plan (ADR 0005) the abandoned execution saved, which its result never named:
+   * set only for a nested-access registration of a resolution that offers staging, when the plan
+   * store holds an unclaimed, intact plan in its scope under the call's plan id
+   * (`plans.planId({ call })`, default the call id). Name it with `stagedToolPlanNotice` so the
+   * model can review it.
+   */
+  readonly plan?: StagedToolPlanRef
 }
 
 /**
@@ -1065,6 +1073,10 @@ export const executeLedgered = (input: {
    */
   readonly typed?: boolean | undefined
   readonly abandonedResult?: ((input: ToolLedgerAbandonedInput) => ToolResult) | undefined
+  /** Reads the plan an abandoned call saved (`ToolLedgerAbandonedInput.plan`); run only for an
+   * abandoned call with `abandonedResult`.
+   */
+  readonly abandonedPlan?: Effect.Effect<StagedToolPlanRef | undefined> | undefined
   /** The result when the wait for an in-flight duplicate ends (default `inFlightTimeoutResult`). */
   readonly inFlightTimeoutResult?: Effect.Effect<ToolResult> | undefined
 }): Effect.Effect<ToolResult, ToolError> =>
@@ -1250,19 +1262,26 @@ export const executeLedgered = (input: {
     const abandoned = (entry: ToolLedgerEntry): Effect.Effect<ToolResult, ToolError> => {
       const abandonedResult = input.abandonedResult
 
-      // A failed listing keeps the abandoned result (the call may have been applied); only the
-      // nested entries are reported as unavailable.
-      return abandonedResult === undefined
-        ? Effect.succeed(abandonedToolCallResult(call))
-        : store.list(key).pipe(
-            Effect.map(sortToolLedgerEntries),
-            Effect.catch(error =>
-              Effect.logWarning(
-                `Tool ledger could not list the nested calls of abandoned ${key}: ${error.message}`
-              ).pipe(Effect.as(undefined))
-            ),
-            Effect.map(nested => abandonedResult({ call, entry, nested }))
+      if (abandonedResult === undefined) return Effect.succeed(abandonedToolCallResult(call))
+
+      return Effect.gen(function* () {
+        // A failed listing keeps the abandoned result (the call may have been applied); only the
+        // nested entries are reported as unavailable.
+        const nested = yield* store.list(key).pipe(
+          Effect.map(sortToolLedgerEntries),
+          Effect.catch(error =>
+            Effect.logWarning(
+              `Tool ledger could not list the nested calls of abandoned ${key}: ${error.message}`
+            ).pipe(Effect.as(undefined))
           )
+        )
+
+        const plan = input.abandonedPlan === undefined ? undefined : yield* input.abandonedPlan
+
+        return abandonedResult(
+          plan === undefined ? { call, entry, nested } : { call, entry, nested, plan }
+        )
+      })
     }
 
     if (!ToolLedgerClaim.$is('Fresh')(current) && !matches(current.entry)) {

@@ -20,7 +20,9 @@ export type CodeModeStructuredContent = {
      * (the ledger's `list` failed), so any of them may have been applied.
      */
     readonly interruptedCallsUnavailable?: true
-    /** The staged tool plan a successful script saved (ADR 0005); nothing of it ran yet. */
+    /** The staged tool plan a successful script saved (ADR 0005); nothing of it ran yet. With
+     * `interrupted`: the plan the abandoned execution saved, read from the plan store.
+     */
     readonly plan?: CodeModeStagedPlan
     /** Nested calls that paused for a person's input (ADR 0014), merged per review tool: they
      * have not completed, whether or not the script caught their rejection. Finish them with
