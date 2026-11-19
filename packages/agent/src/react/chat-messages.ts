@@ -1,4 +1,4 @@
-import { Array as Arr, Data, Match, Option, Predicate } from 'effect'
+import { Array as Arr, Data, Equal, Match, Option, Predicate } from 'effect'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
 import {
   isInstructionMessage,
@@ -718,8 +718,17 @@ type ForeignMessages = ReadonlySet<string>
 
 const noForeignMessages: ForeignMessages = new Set()
 
-/** Where an event may match or place a tool call: from the index `from`, outside `foreign`. */
-type ToolPartScope = { readonly from: number; readonly foreign: ForeignMessages }
+/**
+ * Where an event may match or place a tool call: from the index `from`, outside `foreign`. With
+ * `replays`, a host event acting on a call the turn does not hold (a replay of an earlier turn's
+ * call without event id, or a late tool-batch event after the next turn started) acts on the last
+ * message in the chat holding that same call instead of adding a part.
+ */
+type ToolPartScope = {
+  readonly from: number
+  readonly foreign: ForeignMessages
+  readonly replays: boolean
+}
 
 const findLastMessageIndex = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -771,6 +780,35 @@ const toolCallMessageIndex = (
       index >= scope.from && !scope.foreign.has(message.id) && hasToolCall(message, callId)
   )
 
+/**
+ * The message an event acts on a call in: the last one of its turn (`scope`) holding the call;
+ * else, for a host event that may replay one (`scope.replays`), the last one in the chat holding
+ * it, the same call when the event names one (a later turn's call reusing the id is another call,
+ * which the turn then adds).
+ */
+const matchedToolCallIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  callId: string,
+  scope: ToolPartScope,
+  call?: ToolCall
+) => {
+  const index = toolCallMessageIndex(messages, callId, scope)
+
+  if (index !== -1 || !scope.replays) return index
+
+  const earlier = toolCallMessageIndex(messages, callId, { ...scope, from: 0 })
+
+  return call === undefined ||
+    messages[earlier]?.parts.some(
+      part =>
+        Predicate.isTagged(part, 'ToolCall') &&
+        part.call.id === callId &&
+        Equal.equals(part.call, call)
+    ) === true
+    ? earlier
+    : -1
+}
+
 /** The chat message an event of the turn that started after `anchor` matches a call in. */
 export const turnToolCallMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -780,8 +818,27 @@ export const turnToolCallMessage = (
   messages[
     toolCallMessageIndex(messages, callId, {
       from: turnStartIndex(messages, anchor),
-      foreign: noForeignMessages
+      foreign: noForeignMessages,
+      replays: false
     })
+  ]
+
+/**
+ * The chat message a host event of the latest turn (started after `anchor`) acting on `call` (the
+ * tool batch) updates: its turn's, else the earlier one holding the same call it replays.
+ */
+export const hostToolCallMessage = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  call: ToolCall,
+  anchor: ChatTurnAnchor
+): AgentChatMessage | undefined =>
+  messages[
+    matchedToolCallIndex(
+      messages,
+      call.id,
+      { from: turnStartIndex(messages, anchor), foreign: noForeignMessages, replays: true },
+      call
+    )
   ]
 
 /**
@@ -1156,7 +1213,7 @@ const upsertToolCallPart = (
   state: ChatToolState,
   scope: ToolPartScope
 ): ReadonlyArray<AgentChatMessage> => {
-  const existingIndex = toolCallMessageIndex(messages, call.id, scope)
+  const existingIndex = matchedToolCallIndex(messages, call.id, scope, call)
 
   if (existingIndex !== -1) {
     return messages.map((message, messageIndex) =>
@@ -1178,14 +1235,14 @@ const upsertToolCallPart = (
   return appendToolCallPart(messages, call, state, scope)
 }
 
-/** Updates the state of a call a host event acts on, in the last message of `scope` holding it. */
+/** Updates the state of a call a host event acts on (`matchedToolCallIndex`); never adds one. */
 const updateToolCallState = (
   messages: ReadonlyArray<AgentChatMessage>,
   callId: string,
   scope: ToolPartScope,
   update: (state: ChatToolState) => ChatToolState
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = toolCallMessageIndex(messages, callId, scope)
+  const index = matchedToolCallIndex(messages, callId, scope)
 
   return index === -1
     ? messages
@@ -1464,8 +1521,9 @@ export type AgentChatExecutionOutput = Data.TaggedEnum<{
     readonly prior: Option.Option<AgentChatPart>
   }
   /**
-   * A message it did not create that its `AssistantMessage` replaced (an earlier turn's message
-   * holding a call id a provider reused), with the message as it was.
+   * A message it did not create that its `AssistantMessage` replaced, with the message as it was:
+   * one in its turn (another execution's, or one the tool batch added, holding a call id a provider
+   * reused), or any message when no start was seen.
    */
   ReplacedMessage: { readonly prior: AgentChatMessage }
   /**
@@ -1790,29 +1848,24 @@ export const appendProtocolMessage = (
         'type' in result.structuredContent &&
         result.structuredContent.type === 'interaction_outcome'
 
+      // The result settles the last message holding its call: a provider can reuse the id in
+      // several turns, and the latest is the one a hydrated or merged result answers.
       if (
         (current.acceptance !== undefined || isInteractionOutcome) &&
         messages.some(existing => hasToolCall(existing, current.toolCallId))
       ) {
-        return messages.map(existing => ({
-          ...existing,
-          parts: existing.parts.map(part =>
-            Predicate.isTagged(part, 'ToolCall') && part.call.id === current.toolCallId
-              ? {
-                  ...part,
-                  state: mergeToolState(
-                    part.state,
-                    current.acceptance !== undefined
-                      ? ChatToolState.Accepted({
-                          result,
-                          resultEnvelope: chatMessageEnvelope(current)
-                        })
-                      : ChatToolState.Completed({ result })
-                  )
-                }
-              : part
-          )
-        }))
+        return updateToolCallState(
+          messages,
+          current.toolCallId,
+          { from: 0, foreign: noForeignMessages, replays: false },
+          state =>
+            mergeToolState(
+              state,
+              current.acceptance !== undefined
+                ? ChatToolState.Accepted({ result, resultEnvelope: chatMessageEnvelope(current) })
+                : ChatToolState.Completed({ result })
+            )
+        )
       }
 
       return appendOrphanToolResult(messages, result)
@@ -1881,8 +1934,11 @@ export const applyExecutionEventToChatMessages = (
 
   const from = turnStartIndex(messages, scope.turn)
   // The model's stream never changes another execution's output; a host step acts on any call.
-  const model: ToolPartScope = { from, foreign }
-  const host: ToolPartScope = { from, foreign: noForeignMessages }
+  const model: ToolPartScope = { from, foreign, replays: false }
+  // A request (approval, question, input, interaction) is always the turn's own call.
+  const requested: ToolPartScope = { from, foreign: noForeignMessages, replays: false }
+  // The tool batch and answers act on a call the request or the model placed, maybe a replay.
+  const host: ToolPartScope = { from, foreign: noForeignMessages, replays: true }
 
   return Match.value(event)
     .pipe(
@@ -1927,7 +1983,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.call,
           ChatToolState.ApprovalRequested({ request: current.request }),
-          host
+          requested
         )
       ),
       Match.tag('ToolApprovalGranted', () => messages)
@@ -1943,7 +1999,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.QuestionRequested({ request: current.request }),
-          host
+          requested
         )
       ),
       Match.tag('InputRequested', current =>
@@ -1951,7 +2007,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InputRequested({ request: current.request }),
-          host
+          requested
         )
       ),
       Match.tag('InteractionRequested', current =>
@@ -1959,7 +2015,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InteractionRequested({ request: current.request }),
-          host
+          requested
         )
       ),
       Match.tag('InputSubmitted', current =>
@@ -2067,7 +2123,7 @@ export const applyExecutionEventToChatMessages = (
                 ),
                 Match.exhaustive
               ),
-              host
+              requested
             ),
           appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
         )

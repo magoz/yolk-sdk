@@ -5,6 +5,7 @@ import {
   AgentEnd,
   AgentStart,
   AssistantAgentMessage,
+  BackgroundToolAccepted,
   AssistantMessageEvent,
   AssistantTextPart,
   HostToolCallPart,
@@ -22,6 +23,7 @@ import {
   ToolApprovalRequested,
   ToolApprovalResponse,
   ToolCall,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionStarted,
   ToolInputDelta,
@@ -31,6 +33,7 @@ import {
   ToolResultMessage,
   UserMessage,
   UserMessageEvent,
+  makeBackgroundToolAcceptedResult,
   zeroAgentUsage,
   type AgentEvent,
   type AgentMessage
@@ -43,7 +46,7 @@ import {
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
 import { AgentChatAction } from '../../src/react/chat-actions.ts'
-import type { AgentChatMessage } from '../../src/react/chat-messages.ts'
+import { appendProtocolMessage, type AgentChatMessage } from '../../src/react/chat-messages.ts'
 
 // Model-step executions (events carrying `executionId`): a retried or redelivered model step
 // streams a second answer for the same turn. Every scenario runs through the client reducer and
@@ -1118,6 +1121,133 @@ describe('call ids reused across turns', () => {
     ])
   })
 
+  describe('host events for an earlier turn', () => {
+    const exporting = ToolCall.make({ id: 'call_0', name: 'export', params: { format: 'csv' } })
+
+    const accepted = makeBackgroundToolAcceptedResult({
+      toolCallId: exporting.id,
+      acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:export' })
+    })
+
+    const startedExport = answer('Starting the export', [exporting])
+    const working = answer('Working on it')
+
+    const reduceChat = (events: ReadonlyArray<AgentEvent>, initial = initialAgentChatState) =>
+      events.reduce(
+        (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+        initial
+      )
+
+    const reduceProjection = (events: ReadonlyArray<AgentEvent>) =>
+      events.reduce(
+        (state, event) => applyAgentEventToChatProjection(state, event),
+        makeAgentChatEventProjectionState()
+      )
+
+    it('keeps one settled part when a later turn sees a replayed start of its call', () => {
+      const events = [
+        ...modelTurn('tagged', 'model-1:1', 1, startedExport, exporting),
+        plain(identity => ToolExecutionStarted.make({ ...identity, call: exporting }), 'export:0'),
+        plain(
+          identity =>
+            ToolExecutionAccepted.make({ ...identity, call: exporting, result: accepted }),
+          'export:1'
+        ),
+        ...modelTurn('tagged', 'model-2:1', 2, working)
+      ]
+
+      // A replay without event id of the turn-1 call's start.
+      const replayed = ToolExecutionStarted.make({ call: exporting })
+      const expected = ['Starting the export | call_0 {"format":"csv"}:Accepted', 'Working on it']
+
+      const chat = reduceChat(events)
+      const replayedChat = reduceChat([replayed], chat)
+
+      expect(calls(replayedChat.chatMessages)).toEqual(expected)
+      expect(replayedChat.status).toEqual(chat.status)
+
+      expect(
+        calls(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+      ).toEqual(expected)
+    })
+
+    it("completes an earlier turn's call when its batch event arrives after the next start", () => {
+      const lookup = ran(oslo, result('12C'))
+
+      const result_ = project([
+        ...modelTurn('tagged', 'model-1:1', 1, turnOne, oslo),
+        lookup.started,
+        ...modelTurn('tagged', 'model-2:1', 2, working),
+        lookup.completed
+      ])
+
+      expectChats(result_, ['Oslo first | call_0 {"city":"Oslo"}:Completed', 'Working on it'])
+    })
+
+    it("adds a later turn's call the batch ran when an earlier turn holds another call with its id", () => {
+      // The older execution's call, unacknowledged when the newer one started, was removed; the
+      // tool batch runs it anyway: it is a call of its own, not a replay of turn 1's.
+      const bergenRan = ran(bergen, result('9C'))
+      const turnTwo = () => answer('Now Bergen', [bergen])
+
+      const result_ = project([
+        ...firstTurn('tagged'),
+        start(A, 2),
+        delta(A, 'Now Bergen'),
+        live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+        message(A, turnTwo()),
+        start(B, 2),
+        bergenRan.started,
+        bergenRan.completed,
+        end('end', [turnOne, resultMessage('12C'), turnTwo(), resultMessage('9C')])
+      ])
+
+      expectChats(result_, [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed'
+      ])
+    })
+
+    it('settles only the latest call with its id when a result message is added', () => {
+      const events = [
+        ...firstTurn('tagged'),
+        ...modelTurn('tagged', 'model-2:1', 2, startedExport, exporting)
+      ]
+
+      const acknowledged = ToolResultMessage.make({
+        toolCallId: exporting.id,
+        content: accepted.content,
+        acceptance: accepted.acceptance
+      })
+
+      const expected = [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Starting the export | call_0 {"format":"csv"}:Accepted'
+      ]
+
+      const chat = reduceChat(events)
+
+      expect(
+        calls(
+          reduceAgentChatState(chat, AgentChatAction.AppendMessage({ message: acknowledged }))
+            .chatMessages
+        )
+      ).toEqual(expected)
+
+      expect(
+        calls(
+          reduceAgentChatState(chat, AgentChatAction.HydrateMessage({ message: acknowledged }))
+            .chatMessages
+        )
+      ).toEqual(expected)
+
+      // Hosts merging settled results into a projection (`appendProtocolMessage`).
+      expect(
+        calls(appendProtocolMessage(reduceProjection(events).chatMessages, acknowledged))
+      ).toEqual(expected)
+    })
+  })
+
   describe('across a pause', () => {
     const approval = ToolApprovalRequest.make({
       requestId: 'approval:call_0',
@@ -1360,66 +1490,79 @@ describe('call ids reused across turns', () => {
       ).toEqual(expected)
     })
 
-    it("keeps a later turn's call when that turn's start carried no execution", () => {
-      const searched = ToolCall.make({ id: 'srv_0', name: 'web_search', params: {} })
-      const found = ToolResult.make({ toolCallId: searched.id, content: 'Bergen' })
+    it.each([1, 2])(
+      "keeps a later turn's call when that turn's start carried no execution (%i later turns)",
+      laterTurns => {
+        const searched = ToolCall.make({ id: 'srv_0', name: 'web_search', params: {} })
+        const found = ToolResult.make({ toolCallId: searched.id, content: 'Bergen' })
 
-      const searching = () =>
-        AssistantAgentMessage.make({
+        const searching = () =>
+          AssistantAgentMessage.make({
+            parts: [
+              AssistantTextPart.make({ content: 'Now Bergen' }),
+              ProviderToolCallPart.make({ call: searched }),
+              HostToolCallPart.make({ call: bergen })
+            ]
+          })
+
+        const doneSearching = AssistantAgentMessage.make({
           parts: [
-            AssistantTextPart.make({ content: 'Now Bergen' }),
-            ProviderToolCallPart.make({ call: searched }),
-            HostToolCallPart.make({ call: bergen })
+            AssistantTextPart.make({ content: 'Bergen is 9C' }),
+            ProviderToolCallPart.make({ call: searched })
           ]
         })
 
-      const doneSearching = AssistantAgentMessage.make({
-        parts: [
-          AssistantTextPart.make({ content: 'Bergen is 9C' }),
-          ProviderToolCallPart.make({ call: searched })
+        const thanks = answer('Anything else?')
+        const turnFour = laterTurns === 2 ? [thanks] : []
+
+        const messages = [
+          turnOne,
+          resultMessage('12C'),
+          searching(),
+          resultMessage('9C'),
+          doneSearching,
+          ...turnFour
         ]
-      })
 
-      const messages = [
-        turnOne,
-        resultMessage('12C'),
-        searching(),
-        resultMessage('9C'),
-        doneSearching
-      ]
+        const result_ = project([
+          ...firstTurn('tagged'),
+          start(A, 2),
+          delta(A, 'Now Bergen'),
+          live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+          message(A, searching()),
+          bergenRan.started,
+          start(B, 2),
+          delta(B, 'Lyon instead'),
+          message(B, answer('Lyon instead', [lyon])),
+          bergenRan.completed,
+          // Turn 3's events carry no `executionId`: no `Until` bounds turn 2.
+          plain(identity => LLMStreamStart.make({ ...identity, turn: 3 }), 'turn-3:start'),
+          plain(
+            identity => LLMTextDelta.make({ ...identity, text: 'Bergen is 9C' }),
+            'turn-3:text'
+          ),
+          plain(
+            identity => ProviderToolResult.make({ ...identity, call: searched, result: found }),
+            'turn-3:search'
+          ),
+          plain(
+            identity => AssistantMessageEvent.make({ ...identity, message: doneSearching }),
+            'turn-3:message'
+          ),
+          // A later untagged turn moves the latest start on; turn 2 still ends where turn 3 began.
+          ...(laterTurns === 2 ? modelTurn('plain', 'model-4:1', 4, thanks) : []),
+          end('end', messages)
+        ])
 
-      const result_ = project([
-        ...firstTurn('tagged'),
-        start(A, 2),
-        delta(A, 'Now Bergen'),
-        live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
-        message(A, searching()),
-        bergenRan.started,
-        start(B, 2),
-        delta(B, 'Lyon instead'),
-        message(B, answer('Lyon instead', [lyon])),
-        bergenRan.completed,
-        // Turn 3's events carry no `executionId`: no `Until` bounds turn 2.
-        plain(identity => LLMStreamStart.make({ ...identity, turn: 3 }), 'turn-3:start'),
-        plain(identity => LLMTextDelta.make({ ...identity, text: 'Bergen is 9C' }), 'turn-3:text'),
-        plain(
-          identity => ProviderToolResult.make({ ...identity, call: searched, result: found }),
-          'turn-3:search'
-        ),
-        plain(
-          identity => AssistantMessageEvent.make({ ...identity, message: doneSearching }),
-          'turn-3:message'
-        ),
-        end('end', messages)
-      ])
+        expect(result_.client.messages).toEqual(messages)
 
-      expect(result_.client.messages).toEqual(messages)
-
-      expectChats(result_, [
-        'Oslo first | call_0 {"city":"Oslo"}:Completed',
-        'Now Bergen | srv_0 {}:Called | call_0 {"city":"Bergen"}:Completed',
-        'Bergen is 9C | srv_0 {}:ProviderCompleted'
-      ])
-    })
+        expectChats(result_, [
+          'Oslo first | call_0 {"city":"Oslo"}:Completed',
+          'Now Bergen | srv_0 {}:Called | call_0 {"city":"Bergen"}:Completed',
+          'Bergen is 9C | srv_0 {}:ProviderCompleted',
+          ...(laterTurns === 2 ? ['Anything else?'] : [])
+        ])
+      }
+    )
   })
 })

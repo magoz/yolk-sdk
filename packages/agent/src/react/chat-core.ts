@@ -12,6 +12,7 @@ import {
   type AgentStatusTree,
   type Content,
   type HitlResponse,
+  type ToolCall,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -30,6 +31,7 @@ import {
   AgentChatExecutionOutput,
   discardChatExecutionOutput,
   executionTurnAnchor,
+  hostToolCallMessage,
   isLatestTurnAnchor,
   replaceWithCommittedAnswer,
   deleteChatTurn,
@@ -127,12 +129,12 @@ const withStatusTree = (state: AgentChatState, tree: AgentStatusTree): AgentChat
     ? state
     : { ...state, status: tree.root, subagents: tree.subagents }
 
-/** Whether the call a host event acts on in the latest turn already settled. */
-const isSettledToolCall = (state: AgentChatState, toolCallId: string) =>
-  turnToolCallMessage(state.chatMessages, toolCallId, state.turnStart?.after)?.parts.some(
+/** Whether the call a tool-batch event acts on (`hostToolCallMessage`) already settled. */
+const isSettledToolCall = (state: AgentChatState, call: ToolCall) =>
+  hostToolCallMessage(state.chatMessages, call, state.turnStart?.after)?.parts.some(
     part =>
       Predicate.isTagged(part, 'ToolCall') &&
-      part.call.id === toolCallId &&
+      part.call.id === call.id &&
       (Predicate.isTagged(part.state, 'Completed') || Predicate.isTagged(part.state, 'Accepted'))
   ) === true
 
@@ -236,7 +238,7 @@ const projectExecutionEvent = (
           (messages, turn) =>
             replaceWithCommittedAnswer(
               messages,
-              disputedTurnOutput(executions, turn.shown, latest),
+              turn.shown.output,
               new Set(turn.shown.calls),
               turn.committed
             ),
@@ -266,8 +268,10 @@ const projectExecutionEvent = (
 
   const after = recordAgentExecutionEvent(
     Predicate.isTagged(route, 'Start')
-      ? endEarlierTurns(route.executions, route.started, event.streamId ?? '', started)
-      : executions,
+      ? endEarlierTurns(route.executions, route.started.turn, event.streamId ?? '', started)
+      : Predicate.isTagged(event, 'LLMStreamStart')
+        ? endEarlierTurns(executions, event.turn, event.streamId ?? '', chatMessages)
+        : executions,
     event,
     route,
     owner === undefined
@@ -333,24 +337,6 @@ const turnAnchor = (
   Option.fromNullishOr(messages.at(-1)?.id)
 
 /**
- * A disputed turn's output with where the turn ends: its `Until`, else, when the chat saw a later
- * turn of its run start without one (an untagged start), that turn's start.
- */
-const disputedTurnOutput = (
-  executions: AgentExecutions<AgentChatExecutionOutput>,
-  shown: AgentExecution<AgentChatExecutionOutput>,
-  latest: AgentChatTurnStart | undefined
-): ReadonlyArray<AgentChatExecutionOutput> =>
-  latest === undefined ||
-  latest.turn <= shown.turn ||
-  shown.output.some(output => Predicate.isTagged(output, 'Until')) ||
-  !executions.some(
-    run => run.streamId === latest.streamId && !run.retired && run.executions.includes(shown)
-  )
-    ? shown.output
-    : [...shown.output, AgentChatExecutionOutput.Until({ messageId: latest.after })]
-
-/**
  * The chat messages other executions still hold as their output (an earlier turn's answer kept
  * for reconciling): the owner's events never change them.
  */
@@ -371,12 +357,14 @@ const foreignMessages = (
   )
 
 /**
- * When a later turn of a run starts, the executions of its earlier turns kept for reconciling
- * record where their turn's output ends (`Until`): the last chat message before the new turn.
+ * When a later turn of a run starts (with or without `executionId`), the executions of its earlier
+ * turns kept for reconciling record where their turn's output ends (`Until`), once: the last chat
+ * message before the first later turn. An untagged start settles nothing, so the kept execution
+ * can still be live then.
  */
 const endEarlierTurns = (
   runs: AgentExecutions<AgentChatExecutionOutput>,
-  started: AgentExecution<AgentChatExecutionOutput>,
+  turn: number,
   streamId: string,
   messages: ReadonlyArray<AgentChatMessage>
 ): AgentExecutions<AgentChatExecutionOutput> => {
@@ -385,8 +373,8 @@ const endEarlierTurns = (
   })
 
   const ends = (execution: AgentExecution<AgentChatExecutionOutput>) =>
-    execution.status === 'Settled' &&
-    execution.turn < started.turn &&
+    execution.status !== 'Superseded' &&
+    execution.turn < turn &&
     execution.output.length > 0 &&
     !execution.output.some(output => Predicate.isTagged(output, 'Until'))
 
@@ -449,8 +437,9 @@ const chatExecutionOutput = (
 }
 
 /**
- * Messages an execution's `AssistantMessage` replaced without having created them (an earlier
- * turn's message matched by a reused call id), recorded once with how they were.
+ * Messages an execution's `AssistantMessage` replaced without having created them (one in its turn
+ * matched by a reused call id, or any message when no start was seen), recorded once with how they
+ * were.
  */
 const replacedMessages = (
   execution: AgentExecution<AgentChatExecutionOutput>,
@@ -625,7 +614,7 @@ export const reduceAgentChatState = (
       // A replayed start of an already settled call must not reopen the run.
       const fenced =
         Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
-        isSettledToolCall(state, current.event.call.id)
+        isSettledToolCall(state, current.event.call)
 
       return rememberEvent(
         fenced

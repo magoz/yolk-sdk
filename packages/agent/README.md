@@ -725,11 +725,15 @@ turn). `applyAgentEventToChatProjection` and the `useAgentChat` reducer record w
 model turn starts (`turnStart`, at each `LLMStreamStart`, with or without `executionId`), and a
 turn's tool events (input, its `AssistantMessage`'s calls, provider results, the tool batch,
 approvals, questions and their answers) match a call only after it, so a later turn's call never
-changes an earlier turn's call with the same id. Until a start is seen (and after `AgentStart`),
-and always in `applyAgentEventToChatMessages`, a tool event matches the last message holding the
-call. `reduceAgentEvents` keeps one tool run per call id: a later turn's call replaces the earlier
-turn's run (whose result stays in `messages`), and a later call reusing the id of an accepted
-(background) call is taken for a replay of it.
+changes an earlier turn's call with the same id. A tool-batch event or answer for a call the turn
+does not hold (a replay without event id, or a batch event arriving after the next turn started)
+acts on the last earlier message holding that same call instead of adding a card. Until a start is
+seen (and after `AgentStart`), and always in `applyAgentEventToChatMessages`, a tool event matches
+the last message holding the call, so a reused id can still update an earlier turn's call there;
+answers, approval denials and added acceptance or interaction results update that one call, not
+every call with the id. `reduceAgentEvents` keeps one tool run per call id: a later turn's call
+replaces the earlier turn's run (whose result stays in `messages`), and a later call reusing the id
+of an accepted (background) call is taken for a replay of it.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
