@@ -328,6 +328,7 @@ export {
   inputRequiredNotice,
   inputReviewCallText,
   makeInputRequiredToolResult,
+  maxInputReviewPauses,
   mergeInputRequiredRefs,
   ToolInputRequired,
   toolInputRequired,

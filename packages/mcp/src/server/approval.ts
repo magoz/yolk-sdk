@@ -166,6 +166,8 @@ export type McpServerApprovals = Data.TaggedEnum<{
     readonly codec: RequestStateCodec<ApprovalState>
     /** Signs forwarded rounds (`forward.ts`): same key and principal, its own binding. */
     readonly forwardCodec: RequestStateCodec<unknown>
+    /** How long a prompt stays answerable; a forwarded prompt asked again keeps its first expiry. */
+    readonly ttlSeconds: number
   }
 }>
 
@@ -197,6 +199,7 @@ export const makeMcpServerApprovals = (
 
   const codecs = Result.try({
     try: () => ({
+      ttlSeconds,
       codec: createRequestStateCodec<ApprovalState>({
         key: options.key,
         ttlSeconds,

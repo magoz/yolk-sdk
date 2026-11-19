@@ -165,9 +165,10 @@ export {
   InputReviewResponse,
   inputReviewResult,
   inputReviewToolName,
-  makeInputReviewTool,
-  maxInputReviewPauses
+  makeInputReviewTool
 } from './input-review.ts'
+
+export { maxInputReviewPauses } from '@yolk-sdk/agent/protocol'
 
 export type {
   InputPause,

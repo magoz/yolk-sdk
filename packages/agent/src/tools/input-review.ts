@@ -6,6 +6,7 @@ import {
   InteractionDescriptor,
   InteractionValidationError,
   inputRequiredNotice,
+  maxInputReviewPauses,
   TextPart,
   ToolDef,
   ToolInputRequiredRef,
@@ -16,6 +17,7 @@ import {
   type ToolCall,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
+import { NonEmptyTrimmedString } from '../protocol/input-required.ts'
 import { decodeToolArguments } from './arguments.ts'
 import {
   responseJsonSchemaFromSchema,
@@ -40,11 +42,6 @@ export const inputReviewRenderer = 'input_review'
 
 /** The input review tool's only action; cancelling the interaction sends nothing. */
 export const inputReviewActionId = 'submit'
-
-/** Most pauses one review answers. */
-export const maxInputReviewPauses = 50
-
-const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 /** Model-facing parameters: the pause ids an input-required result named. */
 export const InputReviewParams = Schema.Struct({
@@ -219,7 +216,9 @@ const answersFor = (params: InputReviewParams, response: InputReviewResponse) =>
     return Effect.fail(invalid(`Every pause needs an answer; missing: ${missing.join(', ')}`))
 
   return Effect.succeed(
-    params.pauseIds.map(id => (Object.hasOwn(response.answers, id) ? response.answers[id] : null))
+    Object.fromEntries(
+      Object.entries(response.answers).filter(([id]) => params.pauseIds.includes(id))
+    )
   )
 }
 
@@ -404,11 +403,19 @@ export const makeInputReviewTool = <Context, Pause extends InputPause>(
       const answers = yield* answersFor(input, response)
       const pauses = yield* loaded(input)
 
-      return yield* Effect.forEach(pauses, (pause, index) => {
-        const answer = answers[index] ?? null
-
-        return host.validateAnswer({ pause, answer }).pipe(Effect.as({ pause, answer }))
-      })
+      return yield* Effect.forEach(pauses, pause =>
+        Object.hasOwn(answers, pause.id)
+          ? Effect.succeed(answers[pause.id]).pipe(
+              Effect.filterOrFail(
+                (answer): answer is Schema.Json => answer !== undefined,
+                () => invalid(`No answer for ${pause.id}.`)
+              ),
+              Effect.flatMap(answer =>
+                host.validateAnswer({ pause, answer }).pipe(Effect.as({ pause, answer }))
+              )
+            )
+          : Effect.fail(invalid(`No answer for ${pause.id}.`))
+      )
     })
 
   return {

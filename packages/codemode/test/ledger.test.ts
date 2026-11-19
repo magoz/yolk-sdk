@@ -5,6 +5,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   FileDescriptor,
   filePartFromBytes,
+  makeInputRequiredToolResult,
   nestedToolCallMaxArgsBytes,
   nestedToolCallMaxTotalArgsBytes,
   TextPart,
@@ -354,6 +355,57 @@ describe('code mode with a tool ledger', () => {
       // Plain JSON: survives a JSON round trip unchanged.
       expect(JSON.parse(JSON.stringify(result.structuredContent))).toEqual(result.structuredContent)
       expect(text(result.content)).toContain('- call_1/2 sales_manage')
+    })
+  )
+
+  it.effect("names the pauses of an abandoned script's nested calls that paused for input", () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+      const { executor, state } = scriptedExecutor(async () => 'never runs')
+      const modules = codeModeModules(executor, [])
+      const lease = { nowMs: 0, leaseExpiresAtMs: 1_000, leaseMs: 1_000 }
+
+      yield* store.claim({
+        key: 'call_1',
+        toolName: 'codemode',
+        ...toolLedgerArgs({ code: 'script' }),
+        ...lease
+      })
+
+      yield* store.claim({
+        key: 'call_1/1',
+        parentKey: 'call_1',
+        toolName: 'sales_manage',
+        ...toolLedgerArgs({ note: 'delete' }),
+        ...lease
+      })
+
+      yield* store.complete({
+        key: 'call_1/1',
+        completedAtMs: 1,
+        outcome: ToolLedgerSucceeded.make({
+          result: makeInputRequiredToolResult({
+            toolCallId: 'call_1/1',
+            content: 'The CRM asks to confirm.',
+            reviewToolName: 'review_input',
+            pauseIds: ['p1']
+          })
+        })
+      })
+
+      yield* TestClock.adjust('2 seconds')
+
+      const result = yield* runLedgered(modules, { store })
+
+      expect(state.runs).toBe(0)
+      expect(result.structuredContent).toMatchObject({
+        codemode: {
+          interrupted: true,
+          inputRequired: [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+        }
+      })
+      expect(text(result.content)).toContain('paused for input (not completed)')
+      expect(text(result.content)).toContain('review_input({"pauseIds":["p1"]})')
     })
   )
 

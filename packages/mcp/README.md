@@ -466,11 +466,12 @@ const proxyDelete: McpServerTool = {
   instead of pausing a call nobody can answer.
 - A remote pause is answered as this server's `InputRequiredResult` (the remote forms under their
   keys) with a `requestState` signed by the approvals key under its own binding (server name,
-  principal, method, forward purpose), holding the tool, the arguments digest, a fresh `roundId`,
-  the approval id and the remote pause, bounded by `mcpForwardMaxStateBytes` (64 KiB of JSON).
+  principal, method, forward purpose; signed, not encrypted), holding the tool, the arguments
+  digest, the pause's `roundId` and expiry (`ttlSeconds` after it was first forwarded), the approval
+  id and the remote pause, bounded by `mcpForwardMaxStateBytes` (64 KiB of JSON).
 - `Resume({ roundId, inputRequired, responses, approvalId })`: only a round whose verified state
   matches the call and answers every forwarded form (checked against the forms) resumes; other
-  rounds ask again. A state that does not verify answers `forwardStaleMessage` without calling the
+  rounds are asked again in the same round (same `roundId` and expiry). A state that does not verify answers `forwardStaleMessage` without calling the
   remote tool (with `approval`, the approval is asked again). The server keeps no state: key
   once-only resumption on `roundId`.
 - With `approval`, the tool is offered like an approval tool and runs its approval round first;

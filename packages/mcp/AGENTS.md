@@ -74,20 +74,27 @@
   client against this server) and `test/server/elicitation.test.ts` (forms, changed and oversized
   prompts, a multi-select through the resumable client); shared builders in
   `test/server/mcp-requests.ts`.
+- `toolCallResultToToolResult` keeps a remote error result's structured content that decodes as
+  Yolk's input-required marker (ADR 0014) under `remoteStructuredContent`: a remote server never
+  forges a paused call.
 - Server forwarding tools (`src/server/forward.ts`, ADR 0014): `McpServerForwardingTool`
   (`forward: true`, optional `approval`) proxies a remote tool. `execute(call, round)` gets
-  `McpForwardRound.Initial({ clientElicitation, approvalId })` or `Resume({ roundId,
-inputRequired, responses, approvalId })` and answers the remote `McpToolCallOutcome`.
+  `McpForwardRound.Initial({ clientElicitation, approvalId })` or
+  `Resume({ roundId, inputRequired, responses, approvalId })` and answers the remote
+  `McpToolCallOutcome`.
   `clientElicitation` is true only on a modern request declaring form elicitation with approvals
   configured (hosts opt the remote call into elicitation only then). A remote pause is answered as
   this server's `InputRequiredResult` (the remote forms, typed again with the SDK's
   `isSpecType.ElicitRequestFormParams`) under a `requestState` signed by `forwardCodec` (the
-  approvals key; binding adds `\0forward`), holding tool, arguments digest, a fresh `roundId`, the
-  approval id and the pause, bounded by `mcpForwardMaxStateBytes`. Only a verified state for the
-  same call whose answers fit every form (`toMcpInputResponses`) resumes; otherwise the server asks
-  again; a state that does not verify answers `forwardStaleMessage` without calling the remote
-  tool. With `approval`, the approval round runs first and the forward rounds carry its
-  `approvalId`. Legacy and the header-less JSON path run only `Initial` with
+  approvals key; binding adds `\0forward`; signed, not encrypted), holding tool, arguments digest,
+  the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was first forwarded),
+  the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. Only a verified, unexpired
+  state for the same call whose answers fit every form (`toMcpInputResponses`) resumes; otherwise
+  the server asks again under the same `roundId` and expiry (never a fresh round: that would open a
+  second resume of one remote pause). A state that does not verify answers `forwardStaleMessage`
+  without calling the remote tool; on an `approval` tool it falls to the approval round, which asks
+  again. With `approval`, the approval round runs first and the forward rounds carry its
+  `approvalId`. `Resume` re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only `Initial` with
   `clientElicitation: false`. Once-only resumption is the host's (key on `roundId`). Approval
   `McpServerPrompt.run` and `McpApprovalRound.Run` answer `McpServerCallOutcome` (a result or an
   `InputRequiredResult`). Tests: `test/server/forward.test.ts`.

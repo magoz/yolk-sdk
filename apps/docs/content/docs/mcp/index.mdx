@@ -290,14 +290,17 @@ const proxyDelete: McpServerTool = {
   `approvals` configured: without it, a remote server that needs input refuses to run instead of
   pausing a call nobody can answer.
 - A remote pause is answered as this server's own `InputRequiredResult` (the remote forms under
-  their keys) with a `requestState` signed by the approvals key under its own binding. It holds the
-  tool, the arguments digest, a fresh `roundId`, the approval id, and the remote pause, at most
-  `mcpForwardMaxStateBytes` (64 KiB) of JSON.
+  their keys) with a `requestState` signed (not encrypted) by the approvals key under its own
+  binding. It holds the tool, the arguments digest, the pause's `roundId` and expiry (`ttlSeconds`
+  after it was first forwarded), the approval id, and the remote pause, at most
+  `mcpForwardMaxStateBytes` (64 KiB) of JSON. The client can read the remote forms and
+  `requestState`.
 - `McpForwardRound.Resume({ roundId, inputRequired, responses, approvalId })` runs only for a round
   whose verified state matches the call and answers every forwarded form (checked against the
-  forms); other rounds ask again. A state that does not verify answers `forwardStaleMessage` and
-  calls nothing (with `approval`, the approval is asked again). The server keeps no state, so a replayed answered round arrives again with the
-  same `roundId`: key once-only resumption on it.
+  forms); other rounds are asked again in the same round (same `roundId` and expiry). A state that
+  does not verify, or expired, answers `forwardStaleMessage` and calls nothing (with `approval`, the
+  approval is asked again). The server keeps no state, so a replayed answered round arrives again
+  with the same `roundId`: key once-only resumption on it.
 - With `approval`, the tool is offered like an approval tool: the approval round runs first and
   every forward round carries its `approvalId`. Without it, the tool is listed everywhere; 2025-era
   requests and the header-less JSON path run only `Initial` with `clientElicitation: false`.

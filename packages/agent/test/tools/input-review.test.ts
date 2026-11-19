@@ -8,7 +8,9 @@ import {
   InteractionResponse,
   InteractionValidationError,
   interactionRequestId,
+  inputRequiredNotice,
   makeInputRequiredToolResult,
+  maxInputReviewPauses,
   mergeInputRequiredRefs,
   ToolCall,
   toolInputRequired,
@@ -194,6 +196,25 @@ describe('input-required results', () => {
     )
   })
 
+  it("splits a tool's pauses into reviews the review tool accepts, listing at most five", () => {
+    const ids = Array.from({ length: 6 * maxInputReviewPauses + 1 }, (_, index) => `p${index}`)
+    const [first, ...rest] = ids
+
+    if (first === undefined) return expect.fail('Expected pause ids')
+
+    const merged = mergeInputRequiredRefs([
+      { reviewToolName: 'review_input', pauseIds: [first, ...rest] }
+    ])
+
+    expect(merged.map(ref => ref.pauseIds.length)).toEqual([50, 50, 50, 50, 50, 50, 1])
+
+    const notice = inputRequiredNotice(merged)
+
+    expect(notice).toContain('301 calls need')
+    expect(notice.split('\n').filter(line => line.startsWith('- review_input('))).toHaveLength(5)
+    expect(notice).toContain('and 2 more reviews')
+  })
+
   it('merges refs per review tool without repeating pauses', () => {
     expect(
       mergeInputRequiredRefs([
@@ -316,6 +337,25 @@ describe('makeInputReviewTool', () => {
     })
   )
 
+  it.effect('replays a review whose every pause was recorded as its proven outcome', () =>
+    Effect.gen(function* () {
+      const env = yield* setup(['p1'], 'fail')
+      const call = reviewCall(['p1'])
+      const ref = yield* accept(env, call, { p1: { confirm: true } })
+
+      // Every pause resolved; only the receipt's settlement was lost.
+      yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      const replayed = yield* env.toolSet.execute(call, { interaction: ref })
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(outcome.outcome).toBe('completed')
+      expect(outcome.result?.interrupted).toBe(true)
+      expect(outcome.result?.pauses.map(pause => pause.status)).toEqual(['completed'])
+      expect(env.store.resumed.map(item => item.id)).toEqual(['p1'])
+    })
+  )
+
   it.effect('lists recorded resolutions after a crash, as unknown, without sending again', () =>
     Effect.gen(function* () {
       const env = yield* setup(['p1', 'p2'], 'fail')
@@ -331,6 +371,7 @@ describe('makeInputReviewTool', () => {
       const outcome = yield* outcomeOf(replayed)
 
       expect(replayed.isError).toBe(true)
+      expect(outcome.outcome).toBe('unknown')
       expect(outcome.result?.interrupted).toBe(true)
       expect(outcome.result?.pauses.map(pause => [pause.pauseId, pause.status])).toEqual([
         ['p1', 'completed'],

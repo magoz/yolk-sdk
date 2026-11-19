@@ -6,6 +6,7 @@ import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   callRemoteMcpServerToolResumable,
   resumeRemoteMcpServerToolCall,
+  McpInputRequired,
   type McpElicitationResponses,
   type McpRemoteServerConfig
 } from '../../src/client'
@@ -22,6 +23,7 @@ import {
 import {
   CallResult,
   decodeJson,
+  InputRequired,
   jsonObject,
   key,
   modernRequest,
@@ -79,6 +81,8 @@ type Rounds = Array<string>
 const proxyServer = (input: {
   readonly remote: ToolServer
   readonly rounds: Rounds
+  /** The `roundId` of each resume, in order. */
+  readonly roundIds: Array<string>
   readonly approvals: McpServerApprovalOptions | undefined
   readonly askFirst: boolean
 }) => {
@@ -107,6 +111,7 @@ const proxyServer = (input: {
         },
         Resume: ({ roundId, inputRequired, responses, approvalId }) => {
           input.rounds.push(`resume:${roundId.length > 0}:${approvalId ?? '-'}`)
+          input.roundIds.push(roundId)
 
           return resumeRemoteMcpServerToolCall({
             ...base,
@@ -136,6 +141,27 @@ const proxyServer = (input: {
       })
 }
 
+/** A raw round answering `requestState` (answers optional), expecting another prompt. */
+const stateRound = (
+  proxy: ToolServer,
+  requestState: string | undefined,
+  inputResponses: McpElicitationResponses | undefined
+) =>
+  requestState === undefined
+    ? Effect.die(new Error('Expected a forwarded requestState'))
+    : respond(
+        proxy,
+        modernRequest({
+          method: 'tools/call',
+          toolName: 'proxy_delete',
+          params: jsonObject(
+            inputResponses === undefined
+              ? { name: 'proxy_delete', arguments: { id: 'e1' }, requestState }
+              : { name: 'proxy_delete', arguments: { id: 'e1' }, requestState, inputResponses }
+          )
+        })
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(InputRequired)))
+
 const proxyCall = {
   config: { name: 'proxy', type: 'remote', url: 'https://proxy.example.com/mcp' },
   mcpToolName: 'proxy_delete',
@@ -148,19 +174,30 @@ const approve: McpElicitationResponses = {
   [approvalInputKey]: { action: 'accept', content: { decision: 'approve' } }
 }
 
-const setup = (options: { readonly askFirst?: boolean; readonly approvals?: boolean } = {}) =>
+const setup = (
+  options: {
+    readonly askFirst?: boolean
+    readonly approvals?: boolean
+    readonly ttlSeconds?: number
+  } = {}
+) =>
   Effect.gen(function* () {
     const deleted = yield* Ref.make<ReadonlyArray<string>>([])
     const rounds: Rounds = []
+    const roundIds: Array<string> = []
 
     const proxy = proxyServer({
       remote: remoteServer(deleted),
       rounds,
-      approvals: options.approvals === false ? undefined : { key, principal: 'proxy-token' },
+      roundIds,
+      approvals:
+        options.approvals === false
+          ? undefined
+          : { key, principal: 'proxy-token', ttlSeconds: options.ttlSeconds ?? 600 },
       askFirst: options.askFirst === true
     })
 
-    return { deleted, rounds, layer: inProcess(proxy) }
+    return { deleted, rounds, roundIds, proxy, layer: inProcess(proxy) }
   })
 
 describe('forwarding a remote elicitation', () => {
@@ -297,6 +334,7 @@ describe('forwarding a remote elicitation', () => {
         const proxy = proxyServer({
           remote: remoteServer(deleted),
           rounds,
+          roundIds: [],
           approvals: { key, principal: 'proxy-token' },
           askFirst: false
         })
@@ -322,6 +360,72 @@ describe('forwarding a remote elicitation', () => {
       })
   )
 
+  it.effect('asks again in the same round: a re-asked pause never opens a second resume', () =>
+    Effect.gen(function* () {
+      const { roundIds, proxy, layer } = yield* setup()
+      const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(first, 'InputRequired'))
+        return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+      yield* resumeRemoteMcpServerToolCall({
+        ...proxyCall,
+        inputRequired: first.inputRequired,
+        responses: approve
+      }).pipe(Effect.provide(layer))
+
+      // The answered state again, without answers: asked again, under the same round.
+      const again = yield* stateRound(proxy, first.inputRequired.requestState, undefined)
+
+      yield* resumeRemoteMcpServerToolCall({
+        ...proxyCall,
+        inputRequired: McpInputRequired.make({
+          ...first.inputRequired,
+          requestState: again.result.requestState
+        }),
+        responses: approve
+      }).pipe(Effect.provide(layer))
+
+      expect(roundIds).toHaveLength(2)
+      expect(roundIds[1]).toBe(roundIds[0])
+    })
+  )
+
+  // Real time: the server runs each request on its own runtime clock.
+  it.live('keeps the first expiry when asking again, then answers stale', () =>
+    Effect.gen(function* () {
+      const { rounds, proxy, layer } = yield* setup({ ttlSeconds: 2 })
+      const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(first, 'InputRequired'))
+        return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+      yield* Effect.sleep('1200 millis')
+
+      const again = yield* stateRound(proxy, first.inputRequired.requestState, undefined)
+
+      // Past the first expiry, while the re-asked state's own signature is still fresh.
+      yield* Effect.sleep('1200 millis')
+
+      const late = yield* respond(
+        proxy,
+        modernRequest({
+          method: 'tools/call',
+          toolName: 'proxy_delete',
+          params: jsonObject({
+            name: 'proxy_delete',
+            arguments: { id: 'e1' },
+            requestState: again.result.requestState,
+            inputResponses: approve
+          })
+        })
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(CallResult)))
+
+      expect(late.result.content[0]?.text).toBe(forwardStaleMessage)
+      expect(rounds).toEqual(['initial:true:-'])
+    })
+  )
+
   it.effect('runs only the first round on the header-less JSON path', () =>
     Effect.gen(function* () {
       const deleted = yield* Ref.make<ReadonlyArray<string>>([])
@@ -330,6 +434,7 @@ describe('forwarding a remote elicitation', () => {
       const proxy = proxyServer({
         remote: remoteServer(deleted),
         rounds,
+        roundIds: [],
         approvals: { key, principal: 'proxy-token' },
         askFirst: false
       })

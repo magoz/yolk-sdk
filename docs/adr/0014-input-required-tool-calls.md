@@ -36,6 +36,12 @@ field would have to be threaded through the protocol class, the ledger's stored 
 bounding, transcripts and React. The marker needs two small changes (plan status and code mode
 reporting) and stays plain JSON.
 
+Because the marker is plain JSON, a remote system must not be able to forge it: Yolk's MCP client
+keeps a remote error result's structured content that decodes as the marker under
+`remoteStructuredContent` (`toolCallResultToToolResult`), so a server's own failure never reads as
+a paused call (which plan apply would not stop on). Hosts adapting other remote error results do
+the same.
+
 ## Input review
 
 `makeInputReviewTool` is an interaction registration (renderer `input_review`, one action
@@ -76,13 +82,17 @@ runs one round per request:
   call nobody can answer.
 - A remote pause is forwarded as this server's own `InputRequiredResult` (the remote forms under
   their keys) with a `requestState` signed by the approvals key under its own binding (server name,
-  principal, method, forward purpose) that holds the tool, the arguments digest, a fresh `roundId`,
-  the approval id (when the tool asked its own approval first) and the remote pause. It is bounded
-  (`mcpForwardMaxStateBytes`).
-- `Resume`: only a round whose verified state matches the call and answers every forwarded form
-  (checked against the forms) resumes the remote call; other rounds ask again. A state that does
-  not verify answers `forwardStaleMessage`, sending nothing. Once-only is the host's: key it on
-  `roundId`.
+  principal, method, forward purpose) that holds the tool, the arguments digest, the remote pause's
+  `roundId` and expiry (`ttlSeconds` after it was first forwarded), the approval id (when the tool
+  asked its own approval first) and the remote pause. It is bounded (`mcpForwardMaxStateBytes`). It
+  is signed, not encrypted: the client can read the remote forms and the remote `requestState`.
+- `Resume`: only a round whose verified, unexpired state matches the call and answers every
+  forwarded form (checked against the forms) resumes the remote call. A round that misses an answer
+  is asked the same forms again in the same round (same `roundId` and expiry), so asking again
+  never opens a second resume of one remote pause nor keeps it alive. A state that does not verify
+  answers `forwardStaleMessage`, sending nothing; on a tool with `approval` it is no approval answer
+  either, so the approval is asked again (and an accept starts a new remote call, as a fresh call
+  would). Once-only is the host's: key it on `roundId`.
 - The header-less JSON path and 2025-era requests run only the first round.
 
 ## Rejected alternatives

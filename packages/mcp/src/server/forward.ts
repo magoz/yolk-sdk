@@ -6,14 +6,18 @@
  * resume the remote call. The server keeps no state between rounds.
  *
  * The forward state is signed by the approvals key (`forwardCodec`: bound to the server `name`,
- * the host's principal, the method and the forward purpose), expires with `ttlSeconds`, and names
- * the tool, the arguments digest, a fresh `roundId` and the remote pause. Only a round whose
- * verified state matches the call and answers every forwarded form resumes the remote call; any
- * other round asks again or answers why nothing more ran. The server does not enforce once-only
- * resumption: a replayed answered round arrives again with the same `roundId`, so the host keys
- * once-only execution on it (MRTR's single-use is the server's duty).
+ * the host's principal, the method and the forward purpose) but not encrypted: the client can read
+ * the remote pause (its forms and the remote `requestState`), so a remote `requestState` must not
+ * be secret from this server's client. It names the tool, the arguments digest, a `roundId`, the
+ * remote pause and its expiry (`ttlSeconds` after the remote pause was first forwarded). Only a
+ * round whose verified, unexpired state matches the call and answers every forwarded form resumes
+ * the remote call; a round that misses an answer is asked the same forms again under the same
+ * `roundId` and expiry, so asking again neither opens a second resume nor keeps the pause alive.
+ * The server does not enforce once-only resumption: a replayed answered round arrives again with
+ * the same `roundId`, so the host keys once-only execution on it (MRTR's single-use is the server's
+ * duty).
  */
-import { Data, Effect, Option, Predicate } from 'effect'
+import { Clock, Data, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   inputRequired,
@@ -92,6 +96,8 @@ const ForwardState = Schema.Struct({
   tool: Schema.String,
   argumentsDigest: Schema.String,
   roundId: Schema.String,
+  /** When the remote pause stops being answerable here (epoch ms), kept when asked again. */
+  expiresAtMs: Schema.Number,
   approvalId: Schema.optionalKey(Schema.String),
   pause: McpInputRequired
 })
@@ -132,10 +138,15 @@ const verifiedForwardState = (
     onNone: () => Effect.succeed(Option.none<ForwardState>()),
     onSome: raw =>
       Effect.tryPromise(() => forwardCodec.verify(raw, ctx)).pipe(
-        Effect.map(payload =>
-          Option.filter(
-            decodeForwardState(payload),
-            state => state.tool === call.name && state.argumentsDigest === argumentsDigest
+        Effect.flatMap(payload =>
+          Effect.map(Clock.currentTimeMillis, now =>
+            Option.filter(
+              decodeForwardState(payload),
+              state =>
+                state.tool === call.name &&
+                state.argumentsDigest === argumentsDigest &&
+                now < state.expiresAtMs
+            )
           )
         ),
         Effect.orElseSucceed(() => Option.none<ForwardState>())
@@ -168,13 +179,22 @@ const answersOf = (state: ForwardState, ctx: ServerContext) =>
     )
   })
 
-/** Asks the client the remote pause's forms under a fresh signed forward state. */
+/**
+ * The round a forwarded prompt belongs to: a new remote pause opens one (fresh `roundId`, expiry
+ * `ttlSeconds` from now); asking a pause's forms again keeps its round.
+ */
+type ForwardRound =
+  | { readonly kind: 'new' }
+  | { readonly kind: 'again'; readonly roundId: string; readonly expiresAtMs: number }
+
+/** Asks the client the remote pause's forms under a signed forward state of its round. */
 const ask = (input: {
   readonly approvals: McpServerApprovals
   readonly call: ToolCall
   readonly argumentsDigest: string
   readonly pause: McpInputRequired
   readonly approvalId: string | undefined
+  readonly round: ForwardRound
   readonly ctx: ServerContext
 }): Effect.Effect<McpServerCallOutcome, McpServerError> =>
   Effect.gen(function* () {
@@ -183,25 +203,23 @@ const ask = (input: {
     if (!Predicate.isTagged(approvals, 'Configured'))
       return errorResult(call, forwardUnsupportedMessage)
 
-    if (pause.elicitations.length === 0) return errorResult(call, forwardEmptyPauseMessage)
+    const now = yield* Clock.currentTimeMillis
+
+    const round =
+      input.round.kind === 'again'
+        ? { roundId: input.round.roundId, expiresAtMs: input.round.expiresAtMs }
+        : { roundId: crypto.randomUUID(), expiresAtMs: now + approvals.ttlSeconds * 1000 }
+
+    const base = {
+      kind: 'forward' as const,
+      tool: call.name,
+      argumentsDigest: input.argumentsDigest,
+      ...round,
+      pause
+    }
 
     const state: ForwardState =
-      input.approvalId === undefined
-        ? {
-            kind: 'forward',
-            tool: call.name,
-            argumentsDigest: input.argumentsDigest,
-            roundId: crypto.randomUUID(),
-            pause
-          }
-        : {
-            kind: 'forward',
-            tool: call.name,
-            argumentsDigest: input.argumentsDigest,
-            roundId: crypto.randomUUID(),
-            approvalId: input.approvalId,
-            pause
-          }
+      input.approvalId === undefined ? base : { ...base, approvalId: input.approvalId }
 
     const encoded = yield* encodeForwardState(state).pipe(
       Effect.mapError(
@@ -259,6 +277,9 @@ const outcomeOf = (input: {
 
   if (Predicate.isTagged(outcome, 'Complete')) return Effect.succeed(outcome.result)
 
+  if (outcome.inputRequired.elicitations.length === 0)
+    return Effect.succeed(errorResult(call, forwardEmptyPauseMessage))
+
   if (!input.clientElicitation || input.ctx === undefined)
     return Effect.succeed(errorResult(call, forwardUnsupportedMessage))
 
@@ -268,9 +289,21 @@ const outcomeOf = (input: {
     argumentsDigest: input.argumentsDigest,
     pause: outcome.inputRequired,
     approvalId: input.approvalId,
+    round: { kind: 'new' },
     ctx: input.ctx
   })
 }
+
+/** Whether this request can carry a forwarded prompt to its client. */
+const clientElicits = (input: {
+  readonly approvals: McpServerApprovals
+  readonly ctx: ServerContext | undefined
+  readonly modern: boolean
+}) =>
+  input.modern &&
+  input.ctx !== undefined &&
+  Predicate.isTagged(input.approvals, 'Configured') &&
+  declaresFormElicitation(input.ctx.mcpReq.envelope)
 
 const argumentsDigestOf = (call: ToolCall) =>
   mcpArgumentsDigest(call.params).pipe(
@@ -301,12 +334,7 @@ export const forwardInitialRound = <R>(input: {
 }): Effect.Effect<McpServerCallOutcome, McpServerError, R> =>
   Effect.gen(function* () {
     const { call, ctx } = input
-
-    const clientElicitation =
-      input.modern &&
-      ctx !== undefined &&
-      Predicate.isTagged(input.approvals, 'Configured') &&
-      declaresFormElicitation(ctx.mcpReq.envelope)
+    const clientElicitation = clientElicits(input)
 
     const argumentsDigest = yield* argumentsDigestOf(call)
 
@@ -330,7 +358,7 @@ export const forwardInitialRound = <R>(input: {
  * A round answering a forwarded prompt, or none when the request carries no verified forward state
  * for this call (the caller then runs its first round, or answers that the state is stale). Only
  * answers to every forwarded form resume the remote call; otherwise the same forms are asked again
- * under a fresh state.
+ * in the same round (`roundId` and expiry kept).
  */
 export const forwardAnswerRound = <R>(input: {
   readonly approvals: McpServerApprovals
@@ -359,6 +387,7 @@ export const forwardAnswerRound = <R>(input: {
           argumentsDigest,
           pause: forward.pause,
           approvalId: forward.approvalId,
+          round: { kind: 'again', roundId: forward.roundId, expiresAtMs: forward.expiresAtMs },
           ctx
         })
       )
@@ -380,7 +409,7 @@ export const forwardAnswerRound = <R>(input: {
         argumentsDigest,
         outcome,
         approvalId: forward.approvalId,
-        clientElicitation: true,
+        clientElicitation: clientElicits({ approvals, ctx, modern: true }),
         ctx
       })
     )

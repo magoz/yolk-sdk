@@ -163,6 +163,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   (`toolInputRequired`) rejects like any error result (`error.code === 'input_required'`) and is
   also collected, so `structuredContent.codemode.inputRequired` (merged per review tool) and a
   notice appended after bounding name the review call even when the script caught the rejection.
+  An abandoned script's listing does the same for its ledgered nested calls that paused (listed
+  `failed`, "paused for input").
 - Stageable tools (ADR 0007; approval-gated, so scripts only stage them whatever their
   `callableBy`; stage-only ones are `callableBy: 'codemode'`): while the script may stage,
   `codeModeStageOnlyCatalog` adds every one to the discovery catalog only (`exposure: 'stage'`, no

@@ -916,8 +916,22 @@ const nestedEntryState = (entry: ToolLedgerEntry) => {
   if (Predicate.isTagged(outcome, 'Failed'))
     return `completed with an error: ${truncateCodePoints(outcome.error.message, nestedToolCallMaxErrorChars)}`
 
+  if (Option.isSome(toolInputRequired(outcome.result))) return 'paused for input (not completed)'
+
   return outcome.result.isError === true ? 'completed with an error result' : 'applied'
 }
+
+/** The pauses of an abandoned execution's nested calls that paused for input (ADR 0014). */
+const abandonedInputRequired = (nested: ReadonlyArray<ToolLedgerEntry>) =>
+  mergeInputRequiredRefs(
+    nested.flatMap(entry => {
+      const outcome = entry.outcome
+
+      if (outcome === undefined || Predicate.isTagged(outcome, 'Failed')) return []
+
+      return Option.toArray(toolInputRequired(outcome.result))
+    })
+  )
 
 /** The bounded, wire-safe `interruptedCalls` of an abandoned execution's nested ledger entries:
  * the `nestedCalls` record bounds (`maxCalls`, 8 KiB of arguments per call, 32 KiB in total).
@@ -960,6 +974,8 @@ const interruptedCalls = (
  * by `maxOutputChars`; `structuredContent.codemode.interruptedCalls` carries the same entries for
  * hosts, bounded like `nestedCalls`. When the ledger cannot list them, the result stays
  * interrupted, says they may have been applied, and sets `interruptedCallsUnavailable` instead.
+ * Nested calls that paused for input are listed `failed` and, as for a finished script, named in
+ * `codemode.inputRequired` and a notice after the bounded text.
  */
 const abandonedScriptResult =
   (limits: Required<CodeModeLimits>) =>
@@ -985,23 +1001,35 @@ const abandonedScriptResult =
       'Calls the ledger policy skips (by default read-only calls) are not listed. Verify the state these calls affect before repeating any work.'
     ].join('\n\n')
 
+    const inputRequired = nested === undefined ? [] : abandonedInputRequired(nested)
+
+    const listed: CodeModeStructuredContent['codemode'] =
+      nested === undefined
+        ? { ok: false, interrupted: true, interruptedCallsUnavailable: true }
+        : {
+            ok: false,
+            interrupted: true,
+            interruptedCalls: interruptedCalls(
+              nested,
+              nestedToolCallRecordLimit(limits.maxNestedCalls)
+            )
+          }
+
     const structuredContent: CodeModeStructuredContent = {
-      codemode:
-        nested === undefined
-          ? { ok: false, interrupted: true, interruptedCallsUnavailable: true }
-          : {
-              ok: false,
-              interrupted: true,
-              interruptedCalls: interruptedCalls(
-                nested,
-                nestedToolCallRecordLimit(limits.maxNestedCalls)
-              )
-            }
+      codemode: inputRequired.length === 0 ? listed : { ...listed, inputRequired }
     }
+
+    const notices: ReadonlyArray<CodeModeResultSegment> =
+      inputRequired.length === 0
+        ? []
+        : [{ type: 'text', text: `\n\n${inputRequiredNotice(inputRequired)}` }]
 
     return ToolResult.make({
       toolCallId: call.id,
-      content: codeModeSegmentsContent(boundCodeModeSegments([{ type: 'text', text }], maxChars)),
+      content: codeModeSegmentsContent([
+        ...boundCodeModeSegments([{ type: 'text', text }], maxChars),
+        ...notices
+      ]),
       isError: true,
       structuredContent
     })

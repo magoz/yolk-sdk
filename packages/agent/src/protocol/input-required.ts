@@ -15,7 +15,11 @@ import { ToolResult } from './tool.ts'
  */
 export const toolInputRequiredCode = 'input_required'
 
-const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+/** @internal */
+export const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
+/** Most pauses one input review answers; refs naming more are split into several reviews. */
+export const maxInputReviewPauses = 50
 
 /** Where a paused call is finished: the input review tool to call and the stored pauses' ids. */
 export const ToolInputRequiredRef = Schema.Struct({
@@ -75,8 +79,9 @@ export const toolInputRequired = (result: {
     : Option.none()
 
 /**
- * Merges refs per review tool, keeping first-seen order and dropping repeated pause ids, so one
- * review call per tool finishes every listed pause.
+ * Merges refs per review tool, keeping first-seen order and dropping repeated pause ids, then
+ * splits each tool's pauses into reviews of at most `maxInputReviewPauses`, so every listed review
+ * call is one the review tool accepts.
  */
 export const mergeInputRequiredRefs = (
   refs: ReadonlyArray<ToolInputRequiredRef>
@@ -91,20 +96,32 @@ export const mergeInputRequiredRefs = (
     byTool.set(ref.reviewToolName, ids)
   }
 
-  return Array.from(byTool.entries()).flatMap(([reviewToolName, ids]) => {
-    const [first, ...rest] = ids
+  return Array.from(byTool.entries()).flatMap(([reviewToolName, ids]) =>
+    Array.from({ length: Math.ceil(ids.length / maxInputReviewPauses) }, (_, chunk) =>
+      ids.slice(chunk * maxInputReviewPauses, (chunk + 1) * maxInputReviewPauses)
+    ).flatMap(chunk => {
+      const [first, ...rest] = chunk
 
-    return first === undefined ? [] : [{ reviewToolName, pauseIds: [first, ...rest] }]
-  })
+      return first === undefined ? [] : [{ reviewToolName, pauseIds: [first, ...rest] }]
+    })
+  )
 }
 
-/** Model-visible lines naming the review calls that finish the given pauses. */
+const maxListedReviews = 5
+
+/** Model-visible lines naming the review calls that finish the given pauses (at most five). */
 export const inputRequiredNotice = (refs: ReadonlyArray<ToolInputRequiredRef>): string => {
   const merged = mergeInputRequiredRefs(refs)
   const count = merged.reduce((total, ref) => total + ref.pauseIds.length, 0)
 
+  const listed = merged.slice(0, maxListedReviews)
+  const rest = merged.length - listed.length
+
   return [
-    `${count} call${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} a person's input and ${count === 1 ? 'has' : 'have'} not completed. To continue, call:`,
-    ...merged.map(ref => `- ${inputReviewCallText(ref)}`)
+    `${count} call${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} a person's input and ${count === 1 ? 'has' : 'have'} not completed. To continue, call${merged.length > 1 ? ' each in turn' : ''}:`,
+    ...listed.map(ref => `- ${inputReviewCallText(ref)}`),
+    ...(rest > 0
+      ? [`- … and ${rest} more review${rest === 1 ? '' : 's'} (see structuredContent)`]
+      : [])
   ].join('\n')
 }
