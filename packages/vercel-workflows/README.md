@@ -398,7 +398,8 @@ yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, sta
   execution's calls that no host event acted on are removed. The committed answer is the one among
   `messages` that an execution of the turn streamed; when none is found, the final turn falls back
   to the last assistant message and an earlier turn keeps what it shows. The turn's answer stays in
-  its place (a user message after it stays after it), and a later turn's output never changes it.
+  its place (a user message after it stays after it), and a later turn's output never changes the
+  messages its executions created.
   Until that event, a non-final turn whose older execution committed while the newer one streamed
   shows the newer answer, beside the calls the tool batch ran; `AgentError` carries no messages and
   reconciles nothing (see the limits under "Open cases").
@@ -432,7 +433,9 @@ Open cases:
   answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
   another committed message of the run (same text, same call ids) counts as committed. Tool events
   find a call by id, so a provider that reuses call ids across turns can have a later turn's call
-  update an earlier turn's call of that id; a turn kept for reconciling is protected from this.
+  update an earlier turn's call of that id (#335). A turn kept for reconciling protects the messages
+  its executions created, not an earlier message one of them overwrote through a reused id. A client
+  that never saw a later turn's start (it joined late) also has no bound on where that turn ends.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.
