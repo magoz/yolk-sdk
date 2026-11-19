@@ -730,7 +730,12 @@ without event id, or a batch event arriving after the next turn started), a host
 earlier part instead of adding a card: a request (approval, question, input, interaction) or a
 tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
 answer (question, input or interaction response, approval denial) on the last earlier part holding
-the request it answers (a denial: a pending approval), else on nothing. Tool-batch and request
+the request it answers (a denial: a pending approval), else on nothing. A request (including
+`AgentAwaitingInput`'s requests) never reopens a call past its request: a part answered,
+cancelled, denied, running or finished keeps its state against a request for the same call, with
+or without event id. The loop asks for a call only until it settles: an invalid input answer
+re-pends the same request while the part is still pending (only a valid payload emits
+`InputSubmitted`), and a later turn reusing the id asks on its own part. Tool-batch and request
 events must therefore carry the call exactly as the model emitted it: a host that normalizes
 arguments between the model's events and its own adds a second card for a replayed or late event.
 Until a start is

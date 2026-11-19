@@ -1330,7 +1330,7 @@ describe('call ids reused across turns', () => {
       )
 
       it.each(['question', 'approval'] as const)(
-        "keeps one card when an earlier turn's request is replayed (%s)",
+        "keeps one answered card when an earlier turn's request is replayed (%s)",
         kind => {
           const ask = asks[kind]
 
@@ -1346,19 +1346,15 @@ describe('call ids reused across turns', () => {
               ? QuestionRequested.make({ request: question })
               : ToolApprovalRequested.make({ call: oslo, request: approval })
 
-          // The replay lands on the earlier turn's call (the state a replayed request sets there is
-          // unchanged by turn scoping); it never adds a second card.
-          const cards = (messages: ReadonlyArray<AgentChatMessage>) =>
-            messages.map(
-              chatMessage =>
-                chatMessage.parts.filter(part => Predicate.isTagged(part, 'ToolCall')).length
-            )
+          // The replay lands on the earlier turn's call: it never adds a second card, and the
+          // answered call stays answered (#346).
+          const expected = [ask.shown, 'Working on it']
 
-          expect(cards(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual([1, 0])
+          expect(calls(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual(expected)
 
           expect(
-            cards(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
-          ).toEqual([1, 0])
+            calls(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+          ).toEqual(expected)
         }
       )
     })

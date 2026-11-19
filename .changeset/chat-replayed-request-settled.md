@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/agent': patch
+---
+
+A replayed request no longer reopens a settled call in the chat projections (#346). In `applyAgentEventToChatProjection`, the `useAgentChat` reducer and `applyAgentEventToChatMessages`, a `ToolApprovalRequested`, `QuestionRequested`, `InputRequested` or `InteractionRequested` event (or an `AgentAwaitingInput` request) that reached a call already answered, cancelled, denied, running or finished set it back to pending with an actionable card, for example a replay without event id landing on an earlier turn's call. Such a request now leaves the part as it is when it names the same call (id, name and arguments), with or without event id. The loop asks for a call only until it settles, so a legitimate re-pend still shows: an invalid input answer re-pends the same request while the part is still pending (the server emits `InputSubmitted` only for a valid payload and the chat never applies an input answer locally), a pending request is still replaced by a newer one (a recomputed approval preview), and a later turn reusing the call id asks on its own part.

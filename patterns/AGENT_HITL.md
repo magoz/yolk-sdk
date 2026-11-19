@@ -57,7 +57,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
   `kind` (`permission` or `question`) says what the run needs (ADR 0010).
 - Render approve/deny, question, and typed input controls from headless tool states; keep UI app-owned.
 - Render typed inputs by `InputRequest.input.kind` through an app-owned renderer registry; unknown kinds fall back to an explicit unsupported notice with cancel (never a silent drop). Show server re-pends by keeping the form open; invalid payloads carry no validation detail in events.
-- Keep custom input forms pending during submission; only server acceptance may produce a replayable input result. A transport failure must not turn unvalidated user data into a tool result. `AgentAwaitingInput.requests` restores headless pending state on replay.
+- Keep custom input forms pending during submission; only server acceptance may produce a replayable input result. A transport failure must not turn unvalidated user data into a tool result. `AgentAwaitingInput.requests` restores headless pending state on replay, but a request (event or `AgentAwaitingInput`) never reopens a chat call already answered, cancelled, denied, running or finished: the loop asks only until a call settles, and an invalid input re-pends a part that is still pending.
 - Show denial/cancel reason when available.
 - Use accessible controls: labels, keyboard operation, and polite status updates.
 
