@@ -238,7 +238,11 @@ const resolveStepTools = Effect.gen(function* () {
   abandoned.
 - Set `abandonedResult({ call, entry, nested })` on a registration (or as a `makeTool` option) to
   describe that tool's abandoned call. It gets `nested: undefined` when `list` fails: report the
-  nested calls as unavailable (they may have been applied), never as an empty list.
+  nested calls as unavailable (they may have been applied), never as an empty list. A
+  nested-access registration of a resolution with staged tool plans also gets `plan` (a
+  `StagedToolPlanRef`) when the abandoned call had saved an unclaimed plan: the registry reads it
+  from the plan store under the call's plan id (`plans.planId({ call })`), never from model data.
+  Name it with `stagedToolPlanNotice` so the model can review it.
 - Custom registration wrappers must forward `idempotencyKey` (and `nested`) to the inner
   `execute`. With a ledger configured, executors receive `idempotencyKey` for unledgered calls too.
 - `onLedgerDecision({ key, parentKey?, toolName, decision, waitedMs? })` is called once per ledgered

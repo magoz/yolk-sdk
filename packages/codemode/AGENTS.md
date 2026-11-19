@@ -73,9 +73,13 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   `boundNestedToolCallArgs`, with `complete` (also false for `ToolLedgerEntry.argsTruncated`) and
   per-status `counts` over every entry). When the ledger's `list` fails (`nested` is `undefined`),
   keep the interrupted result, say the nested calls may have been applied, and set
-  `interruptedCallsUnavailable: true` instead; never an empty listing. Never re-run a script on
-  re-execution; deterministic replay is phase 2 (ADR 0002). Use the protocol's bounded-text
-  helpers (`truncateCodePoints`, `boundNestedToolCallArgs`), never local copies.
+  `interruptedCallsUnavailable: true` instead; never an empty listing. When the execution saved its
+  staged plan before it was abandoned, the ledger passes it as `plan` (read from the plan store
+  under the call's plan id, never from model data) and the result names it as a finished script
+  does: `codemode.plan` and `stagedToolPlanNotice` after the bounded text, before any input-required
+  notice. Never re-run a script on re-execution; deterministic replay is phase 2 (ADR 0002). Use
+  the protocol's bounded-text helpers (`truncateCodePoints`, `boundNestedToolCallArgs`), never
+  local copies.
 - Record every executed nested call with `recordNestedToolCall` over
   `makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })` (per-status counts survive
   dropped entries), with its effective `access` from `nested.access` (hosts audit writes by it);
@@ -169,8 +173,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   (`stagedToolPlanNotice` from `@yolk-sdk/agent/tools`, never a copy of its text) is appended after
   bounding (never cut) and `structuredContent.codemode.plan` carries
   `{ id, digest, count, reviewToolName }`; a failed save makes the result `isError` with
-  `{ ok: false }`. The description lists `stage` and the stageable tool names only when staging is
-  offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
+  `{ ok: false }`. An abandoned script's result names a plan it saved the same way (see the tool
+  ledger rule above). The description lists `stage` and the stageable tool names only when staging
+  is offered. Plan semantics live in `@yolk-sdk/agent/tools`; never re-implement them here.
 - Input-required nested calls (ADR 0014): a nested result carrying the `input_required` marker
   (`toolInputRequired`) rejects like any error result (`error.code === 'input_required'`) and is
   also collected, so `structuredContent.codemode.inputRequired` (merged per review tool) and a
@@ -228,8 +233,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - `test/ledger.test.ts`: the tool ledger through code mode (crash then re-execution returns the
   interrupted listing and `interruptedCalls` and runs nothing, a failing `list`, arguments the
   ledger already cut, `interruptedCalls` bounds, long-script conflicts, completed replay,
-  concurrent duplicates wait, replays over the bound keeping pauses and the staged plan), records
-  past 256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
+  concurrent duplicates wait, replays over the bound keeping pauses and the staged plan, an
+  abandoned script naming the plan it saved, read under the host plan id, and not when the read
+  fails or times out, the plan is claimed, or a lookup guard rejects it), records past 256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/plan.test.ts`: staging through code mode (saved plan, nothing applied, description,
   fail-closed direct calls, failed scripts discard, ordering guardrails, invalid/duplicate/limit
   stages, ledgered replay, save conflicts, and the pi executor end to end).
