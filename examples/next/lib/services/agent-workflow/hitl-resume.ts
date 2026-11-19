@@ -4,9 +4,9 @@ import { HookNotFoundError } from 'workflow/errors'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AgentWorkflowStore, type UserId, type WorkflowRunId } from './live-layer'
-import { isHitlPausePending, recordedHitlPause, WorkflowHitlAnswer } from './registry'
+import { isHitlPausePending, recordedHitlAnswer, WorkflowHitlAnswer } from './registry'
 
-/** No stored pause took this answer: it answers no pending request, or the pause has another. */
+/** No pause took this answer: it answers no pending request, or the pause has another. */
 export class WorkflowHitlAnswerRefused extends Data.TaggedError('WorkflowHitlAnswerRefused')<{
   readonly message: string
 }> {}
@@ -22,9 +22,10 @@ const hookPendingRetry = Schedule.max([Schedule.exponential('250 millis', 2.0), 
 
 /**
  * Records `response` durably as the answer of the stored pause holding its request, then resumes
- * that pause's hook with the recorded answer. An identical retry reuses the record; a different
- * answer, or one to a request no pending pause holds (a late duplicate of an earlier pause's
- * answer), is refused before any hook sees it. Returns the recorded answer: `resumeHook` success
+ * that pause's hook with the recorded answer. An identical retry reuses the record, and one of an
+ * answer the workflow already took (from this or an earlier pause) is reported as delivered
+ * without resuming. A different answer to the current pause, or one to a request it does not
+ * hold, is refused before any hook sees it. Returns the recorded answer: `resumeHook` success
  * does not mean the answer was used, so callers report the record, not the resume.
  */
 export const resumeWorkflowHitlAnswer = (input: {
@@ -42,7 +43,7 @@ export const resumeWorkflowHitlAnswer = (input: {
       answer: WorkflowHitlAnswer.make({ response: input.response, tailIndex: input.tailIndex })
     })
 
-    const recorded = recordedHitlPause(state, input.response)
+    const recorded = recordedHitlAnswer(state, input.response)
 
     if (Option.isNone(recorded))
       return yield* Effect.fail(

@@ -146,8 +146,8 @@ export const matchesWorkflowHitlResponse = (
 /**
  * Filters a hook payload like `matchesWorkflowHitlResponse`; when the workflow takes it, marks
  * the pause delivered so the resume route reports a retried answer as delivered instead of
- * waiting for a hook that is gone. A failed mark is reported, not fatal: the next pause or the
- * route's bounded retry still settles that answer.
+ * waiting for a hook that is gone. A failed mark fails the step and the platform retries it (the
+ * mark is idempotent): after a run's last pause nothing else would ever settle that answer.
  */
 export async function acceptWorkflowHitlResponse(input: {
   readonly userId: string
@@ -167,18 +167,7 @@ export async function acceptWorkflowHitlResponse(input: {
         type: 'deliver',
         hookToken: input.hookToken
       })
-    }).pipe(
-      Effect.catch(error =>
-        reportError(
-          new AgentWorkflowStepError({
-            message: 'Workflow HITL delivery mark failed',
-            cause: error
-          }),
-          { operation: 'agent.workflow.hitl_deliver', runId }
-        )
-      ),
-      Effect.provide(AgentWorkflowStore.layer.pipe(Layer.provideMerge(AppLayer)))
-    )
+    }).pipe(Effect.provide(AgentWorkflowStore.layer.pipe(Layer.provideMerge(AppLayer))))
   )
 
   return true

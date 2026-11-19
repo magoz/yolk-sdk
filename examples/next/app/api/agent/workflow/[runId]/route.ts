@@ -13,6 +13,7 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {
   workflowCancelResponse,
+  workflowHitlResumeErrorResponse,
   workflowResumeReadableResponse,
   workflowResumeStartIndexFromUrl
 } from './route-model'
@@ -171,10 +172,10 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
       Effect.succeed(Response.json({ error: 'Not found' }, { status: 404 }))
     ),
     Effect.catchTag('WorkflowHitlAnswerRefused', error =>
-      Effect.succeed(Response.json({ error: error.message }, { status: 409 }))
+      Effect.succeed(workflowHitlResumeErrorResponse(error))
     ),
     Effect.catchTag('WorkflowHitlHookPending', error =>
-      Effect.succeed(Response.json({ error: error.message }, { status: 503 }))
+      Effect.succeed(workflowHitlResumeErrorResponse(error))
     ),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))

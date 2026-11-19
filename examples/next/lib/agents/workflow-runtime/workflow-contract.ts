@@ -4,9 +4,10 @@ export type AgentWorkflowInput = {
 }
 
 // App-owned token strategy, not an SDK transport contract: one token per pause. The turn plus
-// the number of answers its batch already took is unique per pause, so a late duplicate of an
-// earlier pause's answer never reaches a later pause's hook. The client only posts
-// `{ hitlResponses }` to the run endpoint; the route resumes the stored pause holding the request.
+// the number of answers its batch already took is unique per pause, so resuming an earlier
+// pause's token finds no hook rather than a later pause's. Which pause an answer goes to is the
+// resume route's decision: the client only posts `{ hitlResponses }` to the run endpoint, and the
+// route records it for the stored pause holding the request (or reports a delivered duplicate).
 export const agentWorkflowHitlHookToken = (input: {
   readonly runId: string
   readonly turn: number

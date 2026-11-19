@@ -19,11 +19,11 @@ import {
 import { AgentWorkflowStore, UserId, WorkflowRunForbidden, WorkflowRunId } from './live-layer'
 import { stopAgentWorkflow } from './stop'
 import { readWorkflowChild } from './read-child'
-import { maxWorkflowChildren } from './policy'
+import { maxHitlAnsweredPauses, maxWorkflowChildren } from './policy'
 import {
   emptyWorkflowRegistry,
   isHitlPausePending,
-  recordedHitlPause,
+  recordedHitlAnswer,
   transitionWorkflowRegistry,
   WorkflowChildRecord,
   WorkflowHitlAnswer,
@@ -153,7 +153,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
       })
 
     const record = (response: ReturnType<typeof approve>) =>
-      recordedHitlPause(
+      recordedHitlAnswer(
         store.change({
           type: 'answer',
           answer: WorkflowHitlAnswer.make({ response, tailIndex: 3 })
@@ -174,9 +174,61 @@ describe('durable host registry (transactional behavioral fake)', () => {
     expect(isHitlPausePending(store.read(), 'pause-1')).toBe(false)
     expect(Option.isSome(record(approve('a')))).toBe(true)
     store.change({ type: 'pause', pause: pause('pause-2', 'b') })
-    expect(Option.isNone(record(approve('a')))).toBe(true)
+    // After the workflow moved on, an identical retry is the delivered answer of pause 1 and
+    // never occupies pause 2; a different late answer to pause 1 is refused.
+    expect(Option.getOrUndefined(record(approve('a')))).toMatchObject({
+      hookToken: 'pause-1',
+      answer: { tailIndex: 3 },
+      delivered: true
+    })
+    expect(store.read().hitlPause?.answer).toBeNull()
+    expect(Option.isNone(record(approve('a', 'denied')))).toBe(true)
     expect(isHitlPausePending(store.read(), 'pause-1')).toBe(false)
-    expect(Option.isSome(record(approve('b')))).toBe(true)
+    expect(Option.getOrUndefined(record(approve('b')))).toMatchObject({
+      hookToken: 'pause-2',
+      delivered: false
+    })
+  })
+
+  it('keeps answers of replaced pauses (delivery mark lost) and bounds the history', () => {
+    const store = fakeStore()
+
+    for (let index = 0; index < maxHitlAnsweredPauses + 2; index++) {
+      const toolCallId = `call-${index}`
+
+      store.change({
+        type: 'pause',
+        pause: WorkflowHitlPause.make({
+          hookToken: `pause-${index}`,
+          requests: [
+            ToolApprovalRequest.make({
+              requestId: `approval:${toolCallId}`,
+              toolCallId,
+              call: ToolCall.make({ id: toolCallId, name: 'write', params: {} })
+            })
+          ],
+          answer: null,
+          delivered: false
+        })
+      })
+      store.change({
+        type: 'answer',
+        answer: WorkflowHitlAnswer.make({
+          response: ToolApprovalResponse.make({
+            requestId: `approval:${toolCallId}`,
+            toolCallId,
+            decision: 'approved',
+            source: 'user'
+          }),
+          tailIndex: index
+        })
+      })
+    }
+
+    // The current pause's answer is not delivered; every replaced pause's answer is kept.
+    expect(store.read().hitlAnswered?.map(entry => entry.hookToken)).toEqual(
+      Array.from({ length: maxHitlAnsweredPauses }, (_, index) => `pause-${index + 1}`)
+    )
   })
 
   it('matches a recorded answer after the registry row round-trips through JSON', async () => {
@@ -222,7 +274,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
       data: { tags: ['a', 'b'], name: 'Ada' }
     })
 
-    expect(Option.isSome(recordedHitlPause(stored, retried))).toBe(true)
+    expect(Option.isSome(recordedHitlAnswer(stored, retried))).toBe(true)
   })
 
   it('enforces the bounded lifetime fanout including pending reservations', () => {

@@ -1,4 +1,8 @@
-import { Data } from 'effect'
+import { Data, Predicate } from 'effect'
+import type {
+  WorkflowHitlAnswerRefused,
+  WorkflowHitlHookPending
+} from '@/lib/services/agent-workflow/hitl-resume'
 import {
   workflowReadableResponse,
   workflowStreamResponse,
@@ -66,3 +70,16 @@ export const workflowResumeStartIndexAfterTail = (tailIndex: number | undefined)
   tailIndex === undefined ? undefined : tailIndex + 1
 
 export const workflowCancelResponse = () => Response.json({ ok: true })
+
+/**
+ * 409: no pause takes this answer (a different answer to the pause, or no pending request
+ * matches); retrying it cannot succeed. 503: the answer is recorded but the pause's hook never
+ * opened in time; retrying the same answer is safe.
+ */
+export const workflowHitlResumeErrorResponse = (
+  error: WorkflowHitlAnswerRefused | WorkflowHitlHookPending
+) =>
+  Response.json(
+    { error: error.message },
+    { status: Predicate.isTagged(error, 'WorkflowHitlAnswerRefused') ? 409 : 503 }
+  )

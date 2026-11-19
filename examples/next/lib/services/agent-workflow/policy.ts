@@ -14,3 +14,7 @@ export const childAdmissionWaitMs = 60_000
 export const maxChildObservationReads = 32
 
 export const childObservationDelayMs = (attempt: number) => [1000, 5000, 15000][attempt] ?? 30_000
+
+// Delivered HITL answers kept on the registry row: an identical retry within this many pauses is
+// reported as delivered; an older one is refused.
+export const maxHitlAnsweredPauses = 16

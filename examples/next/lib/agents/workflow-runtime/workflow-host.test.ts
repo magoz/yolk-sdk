@@ -10,7 +10,11 @@ import {
   AgentUsage,
   AssistantAgentMessage,
   AssistantTextPart,
+  HitlRequest,
+  HitlResponse,
   HostToolCallPart,
+  InputDescriptor,
+  InputRequest,
   InputResponse,
   ToolCall,
   ToolResult,
@@ -18,8 +22,7 @@ import {
   UserMessage,
   ToolApprovalPolicy,
   ToolApprovalResponse,
-  type InputToolHandler,
-  type HitlResponse
+  type InputToolHandler
 } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
@@ -45,8 +48,10 @@ import {
 import {
   emptyWorkflowRegistry,
   transitionWorkflowRegistry,
-  WorkflowRegistryError,
-  type WorkflowRegistry
+  WorkflowHitlAnswer,
+  WorkflowHitlPause,
+  WorkflowRegistry,
+  WorkflowRegistryError
 } from '@/lib/services/agent-workflow/registry'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { resumeWorkflowHitlAnswer } from '@/lib/services/agent-workflow/hitl-resume'
@@ -56,7 +61,7 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 import { reportWarning } from '@/lib/services/telemetry/report-warning'
 import { admitTelemetryLogContext } from '@/lib/services/telemetry/telemetry-context'
 import type { makeAgentTextRuntime } from './text-response'
-import { runAgentWorkflow } from './run-agent-workflow'
+import { acceptWorkflowHitlResponseStep, runAgentWorkflow } from './run-agent-workflow'
 import { readChildWorkflowStep } from './workflow-child-steps'
 
 type CapturedLogEntry = {
@@ -230,6 +235,8 @@ let hitlEntered = latch()
 let hookGate: ReturnType<typeof latch> | undefined
 
 let hookMisses = 0
+
+let failDeliver = 0
 
 let sleepers: Array<() => void> = []
 
@@ -505,6 +512,7 @@ beforeEach(() => {
   hitlEntered = latch()
   hookGate = undefined
   hookMisses = 0
+  failDeliver = 0
   sleepers = []
   sleepDurations = []
   autoSleep = false
@@ -587,6 +595,12 @@ beforeEach(() => {
             new WorkflowRegistryError({ message: 'Attachment response unavailable' })
           )
 
+        if (command.type === 'deliver' && failDeliver > 0) {
+          failDeliver -= 1
+
+          return yield* Effect.fail(new WorkflowRegistryError({ message: 'Write unavailable' }))
+        }
+
         if (command.type === 'complete') {
           completionAttempts += 1
 
@@ -641,6 +655,15 @@ const childId = (parent: string) => {
   return id
 }
 
+const nickname = (id: string, data: string) =>
+  InputResponse.make({
+    requestId: `input:nickname:${id}`,
+    toolCallId: id,
+    outcome: 'submitted',
+    source: 'user',
+    data
+  })
+
 /** The hook token of the run's current pause, as the tool step recorded it. */
 const pauseToken = (runId: string) => {
   const token = registries.get(runId)?.state.hitlPause?.hookToken
@@ -651,12 +674,12 @@ const pauseToken = (runId: string) => {
 }
 
 /** The resume route's record-then-resume program, against the fake store and platform. */
-const answer = (runId: string, response: HitlResponse) =>
+const answer = (runId: string, response: HitlResponse, tailIndex = 0) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const ownership = yield* decodeWorkflowOwnership({ runId, userId: 'owner' })
 
-      return yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex: 0 })
+      return yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex })
     }).pipe(
       Effect.result,
       Effect.provide(Layer.merge(AgentWorkflowStore.layer, VercelWorkflows.layer))
@@ -866,35 +889,29 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     }
   )
 
-  it('refuses a late duplicate answer to pause 1 so it cannot answer pause 2', async () => {
+  it('reports a late duplicate of pause 1 as delivered and refuses other late answers to it', async () => {
     parentInputCall = true
     siblingInputCall = true
     const parent = await launch()
     await hitlEntered.promise
     const firstToken = pauseToken(parent)
 
-    const response = (id: string, data: string) =>
-      InputResponse.make({
-        requestId: `input:nickname:${id}`,
-        toolCallId: id,
-        outcome: 'submitted',
-        source: 'user',
-        data
-      })
-
     hitlEntered = latch()
-    expect(Result.isSuccess(await answer(parent, response('nick-call', 'Ada')))).toBe(true)
+    expect(Result.isSuccess(await answer(parent, nickname('nick-call', 'Ada'), 7))).toBe(true)
     await hitlEntered.promise
     expect(pauseToken(parent)).not.toBe(firstToken)
 
-    // Both reach the route while pause 2 waits: the duplicate first, the real answer behind it.
-    const [duplicate, sibling] = await Promise.all([
-      answer(parent, response('nick-call', 'Ada')),
-      answer(parent, response('nick-sibling', 'Grace'))
+    // All reach the route while pause 2 waits; the real answer to pause 2 comes last.
+    const [duplicate, overwrite, sibling] = await Promise.all([
+      answer(parent, nickname('nick-call', 'Ada'), 20),
+      answer(parent, nickname('nick-call', 'Overwrite'), 20),
+      answer(parent, nickname('nick-sibling', 'Grace'), 20)
     ])
 
-    expect(duplicate).toMatchObject({ failure: { _tag: 'WorkflowHitlAnswerRefused' } })
-    expect(Result.isSuccess(sibling)).toBe(true)
+    // The identical retry is the delivered answer, replayed from its own stream tail.
+    expect(duplicate).toMatchObject({ success: { response: { data: 'Ada' }, tailIndex: 7 } })
+    expect(overwrite).toMatchObject({ failure: { _tag: 'WorkflowHitlAnswerRefused' } })
+    expect(sibling).toMatchObject({ success: { response: { data: 'Grace' }, tailIndex: 20 } })
     await world.settled(parent)
     expect(world.inspect(parent).status).toBe('completed')
 
@@ -906,6 +923,73 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       { toolCallId: 'nick-call', structuredContent: { data: 'Ada' } },
       { toolCallId: 'nick-sibling', structuredContent: { data: 'Grace' } }
     ])
+  })
+
+  it('lets a corrected answer win over a late duplicate of the invalid answer it replaces', async () => {
+    parentInputCall = true
+    const parent = await launch()
+    await hitlEntered.promise
+
+    hitlEntered = latch()
+    expect(Result.isSuccess(await answer(parent, nickname('nick-call', ''), 3))).toBe(true)
+    // The empty nickname is invalid: the same request pends again in pause 2.
+    await hitlEntered.promise
+
+    const [duplicate, corrected] = await Promise.all([
+      answer(parent, nickname('nick-call', ''), 9),
+      answer(parent, nickname('nick-call', 'Ada'), 9)
+    ])
+
+    expect(duplicate).toMatchObject({ success: { response: { data: '' }, tailIndex: 3 } })
+    expect(corrected).toMatchObject({ success: { response: { data: 'Ada' }, tailIndex: 9 } })
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(
+      requests.at(-1)?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+    ).toMatchObject([{ toolCallId: 'nick-call', structuredContent: { data: 'Ada' } }])
+  })
+
+  it('fails the delivery step on a transient mark failure so the platform retries it', async () => {
+    failDeliver = 1
+    const response = nickname('nick-call', 'Ada')
+
+    const request = InputRequest.make({
+      requestId: 'input:nickname:nick-call',
+      toolCallId: 'nick-call',
+      call: ToolCall.make({ id: 'nick-call', name: 'nickname', params: {} }),
+      input: InputDescriptor.make({ kind: 'nickname-field', title: 'Nickname' })
+    })
+
+    const probe = world.start(async () => {
+      registries.set(getWorkflowMetadata().workflowRunId, {
+        userId: 'owner',
+        state: WorkflowRegistry.make({
+          stopped: false,
+          children: [],
+          hitlPause: WorkflowHitlPause.make({
+            hookToken: 'pause-1',
+            requests: [request],
+            answer: WorkflowHitlAnswer.make({ response, tailIndex: 0 }),
+            delivered: false
+          })
+        })
+      })
+
+      return await world.runStep(acceptWorkflowHitlResponseStep, [
+        {
+          userId: 'owner',
+          hookToken: 'pause-1',
+          requests: [await Effect.runPromise(Schema.encodeEffect(HitlRequest)(request))],
+          response: await Effect.runPromise(Schema.encodeEffect(HitlResponse)(response))
+        }
+      ])
+    }, [])
+
+    await world.settled(probe.runId)
+    expect(await world.sdk.getRun(probe.runId).returnValue).toBe(true)
+    expect(world.inspect(probe.runId).stepAttempts.get('acceptWorkflowHitlResponseStep')).toBe(2)
+    // Marked: an identical retry after the run's last pause is reported, not resumed into a 503.
+    expect(registries.get(probe.runId)?.state.hitlPause?.delivered).toBe(true)
   })
 
   it('retries a recorded answer that arrives before its pause hook exists', async () => {

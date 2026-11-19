@@ -1,6 +1,12 @@
+// @vitest-environment node
 import { describe, expect, it } from '@effect/vitest'
 import {
+  WorkflowHitlAnswerRefused,
+  WorkflowHitlHookPending
+} from '@/lib/services/agent-workflow/hitl-resume'
+import {
   workflowCancelResponse,
+  workflowHitlResumeErrorResponse,
   workflowResumeResponse,
   workflowResumeStartIndexFromUrl,
   workflowResumeStartIndexAfterTail,
@@ -102,5 +108,22 @@ describe('Workflow run route model', () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ ok: true })
+  })
+
+  it('maps a refused HITL answer to 409 and an unopened pause hook to 503', async () => {
+    const refused = workflowHitlResumeErrorResponse(
+      new WorkflowHitlAnswerRefused({ message: 'No pending request accepts this response' })
+    )
+
+    const pending = workflowHitlResumeErrorResponse(
+      new WorkflowHitlHookPending({ message: 'Not ready. Retry.' })
+    )
+
+    expect(refused.status).toBe(409)
+    await expect(refused.json()).resolves.toEqual({
+      error: 'No pending request accepts this response'
+    })
+    expect(pending.status).toBe(503)
+    await expect(pending.json()).resolves.toEqual({ error: 'Not ready. Retry.' })
   })
 })
