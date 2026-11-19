@@ -17,10 +17,54 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - HITL resume tail headers describe the stream tail before the returned body.
 - `continuationLimit: 0` makes non-terminal responses fail without follow-up requests.
 - Durable helpers do not own route auth, run ownership, Workflow hook tokens, or HITL request matching.
-- A request id alone does not say which pause an answer is for: name the pause in the `endpoint`
-  you pass to the HITL resume helpers (for example `?pause=<eventId>`, the `eventId` of the
-  `AgentAwaitingInput` that asked). Continuation reads reuse that endpoint, so the tail route
-  ignores the parameter.
+- A request id alone does not say which pause an answer is for: pass the pause as `pause` to the
+  HITL resume helpers (the `eventId` of the latest `AgentAwaitingInput` that asked). They send it
+  as `?pause=<eventId>` on the POST only; continuation reads use `endpoint` as given. Track it with
+  `rememberHitlPause` (fold every event of every stream that reads the run: start, HITL resume,
+  replay) and read it with `hitlPauseFor` (below). A blank `pause` fails before the POST.
+- Endpoints the client rewrites (`startIndex` reads, the `pause` POST, the run id path) keep how
+  they were written: absolute (`https://host/path`), network-path (`//host/path`; it keeps the
+  host but not an explicit `:80` or userinfo) or `/path`. A
+  path-relative endpoint resolves against the root (`../run` becomes `run`), and the query is
+  re-serialized (`%20` becomes `+`), so put only values the route decodes as form data there.
+
+## Name the pause an answer is for
+
+`HitlPauses` (an Effect Schema: request id -> pause id) is pure, immutable state. `useAgentChat`
+keeps one for you (`state.hitlPauses`, passed to your transport as `request.pause`); without React:
+
+```ts
+import { Effect, Stream } from 'effect'
+import {
+  emptyHitlPauses,
+  hitlPauseFor,
+  rememberHitlPause,
+  streamAgentRunHitlResponseEventStreamUntilTerminal
+} from '@yolk-sdk/agent/client'
+import type { AgentEvent, HitlResponse } from '@yolk-sdk/agent/protocol'
+
+let pauses = emptyHitlPauses
+
+// Every event you read from the run (start, HITL resume, replay), in stream order.
+const remember = (event: AgentEvent) =>
+  Effect.sync(() => {
+    pauses = rememberHitlPause(pauses, event)
+  })
+
+const answer = (runId: string, response: HitlResponse) =>
+  streamAgentRunHitlResponseEventStreamUntilTerminal({
+    endpoint: `/api/agent/workflow/${encodeURIComponent(runId)}`,
+    hitlResponses: [response],
+    pause: hitlPauseFor(pauses, response)
+  }).pipe(Stream.tap(remember))
+```
+
+The latest pause wins per request: a request that pends again (after an invalid answer, or a
+provider reusing a call id in a later turn) moves to its new pause. Fold pauses you already saw
+too (never skip them by `eventId`): a replay from an earlier index re-applies the later pauses after
+the earlier ones, so it ends at the latest. A pause without an `eventId` names
+nothing: its requests forget the earlier pause, and their answers name none (the route refuses
+them rather than taking them for a stale pause). Start from `emptyHitlPauses` for each new run.
 
 ## Use it when
 
