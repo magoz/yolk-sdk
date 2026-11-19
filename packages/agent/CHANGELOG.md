@@ -1,5 +1,21 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.143
+
+### Minor Changes
+
+- 83e4a7b: Clients show the committed answer for each turn of a run in which a newer execution superseded an older one, not only the final turn (#322). When a non-final turn's older execution committed while a newer one streamed, `reduceAgentEvents`, `applyAgentEventToChatProjection` and the `useAgentChat` reducer kept the newer answer and its tool calls until reload, beside the calls the tool batch actually ran. At `AgentEnd` and `AgentAwaitingInput` they now replace it with the committed assistant message from the event's `messages` (the one an execution of that turn streamed, found by value), at the turn's place in the chat (before a user message that followed the turn), keeping each committed call's state; the uncommitted execution's calls no host event acted on are removed (from `toolRuns` too). A turn already showing the committed answer is unchanged, and a later turn's output is never taken or removed by it. Until that event, the newer answer stays shown.
+
+  - `AgentExecution` has an optional `answer` (its `AssistantMessage`); the shown execution of such a turn keeps `calls`, `output` and `answer` after it settles, and a superseded one keeps `answer`, until its run's terminal event. A host event acknowledges a kept execution's call only while its turn is the run's latest.
+  - `AgentChatExecutionOutput` has new `After` and `Until` variants (where an execution's turn starts and ends in the chat); exhaustive matches on it need cases. An execution's events never change a chat message another execution keeps for reconciling, even through a reused call id: its output goes to a message of its own.
+  - An `AssistantMessage` no longer deletes a tool part a host event acted on (running, completed, pending approval or question) that it does not name: a tool batch that ran another execution's call while this one streamed placed it in its message.
+  - Limits (vercel-workflows README, "One step, several executions"): a turn retried after a user message (including a promoted steer with a new `eventId` between its two executions) shows both answers; a client that connects mid-turn sees the earlier execution as plain events; the committed answer is matched by value across the run, so an uncommitted answer equal to another committed message counts as committed; call ids reused across turns can let a later turn's events update an earlier, non-reconciled turn's call.
+
+### Patch Changes
+
+- bfbc4e9: `@yolk-sdk/agent/tools`: the tool ledger keeps a code mode result's staged plan when the result is over `maxResultBytes`. `toolLedgerResult` now keeps `structuredContent.codemode.plan` (`{ id, digest, count, reviewToolName }`, with `ok` and any kept `inputRequired`) and its plan notice as uncut text, only when the text ends with that notice where code mode writes it (last, or followed by the kept input-required notice). Before, it dropped the plan and cut its notice off the end of the text, so a replayed script (a redelivered step) no longer named the plan id and digest `review_plan` needs. Another tool's result with that shape but no notice keeps neither (the ledger never writes the notice itself). The notice text now comes from the new `stagedToolPlanNotice` export, and the plan shape from the new `StagedToolPlanRef` Schema export (`@yolk-sdk/codemode`'s `CodeModeStagedPlan` is now its type); code mode uses both, and its result text is unchanged. Ledger entries recorded before this fix are not repaired: their stored copies stay as they were recorded.
+  - @yolk-sdk/conformance@0.1.0-canary.143
+
 ## 0.1.0-canary.142
 
 ### Patch Changes
