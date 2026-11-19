@@ -87,17 +87,25 @@
   this server's `InputRequiredResult` (the remote forms, typed again with the SDK's
   `isSpecType.ElicitRequestFormParams`) under a `requestState` signed by `forwardCodec` (the
   approvals key; binding adds `\0forward`; signed, not encrypted), holding tool, arguments digest,
-  the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was first forwarded),
-  the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. Only a verified, unexpired
-  state for the same call whose answers fit every form (`toMcpInputResponses`) resumes; otherwise
-  the server asks again under the same `roundId` and expiry (never a fresh round: that would open a
-  second resume of one remote pause). A state that does not verify answers `forwardStaleMessage`
-  without calling the remote tool; on an `approval` tool it falls to the approval round, which asks
-  again. With `approval`, the approval round runs first and the forward rounds carry its
-  `approvalId`. `Resume` re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only `Initial` with
-  `clientElicitation: false`. Once-only resumption is the host's (key on `roundId`). Approval
-  `McpServerPrompt.run` and `McpApprovalRound.Run` answer `McpServerCallOutcome` (a result or an
-  `InputRequiredResult`). Tests: `test/server/forward.test.ts`.
+  the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was forwarded),
+  the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. A new pause's `roundId`
+  (`newRoundId`) is the digest of its origin (the `approvalId`, or the `roundId` it resumed) and
+  the pause (forms, remote `requestState`, binding; not `tool`), hashed as canonical JSON (keys
+  sorted at every level, so a host's store may reorder them), so a host that answers a retried
+  accept or `Resume` with its stored outcome forwards that pause again in the same round. A replay
+  is accepted only while its origin (the approval or round state) is still valid, and the replayed
+  pause then gets a fresh expiry. A first round without approval has no once-only key and gets a
+  random one. Only a verified, unexpired state for the same call whose answers fit every form
+  (`toMcpInputResponses`) resumes; otherwise the server asks again under the same `roundId` and
+  expiry. Never a fresh round for one remote pause: that would open a second resume of it (issue
+  #297). A state that does not verify answers `forwardStaleMessage` without calling the remote
+  tool; on an `approval` tool it falls to the approval round, which asks again. With `approval`,
+  the approval round runs first and the forward rounds carry its `approvalId`. `Resume`
+  re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only
+  `Initial` with `clientElicitation: false`. Once-only resumption is the host's (key on
+  `roundId`). Approval `McpServerPrompt.run` and `McpApprovalRound.Run` answer
+  `McpServerCallOutcome` (a result or an `InputRequiredResult`). Tests:
+  `test/server/forward.test.ts`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
 - Typed results (ADR 0013): `mcpToolToToolDef` declares `mcpToolOutputSchema` as `ToolDef.outputSchema` (never sent to providers): `{ value, files }`, `value` the server's plain-JSON-object `outputSchema` (its `$defs`/`definitions` hoisted to the root; a colliding or `$id` schema, or any other value, leaves it unknown), `files` `Array<FileRef | FileUnavailable>` with the protocol's `toolFileJsonSchemaDefinitions`. `callRemoteMcpServerTool`, `callLocalMcpServerTool` and resumable calls return `mcpToolResult`: `value` is `structuredContent`, else the text of `text` blocks and embedded text resources in order, parsed once when it is one JSON object or array (`mcpTextValue`), else the text, `null` without text (`resource_link` blocks are references and never enter it); blobs, images and audio are captured as file fields through `CallMcpServerToolInput.fileCapture` when given, else the ambient `ToolFileCapture` (calls outside `resolveTools`, such as HITL resumes, need the option); `ToolResult.files` comes from `toolOutputFiles`. Model content: a result without file blocks is byte-identical to `toolCallResultToToolResult`; otherwise each block in order, images and audio as the server sent them (never renamed or MIME-normalized) followed by their `File` part once stored. Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder` (`McpToolOutput`; `resolveTools` requires a decoder whenever `def.outputSchema` is set). The local client (`callLocalMcpServerTool`, `withLocalSession`) keeps one stdio session but awaits each answer before the next request: `initialize` and `tools/list` first, the listing decoded and the validator compiled, and only then `tools/call`, so nothing that fails before dispatch fails after a write ran. An `initialize` error, or a listed `outputSchema` that is not a usable MCP output schema (`isSpecType.Tool` over the tool's name, a fixed object input schema and the listed `outputSchema`; the input schema is never validated) or does not compile, fails before any `tools/call` (`validation`, the remote message). A broken session before the listing's answer (a stdout line that is no JSON-RPC response, an early end) fails the call with no `tools/call` sent. A listing answered with an error or an undecodable result, or one that lacks the tool (first page only), never fails the call: it runs without output validation and logs a value-free warning. The test fake reads stdin on its own detached fiber, so `sent` also holds requests written just before the client failed. Only a real `structuredContent` mismatch against a usable schema fails after the call, with the remote rules (`assertStructuredOutput`). Tests drive a scripted stdio fake that answers what it reads on stdin and assert the requests sent (`test/client/client.test.ts`, "local calls list before they call"). Error results stay `toolCallResultToToolResult`. Tests: `test/client/typed-result.test.ts`, `test/client/client.test.ts` (local validation), `test/client/elicitation.test.ts` (resumed blobs with and without `fileCapture`).
