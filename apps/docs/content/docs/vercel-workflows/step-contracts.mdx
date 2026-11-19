@@ -179,12 +179,17 @@ with `VercelAgentWorkflowRunResult.Completed({ turns, state })` and siblings, or
 | `ModelStepFailed`     | model step exhausted retries                              |
 | `ToolBatchStepFailed` | tool batch step exhausted retries                         |
 | `AwaitInputFailed`    | final HITL hook/resume failure; unlike a successful pause |
-| `CloseStreamFailed`   | terminal model step succeeded but close failed            |
+| `CloseStreamFailed`   | terminal model step succeeded but every close failed      |
 | `MaxTurnsExceeded`    | loop exceeded `maxTurns`                                  |
 
 ## Retry policy
 
-Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Opt into retries per callback:
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`), except for `closeStream`, which
+defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`). Closing a Workflow stream is idempotent on
+Vercel, so a close the platform applied before its step failed (the function died, or the step's
+completion was lost) completes the run on retry instead of reporting `CloseStreamFailed` for a stream
+the client saw end. Keep `closeStream` safe to repeat, or pass `closeStreamRetry: noWorkflowStepRetry`
+to close once. Opt into retries per callback:
 
 ```ts
 await runVercelAgentWorkflow({
@@ -238,4 +243,6 @@ callback. `CommitThenWriteTerminalEventResult` still carries `commitError` and `
 
 `runVercelAgentWorkflow` invokes `closeStream` only after a model step returns `done: true`.
 Failure paths call `writeError` and return without invoking `closeStream`; `writeError` must write
-the safe final error and attempt to close that path.
+the safe final error and attempt to close that path. After `CloseStreamFailed` the stream may
+already carry the committed `AgentEnd` (a close can apply while its step still fails), so a
+`writeError` that records a failure should not replace a committed completion.

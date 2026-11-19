@@ -13,8 +13,8 @@ Workflow 5 captures Node `URL` intrinsics when the module loads.
 ## Behavioral platform emulator
 
 `@yolk-sdk/vercel-workflows/testing` exports `TestWorkflowWorld`. Use it to exercise host code
-against run lifecycle, append-only stream replay, close-once HTTP 409-style conflicts, step retry
-attempts, hooks/resume, cancellation, and the SDK seam consumed by `VercelWorkflows.layerFromSdk`.
+against run lifecycle, append-only stream replay, HTTP 409-style conflicts for writes after close
+(closing again succeeds, as on Vercel), step retry attempts, hooks/resume, cancellation, and the SDK seam consumed by `VercelWorkflows.layerFromSdk`.
 
 This is a test fragment; initialize one world per test and mock the ambient module before importing
 the host Workflow under test:
@@ -135,10 +135,10 @@ Cover:
 - One ordered tool-result message per tool call.
 - HITL reruns the same tool batch with accumulated responses.
 - Event sequence advances across model, tool, and HITL resume.
-- Default retries are disabled.
+- Default retries are disabled, except the close step's (`defaultCloseStreamRetry`).
 - Retried streamed steps have de-dupe-ready event ids.
 - Terminal write happens only after durable commit succeeds.
-- `AgentEnd` closes exactly once through `closeStream`.
+- `AgentEnd` closes through `closeStream`, and only there; a retried close re-closes harmlessly.
 - Failure paths use `writeError`, not `closeStream`; a `writeError` rejection preserves the original
   structured failure result.
 - `AgentAwaitingInput` does not close before resume; resumed execution can append and eventually

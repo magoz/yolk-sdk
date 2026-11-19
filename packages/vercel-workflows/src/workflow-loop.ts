@@ -153,12 +153,21 @@ export type VercelAgentWorkflowLoopConfig = {
   readonly modelStepRetry?: VercelAgentWorkflowStepRetryPolicy
   readonly toolBatchStepRetry?: VercelAgentWorkflowStepRetryPolicy
   readonly awaitInputRetry?: VercelAgentWorkflowStepRetryPolicy
+  /** Defaults to `defaultCloseStreamRetry`; every other step defaults to `noWorkflowStepRetry`. */
   readonly closeStreamRetry?: VercelAgentWorkflowStepRetryPolicy
 }
 
 export const defaultMaxWorkflowTurns = 500
 
 export const noWorkflowStepRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 1 }
+
+/**
+ * The close step retries by default: closing a Vercel Workflow stream is idempotent, so a retry
+ * cannot write anything, and a close the platform applied before its step failed (the function
+ * died, or the step's completion was lost) then completes the run instead of reporting
+ * `CloseStreamFailed` for a stream the client saw end cleanly.
+ */
+export const defaultCloseStreamRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 3 }
 
 export const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
   promise.then(
@@ -263,7 +272,9 @@ export async function runVercelAgentWorkflow(
         eventSequence: modelResult.value.eventSequence ?? state.eventSequence
       }
 
-      const closeResult = await settleWorkflowStep(retryWorkflowStep(closeStream, closeStreamRetry))
+      const closeResult = await settleWorkflowStep(
+        retryWorkflowStep(closeStream, closeStreamRetry ?? defaultCloseStreamRetry)
+      )
 
       if (Predicate.isTagged(closeResult, 'Failure')) {
         await writeErrorSafely(writeError, closeResult.error)

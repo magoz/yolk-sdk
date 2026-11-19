@@ -8,6 +8,13 @@ import {
   TestWorkflowWorld,
   testWorkflowModule
 } from '../src/testing/index.ts'
+import {
+  runVercelAgentWorkflow,
+  type VercelAgentWorkflowLoopConfig,
+  type VercelAgentWorkflowModelStepResult,
+  type VercelAgentWorkflowRunResult,
+  type VercelAgentWorkflowStepRetryPolicy
+} from '../src/workflow.ts'
 
 const collect = async <T>(stream: ReadableStream<T>, count: number): Promise<Array<T>> => {
   const reader = stream.getReader()
@@ -211,27 +218,139 @@ describe('TestWorkflowWorld durable streams', () => {
     expect(world.inspect(runId).streamCloseCount).toBe(1)
   })
 
-  it('rejects a second close with the same conflict shape', async () => {
+  // The Vercel world's close is idempotent (`@workflow/world-vercel` `streamer.js` `close`): only
+  // writes after close conflict.
+  it('accepts a second close like the platform, and still rejects writes after it', async () => {
     const world = new TestWorkflowWorld()
-    let closeError: unknown
+    let writeError: unknown
 
     const { runId } = world.start(async () => {
       const first = TestWorkflowWorld.getWritable<string>().getWriter()
+      await first.write('before-close')
       await first.close()
 
       const second = TestWorkflowWorld.getWritable<string>().getWriter()
+      await second.close()
+
+      const late = TestWorkflowWorld.getWritable<string>().getWriter()
 
       try {
-        await second.close()
+        await late.write('after-close')
       } catch (error) {
-        closeError = error
+        writeError = error
       }
     }, [])
 
     await world.settled(runId)
 
-    expect(closeError).toBeInstanceOf(TestWorkflowStreamConflictError)
-    expect(world.inspect(runId).streamCloseCount).toBe(2)
+    expect(world.status(runId)).toBe('completed')
+    expect(writeError).toBeInstanceOf(TestWorkflowStreamConflictError)
+    expect(world.inspect(runId)).toMatchObject({
+      chunks: ['before-close'],
+      streamClosed: true,
+      streamCloseCount: 2,
+      writeAfterCloseAttempts: 1
+    })
+    expect(await drain(world.getReadable(runId))).toEqual(['before-close'])
+  })
+})
+
+describe('TestWorkflowWorld with runVercelAgentWorkflow close', () => {
+  const runClosingWorkflow = (input: {
+    readonly world: TestWorkflowWorld
+    readonly closeStreamRetry?: VercelAgentWorkflowStepRetryPolicy
+  }) => {
+    const { world, closeStreamRetry } = input
+    let closeExecutions = 0
+    let errorStepRan = 0
+    let result: VercelAgentWorkflowRunResult | undefined
+
+    const modelStep = Object.assign(
+      async (): Promise<VercelAgentWorkflowModelStepResult> => {
+        const writer = TestWorkflowWorld.getWritable<string>().getWriter()
+        await writer.write('AgentEnd')
+        writer.releaseLock()
+
+        return { done: true, messages: [], createdMessages: [], toolCalls: [], usage: {}, turn: 1 }
+      },
+      { maxRetries: 0 }
+    )
+
+    // The platform applies the first execution's close, then the step fails on its last
+    // attempt (the function died, or its completion was lost).
+    const closeStep = Object.assign(
+      async () => {
+        closeExecutions += 1
+        await TestWorkflowWorld.getWritable<string>().getWriter().close()
+
+        if (closeExecutions === 1) throw new Error('close step completion lost')
+      },
+      { maxRetries: 0 }
+    )
+
+    // A host commits its failure state here before writing AgentError (README "Terminal barriers").
+    const errorStep = Object.assign(
+      async () => {
+        errorStepRan += 1
+        const writer = TestWorkflowWorld.getWritable<string>().getWriter()
+
+        try {
+          await writer.write('AgentError')
+        } finally {
+          await writer.close()
+        }
+      },
+      { maxRetries: 0 }
+    )
+
+    const config: VercelAgentWorkflowLoopConfig = {
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: world.step(modelStep, 'model'),
+      runToolBatchStep: () => Promise.reject(new Error('no tools')),
+      closeStream: world.step(closeStep, 'close'),
+      writeError: world.step(errorStep, 'writeError')
+    }
+
+    const { runId } = world.start(async () => {
+      result = await runVercelAgentWorkflow(
+        closeStreamRetry === undefined ? config : { ...config, closeStreamRetry }
+      )
+    }, [])
+
+    return {
+      runId,
+      observed: () => ({ result: result?._tag, closeExecutions, errorStepRan })
+    }
+  }
+
+  // #303: a retried close step re-closes the stream; Vercel accepts it, so the run completes.
+  it('completes when an opted-in close retry re-closes the stream', async () => {
+    const world = new TestWorkflowWorld()
+    const run = runClosingWorkflow({ world, closeStreamRetry: { maxAttempts: 2 } })
+    await world.settled(run.runId)
+
+    expect(run.observed()).toEqual({ result: 'Completed', closeExecutions: 2, errorStepRan: 0 })
+    expect(world.inspect(run.runId)).toMatchObject({
+      chunks: ['AgentEnd'],
+      streamClosed: true,
+      streamCloseCount: 2,
+      writeAfterCloseAttempts: 0
+    })
+  })
+
+  // #302: a clean close whose step then failed is retried by default instead of reported as
+  // CloseStreamFailed and written as a failure.
+  it('retries the close step by default, so a close applied before its step failed completes', async () => {
+    const world = new TestWorkflowWorld()
+    const run = runClosingWorkflow({ world })
+    await world.settled(run.runId)
+
+    expect(run.observed()).toEqual({ result: 'Completed', closeExecutions: 2, errorStepRan: 0 })
+    expect(world.inspect(run.runId)).toMatchObject({
+      chunks: ['AgentEnd'],
+      streamClosed: true,
+      writeAfterCloseAttempts: 0
+    })
   })
 })
 

@@ -72,11 +72,11 @@ queues, hooks, or stream storage.
 ## Test Workflow behavior
 
 `@yolk-sdk/vercel-workflows/testing` provides `TestWorkflowWorld`, a behavioral emulator for host
-tests. It covers run lifecycle, append-only streams with close-once conflicts, step retries and
-attempt metadata, hooks/resume, cancellation, and the SDK seam used by
-`VercelWorkflows.layerFromSdk`. Step errors cross the platform boundary as in a deployment: each is
-stored with the installed `workflow` runtime's step-error serializer and the workflow body sees only
-the value read back (error tags, prototypes and custom fields are lost; `cause` survives). A
+tests. It covers run lifecycle, append-only streams (a write after close conflicts; closing again
+succeeds, as on Vercel), step retries and attempt metadata, hooks/resume, cancellation, and the SDK
+seam used by `VercelWorkflows.layerFromSdk`. Step errors cross the platform boundary as in a
+deployment: each is stored with the installed `workflow` runtime's step-error serializer and the
+workflow body sees only the value read back (error tags, prototypes and custom fields are lost; `cause` survives). A
 FatalError (named `FatalError`, or with `fatal: true`; an `AbortError` is promoted to one) is never
 retried, an exhausted step fails with the platform's FatalError wrapping the last error, and a
 thrown value the platform cannot store (a class instance anywhere in its `cause` chain) is
@@ -242,8 +242,16 @@ tokens that the resume side can reconstruct or store.
 
 ## Retry policy
 
-Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because
-streamed retries can duplicate chunks unless host/client de-dupe is ready.
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`) for model, tool-batch and
+await-input steps. Their retries are opt-in because streamed retries can duplicate chunks unless
+host/client de-dupe is ready.
+
+The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`): closing a Workflow stream
+is idempotent on Vercel, so a retry writes nothing, and a close the platform applied before its step
+failed (the function died, or the step's completion was lost) completes the run instead of
+reporting `CloseStreamFailed` for a stream the client saw end. Keep `closeStream` safe to repeat;
+pass `closeStreamRetry: noWorkflowStepRetry` to close once.
+
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
 
@@ -342,7 +350,9 @@ Existing `(error: unknown) => …` callbacks remain assignable.
 `runVercelAgentWorkflow` calls `closeStream` only after `runModelStep` returns `done: true`. On model,
 tool, await-input, or max-turn failure it calls `writeError` best-effort and returns without calling
 `closeStream`; `writeError` must write a safe run-final error and attempt to close that failure path.
-Never close on resumable `AgentAwaitingInput`.
+Never close on resumable `AgentAwaitingInput`. `CloseStreamFailed` means every close attempt failed,
+but a close can be applied while its step still fails: the stream may already carry the committed
+`AgentEnd`, so a `writeError` that records a failure should not replace a committed completion.
 
 ## Host responsibilities
 

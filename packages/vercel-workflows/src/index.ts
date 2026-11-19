@@ -2,6 +2,7 @@ export {
   commitThenWriteTerminalEvent,
   DurableAgentEventWriteError,
   durableAgentEventId,
+  defaultCloseStreamRetry,
   defaultMaxWorkflowTurns,
   makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
