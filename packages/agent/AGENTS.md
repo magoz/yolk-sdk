@@ -190,6 +190,14 @@ See `docs/adr/0002-code-mode.md`. `@yolk-sdk/agent` owns the contract only; it n
 - `ToolPlanOutcome`, `ToolPlanCallOutcome`, `ToolPlanPreview`, and `ToolPlanPreviewPage` are Effect Schemas (types derived). `previewStoredToolPlan` loads through `plans.store` with scope, integrity, and digest checks and reports `claimed`; `toolPlanKeyPages` pages keys for `previewToolPlan`. Plan previews come from the tool's `changePreview` (see Tool change previews); `ok` entries keep `params` with `preview` or `previewError`, `status: 'error'` is only for keys outside the plan or tools no longer stageable.
 - Tests: `test/tools/plan.test.ts`.
 
+## Input-required tool calls
+
+- ADR `docs/adr/0014-input-required-tool-calls.md`. Files: `protocol/input-required.ts` (`makeInputRequiredToolResult`, `toolInputRequired`, `ToolInputRequiredRef`, `mergeInputRequiredRefs`, `inputRequiredNotice`), `tools/input-review.ts` (`makeInputReviewTool`, the `InputReviewHost` port, `InputPauseResolution`, `InputReviewOutcome`).
+- A tool never pauses: a call a remote system paused stores the pause host-side and returns an error result whose `structuredContent` is `{ code: 'input_required', inputRequired: { reviewToolName, pauseIds } }`. Keep it an error result: output checks skip it, the ledger records it (the call never re-runs), code mode rejects the nested call with that `code`, and plan apply reports it.
+- Plan apply: `input_required` is a `ToolPlanCallStatus` with the call's `inputRequired` ref; it never sets `stopped`. `ToolPlanCallCounts.input_required` is optional (outcomes recorded before it decode). Listings classify ledger entries through `ledgerCallFields`, the same `resultAttempt` the apply uses.
+- `makeInputReviewTool` is a raw interaction registration (renderer `input_review`, action `submit`): call validation and admission go through the host (`load` for present, in-scope, waiting pauses; `validateAnswer` per answer); the action resumes pauses in order through `host.resume`, which must claim each pause before sending and never send after a claim; `unknownOutcome` lists `host.recorded` and reports a proven outcome only in `replay` with every pause resolved. Pauses come from host storage only, never from model params.
+- Tests: `test/tools/input-review.test.ts`, `test/tools/plan.test.ts`.
+
 ## Tool change previews
 
 - ADR `docs/adr/0006-tool-change-previews.md`. Schemas (`ToolChangePreview`, `ToolFieldChange` variants `Value`/`Text`/`Set`/`List`/`Structured`, cut markers, `ToolChangePreviewError`) and the `ToolApprovalPreviewer` loop seam live in `protocol/change-preview.ts` (loop and `ToolApprovalRequest` need them; tools re-exports them). Bounding, signature, grouping, and the internal runner live in `tools/change-preview.ts`.

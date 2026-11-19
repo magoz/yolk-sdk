@@ -122,6 +122,13 @@ executor decorators). With a tool ledger, a redelivered review (receipt `started
 apply's ledger entry for the real outcome; listings never call a call `not_run` while an earlier
 execution may still reach it.
 
+Input-required tool calls ([ADR 0014](../docs/adr/0014-input-required-tool-calls.md)) reuse it
+too: a call a remote system paused for input (an MCP server's form) stores the pause host-side and
+returns `makeInputRequiredToolResult`; the `review_input` interaction (`makeInputReviewTool`) loads
+the stored pauses through the host's `InputReviewHost`, admits one answer per pause, and its action
+resumes each pause once (the host claims it before sending). Code mode and plan apply report such
+calls (`input_required`) instead of failing them.
+
 Call validators and `validateAction` may read host storage (`InteractionCallValidator`); an
 unavailable store fails with `InteractionHostError`, never a verdict: `prepareToolBatch` fails the
 batch with `ToolError` `unavailable` (retry the step), admission answers `InteractionAdmissionError`

@@ -14,6 +14,7 @@ import {
   ToolFile,
   toolOutputDecoder,
   ToolResult,
+  makeInputRequiredToolResult,
   type ToolOutputSchema
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -1452,7 +1453,26 @@ describe('typed results and files in scripts', () => {
       )
   })
 
+  // A typed tool that paused for input (ADR 0014): its result is an error carrying the marker.
+  const pausing = makeTool({
+    name: 'pausing',
+    description: 'Pauses for input',
+    parameters: QueryParams,
+    output: AttachmentOutput,
+    access: 'write',
+    execute: ({ call, params }) =>
+      Effect.succeed(
+        makeInputRequiredToolResult({
+          toolCallId: call.id,
+          content: `The server asks to confirm ${params.query}.`,
+          reviewToolName: 'review_input',
+          pauseIds: [`pause-${params.query}`]
+        })
+      )
+  })
+
   const tools = [
+    pausing,
     typedFile,
     typedList,
     ownFiles,
@@ -1586,6 +1606,29 @@ describe('typed results and files in scripts', () => {
         'tools.raw_excess: returned an invalid result',
         'tools.raw_bytes: returned an invalid result'
       ])
+    })
+  )
+
+  it.live('rejects calls that paused for input and reports them even when caught', () =>
+    Effect.gen(function* () {
+      const result = yield* runWith(
+        `const codes = []
+         for (const query of ['a', 'b']) {
+           try { await tools.pausing({ query }) } catch (error) { codes.push(error.code) }
+         }
+         return codes`,
+        undefined
+      )
+
+      expect(text(result.content)).toContain('["input_required","input_required"]')
+      expect(result.isError).toBeUndefined()
+      expect(result.structuredContent).toMatchObject({
+        codemode: {
+          ok: true,
+          inputRequired: [{ reviewToolName: 'review_input', pauseIds: ['pause-a', 'pause-b'] }]
+        }
+      })
+      expect(text(result.content)).toContain('review_input({"pauseIds":["pause-a","pause-b"]})')
     })
   )
 

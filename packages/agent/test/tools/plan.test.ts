@@ -14,6 +14,7 @@ import {
   ToolResult,
   interactionRequestId,
   isCodeModeCallable,
+  makeInputRequiredToolResult,
   isToolStageable,
   providerToolDefs,
   type InteractionHost,
@@ -132,6 +133,14 @@ const linkTool = (applied: Applied, options: LinkToolOptions = {}) =>
 
         applied.push({ resource: params.resource, key: idempotencyKey })
 
+        if (params.resource === options.pauseOn)
+          return makeInputRequiredToolResult({
+            toolCallId: call.id,
+            content: `The CMS asks to confirm linking ${params.resource}.`,
+            reviewToolName: 'review_input',
+            pauseIds: [`pause-${params.resource}`]
+          })
+
         return yield* Effect.succeed(
           params.resource === options.failOn
             ? ToolResult.make({
@@ -209,6 +218,7 @@ type LinkToolOptions = {
   stageOnly?: boolean
   readResources?: boolean
   failOn?: string
+  pauseOn?: string
   dieOn?: string
   prechecks?: PrecheckTracker
   gate?: Gate
@@ -271,6 +281,7 @@ type SetupOptions = {
   readonly maxArgsBytes?: number
   readonly planId?: ToolPlanOptions['planId']
   readonly failOn?: string
+  readonly pauseOn?: string
   readonly dieOn?: string
   readonly settlement?: 'fail'
   readonly outage?: Outage
@@ -305,6 +316,8 @@ const setup = (options: SetupOptions = {}) =>
     if (options.readResources === true) linkOptions.readResources = true
 
     if (options.failOn !== undefined) linkOptions.failOn = options.failOn
+
+    if (options.pauseOn !== undefined) linkOptions.pauseOn = options.pauseOn
 
     if (options.dieOn !== undefined) linkOptions.dieOn = options.dieOn
 
@@ -1117,6 +1130,53 @@ describe('plan review', () => {
     })
   )
 
+  it.effect('reports a call that paused for input, and goes on past it under stop', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ pauseOn: 'r2', ledger: true })
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const keys = plan.calls.map(call => call.key)
+      const { result } = yield* reviewAndApply(env, plan, keys)
+      const outcome = yield* outcomeOf(result)
+
+      expect(outcome.outcome).toBe('completed')
+      expect(outcome.result?.calls.map(call => call.status)).toEqual([
+        'applied',
+        'input_required',
+        'applied'
+      ])
+      expect(outcome.result?.calls[1]?.inputRequired).toEqual({
+        reviewToolName: 'review_input',
+        pauseIds: ['pause-r2']
+      })
+      expect(outcome.result?.counts).toEqual({
+        applied: 2,
+        failed: 0,
+        skipped: 0,
+        not_run: 0,
+        unknown: 0,
+        input_required: 1
+      })
+      // The paused call ran (and paused); the next call still ran.
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+      expect(textOf(result)).toContain('1 waiting for input')
+      expect(textOf(result)).toContain('review_input({"pauseIds":["pause-r2"]})')
+    })
+  )
+
+  it.effect('decodes outcomes recorded before input_required existed', () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeUnknownEffect(ToolPlanOutcome)({
+        type: 'tool_plan_outcome',
+        planId: 'plan_1',
+        state: 'applied',
+        calls: [{ key: 'plan_1/s1', toolName: 'link_curriculum', status: 'applied' }],
+        counts: { applied: 1, failed: 0, skipped: 0, not_run: 0, unknown: 0 }
+      })
+
+      expect(decoded.counts.input_required).toBeUndefined()
+    })
+  )
+
   it.effect('runs beforeCall first; a rejection fails the call without running it', () =>
     Effect.gen(function* () {
       const seen: Array<string> = []
@@ -1181,6 +1241,32 @@ describe('plan review', () => {
       ])
       expect(textOf(replayed)).toContain('It was not run again')
       expect(env.applied.map(item => item.resource)).toEqual(['r1'])
+    })
+  )
+
+  it.effect('lists a ledgered call that paused for input as input_required after a crash', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({ ledger: true, pauseOn: 'r1', dieOn: 'r2', settlement: 'fail' })
+      const plan = yield* stagedPlan(env, ['r1', 'r2'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      const replayed = yield* afterLeaseExpiry(env.toolSet.execute(call, { interaction: ref }))
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'input_required'],
+        ['script_1/s2', 'unknown']
+      ])
+      expect(outcome.result?.calls[0]?.inputRequired?.pauseIds).toEqual(['pause-r1'])
+      expect(textOf(replayed)).toContain('review_input({"pauseIds":["pause-r1"]})')
     })
   )
 

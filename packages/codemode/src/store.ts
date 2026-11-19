@@ -1,5 +1,6 @@
 import { Option } from 'effect'
 import * as Schema from 'effect/Schema'
+import type { ToolInputRequiredRef } from '@yolk-sdk/agent/protocol'
 import type { CodeModeStore, CodeModeStoreWrites } from './executor.ts'
 import { codeModeToolName } from './tool.ts'
 
@@ -20,6 +21,11 @@ export type CodeModeStructuredContent = {
     readonly interruptedCallsUnavailable?: true
     /** The staged tool plan a successful script saved (ADR 0005); nothing of it ran yet. */
     readonly plan?: CodeModeStagedPlan
+    /** Nested calls that paused for a person's input (ADR 0014), merged per review tool: they
+     * have not completed, whether or not the script caught their rejection. Finish them with
+     * `reviewToolName({ pauseIds })`.
+     */
+    readonly inputRequired?: ReadonlyArray<ToolInputRequiredRef>
   }
 }
 

@@ -16,7 +16,11 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   boundNestedToolCallArgs,
+  inputRequiredNotice,
   makeNestedToolCallRecorder,
+  mergeInputRequiredRefs,
+  toolInputRequired,
+  type ToolInputRequiredRef,
   nestedToolCallMaxErrorChars,
   nestedToolCallRecordLimit,
   nestedToolCallResultFields,
@@ -68,7 +72,8 @@ import {
   codeModeResultSegments,
   codeModeSegmentsContent,
   defaultCodeModeMaxImageBytes,
-  defaultCodeModeMaxImages
+  defaultCodeModeMaxImages,
+  type CodeModeResultSegment
 } from './output.ts'
 import { searchCodeModeTools } from './search.ts'
 import type {
@@ -515,6 +520,8 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
           const fibers = yield* FiberSet.make<ToolResult>().pipe(Scope.provide(scope))
           const runFork = yield* FiberSet.runtime(fibers)<never>()
           const records: Array<CallRecord> = []
+          // Nested calls that paused for input (ADR 0014), reported even when the script caught them.
+          const paused: Array<ToolInputRequiredRef> = []
 
           // Staged tool plans: only when the resolution offers staging and the host keeps it on.
           const stagingOptions = options.staging === false ? undefined : options.staging
@@ -654,6 +661,13 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   Effect.onExit(exit =>
                     Effect.map(Clock.currentTimeMillis, finished => {
                       record.outcome = recordedOutcome(exit, finished - started)
+                    })
+                  ),
+                  Effect.tap(result =>
+                    Effect.sync(() => {
+                      const ref = toolInputRequired(result)
+
+                      if (Option.isSome(ref)) paused.push(ref.value)
                     })
                   ),
                   Effect.tap(result =>
@@ -824,12 +838,18 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             maxImageBytes: limits.maxImageBytes
           })
 
-          // The staging notice follows the bounded output so a cut never hides the plan.
-          const content = codeModeSegmentsContent(
-            stagingNotice === undefined
-              ? segments
-              : [...segments, { type: 'text', text: stagingNotice }]
-          )
+          const inputRequired = mergeInputRequiredRefs(paused)
+
+          const inputRequiredText =
+            inputRequired.length === 0 ? undefined : `\n\n${inputRequiredNotice(inputRequired)}`
+
+          // The staging and input notices follow the bounded output so a cut never hides them.
+          const notices: ReadonlyArray<CodeModeResultSegment> = [
+            stagingNotice,
+            inputRequiredText
+          ].flatMap(text => (text === undefined ? [] : [{ type: 'text', text }]))
+
+          const content = codeModeSegmentsContent([...segments, ...notices])
 
           const ok = result.ok && !planFailed
 
@@ -838,8 +858,10 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
               ? { ok: true, storeWrites: result.storeWrites }
               : { ok }
 
+          const withPlan = savedPlan === undefined ? codemode : { ...codemode, plan: savedPlan }
+
           const structuredContent: CodeModeStructuredContent = {
-            codemode: savedPlan === undefined ? codemode : { ...codemode, plan: savedPlan }
+            codemode: inputRequired.length === 0 ? withPlan : { ...withPlan, inputRequired }
           }
 
           type ResultFields = {

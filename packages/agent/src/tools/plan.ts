@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import {
   ToolChangePreview,
   ToolChangePreviewFailure,
+  ToolInputRequiredRef,
   type InteractionBusinessOutcome,
   type InteractionHostError,
   type InteractionValidationError,
@@ -317,14 +318,17 @@ export type ToolPlanFailurePolicy = 'stop' | 'continue'
 /**
  * What happened to one staged call: `applied`, `failed` (an error result, a `ToolError`, or
  * rejected by `beforeCall`), `skipped` (not selected), `not_run` (selected, after a failure under
- * `stop`), or `unknown` (an interrupted apply's call that started without a recorded result).
+ * `stop`), `unknown` (an interrupted apply's call that started without a recorded result), or
+ * `input_required` (the call ran and paused for a person's input, ADR 0014: it has not completed;
+ * its `inputRequired` names the review that finishes it, and it never stops the apply).
  */
 export const ToolPlanCallStatus = Schema.Literals([
   'applied',
   'failed',
   'skipped',
   'not_run',
-  'unknown'
+  'unknown',
+  'input_required'
 ])
 
 export type ToolPlanCallStatus = typeof ToolPlanCallStatus.Type
@@ -340,17 +344,21 @@ export const ToolPlanCallOutcome = Schema.Struct({
    */
   callId: Schema.optionalKey(Schema.String),
   /** Truncated error text of a failed call. */
-  error: Schema.optionalKey(Schema.String)
+  error: Schema.optionalKey(Schema.String),
+  /** Of an `input_required` call: the review tool and stored pauses that finish it. */
+  inputRequired: Schema.optionalKey(ToolInputRequiredRef)
 })
 
 export type ToolPlanCallOutcome = typeof ToolPlanCallOutcome.Type
 
+/** Per-status counts. `input_required` is absent in outcomes recorded before it existed. */
 export const ToolPlanCallCounts = Schema.Struct({
   applied: Schema.Number,
   failed: Schema.Number,
   skipped: Schema.Number,
   not_run: Schema.Number,
-  unknown: Schema.Number
+  unknown: Schema.Number,
+  input_required: Schema.optionalKey(Schema.Number)
 })
 
 export type ToolPlanCallCounts = typeof ToolPlanCallCounts.Type
