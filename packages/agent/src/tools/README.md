@@ -174,6 +174,9 @@ const resolveStepTools = Effect.gen(function* () {
   same key is a model-visible conflict; never compare the preview. Stored results are bounded
   (`maxResultBytes`, default 1 MiB, measured on the serialized JSON; media, then `nestedCalls`, then
   `structuredContent` are reduced first) and wire-safe; the live call still returns the full result.
+  An input-required result keeps its marker and its review call, and a code mode result its
+  `codemode.inputRequired` and notice, when its text is cut, so a replay still names its pauses;
+  these are never cut, so a result naming many pauses can be stored over `maxResultBytes`.
 - `argsDigest` is a stable format; store it as text (`char(64)`) and never recompute it
   differently: lower-case hex SHA-256 of the UTF-8 bytes of the canonical JSON of the raw
   `call.params` (before Schema decoding), compact, with object keys sorted by UTF-16 code units

@@ -36,6 +36,25 @@ field would have to be threaded through the protocol class, the ledger's stored 
 bounding, transcripts and React. The marker needs two small changes (plan status and code mode
 reporting) and stays plain JSON.
 
+Every replay (a redelivered step, an interrupted plan apply's listing, code mode's abandoned-script
+listing) reads the ledger's stored copy, so the ledger's bounding (`toolLedgerResult`) keeps the
+pause refs of two kinds of results through every reduction, the way it keeps `files`. Over
+`maxResultBytes`, other `structuredContent` fields are dropped and the text is cut before the review
+text, never the review text itself:
+
+- An input-required error result keeps its marker `{ code, inputRequired }` and its review call
+  (`inputRequiredInstruction`, rebuilt from the marker when the text does not end with it).
+- A code mode result keeps `{ codemode: { ok, inputRequired } }` and its notice
+  (`inputRequiredNotice`), only when its text ends with that notice. Any tool can return that shape,
+  so the ledger never writes this notice itself: another tool's result with the shape and no notice
+  has its refs dropped like any other `structuredContent`.
+
+Other results' pause refs are not kept. A plan apply's stored outcome (its fence entry) is reduced
+like any result; over the bound its replay lists the applied calls' own ledger entries instead,
+which keep their markers (a call the ledger policy skips has no entry and is listed `unknown`).
+The kept refs and review text are never cut, so a result naming many pauses can be stored over
+`maxResultBytes`.
+
 Because the marker is plain JSON, a remote system must not be able to forge it: Yolk's MCP client
 keeps a remote error result's structured content that decodes as the marker under
 `remoteStructuredContent` (`toolCallResultToToolResult`), so a server's own failure never reads as
@@ -120,7 +139,10 @@ runs one round per request:
 `packages/agent/test/tools/input-review.test.ts` (marker helpers, call validation against stored
 pauses and outages, admission, resume and new pauses, a refused review, crash listing),
 `packages/agent/test/tools/plan.test.ts` (`input_required` status, apply continuing past it,
-interrupted listing, older outcomes decoding), `packages/codemode/test/pi-executor.test.ts` (caught
-pauses still reported), `packages/mcp/test/server/forward.test.ts` (forward and resume through the
-real resumable client, cancel, clients without form elicitation, no approvals, approval first,
-stale state, the JSON path).
+interrupted listing, older outcomes decoding, an apply outcome over the ledger bound),
+`packages/agent/test/tools/ledger.test.ts` (a stored copy over the bound keeps the marker and the
+review call), `packages/codemode/test/ledger.test.ts` (a replayed script over the bound keeps its
+pauses and notice), `packages/codemode/test/pi-executor.test.ts` (caught pauses still reported),
+`packages/mcp/test/server/forward.test.ts` (forward and resume through the real resumable client,
+cancel, clients without form elicitation, no approvals, approval first, stale state, the JSON
+path).
