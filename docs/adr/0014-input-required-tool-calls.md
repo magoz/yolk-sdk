@@ -83,7 +83,7 @@ runs one round per request:
 - A remote pause is forwarded as this server's own `InputRequiredResult` (the remote forms under
   their keys) with a `requestState` signed by the approvals key under its own binding (server name,
   principal, method, forward purpose) that holds the tool, the arguments digest, the remote pause's
-  `roundId` and expiry (`ttlSeconds` after it was first forwarded), the approval id (when the tool
+  `roundId` and expiry (`ttlSeconds` after it was forwarded), the approval id (when the tool
   asked its own approval first) and the remote pause. It is bounded (`mcpForwardMaxStateBytes`). It
   is signed, not encrypted: the client can read the remote forms and the remote `requestState`.
 - `Resume`: only a round whose verified, unexpired state matches the call and answers every
@@ -93,6 +93,14 @@ runs one round per request:
   answers `forwardStaleMessage`, sending nothing; on a tool with `approval` it is no approval answer
   either, so the approval is asked again (and an accept starts a new remote call, as a fresh call
   would). Once-only is the host's: key it on `roundId`.
+- A remote pause's `roundId` is the digest of where it came from (the approval, or the round it
+  resumed) and the pause, not a random id: a host that answers a retried accept or `Resume` with
+  the outcome it stored (an idempotent ledger) forwards that pause again in the same round, so its
+  `roundId` key still resumes it once. The pause is hashed as canonical JSON (keys sorted at every
+  level), so a store that reorders keys keeps the round. A replay is accepted only while its origin
+  (the approval or round state) is still valid, and the replayed pause then gets a fresh expiry. A
+  random `roundId` per forward opened a second resume of one remote pause (issue #297). A first round without
+  approval has no once-only key, so its pause gets a random `roundId`.
 - The header-less JSON path and 2025-era requests run only the first round.
 
 ## Rejected alternatives

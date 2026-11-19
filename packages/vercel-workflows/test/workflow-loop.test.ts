@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  defaultCloseStreamRetry,
+  noWorkflowStepRetry,
   runVercelAgentWorkflow,
   retryWorkflowStep,
   settleWorkflowStep,
@@ -768,15 +770,66 @@ describe('runVercelAgentWorkflow', () => {
     )
   })
 
-  it('writes close errors after terminal model step', async () => {
-    const error = new Error('close failed')
+  it('retries the close step by default', async () => {
     const errors: Array<unknown> = []
+    let closeAttempts = 0
 
     const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: input => step(() => terminalModelResult(input)),
       runToolBatchStep: input => step(() => toolBatchResult(input)),
-      closeStream: () => failStep(error),
+      closeStream: () =>
+        step(() => {
+          closeAttempts += 1
+
+          if (closeAttempts === 1) throw new Error('close step completion lost')
+        }),
+      writeError: value =>
+        step(() => {
+          errors.push(value)
+        })
+    })
+
+    expect(result._tag).toBe('Completed')
+    expect(closeAttempts).toBe(2)
+    expect(errors).toEqual([])
+  })
+
+  it('closes once when closeStreamRetry opts out of the default retry', async () => {
+    const error = new Error('close failed')
+    let closeAttempts = 0
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      closeStreamRetry: noWorkflowStepRetry,
+      runModelStep: input => step(() => terminalModelResult(input)),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: () => {
+        closeAttempts += 1
+
+        return failStep(error)
+      },
+      writeError: emptyStep
+    })
+
+    expect(result._tag).toBe('CloseStreamFailed')
+    expect(closeAttempts).toBe(1)
+  })
+
+  it('writes close errors after every close attempt fails', async () => {
+    const error = new Error('close failed')
+    const errors: Array<unknown> = []
+    let closeAttempts = 0
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input => step(() => terminalModelResult(input)),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: () => {
+        closeAttempts += 1
+
+        return failStep(error)
+      },
       writeError: value =>
         step(() => {
           errors.push(value)
@@ -797,6 +850,7 @@ describe('runVercelAgentWorkflow', () => {
         }
       })
     )
+    expect(closeAttempts).toBe(defaultCloseStreamRetry.maxAttempts)
     expect(errors).toEqual([error])
   })
 

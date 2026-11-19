@@ -20,10 +20,10 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Import Workflow orchestration APIs from `@yolk-sdk/vercel-workflows`; `./workflow` remains an explicit equivalent subpath.
 - Effect-native Workflow client/layer lives under `./effect`: `VercelWorkflows.layer` wraps public `workflow/api`; `VercelWorkflows.layerFromSdk` is the fake SDK seam. `start` forwards only `attributes` from the SDK's start options (`VercelWorkflowStartOptions`); add others there when a host needs them, never as a pass-through of the SDK type.
 - `./testing` ships `TestWorkflowWorld`: a behavioral platform emulator (run lifecycle,
-  append-only durable streams with close-once -> 409 conflicts, retrying step executor,
-  hooks/resume, cancellation, `sdk.start` attributes checked with the installed `@workflow/world`
-  validator and shown in `inspect`) plus `testWorkflowModule` for mocking the ambient `workflow`
-  module.
+  append-only durable streams with write-after-close -> 409 conflicts and idempotent close (as
+  `@workflow/world-vercel`), retrying step executor, hooks/resume, cancellation, `sdk.start`
+  attributes checked with the installed `@workflow/world` validator and shown in `inspect`) plus
+  `testWorkflowModule` for mocking the ambient `workflow` module.
   Its step executor stores every step error with the installed `workflow` runtime's own serializer
   (`@workflow/core/serialization`, resolved through `workflow` natively so `vi.mock('workflow')`
   never replaces it) and throws only the value read back, with the platform's FatalError rules
@@ -63,7 +63,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
-- Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.
+- Model/tool/await-input step retries are opt-in; their default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks. The close step defaults to `defaultCloseStreamRetry` (`maxAttempts: 3`, any rejection including `FatalError`): a Vercel close is idempotent, so a close-only step's retry writes nothing, and a close applied by an attempt that then failed ends `Completed` when a later attempt succeeds (`CloseStreamFailed` only once every attempt failed).
 - Steps are still at-least-once (queue redelivery re-executes a step, also concurrently with a running first execution). Document that hosts must supply a durable tool ledger (`resolveTools(..., { ledger })` from `@yolk-sdk/agent/tools`) in their tool-batch steps; this package never builds tool sets or imports agent protocol, so it carries no ledger wiring.
 - `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `AwaitInputFailed`, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
 - Destructure callback config before invoking workflow steps/hooks; hook suspension may serialize functions otherwise.

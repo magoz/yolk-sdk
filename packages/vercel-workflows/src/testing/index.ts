@@ -13,7 +13,7 @@ import type {
 } from '../effect.ts'
 
 // Behavioral emulator of the Vercel Workflow platform for tests: run lifecycle,
-// append-only durable streams with close-once -> 409 write conflicts, a step
+// append-only durable streams with write-after-close -> 409 conflicts, a step
 // executor honoring `fn.maxRetries` + `getStepMetadata().attempt`, hooks/resume,
 // and cancellation. Host code under test runs unmodified against it; tests mock
 // only the `workflow` module's ambient APIs, delegating to the active world
@@ -26,11 +26,14 @@ import type {
 // the body: the platform's queue handler fails and redelivers the step, which runs again until its
 // retries run out and it fails with "exceeded max retries" (see `unstorableStepErrors`).
 //
-// The single most important semantic: writing to (or re-closing) a closed
-// durable stream fails with the platform's HTTP 409 "already completed"
-// conflict shape. Any code path that performs a terminal stream effect from a
-// retryable step attempt poisons every subsequent platform retry — exactly the
-// #252 production bug. The emulator enforces that invariant permanently.
+// The single most important semantic: writing to a closed durable stream fails
+// with the platform's HTTP 409 "already completed" conflict shape. Any code
+// path that closes the stream from a retryable step attempt poisons every
+// subsequent write of a platform retry — exactly the #252 production bug. The
+// emulator enforces that invariant permanently. Closing an already closed
+// stream succeeds, as the Vercel world's close is idempotent
+// (`@workflow/world-vercel` `streamer.js` `close`); `streamCloseCount` still
+// counts every close.
 
 export type TestWorkflowRunStatus = VercelWorkflowRunStatus
 
@@ -665,13 +668,12 @@ export class TestWorkflowWorld {
         this.notifyChange(run)
       },
       close: () => {
-        if (run.streamClosed) {
-          run.streamCloseCount += 1
-          throw new TestWorkflowStreamConflictError(run.runId)
-        }
+        run.streamCloseCount += 1
+
+        // Close is idempotent on the platform: re-closing a closed stream succeeds.
+        if (run.streamClosed) return
 
         run.streamClosed = true
-        run.streamCloseCount += 1
         this.notifyChange(run)
       }
     })
