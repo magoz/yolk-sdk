@@ -259,8 +259,12 @@ const resolveStepTools = Effect.gen(function* () {
   example `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`. Without
   `ledger`, execution is unchanged.
 - Waits, store polls included, end at `maxWaitMs` or `deadline` (one final poll runs halfway through
-  the last interval); a failed poll fails closed. Each `heartbeat` and each of up to three
-  `complete` attempts is bounded to 5 s; an outcome that cannot be recorded reads as abandoned.
+  the last interval); a failed poll fails closed. Each of up to three `complete` attempts is
+  bounded to 5 s; an outcome that cannot be recorded reads as abandoned. Each `heartbeat` is
+  bounded to 5 s or a sixth of `leaseMs`, whichever is shorter, and `heartbeatIntervalMs` is
+  clamped to half the lease minus that bound, so one failed or hung heartbeat does not let the
+  lease of a running call lapse. That is a margin for one late heartbeat, not a guarantee: a stalled
+  process can still let the lease lapse.
 - `deadline` bounds only waiting for a duplicate. A call that runs is not cut at it, and recording
   its outcome can take up to about 15 s (three 5 s attempts) after the call returns, so reserve
   that finalization time before the platform stops the step.
@@ -279,7 +283,7 @@ const resolveStepTools = Effect.gen(function* () {
 | `store`               | required                                  | host-implemented `ToolLedgerStore`              |
 | `isLedgered`          | `defaultToolLedgerPolicy`                 | which calls are ledgered (`readCall` input)     |
 | `leaseMs`             | `defaultToolLedgerLeaseMs` (30 s)         | lease of a running call                         |
-| `heartbeatIntervalMs` | a third of `leaseMs`, at most half        | how often a running call renews its lease       |
+| `heartbeatIntervalMs` | a third of `leaseMs` (clamped, see above) | how often a running call renews its lease       |
 | `pollIntervalMs`      | `defaultToolLedgerPollIntervalMs` (1 s)   | how often a duplicate polls an in-flight call   |
 | `maxWaitMs`           | `defaultToolLedgerMaxWaitMs` (150 s)      | longest wait for an in-flight call              |
 | `deadline`            | none                                      | epoch ms after which a duplicate stops waiting  |

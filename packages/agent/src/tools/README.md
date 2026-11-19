@@ -201,10 +201,10 @@ const resolveStepTools = Effect.gen(function* () {
   activations keep their tool's access.
 - Override the policy with `isLedgered` (add your own delegation tools, for example
   `input => defaultToolLedgerPolicy(input) || input.call.name === 'delegate'`), and the timing with
-  `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease, at most half: renewal margin, not a
-  guarantee), `pollIntervalMs` (1 s), `maxWaitMs` (150 s from the first claim; the polls after it
-  stay within the wait, the last one halfway through the final interval), and `deadline` (non-finite
-  values ignored). A failed poll fails closed.
+  `leaseMs` (30 s), `heartbeatIntervalMs` (a third of the lease; clamped, see below),
+  `pollIntervalMs` (1 s), `maxWaitMs` (150 s from the first claim; the polls after it stay within
+  the wait, the last one halfway through the final interval), and `deadline` (non-finite values
+  ignored). A failed poll fails closed.
 - `deadline` bounds only waiting for an in-flight duplicate. A call that runs is not cut at it, and
   recording its outcome can take up to three `complete` attempts of `toolLedgerCompleteTimeoutMs`
   (5 s each, about 15 s) after the call returns. Reserve that finalization time: pass a deadline
@@ -213,11 +213,19 @@ const resolveStepTools = Effect.gen(function* () {
   `AbortSignal` to the driver). The ledger's timeouts interrupt the store operation and wait for
   it to stop, so they cannot cut uninterruptible work (an `Effect.uninterruptible` section, or a
   release or rollback that blocks): it holds the wait, heartbeat, or completion until it ends.
+- Renewal margin: a heartbeat starts one interval after the previous one ends, and each is bounded
+  by the shorter of `toolLedgerCompleteTimeoutMs` (5 s) and a sixth of `leaseMs`. A longer
+  `heartbeatIntervalMs` is clamped to half the lease minus that timeout, so after one heartbeat
+  fails or hangs until its timeout, the next one still lands within the lease (at the defaults:
+  10 s interval, 5 s timeout, 30 s lease). This holds for any `leaseMs`, but it is a margin for one
+  late heartbeat, not a guarantee: a stalled process, or several slow heartbeats, can still let the
+  lease lapse, and a duplicate then reports the running call as abandoned.
 - Each `complete` attempt is bounded (`toolLedgerCompleteTimeoutMs`, 5 s; three attempts), and so is
-  each `heartbeat` (a timed-out or failed heartbeat is logged; the next one still runs). A result or
-  `ToolError` the call returned is recorded before an interruption takes effect (a `ToolError` also
-  when its cause carries interruptions); defects, and interruption without a `ToolError`, record
-  nothing. An outcome that cannot be recorded leaves the entry to read as abandoned.
+  each `heartbeat` (as above; a timed-out or failed heartbeat is logged; the next one still runs).
+  A result or `ToolError` the call returned is recorded before an interruption takes effect (a
+  `ToolError` also when its cause carries interruptions); defects, and interruption without a
+  `ToolError`, record nothing. An outcome that cannot be recorded leaves the entry to read as
+  abandoned.
 - Set `abandonedResult({ call, entry, nested })` on a registration (or as a `makeTool` option) to
   describe that tool's abandoned call. It gets `nested: undefined` when `list` fails: report the
   nested calls as unavailable (they may have been applied), never as an empty list.

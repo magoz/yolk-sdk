@@ -489,6 +489,37 @@ describe('tool ledger', () => {
       const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
 
       const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '30 seconds' })], noteCall(), { store }).pipe(
+          Effect.provide(logger)
+        )
+      )
+
+      yield* TestClock.adjust('30 seconds')
+
+      const result = yield* Fiber.join(running)
+      const [entry] = yield* memory.entries
+
+      expect(result.content).toBe('appended hot lead (1)')
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+      // Default 30 s lease: first heartbeat at 10 s, timed out at 15 s; the next one starts 10 s
+      // later and is still pending when the call returns at 30 s.
+      expect(messages).toEqual([
+        [
+          `Tool ledger heartbeat failed for call_1: timed out after ${toolLedgerCompleteTimeoutMs} ms`
+        ]
+      ])
+    })
+  )
+
+  it.effect('bounds each heartbeat by a sixth of a short lease', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const store: ToolLedgerStore = { ...memory, heartbeat: () => Effect.never }
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const running = yield* Effect.forkChild(
         execute([noteTool(probe, { sleep: '10 seconds' })], noteCall(), {
           store,
           leaseMs: 6_000
@@ -496,18 +527,12 @@ describe('tool ledger', () => {
       )
 
       yield* TestClock.adjust('10 seconds')
+      yield* Fiber.join(running)
 
-      const result = yield* Fiber.join(running)
-      const [entry] = yield* memory.entries
+      // Interval 2 s, timeout 1 s: heartbeats at 2, 5 and 8 s each time out a second later.
+      const timedOut = ['Tool ledger heartbeat failed for call_1: timed out after 1000 ms']
 
-      expect(result.content).toBe('appended hot lead (1)')
-      expect(entry?.outcome?._tag).toBe('Succeeded')
-      // First heartbeat at 2 s, timed out at 7 s; the next one starts 2 s later.
-      expect(messages).toEqual([
-        [
-          `Tool ledger heartbeat failed for call_1: timed out after ${toolLedgerCompleteTimeoutMs} ms`
-        ]
-      ])
+      expect(messages).toEqual([timedOut, timedOut, timedOut])
     })
   )
 
@@ -1185,7 +1210,7 @@ describe('tool ledger', () => {
     })
   )
 
-  it.effect('heartbeats at most every half lease', () =>
+  it.effect('clamps the heartbeat interval to half the lease minus the heartbeat timeout', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
       const memory = makeInMemoryToolLedgerStore()
@@ -1203,7 +1228,7 @@ describe('tool ledger', () => {
       const running = yield* Effect.forkChild(
         execute([noteTool(probe, { sleep: '5 seconds' })], noteCall(), {
           store,
-          leaseMs: 4_000,
+          leaseMs: 6_000,
           heartbeatIntervalMs: 60_000
         })
       )
@@ -1211,7 +1236,108 @@ describe('tool ledger', () => {
       yield* TestClock.adjust('5 seconds')
       yield* Fiber.join(running)
 
-      expect(heartbeats).toEqual([6_000, 8_000])
+      // Heartbeat timeout 1 s (a sixth of the lease), so the interval is 3 s - 1 s = 2 s.
+      expect(heartbeats).toEqual([8_000, 10_000])
+    })
+  )
+
+  // Ledger.tla replays (yolk-sdk #299, #300): one hung or failed heartbeat must not let the lease
+  // of a running call lapse, so a duplicate claiming right after the claim lease waits and replays
+  // instead of reporting the call as abandoned while it runs and then succeeds.
+  const firstHeartbeatFaulty = (fault: 'hangs' | 'fails after 1 s') => {
+    const memory = makeInMemoryToolLedgerStore()
+    let heartbeats = 0
+
+    const store: ToolLedgerStore = {
+      ...memory,
+      heartbeat: request => {
+        heartbeats += 1
+
+        if (heartbeats > 1) return memory.heartbeat(request)
+
+        return fault === 'hangs'
+          ? Effect.never
+          : Effect.sleep('1 second').pipe(
+              Effect.andThen(Effect.fail(new ToolLedgerError({ message: 'connection reset' })))
+            )
+      }
+    }
+
+    return { memory, store }
+  }
+
+  const duplicateAfterFaultyHeartbeat = (input: {
+    readonly ledger: Omit<ToolLedgerOptions, 'store'>
+    readonly fault: 'hangs' | 'fails after 1 s'
+    readonly runFor: Duration.Input
+    readonly duplicateAt: Duration.Input
+    readonly thenWait: Duration.Input
+  }) =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const { memory, store } = firstHeartbeatFaulty(input.fault)
+      const tools = [noteTool(probe, { sleep: input.runFor })]
+      const ledger: ToolLedgerOptions = { ...input.ledger, store }
+
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), ledger))
+
+      yield* TestClock.adjust(input.duplicateAt)
+
+      const duplicate = yield* Effect.forkChild(execute(tools, noteCall(), ledger))
+
+      yield* TestClock.adjust(input.thenWait)
+
+      const firstResult = yield* Fiber.join(first)
+      const duplicateResult = yield* Fiber.join(duplicate)
+      const [entry] = yield* memory.entries
+
+      expect(firstResult.content).toBe('appended hot lead (1)')
+      expect(duplicateResult).toEqual(firstResult)
+      expect(probe.runs).toEqual(['hot lead'])
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+    })
+
+  it.effect('keeps a 6 s lease through a hung heartbeat (#300)', () =>
+    // Interval 2 s, heartbeat timeout 1 s: the heartbeat hung at 2 s ends at 3 s, the next one at
+    // 5 s renews the lease before it ends at 6 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 6_000 },
+      fault: 'hangs',
+      runFor: '10 seconds',
+      duplicateAt: '6 seconds',
+      thenWait: '5 seconds'
+    })
+  )
+
+  it.effect('keeps a 14 s lease through a hung heartbeat (#300)', () =>
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 14_000 },
+      fault: 'hangs',
+      runFor: '20 seconds',
+      duplicateAt: '14100 millis',
+      thenWait: '7 seconds'
+    })
+  )
+
+  it.effect('keeps the lease through a hung heartbeat at a half-lease interval (#299)', () =>
+    // The 15 s interval is clamped to 10 s: the heartbeat hung at 10 s ends at 15 s, the next one
+    // at 25 s renews the lease before it ends at 30 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { heartbeatIntervalMs: 15_000 },
+      fault: 'hangs',
+      runFor: '40 seconds',
+      duplicateAt: '31 seconds',
+      thenWait: '10 seconds'
+    })
+  )
+
+  it.effect('keeps the lease through a failed heartbeat at a half-lease interval (#299)', () =>
+    duplicateAfterFaultyHeartbeat({
+      ledger: { heartbeatIntervalMs: 15_000 },
+      fault: 'fails after 1 s',
+      runFor: '40 seconds',
+      duplicateAt: '30500 millis',
+      thenWait: '11 seconds'
     })
   )
 
