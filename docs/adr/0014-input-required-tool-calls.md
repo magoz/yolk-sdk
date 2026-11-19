@@ -95,10 +95,12 @@ runs one round per request:
   would). Once-only is the host's: key it on `roundId`.
 - A remote pause's `roundId` is the digest of where it came from (the approval, or the round it
   resumed) and the pause, not a random id: a host that answers a retried accept or `Resume` with
-  the outcome it stored (an idempotent ledger) forwards that pause again in the same round (with a
-  new expiry), so its `roundId` key still resumes it once. A random id there opened a second
-  resume of one remote pause (issue #297). A first round without approval has no once-only key, so
-  its pause gets a random `roundId`.
+  the outcome it stored (an idempotent ledger) forwards that pause again in the same round, so its
+  `roundId` key still resumes it once. The pause is hashed as canonical JSON (keys sorted at every
+  level), so a store that reorders keys keeps the round. A replay is accepted only while its origin
+  (the approval or round state) is still valid, and the replayed pause then gets a fresh expiry. A
+  random id there opened a second resume of one remote pause (issue #297). A first round without
+  approval has no once-only key, so its pause gets a random `roundId`.
 - The header-less JSON path and 2025-era requests run only the first round.
 
 ## Rejected alternatives

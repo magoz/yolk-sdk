@@ -471,14 +471,15 @@ const proxyDelete: McpServerTool = {
   and the remote pause, bounded by `mcpForwardMaxStateBytes` (64 KiB of JSON).
 - `Resume({ roundId, inputRequired, responses, approvalId })`: only a round whose verified state
   matches the call and answers every forwarded form (checked against the forms) resumes; other
-  rounds are asked again in the same round (same `roundId` and expiry). A state that does not verify answers `forwardStaleMessage` without calling the
-  remote tool (with `approval`, the approval is asked again). The server keeps no state: key
-  once-only resumption on `roundId`.
+  rounds are asked again in the same round (same `roundId` and expiry). A state that does not
+  verify answers `forwardStaleMessage` without calling the remote tool (with `approval`, the
+  approval is asked again). The server keeps no state: key once-only resumption on `roundId`.
 - A host may answer a duplicate key (a retried accept on `approvalId`, a retried `Resume` on
   `roundId`) with the outcome it stored: a remote pause's `roundId` is derived from the approval or
   round it came from and the pause itself, so a replayed pause is forwarded again under the same
-  `roundId` (with a new expiry) and still resumes once. A first round without `approval` has no
-  key; its pause gets a random `roundId`.
+  `roundId` and still resumes once. A replay is accepted only while its origin (the approval or
+  round state) is still valid, and the replayed pause then gets a fresh expiry. A first round
+  without `approval` has no key; its pause gets a random `roundId`.
 - With `approval`, the tool is offered like an approval tool and runs its approval round first;
   every forward round carries its `approvalId`. Without it, the tool is listed everywhere, and
   2025-era requests and the header-less JSON path run only `Initial` with

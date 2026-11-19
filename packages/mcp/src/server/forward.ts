@@ -9,15 +9,16 @@
  * the host's principal, the method and the forward purpose) but not encrypted: the client can read
  * the remote pause (its forms and the remote `requestState`), so a remote `requestState` must not
  * be secret from this server's client. It names the tool, the arguments digest, a `roundId`, the
- * remote pause and its expiry (`ttlSeconds` after the remote pause was first forwarded). Only a
- * round whose verified, unexpired state matches the call and answers every forwarded form resumes
- * the remote call; a round that misses an answer is asked the same forms again under the same
+ * remote pause and its expiry (`ttlSeconds` after the remote pause was forwarded). Only a round
+ * whose verified, unexpired state matches the call and answers every forwarded form resumes the
+ * remote call; a round that misses an answer is asked the same forms again under the same
  * `roundId` and expiry, so asking again neither opens a second resume nor keeps the pause alive.
  * A new remote pause's `roundId` is derived from where it came from (the approval or the resumed
  * round) and the pause, so a host that answers a retried round with the outcome it stored asks the
- * same pause in the same round (with a new expiry). The server does not enforce once-only
- * resumption: a replayed answered round arrives again with the same `roundId`, so the host keys
- * once-only execution on it (MRTR's single-use is the server's duty).
+ * same pause in the same round. A replay is accepted only while its origin (the approval or round
+ * state) is still valid, and the replayed pause then gets a fresh expiry. The server does not
+ * enforce once-only resumption: a replayed answered round arrives again with the same `roundId`,
+ * so the host keys once-only execution on it (MRTR's single-use is the server's duty).
  */
 import { Clock, Data, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -212,14 +213,16 @@ const encodePauseIdentity = Schema.encodeUnknownEffect(Schema.toCodecJson(PauseI
 
 /**
  * The `roundId` of a new remote pause: the digest of its origin and the pause (its forms, remote
- * `requestState` and binding; not the listed tool definition). A host that answers a retried round
+ * `requestState` and binding; not the listed tool definition). The pause is encoded as a JSON value
+ * and `mcpArgumentsDigest` hashes canonical JSON (keys sorted at every level), so a host store that
+ * reorders keys (JSONB) keeps the round. A host that answers a retried round
  * (an accepted approval, a `Resume`) with the outcome it stored forwards the same pause from the
  * same origin, so it is asked in the same round, and the host's once-only key on `roundId` still
  * resumes it once. A fresh `roundId` there would open a second resume of one remote pause. A first
  * round without approval has no once-only key, so its round is random.
  */
 const newRoundId = (origin: ForwardOrigin, pause: McpInputRequired) => {
-  if (origin.kind === 'call') return Effect.succeed(crypto.randomUUID())
+  if (origin.kind === 'call') return Effect.sync(() => crypto.randomUUID())
 
   return encodePauseIdentity(pause).pipe(
     Effect.flatMap(identity =>

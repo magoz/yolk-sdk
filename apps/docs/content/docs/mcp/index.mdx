@@ -304,8 +304,9 @@ const proxyDelete: McpServerTool = {
 - The host may answer a duplicate key (a retried accept on `approvalId`, a retried `Resume` on
   `roundId`) with the outcome it stored. A remote pause's `roundId` is derived from the approval or
   round it came from and the pause itself, so a replayed pause is forwarded again under the same
-  `roundId` (with a new expiry) and still resumes once. A first round without `approval` has no
-  key, and its pause gets a random `roundId`.
+  `roundId` and still resumes once. A replay is accepted only while its origin (the approval or
+  round state) is still valid, and the replayed pause then gets a fresh expiry. A first round
+  without `approval` has no key, and its pause gets a random `roundId`.
 - With `approval`, the tool is offered like an approval tool: the approval round runs first and
   every forward round carries its `approvalId`. Without it, the tool is listed everywhere; 2025-era
   requests and the header-less JSON path run only `Initial` with `clientElicitation: false`.

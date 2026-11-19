@@ -90,16 +90,19 @@
   the pause's `roundId` and `expiresAtMs` (`Configured.ttlSeconds` after it was forwarded),
   the approval id and the pause, bounded by `mcpForwardMaxStateBytes`. A new pause's `roundId`
   (`newRoundId`) is the digest of its origin (the `approvalId`, or the `roundId` it resumed) and
-  the pause (forms, remote `requestState`, binding; not `tool`), so a host that answers a retried
-  accept or `Resume` with its stored outcome forwards that pause again in the same round (a new
-  expiry); a first round without approval has no once-only key and gets a random one. Only a
-  verified, unexpired state for the same call whose answers fit every form (`toMcpInputResponses`)
-  resumes; otherwise the server asks again under the same `roundId` and expiry. Never a fresh
-  round for one remote pause: that would open a second resume of it (issue #297). A state that does not verify answers `forwardStaleMessage`
-  without calling the remote tool; on an `approval` tool it falls to the approval round, which asks
-  again. With `approval`, the approval round runs first and the forward rounds carry its
-  `approvalId`. `Resume` re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only `Initial` with
-  `clientElicitation: false`. Once-only resumption is the host's (key on `roundId`). Approval
+  the pause (forms, remote `requestState`, binding; not `tool`), hashed as canonical JSON (keys
+  sorted at every level, so a host's store may reorder them), so a host that answers a retried
+  accept or `Resume` with its stored outcome forwards that pause again in the same round. A replay
+  is accepted only while its origin (the approval or round state) is still valid, and the replayed
+  pause then gets a fresh expiry. A first round without approval has no once-only key and gets a
+  random one. Only a verified, unexpired state for the same call whose answers fit every form
+  (`toMcpInputResponses`) resumes; otherwise the server asks again under the same `roundId` and
+  expiry. Never a fresh round for one remote pause: that would open a second resume of it (issue
+  #297). A state that does not verify answers `forwardStaleMessage` without calling the remote
+  tool; on an `approval` tool it falls to the approval round, which asks again. With `approval`,
+  the approval round runs first and the forward rounds carry its `approvalId`. `Resume`
+  re-derives `clientElicitation` from the request. Legacy and the header-less JSON path run only
+  `Initial` with `clientElicitation: false`. Once-only resumption is the host's (key on `roundId`). Approval
   `McpServerPrompt.run` and `McpApprovalRound.Run` answer `McpServerCallOutcome` (a result or an
   `InputRequiredResult`). Tests: `test/server/forward.test.ts`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
