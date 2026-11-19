@@ -26,6 +26,9 @@ const result = await Effect.runPromise(
 )
 ```
 
+On Cloudflare Workers, use `makeCloudflareSandboxLayer` from `@yolk-sdk/sandbox/cloudflare`
+instead; see [Cloudflare Containers](../sandbox/cloudflare).
+
 ## Add the agent tool
 
 ```ts
@@ -49,6 +52,6 @@ still an error result.
 
 ## Move files in and out
 
-The Vercel layer implements the optional `writeFile`/`readFile` on `Sandbox` for workspace-relative
+The Vercel and Cloudflare layers implement the optional `writeFile`/`readFile` on `Sandbox` for workspace-relative
 paths. To let the agent copy files between tools and the workspace, pass the sandbox to
 `makeFileToolModule` from `@yolk-sdk/files`; see [Move files between tools](./files).

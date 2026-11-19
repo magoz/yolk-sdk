@@ -2,7 +2,9 @@ import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  CloudflareSandboxState,
   defaultSandboxLifecycle,
+  makeSandboxName,
   GitSandboxBasicAuth,
   makeVercelSandboxName,
   normalizeWorkspaceCwd,
@@ -144,5 +146,52 @@ describe('sandbox core', () => {
 
     expect(touched.lastUsedAtMs).toBe(200)
     expect(touched.expiresAtMs).toBe(250)
+  })
+
+  it('names Vercel and Cloudflare sandboxes alike', () => {
+    expect(makeSandboxName('user_1:session_1')).toBe(makeVercelSandboxName('user_1:session_1'))
+  })
+
+  it('touching a Cloudflare state keeps its variant and boot id', () => {
+    const state = CloudflareSandboxState.make({
+      name: 'sandbox-a',
+      bootId: 'boot-1',
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 100,
+      maxExpiresAtMs: 300
+    })
+
+    const touched = touchSandboxState({ state, nowMs: 250, lifecycle: defaultSandboxLifecycle })
+
+    expect(touched).toEqual(
+      CloudflareSandboxState.make({
+        name: 'sandbox-a',
+        bootId: 'boot-1',
+        createdAtMs: 0,
+        lastUsedAtMs: 250,
+        expiresAtMs: 300,
+        maxExpiresAtMs: 300
+      })
+    )
+  })
+
+  it('stored state of another provider recreates', () => {
+    const state = VercelSandboxState.make({
+      name: 'sandbox-a',
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 100,
+      maxExpiresAtMs: 300
+    })
+
+    const input = { state: Option.some(state), name: 'sandbox-a', nowMs: 1 }
+
+    expect(
+      sandboxStateDecision({ ...input, lifecycle: defaultSandboxLifecycle, provider: 'Cloudflare' })
+    ).toEqual({ _tag: 'Create', workspaceReset: true, reason: 'provider_mismatch' })
+    expect(
+      sandboxStateDecision({ ...input, lifecycle: defaultSandboxLifecycle, provider: 'Vercel' })
+    ).toMatchObject({ _tag: 'UseExisting' })
   })
 })

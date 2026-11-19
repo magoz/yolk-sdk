@@ -1,4 +1,4 @@
-import { Effect, Match } from 'effect'
+import { Effect, Match, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
@@ -80,14 +80,25 @@ export type SandboxToolModuleOptions<Context> = {
 
 const SandboxToolPreviewUrl = Schema.Struct({ port: Schema.Number, url: Schema.String })
 
-const SandboxToolState = Schema.Struct({
-  _tag: Schema.Literal('Vercel'),
-  name: Schema.String,
-  createdAtMs: Schema.Number,
-  lastUsedAtMs: Schema.Number,
-  expiresAtMs: Schema.Number,
-  maxExpiresAtMs: Schema.Number
-})
+const SandboxToolState = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal('Vercel'),
+    name: Schema.String,
+    createdAtMs: Schema.Number,
+    lastUsedAtMs: Schema.Number,
+    expiresAtMs: Schema.Number,
+    maxExpiresAtMs: Schema.Number
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('Cloudflare'),
+    name: Schema.String,
+    bootId: Schema.String,
+    createdAtMs: Schema.Number,
+    lastUsedAtMs: Schema.Number,
+    expiresAtMs: Schema.Number,
+    maxExpiresAtMs: Schema.Number
+  })
+])
 
 /**
  * Declared output of the `sandbox` tool. `structuredContent` is plain JSON of this shape (already
@@ -248,18 +259,26 @@ const plainSandboxPreviewUrl = (
   url: previewUrl.url
 })
 
+// Reads `_tag` once to branch and once to copy, then each field once, in declaration order.
 const plainSandboxState = (state: SandboxCommandResult['state']): PlainSandboxState =>
-  Match.value(state._tag).pipe(
-    Match.when('Vercel', () => ({
-      _tag: state._tag,
-      name: state.name,
-      createdAtMs: state.createdAtMs,
-      lastUsedAtMs: state.lastUsedAtMs,
-      expiresAtMs: state.expiresAtMs,
-      maxExpiresAtMs: state.maxExpiresAtMs
-    })),
-    Match.exhaustive
-  )
+  Predicate.isTagged(state, 'Cloudflare')
+    ? {
+        _tag: state._tag,
+        name: state.name,
+        bootId: state.bootId,
+        createdAtMs: state.createdAtMs,
+        lastUsedAtMs: state.lastUsedAtMs,
+        expiresAtMs: state.expiresAtMs,
+        maxExpiresAtMs: state.maxExpiresAtMs
+      }
+    : {
+        _tag: state._tag,
+        name: state.name,
+        createdAtMs: state.createdAtMs,
+        lastUsedAtMs: state.lastUsedAtMs,
+        expiresAtMs: state.expiresAtMs,
+        maxExpiresAtMs: state.maxExpiresAtMs
+      }
 
 type SandboxToolStructuredContentFields = {
   readonly exitCode: number | null

@@ -20,5 +20,12 @@ const stableHash = (value: string) => {
   return `${first}${second}`
 }
 
-export const makeVercelSandboxName = (sandboxSessionId: string) =>
+/**
+ * The provider-side sandbox name for a `sandboxSessionId`: a stable hash, so the id itself (user and
+ * session scope) never reaches the provider. The Vercel sandbox and the Cloudflare Durable Object
+ * use it.
+ */
+export const makeSandboxName = (sandboxSessionId: string) =>
   `sandbox-${stableHash(sandboxSessionId)}`
+
+export const makeVercelSandboxName = makeSandboxName

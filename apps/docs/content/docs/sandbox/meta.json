@@ -1,4 +1,4 @@
 {
   "title": "Sandbox",
-  "pages": ["index", "lifecycle-safety"]
+  "pages": ["index", "lifecycle-safety", "cloudflare"]
 }

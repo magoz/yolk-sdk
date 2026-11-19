@@ -198,7 +198,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/sandbox',
     packageName: '@yolk-sdk/sandbox',
-    expectedExports: ['./package.json', '.', './agent', './testing', './vercel'],
+    expectedExports: ['./package.json', '.', './agent', './cloudflare', './testing', './vercel'],
     root: 'full'
   },
   {
