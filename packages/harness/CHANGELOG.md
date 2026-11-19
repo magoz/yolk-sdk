@@ -1,5 +1,22 @@
 # @yolk-sdk/harness
 
+## 0.1.0-canary.141
+
+### Minor Changes
+
+- 40946d2: A message admitted right after an interrupt is no longer dropped from scheduling. An owner that had already passed its stopping check could still run `Inbox.beginDrain` and consume the pending intent of a steer or input admitted after the interrupt; the successor started for that message then skipped, leaving it queued with no execution. Coordinator drains now receive a `stopping` read of their execution, Driver forwards it to `Inbox.beginDrain(runId, scope, stopping?)`, and `beginDrain` returns `Skip` without consuming intent when it reads true under the admission gate. An Inbox implementation must read `stopping` under the same lock that consumes intent and, when it is true, return `Skip` without touching pending intent; a wrapper must forward it. Driver now runs `beginDrain` uninterruptibly, so keep it short and non-blocking.
+
+  Driver now issues the drain token and calls `endDrain` as one `Effect.acquireUseRelease`, so an interrupt landing between them can no longer leave the token live with no drain. The owner's `beginDrain`, including its wait for the Inbox gate, is therefore uninterruptible; an interrupt arriving there is delivered once it returns.
+
+- 5c189b9: A park that stops blocking no longer strands work. New `Driver.clearPark(runId, generation)` drops a park without its answers and wakes the run when input was admitted while it blocked, so those messages are answered (#294). `DriverApi` gains this as a required `clearPark` member: custom `DriverApi` / `Driver.of` implementations must add it. `Inbox.clearPark` now takes that wake effect as a third argument, as `acceptHitl` does; direct callers and custom `InboxApi` adapters must pass it. When the continuation of a Ready park (all HITL answers in) fails with a defect, the run keeps its claim instead of releasing it with the answers parked and nothing scheduled (#296), also when a successor woken behind that defect skips and succeeds; `RunCoordinator.layer` gains the `keepClaimOnSettle` option behind this, asked whenever an owner settles without interruption. A later `resumeSuspended` in the same process re-delivers the answers under `maxResumeAttempts`, so hosts that want in-process recovery after a crashed continuation run `resumeSuspended` during runtime, not only at boot; after a restart the host rebuilds the park from its checkpoint. On exhaustion the claim is released but the park stays Ready, so the next admit or wake replays it with a fresh budget. Other drain defects still release the claim, and nothing retries automatically.
+
+### Patch Changes
+
+- Updated dependencies [d634a02]
+- Updated dependencies [38f38cf]
+- Updated dependencies [3fe00ec]
+  - @yolk-sdk/agent@0.1.0-canary.141
+
 ## 0.1.0-canary.140
 
 ### Patch Changes
