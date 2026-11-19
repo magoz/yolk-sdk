@@ -72,7 +72,12 @@ the token and its answers. So creating the next hook and then disposing the prev
 awaiting works, while a step or other suspension in between leaves the next hook refused. Once the
 holder is disposed or its run ends, a new hook takes the token.
 
-The world does not model reading one hook more than once, nor the platform hook's `getConflict()`.
+The world differs from Vercel in two ways: a non-suspending `await` (such as
+`await Promise.resolve()`) between creating the next hook and disposing the previous one refuses
+the next hook here while Vercel accepts it, and a disposed hook frees its token (and answers
+`TestWorkflowHookNotFoundError`) at once, while Vercel records the disposal at the run's next
+suspension. The world does not model reading one hook more than once, nor the platform hook's
+`getConflict()`.
 
 ### Step errors
 

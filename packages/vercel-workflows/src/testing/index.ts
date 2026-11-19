@@ -718,6 +718,16 @@ export class TestWorkflowWorld {
       // Created and disposed before it was created: it never holds the token.
       if (disposed) return
 
+      // A run cancelled before then rejects it, as `cancel` rejects its registered hooks; a run
+      // that ended otherwise never creates it.
+      if (run.status === 'cancelled') {
+        rejectHook(new TestWorkflowRunCancelledError(run.runId))
+
+        return
+      }
+
+      if (run.status === 'completed' || run.status === 'failed') return
+
       const holder = this.liveHook(token)
 
       if (holder === undefined) {

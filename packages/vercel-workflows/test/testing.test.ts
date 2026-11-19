@@ -3,6 +3,7 @@ import {
   defaultTestWorkflowStepMaxRetries,
   TestWorkflowHookConflictError,
   TestWorkflowHookNotFoundError,
+  TestWorkflowRunCancelledError,
   TestWorkflowRunConflictError,
   TestWorkflowStreamConflictError,
   TestWorkflowWorld,
@@ -978,6 +979,28 @@ describe('TestWorkflowWorld hooks', () => {
     await world.settled(runId)
 
     expect(refusal).toMatchObject({ name: 'HookConflictError', conflictingRunId: runId })
+  })
+
+  it('rejects a hook still pending creation when its run is cancelled', async () => {
+    const world = new TestWorkflowWorld()
+    let hookError: unknown
+
+    const { runId } = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      // Cancelled before the hook is created.
+      void world.cancel(TestWorkflowWorld.getWorkflowMetadata().workflowRunId)
+      hookError = await hook.then(
+        () => undefined,
+        (error: unknown) => error
+      )
+    }, [])
+
+    await nextTask()
+
+    expect(hookError).toBeInstanceOf(TestWorkflowRunCancelledError)
+    await world.settled(runId)
+    expect(world.status(runId)).toBe('cancelled')
   })
 
   it('fails resuming an unknown hook token', async () => {
