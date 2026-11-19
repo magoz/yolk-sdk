@@ -8,6 +8,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | ---------------------------------------- | -------------------------------------------------------------- |
 | `workflow-loop.test.ts`                  | Pure contract tests with fake step callbacks                   |
 | `workflow-events.test.ts`                | Durable event sequencing and terminal commit barrier tests     |
+| `workflow-event-executions.test.ts`      | Retried model-step executions keep distinct event ids (#305)   |
 | `effect.test.ts`                         | Fake `workflow/api` SDK unit tests for `./effect` client/layer |
 | `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/hook/cancel tests    |
 | `testing.test.ts`                        | `TestWorkflowWorld` emulator contract, step-error fidelity     |
@@ -27,4 +28,5 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 
 - App auth/provider/tool imports in package tests.
 - Effect runtime work inside package-owned `'use workflow'` orchestration bodies.
-- Retrying streamed steps without event de-dupe semantics in the test scenario.
+- Retrying streamed steps without event de-dupe semantics in the test scenario, or a model step
+  re-execution that reuses event ids without an `executionId`.

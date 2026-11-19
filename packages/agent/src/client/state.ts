@@ -513,6 +513,18 @@ const activeEventToolCallId = (event: AgentEvent): string | undefined =>
     Match.orElse(() => undefined)
   )
 
+/**
+ * A model response ends with its `AssistantMessage`, so output still streaming when the next one
+ * starts belongs to a superseded execution (a retried or redelivered model step): drop it.
+ */
+const discardUnfinishedStream = (state: AgentClientState): AgentClientState => {
+  const toolRuns = state.toolRuns.filter(run => !Predicate.isTagged(run, 'InputStreaming'))
+
+  return state.text === '' && state.reasoning === '' && toolRuns.length === state.toolRuns.length
+    ? state
+    : { ...state, text: '', reasoning: '', toolRuns }
+}
+
 const applyAgentEventUnchecked = (
   state: AgentClientState,
   event: AgentEvent,
@@ -733,12 +745,12 @@ const applyAgentEventUnchecked = (
         text: '',
         reasoning: ''
       })),
+      Match.tag('LLMStreamStart', () => discardUnfinishedStream(state)),
       Match.tag(
         'AgentRetry',
         'CompactionEnd',
         'CompactionStart',
         'LLMStreamEnd',
-        'LLMStreamStart',
         'SubagentCompleted',
         'SubagentStarted',
         'TurnEnd',

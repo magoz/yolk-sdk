@@ -1288,6 +1288,32 @@ const clearTransientParts = (
     return parts.length > 0 ? [{ ...message, parts }] : []
   })
 
+const isUnfinishedStreamPart = (part: AgentChatPart) =>
+  ((Predicate.isTagged(part, 'Text') || Predicate.isTagged(part, 'Reasoning')) &&
+    part.state === 'streaming') ||
+  (Predicate.isTagged(part, 'ToolCall') && Predicate.isTagged(part.state, 'InputStreaming'))
+
+/**
+ * A model response ends with its `AssistantMessage`, so a response still streaming at the tail
+ * when the next one starts belongs to a superseded execution (a retried or redelivered model
+ * step): drop its unfinished parts, and the message when nothing else remains.
+ */
+const discardUnfinishedStream = (
+  messages: ReadonlyArray<AgentChatMessage>
+): ReadonlyArray<AgentChatMessage> => {
+  const last = messages.at(-1)
+
+  if (last === undefined || last.role !== 'assistant') return messages
+
+  const parts = last.parts.filter(part => !isUnfinishedStreamPart(part))
+
+  if (parts.length === last.parts.length) return messages
+
+  const kept = messages.slice(0, -1)
+
+  return parts.length === 0 ? kept : [...kept, { ...last, parts }]
+}
+
 const finalizeStreamingParts = (
   messages: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatMessage> =>
@@ -1635,12 +1661,12 @@ export const applyAgentEventToChatMessages = (
           appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
         )
       ),
+      Match.tag('LLMStreamStart', () => discardUnfinishedStream(messages)),
       Match.tag(
         'AgentRetry',
         'CompactionEnd',
         'CompactionStart',
         'LLMStreamEnd',
-        'LLMStreamStart',
         'SubagentCompleted',
         'SubagentStarted',
         'TurnEnd',

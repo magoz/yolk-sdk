@@ -10,6 +10,7 @@ import {
   AssistantTextPart,
   HostToolCallPart,
   LLMReasoningDelta,
+  LLMStreamStart,
   LLMTextDelta,
   ProviderErrorInfo,
   QuestionAnswer,
@@ -22,6 +23,7 @@ import {
   ToolExecutionCompleted,
   ToolExecutionStarted,
   ToolInputEnd,
+  ToolInputStart,
   ToolResult,
   UserMessage,
   UserMessageEvent,
@@ -144,6 +146,44 @@ describe('agent chat core', () => {
     expect(state.chatMessages[0]?.parts).toEqual([
       AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
+  })
+
+  it('replaces a superseded model-step execution with the one that streams next', () => {
+    const state = [
+      LLMStreamStart.make({ eventId: 'workflow:1:0:step-1:1', turn: 1 }),
+      LLMReasoningDelta.make({ eventId: 'workflow:1:1:step-1:1', text: 'Thin' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:2:step-1:1', text: 'Hel' }),
+      ToolInputStart.make({ eventId: 'workflow:1:3:step-1:1', id: 'call_1', name: 'weather' }),
+      LLMStreamStart.make({ eventId: 'workflow:1:0:step-1:2', turn: 1 }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1:step-1:2', text: 'Sorry' })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.chatMessages).toHaveLength(1)
+    expect(state.chatMessages[0]?.parts).toEqual([
+      AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'Sorry', state: 'streaming' })
+    ])
+  })
+
+  it('keeps finished assistant messages when the next model stream starts', () => {
+    const message = AssistantAgentMessage.make({
+      parts: [AssistantTextPart.make({ content: 'done' })]
+    })
+
+    const settled = [
+      LLMStreamStart.make({ turn: 1 }),
+      LLMTextDelta.make({ text: 'done' }),
+      AssistantMessageEvent.make({ message })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    const next = applyAgentEventToChatProjection(settled, LLMStreamStart.make({ turn: 2 }))
+
+    expect(next.chatMessages).toBe(settled.chatMessages)
   })
 
   it('projects promoted durable user messages once across event replay', () => {

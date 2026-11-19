@@ -720,6 +720,12 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
+A model response ends with its `AssistantMessage`, so output still streaming when the next
+`LLMStreamStart` arrives belongs to a superseded execution of a retried or redelivered model step
+(each execution's live events carry their own `eventId`s, for example `@yolk-sdk/vercel-workflows`'
+`executionId`). The chat projection and `reduceAgentEvents` discard it then: streaming text,
+reasoning and tool input. Settled messages and tool runs stay.
+
 When the host promotes queued user input into a durable stream, emit a replay-safe user event:
 
 ```ts

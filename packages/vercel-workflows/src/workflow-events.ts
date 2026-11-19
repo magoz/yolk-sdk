@@ -13,6 +13,8 @@ export type DurableAgentEventIdInput = {
   readonly streamId: string
   readonly turn: number
   readonly eventSequence: number
+  /** See `SequenceDurableAgentEventInput.executionId`. */
+  readonly executionId?: string
 }
 
 export type SequenceDurableAgentEventInput<Event extends object = object> = {
@@ -26,6 +28,18 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
    */
   readonly streamId: string
   readonly turn: number
+  /**
+   * Identifies one execution of the step that writes the event; it becomes the id's last part.
+   *
+   * Every execution of a step starts from the same `eventSequence`, and a step runs more than
+   * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).
+   * Set it, unique per execution (for example `${stepId}:${attempt}` from `getStepMetadata()`),
+   * on live events a re-execution can write differently, such as a model step's deltas: without
+   * it, two executions write different events under one id and `eventId` de-dupe keeps parts of
+   * both. Omit it on events every execution writes identically (a committed terminal event, a
+   * receipt replay), so a client drops the repeat.
+   */
+  readonly executionId?: string
   readonly event: Event
   readonly createdAtMs?: number
 }
@@ -90,7 +104,9 @@ export const makeDurableAgentEventSequencerState = (
 ): DurableAgentEventSequencerState => ({ eventSequence })
 
 export const durableAgentEventId = (input: DurableAgentEventIdInput) =>
-  `${input.streamId}:${input.turn}:${input.eventSequence}`
+  input.executionId === undefined
+    ? `${input.streamId}:${input.turn}:${input.eventSequence}`
+    : `${input.streamId}:${input.turn}:${input.eventSequence}:${input.executionId}`
 
 export const sequenceDurableAgentEvent = <Event extends object>(
   input: SequenceDurableAgentEventInput<Event>
@@ -108,7 +124,8 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     eventId: durableAgentEventId({
       streamId: input.streamId,
       turn: input.turn,
-      eventSequence
+      eventSequence,
+      executionId: input.executionId
     })
   }
 

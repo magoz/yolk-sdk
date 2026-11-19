@@ -74,3 +74,8 @@ const projection = events.reduce(
 ```
 
 Use append-only projection for durable logs. Use simpler message reducers only for ephemeral local streams.
+
+A model response ends with its `AssistantMessage`, so output still streaming when the next
+`LLMStreamStart` arrives belongs to a superseded execution of a retried or redelivered model step.
+Both the chat projection and `reduceAgentEvents` discard it then (streaming text, reasoning and tool
+input); settled messages and tool runs stay.

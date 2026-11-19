@@ -19,6 +19,22 @@ describe('durable workflow agent events', () => {
     )
   })
 
+  it('appends an execution id so two executions of one step never share an id', () => {
+    const sequenced = (executionId: string | undefined) =>
+      sequenceDurableAgentEvent({
+        state: makeDurableAgentEventSequencerState(3),
+        streamId: 'workflow:run-1',
+        turn: 2,
+        executionId,
+        event: { _tag: 'LLMTextDelta', text: 'hej' }
+      })
+
+    expect(sequenced('step-1:1').event.eventId).toBe('workflow:run-1:2:3:step-1:1')
+    expect(sequenced('step-1:2').event.eventId).toBe('workflow:run-1:2:3:step-1:2')
+    expect(sequenced(undefined).event.eventId).toBe('workflow:run-1:2:3')
+    expect(sequenced('step-1:1').nextEventSequence).toBe(4)
+  })
+
   it('sequences normal events monotonically', () => {
     const first = sequenceDurableAgentEvent({
       state: makeDurableAgentEventSequencerState(4),

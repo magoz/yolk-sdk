@@ -14,6 +14,7 @@ import {
   AssistantTextPart,
   HostToolCallPart,
   LLMReasoningDelta,
+  LLMStreamStart,
   LLMTextDelta,
   ToolExecutionCompleted,
   ToolExecutionError,
@@ -294,6 +295,44 @@ describe('reduceAgentEvents', () => {
 
     expect(state.text).toBe('hello')
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1', 'workflow:1:2'])
+  })
+
+  it('discards a superseded model-step execution when the next stream starts', () => {
+    const state = reduceAgentEvents([
+      AgentStart.make({ eventId: 'workflow:1:0' }),
+      LLMStreamStart.make({ eventId: 'workflow:1:1:step-1:1', turn: 1 }),
+      LLMReasoningDelta.make({ eventId: 'workflow:1:2:step-1:1', text: 'Thin' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:3:step-1:1', text: 'Hel' }),
+      ToolInputStart.make({ eventId: 'workflow:1:4:step-1:1', id: 'call_1', name: 'weather' }),
+      LLMStreamStart.make({ eventId: 'workflow:1:1:step-1:2', turn: 1 }),
+      LLMTextDelta.make({ eventId: 'workflow:1:2:step-1:2', text: 'Sorry' })
+    ])
+
+    expect(state.text).toBe('Sorry')
+    expect(state.reasoning).toBe('')
+    expect(state.toolRuns).toEqual([])
+  })
+
+  it('keeps settled output when the next model stream starts', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+
+    const message = AssistantAgentMessage.make({
+      parts: [AssistantTextPart.make({ content: 'ok' }), HostToolCallPart.make({ call })]
+    })
+
+    const settled = reduceAgentEvents([
+      LLMStreamStart.make({ turn: 1 }),
+      LLMTextDelta.make({ text: 'ok' }),
+      ToolInputStart.make({ id: call.id, name: call.name }),
+      ToolInputEnd.make({ call }),
+      AssistantMessageEvent.make({ message })
+    ])
+
+    const next = reduceAgentEvents([LLMStreamStart.make({ turn: 2 })], settled)
+
+    expect(next.liveMessages).toEqual([message])
+    expect(next.toolRuns).toBe(settled.toolRuns)
+    expect(next.toolRuns).toEqual([AgentToolRun.InputReady({ call })])
   })
 
   it('allows duplicate events without event ids', () => {

@@ -242,13 +242,16 @@ tokens that the resume side can reconstruct or store.
 
 ## Retry policy
 
-Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because
-streamed retries can duplicate chunks unless host/client de-dupe is ready.
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because a
+retried step streams its events again. `eventId` de-dupe alone does not make that safe: a retried
+model step writes a different answer from the same `eventSequence`, so give its live events an
+`executionId` ([Durable stream events](#durable-stream-events)).
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
 
-One attempt does not stop queue redelivery: a step can still run again after a crash or
-concurrently. See [Tool steps are at-least-once](#tool-steps-are-at-least-once).
+One attempt does not stop queue redelivery or platform step retries (`fn.maxRetries`): a step can
+still run again after a failure or crash, or concurrently. See
+[Tool steps are at-least-once](#tool-steps-are-at-least-once).
 
 `maxTurns` follows the same positive-integer boundary: finite values are floored and clamped to at
 least one. Omitted or non-finite values use `defaultMaxWorkflowTurns`.
@@ -280,12 +283,41 @@ eventSequence = sequenced.nextEventSequence
 A rejected write fails with `DurableAgentEventWriteError`: its `message` is the rejection's message
 (or `String(rejection)`), and `cause` is the rejection itself.
 
-The id format is `${streamId}:${turn}:${eventSequence}`. Scope `streamId` to one logical durable
-run (for example `workflow:${runId}`), not just one route or feature. Replay-safe clients de-dupe by
-`eventId`; reusing a stream id across independent runs can make a follow-up run's live deltas look
-like old replayed events. Keep `eventSequence` in Workflow state and reset it when starting a fresh
-logical stream. Resume route reads should use `startIndex` when available. Host apps still own
-active-run locking, stale-run guards, and cancellation behavior.
+The id format is `${streamId}:${turn}:${eventSequence}`, or
+`${streamId}:${turn}:${eventSequence}:${executionId}` when `executionId` is set. Scope `streamId` to
+one logical durable run (for example `workflow:${runId}`), not just one route or feature.
+Replay-safe clients de-dupe by `eventId`; reusing a stream id across independent runs can make a
+follow-up run's live deltas look like old replayed events. Keep `eventSequence` in Workflow state
+and reset it when starting a fresh logical stream. Resume route reads should use `startIndex` when
+available. Host apps still own active-run locking, stale-run guards, and cancellation behavior.
+
+### One step, several executions
+
+A step can run more than once: opt-in loop retries (`modelStepRetry`), platform retries
+(`fn.maxRetries`), and queue redelivery, which can run beside an execution that is still streaming.
+Every execution starts from the same `eventSequence`. A model step's second execution calls the
+model again and streams a different answer, so without more the same ids carry different events and
+a client de-duping by `eventId` keeps the first execution's early deltas plus the second's tail.
+
+Pass an `executionId` unique per execution on a model step's live events (deltas, tool input,
+messages before the commit). `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is one:
+a loop retry is a new step id, and each platform retry or redelivery a new attempt. Omit it on events
+every execution writes identically, so a client drops the repeat: the terminal event written after
+the host commits (`commitThenWriteTerminalEvent`) and anything replayed from a committed receipt.
+Leaving it out keeps the plain format, so stored ids and events written before do not change.
+
+```ts
+const { stepId, attempt } = getStepMetadata()
+const executionId = `${stepId}:${attempt}`
+
+yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, state })
+```
+
+`@yolk-sdk/agent` clients (`reduceAgentEvents`, `applyAgentEventToChatProjection`) then discard a
+superseded execution's unfinished output when the next execution's `LLMStreamStart` arrives (a model
+response ends with its `AssistantMessage`, so anything still streaming then was abandoned). Two
+executions streaming at the same time can still interleave in the live view until the committed
+messages arrive; none of their events is dropped.
 
 ## Terminal barriers
 
@@ -351,8 +383,8 @@ Never close on resumable `AgentAwaitingInput`.
 - Preserve tool result order and never advance the next model step with dangling host tool calls.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
-- Emit replay-safe event ids for durable streams; scope stream ids per independent run and de-dupe
-  by `eventId` client-side.
+- Emit replay-safe event ids for durable streams; scope stream ids per independent run, give a
+  model step's live events an `executionId` per execution, and de-dupe by `eventId` client-side.
 - Write durable terminal events only after host persistence has settled.
 - Implement `closeStream` for successful final closure and `writeError` for safe final error write
   plus failure closure. Release, but do not close, the writer after `AgentAwaitingInput`.
