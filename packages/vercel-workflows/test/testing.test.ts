@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   defaultTestWorkflowStepMaxRetries,
+  TestWorkflowHookConflictError,
   TestWorkflowHookNotFoundError,
   TestWorkflowRunConflictError,
   TestWorkflowStreamConflictError,
@@ -808,6 +809,122 @@ describe('TestWorkflowWorld hooks', () => {
     await world.settled(runId)
 
     expect(received).toEqual(['answer-for-pause-1', 'answer-for-pause-1'])
+  })
+
+  // Issue #318: the platform refuses a hook whose token another live hook holds
+  // (package-directives.integration.test.ts shows it).
+  it("refuses a hook whose token another run's live hook holds", async () => {
+    const world = new TestWorkflowWorld()
+
+    const holder = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+      return await hook
+    }, [])
+
+    await nextTask()
+
+    let refusal: unknown
+
+    const refused = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+      refusal = await hook.then(
+        () => undefined,
+        (error: unknown) => error
+      )
+    }, [])
+
+    // A refused hook left unawaited fails nothing.
+    const unawaited = world.start(async () => {
+      void TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+    }, [])
+
+    await nextTask()
+
+    expect(refusal).toBeInstanceOf(TestWorkflowHookConflictError)
+    expect(refusal).toMatchObject({
+      name: 'HookConflictError',
+      token: 'session-hitl',
+      conflictingRunId: holder.runId,
+      message: `Hook token "session-hitl" is already in use by another workflow (run "${holder.runId}")`
+    })
+    await world.settled(refused.runId)
+    await world.settled(unawaited.runId)
+    expect(world.status(unawaited.runId)).toBe('completed')
+
+    // The holder's hook still answers, and its token is free again once its run ends.
+    await world.resumeHook('session-hitl', 'holder answer')
+    await world.settled(holder.runId)
+    await expect(world.sdk.getRun(holder.runId).returnValue).resolves.toBe('holder answer')
+
+    const later = world.start(async () => {
+      using hook = TestWorkflowWorld.createHook<string>({ token: 'session-hitl' })
+
+      return await hook
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('session-hitl', 'later answer')
+    await expect(world.sdk.getRun(later.runId).returnValue).resolves.toBe('later answer')
+  })
+
+  it('refuses a second live hook of the same run, whose disposal keeps the first', async () => {
+    const world = new TestWorkflowWorld()
+    let refusal: unknown
+    let received: string | undefined
+
+    const { runId } = world.start(async () => {
+      using first = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      {
+        using second = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+        refusal = await second.then(
+          () => undefined,
+          (error: unknown) => error
+        )
+      }
+
+      received = await first
+    }, [])
+
+    await nextTask()
+
+    expect(refusal).toMatchObject({
+      name: 'HookConflictError',
+      token: 'pause-1',
+      conflictingRunId: runId
+    })
+
+    await world.resumeHook('pause-1', 'first answer')
+    await world.settled(runId)
+    expect(received).toBe('first answer')
+  })
+
+  it('keeps a later hook live when an earlier hook with its token is disposed again', async () => {
+    const world = new TestWorkflowWorld()
+    const received: Array<string> = []
+
+    const { runId } = world.start(async () => {
+      const first = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      received.push(await first)
+      first[Symbol.dispose]()
+
+      using second = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      first[Symbol.dispose]()
+      received.push(await second)
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('pause-1', 'answer-1')
+    await nextTask()
+    await world.resumeHook('pause-1', 'answer-2')
+    await world.settled(runId)
+
+    expect(received).toEqual(['answer-1', 'answer-2'])
   })
 
   it('fails resuming an unknown hook token', async () => {

@@ -67,17 +67,23 @@ export class TestWorkflowHookNotFoundError extends Error {
 }
 
 /**
- * Not thrown by `resumeHook`: like the platform, it accepts every payload sent to a live hook. The
- * platform's `HookConflictError` comes from creating a hook whose token another live hook holds,
- * which this world does not emulate.
- *
- * @deprecated Nothing throws it any more; it will be removed in a later minor release.
+ * The platform's `HookConflictError`: awaiting a hook created while another live hook (of any run,
+ * this one included) held its token fails with it. The refused hook never takes the token.
  */
 export class TestWorkflowHookConflictError extends Error {
   override readonly name = 'HookConflictError'
+  readonly token: string
+  /** The run whose live hook holds the token. */
+  readonly conflictingRunId: string | undefined
 
-  constructor(token: string) {
-    super(`Workflow hook "${token}" was already resumed`)
+  constructor(token: string, conflictingRunId?: string) {
+    super(
+      `Hook token "${token}" is already in use by another workflow${
+        conflictingRunId === undefined ? '' : ` (run "${conflictingRunId}")`
+      }`
+    )
+    this.token = token
+    this.conflictingRunId = conflictingRunId
   }
 }
 
@@ -503,6 +509,19 @@ export class TestWorkflowWorld {
   // the first; later payloads stay unread (a settled promise ignores them) and are dropped with
   // the hook. A disposed hook's token is free again, for a later hook of any run.
   async resumeHook(token: string, payload: unknown): Promise<void> {
+    const live = this.liveHook(token)
+
+    if (live === undefined) throw new TestWorkflowHookNotFoundError(token)
+
+    live.run.resumedHookTokens.add(token)
+    live.hook.resolve(payload)
+  }
+
+  // The one hook holding `token`: undisposed, in a run that has not ended. `makeHook` refuses a
+  // second, so there is at most one.
+  private liveHook(
+    token: string
+  ): { readonly run: TestWorkflowRunRecord; readonly hook: HookRecord } | undefined {
     for (const run of this.runs.values()) {
       if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
         continue
@@ -510,15 +529,10 @@ export class TestWorkflowWorld {
 
       const hook = run.hooks.get(token)
 
-      if (hook !== undefined) {
-        run.resumedHookTokens.add(token)
-        hook.resolve(payload)
-
-        return
-      }
+      if (hook !== undefined) return { run, hook }
     }
 
-    throw new TestWorkflowHookNotFoundError(token)
+    return undefined
   }
 
   hasResumedHook(token: string): boolean {
@@ -679,7 +693,20 @@ export class TestWorkflowWorld {
     })
   }
 
+  // As on the platform, a token another live hook holds (of any run, this one included) is
+  // refused: creating the hook succeeds, awaiting it fails with the conflict, and it never takes
+  // the token, so disposing it changes nothing. Left unawaited, it fails nothing.
   private makeHook<T>(run: TestWorkflowRunRecord, token: string): TestWorkflowHook<T> {
+    const holder = this.liveHook(token)
+
+    if (holder !== undefined) {
+      const refused = Promise.reject<T>(new TestWorkflowHookConflictError(token, holder.run.runId))
+
+      refused.catch(() => {})
+
+      return Object.assign(refused, { [Symbol.dispose]: () => {} })
+    }
+
     let resolveHook: (payload: unknown) => void = () => {}
 
     let rejectHook: (error: TestWorkflowRunCancelledError) => void = () => {}
@@ -691,11 +718,14 @@ export class TestWorkflowWorld {
       rejectHook = reject
     })
 
-    run.hooks.set(token, { resolve: resolveHook, reject: rejectHook })
+    const hook: HookRecord = { resolve: resolveHook, reject: rejectHook }
+
+    run.hooks.set(token, hook)
 
     return Object.assign(promise, {
       [Symbol.dispose]: () => {
-        run.hooks.delete(token)
+        // Frees the token only while this hook holds it, never a later hook that took it since.
+        if (run.hooks.get(token) === hook) run.hooks.delete(token)
       }
     })
   }

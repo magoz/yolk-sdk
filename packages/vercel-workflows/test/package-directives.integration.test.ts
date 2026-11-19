@@ -14,7 +14,9 @@ import {
   packageCancellableWorkflow,
   packageHitlDirectiveWorkflow,
   packageHookAnswersWorkflow,
+  packageHookConflictWorkflow,
   packageHookOnceWorkflow,
+  packageHookSameRunConflictWorkflow,
   packageHookTwoPausesWorkflow,
   packageOwnedDirectiveWorkflow,
   packageStreamHitlWorkflow,
@@ -206,6 +208,46 @@ describe('package-owned workflow directives', () => {
     await waitForHook(second, { token })
     await resumeHook(token, 'run-2 answer')
     await expect(second.returnValue).resolves.toBe('run-2 answer')
+  })
+
+  // The platform side of `TestWorkflowWorld` hook token conflicts (issue #318).
+  it("refuses a hook whose token another run's live hook holds", async () => {
+    const token = `package-hook-conflict:${crypto.randomUUID()}`
+    const holder = await start(packageHookOnceWorkflow, [token])
+
+    await waitForHook(holder, { token })
+
+    const refused = await start(packageHookConflictWorkflow, [token])
+
+    // The platform's message goes on with a link to its docs.
+    await expect(refused.returnValue).resolves.toMatch(
+      `HookConflictError: Hook token "${token}" is already in use by another workflow (run "${holder.runId}")`
+    )
+
+    // The holder's hook is untouched, and its token is free again once its run ends.
+    await resumeHook(token, 'holder answer')
+    await expect(holder.returnValue).resolves.toBe('holder answer')
+
+    const later = await start(packageHookConflictWorkflow, [token])
+
+    await waitForHook(later, { token })
+    await resumeHook(token, 'later answer')
+    await expect(later.returnValue).resolves.toBe('answer: later answer')
+  })
+
+  it('refuses a second live hook of the same run with the same token', async () => {
+    const token = `package-hook-same-run:${crypto.randomUUID()}`
+    const run = await start(packageHookSameRunConflictWorkflow, [token])
+
+    await waitForHook(run, { token })
+    await resumeHook(token, 'first answer')
+
+    await expect(run.returnValue).resolves.toEqual([
+      expect.stringContaining(
+        `HookConflictError: Hook token "${token}" is already in use by another workflow (run "${run.runId}")`
+      ),
+      'first answer'
+    ])
   })
 
   it('cancels package-owned workflow runs', async () => {

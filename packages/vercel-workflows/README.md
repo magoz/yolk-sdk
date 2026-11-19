@@ -93,12 +93,14 @@ creates no run) and `world.inspect(runId).attributes` shows them (`{}` without a
 adds no `$parentRunId`/`$rootRunId`). Hooks follow the platform too: `resumeHook` succeeds for
 every payload sent to a live hook, `await hook` reads the first, the rest are dropped when the hook
 is disposed, and a token whose hook was disposed (or whose run ended) answers
-`TestWorkflowHookNotFoundError` until a hook of any run takes it again. The emulator does not model
-the platform's `HookConflictError` for a token another live hook holds, nor reading a hook more than
-once. Executing a step loads the workflow runtime, so it needs the
-Node test environment. Ambient module mocks do not apply retry policy by
-themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly
-when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
+`TestWorkflowHookNotFoundError` until a hook of any run takes it again. A hook created while
+another live hook (of any run, its own included) holds its token is refused as on the platform:
+awaiting it fails with `TestWorkflowHookConflictError` (the platform's `HookConflictError`, with
+`token` and `conflictingRunId`), and the holder keeps the token. The emulator does not model
+reading a hook more than once, nor the platform hook's `getConflict()`. Executing a step loads the
+workflow runtime, so it needs the Node test environment. Ambient module mocks do not apply retry
+policy by themselves: wrap host step callbacks with `world.step(...)` or call `world.runStep(...)`
+explicitly when the test must exercise platform retry attempts and `getStepMetadata().attempt`.
 
 Mock the ambient `workflow` module so production orchestration runs against the active test world:
 

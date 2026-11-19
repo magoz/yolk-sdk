@@ -109,6 +109,34 @@ export async function packageHookOnceWorkflow(token: string): Promise<string> {
   return await hook
 }
 
+// Creates a hook whose token another hook may hold; returns its answer or the failure awaiting it
+// reports.
+export async function packageHookConflictWorkflow(token: string): Promise<string> {
+  'use workflow'
+
+  using hook = createHook<string>({ token })
+
+  return await hook.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+}
+
+// Two live hooks of one run share a token: the second is refused, the first still answers.
+export async function packageHookSameRunConflictWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  using first = createHook<string>({ token })
+  using second = createHook<string>({ token })
+
+  const refused = await second.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+
+  return [refused, await first]
+}
+
 export async function packageCancellableWorkflow(): Promise<string> {
   'use workflow'
 

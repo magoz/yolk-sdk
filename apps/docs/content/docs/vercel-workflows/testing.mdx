@@ -60,8 +60,15 @@ payload sent to a live hook; `await hook` reads the first, and the rest are drop
 disposes the hook. Once the hook is disposed, or its run ended, resuming its token fails with
 `TestWorkflowHookNotFoundError` until a hook of any run takes the token again. So a test can show a
 second answer being accepted and never used, or a late duplicate reaching the next pause that
-reuses a token ([HITL resume](./hitl-resume)). The world does not model the platform's
-`HookConflictError` for a token another live hook holds, nor reading one hook more than once.
+reuses a token ([HITL resume](./hitl-resume)).
+
+A token is held by one live hook at a time. A hook created while another live hook holds its token,
+in another run or the same one, is refused as on the platform: awaiting it fails with
+`TestWorkflowHookConflictError` (named `HookConflictError`, with `token` and `conflictingRunId`),
+disposing it changes nothing, and the holder keeps the token and its answers. Once the holder is
+disposed or its run ends, a new hook takes the token.
+
+The world does not model reading one hook more than once, nor the platform hook's `getConflict()`.
 
 ### Step errors
 

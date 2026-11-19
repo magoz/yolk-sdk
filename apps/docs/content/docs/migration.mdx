@@ -30,6 +30,16 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.143: test world hook token conflicts
+
+`TestWorkflowWorld` now refuses a hook whose token another live hook holds, in another run or the
+same one, as Vercel does. Creating it succeeds, but awaiting it rejects with
+`TestWorkflowHookConflictError` (named `HookConflictError`, with `token` and `conflictingRunId`),
+and the holder keeps the token. Before, the world registered both. Update host tests in which two
+live runs, or two live hooks of one run, share a token: give each pause its own token, or let the
+holder dispose its hook or end its run first. `TestWorkflowHookConflictError` is no longer
+deprecated ([Hooks](./vercel-workflows/testing#hooks)).
+
 ### Canary.141: idempotent stream close
 
 `TestWorkflowWorld` now treats closing an already closed stream as Vercel does: the close succeeds
