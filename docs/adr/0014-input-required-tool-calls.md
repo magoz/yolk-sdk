@@ -47,7 +47,9 @@ text, never the review text itself:
 - A code mode result keeps `{ codemode: { ok, inputRequired } }` and its notice
   (`inputRequiredNotice`), only when its text ends with that notice. Any tool can return that shape,
   so the ledger never writes this notice itself: another tool's result with the shape and no notice
-  has its refs dropped like any other `structuredContent`.
+  has its refs dropped like any other `structuredContent`. Its staged plan (`codemode.plan`) is
+  kept the same way, with its notice just before this one
+  ([ADR 0005](0005-staged-tool-plans.md)).
 
 Other results' pause refs are not kept. A plan apply's stored outcome (its fence entry) is reduced
 like any result; over the bound its replay lists the applied calls' own ledger entries instead,
