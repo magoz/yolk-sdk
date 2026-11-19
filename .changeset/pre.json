@@ -28,6 +28,7 @@
     "agent-chat-response-issue-codes",
     "agent-claude-optional-tool-params",
     "agent-claude-thinking-replay",
+    "agent-client-name-the-pause",
     "agent-codex-final-output",
     "agent-ledger-heartbeat-margin",
     "agent-loop-composition",
@@ -110,6 +111,7 @@
     "cloudflare-workflow-runtime",
     "code-mode-package",
     "code-mode-tool-contract",
+    "codemode-abandoned-staged-plan",
     "codemode-change-previews",
     "codemode-dynamic-workers",
     "codemode-json-arguments",
@@ -280,6 +282,8 @@
     "safe-chat-context",
     "safe-gmail-attachments",
     "safe-tool-errors",
+    "sandbox-cloudflare-containers",
+    "sandbox-cloudflare-lockstep",
     "sandbox-execution-plane",
     "sandbox-lifecycle-adts",
     "sandbox-tool-output",
@@ -326,6 +330,7 @@
     "workflow-close-idempotent",
     "workflow-five-beta",
     "workflow-hitl-hook-answers",
+    "workflow-hitl-name-the-pause",
     "workflow-hook-token-conflict",
     "workflow-runtime-factory"
   ]
