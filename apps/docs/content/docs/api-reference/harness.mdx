@@ -20,6 +20,9 @@ Import feature APIs from explicit subpaths. The root package is intentionally em
 | `makeCoordinator` | Build a process-local coordinator                                                                                                      |
 | `RunCoordinator`  | Owning service; `.layer({ drain, keepClaimOnSettle })` needs `RunStore`; `keepClaimOnSettle` true keeps an uninterrupted owner's claim |
 
+The `drain` callback of `RunCoordinator.layer` and `makeCoordinator` gets a fourth argument,
+`stopping`: an effect reading that execution's stopping flag. Forward it to `Inbox.beginDrain`.
+
 ## Store
 
 `@yolk-sdk/harness/store`
@@ -66,6 +69,8 @@ not token format, freshness, or authorization.
 service dependencies. `makeInMemoryInboxLayer` delegates to it.
 
 `takePromotable(runId, scope, drainToken)` requires the live `beginDrain` token. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and do not dequeue.
+
+`beginDrain(runId, scope, stopping?)` returns `Skip` without consuming pending intent when `stopping` reads true under the admission gate. Driver passes the owner's stopping flag, so a message admitted right after an interrupt drains in the successor. An Inbox implementation must read `stopping` under the same lock that consumes intent and, when it is true, return `Skip` without touching pending intent; a wrapper must forward it. Driver now runs `beginDrain` uninterruptibly, so keep it short and non-blocking.
 
 ## Driver
 

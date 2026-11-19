@@ -13,8 +13,9 @@ Workflow 5 captures Node `URL` intrinsics when the module loads.
 ## Behavioral platform emulator
 
 `@yolk-sdk/vercel-workflows/testing` exports `TestWorkflowWorld`. Use it to exercise host code
-against run lifecycle, append-only stream replay, close-once HTTP 409-style conflicts, step retry
-attempts, hooks/resume, cancellation, and the SDK seam consumed by `VercelWorkflows.layerFromSdk`.
+against run lifecycle, append-only stream replay, HTTP 409-style conflicts for writes after close
+(closing again succeeds, as on Vercel), step retry attempts, hooks/resume, cancellation, and the
+SDK seam consumed by `VercelWorkflows.layerFromSdk`.
 
 This is a test fragment; initialize one world per test and mock the ambient module before importing
 the host Workflow under test:
@@ -51,6 +52,16 @@ attempts, step attempts, status, run errors, `unstorableStepErrors` (`stepName`,
 `world.sdk.start` checks them with the installed runtime's validator, so an attribute the platform
 rejects fails the start there too. Use `world.sdk` with `VercelWorkflows.layerFromSdk` when testing
 Effect route/service boundaries.
+
+### Hooks
+
+Hooks behave as on the platform. `world.resumeHook` (and `world.sdk.resumeHook`) succeeds for every
+payload sent to a live hook; `await hook` reads the first, and the rest are dropped when `using`
+disposes the hook. Once the hook is disposed, or its run ended, resuming its token fails with
+`TestWorkflowHookNotFoundError` until a hook of any run takes the token again. So a test can show a
+second answer being accepted and never used, or a late duplicate reaching the next pause that
+reuses a token ([HITL resume](./hitl-resume)). The world does not model the platform's
+`HookConflictError` for a token another live hook holds, nor reading one hook more than once.
 
 ### Step errors
 
@@ -135,10 +146,10 @@ Cover:
 - One ordered tool-result message per tool call.
 - HITL reruns the same tool batch with accumulated responses.
 - Event sequence advances across model, tool, and HITL resume.
-- Default retries are disabled.
+- Default retries are disabled, except the close step's (`defaultCloseStreamRetry`).
 - Retried streamed steps have de-dupe-ready event ids.
 - Terminal write happens only after durable commit succeeds.
-- `AgentEnd` closes exactly once through `closeStream`.
+- `AgentEnd` closes through `closeStream`, and only there; a retried close re-closes harmlessly.
 - Failure paths use `writeError`, not `closeStream`; a `writeError` rejection preserves the original
   structured failure result.
 - `AgentAwaitingInput` does not close before resume; resumed execution can append and eventually

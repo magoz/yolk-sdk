@@ -951,16 +951,16 @@ describe('HITL park lifecycle', () => {
 
           return Inbox.of({
             ...inner,
-            beginDrain: (runId, scope) =>
+            beginDrain: (runId, scope, stopping) =>
               Ref.update(beginCount, count => count + 1).pipe(
                 Effect.andThen(Ref.get(beginCount)),
                 Effect.flatMap(count =>
                   count === 2
                     ? Deferred.succeed(secondBeginStarted, undefined).pipe(
                         Effect.andThen(Deferred.await(secondBeginRelease)),
-                        Effect.andThen(inner.beginDrain(runId, scope))
+                        Effect.andThen(inner.beginDrain(runId, scope, stopping))
                       )
-                    : inner.beginDrain(runId, scope)
+                    : inner.beginDrain(runId, scope, stopping)
                 )
               )
           })
@@ -1047,16 +1047,16 @@ describe('HITL park lifecycle', () => {
 
           return Inbox.of({
             ...inner,
-            beginDrain: (runId, scope) =>
+            beginDrain: (runId, scope, stopping) =>
               Ref.update(beginCount, count => count + 1).pipe(
                 Effect.andThen(Ref.get(beginCount)),
                 Effect.flatMap(count =>
                   count === 2
                     ? Deferred.succeed(secondBeginStarted, undefined).pipe(
                         Effect.andThen(Deferred.await(secondBeginRelease)),
-                        Effect.andThen(inner.beginDrain(runId, scope))
+                        Effect.andThen(inner.beginDrain(runId, scope, stopping))
                       )
-                    : inner.beginDrain(runId, scope)
+                    : inner.beginDrain(runId, scope, stopping)
                 )
               )
           })
@@ -1144,16 +1144,16 @@ describe('HITL park lifecycle', () => {
 
           return Inbox.of({
             ...inner,
-            beginDrain: (runId, scope) =>
+            beginDrain: (runId, scope, stopping) =>
               Ref.update(beginCount, count => count + 1).pipe(
                 Effect.andThen(Ref.get(beginCount)),
                 Effect.flatMap(count =>
                   count === 2
                     ? Deferred.succeed(secondBeginStarted, undefined).pipe(
                         Effect.andThen(Deferred.await(secondBeginRelease)),
-                        Effect.andThen(inner.beginDrain(runId, scope))
+                        Effect.andThen(inner.beginDrain(runId, scope, stopping))
                       )
-                    : inner.beginDrain(runId, scope)
+                    : inner.beginDrain(runId, scope, stopping)
                 )
               )
           })

@@ -30,6 +30,21 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.141: idempotent stream close
+
+`TestWorkflowWorld` now treats closing an already closed stream as Vercel does: the close succeeds
+(still counted in `inspect(runId).streamCloseCount`) instead of throwing the 409
+`TestWorkflowStreamConflictError`. Writes after close still throw that conflict. Update host tests
+that expected a second close to throw.
+
+`runVercelAgentWorkflow` now retries the close step by default: `closeStreamRetry` defaults to
+`defaultCloseStreamRetry` (`{ maxAttempts: 3 }`, any rejection, a `FatalError` too), so a close
+applied by an attempt that then failed completes the run when a later attempt succeeds. Keep
+`closeStream` close-only and safe to repeat, or opt out with
+`closeStreamRetry: noWorkflowStepRetry`. Tests that counted one `closeStream` call for a failing
+close now see up to three
+([Retry policy](./vercel-workflows/step-contracts#retry-policy)).
+
 ### Canary.131: test world step errors
 
 `TestWorkflowWorld.runStep` now treats step errors as the platform does: it stores each thrown value

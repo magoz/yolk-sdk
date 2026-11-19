@@ -1418,16 +1418,16 @@ describe('restart recovery', () => {
 
           return Inbox.of({
             ...inner,
-            beginDrain: (id, scope) =>
+            beginDrain: (id, scope, stopping) =>
               Effect.suspend(() => {
                 begins += 1
 
                 return begins === 1
                   ? Deferred.succeed(entered, undefined).pipe(
                       Effect.andThen(Deferred.await(release)),
-                      Effect.andThen(inner.beginDrain(id, scope))
+                      Effect.andThen(inner.beginDrain(id, scope, stopping))
                     )
-                  : inner.beginDrain(id, scope)
+                  : inner.beginDrain(id, scope, stopping)
               })
           })
         })
@@ -1491,16 +1491,16 @@ describe('restart recovery', () => {
 
               return Inbox.of({
                 ...inner,
-                beginDrain: (id, scope) =>
+                beginDrain: (id, scope, stopping) =>
                   Effect.suspend(() => {
                     begins += 1
 
                     return begins === 1
                       ? Deferred.succeed(entered, undefined).pipe(
                           Effect.andThen(Deferred.await(release)),
-                          Effect.andThen(inner.beginDrain(id, scope))
+                          Effect.andThen(inner.beginDrain(id, scope, stopping))
                         )
-                      : inner.beginDrain(id, scope)
+                      : inner.beginDrain(id, scope, stopping)
                   })
               })
             })

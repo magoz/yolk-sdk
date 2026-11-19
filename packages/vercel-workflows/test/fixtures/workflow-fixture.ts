@@ -68,6 +68,47 @@ export async function packageStreamHitlWorkflow(): Promise<string> {
   return response
 }
 
+// Reads one payload, then sleeps with the hook still live, then sleeps again after disposing it.
+export async function packageHookAnswersWorkflow(token: string): Promise<string> {
+  'use workflow'
+
+  let answer: string
+
+  {
+    using hook = createHook<string>({ token })
+
+    answer = await hook
+    await sleep('10m')
+  }
+
+  await sleep('10m')
+
+  return answer
+}
+
+// Two pauses that (wrongly) share one token.
+export async function packageHookTwoPausesWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  const answers: Array<string> = []
+
+  for (let pause = 1; pause <= 2; pause++) {
+    using hook = createHook<string>({ token })
+
+    answers.push(await hook)
+  }
+
+  return answers
+}
+
+export async function packageHookOnceWorkflow(token: string): Promise<string> {
+  'use workflow'
+
+  using hook = createHook<string>({ token })
+
+  return await hook
+}
+
 export async function packageCancellableWorkflow(): Promise<string> {
   'use workflow'
 
