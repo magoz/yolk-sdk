@@ -22,9 +22,10 @@ const runId = WorkflowRunId.make('parent')
 
 const userId = UserId.make('owner')
 
-const pause = (hookToken: string, toolCallId: string) =>
+const pause = (index: number, toolCallId: string) =>
   WorkflowHitlPause.make({
-    hookToken,
+    pauseId: `event-${index}`,
+    hookToken: `pause-${index}`,
     requests: [
       ToolApprovalRequest.make({
         requestId: `approval:${toolCallId}`,
@@ -80,17 +81,17 @@ const harness = (onResume: (token: string) => void) => {
   return { layer, change, resumes }
 }
 
-const resume = (toolCallId: string, tailIndex: number) =>
-  resumeWorkflowHitlAnswer({ runId, userId, response: approve(toolCallId), tailIndex })
+const resume = (pauseId: string | undefined, toolCallId: string, tailIndex: number) =>
+  resumeWorkflowHitlAnswer({ runId, userId, pauseId, response: approve(toolCallId), tailIndex })
 
 describe('resumeWorkflowHitlAnswer', () => {
   it.effect('reports an identical retry after delivery without resuming the hook again', () =>
     Effect.gen(function* () {
       const fake = harness(token => fake.change({ type: 'deliver', hookToken: token }))
-      fake.change({ type: 'pause', pause: pause('pause-1', 'a') })
+      fake.change({ type: 'pause', pause: pause(1, 'a') })
 
-      const first = yield* resume('a', 4).pipe(Effect.provide(fake.layer))
-      const retried = yield* resume('a', 9).pipe(Effect.provide(fake.layer))
+      const first = yield* resume('event-1', 'a', 4).pipe(Effect.provide(fake.layer))
+      const retried = yield* resume('event-1', 'a', 9).pipe(Effect.provide(fake.layer))
 
       expect(fake.resumes).toEqual(['pause-1'])
       expect(first.tailIndex).toBe(4)
@@ -101,12 +102,12 @@ describe('resumeWorkflowHitlAnswer', () => {
   it.effect('reports an identical retry as delivered once the workflow moved to a new pause', () =>
     Effect.gen(function* () {
       const fake = harness(() => undefined)
-      fake.change({ type: 'pause', pause: pause('pause-1', 'a') })
-      yield* resume('a', 4).pipe(Effect.provide(fake.layer))
+      fake.change({ type: 'pause', pause: pause(1, 'a') })
+      yield* resume('event-1', 'a', 4).pipe(Effect.provide(fake.layer))
       // The workflow took the answer (delivery mark lost) and paused again.
-      fake.change({ type: 'pause', pause: pause('pause-2', 'b') })
+      fake.change({ type: 'pause', pause: pause(2, 'b') })
 
-      const retried = yield* resume('a', 9).pipe(Effect.provide(fake.layer))
+      const retried = yield* resume('event-1', 'a', 9).pipe(Effect.provide(fake.layer))
 
       expect(retried.tailIndex).toBe(4)
       expect(fake.resumes).toEqual(['pause-1'])
@@ -117,14 +118,14 @@ describe('resumeWorkflowHitlAnswer', () => {
     Effect.gen(function* () {
       const fake = harness(token => {
         // The workflow took the answer and paused again before this resume reached the hook.
-        fake.change({ type: 'pause', pause: pause('pause-2', 'b') })
+        fake.change({ type: 'pause', pause: pause(2, 'b') })
 
         throw new HookNotFoundError(token)
       })
 
-      fake.change({ type: 'pause', pause: pause('pause-1', 'a') })
+      fake.change({ type: 'pause', pause: pause(1, 'a') })
 
-      const answer = yield* resume('a', 4).pipe(Effect.provide(fake.layer))
+      const answer = yield* resume('event-1', 'a', 4).pipe(Effect.provide(fake.layer))
 
       expect(answer.tailIndex).toBe(4)
       expect(fake.resumes).toEqual(['pause-1'])
@@ -137,19 +138,47 @@ describe('resumeWorkflowHitlAnswer', () => {
         throw new HookNotFoundError(token)
       })
 
-      fake.change({ type: 'pause', pause: pause('pause-1', 'a') })
+      fake.change({ type: 'pause', pause: pause(1, 'a') })
 
-      const fiber = yield* resume('a', 4).pipe(
+      const fiber = yield* resume('event-1', 'a', 4).pipe(
         Effect.provide(fake.layer),
         Effect.flip,
         Effect.forkChild
       )
 
-      yield* TestClock.adjust('10 seconds')
+      // One immediate attempt, then one per delay: 250ms, 500ms, 1s, 2s.
+      yield* Effect.yieldNow
+      expect(fake.resumes).toHaveLength(1)
+
+      for (const [delay, attempts] of [
+        [250, 2],
+        [500, 3],
+        [1000, 4],
+        [2000, 5]
+      ] as const) {
+        yield* TestClock.adjust(delay - 1)
+        expect(fake.resumes).toHaveLength(attempts - 1)
+        yield* TestClock.adjust(1)
+        expect(fake.resumes).toHaveLength(attempts)
+      }
+
       const error = yield* Fiber.join(fiber)
 
       expect(error._tag).toBe('WorkflowHitlHookPending')
-      expect(fake.resumes).toEqual(Array.from({ length: 5 }, () => 'pause-1'))
+      expect(new Set(fake.resumes)).toEqual(new Set(['pause-1']))
+    })
+  )
+
+  it.effect('refuses an answer that names no pause without recording it', () =>
+    Effect.gen(function* () {
+      const fake = harness(() => undefined)
+      fake.change({ type: 'pause', pause: pause(1, 'a') })
+
+      const error = yield* resume(undefined, 'a', 4).pipe(Effect.provide(fake.layer), Effect.flip)
+
+      expect(error._tag).toBe('WorkflowHitlAnswerRefused')
+      expect(fake.change({ type: 'deliver', hookToken: 'none' }).hitlPause?.answer).toBeNull()
+      expect(fake.resumes).toEqual([])
     })
   )
 })

@@ -55,6 +55,7 @@ import {
 } from '@/lib/services/agent-workflow/registry'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { resumeWorkflowHitlAnswer } from '@/lib/services/agent-workflow/hitl-resume'
+import { maxHitlAnsweredPauses } from '@/lib/services/agent-workflow/policy'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -674,17 +675,28 @@ const pauseToken = (runId: string) => {
 }
 
 /** The resume route's record-then-resume program, against the fake store and platform. */
-const answer = (runId: string, response: HitlResponse, tailIndex = 0) =>
+const answer = (runId: string, pauseId: string, response: HitlResponse, tailIndex = 0) =>
   Effect.runPromise(
     Effect.gen(function* () {
       const ownership = yield* decodeWorkflowOwnership({ runId, userId: 'owner' })
 
-      return yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex })
+      return yield* resumeWorkflowHitlAnswer({ ...ownership, pauseId, response, tailIndex })
     }).pipe(
       Effect.result,
       Effect.provide(Layer.merge(AgentWorkflowStore.layer, VercelWorkflows.layer))
     )
   )
+
+/** What the client names when it answers: the eventId of the latest `AgentAwaitingInput`. */
+const awaitingPause = async (runId: string) => {
+  const pauseId = (await events(runId))
+    .filter(event => Predicate.isTagged(event, 'AgentAwaitingInput'))
+    .at(-1)?.eventId
+
+  if (pauseId === undefined) throw new Error('Expected an AgentAwaitingInput with an eventId')
+
+  return pauseId
+}
 
 const events = (runId: string) =>
   Effect.runPromise(
@@ -894,18 +906,23 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     siblingInputCall = true
     const parent = await launch()
     await hitlEntered.promise
-    const firstToken = pauseToken(parent)
+    const first = await awaitingPause(parent)
+    // The client names the pause by the id the host recorded it under.
+    expect(registries.get(parent)?.state.hitlPause?.pauseId).toBe(first)
 
     hitlEntered = latch()
-    expect(Result.isSuccess(await answer(parent, nickname('nick-call', 'Ada'), 7))).toBe(true)
+    expect(Result.isSuccess(await answer(parent, first, nickname('nick-call', 'Ada'), 7))).toBe(
+      true
+    )
     await hitlEntered.promise
-    expect(pauseToken(parent)).not.toBe(firstToken)
+    const second = await awaitingPause(parent)
+    expect(second).not.toBe(first)
 
     // All reach the route while pause 2 waits; the real answer to pause 2 comes last.
     const [duplicate, overwrite, sibling] = await Promise.all([
-      answer(parent, nickname('nick-call', 'Ada'), 20),
-      answer(parent, nickname('nick-call', 'Overwrite'), 20),
-      answer(parent, nickname('nick-sibling', 'Grace'), 20)
+      answer(parent, first, nickname('nick-call', 'Ada'), 20),
+      answer(parent, first, nickname('nick-call', 'Overwrite'), 20),
+      answer(parent, second, nickname('nick-sibling', 'Grace'), 20)
     ])
 
     // The identical retry is the delivered answer, replayed from its own stream tail.
@@ -929,15 +946,17 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     parentInputCall = true
     const parent = await launch()
     await hitlEntered.promise
+    const first = await awaitingPause(parent)
 
     hitlEntered = latch()
-    expect(Result.isSuccess(await answer(parent, nickname('nick-call', ''), 3))).toBe(true)
+    expect(Result.isSuccess(await answer(parent, first, nickname('nick-call', ''), 3))).toBe(true)
     // The empty nickname is invalid: the same request pends again in pause 2.
     await hitlEntered.promise
+    const second = await awaitingPause(parent)
 
     const [duplicate, corrected] = await Promise.all([
-      answer(parent, nickname('nick-call', ''), 9),
-      answer(parent, nickname('nick-call', 'Ada'), 9)
+      answer(parent, first, nickname('nick-call', ''), 9),
+      answer(parent, second, nickname('nick-call', 'Ada'), 9)
     ])
 
     expect(duplicate).toMatchObject({ success: { response: { data: '' }, tailIndex: 3 } })
@@ -947,6 +966,82 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(
       requests.at(-1)?.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
     ).toMatchObject([{ toolCallId: 'nick-call', structuredContent: { data: 'Ada' } }])
+  })
+
+  it('refuses a late duplicate of an invalid answer whose pause left the history', async () => {
+    parentInputCall = true
+    const parent = await launch()
+    await hitlEntered.promise
+    const first = await awaitingPause(parent)
+    let current = first
+
+    // Pause 1 plus `maxHitlAnsweredPauses` more invalid answers: pause 1 leaves the history.
+    for (let round = 0; round <= maxHitlAnsweredPauses; round++) {
+      hitlEntered = latch()
+      expect(Result.isSuccess(await answer(parent, current, nickname('nick-call', '')))).toBe(true)
+      await hitlEntered.promise
+      current = await awaitingPause(parent)
+    }
+
+    expect(registries.get(parent)?.state.hitlAnswered?.some(entry => entry.pauseId === first)).toBe(
+      false
+    )
+    expect(await answer(parent, first, nickname('nick-call', ''))).toMatchObject({
+      failure: { _tag: 'WorkflowHitlAnswerRefused' }
+    })
+    // Never recorded for the current pause, which still takes its own answer.
+    expect(registries.get(parent)?.state.hitlPause?.answer).toBeNull()
+    expect(Result.isSuccess(await answer(parent, current, nickname('nick-call', 'Ada')))).toBe(true)
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+  })
+
+  it('resumes a later turn whose approval reuses a call id and decision of an earlier turn', async () => {
+    const reused = ToolCall.make({ id: 'reused', name: 'gated', params: {} })
+
+    parentStream = request => {
+      const results = request.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+
+      return results.length < 2 ? reply([reused]) : finished('Parent done')
+    }
+
+    const approved = ToolApprovalResponse.make({
+      requestId: 'approval:reused',
+      toolCallId: 'reused',
+      decision: 'approved',
+      source: 'user'
+    })
+
+    const parent = await launch()
+    await hitlEntered.promise
+    const first = await awaitingPause(parent)
+
+    hitlEntered = latch()
+    expect(Result.isSuccess(await answer(parent, first, approved, 2))).toBe(true)
+    await hitlEntered.promise
+    const second = await awaitingPause(parent)
+    expect(second).not.toBe(first)
+
+    // A late retry of turn 1's answer is delivered and never fills turn 2's pause.
+    expect(await answer(parent, first, approved, 30)).toMatchObject({
+      success: { tailIndex: 2 }
+    })
+    expect(registries.get(parent)?.state.hitlPause).toMatchObject({
+      pauseId: second,
+      answer: null
+    })
+
+    // The same decision for the same call id, naming pause 2, resumes pause 2.
+    expect(await answer(parent, second, approved, 40)).toMatchObject({
+      success: { tailIndex: 40 }
+    })
+    await vi.waitFor(() => expect(world.inspect(parent).status).toBe('completed'))
+    expect(
+      (await events(parent)).filter(
+        event =>
+          Predicate.isTagged(event, 'ToolExecutionCompleted') && event.result.content === 'written'
+      )
+    ).toHaveLength(2)
   })
 
   it('fails the delivery step on a transient mark failure so the platform retries it', async () => {
@@ -967,6 +1062,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
           stopped: false,
           children: [],
           hitlPause: WorkflowHitlPause.make({
+            pauseId: 'event-1',
             hookToken: 'pause-1',
             requests: [request],
             answer: WorkflowHitlAnswer.make({ response, tailIndex: 0 }),
@@ -1000,6 +1096,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
 
     const resumed = answer(
       parent,
+      await awaitingPause(parent),
       InputResponse.make({
         requestId: 'input:nickname:nick-call',
         toolCallId: 'nick-call',

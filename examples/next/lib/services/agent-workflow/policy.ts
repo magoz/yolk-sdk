@@ -15,6 +15,7 @@ export const maxChildObservationReads = 32
 
 export const childObservationDelayMs = (attempt: number) => [1000, 5000, 15000][attempt] ?? 30_000
 
-// Delivered HITL answers kept on the registry row: an identical retry within this many pauses is
-// reported as delivered; an older one is refused.
+// Delivered HITL answers kept on the registry row, by the pause they answered. A retry naming one
+// of these pauses is reported as delivered when identical and refused otherwise; one naming an
+// older (evicted) pause is refused. Neither is ever recorded for the current pause.
 export const maxHitlAnsweredPauses = 16

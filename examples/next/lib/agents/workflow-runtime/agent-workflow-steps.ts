@@ -2,6 +2,7 @@ import { getStepMetadata, getWorkflowMetadata, getWritable } from 'workflow'
 import { Cause, Clock, Effect, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  durableAgentEventId,
   makeDurableAgentEventSequencerState,
   writeDurableAgentEvent,
   type SerializableWorkflowState,
@@ -177,6 +178,7 @@ export async function acceptWorkflowHitlResponse(input: {
 const recordWorkflowHitlPause = (input: {
   readonly context: WorkflowAgentContext
   readonly workflowRunId: string
+  readonly pauseId: string
   readonly hookToken: string
   readonly requests: ReadonlyArray<HitlRequest>
 }) =>
@@ -194,6 +196,7 @@ const recordWorkflowHitlPause = (input: {
     yield* store.change(ownership.runId, ownership.userId, {
       type: 'pause',
       pause: WorkflowHitlPause.make({
+        pauseId: input.pauseId,
         hookToken: input.hookToken,
         requests: input.requests,
         answer: null,
@@ -545,12 +548,24 @@ export async function runAgentWorkflowToolBatchStep(input: {
         ),
         Stream.runForEach(event =>
           (Predicate.isTagged(event, 'AgentAwaitingInput')
-            ? recordWorkflowHitlPause({
-                context,
-                workflowRunId,
-                hookToken,
-                requests: event.requests
-              }).pipe(Effect.provideService(AgentWorkflowStore, store))
+            ? Ref.get(eventSequence).pipe(
+                Effect.flatMap(sequence =>
+                  recordWorkflowHitlPause({
+                    context,
+                    workflowRunId,
+                    // The id `writeSequencedWorkflowEvent` gives this event below: the client
+                    // names the pause by it when it answers.
+                    pauseId: durableAgentEventId({
+                      streamId: workflowEventStreamId(eventRunId),
+                      turn: input.turn ?? 0,
+                      eventSequence: sequence
+                    }),
+                    hookToken,
+                    requests: event.requests
+                  })
+                ),
+                Effect.provideService(AgentWorkflowStore, store)
+              )
             : Effect.void
           ).pipe(
             Effect.andThen(

@@ -13,6 +13,7 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {
   workflowCancelResponse,
+  workflowHitlPauseFromUrl,
   workflowHitlResumeErrorResponse,
   workflowResumeReadableResponse,
   workflowResumeStartIndexFromUrl
@@ -157,7 +158,12 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
     const tailIndex = yield* workflows.tailIndex(runId)
 
     // Record the answer for its pause before resuming: report the record, not `resumeHook`.
-    const answer = yield* resumeWorkflowHitlAnswer({ ...ownership, response, tailIndex })
+    const answer = yield* resumeWorkflowHitlAnswer({
+      ...ownership,
+      pauseId: workflowHitlPauseFromUrl(request.url),
+      response,
+      tailIndex
+    })
 
     const readable = yield* workflows.getReadable<Uint8Array>(runId, {
       startIndex: answer.tailIndex + 1

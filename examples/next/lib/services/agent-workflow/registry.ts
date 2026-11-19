@@ -27,10 +27,16 @@ export class WorkflowHitlAnswer extends Schema.Class<WorkflowHitlAnswer>('Workfl
 }) {}
 
 /**
- * The run's latest HITL pause: its own hook token, the requests it holds, and at most one
+ * The run's latest HITL pause: its id, its own hook token, the requests it holds, and at most one
  * recorded answer. A later pause replaces it; only its answer stays, in `hitlAnswered`.
  */
 export class WorkflowHitlPause extends Schema.Class<WorkflowHitlPause>('WorkflowHitlPause')({
+  /**
+   * The `eventId` of the pause's `AgentAwaitingInput`: what the client sees, and names with its
+   * answer. Request ids alone are ambiguous: a request pends again after an invalid answer, and
+   * providers reuse tool call ids across turns.
+   */
+  pauseId: Schema.String,
   hookToken: Schema.String,
   requests: Schema.Array(HitlRequest),
   answer: Schema.NullOr(WorkflowHitlAnswer),
@@ -42,7 +48,7 @@ export class WorkflowHitlPause extends Schema.Class<WorkflowHitlPause>('Workflow
 export class WorkflowHitlDelivered extends Schema.Class<WorkflowHitlDelivered>(
   'WorkflowHitlDelivered'
 )({
-  hookToken: Schema.String,
+  pauseId: Schema.String,
   answer: WorkflowHitlAnswer
 }) {}
 
@@ -68,28 +74,33 @@ export const answersHitlRequest = (request: HitlRequest, response: HitlResponse)
     (Predicate.isTagged(request, 'ToolApprovalRequest') &&
       Predicate.isTagged(response, 'ToolApprovalResponse')))
 
-const deliveredHitlAnswer = (state: WorkflowRegistry, response: HitlResponse) =>
-  (state.hitlAnswered ?? []).find(entry => Equal.equals(entry.answer.response, response))
-
 /**
- * The recorded answer identical to `response`: the current pause's, or a delivered earlier one
- * (an identical retry after the workflow moved on). None when no pause took it.
+ * The answer recorded for pause `pauseId` when it is identical to `response`: the current
+ * pause's, or a delivered one of the last `maxHitlAnsweredPauses` pauses. None for a different
+ * answer, or an unknown or evicted pause. `pendingHookToken` is the hook to resume with it;
+ * undefined once the workflow took it (delivered).
  */
-export const recordedHitlAnswer = (state: WorkflowRegistry, response: HitlResponse) => {
+export const recordedHitlAnswer = (
+  state: WorkflowRegistry,
+  pauseId: string,
+  response: HitlResponse
+) => {
   const pause = state.hitlPause
 
-  if (pause !== undefined && pause.answer !== null && Equal.equals(pause.answer.response, response))
-    return Option.some({
-      hookToken: pause.hookToken,
-      answer: pause.answer,
-      delivered: pause.delivered
-    })
+  if (pause?.pauseId === pauseId)
+    return pause.answer !== null && Equal.equals(pause.answer.response, response)
+      ? Option.some({
+          answer: pause.answer,
+          pendingHookToken: pause.delivered ? undefined : pause.hookToken
+        })
+      : Option.none()
 
-  return Option.map(Option.fromNullishOr(deliveredHitlAnswer(state, response)), entry => ({
-    hookToken: entry.hookToken,
-    answer: entry.answer,
-    delivered: true
-  }))
+  return Option.fromNullishOr(
+    (state.hitlAnswered ?? []).find(entry => entry.pauseId === pauseId)
+  ).pipe(
+    Option.filter(entry => Equal.equals(entry.answer.response, response)),
+    Option.map(entry => ({ answer: entry.answer, pendingHookToken: undefined }))
+  )
 }
 
 /** The workflow can still take an answer from this token's hook. */
@@ -108,7 +119,7 @@ export type RegistryCommand =
     }
   | { readonly type: 'stop' }
   | { readonly type: 'pause'; readonly pause: WorkflowHitlPause }
-  | { readonly type: 'answer'; readonly answer: WorkflowHitlAnswer }
+  | { readonly type: 'answer'; readonly pauseId: string; readonly answer: WorkflowHitlAnswer }
   | { readonly type: 'deliver'; readonly hookToken: string }
 
 type HitlCommand = Extract<RegistryCommand, { readonly type: 'pause' | 'answer' | 'deliver' }>
@@ -117,12 +128,12 @@ type HitlCommand = Extract<RegistryCommand, { readonly type: 'pause' | 'answer' 
 const archiveHitlAnswer = (state: WorkflowRegistry, pause: WorkflowHitlPause) => {
   const answered = state.hitlAnswered ?? []
 
-  if (pause.answer === null || answered.some(entry => entry.hookToken === pause.hookToken))
+  if (pause.answer === null || answered.some(entry => entry.pauseId === pause.pauseId))
     return answered
 
   return [
     ...answered,
-    WorkflowHitlDelivered.make({ hookToken: pause.hookToken, answer: pause.answer })
+    WorkflowHitlDelivered.make({ pauseId: pause.pauseId, answer: pause.answer })
   ].slice(-maxHitlAnsweredPauses)
 }
 
@@ -154,12 +165,9 @@ const transitionHitl = (state: WorkflowRegistry, command: HitlCommand): Workflow
         })
       : state
 
-  // A repeat of a delivered answer is that earlier submission: it never takes this pause's slot
-  // (a late duplicate of an invalid answer to a request that pended again).
-  if (deliveredHitlAnswer(state, command.answer.response) !== undefined) return state
-
-  // One answer per pause, and only to a request the pause holds.
-  return pause.answer === null &&
+  // Only an answer naming this pause can take its slot: one answer, to a request it holds.
+  return pause.pauseId === command.pauseId &&
+    pause.answer === null &&
     !pause.delivered &&
     pause.requests.some(request => answersHitlRequest(request, command.answer.response))
     ? WorkflowRegistry.make({

@@ -6,7 +6,7 @@ import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AgentWorkflowStore, type UserId, type WorkflowRunId } from './live-layer'
 import { isHitlPausePending, recordedHitlAnswer, WorkflowHitlAnswer } from './registry'
 
-/** No pause took this answer: it answers no pending request, or the pause has another. */
+/** The named pause does not take this answer; `message` says why. */
 export class WorkflowHitlAnswerRefused extends Data.TaggedError('WorkflowHitlAnswerRefused')<{
   readonly message: string
 }> {}
@@ -21,39 +21,54 @@ export class WorkflowHitlHookPending extends Data.TaggedError('WorkflowHitlHookP
 const hookPendingRetry = Schedule.max([Schedule.exponential('250 millis', 2.0), Schedule.recurs(4)])
 
 /**
- * Records `response` durably as the answer of the stored pause holding its request, then resumes
- * that pause's hook with the recorded answer. An identical retry reuses the record, and one of an
- * answer the workflow already took (from this or an earlier pause) is reported as delivered
- * without resuming. A different answer to the current pause, or one to a request it does not
- * hold, is refused before any hook sees it. Returns the recorded answer: `resumeHook` success
- * does not mean the answer was used, so callers report the record, not the resume.
+ * Records `response` durably as the answer of pause `pauseId` (the `eventId` of the
+ * `AgentAwaitingInput` the client answered), then resumes that pause's hook with it. Matching is
+ * strictly by the named pause:
+ * - the current pause: the first answer to a request it holds is recorded; an identical retry
+ *   reuses the record; anything else is refused while that answer occupies the pause;
+ * - a delivered pause among the last `maxHitlAnsweredPauses`: an identical answer is reported as
+ *   delivered (never resumed again); a different one is refused;
+ * - no pause named, or an unknown or evicted one: refused, never recorded for the current pause.
+ * Returns the recorded answer: `resumeHook` success does not mean the answer was used, so callers
+ * report the record, not the resume.
  */
 export const resumeWorkflowHitlAnswer = (input: {
   readonly runId: WorkflowRunId
   readonly userId: UserId
+  readonly pauseId: string | undefined
   readonly response: HitlResponse
   readonly tailIndex: number
 }) =>
   Effect.gen(function* () {
     const store = yield* AgentWorkflowStore
     const workflows = yield* VercelWorkflows
+    const pauseId = input.pauseId
+
+    // A request id alone cannot say which pause it answers (re-pends, reused tool call ids).
+    if (pauseId === undefined)
+      return yield* Effect.fail(
+        new WorkflowHitlAnswerRefused({
+          message: 'Name the pause this answers: the eventId of its AgentAwaitingInput (?pause=)'
+        })
+      )
 
     const state = yield* store.change(input.runId, input.userId, {
       type: 'answer',
+      pauseId,
       answer: WorkflowHitlAnswer.make({ response: input.response, tailIndex: input.tailIndex })
     })
 
-    const recorded = recordedHitlAnswer(state, input.response)
+    const recorded = recordedHitlAnswer(state, pauseId, input.response)
 
     if (Option.isNone(recorded))
       return yield* Effect.fail(
-        new WorkflowHitlAnswerRefused({ message: 'No pending request accepts this response' })
+        new WorkflowHitlAnswerRefused({ message: 'This pause does not accept this response' })
       )
 
-    const { hookToken, answer, delivered } = recorded.value
+    const { answer, pendingHookToken: hookToken } = recorded.value
 
     // The workflow already took this answer (an earlier attempt of this resume): report it.
-    if (delivered) return answer
+    if (hookToken === undefined) return answer
 
     const payload = yield* Schema.encodeEffect(HitlResponse)(answer.response)
 
