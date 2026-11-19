@@ -66,6 +66,32 @@ export class HookNotFoundError extends Error {
   }
 }
 
+/**
+ * The platform's `HookConflictError` (its message, without the platform's docs link): awaiting a
+ * hook fails with it when another live hook (of any run, its own included) held its token when the
+ * run decided the hook. The refused hook never takes the token.
+ */
+export class HookConflictError extends Error {
+  readonly token: string
+  /** The run whose live hook holds the token. */
+  readonly conflictingRunId: string | undefined
+
+  constructor(token: string, conflictingRunId?: string) {
+    super(
+      `Hook token "${token}" is already in use by another workflow${
+        conflictingRunId === undefined ? '' : ` (run "${conflictingRunId}")`
+      }`
+    )
+    this.name = 'HookConflictError'
+    this.token = token
+    this.conflictingRunId = conflictingRunId
+  }
+
+  static is(value: unknown): value is HookConflictError {
+    return value instanceof Error && value.name === 'HookConflictError'
+  }
+}
+
 const day = 86_400_000
 
 const units = new Map([

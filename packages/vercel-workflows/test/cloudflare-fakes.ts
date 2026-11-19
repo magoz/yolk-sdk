@@ -118,7 +118,8 @@ export const makeFakeWorkflowRuns = () => {
       resumeHook: (token, payload) => objectOf(name).resumeHook(token, payload),
       tailIndex: () => objectOf(name).tailIndex(),
       readable: startIndex => objectOf(name).readable(startIndex),
-      hookRegister: runId => objectOf(name).hookRegister(runId),
+      hookHeld: token => objectOf(name).hookHeld(token),
+      hookClaim: (token, runId) => objectOf(name).hookClaim(token, runId),
       hookRun: () => objectOf(name).hookRun()
     })
   }

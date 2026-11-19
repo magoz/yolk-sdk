@@ -19,7 +19,7 @@ const makeHost = (store: RunStore) => {
   const host: ExecutionHost = {
     store,
     wakeAt: () => undefined,
-    registerHook: async () => undefined,
+    claimHook: async () => ({ claimed: true }),
     chunkAppended: () => undefined,
     streamClosed: () => undefined,
     runSettled: () => {
@@ -153,6 +153,69 @@ describe('WorkflowExecution', () => {
 
     expect(outcome(store)).toEqual({ status: 'completed', value: 'prepared:yes' })
     expect(stepRuns).toBe(1)
+  })
+
+  it('refuses a hook while another live hook of its run holds the token', async () => {
+    const refusal = (hook: PromiseLike<unknown>) =>
+      hook.then(
+        () => 'accepted',
+        (error: unknown) => ({
+          name: Predicate.hasProperty(error, 'name') ? error.name : undefined,
+          conflictingRunId: Predicate.hasProperty(error, 'conflictingRunId')
+            ? error.conflictingRunId
+            : undefined
+        })
+      )
+
+    async function roundsWorkflow() {
+      const first = createHook({ token: 'round' })
+      const a = await first
+      // The answered first hook still holds the token: a second hook is refused when awaited, and
+      // disposing it never frees the first hook's token.
+      const refused = createHook({ token: 'round' })
+      const conflict = await refusal(refused)
+
+      refused[Symbol.dispose]()
+
+      const stillRefused = await refusal(createHook({ token: 'round' }))
+      // Disposed before the run waits again: the next hook takes the token, as on the platform.
+      const second = createHook({ token: 'round' })
+
+      first[Symbol.dispose]()
+
+      const b = await second
+
+      second[Symbol.dispose]()
+
+      using third = createHook({ token: 'round' })
+      const c = await third
+
+      return { a, conflict, stillRefused, b, c }
+    }
+
+    workflowEntry(roundsWorkflow, 'test#rounds')
+
+    const store = makeMemoryRunStore()
+    const { host, settled } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+    const done = settled()
+
+    startRun(store, 'test#rounds', [])
+    execution.kick()
+    await waitFor(() => store.readPendingHook('round') === 'hook:round#0')
+    execution.deliverHook('round', serialize('a'))
+    await waitFor(() => store.readPendingHook('round') === 'hook:round#3')
+    execution.deliverHook('round', serialize('b'))
+    await waitFor(() => store.readPendingHook('round') === 'hook:round#4')
+    execution.deliverHook('round', serialize('c'))
+    await done
+
+    const conflict = { name: 'HookConflictError', conflictingRunId: 'wrun_test' }
+
+    expect(outcome(store)).toEqual({
+      status: 'completed',
+      value: { a: 'a', conflict, stillRefused: conflict, b: 'b', c: 'c' }
+    })
   })
 
   it('retries a failing step, stops on a fatal error, and wraps an exhausted one', async () => {

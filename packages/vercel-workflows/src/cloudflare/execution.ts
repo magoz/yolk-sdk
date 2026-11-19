@@ -1,6 +1,12 @@
 import { Predicate } from 'effect'
-import { stepStorage, workflowStorage, type StepScope, type WorkflowScope } from './context.ts'
-import { FatalError, HookNotFoundError, RetryableError } from './errors.ts'
+import {
+  stepStorage,
+  workflowStorage,
+  type StepScope,
+  type WorkflowHook,
+  type WorkflowScope
+} from './context.ts'
+import { FatalError, HookConflictError, HookNotFoundError, RetryableError } from './errors.ts'
 import { workflowById } from './registry.ts'
 import { deserialize, serialize } from './serialization.ts'
 import type { JournalEntry, RunRecord, RunStore } from './store.ts'
@@ -13,12 +19,20 @@ import type { JournalEntry, RunRecord, RunStore } from './store.ts'
  * Steps are at least once: a step cut off by an eviction runs again on replay.
  */
 
+/** A hook index's answer to a run's claim on a token: taken, or held by another run's live hook. */
+export type HookClaim =
+  | { readonly claimed: true }
+  | { readonly claimed: false; readonly holderRunId: string }
+
 export interface ExecutionHost {
   readonly store: RunStore
   /** Arm a wake-up (an alarm) no later than `time`. */
   readonly wakeAt: (time: number) => void
-  /** Make `token` resolvable to this run from outside (`resumeHook`). */
-  readonly registerHook: (token: string) => Promise<void>
+  /**
+   * Route `token` to this run from outside (`resumeHook`), unless a live hook of another run holds
+   * it. The run itself has no live hook on `token` when it claims.
+   */
+  readonly claimHook: (token: string) => Promise<HookClaim>
   readonly chunkAppended: (index: number, chunk: Uint8Array) => void
   readonly streamClosed: () => void
   readonly runSettled: () => void
@@ -49,6 +63,13 @@ const halted = <A>(): Promise<A> => new Promise<A>(() => undefined)
 const isTerminal = (run: RunRecord) =>
   run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
 
+/** The run whose hook held the token when a refused hook's journal entry was written. */
+const holderOf = (entry: JournalEntry): string | undefined => {
+  const holder = deserialize(entry.value)
+
+  return Predicate.isString(holder) ? holder : undefined
+}
+
 const replayEntry = (entry: JournalEntry): unknown => {
   const value = deserialize(entry.value)
 
@@ -67,11 +88,34 @@ const encodeChunk = (chunk: unknown): Uint8Array => {
   throw new TypeError('Workflow streams take Uint8Array, ArrayBuffer or string chunks')
 }
 
+/** A hook change the run applies when it next waits: a new hook takes its token, or frees it. */
+type HookChange = {
+  readonly kind: 'claim' | 'release'
+  readonly token: string
+  /** The hook's journal key. */
+  readonly key: string
+}
+
+type HookWaiter = {
+  readonly resolve: (payload: unknown) => void
+  readonly reject: (error: HookConflictError) => void
+}
+
+/** A promise whose rejection is reported only to whoever awaits it. */
+const quiet = <A>(promise: Promise<A>): Promise<A> => {
+  promise.catch(() => undefined)
+
+  return promise
+}
+
 class LiveRun {
   stepsInFlight = 0
   private halted = false
   private readonly counters = new Map<string, number>()
-  private readonly hookWaiters = new Map<string, (payload: unknown) => void>()
+  private readonly hookWaiters = new Map<string, HookWaiter>()
+  private hookChanges: Array<HookChange> = []
+  private hookTimer: ReturnType<typeof setTimeout> | undefined
+  private hookChangesApplied: Promise<void> = Promise.resolve()
   private readonly sleepTimers = new Set<ReturnType<typeof setTimeout>>()
 
   private readonly run: RunRecord
@@ -89,15 +133,20 @@ class LiveRun {
 
     this.sleepTimers.clear()
     this.hookWaiters.clear()
+
+    if (this.hookTimer !== undefined) clearTimeout(this.hookTimer)
+
+    this.hookTimer = undefined
+    this.hookChanges = []
   }
 
   resolveHook(key: string, payload: unknown): boolean {
-    const resolve = this.hookWaiters.get(key)
+    const waiter = this.hookWaiters.get(key)
 
-    if (resolve === undefined) return false
+    if (waiter === undefined) return false
 
     this.hookWaiters.delete(key)
-    resolve(payload)
+    waiter.resolve(payload)
 
     return true
   }
@@ -248,29 +297,140 @@ class LiveRun {
     }
   }
 
-  private hook(token: string): Promise<unknown> {
-    if (this.halted) return halted()
+  // A hook holds its token from when the run next waits until it is disposed or the run ends; one
+  // live hook holds a token at a time. Its journal entry is its first payload, or the run holding
+  // the token when it was refused, so a replay reads the same outcome.
+  private hook(token: string): WorkflowHook {
+    if (this.halted) return { payload: halted(), dispose: () => undefined }
 
-    const store = this.host.store
     const key = this.nextKey(`hook:${token}`)
-    const recorded = store.readJournal(key)
+    const recorded = this.host.store.readJournal(key)
+    let disposed = false
+
+    const dispose = () => {
+      if (disposed) return
+
+      disposed = true
+      this.disposeHook(token, key)
+    }
 
     if (recorded !== undefined) {
-      try {
-        return Promise.resolve(replayEntry(recorded))
-      } catch (error) {
-        return Promise.reject(error)
+      const payload = recorded.ok
+        ? Promise.resolve(deserialize(recorded.value))
+        : Promise.reject(new HookConflictError(token, holderOf(recorded)))
+
+      return { payload: quiet(payload), dispose }
+    }
+
+    const payload = new Promise<unknown>((resolve, reject) => {
+      this.hookWaiters.set(key, { resolve, reject })
+    })
+
+    this.changeHook({ kind: 'claim', token, key })
+
+    return { payload: quiet(payload), dispose }
+  }
+
+  private disposeHook(token: string, key: string) {
+    const unclaimed = this.hookChanges.findIndex(
+      change => change.kind === 'claim' && change.key === key
+    )
+
+    // Disposed before the run waited: it never takes the token.
+    if (unclaimed !== -1) {
+      this.hookChanges.splice(unclaimed, 1)
+      this.hookWaiters.delete(key)
+
+      return
+    }
+
+    this.changeHook({ kind: 'release', token, key })
+  }
+
+  // The platform creates hooks, and records their disposals, when the run next suspends. This
+  // runtime applies them once the body is idle (the next macrotask), in order, after earlier ones.
+  private changeHook(change: HookChange) {
+    this.hookChanges.push(change)
+
+    if (this.hookTimer !== undefined) return
+
+    this.hookTimer = setTimeout(() => {
+      const changes = this.hookChanges
+
+      this.hookTimer = undefined
+      this.hookChanges = []
+      this.hookChangesApplied = this.hookChangesApplied
+        .then(() => this.applyHookChanges(changes))
+        .catch(error => this.host.log('Could not apply workflow hook changes', error))
+    }, 0)
+  }
+
+  // Disposals first: they are of hooks created before this batch's new ones, and the platform
+  // frees a disposed hook's token before a later hook of the run claims it.
+  private async applyHookChanges(changes: ReadonlyArray<HookChange>) {
+    const store = this.host.store
+
+    for (const change of changes) {
+      if (change.kind === 'release' && store.readPendingHook(change.token) === change.key) {
+        store.deletePendingHook(change.token)
       }
     }
 
+    for (const change of changes) {
+      if (change.kind === 'claim') await this.claimHook(change.token, change.key)
+    }
+  }
+
+  private async claimHook(token: string, key: string) {
+    const store = this.host.store
+    const run = store.readRun()
+
+    if (this.halted || run === undefined || isTerminal(run)) return
+
+    const held = store.readPendingHook(token)
+
+    // A replay re-creating the hook that holds the token.
+    if (held === key) return
+
+    if (held !== undefined) {
+      this.refuseHook(token, key, this.run.runId)
+
+      return
+    }
+
+    // Held here first, so a resume the index routes here before the claim returns finds it.
     store.writePendingHook(token, key)
 
-    return new Promise(resolve => {
-      this.hookWaiters.set(key, resolve)
-      this.host.registerHook(token).catch(error => {
-        this.host.log(`Could not register workflow hook ${token}`, error)
-      })
-    })
+    let claim: HookClaim
+
+    try {
+      claim = await this.host.claimHook(token)
+    } catch (error) {
+      if (store.readPendingHook(token) === key) store.deletePendingHook(token)
+
+      this.host.log(`Could not register workflow hook ${token}`, error)
+
+      return
+    }
+
+    if (claim.claimed || this.halted) return
+
+    if (store.readPendingHook(token) === key) store.deletePendingHook(token)
+
+    this.refuseHook(token, key, claim.holderRunId)
+  }
+
+  private refuseHook(token: string, key: string, holderRunId: string) {
+    const store = this.host.store
+
+    if (store.readJournal(key) === undefined) {
+      store.writeJournal(key, { ok: false, value: serialize(holderRunId) })
+    }
+
+    const waiter = this.hookWaiters.get(key)
+
+    this.hookWaiters.delete(key)
+    waiter?.reject(new HookConflictError(token, holderRunId))
   }
 
   private sleep(ms: number): Promise<void> {
@@ -360,15 +520,28 @@ export class WorkflowExecution {
       })
   }
 
-  /** Records a hook's payload, then hands it to the waiting body or replays the run. */
+  /** Whether a live hook of this run holds `token`: neither disposed nor ended with its run. */
+  holdsHook(token: string): boolean {
+    const run = this.host.store.readRun()
+
+    return (
+      run !== undefined && !isTerminal(run) && this.host.store.readPendingHook(token) !== undefined
+    )
+  }
+
+  /**
+   * Records the first payload of the hook holding `token`, then hands it to the waiting body or
+   * replays the run. A hook is read once here, so later payloads are accepted and dropped.
+   */
   deliverHook(token: string, payloadText: string): void {
     const store = this.host.store
     const key = store.readPendingHook(token)
 
-    if (key === undefined) throw new HookNotFoundError(token)
+    if (key === undefined || !this.holdsHook(token)) throw new HookNotFoundError(token)
+
+    if (store.readJournal(key) !== undefined) return
 
     store.writeJournal(key, { ok: true, value: payloadText })
-    store.deletePendingHook(token)
 
     if (this.live?.resolveHook(key, deserialize(payloadText)) === true) return
 

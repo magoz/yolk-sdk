@@ -20,8 +20,18 @@ Each run lives in its own `WorkflowRun` Durable Object, named by its run id.
   alarm replays the run. A step's `maxRetries` (default 3) bounds retries with exponential backoff;
   `RetryableError` waits for its `retryAfter`; `FatalError` is never retried; an exhausted step
   throws a `FatalError` whose `cause` is the last error.
-- `createHook({ token })` registers the token in a hook-index object (`hook:<token>`) that
-  `resumeHook` reads; `resumeHook` rejects with `HookNotFoundError` when no run waits on the token.
+- Hook tokens follow Vercel's rules. One live hook holds a token at a time, and a hook-index object
+  (`hook:<token>`) routes `resumeHook` to the run whose live hook holds it. A run decides its new
+  hooks once its body is idle, after the disposals it made since: a hook whose token another live
+  hook (of any run, its own included) still holds is refused, and awaiting it rejects with
+  `HookConflictError` (`token`, `conflictingRunId`) while the holder keeps the token. A token is
+  free again once its hook is disposed or its run ends. `resumeHook` succeeds for every payload
+  sent to a live hook (`await hook` reads the first) and rejects with `HookNotFoundError` when no
+  live hook holds the token.
+- Unlike Vercel, which decides at the run's next durable suspension, the runtime decides at the
+  next macrotask, so dispose the previous hook before any `await` that yields to the event loop. A
+  hook is read once (awaiting it again gives the first payload), and `getConflict()` is not
+  provided.
 - `sleep(duration)` stores its wake time and arms the object's alarm.
 - `getWritable()` in a step appends to the run's stream; `getRun(runId).getReadable({ startIndex })`
   follows it live and `getTailIndex()` returns the last chunk's index.

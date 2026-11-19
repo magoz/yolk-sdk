@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import { WorkflowExecution, type ExecutionHost } from './execution.ts'
+import { WorkflowExecution, type ExecutionHost, type HookClaim } from './execution.ts'
 import { runNamespace, type RunOutcome, type StartRunInput } from './namespace.ts'
 import { makeHookIndex, makeSqliteRunStore } from './sqlite-store.ts'
 import type { RunStore } from './store.ts'
@@ -35,12 +35,12 @@ export class WorkflowRun extends DurableObject {
       wakeAt: time => {
         this.ctx.waitUntil(this.armAlarm(time))
       },
-      registerHook: async token => {
+      claimHook: async token => {
         const runId = this.store.readRun()?.runId
 
-        if (runId === undefined) return
+        if (runId === undefined) throw new Error('Workflow run not found')
 
-        await runNamespace().getByName(`hook:${token}`).hookRegister(runId)
+        return runNamespace().getByName(`hook:${token}`).hookClaim(token, runId)
       },
       chunkAppended: (_index, chunk) => {
         for (const reader of this.readers) reader.controller.enqueue(new Uint8Array(chunk))
@@ -113,9 +113,9 @@ export class WorkflowRun extends DurableObject {
     this.execution.cancel()
   }
 
-  /** Delivers a hook payload (devalue text); false when this run does not wait on `token`. */
+  /** Delivers a hook payload (devalue text); false when no live hook of this run holds `token`. */
   async resumeHook(token: string, payload: string): Promise<boolean> {
-    if (this.store.readPendingHook(token) === undefined) return false
+    if (!this.execution.holdsHook(token)) return false
 
     this.execution.deliverHook(token, payload)
 
@@ -155,8 +155,40 @@ export class WorkflowRun extends DurableObject {
     })
   }
 
-  async hookRegister(runId: string): Promise<void> {
-    makeHookIndex(this.ctx.storage.sql).write(runId)
+  /** Whether a live hook of this run holds `token` (it was neither disposed nor did its run end). */
+  async hookHeld(token: string): Promise<boolean> {
+    return this.execution.holdsHook(token)
+  }
+
+  /**
+   * On a hook index: routes `token` to `runId` unless a live hook of another run holds it. The
+   * index names the run that took the token last; a disposed hook or an ended run frees it without
+   * telling the index, so the index asks that run whether it still holds the token.
+   */
+  async hookClaim(token: string, runId: string): Promise<HookClaim> {
+    const index = makeHookIndex(this.ctx.storage.sql)
+
+    for (;;) {
+      const holder = index.read()
+
+      // The claiming run has no live hook on the token: an entry naming it is stale.
+      if (holder === undefined || holder === runId) {
+        index.write(runId)
+
+        return { claimed: true }
+      }
+
+      if (await runNamespace().getByName(holder).hookHeld(token)) {
+        return { claimed: false, holderRunId: holder }
+      }
+
+      // Another claim may have taken the token while the holder answered.
+      if (index.read() === holder) {
+        index.write(runId)
+
+        return { claimed: true }
+      }
+    }
   }
 
   async hookRun(): Promise<string | undefined> {

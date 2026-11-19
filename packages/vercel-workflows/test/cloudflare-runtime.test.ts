@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { Predicate } from 'effect'
 import { parseAst } from 'vite'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { getRun, resumeHook, start } from '../src/cloudflare/api.ts'
@@ -13,7 +14,7 @@ import { registerWorkflowModules } from '../src/cloudflare/registry.ts'
 import { deserialize, serialize } from '../src/cloudflare/serialization.ts'
 import { makeSqliteRunStore } from '../src/cloudflare/sqlite-store.ts'
 import { compileWorkflowDirectives, workflowDirectivesRuntime } from '../src/cloudflare/vite.ts'
-import { createHook, getWritable } from '../src/cloudflare/workflow.ts'
+import { createHook, getWritable, sleep } from '../src/cloudflare/workflow.ts'
 import { makeFakeWorkflowRuns, makeSqliteSql } from './cloudflare-fakes.ts'
 
 const readText = async (stream: ReadableStream<Uint8Array>) => {
@@ -100,6 +101,95 @@ describe('WorkflowRun and the workflow/api module', () => {
     expect(await run.returnValue).toEqual({ answer: { ok: true } })
     await expect(resumeHook('runtime-approve', 'again')).rejects.toSatisfy(HookNotFoundError.is)
     await expect(resumeHook('runtime-unknown', 'x')).rejects.toSatisfy(HookNotFoundError.is)
+  })
+
+  it('refuses a hook whose token a live hook of another run holds, until that run ends', async () => {
+    async function holding() {
+      // Never disposed: the token is freed when the run ends.
+      const hook = createHook({ token: 'runtime-shared' })
+
+      return await hook
+    }
+
+    async function taking() {
+      using hook = createHook({ token: 'runtime-shared' })
+
+      try {
+        return { answer: await hook }
+      } catch (error) {
+        return {
+          refused: Predicate.hasProperty(error, 'name') ? error.name : undefined,
+          conflictingRunId: Predicate.hasProperty(error, 'conflictingRunId')
+            ? error.conflictingRunId
+            : undefined
+        }
+      }
+    }
+
+    workflowEntry(holding, 'runtime#holding')
+    workflowEntry(taking, 'runtime#taking')
+
+    const holder = await start(holding)
+    const index = runs.namespace.getByName('hook:runtime-shared')
+
+    await waitFor(async () => (await index.hookRun()) === holder.runId)
+
+    const refused = await start(taking)
+
+    expect(await refused.returnValue).toEqual({
+      refused: 'HookConflictError',
+      conflictingRunId: holder.runId
+    })
+
+    // The holder keeps the token and its answers.
+    await resumeHook('runtime-shared', 'first')
+    expect(await holder.returnValue).toBe('first')
+
+    const taker = await start(taking)
+
+    await waitFor(async () => (await index.hookRun()) === taker.runId)
+    await resumeHook('runtime-shared', 'second')
+    expect(await taker.returnValue).toEqual({ answer: 'second' })
+  })
+
+  it('frees a token when its hook is disposed', async () => {
+    async function abandoning() {
+      const hook = createHook({ token: 'runtime-abandoned' })
+
+      // The run waits: its hook takes the token. Then it disposes the hook unanswered.
+      await sleep(20)
+      hook[Symbol.dispose]()
+
+      return await createHook({ token: 'runtime-after' })
+    }
+
+    async function retaking() {
+      using hook = createHook({ token: 'runtime-abandoned' })
+
+      return await hook
+    }
+
+    workflowEntry(abandoning, 'runtime#abandoning')
+    workflowEntry(retaking, 'runtime#retaking')
+
+    const abandoned = await start(abandoning)
+    const index = runs.namespace.getByName('hook:runtime-abandoned')
+
+    await waitFor(async () => (await index.hookRun()) === abandoned.runId)
+    await waitFor(
+      async () =>
+        (await runs.namespace.getByName('hook:runtime-after').hookRun()) === abandoned.runId
+    )
+    await expect(resumeHook('runtime-abandoned', 'late')).rejects.toSatisfy(HookNotFoundError.is)
+
+    const taker = await start(retaking)
+
+    await waitFor(async () => (await index.hookRun()) === taker.runId)
+    await resumeHook('runtime-abandoned', 'taken')
+    expect(await taker.returnValue).toBe('taken')
+
+    await resumeHook('runtime-after', 'done')
+    expect(await abandoned.returnValue).toBe('done')
   })
 
   it('replays a run after its object was evicted without re-running finished steps', async () => {
