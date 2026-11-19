@@ -17,6 +17,10 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - HITL resume tail headers describe the stream tail before the returned body.
 - `continuationLimit: 0` makes non-terminal responses fail without follow-up requests.
 - Durable helpers do not own route auth, run ownership, Workflow hook tokens, or HITL request matching.
+- A request id alone does not say which pause an answer is for: name the pause in the `endpoint`
+  you pass to the HITL resume helpers (for example `?pause=<eventId>`, the `eventId` of the
+  `AgentAwaitingInput` that asked). Continuation reads reuse that endpoint, so the tail route
+  ignores the parameter.
 
 ## Use it when
 
