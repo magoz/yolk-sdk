@@ -258,8 +258,8 @@ approval then stays pending even when its tool's policy changed since the pause.
 The loop owns its accumulator: host mutation of a supplied array cannot affect a later batch.
 Response order and element identity are preserved; response objects are not deep-cloned.
 
-The host owns `hookToken` construction, auth, resume routes, and response decoding. Two platform
-rules shape them:
+The host owns `hookToken` construction, auth, resume routes, and response decoding. Platform rules
+and request ids shape them:
 
 - **One token per pause.** A disposed hook's token is free again, and `resumeHook` routes by token
   alone. A token that several pauses share (one per run or session) delivers a late duplicate of
@@ -268,22 +268,48 @@ rules shape them:
   `hitl:${runId}:${input.turn ?? 0}:${input.hitlResponses?.length ?? 0}` (the turn and how many
   answers the batch already took; a token built only from pending request ids repeats when a
   request re-pends after an invalid answer). Store it with the pending state you persist before
-  `AgentAwaitingInput`, and resume the stored pause that holds the request being answered. The loop
-  does not check tokens. Filtering answers by request id inside `awaitInput` (discard one no
-  pending request matches and wait again) also keeps a late duplicate out of the batch, but answers
-  that reached the hook behind the discarded one are dropped with it, so the rule still applies.
+  `AgentAwaitingInput`, and resume the stored pause the answer names (next rule). The loop does not
+  check tokens. Filtering answers by request id inside `awaitInput` (discard one no pending request
+  matches and wait again) also keeps a late duplicate out of the batch, but answers that reached
+  the hook behind the discarded one are dropped with it, so the rule still applies.
+- **An answer names its pause; a request id alone is ambiguous.** A request pends again under the
+  same id after an invalid answer, and approval request ids are `approval:${call.id}`, which repeat
+  when a provider reuses a call id in a later turn: matched by request id, a late retry can fill a
+  later pause, or a new answer be taken for an old one. Give each pause an id the client sees: the
+  `eventId` its `AgentAwaitingInput` gets (`durableAgentEventId` from the `streamId`, `turn` and
+  `eventSequence` you sequence it with, without an `executionId`: tool-batch events keep plain ids,
+  so every execution of the step yields the same id), stored with the pause before the event is
+  written. A re-executed step that stores the same pause (same token) again keeps the existing
+  record and its answer. Without durable event ids the client has nothing to name: sequence the
+  event with `writeDurableAgentEvent`, or give the pause another stored id it sees on the event. The
+  client sends the `eventId` of the latest `AgentAwaitingInput` holding the request it answers (for
+  example `?pause=<eventId>` on the `endpoint` it passes to
+  `streamAgentRunHitlResponseEventStreamUntilTerminal`), and the route matches strictly by it.
+  Keep a bounded history of delivered pauses: an identical retry of a delivered pause is reported
+  as delivered, without resuming. An answer naming no pause, an unknown pause, or an evicted one is
+  refused and never recorded for the current pause.
+- **Mark a pause delivered when the workflow takes its answer.** In `awaitInput`, once the hook
+  resolves with an answer you keep, run a step that marks the pause (by its token) delivered; make
+  the mark idempotent and let a failed mark fail that step, so the platform retries it. Storing the
+  next pause also delivers the previous one, but nothing follows a run's last pause: without the
+  mark its answer never settles, and its retries end in errors instead of being reported as
+  delivered.
 - **`resumeHook` success does not mean the answer was used.** A hook accepts every payload until
   the workflow disposes it, and `resumeHook` succeeds for each; the `awaitInput` above reads the
   first, and the rest are dropped with the hook. So before resuming, admit only an answer to a
-  request the stored pause still holds and record it durably for that pause (an identical retry
+  request the named pause still holds and record it durably for that pause (an identical retry
   reuses the record; a different answer is refused), then report what was recorded, not what
-  `resumeHook` returned. Give each payload the request id it answers.
+  `resumeHook` returned. Give each payload the request id it answers. Store the stream tail index
+  with the first record: an identical retry gets that tail, and the response streams from
+  `tailIndex + 1`, so every retry replays the same continuation.
 - **`HookNotFoundError` means no hook is resumable under that token now.** The hook may not exist
   yet (the tool step writes `AgentAwaitingInput` before the workflow replays and calls
   `createHook`, so a fast client can get there first), the token may be wrong, or the hook was
   disposed (its answer used, perhaps by an earlier attempt of this same resume) or its run ended.
   While the stored pause is still pending, retry resuming the recorded answer a bounded number of
-  times; once the pause has moved on, report the recorded answer as delivered, not as an error.
+  times; when they run out, answer with a retryable status (for example 503) saying the answer is
+  recorded and a retry is safe, not with the `HookNotFoundError`. Once the pause has moved on,
+  report the recorded answer as delivered, not as an error.
 
 ## Retry policy
 
@@ -441,11 +467,15 @@ Open cases:
   deterministic `eventId` (de-duplicated by the client) are not affected. A client that connects
   mid-turn never saw the earlier execution's start, so its events take the plain path. The committed
   answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
-  another committed message of the run (same text, same call ids) counts as committed. Tool events
-  find a call by id, so a provider that reuses call ids across turns can have a later turn's call
-  update an earlier turn's call of that id (#335). A turn kept for reconciling protects the messages
-  its executions created, not an earlier message one of them overwrote through a reused id. A client
-  that never saw a later turn's start (it joined late) also has no bound on where that turn ends.
+  another committed message of the run (same text, same call ids) counts as committed. Providers
+  can reuse call ids across turns: the chat projections match a turn's tool events only after the
+  latest turn start they saw (a replayed or late request or tool-batch event for a call that turn
+  lacks acts on the earlier part holding the same call, an answer on the part holding its request),
+  so until a client sees a start (it joined mid-turn) or after
+  `AgentStart`, a reused id can still update an earlier turn's call, and `reduceAgentEvents` keeps
+  one tool run per call id (the latest turn's; a reused id of an accepted call counts as its
+  replay). A client that never saw a later turn's start has no bound on where a reconciled turn
+  ends; the committed answer takes the first part of each of its calls after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.

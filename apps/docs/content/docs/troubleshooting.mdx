@@ -336,7 +336,7 @@ resolve to `{ value, files }`: `value` is the metadata output, `files` the attac
 
 ### Approval pauses forever
 
-If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.
+If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses (Workflow hosts: match the named pause; see [HITL resume](./vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)).
 
 ## Streaming errors
 
@@ -741,6 +741,12 @@ An answer that `resumeHook` accepted but the run never used went to a hook that 
 another answer (a live hook accepts every payload and the workflow reads the first), or to the next
 pause through a token several pauses share. Use one token per pause and record answers durably before
 resuming ([HITL resume](./vercel-workflows/hitl-resume)).
+
+An answer taken for the wrong pause (a late retry filling a later pause, or a new answer taken for a
+retry of an old one) was matched by request id alone. Requests re-pend under the same id after an
+invalid answer, and providers reuse call ids across turns. Have the client name the pause it
+answers, the `eventId` of its `AgentAwaitingInput`, and match strictly by it
+([Name the pause](./vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)).
 
 `HookNotFoundError` means no hook is resumable under that token right now: the workflow has not
 created it yet (a client faster than the replay after `AgentAwaitingInput`), the token is wrong, the

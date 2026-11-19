@@ -110,6 +110,7 @@ import {
   positiveInteger,
   previewStoredToolPlanWith,
   previewToolPlanWith,
+  savedToolPlanRef,
   type ToolPlanResolution
 } from './plan-runtime.ts'
 import { makeToolSearchTool } from './tool-search.ts'
@@ -2512,7 +2513,12 @@ export const resolveTools = <Context>(
               parentKey: parentCallId,
               execute: runRegistration(match, call, idempotencyKey),
               typed: match.tool.def.outputSchema !== undefined,
-              abandonedResult: match.tool.abandonedResult
+              abandonedResult: match.tool.abandonedResult,
+              // A staging call may have saved its plan before it was abandoned (ADR 0005).
+              abandonedPlan:
+                planResolution !== undefined && match.tool.nestedToolAccess === true
+                  ? savedToolPlanRef(planResolution, call)
+                  : undefined
             })
           : runRegistration(match, call, idempotencyKey)
       })

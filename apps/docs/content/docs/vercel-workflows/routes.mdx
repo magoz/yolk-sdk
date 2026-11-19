@@ -142,34 +142,56 @@ run before building it, so refusals keep their status: once the blank line is se
 
 ## Resume HITL
 
+Route fragment (host-owned helpers):
+
 ```ts
 import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 
-export const resumeProgram = (request: Request) =>
+export const resumeProgram = (request: Request, runId: string) =>
   Effect.gen(function* () {
     const workflows = yield* VercelWorkflows
-    const body = yield* Effect.promise(() => request.json())
-    const input = yield* Effect.promise(() => decodeHitlResumeRequest(body))
-    yield* Effect.promise(() => assertCanResumeRun(input.runId, input.hitlResponses))
+    yield* Effect.promise(() => assertCanResumeRun(runId))
 
-    const hitlResponse = yield* Effect.promise(() => decodeSingleHitlResponse(input.hitlResponses))
-    const streamTailIndex = yield* workflows.tailIndex(input.runId)
-    yield* workflows.resumeHook(input.hookToken, hitlResponse)
-    const readable = yield* workflows.getReadable<Uint8Array>(input.runId, {
-      startIndex: streamTailIndex + 1
+    const body = yield* Effect.promise(() => request.json())
+    const hitlResponse = yield* Effect.promise(() => decodeSingleHitlResponse(body.hitlResponses))
+    // The pause this answers: the `eventId` of its `AgentAwaitingInput`, named by the client.
+    const pauseId = new URL(request.url).searchParams.get('pause')
+
+    if (pauseId === null) return refusedAnswerResponse('Name the pause this answers')
+
+    const tailIndex = yield* workflows.tailIndex(runId)
+    // Host-owned, as in HITL resume: records the answer for the named pause (with this tail index;
+    // an identical retry gets the first record's), then resumes that pause's own hook token with
+    // it, retrying a bounded number of times on `HookNotFoundError` while the pause is pending.
+    // A delivered pause's identical answer is reported without resuming; the rest are refused.
+    const recorded = yield* Effect.promise(() =>
+      recordAndResumeHitlAnswer({ runId, pauseId, response: hitlResponse, tailIndex })
+    )
+
+    if (recorded.status === 'refused') return refusedAnswerResponse(recorded.reason)
+    // Out of resume attempts: the answer stays recorded; a retryable 503 says retrying is safe.
+    if (recorded.status === 'hook-pending') return answerRecordedRetryResponse(recorded)
+
+    // Replay from the recorded tail, so every retry of this answer replays the same continuation.
+    const readable = yield* workflows.getReadable<Uint8Array>(runId, {
+      startIndex: recorded.tailIndex + 1
     })
 
     return new Response(readable, {
       headers: {
         'content-type': 'application/x-ndjson',
-        'x-workflow-stream-tail-index': String(streamTailIndex)
+        'x-workflow-stream-tail-index': String(recorded.tailIndex)
       }
     })
   })
 ```
 
-The helper-compatible request body is `{ hitlResponses }`. The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
+The helper-compatible request body is `{ hitlResponses }`; the client names the pause in the
+endpoint (`?pause=<eventId>`). The resume side must verify the authenticated user owns the run,
+match the response against the requests of the pause it names (never by request id alone), and
+record it before resuming. The full record-then-resume code and its rules are in
+[HITL resume](./hitl-resume#resume-from-a-route).
 
 If your resume route returns `202` with no body, do not use `streamAgentRunHitlResponseEventStreamUntilTerminal`. POST the resume yourself, then call `streamAgentRunEventStreamUntilTerminal` on the tail route.
 

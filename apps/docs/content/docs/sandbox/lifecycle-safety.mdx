@@ -7,7 +7,8 @@ The sandbox package exposes execution mechanics. Your app owns safety policy.
 
 `@yolk-sdk/sandbox/vercel` is Node/server-only because `@vercel/sandbox` imports Node built-ins.
 Browser and Worker code may use provider-free core types but must call a host execution endpoint
-instead of importing the Vercel adapter.
+instead of importing the Vercel adapter. Cloudflare Workers can use the
+[Cloudflare Containers adapter](./cloudflare) instead.
 
 ## Vercel layer
 

@@ -89,6 +89,17 @@ notice). Any tool can return that shape, so the ledger never writes the notice f
 fields: another tool's result with the shape and no notice has its plan dropped. Entries recorded
 before this rule are not repaired.
 
+A script can save its plan and then be abandoned before the ledger records its result (the
+process dies after `put`). Its re-execution never runs the script again; the interrupted listing
+(`abandonedResult`) names the plan the same way, `codemode.plan` and the plan notice after the
+bounded listing, before any input-required notice, so the plan is not orphaned. The registry reads
+it from the plan store under the call's plan id (`plans.planId({ call })`, the id `stage` used),
+never from model data, and passes it as `ToolLedgerAbandonedInput.plan` only to nested-access
+registrations of a resolution that offers staging, and only when the stored plan is in the
+store's scope, intact, and unclaimed. A throwing or invalid host plan id names nothing; a store
+failure, or a read past 5 s (`toolLedgerCompleteTimeoutMs`, like one ledger store write), is
+logged and leaves the plan unnamed: an unreviewed plan is inert.
+
 ## Review phase
 
 `makePlanReviewTool` (default name `review_plan`, renderer `tool_plan_review`, one action `apply`):
@@ -258,4 +269,7 @@ held first proving nothing ran), argument snapshots, bounded precheck concurrenc
 plan ids, nested ledger keys, cancel, paged stored previews with Schema decoding, and the pi
 executor end to end. `packages/agent/test/tools/ledger.test.ts` and
 `packages/codemode/test/ledger.test.ts`: a stored copy over the ledger bound keeps the plan and its
-notice (with a paused nested call too), and only with the notice where code mode writes it.
+notice (with a paused nested call too), and only with the notice where code mode writes it; a
+script abandoned after saving its plan names it (under the host plan id, with pauses too), and not
+when the plan store fails or times out, a review claimed the plan, or any other lookup guard
+rejects it (scope, integrity, id, a throwing or empty host plan id, no staging).

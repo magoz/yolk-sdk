@@ -417,7 +417,8 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
             state: loaded,
             name,
             nowMs,
-            lifecycle
+            lifecycle,
+            provider: 'Vercel'
           })
 
           if (Predicate.isTagged(decision, 'Create')) {

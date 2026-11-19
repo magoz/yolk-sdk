@@ -1,5 +1,11 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.144
+
+### Patch Changes
+
+- 6afa1c5: Advance in lockstep with `@yolk-sdk/sandbox`, which adds a Cloudflare Containers backend (`@yolk-sdk/sandbox/cloudflare`). These packages have no direct changes in this release.
+
 ## 0.1.0-canary.143
 
 ## 0.1.0-canary.142

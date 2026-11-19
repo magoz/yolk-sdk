@@ -40,10 +40,21 @@ duplicate out of the batch. The token-per-pause rule still applies: answers that
 behind a discarded one are dropped with it, while `resumeHook` told their senders it succeeded.
 
 Persist enough state for your UI and resume route to verify the request, including the pause's
-token. To show approvers a before → after diff, pass `approvalPreviews: toolSet.approvalPreviews` to the `prepareToolBatch`
-or `runToolBatch` call in your tool step; pending `ToolApprovalRequest`s of tools with a
-`changePreview` hook then carry `preview`, or `previewError` (render the arguments instead). Previews are recomputed whenever the batch reruns with siblings still pending, so render
-the latest request per call. See [Preview the change](../agent/tools-hitl#preview-the-change).
+token and its id: the `eventId` its `AgentAwaitingInput` event is about to get. Compute it with
+`durableAgentEventId` from the `streamId`, `turn` and `eventSequence` you sequence that event with,
+without an `executionId` (tool-batch events keep plain ids), so every execution of the step yields
+the same id. Store the pause before you write the event, so a client never names a pause your route
+does not know ([Name the pause](#name-the-pause-an-answer-is-for)). Steps run at least once: when a
+re-executed step stores the same pause (same token) again, keep the existing record and any answer
+already recorded for it. A host whose events carry no durable `eventId` gives the client nothing to
+name: sequence the event with `writeDurableAgentEvent`, or give the pause another stored id the
+client reads from the event.
+
+To show approvers a before → after diff, pass `approvalPreviews: toolSet.approvalPreviews` to the
+`prepareToolBatch` or `runToolBatch` call in your tool step; pending `ToolApprovalRequest`s of tools
+with a `changePreview` hook then carry `preview`, or `previewError` (render the arguments instead).
+Previews are recomputed whenever the batch reruns with siblings still pending, so render the latest
+request per call. See [Preview the change](../agent/tools-hitl#preview-the-change).
 
 ## Wait in the workflow
 
@@ -56,6 +67,13 @@ awaitInput: async awaitingInput => {
 
 When the hook resolves, Yolk appends the decoded response to accumulated `hitlResponses` and reruns the same tool batch.
 
+Mark the stored pause delivered when the workflow takes its answer: in `awaitInput`, once the hook
+resolves with an answer you keep, run a step that marks the pause (by its token) delivered. Make the
+mark idempotent and let a failed mark fail that step, so the platform retries it. Storing the run's
+next pause also delivers the previous one, but nothing follows a run's last pause: without the
+mark, its answer never settles, and a retry of it waits for a hook that is gone and ends in an
+error instead of being reported as delivered.
+
 `AgentAwaitingInput` ends the current client consumption window but not the Workflow run. Persist
 pending state and emit it as a commit barrier; release the writer lock without final-closing the
 Workflow stream before the hook resumes. `AwaitInputFailed` is final and invokes `writeError`, which
@@ -63,46 +81,97 @@ must write the safe error and close.
 
 ## Resume from a route
 
+Route fragment (host-owned helpers):
+
 ```ts
-import { resumeHook } from 'workflow/api'
+import { getRun, resumeHook } from 'workflow/api'
 import { HookNotFoundError } from 'workflow/errors'
 
+const run = getRun(runId)
 const hitlResponse = await decodeSingleHitlResponse(hitlResponses)
+// The pause this answers: the `eventId` of its `AgentAwaitingInput`, named by the client.
+const pauseId = new URL(request.url).searchParams.get('pause')
 
-// Host-owned: finds the stored pause that holds this request and records the answer durably.
-// An identical retry gets the same record; a different answer to that request is refused.
-const recorded = await recordPendingHitlAnswer({
+if (pauseId === null) return refusedAnswerResponse('Name the pause this answers')
+
+// Host-owned: records the answer durably for the stored pause `pauseId`, matched by that id only,
+// with the stream tail before this first attempt.
+// - The current pause: its first answer to a request it holds is recorded, and an identical retry
+//   gets the same record (and the first attempt's tail index).
+// - A delivered pause still in your bounded history: an identical answer is reported as delivered.
+// - Anything else (a different answer, a request the pause does not hold, an unknown or evicted
+//   pause) is refused, never recorded for the current pause.
+const recorded = await recordHitlAnswer({
   runId,
-  requestId: hitlResponse.requestId,
-  toolCallId: hitlResponse.toolCallId,
-  response: hitlResponse
+  pauseId,
+  response: hitlResponse,
+  tailIndex: await run.getReadable({ startIndex: -1 }).getTailIndex()
 })
 
-for (let attempt = 1; ; attempt++) {
-  try {
-    await resumeHook(recorded.hookToken, recorded.response)
-    break
-  } catch (error) {
-    if (!HookNotFoundError.is(error)) throw error
-    // The run moved past the pause: the recorded answer was already delivered.
-    if (!(await isPausePending(runId, recorded.hookToken))) break
-    // The hook does not exist yet: retry, bounded.
-    if (attempt >= maxResumeAttempts) throw error
-    await delay(attempt * 250)
+if (recorded.status === 'refused') return refusedAnswerResponse(recorded.reason)
+
+// Only a pending answer resumes; a delivered one is reported, never resumed again.
+if (recorded.status === 'pending') {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await resumeHook(recorded.hookToken, recorded.response)
+      break
+    } catch (error) {
+      if (!HookNotFoundError.is(error)) throw error
+      // The run moved past the pause: the recorded answer was already delivered.
+      if (!(await isPausePending(runId, recorded.hookToken))) break
+      // The hook does not exist yet: retry, bounded. Out of attempts, the answer stays recorded:
+      // answer with a retryable status (for example 503) saying a retry of it is safe.
+      if (attempt >= maxResumeAttempts) return answerRecordedRetryResponse(recorded)
+      await delay(attempt * 250)
+    }
   }
 }
 
-return recordedAnswerResponse(recorded)
+// Every retry of this answer streams the same continuation, from the recorded tail.
+return recordedAnswerResponse(
+  recorded,
+  run.getReadable<Uint8Array>({ startIndex: recorded.tailIndex + 1 })
+)
 ```
 
-`hitlResponses` is the `@yolk-sdk/agent/client` request body field. Do not resume only by hook token. Match run ownership, request id, tool call id, and response type.
+`hitlResponses` is the `@yolk-sdk/agent/client` request body field. Do not resume only by hook
+token. Match run ownership, the named pause, and then request id, tool call id, and response type
+against the requests that pause holds.
 
 `resumeHook` success does not mean the answer was used. A hook accepts every payload until the
 workflow disposes it, and `resumeHook` succeeds for each; `await hook` reads the first and the rest
 are dropped with the hook. Two tabs answering the same pause both see success. So before resuming,
-record the answer durably for the stored pause that holds its request: an identical retry reuses
-the record, a different answer is refused. Resume that pause's token with the recorded answer, and
-tell the user what was recorded, not what `resumeHook` returned.
+record the answer durably for the pause it names: an identical retry reuses the record, a different
+answer is refused. Resume that pause's token with the recorded answer, and tell the user what was
+recorded, not what `resumeHook` returned. Store the stream tail index with the first record: an
+identical retry gets the first record's tail, and the response streams from
+`recorded.tailIndex + 1`, so every retry of an answer replays the same continuation.
+
+### Name the pause an answer is for
+
+A request id alone does not say which pause an answer is for. A request pends again under the same
+id after an invalid answer, and approval request ids are `approval:${call.id}`, which repeat when a
+provider reuses a call id in a later turn. Matched by request id, a late retry of an earlier answer
+can fill a later pause, and a new answer can be taken for an old one. So the client names the pause
+it answers, and the route matches by that name only:
+
+- The pause id is the `eventId` of the `AgentAwaitingInput` that asked. Your tool step computes it
+  with `durableAgentEventId` and stores it with the pause before writing the event.
+- The client remembers, per request id, the `eventId` of the latest `AgentAwaitingInput` holding
+  that request, from every stream it reads (start, HITL resume, replay), and sends it with the
+  answer. `streamAgentRunHitlResponseEventStreamUntilTerminal` posts `{ hitlResponses }` to the
+  `endpoint` you pass, so put the pause there (for example `?pause=<eventId>`); the tail reads that
+  follow reuse that endpoint, so your tail route ignores the extra parameter.
+- Record per named pause. Keep a bounded history of delivered pauses (pause id and recorded
+  answer): an identical retry of a delivered pause is reported as delivered, without resuming. A
+  pause becomes delivered when the workflow takes its answer (the idempotent mark in
+  [Wait in the workflow](#wait-in-the-workflow)) or when the run stores its next pause.
+- A re-executed tool step computes the same pause id (no `executionId`) and stores the same pause
+  (same token) again: keep the existing record and its answer.
+- Refuse an answer that names no pause, an unknown pause, or one evicted from the history. Never
+  record it for the current pause. A refusal is final for that answer to that pause; the person can
+  answer the request again for its later pause once that `AgentAwaitingInput` arrives.
 
 `HookNotFoundError` means no hook is resumable under that token right now, not only that the hook
 is gone:
@@ -115,7 +184,10 @@ is gone:
 - The run ended.
 
 While the stored pause is still pending, retry resuming the recorded answer a bounded number of
-times. Once the pause has moved on, report the recorded answer as delivered, not as an error.
+times. When the attempts run out, answer with a retryable status (for example 503) that says the
+answer is recorded and retrying it is safe, not with the `HookNotFoundError`. Once the pause has
+moved on (marked delivered, see [Wait in the workflow](#wait-in-the-workflow)), report the recorded
+answer as delivered, not as an error.
 
 ## Event sequence rule
 

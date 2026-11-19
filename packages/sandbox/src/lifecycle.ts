@@ -2,6 +2,7 @@ import { Effect, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { SandboxInputError } from './errors.ts'
 import {
+  CloudflareSandboxState,
   DisposableSandboxLifecycle,
   EmptySandboxInitialSource,
   type SandboxInitialSource,
@@ -67,7 +68,11 @@ export const defaultSandboxLifecycle = DisposableSandboxLifecycle.make({
 
 export const defaultSandboxInitialSource = EmptySandboxInitialSource.make({})
 
-export type SandboxRecreateReason = 'idle_expired' | 'max_expired' | 'name_mismatch'
+export type SandboxRecreateReason =
+  | 'idle_expired'
+  | 'max_expired'
+  | 'name_mismatch'
+  | 'provider_mismatch'
 
 const SandboxUseExistingDecision = Schema.TaggedStruct('UseExisting', {
   state: Schema.Unknown
@@ -75,7 +80,9 @@ const SandboxUseExistingDecision = Schema.TaggedStruct('UseExisting', {
 
 const SandboxCreateDecision = Schema.TaggedStruct('Create', {
   workspaceReset: Schema.Boolean,
-  reason: Schema.optionalKey(Schema.Literals(['idle_expired', 'max_expired', 'name_mismatch']))
+  reason: Schema.optionalKey(
+    Schema.Literals(['idle_expired', 'max_expired', 'name_mismatch', 'provider_mismatch'])
+  )
 })
 
 export type SandboxStateDecision =
@@ -243,6 +250,32 @@ export const initialSandboxState = (input: {
     Match.exhaustive
   )
 
+// The same state variant with new use times; provider-specific fields are kept.
+const withSandboxUseTimes = (
+  state: SandboxState,
+  times: { readonly lastUsedAtMs: number; readonly expiresAtMs: number }
+): SandboxState =>
+  Match.value(state).pipe(
+    Match.withReturnType<SandboxState>(),
+    Match.tagsExhaustive({
+      Vercel: vercel =>
+        VercelSandboxState.make({
+          name: vercel.name,
+          createdAtMs: vercel.createdAtMs,
+          maxExpiresAtMs: vercel.maxExpiresAtMs,
+          ...times
+        }),
+      Cloudflare: cloudflare =>
+        CloudflareSandboxState.make({
+          name: cloudflare.name,
+          bootId: cloudflare.bootId,
+          createdAtMs: cloudflare.createdAtMs,
+          maxExpiresAtMs: cloudflare.maxExpiresAtMs,
+          ...times
+        })
+    })
+  )
+
 export const touchSandboxState = (input: {
   readonly state: SandboxState
   readonly nowMs: number
@@ -251,15 +284,13 @@ export const touchSandboxState = (input: {
   Match.value(input.lifecycle).pipe(
     Match.withReturnType<SandboxState>(),
     Match.tag('Disposable', lifecycle =>
-      VercelSandboxState.make({
-        ...input.state,
+      withSandboxUseTimes(input.state, {
         lastUsedAtMs: input.nowMs,
         expiresAtMs: Math.min(input.nowMs + lifecycle.idleTtlMs, input.state.maxExpiresAtMs)
       })
     ),
     Match.tag('Persistent', lifecycle =>
-      VercelSandboxState.make({
-        ...input.state,
+      withSandboxUseTimes(input.state, {
         lastUsedAtMs: input.nowMs,
         expiresAtMs: input.nowMs + lifecycle.idleTtlMs
       })
@@ -277,6 +308,8 @@ export const sandboxStateDecision = (input: {
   readonly name: string
   readonly nowMs: number
   readonly lifecycle: SandboxLifecycle
+  /** The adapter's state variant: stored state of another provider recreates. */
+  readonly provider?: SandboxState['_tag']
 }): SandboxStateDecision => {
   if (Option.isNone(input.state)) {
     return SandboxCreateDecision.make({ workspaceReset: false })
@@ -286,6 +319,10 @@ export const sandboxStateDecision = (input: {
 
   if (state.name !== input.name) {
     return SandboxCreateDecision.make({ workspaceReset: true, reason: 'name_mismatch' })
+  }
+
+  if (input.provider !== undefined && state._tag !== input.provider) {
+    return SandboxCreateDecision.make({ workspaceReset: true, reason: 'provider_mismatch' })
   }
 
   if (Predicate.isTagged(input.lifecycle, 'Persistent')) {

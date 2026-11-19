@@ -122,7 +122,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './server/node'
     ]
   },
-  { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
+  { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './cloudflare', './testing', './vercel'] },
   { name: '@yolk-sdk/files', exports: ['.'] },
   { name: '@yolk-sdk/pool', exports: ['.', './store'] },
   { name: '@yolk-sdk/codemode', exports: ['.', './cloudflare', './node'] },
@@ -463,6 +463,12 @@ const main = async () => {
           'const cloudflareExecutor = codemodeCloudflare.makeDynamicWorkerCodeModeExecutor({ loader: () => ({ load: code => { smokeLoaded.push(code); return { getEntrypoint: () => ({ run: async () => ({ ok: true, payload: "42", writes: "[[\\"k\\",\\"1\\"]]", output: [] }) }) } } }) })',
           'const cloudflareResult = await cloudflareExecutor.execute("const n: number = 2; return n * 21", { tools: [], globals: [], timeoutMs: 10000, memoryLimitBytes: 64 * 1024 * 1024, store: {}, signal: new AbortController().signal })',
           'if (!cloudflareResult.ok || cloudflareResult.value !== 42 || cloudflareResult.storeWrites.set.k !== 1 || smokeLoaded[0]?.globalOutbound !== null || !smokeLoaded[0].modules["script.js"].includes("const n = 2")) throw new Error(`Dynamic Worker executor smoke failed: ${JSON.stringify(cloudflareResult)}`)',
+          'const sandboxCloudflare = await import("@yolk-sdk/sandbox/cloudflare")',
+          'for (const symbol of ["CloudflareSandbox", "makeCloudflareSandboxLayer"]) { if (typeof sandboxCloudflare[symbol] !== "function") throw new Error(`Missing Cloudflare sandbox export: ${symbol}`) }',
+          'const smokeStorage = { get: async () => undefined, put: async () => undefined, delete: async () => false, getAlarm: async () => null, setAlarm: async () => undefined, deleteAlarm: async () => undefined }',
+          'const smokeSandbox = new sandboxCloudflare.CloudflareSandbox({ storage: smokeStorage }, {})',
+          'const smokeReply = await smokeSandbox.writeFile({ container: { image: "Sandbox", instance: { vcpu: 1, memoryMib: 2048, diskMb: 8192 }, env: {}, internet: true, workspaceRoot: "/workspace", source: sandboxCloudflare.CloudflareSandboxSourceSpec.Empty(), idleTtlMs: 60000 }, fresh: false, path: "/workspace/a", bytes: new Uint8Array(0) })',
+          'if (smokeReply.ok !== false || smokeReply.kind !== "config" || sandboxCloudflare.defaultCloudflareSandboxWorkspaceRoot !== "/workspace") throw new Error(`Cloudflare sandbox smoke failed: ${JSON.stringify(smokeReply)}`)',
           'const workflowsCloudflare = await import("@yolk-sdk/vercel-workflows/cloudflare")',
           'for (const symbol of ["WorkflowRun", "WorkflowExecution", "registerWorkflowModules", "makeMemoryRunStore", "makeSqliteRunStore", "serialize", "deserialize"]) { if (typeof workflowsCloudflare[symbol] !== "function") throw new Error(`Missing Cloudflare workflow export: ${symbol}`) }',
           'if (workflowsCloudflare.workflowRunsBinding !== "WORKFLOW_RUNS" || !(workflowsCloudflare.deserialize(workflowsCloudflare.serialize(new Map([[1, 2]]))) instanceof Map)) throw new Error("Cloudflare workflow runtime smoke failed")',

@@ -22,9 +22,10 @@ export {
   validateSandboxCommand
 } from './lifecycle.ts'
 
-export { makeVercelSandboxName } from './name.ts'
+export { makeSandboxName, makeVercelSandboxName } from './name.ts'
 
 export {
+  CloudflareSandboxState,
   DisposableSandboxLifecycle,
   EmptySandboxInitialSource,
   GitSandboxBasicAuth,

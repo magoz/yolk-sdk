@@ -1,4 +1,4 @@
-import { Data, Effect, Match, Option, Predicate, Result } from 'effect'
+import { Data, Duration, Effect, Match, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -23,10 +23,12 @@ import { nestedToolCallMaxErrorChars } from '../protocol/nested-tool-calls.ts'
 import {
   canonicalToolArguments,
   sortToolLedgerEntries,
+  toolLedgerCompleteTimeoutMs,
   type ToolLedgerAbandonedInput,
   type ToolLedgerEntry,
   type ToolLedgerError
 } from './ledger.ts'
+import type { StagedToolPlanRef } from './plan-notice.ts'
 import {
   maxToolPlanPreviewKeys,
   StagedCall,
@@ -35,6 +37,7 @@ import {
   ToolPlanReviewParams,
   ToolPlanReviewResponse,
   ToolPlanStageError,
+  ToolPlanStoreError,
   toolPlanDigest,
   toolPlanIntegrityProblem,
   toolPlanPrecheckConcurrency,
@@ -330,6 +333,14 @@ const makeBuilder = <Context>(
 export const positiveInteger = (value: number | undefined) =>
   value !== undefined && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 
+// A throwing host callback is an invalid id: it disables staging for this call (never the
+// script), and an abandoned call's plan is then never named (`savedToolPlanRef`).
+const stagingPlanId = <Context>(resolution: ToolPlanResolution<Context>, parent: ToolCall) =>
+  Result.getOrElse(
+    Result.try(() => resolution.planId(parent)),
+    () => ''
+  )
+
 /** `NestedToolExecutor.staging` for one nested-access call. */
 export const makeToolPlanStaging = <Context>(
   resolution: ToolPlanResolution<Context>,
@@ -342,14 +353,68 @@ export const makeToolPlanStaging = <Context>(
   begin: options =>
     makeBuilder(
       resolution,
-      // A throwing host callback disables staging for this call (an invalid id), never the script.
-      Result.getOrElse(
-        Result.try(() => resolution.planId(parent)),
-        () => ''
-      ),
+      stagingPlanId(resolution, parent),
       Math.min(resolution.maxCalls, positiveInteger(options?.maxCalls) ?? resolution.maxCalls)
     )
 })
+
+/** Bound of the plan store read behind an abandoned call's result, like one tool ledger store
+ * write (`toolLedgerCompleteTimeoutMs`); it only cuts interruptible store work (`ToolPlanStore`).
+ */
+const abandonedPlanReadTimeoutMs = toolLedgerCompleteTimeoutMs
+
+/**
+ * The plan a nested-access call saved before it was abandoned, as its result would have named it
+ * (`ToolLedgerAbandonedInput.plan`). It is read from the plan store under the plan id staging gave
+ * that call (`plans.planId({ call })`, default the call id), never from the call's arguments.
+ * `undefined` when the store holds no such plan (the script never saved one), or holds one in
+ * another scope, failing the integrity checks, or already claimed by a review. A store failure,
+ * or a read slower than `abandonedPlanReadTimeoutMs`, is logged and gives `undefined`: an
+ * unreviewed plan is inert, so the abandoned result stays as it was.
+ */
+export const savedToolPlanRef = <Context>(
+  resolution: ToolPlanResolution<Context>,
+  parent: ToolCall
+): Effect.Effect<StagedToolPlanRef | undefined> =>
+  Effect.suspend(() => {
+    const planId = stagingPlanId(resolution, parent)
+
+    if (!isValidPlanId(planId)) return Effect.succeed(undefined)
+
+    return resolution.store.get(planId).pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.millis(abandonedPlanReadTimeoutMs),
+        orElse: () =>
+          Effect.fail(
+            new ToolPlanStoreError({
+              cause: 'storage',
+              message: `timed out after ${abandonedPlanReadTimeoutMs} ms`
+            })
+          )
+      }),
+      Effect.map(stored => {
+        if (stored === undefined || stored.claimedBy !== undefined) return undefined
+
+        const plan = stored.plan
+
+        return plan.id !== planId ||
+          plan.scope !== resolution.store.scope ||
+          toolPlanIntegrityProblem(plan) !== undefined
+          ? undefined
+          : {
+              id: plan.id,
+              digest: plan.digest,
+              count: plan.calls.length,
+              reviewToolName: resolution.reviewToolName
+            }
+      }),
+      Effect.catch(error =>
+        Effect.logWarning(
+          `Plan store could not read the plan of abandoned ${parent.id}: ${error.message}`
+        ).pipe(Effect.as(undefined))
+      )
+    )
+  })
 
 const invalid = (message: string) => new InteractionValidationError({ message })
 

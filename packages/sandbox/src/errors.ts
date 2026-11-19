@@ -56,7 +56,7 @@ export class SandboxStateStoreError extends Schema.TaggedError<SandboxStateStore
 export class SandboxProviderError extends Schema.TaggedError<SandboxProviderError>()(
   'SandboxProviderError',
   {
-    provider: Schema.Literal('vercel'),
+    provider: Schema.Literals(['vercel', 'cloudflare']),
     operation: Schema.String,
     message: Schema.String,
     underlying: Schema.optional(Schema.Unknown)
