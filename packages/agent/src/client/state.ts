@@ -25,6 +25,7 @@ import { Data, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   agentEventToolCallIds,
+  disputedAgentTurns,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -490,15 +491,32 @@ export const applyAgentEventWithOptions = (
   const executions = state.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
 
-  if (Predicate.isTagged(route, 'Drop')) return rememberEvent(state, event)
+  if (Predicate.isTagged(route, 'Drop')) {
+    const recorded = recordAgentExecutionEvent(executions, event, route, [])
+
+    return rememberEvent(
+      recorded === executions ? state : { ...state, executions: recorded },
+      event
+    )
+  }
 
   if (Predicate.isTagged(route, 'Stale')) {
     return rememberEvent({ ...state, executions: route.executions }, event)
   }
 
-  const routed = Predicate.isTagged(route, 'Start')
-    ? discardSupersededExecutions(state, route.superseded)
+  const started = Predicate.isTagged(route, 'Start')
+    ? discardExecutionOutput(state, route.superseded)
     : state
+
+  // The terminal's messages are the committed transcript; a turn that showed another execution's
+  // answer also drops that execution's unacknowledged tool runs.
+  const routed =
+    Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput')
+      ? discardExecutionOutput(
+          started,
+          disputedAgentTurns(executions, event).map(turn => turn.shown)
+        )
+      : started
 
   const owner = Predicate.isTagged(route, 'Owned')
     ? route.execution
@@ -552,17 +570,18 @@ const executionOutput = (
 }
 
 /**
- * A superseded execution's output is provisional: its live messages, and the tool runs it touched
- * that no other event acknowledged (restored to the run they replaced, else removed).
+ * A superseded execution's output, or one the step did not commit, is provisional: its live
+ * messages, and the tool runs it touched that no other event acknowledged and only the model's
+ * stream changed (restored to the run they replaced, else removed).
  */
-const discardSupersededExecutions = (
+const discardExecutionOutput = (
   state: AgentClientState,
-  superseded: ReadonlyArray<AgentExecution<AgentClientExecutionOutput>>
+  discarded: ReadonlyArray<AgentExecution<AgentClientExecutionOutput>>
 ): AgentClientState => {
-  if (superseded.length === 0) return state
+  if (discarded.length === 0) return state
 
-  const unacknowledged = new Set(superseded.flatMap(execution => execution.calls))
-  const outputs = superseded.flatMap(execution => execution.output)
+  const unacknowledged = new Set(discarded.flatMap(execution => execution.calls))
+  const outputs = discarded.flatMap(execution => execution.output)
 
   const messages = new Set(
     outputs.flatMap(output => (Predicate.isTagged(output, 'LiveMessage') ? [output.message] : []))
@@ -584,10 +603,17 @@ const discardSupersededExecutions = (
     toolRuns: state.toolRuns.flatMap(run => {
       const prior = runs.get(toolRunId(run))
 
-      return prior === undefined ? [run] : Option.toArray(prior)
+      // A run a host event set belongs to a later call that reused the id: it stays.
+      return prior === undefined || !isModelToolRun(run) ? [run] : Option.toArray(prior)
     })
   }
 }
+
+/** A run only the model's stream produced (its input, a call, a provider result). */
+const isModelToolRun = (run: AgentToolRun) =>
+  Predicate.isTagged(run, 'InputStreaming') ||
+  Predicate.isTagged(run, 'InputReady') ||
+  Predicate.isTagged(run, 'ProviderCompleted')
 
 const applyAgentEventRouted = (
   state: AgentClientState,

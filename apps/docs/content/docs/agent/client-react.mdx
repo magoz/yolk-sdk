@@ -81,8 +81,10 @@ reducer and `reduceAgentEvents` route by them, per run and turn. When a newer ex
 starts, the older one's output (streaming text, its assistant message, tool calls nothing acted on)
 is removed and its later events are dropped; a start for an older turn, or after its run's
 terminal event, is dropped.
-At `AgentEnd` and `AgentAwaitingInput`, a final turn that ran more than once shows the committed
-answer; a non-final one keeps the newer execution's answer until reload
-([open case](../vercel-workflows#emit-replay-safe-stream-events)). Keep the projection's
+At `AgentEnd` and `AgentAwaitingInput`, each turn in which a newer execution superseded an older one
+shows the committed answer from the event's messages, with its tool calls' state; before that
+event, a non-final turn whose older execution committed shows the newer one. A turn retried after a
+user message, a client that connected mid-turn and call ids reused across turns have
+[limits](../vercel-workflows#emit-replay-safe-stream-events). Keep the projection's
 `executions` with its `seenEventIds`, and reset it to `[]` per run if events carry no `streamId`.
 Events without `executionId` only discard output still streaming at the next `LLMStreamStart`.

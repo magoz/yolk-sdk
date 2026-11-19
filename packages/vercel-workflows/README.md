@@ -401,9 +401,18 @@ yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, sta
   start and its later events are dropped. The client records a terminal's run from its `streamId`
   even when it saw no execution of that run; a terminal without `streamId` closes the runs still
   streaming. `AgentStart` begins a fresh run, even under a reused `streamId`.
-- At `AgentEnd` and `AgentAwaitingInput`, if the final turn ran more than once, its shown answer is
-  replaced by the committed assistant message from the event's `messages`, keeping the state of its
-  tool calls (a pending question stays pending).
+- At `AgentEnd` and `AgentAwaitingInput`, each turn of the run in which a newer execution
+  superseded an older one, and that shows an answer other than the committed one, shows the
+  committed assistant message from the event's `messages` in its place, keeping the state of its
+  tool calls (a completed call stays completed, a pending question stays pending); the shown
+  execution's calls that no host event acted on are removed. The committed answer is the one among
+  `messages` that an execution of the turn streamed; when none is found, the final turn falls back
+  to the last assistant message and an earlier turn keeps what it shows. The turn's answer stays in
+  its place (a user message after it stays after it), and a later turn's output never changes the
+  messages its executions created.
+  Until that event, a non-final turn whose older execution committed while the newer one streamed
+  shows the newer answer, beside the calls the tool batch ran; `AgentError` carries no messages and
+  reconciles nothing (see the limits under "Open cases").
 - Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
   output still streaming.
 
@@ -425,10 +434,18 @@ Host duties:
 
 Open cases:
 
-- A non-final turn whose older execution committed while the newer one streamed. The chat keeps
-  the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran the older
-  execution's calls, so the shown calls and the executed ones differ. Only the final turn is
-  reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
+- Limits of the reconcile at `AgentEnd` / `AgentAwaitingInput`. Clients show both answers of a turn
+  when a user message arrived between its two executions: one retried after a user message settled
+  the first is never treated as a turn that ran twice. This includes a promoted steer written with a
+  new `eventId` between two executions of a turn; hosts that replay a promoted steer under a
+  deterministic `eventId` (de-duplicated by the client) are not affected. A client that connects
+  mid-turn never saw the earlier execution's start, so its events take the plain path. The committed
+  answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
+  another committed message of the run (same text, same call ids) counts as committed. Tool events
+  find a call by id, so a provider that reuses call ids across turns can have a later turn's call
+  update an earlier turn's call of that id (#335). A turn kept for reconciling protects the messages
+  its executions created, not an earlier message one of them overwrote through a reused id. A client
+  that never saw a later turn's start (it joined late) also has no bound on where that turn ends.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.

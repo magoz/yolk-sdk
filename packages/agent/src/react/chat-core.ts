@@ -16,7 +16,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import {
   agentEventToolCallIds,
-  disputedAgentExecution,
+  disputedAgentTurns,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -25,6 +25,7 @@ import {
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
+  applyExecutionEventToChatMessages,
   AgentChatExecutionOutput,
   discardChatExecutionOutput,
   replaceWithCommittedAnswer,
@@ -155,8 +156,8 @@ type ProjectedExecutionEvent = ExecutionProjection & {
 /**
  * Applies one event with model-step execution routing (`executionId`): drops a superseded,
  * settled or stale execution's events, removes a superseded execution's provisional output when a
- * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` replaces a disputed
- * turn's answer with the committed one.
+ * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` shows the committed
+ * answer of every turn of the run that ran more than once and shows another one.
  */
 const projectExecutionEvent = (
   projection: ExecutionProjection,
@@ -166,7 +167,13 @@ const projectExecutionEvent = (
   const executions = projection.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
 
-  if (Predicate.isTagged(route, 'Drop')) return { ...projection, applied: false }
+  if (Predicate.isTagged(route, 'Drop')) {
+    const recorded = recordAgentExecutionEvent(executions, event, route, [])
+
+    return recorded === executions
+      ? { ...projection, applied: false }
+      : { chatMessages: projection.chatMessages, executions: recorded, applied: false }
+  }
 
   if (Predicate.isTagged(route, 'Stale')) {
     return { chatMessages: projection.chatMessages, executions: route.executions, applied: false }
@@ -180,16 +187,17 @@ const projectExecutionEvent = (
       )
     : projection.chatMessages
 
-  const disputed = disputedAgentExecution(executions)
-
   const committed =
-    disputed !== undefined &&
-    (Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput'))
-      ? replaceWithCommittedAnswer(
-          started,
-          disputed.output,
-          new Set(disputed.calls),
-          event.messages
+    Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput')
+      ? disputedAgentTurns(executions, event).reduce(
+          (messages, turn) =>
+            replaceWithCommittedAnswer(
+              messages,
+              turn.shown.output,
+              new Set(turn.shown.calls),
+              turn.committed
+            ),
+          started
         )
       : started
 
@@ -199,18 +207,97 @@ const projectExecutionEvent = (
       ? route.started
       : undefined
 
-  const chatMessages = applyAgentEventToChatMessages(committed, event, options)
+  const chatMessages =
+    owner === undefined
+      ? applyAgentEventToChatMessages(committed, event, options)
+      : applyExecutionEventToChatMessages(
+          committed,
+          event,
+          options,
+          foreignMessages(executions, owner)
+        )
+
+  const anchor = Predicate.isTagged(route, 'Start') ? [turnAnchor(route.superseded, started)] : []
 
   const after = recordAgentExecutionEvent(
-    Predicate.isTagged(route, 'Start') ? route.executions : executions,
+    Predicate.isTagged(route, 'Start')
+      ? endEarlierTurns(route.executions, route.started, event.streamId ?? '', started)
+      : executions,
     event,
     route,
-    owner === undefined ? [] : chatExecutionOutput(owner, event, committed, chatMessages)
+    owner === undefined
+      ? []
+      : [...anchor, ...chatExecutionOutput(owner, event, committed, chatMessages)]
   )
 
   return after === executions
     ? { ...projection, chatMessages, applied: true }
     : { chatMessages, executions: after, applied: true }
+}
+
+/**
+ * Where a turn's output starts, recorded when an execution starts: the anchor of the execution it
+ * superseded (the turn's first), else the last chat message.
+ */
+const turnAnchor = (
+  superseded: ReadonlyArray<AgentExecution<AgentChatExecutionOutput>>,
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentChatExecutionOutput =>
+  superseded
+    .flatMap(execution => execution.output)
+    .find(output => Predicate.isTagged(output, 'After')) ??
+  AgentChatExecutionOutput.After({ messageId: Option.fromNullishOr(messages.at(-1)?.id) })
+
+/**
+ * The chat messages other executions still hold as their output (an earlier turn's answer kept
+ * for reconciling): the owner's events never change them.
+ */
+const foreignMessages = (
+  executions: AgentExecutions<AgentChatExecutionOutput>,
+  owner: AgentExecution<AgentChatExecutionOutput>
+): ReadonlySet<string> =>
+  new Set(
+    executions.flatMap(run =>
+      run.executions.flatMap(execution =>
+        execution.executionId === owner.executionId
+          ? []
+          : execution.output.flatMap(output =>
+              Predicate.isTagged(output, 'Message') ? [output.messageId] : []
+            )
+      )
+    )
+  )
+
+/**
+ * When a later turn of a run starts, the executions of its earlier turns kept for reconciling
+ * record where their turn's output ends (`Until`): the last chat message before the new turn.
+ */
+const endEarlierTurns = (
+  runs: AgentExecutions<AgentChatExecutionOutput>,
+  started: AgentExecution<AgentChatExecutionOutput>,
+  streamId: string,
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentExecutions<AgentChatExecutionOutput> => {
+  const until = AgentChatExecutionOutput.Until({
+    messageId: Option.fromNullishOr(messages.at(-1)?.id)
+  })
+
+  const ends = (execution: AgentExecution<AgentChatExecutionOutput>) =>
+    execution.status === 'Settled' &&
+    execution.turn < started.turn &&
+    execution.output.length > 0 &&
+    !execution.output.some(output => Predicate.isTagged(output, 'Until'))
+
+  return runs.map(run =>
+    run.streamId !== streamId || run.retired || !run.executions.some(ends)
+      ? run
+      : {
+          ...run,
+          executions: run.executions.map(execution =>
+            ends(execution) ? { ...execution, output: [...execution.output, until] } : execution
+          )
+        }
+  )
 }
 
 const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>

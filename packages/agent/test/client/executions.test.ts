@@ -10,6 +10,8 @@ import {
   HostToolCallPart,
   LLMStreamStart,
   LLMTextDelta,
+  ProviderToolCallPart,
+  ProviderToolResult,
   QuestionPrompt,
   QuestionRequest,
   QuestionRequested,
@@ -104,23 +106,22 @@ const project = (events: ReadonlyArray<AgentEvent>) => ({
   ).chatMessages
 })
 
+/** A chat message's text, and its tool calls as `id:state`. */
+const describeParts = (chatMessage: AgentChatMessage) =>
+  chatMessage.parts
+    .flatMap(part => {
+      if (Predicate.isTagged(part, 'Text')) return [part.content]
+
+      if (Predicate.isTagged(part, 'ToolCall')) return [`${part.call.id}:${part.state._tag}`]
+
+      return []
+    })
+    .join(' | ')
+
 /** Per assistant chat message: its text, and its tool calls as `id:state`. */
 const shown = (messages: ReadonlyArray<AgentChatMessage>) =>
   messages.flatMap(chatMessage =>
-    chatMessage.role !== 'assistant'
-      ? []
-      : [
-          chatMessage.parts
-            .flatMap(part => {
-              if (Predicate.isTagged(part, 'Text')) return [part.content]
-
-              if (Predicate.isTagged(part, 'ToolCall'))
-                return [`${part.call.id}:${part.state._tag}`]
-
-              return []
-            })
-            .join(' | ')
-        ]
+    chatMessage.role !== 'assistant' ? [] : [describeParts(chatMessage)]
   )
 
 const expectBothChats = (result: ReturnType<typeof project>, expected: ReadonlyArray<string>) => {
@@ -508,6 +509,432 @@ describe('model-step executions', () => {
     expect(result.client.messages).toEqual([next])
     expect(shown(result.projection).at(-1)).toBe('New answer')
     expect(shown(result.chat).at(-1)).toBe('New answer')
+  })
+
+  describe('a non-final turn that ran twice', () => {
+    const lookup = ToolCall.make({ id: 'call_a', name: 'weather', params: { city: 'Oslo' } })
+    const search = ToolCall.make({ id: 'call_b', name: 'search', params: { query: 'Oslo' } })
+    const asking = ToolCall.make({ id: 'call_q', name: 'question', params: {} })
+    // Distinct but equal instances: the terminal's messages arrive decoded apart from the events.
+    const olderAnswer = () => answer('Checking the weather', [lookup])
+    const newerAnswer = () => answer('Searching instead', [search])
+    const done = answer('It is 12C in Oslo')
+    const asked = answer('Celsius or Fahrenheit?', [asking])
+    const weather = ToolResult.make({ toolCallId: lookup.id, content: '12C' })
+    const found = ToolResult.make({ toolCallId: search.id, content: 'Oslo: 12C' })
+
+    const request = QuestionRequest.make({
+      requestId: 'question:call_q',
+      toolCallId: asking.id,
+      call: asking,
+      questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Pick one' })]
+    })
+
+    const inputEnd = (executionId: string, call: ToolCall) =>
+      live(identity => ToolInputEnd.make({ ...identity, call }), executionId)
+
+    const batch = (call: ToolCall, result: ToolResult) => ({
+      started: plain(identity => ToolExecutionStarted.make({ ...identity, call }), `${call.id}:0`),
+      completed: plain(
+        identity => ToolExecutionCompleted.make({ ...identity, call, result }),
+        `${call.id}:1`
+      )
+    })
+
+    const finalTurn = (terminal: 'end' | 'pause', committed: ReadonlyArray<AgentMessage>) =>
+      terminal === 'end'
+        ? [
+            start('step-2:1', 2),
+            delta('step-2:1', 'It is 12C in Oslo'),
+            message('step-2:1', done),
+            end('end', [...committed, done])
+          ]
+        : [
+            start('step-2:1', 2),
+            delta('step-2:1', 'Celsius or Fahrenheit?'),
+            live(identity => ToolInputEnd.make({ ...identity, call: asking }), 'step-2:1'),
+            message('step-2:1', asked),
+            plain(identity => QuestionRequested.make({ ...identity, request }), 'question'),
+            plain(
+              identity =>
+                AgentAwaitingInput.make({
+                  ...identity,
+                  requests: [request],
+                  messages: [...committed, asked],
+                  turns: 2,
+                  usage: zeroAgentUsage
+                }),
+              'pause'
+            )
+          ]
+
+    const lastTurn = {
+      end: 'It is 12C in Oslo',
+      pause: 'Celsius or Fahrenheit? | call_q:QuestionRequested'
+    }
+
+    const olderRan = batch(lookup, weather)
+
+    const interleavings = [
+      'concurrent',
+      'newer answers after the batch',
+      'sequential',
+      'newer silent'
+    ] as const
+
+    // The older execution committed: the tool batch ran its call while the newer one streamed.
+    const olderCommitted: Record<(typeof interleavings)[number], ReadonlyArray<AgentEvent>> = {
+      concurrent: [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        start(B, 1),
+        delta(B, 'Searching instead'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        inputEnd(B, search),
+        olderRan.started,
+        message(B, newerAnswer()),
+        olderRan.completed
+      ],
+      'newer answers after the batch': [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        start(B, 1),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        delta(B, 'Searching instead'),
+        olderRan.started,
+        olderRan.completed,
+        inputEnd(B, search),
+        message(B, newerAnswer())
+      ],
+      sequential: [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        olderRan.started,
+        start(B, 1),
+        delta(B, 'Searching instead'),
+        inputEnd(B, search),
+        message(B, newerAnswer()),
+        olderRan.completed
+      ],
+      'newer silent': [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        start(B, 1),
+        olderRan.started,
+        olderRan.completed
+      ]
+    }
+
+    describe.each(['end', 'pause'] as const)('at %s', terminal => {
+      it.each(interleavings)(
+        'shows the older committed answer and the calls the batch ran (%s)',
+        interleaving => {
+          const committed = [
+            olderAnswer(),
+            ToolResultMessage.make({ toolCallId: lookup.id, content: weather.content })
+          ]
+
+          const result = project([
+            ...olderCommitted[interleaving],
+            ...finalTurn(terminal, committed)
+          ])
+
+          expect(result.client.messages).toEqual([...committed, terminal === 'end' ? done : asked])
+
+          expect(result.client.liveMessages).toEqual([])
+          expect(result.client.text).toBe('')
+
+          expect(
+            result.client.toolRuns.map(run =>
+              Predicate.isTagged(run, 'QuestionRequested')
+                ? `${run.request.toolCallId}:${run._tag}`
+                : `${'call' in run ? run.call.id : ''}:${run._tag}`
+            )
+          ).toEqual(
+            terminal === 'end'
+              ? ['call_a:Completed']
+              : ['call_a:Completed', 'call_q:QuestionRequested']
+          )
+
+          expectBothChats(result, ['Checking the weather | call_a:Completed', lastTurn[terminal]])
+        }
+      )
+
+      it('keeps the newer answer when the newer execution committed', () => {
+        const newerRan = batch(search, found)
+
+        const committed = [
+          newerAnswer(),
+          ToolResultMessage.make({ toolCallId: search.id, content: found.content })
+        ]
+
+        const result = project([
+          start(A, 1),
+          delta(A, 'Checking the weather'),
+          inputEnd(A, lookup),
+          message(A, olderAnswer()),
+          start(B, 1),
+          delta(B, 'Searching instead'),
+          inputEnd(B, search),
+          message(B, newerAnswer()),
+          newerRan.started,
+          newerRan.completed,
+          ...finalTurn(terminal, committed)
+        ])
+
+        expect(result.client.messages).toEqual([...committed, terminal === 'end' ? done : asked])
+        expectBothChats(result, ['Searching instead | call_b:Completed', lastTurn[terminal]])
+      })
+    })
+
+    describe('reach of the reconcile', () => {
+      const committedTurn = () => [
+        olderAnswer(),
+        ToolResultMessage.make({ toolCallId: lookup.id, content: weather.content })
+      ]
+
+      const runs = (state: ReturnType<typeof project>['client']) =>
+        state.toolRuns.map(run =>
+          Predicate.isTagged(run, 'QuestionRequested')
+            ? `${run.request.toolCallId}:${run._tag}`
+            : `${'call' in run ? run.call.id : ''}:${run._tag}`
+        )
+
+      it.each(['end', 'pause'] as const)(
+        "keeps a later turn's answer that reuses the shown answer's call id (%s)",
+        terminal => {
+          // A provider that numbers calls per response reuses `call_b` in the next turn.
+          const reused = ToolCall.make({ id: 'call_b', name: 'question', params: {} })
+          const reusing = answer('Which unit?', [reused])
+
+          const reusedRequest = QuestionRequest.make({
+            requestId: 'question:call_b',
+            toolCallId: reused.id,
+            call: reused,
+            questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Pick one' })]
+          })
+
+          const messages = [...committedTurn(), reusing]
+
+          const result = project([
+            ...olderCommitted.sequential,
+            start('step-2:1', 2),
+            message('step-2:1', reusing),
+            ...(terminal === 'end'
+              ? [end('end', messages)]
+              : [
+                  plain(
+                    identity => QuestionRequested.make({ ...identity, request: reusedRequest }),
+                    'question-b'
+                  ),
+                  plain(
+                    identity =>
+                      AgentAwaitingInput.make({
+                        ...identity,
+                        requests: [reusedRequest],
+                        messages,
+                        turns: 2,
+                        usage: zeroAgentUsage
+                      }),
+                    'pause'
+                  )
+                ])
+          ])
+
+          expect(result.client.messages).toEqual(messages)
+          expect(result.client.liveMessages).toEqual([])
+
+          expect(runs(result.client)).toEqual(
+            terminal === 'end'
+              ? ['call_a:Completed']
+              : ['call_a:Completed', 'call_b:QuestionRequested']
+          )
+
+          expectBothChats(result, [
+            'Checking the weather | call_a:Completed',
+            terminal === 'end'
+              ? 'Which unit? | call_b:Called'
+              : 'Which unit? | call_b:QuestionRequested'
+          ])
+        }
+      )
+
+      it("keeps a later turn's call that reuses an id of the shown answer", () => {
+        const reused = ToolCall.make({ id: 'call_b', name: 'search', params: { query: 'Bergen' } })
+        const looking = answer('Looking it up', [reused])
+        const bergen = ToolResult.make({ toolCallId: reused.id, content: 'Bergen: 9C' })
+        const ran = batch(reused, bergen)
+
+        const messages = [
+          ...committedTurn(),
+          looking,
+          ToolResultMessage.make({ toolCallId: reused.id, content: bergen.content }),
+          done
+        ]
+
+        const result = project([
+          ...olderCommitted.sequential,
+          start('step-2:1', 2),
+          delta('step-2:1', 'Looking it up'),
+          inputEnd('step-2:1', reused),
+          message('step-2:1', looking),
+          ran.started,
+          ran.completed,
+          start('step-3:1', 3),
+          delta('step-3:1', 'It is 12C in Oslo'),
+          message('step-3:1', done),
+          end('end', messages)
+        ])
+
+        expect(result.client.messages).toEqual(messages)
+        expect(runs(result.client)).toEqual(['call_a:Completed', 'call_b:Completed'])
+
+        expectBothChats(result, [
+          'Checking the weather | call_a:Completed',
+          'Looking it up | call_b:Completed',
+          'It is 12C in Oslo'
+        ])
+      })
+
+      it('puts the committed answer before a user message that followed the turn', () => {
+        const steer = UserMessage.make({ content: 'And Bergen?' })
+
+        const result = project([
+          ...olderCommitted.sequential,
+          plain(identity => UserMessageEvent.make({ ...identity, message: steer }), 'steer'),
+          ...finalTurn('end', [...committedTurn(), steer])
+        ])
+
+        expect(result.client.messages).toEqual([...committedTurn(), steer, done])
+
+        const transcript = (messages: ReadonlyArray<AgentChatMessage>) =>
+          messages.map(chatMessage => `${chatMessage.role}: ${describeParts(chatMessage)}`)
+
+        const expected = [
+          'assistant: Checking the weather | call_a:Completed',
+          'user: And Bergen?',
+          'assistant: It is 12C in Oslo'
+        ]
+
+        expect(transcript(result.projection)).toEqual(expected)
+        expect(transcript(result.chat)).toEqual(expected)
+      })
+
+      it("keeps a later turn's call with an id of the committed answer in its turn", () => {
+        const searched = ToolCall.make({ id: 'srv_1', name: 'web_search', params: {} })
+        const searchedResult = ToolResult.make({ toolCallId: searched.id, content: 'Oslo' })
+
+        const olderSearching = () =>
+          AssistantAgentMessage.make({
+            parts: [
+              AssistantTextPart.make({ content: 'Checking the weather' }),
+              ProviderToolCallPart.make({ call: searched }),
+              HostToolCallPart.make({ call: lookup })
+            ]
+          })
+
+        const doneSearching = AssistantAgentMessage.make({
+          parts: [
+            AssistantTextPart.make({ content: 'It is 12C in Oslo' }),
+            ProviderToolCallPart.make({ call: searched })
+          ]
+        })
+
+        const messages = [
+          olderSearching(),
+          ToolResultMessage.make({ toolCallId: lookup.id, content: weather.content }),
+          doneSearching
+        ]
+
+        const result = project([
+          start(A, 1),
+          delta(A, 'Checking the weather'),
+          inputEnd(A, lookup),
+          message(A, olderSearching()),
+          olderRan.started,
+          start(B, 1),
+          delta(B, 'Searching instead'),
+          inputEnd(B, search),
+          message(B, newerAnswer()),
+          olderRan.completed,
+          start('step-2:1', 2),
+          delta('step-2:1', 'It is 12C in Oslo'),
+          live(
+            identity =>
+              ProviderToolResult.make({ ...identity, call: searched, result: searchedResult }),
+            'step-2:1'
+          ),
+          message('step-2:1', doneSearching),
+          end('end', messages)
+        ])
+
+        expect(result.client.messages).toEqual(messages)
+
+        expectBothChats(result, [
+          'Checking the weather | srv_1:Called | call_a:Completed',
+          'It is 12C in Oslo | srv_1:ProviderCompleted'
+        ])
+      })
+
+      it('shows the committed answer when the message its turn followed is gone', () => {
+        const question = UserMessage.make({ content: 'Weather in Oslo?' })
+
+        const asking = plain(
+          identity => UserMessageEvent.make({ ...identity, message: question }),
+          'q'
+        )
+
+        const terminal = end('end', [...committedTurn(), done])
+
+        const before = [
+          asking,
+          ...olderCommitted.sequential,
+          start('step-2:1', 2),
+          delta('step-2:1', 'It is 12C in Oslo'),
+          message('step-2:1', done)
+        ]
+
+        // A host removed the message the turn's output followed (here: the user message).
+        const withoutQuestion = (messages: ReadonlyArray<AgentChatMessage>) =>
+          messages.filter(chatMessage => chatMessage.role !== 'user')
+
+        const projected = before.reduce(
+          (state, event) => applyAgentEventToChatProjection(state, event),
+          makeAgentChatEventProjectionState()
+        )
+
+        const reduced = before.reduce(
+          (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+          initialAgentChatState
+        )
+
+        const expected = ['Checking the weather | call_a:Completed', 'It is 12C in Oslo']
+
+        expect(
+          shown(
+            applyAgentEventToChatProjection(
+              { ...projected, chatMessages: withoutQuestion(projected.chatMessages) },
+              terminal
+            ).chatMessages
+          )
+        ).toEqual(expected)
+
+        expect(
+          shown(
+            reduceAgentChatState(
+              { ...reduced, chatMessages: withoutQuestion(reduced.chatMessages) },
+              AgentChatAction.Event({ event: terminal })
+            ).chatMessages
+          )
+        ).toEqual(expected)
+      })
+    })
   })
 
   it('keeps events without an execution on the plain path', () => {
