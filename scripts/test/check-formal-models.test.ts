@@ -1,16 +1,18 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { accessSync, constants } from 'node:fs'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Exit, Fiber, Layer } from 'effect'
+import { Effect, Exit, Fiber, Layer, Option } from 'effect'
 import { sha256 } from '../formal-model-manifest.ts'
 import {
   Everystate,
   EverystateRunError,
+  everystateChecker,
+  EverystateChecker,
   everystateLauncher,
   ModelFiles,
   ModelsCheckAt,
@@ -377,30 +379,119 @@ describe('ModelsCheckAt', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
+// Which checker runs
+// ---------------------------------------------------------------------------------------------
+
+/** A copy of the everystate package layout: the launcher, and a native checker when given. */
+const withEverystateCopy = <A, E>(
+  native: { readonly from: string; readonly mode: number } | undefined,
+  test: (copy: { readonly launcher: string; readonly native: string }) => Effect.Effect<A, E>
+) =>
+  Effect.acquireUseRelease(
+    Effect.promise(async () => {
+      const copy = await mkdtemp(join(tmpdir(), 'yolk-everystate-copy-'))
+      const copiedLauncher = join(copy, 'bin', 'everystate.mjs')
+      const nativeFile = join(copy, 'native', `${process.platform}-${process.arch}`, 'everystate')
+
+      await mkdir(dirname(copiedLauncher), { recursive: true })
+      await copyFile(launcher, copiedLauncher)
+
+      if (native !== undefined) {
+        await mkdir(dirname(nativeFile), { recursive: true })
+        await copyFile(native.from, nativeFile)
+        await chmod(nativeFile, native.mode)
+      }
+
+      return { root: copy, launcher: copiedLauncher, native: nativeFile }
+    }),
+    copy => test(copy),
+    copy => Effect.promise(() => rm(copy.root, { recursive: true, force: true }))
+  )
+
+const isExecutable = (file: string) => {
+  try {
+    accessSync(file, constants.X_OK)
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Executable bits do not exist on Windows.
+describe.skipIf(process.platform === 'win32')('everystateChecker', () => {
+  it.effect('runs the launcher (the WebAssembly build) only when there is no native checker', () =>
+    withEverystateCopy(undefined, copy =>
+      Effect.sync(() => {
+        expect(everystateChecker(copy.launcher, {})).toEqual(
+          EverystateChecker.Wasm({ launcher: copy.launcher })
+        )
+      })
+    )
+  )
+
+  it.effect('runs a native checker directly, restoring a missing executable bit first', () =>
+    withEverystateCopy({ from: script, mode: 0o644 }, copy =>
+      Effect.sync(() => {
+        expect(everystateChecker(copy.launcher, {})).toEqual(
+          EverystateChecker.Native({ file: copy.native })
+        )
+        expect(isExecutable(copy.native)).toBe(true)
+      })
+    )
+  )
+
+  it.effect('honours EVERYSTATE_BINARY, and refuses one that is not executable', () =>
+    withEverystateCopy({ from: script, mode: 0o755 }, copy =>
+      Effect.gen(function* () {
+        expect(everystateChecker(copy.launcher, { EVERYSTATE_BINARY: copy.native })).toEqual(
+          EverystateChecker.Native({ file: copy.native })
+        )
+
+        yield* Effect.promise(() => chmod(copy.native, 0o644))
+
+        expect(
+          EverystateChecker.$is('Unusable')(
+            everystateChecker(copy.launcher, { EVERYSTATE_BINARY: copy.native })
+          )
+        ).toBe(true)
+      })
+    )
+  )
+})
+
+// ---------------------------------------------------------------------------------------------
 // Stopping the checker: a model that never finishes must not leave a checker process behind
 // ---------------------------------------------------------------------------------------------
 
 type RunningProcess = { readonly pid: number; readonly args: string }
 
-/** Processes whose command line holds `marker` (`ps` works on Linux and macOS). */
+/**
+ * Processes whose command line holds `marker` (`ps` works on Linux and macOS; `-ww` keeps long
+ * command lines whole). A failing `ps` fails the test.
+ */
 const processesWith = (marker: string) =>
   Effect.promise(
     () =>
-      new Promise<ReadonlyArray<RunningProcess>>(settle => {
-        execFile('ps', ['-eo', 'pid=,args='], (error, stdout) => {
+      new Promise<ReadonlyArray<RunningProcess>>((settle, refuse) => {
+        execFile('ps', ['-ww', '-eo', 'pid=,args='], (error, stdout) => {
+          if (error !== null) {
+            refuse(error)
+
+            return
+          }
+
           settle(
-            error === null
-              ? stdout
-                  .split('\n')
-                  .filter(line => line.includes(marker))
-                  .map(line => ({ pid: Number.parseInt(line.trim(), 10), args: line.trim() }))
-              : []
+            stdout
+              .split('\n')
+              .filter(line => line.includes(marker))
+              .map(line => ({ pid: Number.parseInt(line.trim(), 10), args: line.trim() }))
           )
         })
       })
   )
 
-/** Polls `processesWith(marker)` until `done` holds or `timeoutMs` passes; returns the last list. */
+/** Polls `processesWith(marker)` until `done` holds or `timeoutMs` passes; the last list. */
 const pollProcesses = (
   marker: string,
   done: (running: ReadonlyArray<RunningProcess>) => boolean,
@@ -419,19 +510,9 @@ const pollProcesses = (
   return poll
 }
 
-// The prebuilt checker everystate ships for this platform; the launcher runs it as a child.
-const nativeChecker = join(
-  repositoryRoot,
-  'node_modules',
-  'everystate',
-  'native',
-  `${process.platform}-${process.arch}`
-)
-
-const hasNativeChecker = existsSync(nativeChecker)
-
-const nativeCheckerRunning = (running: ReadonlyArray<RunningProcess>) =>
-  running.some(entry => entry.args.includes(`${sep}native${sep}`))
+/** Whether one of the processes runs `file` (the native checker itself, not only the launcher). */
+const runs = (file: string) => (running: ReadonlyArray<RunningProcess>) =>
+  running.some(entry => entry.args.includes(file))
 
 const killAll = (running: ReadonlyArray<RunningProcess>) =>
   Effect.sync(() => {
@@ -481,43 +562,80 @@ const withSpinningModel = <A, E>(test: (root: string, marker: string) => Effect.
   )
 }
 
-// Without a prebuilt checker for this platform, everystate runs its WebAssembly build in-process.
-describe.skipIf(!hasNativeChecker)('stopping everystate', () => {
-  it.live('kills the checker when the check is interrupted', () =>
-    withSpinningModel((root, marker) =>
-      Effect.gen(function* () {
-        const fiber = yield* Effect.forkChild(
-          runModelsCheck.pipe(Effect.provide(ModelsCheckAt(root, launcher)))
-        )
+// The checker the script selects here, without `EVERYSTATE_BINARY` (the tests pass the same empty
+// environment). The WebAssembly build runs inside the launcher's process, so only a native
+// checker can outlive what the script kills; there is nothing to test without one.
+const nativeChecker = Option.liftPredicate(
+  everystateChecker(launcher, {}),
+  EverystateChecker.$is('Native')
+).pipe(Option.map(checker => checker.file))
 
-        // Wait until the native checker itself runs, not only the launcher that starts it.
-        expect(
-          nativeCheckerRunning(yield* pollProcesses(marker, nativeCheckerRunning, 20_000))
-        ).toBe(true)
+describe.skipIf(process.platform === 'win32' || Option.isNone(nativeChecker))(
+  'stopping everystate',
+  () => {
+    const native = Option.getOrElse(nativeChecker, () => '')
 
-        yield* Fiber.interrupt(fiber)
+    it.live('kills the checker when the check is interrupted', () =>
+      withSpinningModel((root, marker) =>
+        Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(
+            runModelsCheck.pipe(Effect.provide(ModelsCheckAt(root, launcher, { environment: {} })))
+          )
 
-        expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
-      })
+          expect(runs(native)(yield* pollProcesses(marker, runs(native), 20_000))).toBe(true)
+
+          yield* Fiber.interrupt(fiber)
+
+          expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
+        })
+      )
     )
-  )
 
-  it.live('kills the checker when it runs past its time limit', () =>
-    withSpinningModel((root, marker) =>
-      Effect.gen(function* () {
-        const outcome = yield* runModelsCheck.pipe(
-          Effect.provide(ModelsCheckAt(root, launcher, { timeoutMs: 2_000 }))
-        )
+    it.live('kills the checker when it runs past its time limit', () =>
+      withSpinningModel((root, marker) =>
+        Effect.gen(function* () {
+          const outcome = yield* runModelsCheck.pipe(
+            Effect.provide(ModelsCheckAt(root, launcher, { timeoutMs: 2_000, environment: {} }))
+          )
 
-        expect(modelsCheckSucceeded(outcome)).toBe(false)
-        expect(renderModelsCheckOutcome(outcome)).toContain(
-          `${marker}.cfg: everystate did not finish within 2 s`
-        )
-        expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
-      })
+          expect(modelsCheckSucceeded(outcome)).toBe(false)
+          expect(renderModelsCheckOutcome(outcome)).toContain(
+            `${marker}.cfg: everystate did not finish within 2 s`
+          )
+          expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual([])
+        })
+      )
     )
-  )
-})
+
+    it.live(
+      'kills the checker on interruption when the native binary lacks the executable bit',
+      () =>
+        // The binary installed without its executable bit, as some installs leave it: the
+        // launcher would repair it and start it behind `spawnSync`, out of reach of a kill.
+        withEverystateCopy({ from: native, mode: 0o644 }, copy =>
+          withSpinningModel((root, marker) =>
+            Effect.gen(function* () {
+              const fiber = yield* Effect.forkChild(
+                runModelsCheck.pipe(
+                  Effect.provide(ModelsCheckAt(root, copy.launcher, { environment: {} }))
+                )
+              )
+
+              expect(
+                runs(copy.native)(yield* pollProcesses(marker, runs(copy.native), 20_000))
+              ).toBe(true)
+
+              yield* Fiber.interrupt(fiber)
+
+              expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual(
+                []
+              )
+            })
+          )
+        )
+    )
+  }
+)
 
 // ---------------------------------------------------------------------------------------------
 // The CLI

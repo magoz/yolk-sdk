@@ -1,5 +1,6 @@
 /**
- * Formal model check (`pnpm models:check`, part of `pnpm check`; `patterns/FORMAL_VERIFICATION.md`).
+ * Formal model check (`pnpm models:check`, part of `pnpm check`;
+ * `patterns/FORMAL_VERIFICATION.md`).
  *
  * Finds every model manifest (`**` `/formal/*.model.json`, outside hidden directories, installed
  * packages and build output), runs each configuration it lists with everystate, and fails when:
@@ -17,7 +18,7 @@
  * code. It writes only that manifest.
  */
 import { execFile } from 'node:child_process'
-import { accessSync, constants } from 'node:fs'
+import { accessSync, chmodSync, constants, existsSync } from 'node:fs'
 import { glob, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve } from 'node:path'
 import process from 'node:process'
@@ -474,16 +475,61 @@ const modelFilesAt = (root: string) => {
 // A model that runs this long is too large for the check; keep checked configurations small.
 const everystateTimeoutMs = 10 * 60_000
 
-/** How a configuration is run: the program and the arguments before everystate's own. */
-type EverystateCommand = { readonly file: string; readonly args: ReadonlyArray<string> }
+// Node's own buffer for the checker's output: past it, Node kills the checker.
+const everystateMaxOutputBytes = 1 << 26
+
+/** The environment the checker selection reads (only `EVERYSTATE_BINARY`). */
+export type EverystateEnvironment = Readonly<Record<string, string | undefined>>
 
 /**
- * The prebuilt native checker beside the `launcher` when this platform has one, else the launcher
- * (which then runs everystate's WebAssembly build in its own process). The launcher starts the
- * native checker with `spawnSync` and forwards no signal to it, so killing the launcher would leave
- * the checker running: run the checker directly, so a kill reaches the process doing the work.
+ * Which everystate program runs a configuration. everystate's launcher
+ * (`node_modules/everystate/bin/everystate.mjs`) starts its native checker with `spawnSync` and
+ * forwards no signal to it, so killing the launcher at the time limit or on interruption would
+ * leave the checker running. The native checker therefore always runs directly; the launcher runs
+ * only when there is no native checker, and then runs everystate's WebAssembly build in its own
+ * process, so killing it stops the check.
  */
-const everystateCommand = (launcher: string): EverystateCommand => {
+export type EverystateChecker = Data.TaggedEnum<{
+  /** A native checker, run directly: `EVERYSTATE_BINARY`, or this platform's prebuilt binary. */
+  Native: { readonly file: string }
+  /** No native checker for this platform: the launcher runs the WebAssembly build in-process. */
+  Wasm: { readonly launcher: string }
+  /** A native checker exists but cannot be run. */
+  Unusable: { readonly message: string }
+}>
+
+export const EverystateChecker = Data.taggedEnum<EverystateChecker>()
+
+const isExecutable = (file: string) => {
+  try {
+    accessSync(file, constants.X_OK)
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Selects the checker as the launcher would, without running the launcher in front of a native
+ * checker: `EVERYSTATE_BINARY` when set (the launcher's override), else the prebuilt binary beside
+ * the `launcher` for this platform, made executable when installed without its executable bit (the
+ * launcher repairs it the same way), else the WebAssembly build through the launcher.
+ */
+export const everystateChecker = (
+  launcher: string,
+  environment: EverystateEnvironment = process.env
+): EverystateChecker => {
+  const override = environment['EVERYSTATE_BINARY']
+
+  if (override !== undefined && override !== '') {
+    return isExecutable(override)
+      ? EverystateChecker.Native({ file: override })
+      : EverystateChecker.Unusable({
+          message: `EVERYSTATE_BINARY (${override}) is not an executable file`
+        })
+  }
+
   const native = join(
     dirname(launcher),
     '..',
@@ -492,32 +538,70 @@ const everystateCommand = (launcher: string): EverystateCommand => {
     process.platform === 'win32' ? 'everystate.exe' : 'everystate'
   )
 
-  try {
-    accessSync(native, constants.X_OK)
+  if (!existsSync(native)) return EverystateChecker.Wasm({ launcher })
 
-    return { file: native, args: [] }
-  } catch {
-    return { file: process.execPath, args: [launcher] }
+  if (!isExecutable(native)) {
+    try {
+      chmodSync(native, 0o755)
+    } catch {
+      // Reported below: the checker is still not executable.
+    }
   }
+
+  return isExecutable(native)
+    ? EverystateChecker.Native({ file: native })
+    : EverystateChecker.Unusable({
+        message:
+          `everystate's native checker (${native}) is not executable ` +
+          'and could not be made executable'
+      })
 }
 
 const runEverystate = (
   root: string,
-  command: EverystateCommand,
+  checker: EverystateChecker,
+  timeoutMs: number,
+  input: { readonly directory: string; readonly spec: string; readonly config: string }
+) =>
+  EverystateChecker.$match(checker, {
+    Unusable: ({ message }) => Effect.fail(new EverystateRunError({ message })),
+    Native: ({ file }) => runEverystateProgram(root, file, [], timeoutMs, input),
+    Wasm: ({ launcher }) =>
+      runEverystateProgram(root, process.execPath, [launcher], timeoutMs, input)
+  })
+
+const runEverystateProgram = (
+  root: string,
+  file: string,
+  leadingArgs: ReadonlyArray<string>,
   timeoutMs: number,
   input: { readonly directory: string; readonly spec: string; readonly config: string }
 ) =>
   Effect.callback<string, EverystateRunError>(resume => {
     const child = execFile(
-      command.file,
-      [...command.args, '-json', '-config', input.config, input.spec],
+      file,
+      [...leadingArgs, '-json', '-config', input.config, input.spec],
       {
         cwd: join(root, ...input.directory.split('/')),
-        maxBuffer: 1 << 26,
+        maxBuffer: everystateMaxOutputBytes,
         timeout: timeoutMs
       },
       (error, stdout) => {
-        // `killed` is set only when this process killed the checker: here, at the time limit.
+        // Node killed the checker because its output passed `maxBuffer` (`killed` is set too).
+        if (error !== null && error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          resume(
+            Effect.fail(
+              new EverystateRunError({
+                message: `everystate printed more than ${everystateMaxOutputBytes / (1 << 20)} MiB`
+              })
+            )
+          )
+
+          return
+        }
+
+        // Otherwise `killed` means Node killed it at the time limit. (An interruption kills it
+        // too, through the finalizer below, but then nothing reads this result.)
         if (error !== null && error.killed === true) {
           resume(
             Effect.fail(
@@ -548,7 +632,7 @@ const runEverystate = (
       }
     )
 
-    // Interrupted (a failed sibling, Ctrl+C handling, a caller's timeout): stop the checker too.
+    // Interrupted (a failed sibling, a caller's timeout): stop the checker too.
     return Effect.sync(() => {
       child.kill()
     })
@@ -556,24 +640,24 @@ const runEverystate = (
 
 /**
  * The working tree under `root`, checked with the everystate `launcher`
- * (`node_modules/everystate/bin/everystate.mjs`): the native checker beside it runs directly when
- * this platform has one, else the launcher runs its WebAssembly build. `timeoutMs` (default ten
- * minutes) bounds each configuration.
+ * (`node_modules/everystate/bin/everystate.mjs`; the checker it selects: `everystateChecker`).
+ * `timeoutMs` (default ten minutes) bounds each configuration; `environment` (default
+ * `process.env`) is what the selection reads.
  */
 export const ModelsCheckAt = (
   root: string,
   launcher: string,
-  options: { readonly timeoutMs?: number } = {}
+  options: { readonly timeoutMs?: number; readonly environment?: EverystateEnvironment } = {}
 ) =>
   Layer.mergeAll(
     Layer.succeed(ModelFiles, modelFilesAt(root)),
     Layer.effect(
       Everystate,
       Effect.sync(() => {
-        const command = everystateCommand(launcher)
+        const checker = everystateChecker(launcher, options.environment)
         const timeoutMs = options.timeoutMs ?? everystateTimeoutMs
 
-        return Everystate.of({ run: input => runEverystate(root, command, timeoutMs, input) })
+        return Everystate.of({ run: input => runEverystate(root, checker, timeoutMs, input) })
       })
     )
   )
