@@ -16,6 +16,7 @@ export type {
   ActiveChatToolPart,
   AgentChatEventProjectionState,
   AgentChatState,
+  AgentChatTurnStart,
   CompletedChatToolPart
 } from './chat-core.ts'
 

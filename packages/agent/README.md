@@ -720,6 +720,27 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
+Providers can reuse tool call ids across turns (some number calls per response: `call_0` in every
+turn). `applyAgentEventToChatProjection` and the `useAgentChat` reducer record where the latest
+model turn starts (`turnStart`, at each `LLMStreamStart`, with or without `executionId`), and a
+turn's tool events (input, its `AssistantMessage`'s calls, provider results, the tool batch,
+approvals, questions and their answers) match a call only after it, so a later turn's call never
+changes an earlier turn's call with the same id. When the turn does not hold the call (a replay
+without event id, or a batch event arriving after the next turn started), a host event acts on an
+earlier part instead of adding a card: a request (approval, question, input, interaction) or a
+tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
+answer (question, input or interaction response, approval denial) on the last earlier part holding
+the request it answers (a denial: a pending approval), else on nothing. Tool-batch and request
+events must therefore carry the call exactly as the model emitted it: a host that normalizes
+arguments between the model's events and its own adds a second card for a replayed or late event.
+Until a start is
+seen (and after `AgentStart`), and always in `applyAgentEventToChatMessages`, a tool event matches
+the last message holding the call, so a reused id can still update an earlier turn's call there;
+answers, approval denials and added acceptance or interaction results update that one call, not
+every call with the id. `reduceAgentEvents` keeps one tool run per call id: a later turn's call
+replaces the earlier turn's run (whose result stays in `messages`), and a later call reusing the id
+of an accepted (background) call is taken for a replay of it.
+
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
 execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
@@ -738,12 +759,12 @@ and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.
   superseded an older one shows the committed answer from the event's messages in its place, with
   the state of its tool calls; the uncommitted execution's calls no host event acted on are removed,
   and a later turn's output never changes it. Before that event, a non-final turn whose older
-  execution committed shows the newer answer. A turn retried after a user message, a client that
-  connected mid-turn and call ids reused across turns have limits (the vercel-workflows README,
-  "One step, several executions", open cases).
+  execution committed shows the newer answer. A turn retried after a user message and a client
+  that connected mid-turn have limits (the vercel-workflows README, "One step, several executions",
+  open cases).
 
-Carry `executions` along with `seenEventIds` when you keep projection state yourself, and reset it
-to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
+Carry `executions` and `turnStart` along with `seenEventIds` when you keep projection state
+yourself, and reset `executions` to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
 streaming into it at once are unsupported). `reduceAgentEvents` keeps one draft buffer (`text`,
 `reasoning`) that every `LLMStreamStart` clears. Without `executionId`, the next
 `LLMStreamStart` only discards output still streaming.

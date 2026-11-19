@@ -84,7 +84,17 @@ terminal event, is dropped.
 At `AgentEnd` and `AgentAwaitingInput`, each turn in which a newer execution superseded an older one
 shows the committed answer from the event's messages, with its tool calls' state; before that
 event, a non-final turn whose older execution committed shows the newer one. A turn retried after a
-user message, a client that connected mid-turn and call ids reused across turns have
+user message and a client that connected mid-turn have
 [limits](../vercel-workflows#emit-replay-safe-stream-events). Keep the projection's
-`executions` with its `seenEventIds`, and reset it to `[]` per run if events carry no `streamId`.
-Events without `executionId` only discard output still streaming at the next `LLMStreamStart`.
+`executions` and `turnStart` with its `seenEventIds`, and reset `executions` to `[]` per run if
+events carry no `streamId`. Events without `executionId` only discard output still streaming at the
+next `LLMStreamStart`.
+
+Providers can reuse tool call ids across turns. The chat projection and the `useAgentChat` reducer
+record where the latest model turn starts (`turnStart`), and a turn's tool events only match a
+call after it, so a later turn's call never changes an earlier turn's call with the same id. A
+replayed or late request or tool-batch event updates the earlier part holding the same call (send
+the call as the model emitted it), and a replayed answer the part holding its request. Before any
+start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
+holding the call (answers and added results update only that one); `reduceAgentEvents` keeps one
+tool run per call id.

@@ -5,6 +5,7 @@ import {
   AgentEnd,
   AgentStart,
   AssistantAgentMessage,
+  BackgroundToolAccepted,
   AssistantMessageEvent,
   AssistantTextPart,
   HostToolCallPart,
@@ -14,16 +15,26 @@ import {
   ProviderToolResult,
   QuestionPrompt,
   QuestionRequest,
+  QuestionAnswered,
   QuestionRequested,
+  QuestionResponse,
+  ToolApprovalDenied,
+  ToolApprovalGranted,
+  ToolApprovalRequest,
+  ToolApprovalRequested,
+  ToolApprovalResponse,
   ToolCall,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionStarted,
+  ToolInputDelta,
   ToolInputEnd,
   ToolInputStart,
   ToolResult,
   ToolResultMessage,
   UserMessage,
   UserMessageEvent,
+  makeBackgroundToolAcceptedResult,
   zeroAgentUsage,
   type AgentEvent,
   type AgentMessage
@@ -36,7 +47,7 @@ import {
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
 import { AgentChatAction } from '../../src/react/chat-actions.ts'
-import type { AgentChatMessage } from '../../src/react/chat-messages.ts'
+import { appendProtocolMessage, type AgentChatMessage } from '../../src/react/chat-messages.ts'
 
 // Model-step executions (events carrying `executionId`): a retried or redelivered model step
 // streams a second answer for the same turn. Every scenario runs through the client reducer and
@@ -948,5 +959,765 @@ describe('model-step executions', () => {
     expect(result.client.text).toBe('Sorry')
     expect(result.client.executions ?? []).toEqual([])
     expectBothChats(result, ['Sorry'])
+  })
+})
+
+// Providers that number calls per response reuse `call_0` in every turn (and in every execution of
+// a turn): a turn's events match a call only after its turn's start, never an earlier turn's call.
+describe('call ids reused across turns', () => {
+  const weather = (city: string) =>
+    ToolCall.make({ id: 'call_0', name: 'weather', params: { city } })
+
+  const oslo = weather('Oslo')
+  const bergen = weather('Bergen')
+  const paris = weather('Paris')
+  const lyon = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Lyon' } })
+  const result = (content: string) => ToolResult.make({ toolCallId: 'call_0', content })
+
+  const resultMessage = (content: string) =>
+    ToolResultMessage.make({ toolCallId: 'call_0', content })
+
+  const describeCalls = (chatMessage: AgentChatMessage) =>
+    chatMessage.parts
+      .flatMap(part => {
+        if (Predicate.isTagged(part, 'Text')) return [part.content]
+
+        if (Predicate.isTagged(part, 'ToolCall')) {
+          return [`${part.call.id} ${JSON.stringify(part.call.params)}:${part.state._tag}`]
+        }
+
+        return []
+      })
+      .join(' | ')
+
+  /** Per assistant chat message: its text, and its tool calls as `id params:state`. */
+  const calls = (messages: ReadonlyArray<AgentChatMessage>) =>
+    messages.flatMap(chatMessage =>
+      chatMessage.role !== 'assistant' ? [] : [describeCalls(chatMessage)]
+    )
+
+  const expectChats = (result: ReturnType<typeof project>, expected: ReadonlyArray<string>) => {
+    expect(calls(result.projection)).toEqual(expected)
+    expect(calls(result.chat)).toEqual(expected)
+  }
+
+  type Tagging = 'tagged' | 'plain'
+
+  /** One model turn: its start, text, the call's input stream and its `AssistantMessage`. */
+  const modelTurn = (
+    tagging: Tagging,
+    executionId: string,
+    turn: number,
+    value: AssistantAgentMessage,
+    call?: ToolCall
+  ): ReadonlyArray<AgentEvent> => {
+    const event = <Event extends AgentEvent>(make: (identity: PlainIdentity) => Event) =>
+      tagging === 'tagged'
+        ? live(make, executionId)
+        : plain(make, `${executionId}:${(sequence += 1)}`)
+
+    const text = value.parts
+      .flatMap(part =>
+        Predicate.isTagged(part, 'Text') && Predicate.isString(part.content) ? [part.content] : []
+      )
+      .join('')
+
+    return [
+      event(identity => LLMStreamStart.make({ ...identity, turn })),
+      ...(text === '' ? [] : [event(identity => LLMTextDelta.make({ ...identity, text }))]),
+      ...(call === undefined
+        ? []
+        : [
+            event(identity => ToolInputStart.make({ ...identity, id: call.id, name: call.name })),
+            event(identity =>
+              ToolInputDelta.make({ ...identity, id: call.id, delta: JSON.stringify(call.params) })
+            ),
+            event(identity => ToolInputEnd.make({ ...identity, call }))
+          ]),
+      event(identity => AssistantMessageEvent.make({ ...identity, message: value }))
+    ]
+  }
+
+  /** The tool batch running a call (host events, no execution). */
+  const ran = (call: ToolCall, value: ToolResult) => {
+    const id = `${JSON.stringify(call.params)}:${(sequence += 1)}`
+
+    return {
+      started: plain(identity => ToolExecutionStarted.make({ ...identity, call }), `${id}:started`),
+      completed: plain(
+        identity => ToolExecutionCompleted.make({ ...identity, call, result: value }),
+        `${id}:completed`
+      )
+    }
+  }
+
+  const batch = (call: ToolCall, value: ToolResult) => {
+    const run = ran(call, value)
+
+    return [run.started, run.completed]
+  }
+
+  const turnOne = answer('Oslo first', [oslo])
+
+  const firstTurn = (tagging: Tagging) => [
+    ...modelTurn(tagging, 'model-1:1', 1, turnOne, oslo),
+    ...batch(oslo, result('12C'))
+  ]
+
+  const userMessage = (content: string, id: string) =>
+    plain(
+      identity => UserMessageEvent.make({ ...identity, message: UserMessage.make({ content }) }),
+      id
+    )
+
+  it.each(['tagged', 'plain'] as const)(
+    "keeps an earlier turn's completed call when a later turn reuses its id (%s)",
+    tagging => {
+      const turnTwo = answer('Now Bergen', [bergen])
+      const done = answer('Oslo 12C, Bergen 9C')
+
+      const messages = [turnOne, resultMessage('12C'), turnTwo, resultMessage('9C'), done]
+
+      const events = [
+        ...firstTurn(tagging),
+        ...modelTurn(tagging, 'model-2:1', 2, turnTwo, bergen),
+        ...batch(bergen, result('9C')),
+        ...modelTurn(tagging, 'model-3:1', 3, done),
+        end('end', messages)
+      ]
+
+      const expected = [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+        'Oslo 12C, Bergen 9C'
+      ]
+
+      expectChats(project(events.slice(0, -1)), expected)
+
+      const ended = project(events)
+
+      expectChats(ended, expected)
+      expect(ended.client.messages).toEqual(messages)
+      // The client state keeps one tool run per call id, the latest turn's; earlier results stay in
+      // `messages`.
+      expect(ended.client.toolRuns).toMatchObject([{ _tag: 'Completed', call: bergen }])
+    }
+  )
+
+  it('keeps one call when an untagged step of a later turn runs again', () => {
+    // A redelivered step without `executionId` repeats the call: the turn keeps its start.
+    const turnTwo = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call: bergen })] })
+
+    const result_ = project([
+      ...firstTurn('plain'),
+      plain(identity => LLMStreamStart.make({ ...identity, turn: 2 }), 'first-attempt'),
+      plain(identity => ToolInputEnd.make({ ...identity, call: bergen }), 'first-attempt:call'),
+      ...modelTurn('plain', 'model-2:2', 2, turnTwo, bergen),
+      ...batch(bergen, result('9C'))
+    ])
+
+    expectChats(result_, [
+      'Oslo first | call_0 {"city":"Oslo"}:Completed',
+      'call_0 {"city":"Bergen"}:Completed'
+    ])
+  })
+
+  describe('host events for an earlier turn', () => {
+    const exporting = ToolCall.make({ id: 'call_0', name: 'export', params: { format: 'csv' } })
+
+    const accepted = makeBackgroundToolAcceptedResult({
+      toolCallId: exporting.id,
+      acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:export' })
+    })
+
+    const startedExport = answer('Starting the export', [exporting])
+    const working = answer('Working on it')
+
+    const reduceChat = (events: ReadonlyArray<AgentEvent>, initial = initialAgentChatState) =>
+      events.reduce(
+        (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+        initial
+      )
+
+    const reduceProjection = (events: ReadonlyArray<AgentEvent>) =>
+      events.reduce(
+        (state, event) => applyAgentEventToChatProjection(state, event),
+        makeAgentChatEventProjectionState()
+      )
+
+    it('keeps one settled part when a later turn sees a replayed start of its call', () => {
+      const events = [
+        ...modelTurn('tagged', 'model-1:1', 1, startedExport, exporting),
+        plain(identity => ToolExecutionStarted.make({ ...identity, call: exporting }), 'export:0'),
+        plain(
+          identity =>
+            ToolExecutionAccepted.make({ ...identity, call: exporting, result: accepted }),
+          'export:1'
+        ),
+        ...modelTurn('tagged', 'model-2:1', 2, working)
+      ]
+
+      // A replay without event id of the turn-1 call's start.
+      const replayed = ToolExecutionStarted.make({ call: exporting })
+      const expected = ['Starting the export | call_0 {"format":"csv"}:Accepted', 'Working on it']
+
+      const chat = reduceChat(events)
+      const replayedChat = reduceChat([replayed], chat)
+
+      expect(calls(replayedChat.chatMessages)).toEqual(expected)
+      expect(replayedChat.status).toEqual(chat.status)
+
+      expect(
+        calls(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+      ).toEqual(expected)
+    })
+
+    it("completes an earlier turn's call when its batch event arrives after the next start", () => {
+      const lookup = ran(oslo, result('12C'))
+
+      const result_ = project([
+        ...modelTurn('tagged', 'model-1:1', 1, turnOne, oslo),
+        lookup.started,
+        ...modelTurn('tagged', 'model-2:1', 2, working),
+        lookup.completed
+      ])
+
+      expectChats(result_, ['Oslo first | call_0 {"city":"Oslo"}:Completed', 'Working on it'])
+    })
+
+    it("adds a later turn's call the batch ran when an earlier turn holds another call with its id", () => {
+      // The older execution's call, unacknowledged when the newer one started, was removed; the
+      // tool batch runs it anyway: it is a call of its own, not a replay of turn 1's.
+      const bergenRan = ran(bergen, result('9C'))
+      const turnTwo = () => answer('Now Bergen', [bergen])
+
+      const result_ = project([
+        ...firstTurn('tagged'),
+        start(A, 2),
+        delta(A, 'Now Bergen'),
+        live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+        message(A, turnTwo()),
+        start(B, 2),
+        bergenRan.started,
+        bergenRan.completed,
+        end('end', [turnOne, resultMessage('12C'), turnTwo(), resultMessage('9C')])
+      ])
+
+      expectChats(result_, [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed'
+      ])
+    })
+
+    const twoTurns = [
+      ...firstTurn('tagged'),
+      ...modelTurn('tagged', 'model-2:1', 2, answer('Now Bergen', [bergen]), bergen),
+      ...batch(bergen, result('9C')),
+      ...modelTurn('tagged', 'model-3:1', 3, working)
+    ]
+
+    it('keeps one part when a replayed start names a call two turns back', () => {
+      // Turn 2 reused `call_0`; the replay names turn 1's call.
+      const replayed = ToolExecutionStarted.make({ call: oslo })
+
+      const expected = [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+        'Working on it'
+      ]
+
+      const chat = reduceChat(twoTurns)
+      const replayedChat = reduceChat([replayed], chat)
+
+      expect(calls(replayedChat.chatMessages)).toEqual(expected)
+      expect(replayedChat.status).toEqual(chat.status)
+
+      expect(
+        calls(applyAgentEventToChatProjection(reduceProjection(twoTurns), replayed).chatMessages)
+      ).toEqual(expected)
+    })
+
+    describe('a replayed answer to an earlier turn', () => {
+      const unit = ToolCall.make({ id: 'call_0', name: 'question', params: { city: 'Oslo' } })
+
+      const question = QuestionRequest.make({
+        requestId: 'question:call_0',
+        toolCallId: 'call_0',
+        call: unit,
+        questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Celsius or Fahrenheit?' })]
+      })
+
+      const answered = QuestionResponse.make({
+        requestId: question.requestId,
+        toolCallId: 'call_0',
+        outcome: 'answered',
+        source: 'user',
+        answers: []
+      })
+
+      const approval = ToolApprovalRequest.make({
+        requestId: 'approval:call_0',
+        toolCallId: 'call_0',
+        call: oslo
+      })
+
+      const denied = ToolApprovalResponse.make({
+        requestId: approval.requestId,
+        toolCallId: 'call_0',
+        decision: 'denied',
+        source: 'user'
+      })
+
+      const asks = {
+        question: {
+          message: answer('Which unit?', [unit]),
+          call: unit,
+          requested: plain(
+            identity => QuestionRequested.make({ ...identity, request: question }),
+            'question'
+          ),
+          answer: (identity: Partial<PlainIdentity>): AgentEvent =>
+            QuestionAnswered.make({ ...identity, response: answered }),
+          shown: 'Which unit? | call_0 {"city":"Oslo"}:QuestionAnswered'
+        },
+        approval: {
+          message: answer('Oslo needs approval', [oslo]),
+          call: oslo,
+          requested: plain(
+            identity => ToolApprovalRequested.make({ ...identity, call: oslo, request: approval }),
+            'approval'
+          ),
+          answer: (identity: Partial<PlainIdentity>): AgentEvent =>
+            ToolApprovalDenied.make({
+              ...identity,
+              toolCallId: 'call_0',
+              reason: 'No',
+              response: denied
+            }),
+          shown: 'Oslo needs approval | call_0 {"city":"Oslo"}:Denied'
+        }
+      }
+
+      it.each(['question', 'approval'] as const)(
+        "leaves a later turn's call with the id alone (%s)",
+        kind => {
+          const ask = asks[kind]
+
+          const events = [
+            ...modelTurn('tagged', 'model-1:1', 1, ask.message, ask.call),
+            ask.requested,
+            plain(ask.answer, 'answer'),
+            ...modelTurn('tagged', 'model-2:1', 2, answer('Now Bergen', [bergen]), bergen),
+            ...batch(bergen, result('9C')),
+            ...modelTurn('tagged', 'model-3:1', 3, working)
+          ]
+
+          // The answer again, without event id.
+          const replayed = ask.answer({})
+
+          const expected = [
+            ask.shown,
+            'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+            'Working on it'
+          ]
+
+          expect(calls(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual(expected)
+
+          expect(
+            calls(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+          ).toEqual(expected)
+        }
+      )
+
+      it.each(['question', 'approval'] as const)(
+        "keeps one card when an earlier turn's request is replayed (%s)",
+        kind => {
+          const ask = asks[kind]
+
+          const events = [
+            ...modelTurn('tagged', 'model-1:1', 1, ask.message, ask.call),
+            ask.requested,
+            plain(ask.answer, 'answer'),
+            ...modelTurn('tagged', 'model-2:1', 2, working)
+          ]
+
+          const replayed =
+            kind === 'question'
+              ? QuestionRequested.make({ request: question })
+              : ToolApprovalRequested.make({ call: oslo, request: approval })
+
+          // The replay lands on the earlier turn's call (the state a replayed request sets there is
+          // unchanged by turn scoping); it never adds a second card.
+          const cards = (messages: ReadonlyArray<AgentChatMessage>) =>
+            messages.map(
+              chatMessage =>
+                chatMessage.parts.filter(part => Predicate.isTagged(part, 'ToolCall')).length
+            )
+
+          expect(cards(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual([1, 0])
+
+          expect(
+            cards(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+          ).toEqual([1, 0])
+        }
+      )
+    })
+
+    it('settles only the latest call with its id when a result message is added', () => {
+      const events = [
+        ...firstTurn('tagged'),
+        ...modelTurn('tagged', 'model-2:1', 2, startedExport, exporting)
+      ]
+
+      const acknowledged = ToolResultMessage.make({
+        toolCallId: exporting.id,
+        content: accepted.content,
+        acceptance: accepted.acceptance
+      })
+
+      const expected = [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Starting the export | call_0 {"format":"csv"}:Accepted'
+      ]
+
+      const chat = reduceChat(events)
+
+      expect(
+        calls(
+          reduceAgentChatState(chat, AgentChatAction.AppendMessage({ message: acknowledged }))
+            .chatMessages
+        )
+      ).toEqual(expected)
+
+      expect(
+        calls(
+          reduceAgentChatState(chat, AgentChatAction.HydrateMessage({ message: acknowledged }))
+            .chatMessages
+        )
+      ).toEqual(expected)
+
+      // Hosts merging settled results into a projection (`appendProtocolMessage`).
+      expect(
+        calls(appendProtocolMessage(reduceProjection(events).chatMessages, acknowledged))
+      ).toEqual(expected)
+    })
+  })
+
+  describe('across a pause', () => {
+    const approval = ToolApprovalRequest.make({
+      requestId: 'approval:call_0',
+      toolCallId: 'call_0',
+      call: bergen
+    })
+
+    const approved = ToolApprovalResponse.make({
+      requestId: approval.requestId,
+      toolCallId: 'call_0',
+      decision: 'approved',
+      source: 'user'
+    })
+
+    const unit = ToolCall.make({ id: 'call_0', name: 'question', params: { city: 'Bergen' } })
+
+    const question = QuestionRequest.make({
+      requestId: 'question:call_0',
+      toolCallId: 'call_0',
+      call: unit,
+      questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Celsius or Fahrenheit?' })]
+    })
+
+    const answered = QuestionResponse.make({
+      requestId: question.requestId,
+      toolCallId: 'call_0',
+      outcome: 'answered',
+      source: 'user',
+      answers: []
+    })
+
+    const asks = {
+      approval: {
+        message: answer('Bergen needs approval', [bergen]),
+        call: bergen,
+        request: approval,
+        response: approved,
+        requested: plain(
+          identity => ToolApprovalRequested.make({ ...identity, call: bergen, request: approval }),
+          'approval'
+        ),
+        // The resumed tool batch runs the paused call before the next turn starts.
+        resumed: [
+          plain(
+            identity =>
+              ToolApprovalGranted.make({ ...identity, toolCallId: 'call_0', response: approved }),
+            'granted'
+          ),
+          ...batch(bergen, result('9C'))
+        ],
+        shown: 'Bergen needs approval | call_0 {"city":"Bergen"}:Completed'
+      },
+      question: {
+        message: answer('Which unit for Bergen?', [unit]),
+        call: unit,
+        request: question,
+        response: answered,
+        requested: plain(
+          identity => QuestionRequested.make({ ...identity, request: question }),
+          'question'
+        ),
+        resumed: [
+          plain(identity => QuestionAnswered.make({ ...identity, response: answered }), 'answered')
+        ],
+        shown: 'Which unit for Bergen? | call_0 {"city":"Bergen"}:QuestionAnswered'
+      }
+    }
+
+    describe.each(['approval', 'question'] as const)('%s', kind => {
+      const ask = asks[kind]
+      const done = answer('Bergen is 9C')
+
+      const paused = (tagging: Tagging) => [
+        ...firstTurn(tagging),
+        ...modelTurn(tagging, 'model-2:1', 2, ask.message, ask.call),
+        ask.requested,
+        plain(
+          identity =>
+            AgentAwaitingInput.make({
+              ...identity,
+              requests: [ask.request],
+              messages: [turnOne, resultMessage('12C'), ask.message],
+              turns: 2,
+              usage: zeroAgentUsage
+            }),
+          'pause'
+        )
+      ]
+
+      const resumed = (tagging: Tagging) => [
+        ...ask.resumed,
+        ...modelTurn(tagging, 'model-3:1', 3, done),
+        end('end', [done])
+      ]
+
+      const expected = ['Oslo first | call_0 {"city":"Oslo"}:Completed', ask.shown, 'Bergen is 9C']
+
+      it.each(['tagged', 'plain'] as const)(
+        "acts on the paused call, not an earlier turn's call with its id (%s)",
+        tagging => {
+          expectChats(project([...paused(tagging), ...resumed(tagging)]), expected)
+        }
+      )
+
+      it.each(['tagged', 'plain'] as const)(
+        'acts on the paused call after a local answer (%s)',
+        tagging => {
+          const pausedState = paused(tagging).reduce(
+            (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+            initialAgentChatState
+          )
+
+          const answeredState = reduceAgentChatState(
+            pausedState,
+            AgentChatAction.SubmitHitlResponse({ response: ask.response })
+          )
+
+          const final = resumed(tagging).reduce(
+            (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+            answeredState
+          )
+
+          expect(calls(final.chatMessages)).toEqual(expected)
+        }
+      )
+    })
+  })
+
+  describe('with a turn that ran twice', () => {
+    const turnTwo = () => answer('Now Bergen', [bergen])
+    const bergenRan = ran(bergen, result('9C'))
+
+    // Turn 2's older execution commits `call_0`; the newer one reuses the id for another call.
+    const disputed = [
+      start(A, 2),
+      delta(A, 'Now Bergen'),
+      live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+      message(A, turnTwo()),
+      bergenRan.started,
+      start(B, 2),
+      message(B, answer('Lyon instead', [weather('Lyon')])),
+      bergenRan.completed
+    ]
+
+    it("keeps every turn's call when a disputed turn between them reuses the id", () => {
+      const turnThree = answer('And Paris', [paris])
+      const done = answer('All done')
+
+      const messages = [
+        turnOne,
+        resultMessage('12C'),
+        turnTwo(),
+        resultMessage('9C'),
+        turnThree,
+        resultMessage('15C'),
+        done
+      ]
+
+      const result_ = project([
+        ...firstTurn('tagged'),
+        ...disputed,
+        ...modelTurn('tagged', 'model-3:1', 3, turnThree, paris),
+        ...batch(paris, result('15C')),
+        ...modelTurn('tagged', 'model-4:1', 4, done),
+        end('end', messages)
+      ])
+
+      expect(result_.client.messages).toEqual(messages)
+
+      expectChats(result_, [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+        'And Paris | call_0 {"city":"Paris"}:Completed',
+        'All done'
+      ])
+    })
+
+    it("discards the newer answer before a steer when the turn's anchor is gone", () => {
+      const done = answer('Bergen is 9C')
+
+      const before = [
+        userMessage('Weather in Oslo, then Bergen?', 'question'),
+        ...firstTurn('tagged'),
+        start(A, 2),
+        delta(A, 'Now Bergen'),
+        live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+        message(A, turnTwo()),
+        bergenRan.started,
+        start(B, 2),
+        delta(B, 'Lyon instead'),
+        live(identity => ToolInputEnd.make({ ...identity, call: lyon }), B),
+        message(B, answer('Lyon instead', [lyon])),
+        bergenRan.completed,
+        userMessage('Thanks', 'steer'),
+        ...modelTurn('tagged', 'model-3:1', 3, done)
+      ]
+
+      const terminal = end('end', [turnOne, resultMessage('12C'), turnTwo(), resultMessage('9C')])
+
+      // A host removed turn 2's anchor, the message its output followed (turn 1's answer).
+      const withoutTurnOne = (messages: ReadonlyArray<AgentChatMessage>) =>
+        messages.filter(chatMessage => !describeCalls(chatMessage).startsWith('Oslo first'))
+
+      const transcript = (messages: ReadonlyArray<AgentChatMessage>) =>
+        messages.map(chatMessage => `${chatMessage.role}: ${describeCalls(chatMessage)}`)
+
+      const projected = before.reduce(
+        (state, event) => applyAgentEventToChatProjection(state, event),
+        makeAgentChatEventProjectionState()
+      )
+
+      const reduced = before.reduce(
+        (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+        initialAgentChatState
+      )
+
+      const expected = [
+        'user: Weather in Oslo, then Bergen?',
+        'assistant: Now Bergen | call_0 {"city":"Bergen"}:Completed',
+        'user: Thanks',
+        'assistant: Bergen is 9C'
+      ]
+
+      expect(
+        transcript(
+          applyAgentEventToChatProjection(
+            { ...projected, chatMessages: withoutTurnOne(projected.chatMessages) },
+            terminal
+          ).chatMessages
+        )
+      ).toEqual(expected)
+
+      expect(
+        transcript(
+          reduceAgentChatState(
+            { ...reduced, chatMessages: withoutTurnOne(reduced.chatMessages) },
+            AgentChatAction.Event({ event: terminal })
+          ).chatMessages
+        )
+      ).toEqual(expected)
+    })
+
+    it.each([1, 2])(
+      "keeps a later turn's call when that turn's start carried no execution (%i later turns)",
+      laterTurns => {
+        const searched = ToolCall.make({ id: 'srv_0', name: 'web_search', params: {} })
+        const found = ToolResult.make({ toolCallId: searched.id, content: 'Bergen' })
+
+        const searching = () =>
+          AssistantAgentMessage.make({
+            parts: [
+              AssistantTextPart.make({ content: 'Now Bergen' }),
+              ProviderToolCallPart.make({ call: searched }),
+              HostToolCallPart.make({ call: bergen })
+            ]
+          })
+
+        const doneSearching = AssistantAgentMessage.make({
+          parts: [
+            AssistantTextPart.make({ content: 'Bergen is 9C' }),
+            ProviderToolCallPart.make({ call: searched })
+          ]
+        })
+
+        const thanks = answer('Anything else?')
+        const turnFour = laterTurns === 2 ? [thanks] : []
+
+        const messages = [
+          turnOne,
+          resultMessage('12C'),
+          searching(),
+          resultMessage('9C'),
+          doneSearching,
+          ...turnFour
+        ]
+
+        const result_ = project([
+          ...firstTurn('tagged'),
+          start(A, 2),
+          delta(A, 'Now Bergen'),
+          live(identity => ToolInputEnd.make({ ...identity, call: bergen }), A),
+          message(A, searching()),
+          bergenRan.started,
+          start(B, 2),
+          delta(B, 'Lyon instead'),
+          message(B, answer('Lyon instead', [lyon])),
+          bergenRan.completed,
+          // Turn 3's events carry no `executionId`: its untagged start records turn 2's `Until`.
+          plain(identity => LLMStreamStart.make({ ...identity, turn: 3 }), 'turn-3:start'),
+          plain(
+            identity => LLMTextDelta.make({ ...identity, text: 'Bergen is 9C' }),
+            'turn-3:text'
+          ),
+          plain(
+            identity => ProviderToolResult.make({ ...identity, call: searched, result: found }),
+            'turn-3:search'
+          ),
+          plain(
+            identity => AssistantMessageEvent.make({ ...identity, message: doneSearching }),
+            'turn-3:message'
+          ),
+          // A later untagged turn moves the latest start on; turn 2 still ends where turn 3 began.
+          ...(laterTurns === 2 ? modelTurn('plain', 'model-4:1', 4, thanks) : []),
+          end('end', messages)
+        ])
+
+        expect(result_.client.messages).toEqual(messages)
+
+        expectChats(result_, [
+          'Oslo first | call_0 {"city":"Oslo"}:Completed',
+          'Now Bergen | srv_0 {}:Called | call_0 {"city":"Bergen"}:Completed',
+          'Bergen is 9C | srv_0 {}:ProviderCompleted',
+          ...(laterTurns === 2 ? ['Anything else?'] : [])
+        ])
+      }
+    )
   })
 })
