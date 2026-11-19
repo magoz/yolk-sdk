@@ -391,9 +391,14 @@ yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, sta
   start and its later events are dropped. The client records a terminal's run from its `streamId`
   even when it saw no execution of that run; a terminal without `streamId` closes the runs still
   streaming. `AgentStart` begins a fresh run, even under a reused `streamId`.
-- At `AgentEnd` and `AgentAwaitingInput`, if the final turn ran more than once, its shown answer is
-  replaced by the committed assistant message from the event's `messages`, keeping the state of its
-  tool calls (a pending question stays pending).
+- At `AgentEnd` and `AgentAwaitingInput`, every turn of the run that ran more than once and shows
+  an answer other than the committed one shows the committed assistant message from the event's
+  `messages` in its place, keeping the state of its tool calls (a completed call stays completed, a
+  pending question stays pending); the shown execution's calls that no host event acted on are
+  removed. The committed answer is the one among `messages` that an execution of the turn streamed
+  (for the final turn, else the last assistant message). Until that event, a non-final turn whose
+  older execution committed while the newer one streamed shows the newer answer, beside the calls
+  the tool batch ran; `AgentError` carries no messages and reconciles nothing.
 - Events without `executionId` keep the plain behaviour: the next `LLMStreamStart` only discards
   output still streaming.
 
@@ -415,10 +420,6 @@ Host duties:
 
 Open cases:
 
-- A non-final turn whose older execution committed while the newer one streamed. The chat keeps
-  the newer (uncommitted) answer and its tool calls until reload, while the tool batch ran the older
-  execution's calls, so the shown calls and the executed ones differ. Only the final turn is
-  reconciled with the committed messages (at `AgentEnd` or `AgentAwaitingInput`).
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.

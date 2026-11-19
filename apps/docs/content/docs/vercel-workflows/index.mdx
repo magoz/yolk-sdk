@@ -92,9 +92,8 @@ as `${stepId}:${attempt}` from `getStepMetadata()`, on every event the model cal
 id and sets it on the event with the `streamId`. Leave it off host events (a promoted user message,
 the terminal event written after the commit); a receipt replay rewrites only that terminal event.
 Yolk clients then remove a superseded execution's output, drop its later events and late starts,
-and show the committed answer for a final turn that ran more than once. Open case: a non-final turn
-whose older execution committed keeps the newer execution's answer and tool calls until reload,
-though the tool batch ran the older one's calls. Tool-batch steps are out of scope (read calls are
+and, at `AgentEnd` or `AgentAwaitingInput`, show the committed answer and the calls the tool batch
+ran for every turn that ran more than once. Tool-batch steps are out of scope (read calls are
 not ledgered and can rerun differently). Upgrade clients with the server: older clients show both
 executions back to back.
 

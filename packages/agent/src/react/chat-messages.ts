@@ -1158,20 +1158,24 @@ const partsFromAssistantMessage = (
         acceptedCallIds.has(part.call.id)
     )
 
-  if (!preservesAcknowledgement) return parts
+  // Partial/mixed replay cannot delete sibling calls already witnessed in this message, and no
+  // message deletes a call a host step acted on: a tool batch that ran another execution's call
+  // while this one streamed placed it here.
+  const kept = existingParts.filter(
+    existing =>
+      Predicate.isTagged(existing, 'ToolCall') &&
+      (preservesAcknowledgement || isHostToolState(existing.state)) &&
+      !parts.some(part => Predicate.isTagged(part, 'ToolCall') && part.call.id === existing.call.id)
+  )
 
-  // Partial/mixed replay cannot delete sibling calls already witnessed in this message.
-  return [
-    ...parts,
-    ...existingParts.filter(
-      existing =>
-        Predicate.isTagged(existing, 'ToolCall') &&
-        !parts.some(
-          part => Predicate.isTagged(part, 'ToolCall') && part.call.id === existing.call.id
-        )
-    )
-  ]
+  return kept.length === 0 ? parts : [...parts, ...kept]
 }
+
+/** A state a host event set, not the model's stream (input, a call, a provider result). */
+const isHostToolState = (state: ChatToolState) =>
+  !Predicate.isTagged(state, 'Called') &&
+  !Predicate.isTagged(state, 'InputStreaming') &&
+  !Predicate.isTagged(state, 'ProviderCompleted')
 
 const appendOrReplaceAssistantMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -1329,6 +1333,11 @@ export type AgentChatExecutionOutput = Data.TaggedEnum<{
    * holding a call id a provider reused), with the message as it was.
    */
   ReplacedMessage: { readonly prior: AgentChatMessage }
+  /**
+   * Where its turn's output starts: after this chat message (none: the chat was empty). Recorded
+   * at its start, from the execution it superseded when there is one.
+   */
+  After: { readonly messageId: Option.Option<string> }
 }>
 
 export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
@@ -1400,43 +1409,39 @@ export const discardChatExecutionOutput = (
 }
 
 /**
- * The messages and tool parts an execution produced that survive its discard: what a committed
- * answer may take over. A part it overwrote that the discard restored to its prior (an earlier
- * turn's call with a reused id, its call unacknowledged) is not the execution's, so it never moves.
- */
-const executionToolParts = (
-  outputs: ReadonlyArray<AgentChatExecutionOutput>,
-  unacknowledged: ReadonlySet<string>
-) => ({
-  messages: new Set(
-    outputs.flatMap(output => (Predicate.isTagged(output, 'Message') ? [output.messageId] : []))
-  ),
-  parts: new Set(
-    outputs.flatMap(output =>
-      Predicate.isTagged(output, 'ToolPart') &&
-      !(Option.isSome(output.prior) && unacknowledged.has(output.callId))
-        ? [toolPartKey(output.messageId, output.callId)]
-        : []
-    )
-  )
-})
-
-/**
- * Replaces a disputed turn's shown answer with the committed one (`AgentEnd` /
- * `AgentAwaitingInput` messages): removes the live execution's output, moves the committed answer's
- * tool calls from the execution's own messages and parts (keeping their current state, such as a
- * pending question) into the committed message, and appends it.
+ * Shows a turn's committed answer instead of the one its shown execution produced (`AgentEnd` /
+ * `AgentAwaitingInput` messages, for a turn that ran more than once): removes the execution's
+ * output, takes the part of each committed tool call from the turn's messages (the first after
+ * where the turn starts, keeping its state, such as a completed call or a pending question), and
+ * puts the committed message where the turn starts. A message left with no parts goes. Output
+ * recorded without `After` (states built before it) starts the turn after the last user message
+ * and appends the answer; when its message is gone, nothing changes.
  */
 export const replaceWithCommittedAnswer = (
   messages: ReadonlyArray<AgentChatMessage>,
   outputs: ReadonlyArray<AgentChatExecutionOutput>,
   calls: ReadonlySet<string>,
-  committed: ReadonlyArray<AgentMessage>
+  answer: AssistantAgentMessage
 ): ReadonlyArray<AgentChatMessage> => {
-  const answer = committed.filter(message => Predicate.isTagged(message, 'Assistant')).at(-1)
+  const after = outputs.flatMap(output =>
+    Predicate.isTagged(output, 'After') ? [output.messageId] : []
+  )[0]
+
   const discarded = discardChatExecutionOutput(messages, outputs, calls)
 
-  if (answer === undefined || !Predicate.isTagged(answer, 'Assistant')) return discarded
+  const start =
+    after === undefined
+      ? findLastMessageIndex(discarded, message => message.role === 'user') + 1
+      : Option.match(after, {
+          onNone: () => 0,
+          onSome: id => {
+            const index = discarded.findIndex(message => message.id === id)
+
+            return index === -1 ? undefined : index + 1
+          }
+        })
+
+  if (start === undefined) return messages
 
   const answerCalls = new Set(
     answer.parts.flatMap(part =>
@@ -1447,17 +1452,16 @@ export const replaceWithCommittedAnswer = (
   )
 
   const states = new Map<string, ChatToolState>()
-  const own = executionToolParts(outputs, calls)
-  const lastUser = findLastMessageIndex(discarded, message => message.role === 'user')
 
-  const moved = discarded.flatMap((message, index) => {
-    if (index <= lastUser) return [message]
+  const taken = discarded.flatMap((message, index) => {
+    if (index < start) return [message]
 
     const parts = message.parts.filter(part => {
-      if (!Predicate.isTagged(part, 'ToolCall') || !answerCalls.has(part.call.id)) return true
-
-      // Only the disputed execution's own parts move; another turn's call with a reused id stays.
-      if (!own.messages.has(message.id) && !own.parts.has(toolPartKey(message.id, part.call.id)))
+      if (
+        !Predicate.isTagged(part, 'ToolCall') ||
+        !answerCalls.has(part.call.id) ||
+        states.has(part.call.id)
+      )
         return true
 
       states.set(part.call.id, part.state)
@@ -1470,20 +1474,22 @@ export const replaceWithCommittedAnswer = (
     return parts.length === 0 ? [] : [{ ...message, parts }]
   })
 
-  const appended = appendProtocolMessage(moved, answer)
+  const sequence = nextMessageSequence(taken)
+  const neighbour = taken[start - 1] ?? taken[start]
+  const shown = assistantChatMessage(answer, sequence, neighbour?.turnId ?? turnId(sequence))
 
-  return appended.map((message, index) =>
-    index !== appended.length - 1
-      ? message
-      : {
-          ...message,
-          parts: message.parts.map(part =>
-            Predicate.isTagged(part, 'ToolCall')
-              ? { ...part, state: states.get(part.call.id) ?? part.state }
-              : part
-          )
-        }
-  )
+  const committed = {
+    ...shown,
+    parts: shown.parts.map(part =>
+      Predicate.isTagged(part, 'ToolCall')
+        ? { ...part, state: states.get(part.call.id) ?? part.state }
+        : part
+    )
+  }
+
+  return after === undefined
+    ? [...taken, committed]
+    : [...taken.slice(0, start), committed, ...taken.slice(start)]
 }
 
 /**

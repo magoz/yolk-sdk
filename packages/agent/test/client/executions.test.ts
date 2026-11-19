@@ -510,6 +510,189 @@ describe('model-step executions', () => {
     expect(shown(result.chat).at(-1)).toBe('New answer')
   })
 
+  describe('a non-final turn that ran twice', () => {
+    const lookup = ToolCall.make({ id: 'call_a', name: 'weather', params: { city: 'Oslo' } })
+    const search = ToolCall.make({ id: 'call_b', name: 'search', params: { query: 'Oslo' } })
+    const asking = ToolCall.make({ id: 'call_q', name: 'question', params: {} })
+    // Distinct but equal instances: the terminal's messages arrive decoded apart from the events.
+    const olderAnswer = () => answer('Checking the weather', [lookup])
+    const newerAnswer = () => answer('Searching instead', [search])
+    const done = answer('It is 12C in Oslo')
+    const asked = answer('Celsius or Fahrenheit?', [asking])
+    const weather = ToolResult.make({ toolCallId: lookup.id, content: '12C' })
+    const found = ToolResult.make({ toolCallId: search.id, content: 'Oslo: 12C' })
+
+    const request = QuestionRequest.make({
+      requestId: 'question:call_q',
+      toolCallId: asking.id,
+      call: asking,
+      questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Pick one' })]
+    })
+
+    const inputEnd = (executionId: string, call: ToolCall) =>
+      live(identity => ToolInputEnd.make({ ...identity, call }), executionId)
+
+    const batch = (call: ToolCall, result: ToolResult) => ({
+      started: plain(identity => ToolExecutionStarted.make({ ...identity, call }), `${call.id}:0`),
+      completed: plain(
+        identity => ToolExecutionCompleted.make({ ...identity, call, result }),
+        `${call.id}:1`
+      )
+    })
+
+    const finalTurn = (terminal: 'end' | 'pause', committed: ReadonlyArray<AgentMessage>) =>
+      terminal === 'end'
+        ? [
+            start('step-2:1', 2),
+            delta('step-2:1', 'It is 12C in Oslo'),
+            message('step-2:1', done),
+            end('end', [...committed, done])
+          ]
+        : [
+            start('step-2:1', 2),
+            delta('step-2:1', 'Celsius or Fahrenheit?'),
+            live(identity => ToolInputEnd.make({ ...identity, call: asking }), 'step-2:1'),
+            message('step-2:1', asked),
+            plain(identity => QuestionRequested.make({ ...identity, request }), 'question'),
+            plain(
+              identity =>
+                AgentAwaitingInput.make({
+                  ...identity,
+                  requests: [request],
+                  messages: [...committed, asked],
+                  turns: 2,
+                  usage: zeroAgentUsage
+                }),
+              'pause'
+            )
+          ]
+
+    const lastTurn = {
+      end: 'It is 12C in Oslo',
+      pause: 'Celsius or Fahrenheit? | call_q:QuestionRequested'
+    }
+
+    const olderRan = batch(lookup, weather)
+
+    const interleavings = [
+      'concurrent',
+      'newer answers after the batch',
+      'sequential',
+      'newer silent'
+    ] as const
+
+    // The older execution committed: the tool batch ran its call while the newer one streamed.
+    const olderCommitted: Record<(typeof interleavings)[number], ReadonlyArray<AgentEvent>> = {
+      concurrent: [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        start(B, 1),
+        delta(B, 'Searching instead'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        inputEnd(B, search),
+        olderRan.started,
+        message(B, newerAnswer()),
+        olderRan.completed
+      ],
+      'newer answers after the batch': [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        start(B, 1),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        delta(B, 'Searching instead'),
+        olderRan.started,
+        olderRan.completed,
+        inputEnd(B, search),
+        message(B, newerAnswer())
+      ],
+      sequential: [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        olderRan.started,
+        start(B, 1),
+        delta(B, 'Searching instead'),
+        inputEnd(B, search),
+        message(B, newerAnswer()),
+        olderRan.completed
+      ],
+      'newer silent': [
+        start(A, 1),
+        delta(A, 'Checking the weather'),
+        inputEnd(A, lookup),
+        message(A, olderAnswer()),
+        start(B, 1),
+        olderRan.started,
+        olderRan.completed
+      ]
+    }
+
+    describe.each(['end', 'pause'] as const)('at %s', terminal => {
+      it.each(interleavings)(
+        'shows the older committed answer and the calls the batch ran (%s)',
+        interleaving => {
+          const committed = [
+            olderAnswer(),
+            ToolResultMessage.make({ toolCallId: lookup.id, content: weather.content })
+          ]
+
+          const result = project([
+            ...olderCommitted[interleaving],
+            ...finalTurn(terminal, committed)
+          ])
+
+          expect(result.client.messages).toEqual([...committed, terminal === 'end' ? done : asked])
+
+          expect(result.client.liveMessages).toEqual([])
+          expect(result.client.text).toBe('')
+
+          expect(
+            result.client.toolRuns.map(run =>
+              Predicate.isTagged(run, 'QuestionRequested')
+                ? `${run.request.toolCallId}:${run._tag}`
+                : `${'call' in run ? run.call.id : ''}:${run._tag}`
+            )
+          ).toEqual(
+            terminal === 'end'
+              ? ['call_a:Completed']
+              : ['call_a:Completed', 'call_q:QuestionRequested']
+          )
+
+          expectBothChats(result, ['Checking the weather | call_a:Completed', lastTurn[terminal]])
+        }
+      )
+
+      it('keeps the newer answer when the newer execution committed', () => {
+        const newerRan = batch(search, found)
+
+        const committed = [
+          newerAnswer(),
+          ToolResultMessage.make({ toolCallId: search.id, content: found.content })
+        ]
+
+        const result = project([
+          start(A, 1),
+          delta(A, 'Checking the weather'),
+          inputEnd(A, lookup),
+          message(A, olderAnswer()),
+          start(B, 1),
+          delta(B, 'Searching instead'),
+          inputEnd(B, search),
+          message(B, newerAnswer()),
+          newerRan.started,
+          newerRan.completed,
+          ...finalTurn(terminal, committed)
+        ])
+
+        expect(result.client.messages).toEqual([...committed, terminal === 'end' ? done : asked])
+        expectBothChats(result, ['Searching instead | call_b:Completed', lastTurn[terminal]])
+      })
+    })
+  })
+
   it('keeps events without an execution on the plain path', () => {
     const result = project([
       plain(identity => LLMStreamStart.make({ ...identity, turn: 1 }), '0'),
