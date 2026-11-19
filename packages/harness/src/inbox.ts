@@ -100,7 +100,18 @@ export type InboxApi = {
     onReady: Effect.Effect<void>
   ) => Effect.Effect<HitlDecision>
   readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
-  readonly beginDrain: (runId: string, scope: Promotable) => Effect.Effect<DrainBegin>
+  /**
+   * Consumes this drain's pending intent and issues the live drain token. When
+   * `stopping` (the owner's stopping flag, read under the admission gate) is true,
+   * returns `Skip` and leaves the intent for the successor. Implementations read
+   * `stopping` under the same lock that consumes intent. Driver runs this
+   * uninterruptibly, so keep it short and non-blocking.
+   */
+  readonly beginDrain: (
+    runId: string,
+    scope: Promotable,
+    stopping?: Effect.Effect<boolean>
+  ) => Effect.Effect<DrainBegin>
   readonly endDrain: (
     runId: string,
     drainToken: DrainToken,
@@ -366,10 +377,12 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 })
               )
             ),
-          beginDrain: (runId, scope) =>
+          beginDrain: (runId, scope, stopping) =>
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
+                  // Under the gate, before consuming intent: see `InboxApi.beginDrain`.
+                  if (stopping !== undefined && (yield* stopping)) return DrainBegin.Skip()
                   const control = yield* getControl(runId)
                   const pending = control.pending
 
