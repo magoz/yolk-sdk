@@ -737,9 +737,23 @@ Until a start is
 seen (and after `AgentStart`), and always in `applyAgentEventToChatMessages`, a tool event matches
 the last message holding the call, so a reused id can still update an earlier turn's call there;
 answers, approval denials and added acceptance or interaction results update that one call, not
-every call with the id. `reduceAgentEvents` keeps one tool run per call id: a later turn's call
-replaces the earlier turn's run (whose result stays in `messages`), and a later call reusing the id
-of an accepted (background) call is taken for a replay of it.
+every call with the id.
+
+`reduceAgentEvents` scopes tool runs the same way: its state records where the latest turn's runs
+start in `toolRuns` (`turnStart`, an `AgentClientTurnStart`), so a later turn's call reusing an id
+gets a run of its own after the earlier turn's (`toolRuns` can hold one run per turn for an id; read
+by id, the last is the latest). The model's events (input, provider results) act only on the latest
+turn's run; host events act on it first, else a request or tool-batch event on the last earlier run
+holding the same call and an answer on the last earlier run holding its request; the latest turn's
+run also gives way to that earlier run when it holds another call or request (an answer for a call
+another turn holds with another request changes nothing). A replay without event id of an accepted
+(background) call's start or request still leaves its `Accepted` run alone, and with a turn start
+known, the transcript's acknowledgement fences only events naming the acknowledged call, not a later
+call reusing its id. A request event never reopens a run past its request (denied, answered,
+cancelled, submitted, running or finished) when it names the same call, with or without event id;
+a `Denied` run keeps the approval request it denies (`request`) for that check. Until a start is
+seen (and after `AgentStart` or a local submit), tool events act on the last run holding the call
+id, as before; a state built before `turnStart` behaves that way too.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
@@ -763,8 +777,8 @@ and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.
   that connected mid-turn have limits (the vercel-workflows README, "One step, several executions",
   open cases).
 
-Carry `executions` and `turnStart` along with `seenEventIds` when you keep projection state
-yourself, and reset `executions` to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
+Carry `executions` and `turnStart` along with `seenEventIds` when you keep projection or client
+state yourself, and reset `executions` to `[]` per run if your events carry no `streamId`. Feed one state one run at a time (two runs
 streaming into it at once are unsupported). `reduceAgentEvents` keeps one draft buffer (`text`,
 `reasoning`) that every `LLMStreamStart` clears. Without `executionId`, the next
 `LLMStreamStart` only discards output still streaming.

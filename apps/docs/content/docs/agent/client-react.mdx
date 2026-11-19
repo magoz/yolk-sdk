@@ -96,5 +96,7 @@ call after it, so a later turn's call never changes an earlier turn's call with 
 replayed or late request or tool-batch event updates the earlier part holding the same call (send
 the call as the model emitted it), and a replayed answer the part holding its request. Before any
 start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
-holding the call (answers and added results update only that one); `reduceAgentEvents` keeps one
-tool run per call id.
+holding the call (answers and added results update only that one). `reduceAgentEvents` scopes its
+tool runs the same way (`turnStart` on its state): a later turn's call reusing an id gets its own
+run, also when the id was an accepted background call's, so `toolRuns` can hold one run per turn
+for an id (the last is the latest).

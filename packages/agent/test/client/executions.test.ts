@@ -1098,9 +1098,11 @@ describe('call ids reused across turns', () => {
 
       expectChats(ended, expected)
       expect(ended.client.messages).toEqual(messages)
-      // The client state keeps one tool run per call id, the latest turn's; earlier results stay in
-      // `messages`.
-      expect(ended.client.toolRuns).toMatchObject([{ _tag: 'Completed', call: bergen }])
+      // The client state keeps each turn's tool run (`test/client/tool-run-turns.test.ts`).
+      expect(ended.client.toolRuns).toMatchObject([
+        { _tag: 'Completed', call: oslo },
+        { _tag: 'Completed', call: bergen }
+      ])
     }
   )
 

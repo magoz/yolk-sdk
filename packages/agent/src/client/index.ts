@@ -18,6 +18,7 @@ export type { AgentExecution, AgentExecutionRun, AgentExecutions } from './execu
 
 export type {
   AgentClientState,
+  AgentClientTurnStart,
   AgentToolRun,
   AgentTranscript,
   ApplyAgentEventOptions
