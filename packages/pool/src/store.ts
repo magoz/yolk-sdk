@@ -63,15 +63,19 @@ export type PoolStoreApi = {
    * - one that ended before the other began is replaced by the other (an expired cooldown never
    *   shapes a later one);
    * - two that overlap merge into one: the later end and its kind (of two that end together, the
-   *   later-started one's kind), with the later `startedAtMs` of the two, so the kept cooldown
-   *   carries the newest failure's time and a reading taken before that failure never clears it;
+   *   later-started one's kind; of two that also start together, quota), with the later
+   *   `startedAtMs` of the two, so the kept cooldown carries the newest failure's time and a
+   *   reading taken before that failure never clears it;
    * - a kept quota cooldown records the latest end of any auth failure it absorbed as
    *   `authUntilMs` (omitted when that ended by the kept start), so no reading clears it before
    *   then.
    *
    * Concurrent writes for one account are the normal case, so merge atomically: one statement,
-   * for example an upsert that takes the greatest start and picks the end and kind with a `CASE`
-   * on which ends later, never a read followed by a write.
+   * never a read followed by a write. For example an upsert that sets the start to the greatest
+   * start, picks the end and kind with a `CASE` on which ends later (then which started later,
+   * then quota), and sets `authUntilMs` to the greatest auth end of the two (an auth cooldown's
+   * end, a quota cooldown's `authUntilMs`) when the kept one is quota and that end is after the
+   * merged start, else null.
    */
   readonly putCooldown: (cooldown: PoolCooldown) => Effect.Effect<void, PoolStoreError>
   /**
@@ -119,11 +123,15 @@ const mergeCooldowns = (current: PoolCooldown, next: PoolCooldown): PoolCooldown
     return current
   }
 
-  const kept =
-    next.untilMs > current.untilMs ||
-    (next.untilMs === current.untilMs && next.startedAtMs > current.startedAtMs)
-      ? next
-      : current
+  // The later end, then the later start, then quota: "auth" means rejected credentials only.
+  const nextWins =
+    next.untilMs !== current.untilMs
+      ? next.untilMs > current.untilMs
+      : next.startedAtMs !== current.startedAtMs
+        ? next.startedAtMs > current.startedAtMs
+        : Predicate.isTagged(next, 'PoolQuotaCooldown')
+
+  const kept = nextWins ? next : current
 
   const fields = {
     accountId: kept.accountId,
@@ -135,16 +143,18 @@ const mergeCooldowns = (current: PoolCooldown, next: PoolCooldown): PoolCooldown
     return PoolAuthCooldown.make(fields)
   }
 
-  const authUntilMs = Math.max(
-    ...[current, next].flatMap(cooldown => {
-      const until = authUntilOf(cooldown)
+  const authEnds = [current, next].flatMap(cooldown => {
+    const until = authUntilOf(cooldown)
 
-      return until === undefined ? [] : [until]
-    })
-  )
+    return until === undefined ? [] : [until]
+  })
+
+  const authUntilMs = authEnds.length === 0 ? undefined : Math.max(...authEnds)
 
   return PoolQuotaCooldown.make(
-    authUntilMs > fields.startedAtMs ? { ...fields, authUntilMs } : fields
+    authUntilMs !== undefined && authUntilMs > fields.startedAtMs
+      ? { ...fields, authUntilMs }
+      : fields
   )
 }
 
@@ -318,6 +328,13 @@ const contractMerges: ReadonlyArray<{
     first: { kind: 'quota', startedAtMs: 5, untilMs: 100 },
     second: { kind: 'auth', startedAtMs: 5, untilMs: 50 },
     kept: { kind: 'quota', startedAtMs: 5, untilMs: 100, authUntilMs: 50 }
+  },
+  {
+    id: 'full-tie',
+    name: 'of a quota and an auth cooldown that start and end together, quota stays with the auth end',
+    first: { kind: 'quota', startedAtMs: 5, untilMs: 100 },
+    second: { kind: 'auth', startedAtMs: 5, untilMs: 100 },
+    kept: { kind: 'quota', startedAtMs: 5, untilMs: 100, authUntilMs: 100 }
   },
   {
     id: 'auth-quota',

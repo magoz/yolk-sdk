@@ -111,7 +111,8 @@ its database:
   - a cooldown that ended before the other began gives way to it, so an ended cooldown (an old
     auth blip) never shapes a later one;
   - two that overlap merge: the later end and that cooldown's kind (of two that end together, the
-    later-started one's), with the later `startedAtMs` of the two;
+    later-started one's; of two that also start together, quota), with the later `startedAtMs` of
+    the two;
   - the kept cooldown thus carries the newest failure's time: a reading taken before that failure
     never clears it, even when a longer cooldown absorbed a shorter, newer failure;
   - a kept quota cooldown records the end of an auth failure it absorbed as `authUntilMs`
@@ -122,13 +123,17 @@ its database:
     an exhausted pool still reports the quota reset, and auth exhaustion still means rejected
     credentials only;
   - concurrent writes for one account are normal (two requests failing on the same account), so
-    host stores merge atomically (one statement: an upsert with the greatest start and a `CASE`
-    on which ends later), never a read followed by a write.
+    host stores merge atomically, never a read followed by a write: one upsert that sets the
+    greatest start, picks the end and kind with a `CASE` on which ends later (then which started
+    later, then quota), and sets `authUntilMs` to the greatest auth end of the two (an auth
+    cooldown's end, a quota cooldown's `authUntilMs`) when the kept one is quota and that end is
+    after the merged start, else null.
 
   Clearing removes only a quota cooldown, and only the observed one (same `startedAtMs` and
   `authUntilMs`). Two failures in the same millisecond share a start; absorbing an auth failure
   either makes the cooldown an auth one or sets `authUntilMs`, so a clear observed before that
   merge fails.
+
   Model-scoped exhaustion is handled through readings (model-scoped windows), not cooldowns:
   Claude's model-only rejections carry no quota reset, and a Codex quota error does not say whether
   it is model-scoped, so it cools the whole account;

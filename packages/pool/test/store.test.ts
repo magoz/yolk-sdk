@@ -76,12 +76,17 @@ describe('poolStoreContract', () => {
           Effect.sync(() => {
             const current = cooldowns.get(input.accountId)
 
-            return (
-              Predicate.isTagged(current, 'PoolQuotaCooldown') &&
-              current.startedAtMs === input.startedAtMs &&
-              current.authUntilMs === input.authUntilMs &&
-              cooldowns.delete(input.accountId)
-            )
+            if (
+              !Predicate.isTagged(current, 'PoolQuotaCooldown') ||
+              current.startedAtMs !== input.startedAtMs ||
+              current.authUntilMs !== input.authUntilMs
+            ) {
+              return false
+            }
+
+            cooldowns.delete(input.accountId)
+
+            return true
           })
       }
     }
