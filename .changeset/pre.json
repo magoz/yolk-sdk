@@ -220,6 +220,7 @@
     "harness-step-outcome",
     "honest-transports-reflect",
     "host-neutral-subagent-guidance",
+    "input-required-tool-calls",
     "kie-connector",
     "knowledge-tool-output",
     "linkedin-search-conformance-cases",
