@@ -721,8 +721,8 @@ const noForeignMessages: ForeignMessages = new Set()
 /**
  * Where an event may match or place a tool call: from the index `from`, outside `foreign`. With
  * `replays`, a host event acting on a call the turn does not hold (a replay of an earlier turn's
- * call without event id, or a late tool-batch event after the next turn started) acts on the last
- * message in the chat holding that same call instead of adding a part.
+ * event without event id, or a late tool-batch event after the next turn started) acts on the
+ * earlier part it replays (`matchedToolCallIndex`) instead of adding one.
  */
 type ToolPartScope = {
   readonly from: number
@@ -780,33 +780,81 @@ const toolCallMessageIndex = (
       index >= scope.from && !scope.foreign.has(message.id) && hasToolCall(message, callId)
   )
 
+type ToolCallPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
+
+/** The earlier part a host event replays when its turn does not hold the call. */
+type ReplayedPart = (part: ToolCallPart) => boolean
+
+/** A tool-batch or request event replays the part holding the same call it names. */
+const sameCall =
+  (call: ToolCall): ReplayedPart =>
+  part =>
+    Equal.equals(part.call, call)
+
+/** The request a call's state carries (pending or answered), if any. */
+const toolStateRequestId = (state: ChatToolState): string | undefined =>
+  Match.value(state).pipe(
+    Match.tag(
+      'ApprovalRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InputSubmitted',
+      'InputCancelled',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      current => current.request?.requestId
+    ),
+    Match.tag(
+      'QuestionRequested',
+      'InputRequested',
+      'InteractionRequested',
+      current => current.request.requestId
+    ),
+    Match.tag(
+      'Called',
+      'InputStreaming',
+      'Denied',
+      'Running',
+      'Accepted',
+      'Completed',
+      'Errored',
+      'ProviderCompleted',
+      () => undefined
+    ),
+    Match.exhaustive
+  )
+
+/** An answer replays the part holding the request it answers. */
+const answeredRequest =
+  (requestId: string): ReplayedPart =>
+  part =>
+    toolStateRequestId(part.state) === requestId
+
 /**
  * The message an event acts on a call in: the last one of its turn (`scope`) holding the call;
- * else, for a host event that may replay one (`scope.replays`), the last one in the chat holding
- * it, the same call when the event names one (a later turn's call reusing the id is another call,
- * which the turn then adds).
+ * else, for a host event that may replay one (`scope.replays`), the last earlier message holding
+ * the part it replays (`replayed`: the same call, or the request an answer answers). A later turn's
+ * call reusing the id is another call: the turn then adds it, and an answer changes nothing.
  */
 const matchedToolCallIndex = (
   messages: ReadonlyArray<AgentChatMessage>,
   callId: string,
   scope: ToolPartScope,
-  call?: ToolCall
+  replayed: ReplayedPart
 ) => {
   const index = toolCallMessageIndex(messages, callId, scope)
 
   if (index !== -1 || !scope.replays) return index
 
-  const earlier = toolCallMessageIndex(messages, callId, { ...scope, from: 0 })
-
-  return call === undefined ||
-    messages[earlier]?.parts.some(
-      part =>
-        Predicate.isTagged(part, 'ToolCall') &&
-        part.call.id === callId &&
-        Equal.equals(part.call, call)
-    ) === true
-    ? earlier
-    : -1
+  return findLastMessageIndex(
+    messages,
+    (message, messageIndex) =>
+      messageIndex < scope.from &&
+      !scope.foreign.has(message.id) &&
+      message.parts.some(
+        part => Predicate.isTagged(part, 'ToolCall') && part.call.id === callId && replayed(part)
+      )
+  )
 }
 
 /** The chat message an event of the turn that started after `anchor` matches a call in. */
@@ -837,7 +885,7 @@ export const hostToolCallMessage = (
       messages,
       call.id,
       { from: turnStartIndex(messages, anchor), foreign: noForeignMessages, replays: true },
-      call
+      sameCall(call)
     )
   ]
 
@@ -1213,7 +1261,7 @@ const upsertToolCallPart = (
   state: ChatToolState,
   scope: ToolPartScope
 ): ReadonlyArray<AgentChatMessage> => {
-  const existingIndex = matchedToolCallIndex(messages, call.id, scope, call)
+  const existingIndex = matchedToolCallIndex(messages, call.id, scope, sameCall(call))
 
   if (existingIndex !== -1) {
     return messages.map((message, messageIndex) =>
@@ -1240,9 +1288,10 @@ const updateToolCallState = (
   messages: ReadonlyArray<AgentChatMessage>,
   callId: string,
   scope: ToolPartScope,
+  replayed: ReplayedPart,
   update: (state: ChatToolState) => ChatToolState
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = matchedToolCallIndex(messages, callId, scope)
+  const index = matchedToolCallIndex(messages, callId, scope, replayed)
 
   return index === -1
     ? messages
@@ -1858,6 +1907,7 @@ export const appendProtocolMessage = (
           messages,
           current.toolCallId,
           { from: 0, foreign: noForeignMessages, replays: false },
+          () => false,
           state =>
             mergeToolState(
               state,
@@ -1935,9 +1985,7 @@ export const applyExecutionEventToChatMessages = (
   const from = turnStartIndex(messages, scope.turn)
   // The model's stream never changes another execution's output; a host step acts on any call.
   const model: ToolPartScope = { from, foreign, replays: false }
-  // A request (approval, question, input, interaction) is always the turn's own call.
-  const requested: ToolPartScope = { from, foreign: noForeignMessages, replays: false }
-  // The tool batch and answers act on a call the request or the model placed, maybe a replay.
+  // Requests, the tool batch and answers act on a call the model placed, maybe a replay of one.
   const host: ToolPartScope = { from, foreign: noForeignMessages, replays: true }
 
   return Match.value(event)
@@ -1983,15 +2031,19 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.call,
           ChatToolState.ApprovalRequested({ request: current.request }),
-          requested
+          host
         )
       ),
       Match.tag('ToolApprovalGranted', () => messages)
     )
     .pipe(
       Match.tag('ToolApprovalDenied', current =>
-        updateToolCallState(messages, current.toolCallId, host, () =>
-          ChatToolState.Denied({ reason: current.reason })
+        updateToolCallState(
+          messages,
+          current.toolCallId,
+          host,
+          part => Predicate.isTagged(part.state, 'ApprovalRequested'),
+          () => ChatToolState.Denied({ reason: current.reason })
         )
       ),
       Match.tag('QuestionRequested', current =>
@@ -1999,7 +2051,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.QuestionRequested({ request: current.request }),
-          requested
+          host
         )
       ),
       Match.tag('InputRequested', current =>
@@ -2007,7 +2059,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InputRequested({ request: current.request }),
-          requested
+          host
         )
       ),
       Match.tag('InteractionRequested', current =>
@@ -2015,55 +2067,85 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InteractionRequested({ request: current.request }),
-          requested
+          host
         )
       ),
       Match.tag('InputSubmitted', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveInputRequest(
-            inputRequestFromToolState(state),
-            ChatToolState.InputSubmitted({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveInputRequest(
+              inputRequestFromToolState(state),
+              ChatToolState.InputSubmitted({ response: current.response })
+            )
         )
       ),
       Match.tag('InputCancelled', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveInputRequest(
-            inputRequestFromToolState(state),
-            ChatToolState.InputCancelled({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveInputRequest(
+              inputRequestFromToolState(state),
+              ChatToolState.InputCancelled({ response: current.response })
+            )
         )
       ),
       Match.tag('InteractionSubmitted', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveInteractionRequest(
-            interactionRequestFromToolState(state),
-            ChatToolState.InteractionSubmitted({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveInteractionRequest(
+              interactionRequestFromToolState(state),
+              ChatToolState.InteractionSubmitted({ response: current.response })
+            )
         )
       ),
       Match.tag('InteractionCancelled', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveInteractionRequest(
-            interactionRequestFromToolState(state),
-            ChatToolState.InteractionCancelled({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveInteractionRequest(
+              interactionRequestFromToolState(state),
+              ChatToolState.InteractionCancelled({ response: current.response })
+            )
         )
       ),
       Match.tag('QuestionAnswered', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveQuestionRequest(
-            questionRequestFromToolState(state),
-            ChatToolState.QuestionAnswered({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveQuestionRequest(
+              questionRequestFromToolState(state),
+              ChatToolState.QuestionAnswered({ response: current.response })
+            )
         )
       ),
       Match.tag('QuestionCancelled', current =>
-        updateToolCallState(messages, current.response.toolCallId, host, state =>
-          preserveQuestionRequest(
-            questionRequestFromToolState(state),
-            ChatToolState.QuestionCancelled({ response: current.response })
-          )
+        updateToolCallState(
+          messages,
+          current.response.toolCallId,
+          host,
+          answeredRequest(current.response.requestId),
+          state =>
+            preserveQuestionRequest(
+              questionRequestFromToolState(state),
+              ChatToolState.QuestionCancelled({ response: current.response })
+            )
         )
       ),
       Match.tag('ToolExecutionStarted', current =>
@@ -2123,7 +2205,7 @@ export const applyExecutionEventToChatMessages = (
                 ),
                 Match.exhaustive
               ),
-              requested
+              host
             ),
           appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
         )

@@ -443,8 +443,9 @@ Open cases:
   answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
   another committed message of the run (same text, same call ids) counts as committed. Providers
   can reuse call ids across turns: the chat projections match a turn's tool events only after the
-  latest turn start they saw (a replayed or late tool-batch event or answer for a call that turn
-  lacks acts on the earlier message holding that same call), so until a client sees a start (it joined mid-turn) or after
+  latest turn start they saw (a replayed or late request or tool-batch event for a call that turn
+  lacks acts on the earlier part holding the same call, an answer on the part holding its request),
+  so until a client sees a start (it joined mid-turn) or after
   `AgentStart`, a reused id can still update an earlier turn's call, and `reduceAgentEvents` keeps
   one tool run per call id (the latest turn's; a reused id of an accepted call counts as its
   replay). A client that never saw a later turn's start has no bound on where a reconciled turn

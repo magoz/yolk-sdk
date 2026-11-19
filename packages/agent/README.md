@@ -725,9 +725,15 @@ turn). `applyAgentEventToChatProjection` and the `useAgentChat` reducer record w
 model turn starts (`turnStart`, at each `LLMStreamStart`, with or without `executionId`), and a
 turn's tool events (input, its `AssistantMessage`'s calls, provider results, the tool batch,
 approvals, questions and their answers) match a call only after it, so a later turn's call never
-changes an earlier turn's call with the same id. A tool-batch event or answer for a call the turn
-does not hold (a replay without event id, or a batch event arriving after the next turn started)
-acts on the last earlier message holding that same call instead of adding a card. Until a start is
+changes an earlier turn's call with the same id. When the turn does not hold the call (a replay
+without event id, or a batch event arriving after the next turn started), a host event acts on an
+earlier part instead of adding a card: a request (approval, question, input, interaction) or a
+tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
+answer (question, input or interaction response, approval denial) on the last earlier part holding
+the request it answers (a denial: a pending approval), else on nothing. Tool-batch and request
+events must therefore carry the call exactly as the model emitted it: a host that normalizes
+arguments between the model's events and its own adds a second card for a replayed or late event.
+Until a start is
 seen (and after `AgentStart`), and always in `applyAgentEventToChatMessages`, a tool event matches
 the last message holding the call, so a reused id can still update an earlier turn's call there;
 answers, approval denials and added acceptance or interaction results update that one call, not

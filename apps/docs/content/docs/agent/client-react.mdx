@@ -92,8 +92,9 @@ next `LLMStreamStart`.
 
 Providers can reuse tool call ids across turns. The chat projection and the `useAgentChat` reducer
 record where the latest model turn starts (`turnStart`), and a turn's tool events only match a
-call after it, so a later turn's call never changes an earlier turn's call with the same id; a
-replayed or late tool-batch event for an earlier turn's call still updates that call. Before any
+call after it, so a later turn's call never changes an earlier turn's call with the same id. A
+replayed or late request or tool-batch event updates the earlier part holding the same call (send
+the call as the model emitted it), and a replayed answer the part holding its request. Before any
 start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
 holding the call (answers and added results update only that one); `reduceAgentEvents` keeps one
 tool run per call id.

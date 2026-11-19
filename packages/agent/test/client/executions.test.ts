@@ -18,6 +18,7 @@ import {
   QuestionAnswered,
   QuestionRequested,
   QuestionResponse,
+  ToolApprovalDenied,
   ToolApprovalGranted,
   ToolApprovalRequest,
   ToolApprovalRequested,
@@ -1208,6 +1209,160 @@ describe('call ids reused across turns', () => {
       ])
     })
 
+    const twoTurns = [
+      ...firstTurn('tagged'),
+      ...modelTurn('tagged', 'model-2:1', 2, answer('Now Bergen', [bergen]), bergen),
+      ...batch(bergen, result('9C')),
+      ...modelTurn('tagged', 'model-3:1', 3, working)
+    ]
+
+    it('keeps one part when a replayed start names a call two turns back', () => {
+      // Turn 2 reused `call_0`; the replay names turn 1's call.
+      const replayed = ToolExecutionStarted.make({ call: oslo })
+
+      const expected = [
+        'Oslo first | call_0 {"city":"Oslo"}:Completed',
+        'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+        'Working on it'
+      ]
+
+      const chat = reduceChat(twoTurns)
+      const replayedChat = reduceChat([replayed], chat)
+
+      expect(calls(replayedChat.chatMessages)).toEqual(expected)
+      expect(replayedChat.status).toEqual(chat.status)
+
+      expect(
+        calls(applyAgentEventToChatProjection(reduceProjection(twoTurns), replayed).chatMessages)
+      ).toEqual(expected)
+    })
+
+    describe('a replayed answer to an earlier turn', () => {
+      const unit = ToolCall.make({ id: 'call_0', name: 'question', params: { city: 'Oslo' } })
+
+      const question = QuestionRequest.make({
+        requestId: 'question:call_0',
+        toolCallId: 'call_0',
+        call: unit,
+        questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Celsius or Fahrenheit?' })]
+      })
+
+      const answered = QuestionResponse.make({
+        requestId: question.requestId,
+        toolCallId: 'call_0',
+        outcome: 'answered',
+        source: 'user',
+        answers: []
+      })
+
+      const approval = ToolApprovalRequest.make({
+        requestId: 'approval:call_0',
+        toolCallId: 'call_0',
+        call: oslo
+      })
+
+      const denied = ToolApprovalResponse.make({
+        requestId: approval.requestId,
+        toolCallId: 'call_0',
+        decision: 'denied',
+        source: 'user'
+      })
+
+      const asks = {
+        question: {
+          message: answer('Which unit?', [unit]),
+          call: unit,
+          requested: plain(
+            identity => QuestionRequested.make({ ...identity, request: question }),
+            'question'
+          ),
+          answer: (identity: Partial<PlainIdentity>): AgentEvent =>
+            QuestionAnswered.make({ ...identity, response: answered }),
+          shown: 'Which unit? | call_0 {"city":"Oslo"}:QuestionAnswered'
+        },
+        approval: {
+          message: answer('Oslo needs approval', [oslo]),
+          call: oslo,
+          requested: plain(
+            identity => ToolApprovalRequested.make({ ...identity, call: oslo, request: approval }),
+            'approval'
+          ),
+          answer: (identity: Partial<PlainIdentity>): AgentEvent =>
+            ToolApprovalDenied.make({
+              ...identity,
+              toolCallId: 'call_0',
+              reason: 'No',
+              response: denied
+            }),
+          shown: 'Oslo needs approval | call_0 {"city":"Oslo"}:Denied'
+        }
+      }
+
+      it.each(['question', 'approval'] as const)(
+        "leaves a later turn's call with the id alone (%s)",
+        kind => {
+          const ask = asks[kind]
+
+          const events = [
+            ...modelTurn('tagged', 'model-1:1', 1, ask.message, ask.call),
+            ask.requested,
+            plain(ask.answer, 'answer'),
+            ...modelTurn('tagged', 'model-2:1', 2, answer('Now Bergen', [bergen]), bergen),
+            ...batch(bergen, result('9C')),
+            ...modelTurn('tagged', 'model-3:1', 3, working)
+          ]
+
+          // The answer again, without event id.
+          const replayed = ask.answer({})
+
+          const expected = [
+            ask.shown,
+            'Now Bergen | call_0 {"city":"Bergen"}:Completed',
+            'Working on it'
+          ]
+
+          expect(calls(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual(expected)
+
+          expect(
+            calls(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+          ).toEqual(expected)
+        }
+      )
+
+      it.each(['question', 'approval'] as const)(
+        "keeps one card when an earlier turn's request is replayed (%s)",
+        kind => {
+          const ask = asks[kind]
+
+          const events = [
+            ...modelTurn('tagged', 'model-1:1', 1, ask.message, ask.call),
+            ask.requested,
+            plain(ask.answer, 'answer'),
+            ...modelTurn('tagged', 'model-2:1', 2, working)
+          ]
+
+          const replayed =
+            kind === 'question'
+              ? QuestionRequested.make({ request: question })
+              : ToolApprovalRequested.make({ call: oslo, request: approval })
+
+          // The replay lands on the earlier turn's call (the state a replayed request sets there is
+          // unchanged by turn scoping); it never adds a second card.
+          const cards = (messages: ReadonlyArray<AgentChatMessage>) =>
+            messages.map(
+              chatMessage =>
+                chatMessage.parts.filter(part => Predicate.isTagged(part, 'ToolCall')).length
+            )
+
+          expect(cards(reduceChat([replayed], reduceChat(events)).chatMessages)).toEqual([1, 0])
+
+          expect(
+            cards(applyAgentEventToChatProjection(reduceProjection(events), replayed).chatMessages)
+          ).toEqual([1, 0])
+        }
+      )
+    })
+
     it('settles only the latest call with its id when a result message is added', () => {
       const events = [
         ...firstTurn('tagged'),
@@ -1535,7 +1690,7 @@ describe('call ids reused across turns', () => {
           delta(B, 'Lyon instead'),
           message(B, answer('Lyon instead', [lyon])),
           bergenRan.completed,
-          // Turn 3's events carry no `executionId`: no `Until` bounds turn 2.
+          // Turn 3's events carry no `executionId`: its untagged start records turn 2's `Until`.
           plain(identity => LLMStreamStart.make({ ...identity, turn: 3 }), 'turn-3:start'),
           plain(
             identity => LLMTextDelta.make({ ...identity, text: 'Bergen is 9C' }),
