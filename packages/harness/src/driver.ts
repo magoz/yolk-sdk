@@ -241,9 +241,10 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                 )
               })
             ),
-          // A defect in a Ready continuation leaves the answered park unacknowledged and no
-          // pending intent; keep the claim so resumeSuspended re-delivers it (bounded).
-          keepClaimOnDefect: runId =>
+          // A Ready park still here at settlement is unacknowledged: its continuation died, or
+          // a successor queued behind that defect skipped with no pending intent. Keep the
+          // claim so resumeSuspended re-delivers it (bounded) instead of stranding it.
+          keepClaimOnSettle: runId =>
             inbox.parked(runId).pipe(Effect.map(parked => parked?.ready === true))
         }).pipe(Layer.provide(storeLayer))
 

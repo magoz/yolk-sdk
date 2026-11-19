@@ -131,6 +131,114 @@ describe('a park that stops blocking leaves no stranded work', () => {
     })
   )
 
+  // A wake queued behind the crashing continuation starts a successor that skips (no pending
+  // intent) and succeeds; that success must not release the claim the defect kept.
+  it.effect('a successor that skips after a Ready continuation defect keeps the claim', () =>
+    Effect.gen(function* () {
+      const taken = yield* Ref.make<ReadonlyArray<string>>([])
+      const attempts = yield* Ref.make(0)
+      const parkOnFirst = parkOnFirstInput(taken)
+
+      const drain: Drain = (runId, force, scope, context) =>
+        context.readyResponses.length === 0
+          ? parkOnFirst(runId, force, scope, context)
+          : Ref.updateAndGet(attempts, count => count + 1).pipe(
+              Effect.flatMap(count =>
+                count === 1 ? Effect.die('continuation defect') : Effect.void
+              )
+            )
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        const store = yield* RunStore
+        yield* admit(input('i1'))
+        yield* driver.awaitIdle('run_1')
+        const parked = yield* inbox.parked('run_1')
+        expect(parked).toBeDefined()
+
+        if (parked === undefined) return
+        yield* driver.resumeHitl('run_1', {
+          itemId: 'a1',
+          requestId: 'r1',
+          generation: parked.generation
+        })
+        // Admitted before the continuation begins: pending is already `input`, so this only
+        // queues a coordinator wake that starts a successor after the defect.
+        yield* admit({ id: 's1', runId: 'run_1', delivery: 'steer', kind: 'input' })
+        yield* driver.awaitIdle('run_1')
+
+        expect(yield* Ref.get(attempts)).toBe(1)
+        expect((yield* inbox.parked('run_1'))?.ready).toBe(true)
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+
+        expect(yield* driver.resumeSuspended).toEqual({ resumed: ['run_1'], exhausted: [] })
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(attempts)).toBe(2)
+        expect(yield* inbox.parked('run_1')).toBeUndefined()
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+      }).pipe(Effect.provide(makeInMemoryHarnessLayer({ drain })))
+    })
+  )
+
+  it.effect('a continuation that always crashes is retried only within maxResumeAttempts', () =>
+    Effect.gen(function* () {
+      const taken = yield* Ref.make<ReadonlyArray<string>>([])
+      const attempts = yield* Ref.make(0)
+      const parkOnFirst = parkOnFirstInput(taken)
+
+      const drain: Drain = (runId, force, scope, context) =>
+        context.readyResponses.length === 0
+          ? parkOnFirst(runId, force, scope, context)
+          : Ref.update(attempts, count => count + 1).pipe(
+              Effect.andThen(Effect.die('continuation defect'))
+            )
+
+      yield* Effect.gen(function* () {
+        const driver = yield* Driver
+        const inbox = yield* Inbox
+        const store = yield* RunStore
+        yield* admit(input('i1'))
+        yield* driver.awaitIdle('run_1')
+        const parked = yield* inbox.parked('run_1')
+        expect(parked).toBeDefined()
+
+        if (parked === undefined) return
+        yield* driver.resumeHitl('run_1', {
+          itemId: 'a1',
+          requestId: 'r1',
+          generation: parked.generation
+        })
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(attempts)).toBe(1)
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+        expect(yield* store.resumeCount('run_1')).toBe(0)
+
+        expect(yield* driver.resumeSuspended).toEqual({ resumed: ['run_1'], exhausted: [] })
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(attempts)).toBe(2)
+        // The crash keeps the claim and the charged attempt.
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+        expect(yield* store.resumeCount('run_1')).toBe(1)
+
+        expect(yield* driver.resumeSuspended).toEqual({ resumed: [], exhausted: ['run_1'] })
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(attempts)).toBe(2)
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+        expect(yield* store.resumeCount('run_1')).toBe(0)
+        expect(yield* driver.resumeSuspended).toEqual({ resumed: [], exhausted: [] })
+
+        // Exhaustion leaves the park Ready: the next wake replays it with a fresh budget.
+        expect((yield* inbox.parked('run_1'))?.ready).toBe(true)
+        yield* driver.wake('run_1')
+        yield* driver.awaitIdle('run_1')
+        expect(yield* Ref.get(attempts)).toBe(3)
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+        expect(yield* store.resumeCount('run_1')).toBe(0)
+      }).pipe(Effect.provide(makeInMemoryHarnessLayer({ drain, maxResumeAttempts: 1 })))
+    })
+  )
+
   it.effect('a drain defect without a Ready park still releases the claim', () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {

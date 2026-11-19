@@ -94,7 +94,7 @@ Ownership is per shared Driver instance. The host or platform supplies cross-pro
 
 - User `stop` (or generic `interrupt` with reason `user`) is terminal at the captured owner's settlement and releases a leftover claim after that owner has actually settled.
 - Shutdown interrupt keeps the claim.
-- A drain defect releases the claim, except while the run has a Ready park (answers the failed continuation did not acknowledge): `resumeSuspended` then re-delivers them under `maxResumeAttempts`. Nothing retries on its own.
+- A drain defect releases the claim, except while the run has a Ready park (answers no drain acknowledged): the claim stays, including when a successor woken behind the defect skips and succeeds, and a later `resumeSuspended` in the same process re-delivers them under `maxResumeAttempts`. Nothing retries on its own, so hosts that want in-process recovery after a crashed continuation run `resumeSuspended` during runtime, not only at boot. After a restart the in-memory park is gone; the host rebuilds it from its checkpoint.
 
 ## Setup and recovery
 

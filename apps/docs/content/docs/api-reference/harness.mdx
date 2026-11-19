@@ -11,14 +11,14 @@ Import feature APIs from explicit subpaths. The root package is intentionally em
 
 `@yolk-sdk/harness/coordinator`
 
-| Export            | Purpose                                                                           |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `Promotable`      | `'input' \| 'steer'`; input subsumes steer when coalescing wakes                  |
-| `CapturedRun`     | `Started` / `Joined` / `Stopping` waiter                                          |
-| `StopReceipt`     | `Idle` / `Interrupted` / `LiveStopping` / `Settling`                              |
-| `Coordinator`     | Process-local doorbell coordinator shape                                          |
-| `makeCoordinator` | Build a process-local coordinator                                                 |
-| `RunCoordinator`  | Owning coordinator service; `RunCoordinator.layer({ drain })` requires `RunStore` |
+| Export            | Purpose                                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `Promotable`      | `'input' \| 'steer'`; input subsumes steer when coalescing wakes                                                                       |
+| `CapturedRun`     | `Started` / `Joined` / `Stopping` waiter                                                                                               |
+| `StopReceipt`     | `Idle` / `Interrupted` / `LiveStopping` / `Settling`                                                                                   |
+| `Coordinator`     | Process-local doorbell coordinator shape                                                                                               |
+| `makeCoordinator` | Build a process-local coordinator                                                                                                      |
+| `RunCoordinator`  | Owning service; `.layer({ drain, keepClaimOnSettle })` needs `RunStore`; `keepClaimOnSettle` true keeps an uninterrupted owner's claim |
 
 ## Store
 
@@ -105,7 +105,7 @@ type Drain = (
 
 The driver provides `Inbox` and `RunStore` to the drain. Provide any additional host dependencies before passing `drain`.
 
-`interrupt` acknowledges request delivery, not owner settlement. User stop releases a leftover claim after that owner has settled. Shutdown interrupt keeps the claim. A drain defect releases it, except while the run has a Ready park: then `resumeSuspended` re-delivers those answers under `maxResumeAttempts`.
+`interrupt` acknowledges request delivery, not owner settlement. User stop releases a leftover claim after that owner has settled. Shutdown interrupt keeps the claim. A drain defect releases it, except while the run has a Ready park: the claim stays (also through a successor that skips and succeeds), and a later `resumeSuspended` in the same process re-delivers those answers under `maxResumeAttempts`. Hosts that want in-process recovery after a crashed continuation run `resumeSuspended` during runtime, not only at boot; after a restart the host rebuilds the park from its checkpoint.
 
 `clearPark(runId, generation)` drops a park without its answers and wakes the run for input admitted while it blocked. Raw `Inbox.clearPark` takes that wake effect as its third argument.
 
