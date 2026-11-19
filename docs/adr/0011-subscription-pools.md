@@ -107,10 +107,16 @@ its database:
   the expected account, so concurrent instances converge;
 - cooldowns: one per account, a tagged union `PoolQuotaCooldown` or `PoolAuthCooldown` with
   `startedAtMs` and `untilMs`; writing keeps the one that ends later (of two that end together, the
-  later-started one, so a newer failure is never cleared by an older reading), clearing requires
-  the observed `startedAtMs`. Model-scoped exhaustion is handled through readings (model-scoped windows), not
-  cooldowns: Claude's model-only rejections carry no quota reset, and a Codex quota error does not
-  say whether it is model-scoped, so it cools the whole account;
+  later-started one) with the later `startedAtMs` of the two, and as an auth cooldown when either
+  is one. The kept cooldown thus carries the newest failure's time, so a reading taken before that
+  failure never clears it even when a longer cooldown absorbed a shorter, newer failure, and an
+  auth failure is never absorbed into a quota cooldown a reading may clear (the merged cooldown
+  sits out until the later end, even when that was a quota reset a reading could have cleared
+  early); clearing requires the observed `startedAtMs` and never removes an auth cooldown (two
+  failures in the same millisecond share a start, so the start alone cannot tell them apart).
+  Model-scoped exhaustion is handled through readings (model-scoped windows), not cooldowns:
+  Claude's model-only rejections carry no quota reset, and a Codex quota error does not say whether
+  it is model-scoped, so it cools the whole account;
 - readings: the latest `ProviderSubscriptionUsageSnapshot` per account.
 
 The in-memory store serves tests and single-process hosts. `poolStoreContract` pins the semantics

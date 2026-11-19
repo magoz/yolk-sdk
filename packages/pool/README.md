@@ -103,9 +103,13 @@ skipping accounts a fresh reading shows used up unless nothing else is left.
 ## Store
 
 `PoolStoreApi` holds pins (per pool and route), one cooldown per account, and the latest reading
-per account. Implementations must be atomic per key (`movePin` is a compare-and-set). Run every
-case of `poolStoreContract` against a fresh store of your implementation in your tests. Store
-failures never fail a request: the pool routes fill-first without state and logs a warning.
+per account. Implementations must be atomic per key (`movePin` is a compare-and-set). Writing a
+cooldown keeps the one that ends later, stamped with the newer `startedAtMs` of the two and kept
+as a `PoolAuthCooldown` when either is one, and `clearCooldown` never removes a
+`PoolAuthCooldown`, so a reading taken before the latest failure never clears it and no reading
+clears an auth failure. Run every case of `poolStoreContract` against a fresh store of your
+implementation in your tests. Store failures never fail a request: the pool routes fill-first
+without state and logs a warning.
 
 ## Host responsibilities
 
