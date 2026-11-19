@@ -1,5 +1,7 @@
 export { BlobTextReadError, documentPartFromTextFile, textFromBlob } from './attachments.ts'
 
+export { HitlPauses, emptyHitlPauses, hitlPauseFor, rememberHitlPause } from './hitl-pauses.ts'
+
 export {
   AgentClientExecutionOutput,
   appendAgentMessage,

@@ -842,8 +842,10 @@ Durable Workflow clients can use `streamAgentEventStreamUntilTerminal`,
 `streamAgentRunEventStreamUntilTerminal`, and `streamAgentRunHitlResponseEventStreamUntilTerminal` to follow
 continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` headers. These helpers
 fail with `AgentTransportError` if no terminal event is reached before the continuation limit.
-A HITL answer names the pause it answers in the `endpoint` you pass (see
-[the client README](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/client/README.md)).
+A HITL answer names the pause it answers: pass `pause` (the `eventId` of the latest
+`AgentAwaitingInput` holding its request, tracked with `rememberHitlPause` / `hitlPauseFor`, or by
+`useAgentChat` as `request.pause`), sent as `?pause=` on the POST only (see
+[the client README](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/client/README.md#name-the-pause-an-answer-is-for)).
 Empty non-terminal continuation chunks are polling gaps: the client waits briefly, retries from the
 same `startIndex`, and respects the request `signal` while waiting.
 Blank lines in a body are heartbeats: never events, never counted toward `startIndex`. With

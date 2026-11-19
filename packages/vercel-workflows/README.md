@@ -282,9 +282,11 @@ and request ids shape them:
   written. A re-executed step that stores the same pause (same token) again keeps the existing
   record and its answer. Without durable event ids the client has nothing to name: sequence the
   event with `writeDurableAgentEvent`, or give the pause another stored id it sees on the event. The
-  client sends the `eventId` of the latest `AgentAwaitingInput` holding the request it answers (for
-  example `?pause=<eventId>` on the `endpoint` it passes to
-  `streamAgentRunHitlResponseEventStreamUntilTerminal`), and the route matches strictly by it.
+  client sends the `eventId` of the latest `AgentAwaitingInput` holding the request it answers (the
+  `pause` option of `streamAgentRunHitlResponseEventStreamUntilTerminal`, sent as `?pause=<eventId>`
+  on the POST only; `useAgentChat` hands it to your transport as `request.pause`, and
+  `rememberHitlPause` / `hitlPauseFor` track it without React), and the route matches strictly by
+  it.
   Keep a bounded history of delivered pauses: an identical retry of a delivered pause is reported
   as delivered, without resuming. An answer naming no pause, an unknown pause, or an evicted one is
   refused and never recorded for the current pause.
