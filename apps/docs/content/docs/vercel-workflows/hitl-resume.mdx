@@ -160,9 +160,11 @@ it answers, and the route matches by that name only:
   with `durableAgentEventId` and stores it with the pause before writing the event.
 - The client remembers, per request id, the `eventId` of the latest `AgentAwaitingInput` holding
   that request, from every stream it reads (start, HITL resume, replay), and sends it with the
-  answer. `streamAgentRunHitlResponseEventStreamUntilTerminal` posts `{ hitlResponses }` to the
-  `endpoint` you pass, so put the pause there (for example `?pause=<eventId>`); the tail reads that
-  follow reuse that endpoint, so your tail route ignores the extra parameter.
+  answer. `useAgentChat` does this for you: it hands your transport the pause as `request.pause`.
+  Without React, fold events with `rememberHitlPause` and read the pause with `hitlPauseFor` (both
+  from `@yolk-sdk/agent/client`). Pass it as `pause` to
+  `streamAgentRunHitlResponseEventStreamUntilTerminal`, which posts `{ hitlResponses }` to
+  `endpoint?pause=<eventId>`; the tail reads that follow use `endpoint` without it.
 - Record per named pause. Keep a bounded history of delivered pauses (pause id and recorded
   answer): an identical retry of a delivered pause is reported as delivered, without resuming. A
   pause becomes delivered when the workflow takes its answer (the idempotent mark in
@@ -172,6 +174,30 @@ it answers, and the route matches by that name only:
 - Refuse an answer that names no pause, an unknown pause, or one evicted from the history. Never
   record it for the current pause. A refusal is final for that answer to that pause; the person can
   answer the request again for its later pause once that `AgentAwaitingInput` arrives.
+
+Client fragment (`runId` is the run your start stream reported, `onRunId`):
+
+```ts
+const transport: AgentChatTransport = request => {
+  const hitlResponse = request.hitlResponses?.[0]
+
+  if (hitlResponse !== undefined && runId !== null) {
+    return Stream.toAsyncIterable(
+      streamAgentRunHitlResponseEventStreamUntilTerminal({
+        endpoint: `/api/agent/workflow/${encodeURIComponent(runId)}`,
+        hitlResponses: [hitlResponse],
+        // The pause it answers; absent when no pause with an `eventId` asked for this request.
+        pause: request.pause,
+        signal: request.signal
+      })
+    )
+  }
+
+  return Stream.toAsyncIterable(
+    streamAgentEventStreamUntilTerminal({ ...request, endpoint: '/api/agent/workflow' })
+  )
+}
+```
 
 `HookNotFoundError` means no hook is resumable under that token right now, not only that the hook
 is gone:

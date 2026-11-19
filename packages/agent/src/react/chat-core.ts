@@ -24,6 +24,7 @@ import {
   type AgentExecutionRoute,
   type AgentExecutions
 } from '../client/executions.ts'
+import { emptyHitlPauses, rememberHitlPause, type HitlPauses } from '../client/hitl-pauses.ts'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
@@ -64,6 +65,12 @@ export type AgentChatState = {
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
   /** The latest model turn's start; see `AgentChatEventProjectionState`. */
   readonly turnStart?: AgentChatTurnStart
+  /**
+   * The pause each request was last asked in (`rememberHitlPause`) on this stream: `useAgentChat`
+   * puts it on the transport request of an answer (`pause`). Reset with `seenEventIds`; absent in
+   * states built before it.
+   */
+  readonly hitlPauses?: HitlPauses
 }
 
 /**
@@ -482,12 +489,20 @@ export type AgentChatAction =
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
-/** A new stream starts: its event ids, executions and turns are its own. */
+/** A new stream starts: its event ids, executions, turns and pauses are its own. */
 const restarted = (state: AgentChatState) => ({
-  ...Struct.omit(state, ['turnStart']),
+  ...Struct.omit(state, ['turnStart', 'hitlPauses']),
   seenEventIds: [],
   executions: []
 })
+
+/** Records the pause an applied `AgentAwaitingInput` names (`rememberHitlPause`). */
+const rememberPause = (state: AgentChatState, event: AgentEvent): AgentChatState => {
+  const pauses = state.hitlPauses ?? emptyHitlPauses
+  const next = rememberHitlPause(pauses, event)
+
+  return next === pauses ? state : { ...state, hitlPauses: next }
+}
 
 const withoutFailure = (state: AgentChatState): AgentChatState =>
   Predicate.isTagged(state.status, 'Failed') ? { ...state, status: idleAgentStatus } : state
@@ -617,9 +632,12 @@ export const reduceAgentChatState = (
         isSettledToolCall(state, current.event.call)
 
       return rememberEvent(
-        fenced
-          ? projected
-          : withStatusTree(projected, nextAgentStatusTree(statusTree(state), current.event)),
+        rememberPause(
+          fenced
+            ? projected
+            : withStatusTree(projected, nextAgentStatusTree(statusTree(state), current.event)),
+          current.event
+        ),
         current.event
       )
     }),

@@ -78,6 +78,12 @@ export type StreamAgentRunEventsRequest = {
 export type StreamAgentRunHitlResponseEventsRequest = {
   readonly endpoint: string
   readonly hitlResponses: ReadonlyArray<HitlResponse>
+  /**
+   * The pause the answer is for: the `eventId` of the `AgentAwaitingInput` that asked
+   * (`hitlPauseFor`). Sent as the `pause` query parameter of the POST only; continuation reads
+   * use `endpoint` as given.
+   */
+  readonly pause?: string
   readonly signal?: AbortSignal
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
   readonly onResponse?: (response: AgentHttpResponseInfo) => void
@@ -571,13 +577,35 @@ const makeHttpRequest = (request: StreamAgentEventsRequest) =>
     )
   )
 
+const invalidAgentRunHitlPauseError = (pause: string) =>
+  new AgentTransportError({
+    message: 'Invalid agent run HITL pause',
+    cause: pause
+  })
+
+/** The HITL POST URL: `endpoint`, naming the answer's pause (`?pause=`) when one is given. */
+const agentRunHitlResponseEndpointEffect = (endpoint: string, pause: string | undefined) =>
+  Effect.gen(function* () {
+    if (pause === undefined) return endpoint
+
+    if (pause.trim().length === 0) return yield* Effect.fail(invalidAgentRunHitlPauseError(pause))
+
+    const parsed = yield* parseEndpointEffect(endpoint)
+    parsed.url.searchParams.set('pause', pause)
+
+    return serializeEndpoint(parsed)
+  })
+
 const makeHttpRunHitlResponseRequest = (request: StreamAgentRunHitlResponseEventsRequest) =>
-  encodeJsonString(
-    { hitlResponses: request.hitlResponses },
-    'Could not serialize agent run HITL response'
-  ).pipe(
-    Effect.map(body =>
-      HttpClientRequest.post(request.endpoint).pipe(
+  Effect.all([
+    agentRunHitlResponseEndpointEffect(request.endpoint, request.pause),
+    encodeJsonString(
+      { hitlResponses: request.hitlResponses },
+      'Could not serialize agent run HITL response'
+    )
+  ]).pipe(
+    Effect.map(([endpoint, body]) =>
+      HttpClientRequest.post(endpoint).pipe(
         HttpClientRequest.setHeaders({
           accept: 'application/x-ndjson',
           'content-type': 'application/json'

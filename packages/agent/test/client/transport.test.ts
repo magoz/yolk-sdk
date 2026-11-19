@@ -659,6 +659,72 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['LLMTextDelta', 'AgentEnd'])
   })
 
+  it('names the pause on the HITL POST only, never on the tail reads', async () => {
+    const response = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+
+    const requests: Array<CapturedRequest> = []
+
+    const events = await collectEventStream(
+      streamAgentRunHitlResponseEventStreamUntilTerminal({
+        endpoint: '/api/agent/run_1?tenant=a',
+        hitlResponses: [response],
+        pause: 'workflow:run_1:2&4',
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response(encodeEvents([LLMTextDelta.make({ text: 'working' })]), {
+              headers: { 'x-workflow-stream-tail-index': '3' }
+            }),
+            new Response(encodeEvents([LLMTextDelta.make({ text: 'still working' })])),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => [item.request.method, item.request.url])).toEqual([
+      ['POST', '/api/agent/run_1?tenant=a&pause=workflow%3Arun_1%3A2%264'],
+      ['GET', '/api/agent/run_1?tenant=a&startIndex=5'],
+      ['GET', '/api/agent/run_1?tenant=a&startIndex=6']
+    ])
+    expect(readCapturedBody(requests)).toBe(JSON.stringify({ hitlResponses: [response] }))
+    expect(events.map(event => event._tag)).toEqual(['LLMTextDelta', 'LLMTextDelta', 'AgentEnd'])
+  })
+
+  it('refuses a blank pause before sending the answer', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectEventStream(
+        streamAgentRunHitlResponseEventStream({
+          endpoint: '/api/agent/run_1',
+          hitlResponses: [
+            ToolApprovalResponse.make({
+              requestId: 'approval:call_1',
+              toolCallId: 'call_1',
+              decision: 'approved',
+              source: 'user'
+            })
+          ],
+          pause: ' ',
+          httpClientLayer: makeHttpClientLayer(new Response(''), requests)
+        })
+      )
+    ).rejects.toMatchObject({
+      _tag: 'AgentTransportError',
+      message: 'Invalid agent run HITL pause'
+    })
+
+    expect(requests).toEqual([])
+  })
+
   it('keeps polling durable HITL resumes after empty continuation chunks', async () => {
     const response = ToolApprovalResponse.make({
       requestId: 'approval:call_1',

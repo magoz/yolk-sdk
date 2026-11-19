@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AgentError,
   AgentFailed,
   agentStatusRetry,
@@ -19,6 +20,8 @@ import {
   QuestionResponse,
   QuestionRequested,
   SubagentStarted,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
   ToolCall,
   ToolExecutionCompleted,
   ToolExecutionStarted,
@@ -28,8 +31,10 @@ import {
   UserMessage,
   UserMessageEvent,
   idleAgentStatus,
-  makeSubagentRunId
+  makeSubagentRunId,
+  zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
+import { emptyHitlPauses, hitlPauseFor } from '../../src/client/hitl-pauses.ts'
 import {
   applyAgentEventToChatProjection,
   getAgentChatLiveActivityCount,
@@ -415,6 +420,50 @@ describe('agent chat core', () => {
         state: ChatToolState.QuestionAnswered({ response, request })
       })
     )
+  })
+
+  it('remembers the pause of each request per stream, and forgets it when a new one starts', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'write', params: {} })
+
+    const request = ToolApprovalRequest.make({
+      requestId: 'approval:call_1',
+      toolCallId: call.id,
+      call
+    })
+
+    const paused = (eventId: string) =>
+      AgentAwaitingInput.make({
+        eventId,
+        requests: [request],
+        messages: [],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+
+    const response = ToolApprovalResponse.make({
+      requestId: request.requestId,
+      toolCallId: call.id,
+      decision: 'approved',
+      source: 'user'
+    })
+
+    const asked = [paused('run:4'), paused('run:9'), paused('run:4')].reduce(
+      (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+      reduceAgentChatState(
+        initialAgentChatState,
+        AgentChatAction.Submit({ message: UserMessage.make({ content: 'go' }) })
+      )
+    )
+
+    // The replayed `run:4` was already seen: the latest pause stays.
+    expect(hitlPauseFor(asked.hitlPauses ?? emptyHitlPauses, response)).toBe('run:9')
+
+    for (const action of [
+      AgentChatAction.SubmitHitlResponse({ response }),
+      AgentChatAction.Submit({ message: UserMessage.make({ content: 'again' }) })
+    ]) {
+      expect(reduceAgentChatState(asked, action).hitlPauses).toBeUndefined()
+    }
   })
 
   it('counts active text, tool, and voice work', () => {

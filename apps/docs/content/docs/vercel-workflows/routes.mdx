@@ -187,8 +187,10 @@ export const resumeProgram = (request: Request, runId: string) =>
   })
 ```
 
-The helper-compatible request body is `{ hitlResponses }`; the client names the pause in the
-endpoint (`?pause=<eventId>`). The resume side must verify the authenticated user owns the run,
+The helper-compatible request body is `{ hitlResponses }`; the client names the pause as the
+`pause` query parameter of the POST (`?pause=<eventId>`, what
+`streamAgentRunHitlResponseEventStreamUntilTerminal` sends for its `pause` option; tail reads carry
+none). The resume side must verify the authenticated user owns the run,
 match the response against the requests of the pause it names (never by request id alone), and
 record it before resuming. The full record-then-resume code and its rules are in
 [HITL resume](./hitl-resume#resume-from-a-route).

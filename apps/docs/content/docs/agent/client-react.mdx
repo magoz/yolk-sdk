@@ -57,6 +57,37 @@ constructors and returns the hook-result constructors. Duration descriptors use
 Client and chat state carry the run's `status` as an [`AgentStatus`](./status) plus `subagents`;
 failures and pending retries are statuses (`Failed`, `Working(Retrying)`), not separate fields.
 
+## Name the pause an answer is for
+
+A durable host matches an answer to the pause that asked, not to its request id alone (requests
+pend again after an invalid answer, and providers reuse call ids;
+[HITL resume](../vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)). `useAgentChat`
+remembers, per request id, the `eventId` of the latest `AgentAwaitingInput` it applied that holds the
+request (`state.hitlPauses`, from your transport's streams and from `applyEvent` replays), and gives
+an answer's transport request that pause as `request.pause` (absent when no such pause had an
+`eventId`). A durable transport passes it on (fragment; the full transport is in
+[HITL resume](../vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)):
+
+```ts
+const hitlResponse = request.hitlResponses?.[0]
+
+if (hitlResponse !== undefined) {
+  return Stream.toAsyncIterable(
+    streamAgentRunHitlResponseEventStreamUntilTerminal({
+      endpoint: runEndpoint,
+      hitlResponses: [hitlResponse],
+      pause: request.pause, // sent as `?pause=<eventId>` on the POST, never on tail reads
+      signal: request.signal
+    })
+  )
+}
+```
+
+The map belongs to one stream, like `seenEventIds`: a new message, an answer, a regeneration or an
+edit starts afresh. Without React, keep a `HitlPauses` yourself with `rememberHitlPause` and
+`hitlPauseFor` from `@yolk-sdk/agent/client`. The default transport (`streamAgentEventStream`)
+ignores `pause`.
+
 The package is headless. It does not ship Yolk UI components, styling, auth, uploads, or route handlers. Your UI owns the input box, message bubbles, attachments, voice controls, pending states, and errors.
 
 ## Replay-safe projection
