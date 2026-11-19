@@ -99,7 +99,15 @@ export type InboxApi = {
     admission: HitlAdmission,
     onReady: Effect.Effect<void>
   ) => Effect.Effect<HitlDecision>
-  readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
+  /**
+   * Drops the current park. Input admitted while it blocked (and any pending intent) becomes
+   * pending `input` and runs `wake` under the admission gate, like the other unblocking steps.
+   */
+  readonly clearPark: (
+    runId: string,
+    generation: ParkGeneration,
+    wake: Effect.Effect<void>
+  ) => Effect.Effect<boolean>
   readonly beginDrain: (runId: string, scope: Promotable) => Effect.Effect<DrainBegin>
   readonly endDrain: (
     runId: string,
@@ -345,7 +353,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 })
               )
             ),
-          clearPark: (runId, generation) =>
+          clearPark: (runId, generation, wake) =>
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
@@ -355,12 +363,17 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     return false
                   }
 
+                  // Admission recorded no intent while the park blocked; restore it here.
+                  const queued = (yield* Ref.get(items)).some(item => item.runId === runId)
+                  const pending = queued ? widerPending(control.pending, 'input') : control.pending
                   yield* writeControl(runId, {
-                    pending: control.pending,
+                    pending,
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: undefined
                   })
+
+                  if (pending !== undefined) yield* wake
 
                   return true
                 })

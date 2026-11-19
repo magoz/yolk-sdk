@@ -120,7 +120,7 @@ Durable Object claim persistence requires host `load` / `save` callbacks on `mak
 
 Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`. There is no Vercel Workflow driver in this package and no hook registry or `World`.
 
-`Driver.pause` / `resumeHitl` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
+`Driver.pause` / `resumeHitl` / `clearPark` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
 
 ## Token types
 
@@ -151,7 +151,8 @@ Startup is explicit: build the shared Driver/Inbox/Store, restore host-owned wai
 - All sibling request ids must be answered before continuation. Partial accepts do not start a tool drain.
 - Host drain receives `DrainContext.drainToken` and `readyResponses`. Pause with that token; do not park from a stale token. `Inbox.takePromotable(runId, scope, drainToken)` also requires that live token and dequeues only while it still owns the run. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and leave the queue unchanged. This canary signature is intentionally required; there is no optional/unchecked take.
 - `Inbox.beginDrain(runId, scope)` and `wakeIfUnblocked(runId, scope, wake)` are scope-aware. Pending input subsumes steer. A steer drain does not consume a later input intent, so an input admitted after Coordinator captures steer still drains.
-- A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them (at-least-once). Host side effects must be idempotent.
+- A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them parked and does not retry on its own. After a drain defect or a shutdown interrupt the claim stays, so `resumeSuspended` re-delivers them under `maxResumeAttempts`; after a user interrupt the next `admit` / `wake` / `run` does. Delivery is at-least-once: host side effects must be idempotent.
+- `Driver.clearPark(runId, generation)` drops a park without its answers (for example a cancelled approval). Input admitted while that park blocked becomes pending and wakes the run. Raw `Inbox.clearPark` takes that wake effect, as `acceptHitl` does.
 - Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
 - After process restart, hosts enumerate their own persisted waiting checkpoints and rebuild a fresh park with the current drain token. Do not import old Inbox parks, drain tokens, or generation strings. Correlate later responses to the new park and host identity policy. Persisted partial responses may be re-admitted only after protocol/host validation against that fresh park.
 

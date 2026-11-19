@@ -71,20 +71,20 @@ service dependencies. `makeInMemoryInboxLayer` delegates to it.
 
 `@yolk-sdk/harness/driver`
 
-| Export                     | Purpose                                          |
-| -------------------------- | ------------------------------------------------ |
-| `Driver`                   | Run, wake, interrupt, admit, pause, resume, stop |
-| `DriverApi`                | Driver service method contract                   |
-| `Drain`                    | Host execution; see signature below              |
-| `DrainContext`             | `{ drainToken, readyResponses }`                 |
-| `makeDriverLayer`          | Driver layer; default drain is `Effect.void`     |
-| `makeHarness`              | Merge driver + store + inbox layers              |
-| `admit`                    | Enqueue an inbox item and wake                   |
-| `defaultMaxResumeAttempts` | `10`                                             |
-| `InvalidMaxResumeAttempts` | Layer-init failure for invalid budgets           |
-| `ResumeSuspendedResult`    | `{ resumed, exhausted }`                         |
-| `StopDecision`             | `Interrupted` / `ParkCleared` / `Idle`           |
-| `InterruptReason`          | `'user' \| 'shutdown'`                           |
+| Export                     | Purpose                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| `Driver`                   | Run, wake, interrupt, admit, pause, resume, clear park, stop |
+| `DriverApi`                | Driver service method contract                               |
+| `Drain`                    | Host execution; see signature below                          |
+| `DrainContext`             | `{ drainToken, readyResponses }`                             |
+| `makeDriverLayer`          | Driver layer; default drain is `Effect.void`                 |
+| `makeHarness`              | Merge driver + store + inbox layers                          |
+| `admit`                    | Enqueue an inbox item and wake                               |
+| `defaultMaxResumeAttempts` | `10`                                                         |
+| `InvalidMaxResumeAttempts` | Layer-init failure for invalid budgets                       |
+| `ResumeSuspendedResult`    | `{ resumed, exhausted }`                                     |
+| `StopDecision`             | `Interrupted` / `ParkCleared` / `Idle`                       |
+| `InterruptReason`          | `'user' \| 'shutdown'`                                       |
 
 `Driver.layer({ maxResumeAttempts })` requires `RunStore`, `Inbox`, and `RunCoordinator`.
 `Driver.coordinatedLayer({ drain, maxResumeAttempts })` wires the coordinator and requires only
@@ -105,7 +105,9 @@ type Drain = (
 
 The driver provides `Inbox` and `RunStore` to the drain. Provide any additional host dependencies before passing `drain`.
 
-`interrupt` acknowledges request delivery, not owner settlement. User stop releases a leftover claim after that owner has settled. Shutdown interrupt keeps the claim.
+`interrupt` acknowledges request delivery, not owner settlement. User stop releases a leftover claim after that owner has settled. Shutdown interrupt keeps the claim. A drain defect releases it, except while the run has a Ready park: then `resumeSuspended` re-delivers those answers under `maxResumeAttempts`.
+
+`clearPark(runId, generation)` drops a park without its answers and wakes the run for input admitted while it blocked. Raw `Inbox.clearPark` takes that wake effect as its third argument.
 
 `@yolk-sdk/harness/driver/memory`
 
