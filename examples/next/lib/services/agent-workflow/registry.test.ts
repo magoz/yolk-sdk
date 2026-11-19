@@ -1,5 +1,14 @@
 // @vitest-environment node
-import { Effect, Layer, Predicate } from 'effect'
+import { Effect, Layer, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
+import {
+  InputDescriptor,
+  InputRequest,
+  InputResponse,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall
+} from '@yolk-sdk/agent/protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowRunNotFoundError } from 'workflow/errors'
 import {
@@ -10,11 +19,16 @@ import {
 import { AgentWorkflowStore, UserId, WorkflowRunForbidden, WorkflowRunId } from './live-layer'
 import { stopAgentWorkflow } from './stop'
 import { readWorkflowChild } from './read-child'
-import { maxWorkflowChildren } from './policy'
+import { maxHitlAnsweredPauses, maxWorkflowChildren } from './policy'
 import {
   emptyWorkflowRegistry,
+  isHitlPausePending,
+  recordedHitlAnswer,
   transitionWorkflowRegistry,
   WorkflowChildRecord,
+  WorkflowHitlAnswer,
+  WorkflowHitlPause,
+  WorkflowRegistry,
   type RegistryCommand
 } from './registry'
 
@@ -111,6 +125,162 @@ describe('durable host registry (transactional behavioral fake)', () => {
       expect(store.read().children[0]?.workflowRunId).toBe(admitted ? 'child-a' : null)
       expect(store.read().children[0]?.result).toBeNull()
     }
+  })
+
+  const approvalPause = (index: number, toolCallId: string) =>
+    WorkflowHitlPause.make({
+      pauseId: `event-${index}`,
+      hookToken: `pause-${index}`,
+      requests: [
+        ToolApprovalRequest.make({
+          requestId: `approval:${toolCallId}`,
+          toolCallId,
+          call: ToolCall.make({ id: toolCallId, name: 'write', params: {} })
+        })
+      ],
+      answer: null,
+      delivered: false
+    })
+
+  const approve = (toolCallId: string, decision: 'approved' | 'denied' = 'approved') =>
+    ToolApprovalResponse.make({
+      requestId: `approval:${toolCallId}`,
+      toolCallId,
+      decision,
+      source: 'user'
+    })
+
+  const recordFor =
+    (store: ReturnType<typeof fakeStore>) =>
+    (pauseId: string, response: ReturnType<typeof approve>, tailIndex = 3) =>
+      recordedHitlAnswer(
+        store.change({
+          type: 'answer',
+          pauseId,
+          answer: WorkflowHitlAnswer.make({ response, tailIndex })
+        }),
+        pauseId,
+        response
+      )
+
+  it('records one answer per pause, only for the pause it names and a request it holds', () => {
+    const store = fakeStore()
+    const record = recordFor(store)
+
+    store.change({ type: 'pause', pause: approvalPause(1, 'a') })
+    expect(Option.isNone(record('event-1', approve('b')))).toBe(true)
+    expect(Option.isNone(record('event-0', approve('a')))).toBe(true)
+    expect(store.read().hitlPause?.answer).toBeNull()
+    expect(Option.getOrUndefined(record('event-1', approve('a')))).toMatchObject({
+      pendingHookToken: 'pause-1'
+    })
+    // An identical retry reuses the record; a different answer to the pause is refused.
+    expect(Option.isSome(record('event-1', approve('a'), 8))).toBe(true)
+    expect(store.read().hitlPause?.answer?.tailIndex).toBe(3)
+    expect(Option.isNone(record('event-1', approve('a', 'denied')))).toBe(true)
+    // A redelivered tool step records the same pause again without losing its answer.
+    store.change({ type: 'pause', pause: approvalPause(1, 'a') })
+    expect(isHitlPausePending(store.read(), 'pause-1')).toBe(true)
+    store.change({ type: 'deliver', hookToken: 'pause-1' })
+    expect(isHitlPausePending(store.read(), 'pause-1')).toBe(false)
+    expect(Option.getOrUndefined(record('event-1', approve('a')))).toMatchObject({
+      pendingHookToken: undefined
+    })
+  })
+
+  it('tells answers to a reused call id apart by the pause they name', () => {
+    const store = fakeStore()
+    const record = recordFor(store)
+
+    store.change({ type: 'pause', pause: approvalPause(1, 'a') })
+    record('event-1', approve('a'))
+    store.change({ type: 'deliver', hookToken: 'pause-1' })
+    // A later turn reuses call id `a`: same request id, same decision.
+    store.change({ type: 'pause', pause: approvalPause(2, 'a') })
+
+    // A late retry of turn 1's answer is delivered and never fills pause 2.
+    expect(Option.getOrUndefined(record('event-1', approve('a')))).toMatchObject({
+      answer: { tailIndex: 3 },
+      pendingHookToken: undefined
+    })
+    expect(store.read().hitlPause?.answer).toBeNull()
+    expect(Option.isNone(record('event-1', approve('a', 'denied')))).toBe(true)
+    // The identical answer naming pause 2 is pause 2's.
+    expect(Option.getOrUndefined(record('event-2', approve('a'), 9))).toMatchObject({
+      answer: { tailIndex: 9 },
+      pendingHookToken: 'pause-2'
+    })
+  })
+
+  it('keeps answers of replaced pauses (delivery mark lost), bounded; refuses evicted ones', () => {
+    const store = fakeStore()
+    const record = recordFor(store)
+
+    for (let index = 0; index < maxHitlAnsweredPauses + 2; index++) {
+      store.change({ type: 'pause', pause: approvalPause(index, 'a') })
+      record(`event-${index}`, approve('a'), index)
+    }
+
+    // The current pause's answer is not delivered; every replaced pause's answer is kept.
+    expect(store.read().hitlAnswered?.map(entry => entry.pauseId)).toEqual(
+      Array.from({ length: maxHitlAnsweredPauses }, (_, index) => `event-${index + 1}`)
+    )
+
+    store.change({ type: 'pause', pause: approvalPause(99, 'a') })
+    // Pause 0 was evicted: its late answer is refused, never recorded for the current pause.
+    expect(Option.isNone(record('event-0', approve('a')))).toBe(true)
+    expect(store.read().hitlPause?.answer).toBeNull()
+  })
+
+  it('matches a recorded answer after the registry row round-trips through JSON', async () => {
+    const response = InputResponse.make({
+      requestId: 'input:nickname:call',
+      toolCallId: 'call',
+      outcome: 'submitted',
+      source: 'user',
+      data: { name: 'Ada', tags: ['a', 'b'] }
+    })
+
+    const state = transitionWorkflowRegistry(
+      transitionWorkflowRegistry(emptyWorkflowRegistry(), {
+        type: 'pause',
+        pause: WorkflowHitlPause.make({
+          pauseId: 'event-1',
+          hookToken: 'pause-1',
+          requests: [
+            InputRequest.make({
+              requestId: 'input:nickname:call',
+              toolCallId: 'call',
+              call: ToolCall.make({ id: 'call', name: 'nickname', params: {} }),
+              input: InputDescriptor.make({ kind: 'nickname-field', title: 'Nickname' })
+            })
+          ],
+          answer: null,
+          delivered: false
+        })
+      }),
+      {
+        type: 'answer',
+        pauseId: 'event-1',
+        answer: WorkflowHitlAnswer.make({ response, tailIndex: 0 })
+      }
+    )
+
+    const stored = await Effect.runPromise(
+      Schema.encodeEffect(Schema.fromJsonString(WorkflowRegistry))(state).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(WorkflowRegistry)))
+      )
+    )
+
+    const retried = InputResponse.make({
+      toolCallId: 'call',
+      requestId: 'input:nickname:call',
+      outcome: 'submitted',
+      source: 'user',
+      data: { tags: ['a', 'b'], name: 'Ada' }
+    })
+
+    expect(Option.isSome(recordedHitlAnswer(stored, 'event-1', retried))).toBe(true)
   })
 
   it('enforces the bounded lifetime fanout including pending reservations', () => {
