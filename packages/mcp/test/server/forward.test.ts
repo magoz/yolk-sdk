@@ -8,10 +8,12 @@ import {
   resumeRemoteMcpServerToolCall,
   McpFormElicitation,
   McpInputRequired,
+  McpToolCallComplete,
   McpToolCallInputRequired,
   type McpClientOptions,
   type McpElicitationResponses,
-  type McpRemoteServerConfig
+  type McpRemoteServerConfig,
+  type McpToolCallOutcome
 } from '../../src/client'
 import {
   approvalInputKey,
@@ -22,7 +24,7 @@ import {
   McpForwardRound,
   McpServerError,
   type McpServerApprovalOptions,
-  type McpServerTool
+  type McpServerForwardingTool
 } from '../../src/server'
 import {
   CallResult,
@@ -81,6 +83,71 @@ const remoteConfig: McpRemoteServerConfig = {
 
 type Rounds = Array<string>
 
+const isJsonArray = Schema.is(Schema.Array(Schema.Json))
+
+const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
+
+/** JSON with every object's keys in reverse order, as a JSONB store may read them back. */
+const reversedKeys = (value: Schema.Json): Schema.Json => {
+  if (isJsonArray(value)) return value.map(reversedKeys)
+
+  if (isJsonObject(value))
+    return Object.fromEntries(
+      Object.entries(value)
+        .toReversed()
+        .map(([name, member]) => [name, reversedKeys(member)])
+    )
+
+  return value
+}
+
+const PauseJson = Schema.toCodecJson(McpInputRequired)
+
+/** A stored outcome read back through JSON with every object's keys reordered. */
+const reloadReordered = (outcome: McpToolCallOutcome) =>
+  Predicate.isTagged(outcome, 'InputRequired')
+    ? Schema.encodeUnknownEffect(PauseJson)(outcome.inputRequired).pipe(
+        Effect.map(reversedKeys),
+        Effect.flatMap(Schema.decodeUnknownEffect(PauseJson)),
+        Effect.map(inputRequired => McpToolCallInputRequired.make({ inputRequired })),
+        Effect.orDie
+      )
+    : Effect.succeed(outcome)
+
+/**
+ * The host's once-only keys (`approval:<approvalId>`, `forward:<roundId>`), kept the idempotent
+ * way: a duplicate key answers the outcome stored under it (read back through `reload`), as a
+ * tool-call ledger replays a completed call. A first round without approval has no key and always
+ * runs.
+ */
+const replaying = (
+  tool: McpServerForwardingTool,
+  reload: (outcome: McpToolCallOutcome) => Effect.Effect<McpToolCallOutcome> = Effect.succeed
+): McpServerForwardingTool => {
+  const stored = new Map<string, McpToolCallOutcome>()
+
+  return {
+    ...tool,
+    execute: (call, round) => {
+      const key = McpForwardRound.$match(round, {
+        Initial: ({ approvalId }) =>
+          approvalId === undefined ? undefined : `approval:${approvalId}`,
+        Resume: ({ roundId }) => `forward:${roundId}`
+      })
+
+      if (key === undefined) return tool.execute(call, round)
+
+      const replayed = stored.get(key)
+
+      if (replayed !== undefined) return reload(replayed)
+
+      return tool
+        .execute(call, round)
+        .pipe(Effect.tap(outcome => Effect.sync(() => stored.set(key, outcome))))
+    }
+  }
+}
+
 /** The proxy (o-o): `proxy_delete` forwards to the remote `delete`, recording each round. */
 const proxyServer = (input: {
   readonly remote: ToolServer
@@ -89,10 +156,12 @@ const proxyServer = (input: {
   readonly roundIds: Array<string>
   readonly approvals: McpServerApprovalOptions | undefined
   readonly askFirst: boolean
+  /** Whether the host answers a duplicate once-only key with its stored outcome (`replaying`). */
+  readonly replays?: boolean
 }) => {
   const remote = inProcess(input.remote)
 
-  const forwarding: McpServerTool = {
+  const proxied: McpServerForwardingTool = {
     def: ToolDef.make({ name: 'proxy_delete', description: 'Delete remotely', parameters }),
     forward: true,
     approval: input.askFirst ? { message: () => Effect.succeed('Run proxy_delete?') } : undefined,
@@ -134,6 +203,8 @@ const proxyServer = (input: {
       )
     }
   }
+
+  const forwarding = input.replays === true ? replaying(proxied) : proxied
 
   return input.approvals === undefined
     ? makeMcpToolServer({ name: 'proxy', version: '0', tools: [forwarding] })
@@ -198,6 +269,7 @@ const setup = (
     readonly askFirst?: boolean
     readonly approvals?: boolean
     readonly ttlSeconds?: number
+    readonly replays?: boolean
   } = {}
 ) =>
   Effect.gen(function* () {
@@ -213,7 +285,8 @@ const setup = (
         options.approvals === false
           ? undefined
           : { key, principal: 'proxy-token', ttlSeconds: options.ttlSeconds ?? 600 },
-      askFirst: options.askFirst === true
+      askFirst: options.askFirst === true,
+      replays: options.replays === true
     })
 
     return { deleted, rounds, roundIds, proxy, layer: inProcess(proxy) }
@@ -417,6 +490,48 @@ describe('forwarding a remote elicitation', () => {
     })
   )
 
+  // Issue #297: an accepted approval retried after a lost response, against a host that answers
+  // its duplicate `approvalId` with the stored remote pause, forwards that pause in the same round.
+  it.effect('forwards a replayed remote pause in the same round, so it resumes once', () =>
+    Effect.gen(function* () {
+      const { deleted, roundIds, layer } = yield* setup({ askFirst: true, replays: true })
+      const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+
+      if (!Predicate.isTagged(first, 'InputRequired'))
+        return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+      const acceptApproval = resumeRemoteMcpServerToolCall({
+        ...proxyCall,
+        inputRequired: first.inputRequired,
+        responses: approve
+      }).pipe(Effect.provide(layer))
+
+      const forwarded = yield* acceptApproval
+      const retried = yield* acceptApproval
+
+      if (!Predicate.isTagged(forwarded, 'InputRequired'))
+        return expect.fail(`Expected InputRequired, got ${forwarded._tag}`)
+
+      if (!Predicate.isTagged(retried, 'InputRequired'))
+        return expect.fail(`Expected InputRequired, got ${retried._tag}`)
+
+      const asked = yield* statePayload(forwarded.inputRequired.requestState)
+      const reasked = yield* statePayload(retried.inputRequired.requestState)
+
+      // Both prompts of the one remote pause are answered (a second tab, the retry's owner).
+      for (const prompt of [forwarded, retried])
+        yield* resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: prompt.inputRequired,
+          responses: approve
+        }).pipe(Effect.provide(layer))
+
+      expect(yield* Ref.get(deleted)).toHaveLength(1)
+      expect(roundIds).toEqual([asked.roundId])
+      expect(reasked.roundId).toBe(asked.roundId)
+    })
+  )
+
   // Real time: the server runs each request on its own runtime clock.
   it.live('keeps the first expiry when asking again, then answers stale', () =>
     Effect.gen(function* () {
@@ -573,6 +688,272 @@ describe('forwarding a remote elicitation', () => {
         ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(CallResult)))
 
         expect(answer.result.content[0]?.text).toBe(forwardUnsupportedMessage)
+      })
+    )
+
+    // Issue #297: a retried `Resume` the host answers with the stored next remote pause.
+    it.effect('forwards a replayed next pause in the same round, so it resumes once', () =>
+      Effect.gen(function* () {
+        const nextForm = McpInputRequired.make({ ...okForm, requestState: 'remote-2' })
+        const resumed: Array<string | undefined> = []
+
+        const remote: McpServerForwardingTool = {
+          def: ToolDef.make({ name: 'proxy_delete', description: 'Delete remotely', parameters }),
+          forward: true,
+          execute: (call, round) =>
+            McpForwardRound.$match(round, {
+              Initial: () =>
+                Effect.succeed<McpToolCallOutcome>(
+                  McpToolCallInputRequired.make({ inputRequired: okForm })
+                ),
+              Resume: ({ inputRequired }) =>
+                Effect.sync((): McpToolCallOutcome => {
+                  resumed.push(inputRequired.requestState)
+
+                  return inputRequired.requestState === okForm.requestState
+                    ? McpToolCallInputRequired.make({ inputRequired: nextForm })
+                    : McpToolCallComplete.make({
+                        result: ToolResult.make({ toolCallId: call.id, content: 'deleted' })
+                      })
+                })
+            })
+        }
+
+        const layer = inProcess(
+          makeMcpToolServer({
+            name: 'proxy',
+            version: '0',
+            approvals: { key, principal: 'proxy-token' },
+            tools: [replaying(remote)]
+          })
+        )
+
+        const ok: McpElicitationResponses = { ok: { action: 'accept', content: { ok: true } } }
+        const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+
+        if (!Predicate.isTagged(first, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+        const answerFirst = resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: first.inputRequired,
+          responses: ok
+        }).pipe(Effect.provide(layer))
+
+        const next = yield* answerFirst
+        const retried = yield* answerFirst
+
+        if (!Predicate.isTagged(next, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${next._tag}`)
+
+        if (!Predicate.isTagged(retried, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${retried._tag}`)
+
+        const asked = yield* statePayload(next.inputRequired.requestState)
+        const reasked = yield* statePayload(retried.inputRequired.requestState)
+
+        for (const prompt of [next, retried])
+          yield* resumeRemoteMcpServerToolCall({
+            ...proxyCall,
+            inputRequired: prompt.inputRequired,
+            responses: ok
+          }).pipe(Effect.provide(layer))
+
+        expect(resumed).toEqual(['remote-1', 'remote-2'])
+        expect(reasked.roundId).toBe(asked.roundId)
+      })
+    )
+
+    const bothFields: McpElicitationResponses = {
+      ok: { action: 'accept', content: { ok: true, sure: true } }
+    }
+
+    // A host that stores outcomes as JSONB reads nested keys back in another order.
+    it.effect('forwards a replayed pause read back with reordered keys in the same round', () =>
+      Effect.gen(function* () {
+        const twoFields = McpInputRequired.make({
+          ...okForm,
+          elicitations: [
+            McpFormElicitation.make({
+              key: 'ok',
+              message: 'Sure?',
+              requestedSchema: {
+                type: 'object',
+                properties: { ok: { type: 'boolean' }, sure: { type: 'boolean' } },
+                required: ['ok', 'sure']
+              }
+            })
+          ],
+          requestState: 'remote-2'
+        })
+
+        const resumed: Array<string | undefined> = []
+
+        const remote: McpServerForwardingTool = {
+          def: ToolDef.make({ name: 'proxy_delete', description: 'Delete remotely', parameters }),
+          forward: true,
+          execute: (call, round) =>
+            McpForwardRound.$match(round, {
+              Initial: () =>
+                Effect.succeed<McpToolCallOutcome>(
+                  McpToolCallInputRequired.make({ inputRequired: okForm })
+                ),
+              Resume: ({ inputRequired }) =>
+                Effect.sync((): McpToolCallOutcome => {
+                  resumed.push(inputRequired.requestState)
+
+                  return inputRequired.requestState === okForm.requestState
+                    ? McpToolCallInputRequired.make({ inputRequired: twoFields })
+                    : McpToolCallComplete.make({
+                        result: ToolResult.make({ toolCallId: call.id, content: 'deleted' })
+                      })
+                })
+            })
+        }
+
+        const layer = inProcess(
+          makeMcpToolServer({
+            name: 'proxy',
+            version: '0',
+            approvals: { key, principal: 'proxy-token' },
+            tools: [replaying(remote, reloadReordered)]
+          })
+        )
+
+        const first = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+
+        if (!Predicate.isTagged(first, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+        const answerFirst = resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: first.inputRequired,
+          responses: { ok: { action: 'accept', content: { ok: true } } }
+        }).pipe(Effect.provide(layer))
+
+        const next = yield* answerFirst
+        const retried = yield* answerFirst
+
+        if (!Predicate.isTagged(next, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${next._tag}`)
+
+        if (!Predicate.isTagged(retried, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${retried._tag}`)
+
+        const asked = yield* statePayload(next.inputRequired.requestState)
+        const reasked = yield* statePayload(retried.inputRequired.requestState)
+
+        for (const prompt of [next, retried])
+          yield* resumeRemoteMcpServerToolCall({
+            ...proxyCall,
+            inputRequired: prompt.inputRequired,
+            responses: bothFields
+          }).pipe(Effect.provide(layer))
+
+        expect(resumed).toEqual(['remote-1', 'remote-2'])
+        expect(reasked.roundId).toBe(asked.roundId)
+      })
+    )
+
+    // The same forms and remote `requestState` again, from another round: another remote pause.
+    it.effect('opens a new round when a remote asks the identical pause again', () =>
+      Effect.gen(function* () {
+        const resumed: Array<string | undefined> = []
+
+        const remote: McpServerForwardingTool = {
+          def: ToolDef.make({ name: 'proxy_delete', description: 'Delete remotely', parameters }),
+          forward: true,
+          approval: { message: () => Effect.succeed('Run proxy_delete?') },
+          execute: (call, round) =>
+            McpForwardRound.$match(round, {
+              Initial: () =>
+                Effect.succeed<McpToolCallOutcome>(
+                  McpToolCallInputRequired.make({ inputRequired: okForm })
+                ),
+              Resume: ({ inputRequired }) =>
+                Effect.sync((): McpToolCallOutcome => {
+                  resumed.push(inputRequired.requestState)
+
+                  return resumed.length === 1
+                    ? McpToolCallInputRequired.make({ inputRequired: okForm })
+                    : McpToolCallComplete.make({
+                        result: ToolResult.make({ toolCallId: call.id, content: 'deleted' })
+                      })
+                })
+            })
+        }
+
+        const layer = inProcess(
+          makeMcpToolServer({
+            name: 'proxy',
+            version: '0',
+            approvals: { key, principal: 'proxy-token' },
+            tools: [replaying(remote)]
+          })
+        )
+
+        const ok: McpElicitationResponses = { ok: { action: 'accept', content: { ok: true } } }
+
+        const approval = yield* callRemoteMcpServerToolResumable(proxyCall).pipe(
+          Effect.provide(layer)
+        )
+
+        if (!Predicate.isTagged(approval, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${approval._tag}`)
+
+        const first = yield* resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: approval.inputRequired,
+          responses: approve
+        }).pipe(Effect.provide(layer))
+
+        if (!Predicate.isTagged(first, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+        const again = yield* resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: first.inputRequired,
+          responses: ok
+        }).pipe(Effect.provide(layer))
+
+        if (!Predicate.isTagged(again, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${again._tag}`)
+
+        const done = yield* resumeRemoteMcpServerToolCall({
+          ...proxyCall,
+          inputRequired: again.inputRequired,
+          responses: ok
+        }).pipe(Effect.provide(layer))
+
+        if (!Predicate.isTagged(done, 'Complete'))
+          return expect.fail(`Expected Complete, got ${done._tag}`)
+
+        const firstRound = yield* statePayload(first.inputRequired.requestState)
+        const againRound = yield* statePayload(again.inputRequired.requestState)
+
+        expect(done.result.content).toBe('deleted')
+        expect(resumed).toEqual(['remote-1', 'remote-1'])
+        expect(againRound.roundId).not.toBe(firstRound.roundId)
+      })
+    )
+
+    it.effect('gives two first rounds without approval their own rounds for one pause', () =>
+      Effect.gen(function* () {
+        const layer = inProcess(scripted(okForm, okForm))
+        const call = callRemoteMcpServerToolResumable(proxyCall).pipe(Effect.provide(layer))
+        const first = yield* call
+        const second = yield* call
+
+        if (!Predicate.isTagged(first, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${first._tag}`)
+
+        if (!Predicate.isTagged(second, 'InputRequired'))
+          return expect.fail(`Expected InputRequired, got ${second._tag}`)
+
+        const firstRound = yield* statePayload(first.inputRequired.requestState)
+        const secondRound = yield* statePayload(second.inputRequired.requestState)
+
+        expect(secondRound.roundId).not.toBe(firstRound.roundId)
       })
     )
   })

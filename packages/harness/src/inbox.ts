@@ -99,8 +99,27 @@ export type InboxApi = {
     admission: HitlAdmission,
     onReady: Effect.Effect<void>
   ) => Effect.Effect<HitlDecision>
-  readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
-  readonly beginDrain: (runId: string, scope: Promotable) => Effect.Effect<DrainBegin>
+  /**
+   * Drops the current park. Input admitted while it blocked (and any pending intent) becomes
+   * pending `input` and runs `wake` under the admission gate, like the other unblocking steps.
+   */
+  readonly clearPark: (
+    runId: string,
+    generation: ParkGeneration,
+    wake: Effect.Effect<void>
+  ) => Effect.Effect<boolean>
+  /**
+   * Consumes this drain's pending intent and issues the live drain token. When
+   * `stopping` (the owner's stopping flag, read under the admission gate) is true,
+   * returns `Skip` and leaves the intent for the successor. Implementations read
+   * `stopping` under the same lock that consumes intent. Driver runs this
+   * uninterruptibly, so keep it short and non-blocking.
+   */
+  readonly beginDrain: (
+    runId: string,
+    scope: Promotable,
+    stopping?: Effect.Effect<boolean>
+  ) => Effect.Effect<DrainBegin>
   readonly endDrain: (
     runId: string,
     drainToken: DrainToken,
@@ -345,7 +364,7 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                 })
               )
             ),
-          clearPark: (runId, generation) =>
+          clearPark: (runId, generation, wake) =>
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
@@ -355,21 +374,28 @@ export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness
                     return false
                   }
 
+                  // Admission recorded no intent while the park blocked; restore it here.
+                  const queued = (yield* Ref.get(items)).some(item => item.runId === runId)
+                  const pending = queued ? widerPending(control.pending, 'input') : control.pending
                   yield* writeControl(runId, {
-                    pending: control.pending,
+                    pending,
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: undefined
                   })
 
+                  if (pending !== undefined) yield* wake
+
                   return true
                 })
               )
             ),
-          beginDrain: (runId, scope) =>
+          beginDrain: (runId, scope, stopping) =>
             withGate(
               Effect.uninterruptible(
                 Effect.gen(function* () {
+                  // Under the gate, before consuming intent: see `InboxApi.beginDrain`.
+                  if (stopping !== undefined && (yield* stopping)) return DrainBegin.Skip()
                   const control = yield* getControl(runId)
                   const pending = control.pending
 

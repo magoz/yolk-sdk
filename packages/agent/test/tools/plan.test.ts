@@ -261,6 +261,7 @@ type LedgerOptionFields = {
   store: ToolLedgerOptions['store']
   isLedgered?: ToolLedgerOptions['isLedgered']
   maxWaitMs?: number
+  maxResultBytes?: number
   onLedgerDecision?: ToolLedgerOptions['onLedgerDecision']
 }
 
@@ -290,6 +291,7 @@ type SetupOptions = {
   readonly prechecks?: PrecheckTracker
   readonly gate?: Gate
   readonly maxWaitMs?: number
+  readonly maxResultBytes?: number
   readonly decisions?: Array<string>
 }
 
@@ -367,6 +369,8 @@ const setup = (options: SetupOptions = {}) =>
       if (options.unledgered === true) ledger.isLedgered = () => false
 
       if (options.maxWaitMs !== undefined) ledger.maxWaitMs = options.maxWaitMs
+
+      if (options.maxResultBytes !== undefined) ledger.maxResultBytes = options.maxResultBytes
 
       if (decisions !== undefined)
         ledger.onLedgerDecision = event => {
@@ -1267,6 +1271,53 @@ describe('plan review', () => {
       ])
       expect(outcome.result?.calls[0]?.inputRequired?.pauseIds).toEqual(['pause-r1'])
       expect(textOf(replayed)).toContain('review_input({"pauseIds":["pause-r1"]})')
+    })
+  )
+
+  // The fence's stored copy over the bound loses `FencedApply`; the replay then lists the calls'
+  // own ledger entries, whose markers the ledger keeps, so the pauses are still named.
+  it.effect('names the pauses when the stored apply outcome is over the ledger bound', () =>
+    Effect.gen(function* () {
+      const env = yield* setup({
+        ledger: true,
+        pauseOn: 'r2',
+        settlement: 'fail',
+        maxResultBytes: 900
+      })
+
+      const plan = yield* stagedPlan(env, ['r1', 'r2', 'r3'])
+      const call = reviewCall(plan)
+
+      const ref = yield* accept(
+        env,
+        call,
+        plan.calls.map(staged => staged.key)
+      )
+
+      // The apply completes and records its fence; settling the receipt fails.
+      yield* env.toolSet.execute(call, { interaction: ref }).pipe(Effect.exit)
+
+      const fenceEntry = (yield* env.ledgerStore.entries).find(entry => entry.key === call.id)
+
+      const fenceResult =
+        fenceEntry?.outcome?._tag === 'Succeeded' ? fenceEntry.outcome.result : undefined
+
+      const replayed = yield* env.toolSet.execute(call, { interaction: ref })
+      const outcome = yield* outcomeOf(replayed)
+
+      expect(fenceResult).toBeDefined()
+      expect(fenceResult?.structuredContent).toBeUndefined()
+      expect(env.applied.map(item => item.resource)).toEqual(['r1', 'r2', 'r3'])
+      expect(outcome.result?.calls.map(item => [item.key, item.status])).toEqual([
+        ['script_1/s1', 'applied'],
+        ['script_1/s2', 'input_required'],
+        ['script_1/s3', 'applied']
+      ])
+      expect(outcome.result?.calls[1]?.inputRequired).toEqual({
+        reviewToolName: 'review_input',
+        pauseIds: ['pause-r2']
+      })
+      expect(textOf(replayed)).toContain('review_input({"pauseIds":["pause-r2"]})')
     })
   )
 

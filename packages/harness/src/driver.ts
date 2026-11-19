@@ -10,6 +10,7 @@ import {
   type HitlDecision,
   type InboxItem,
   type ParkedResponse,
+  type ParkGeneration,
   type PauseDecision
 } from './inbox.ts'
 import { RunStore } from './store.ts'
@@ -71,6 +72,8 @@ export type DriverApi = {
     drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly resumeHitl: (runId: string, admission: HitlAdmission) => Effect.Effect<HitlDecision>
+  /** Drops that park generation and wakes the run for input admitted while it blocked. */
+  readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
   readonly stop: (runId: string) => Effect.Effect<StopDecision>
 }
 
@@ -166,6 +169,8 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
           pause: (runId, requestIds, drainToken) => inbox.park(runId, requestIds, drainToken),
           resumeHitl: (runId, admission) =>
             inbox.acceptHitl(runId, admission, coordinator.wake(runId, 'input')),
+          clearPark: (runId, generation) =>
+            inbox.clearPark(runId, generation, coordinator.wake(runId, 'input')),
           stop: runId =>
             inbox
               .invalidate(
@@ -217,9 +222,12 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
         const inboxLayer = Layer.succeed(Inbox, inbox)
 
         const coordinator = RunCoordinator.layer({
-          drain: (runId, force, scope) =>
-            inbox.beginDrain(runId, scope).pipe(
-              Effect.flatMap(begun => {
+          // Token issue and endDrain are one acquire/release, so an interrupt
+          // cannot land between them and leave the token live with no owner.
+          drain: (runId, force, scope, stopping) =>
+            Effect.acquireUseRelease(
+              inbox.beginDrain(runId, scope, stopping),
+              begun => {
                 if (DrainBegin.$is('Skip')(begun)) return Effect.void
 
                 return Effect.suspend(() =>
@@ -227,15 +235,18 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                     drainToken: begun.drainToken,
                     readyResponses: begun.readyResponses
                   })
-                ).pipe(
-                  Effect.provideService(Inbox, inbox),
-                  Effect.provideService(RunStore, store),
-                  Effect.onExit(exit =>
-                    inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
-                  )
-                )
-              })
-            )
+                ).pipe(Effect.provideService(Inbox, inbox), Effect.provideService(RunStore, store))
+              },
+              (begun, exit) =>
+                DrainBegin.$is('Skip')(begun)
+                  ? Effect.void
+                  : inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
+            ),
+          // A Ready park still here at settlement is unacknowledged: its continuation died, or
+          // a successor queued behind that defect skipped with no pending intent. Keep the
+          // claim so resumeSuspended re-delivers it (bounded) instead of stranding it.
+          keepClaimOnSettle: runId =>
+            inbox.parked(runId).pipe(Effect.map(parked => parked?.ready === true))
         }).pipe(Layer.provide(storeLayer))
 
         return Driver.layer({ maxResumeAttempts }).pipe(

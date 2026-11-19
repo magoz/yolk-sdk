@@ -17,12 +17,14 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   ImagePart,
   inlineBase64AttachmentSource,
+  makeInputRequiredToolResult,
   NestedToolCallAccess,
   NestedToolCallRecord,
   NestedToolCalls,
   TextPart,
   ToolCall,
   ToolDef,
+  toolInputRequired,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -489,6 +491,37 @@ describe('tool ledger', () => {
       const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
 
       const running = yield* Effect.forkChild(
+        execute([noteTool(probe, { sleep: '30 seconds' })], noteCall(), { store }).pipe(
+          Effect.provide(logger)
+        )
+      )
+
+      yield* TestClock.adjust('30 seconds')
+
+      const result = yield* Fiber.join(running)
+      const [entry] = yield* memory.entries
+
+      expect(result.content).toBe('appended hot lead (1)')
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+      // Default 30 s lease: first heartbeat at 10 s, timed out at 15 s; the next one starts 10 s
+      // later and is still pending when the call returns at 30 s.
+      expect(messages).toEqual([
+        [
+          `Tool ledger heartbeat failed for call_1: timed out after ${toolLedgerCompleteTimeoutMs} ms`
+        ]
+      ])
+    })
+  )
+
+  it.effect('bounds each heartbeat by a sixth of a short lease', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const memory = makeInMemoryToolLedgerStore()
+      const store: ToolLedgerStore = { ...memory, heartbeat: () => Effect.never }
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      const running = yield* Effect.forkChild(
         execute([noteTool(probe, { sleep: '10 seconds' })], noteCall(), {
           store,
           leaseMs: 6_000
@@ -496,18 +529,12 @@ describe('tool ledger', () => {
       )
 
       yield* TestClock.adjust('10 seconds')
+      yield* Fiber.join(running)
 
-      const result = yield* Fiber.join(running)
-      const [entry] = yield* memory.entries
+      // Interval 2 s, timeout 1 s: heartbeats at 2, 5 and 8 s each time out a second later.
+      const timedOut = ['Tool ledger heartbeat failed for call_1: timed out after 1000 ms']
 
-      expect(result.content).toBe('appended hot lead (1)')
-      expect(entry?.outcome?._tag).toBe('Succeeded')
-      // First heartbeat at 2 s, timed out at 7 s; the next one starts 2 s later.
-      expect(messages).toEqual([
-        [
-          `Tool ledger heartbeat failed for call_1: timed out after ${toolLedgerCompleteTimeoutMs} ms`
-        ]
-      ])
+      expect(messages).toEqual([timedOut, timedOut, timedOut])
     })
   )
 
@@ -1185,7 +1212,7 @@ describe('tool ledger', () => {
     })
   )
 
-  it.effect('heartbeats at most every half lease', () =>
+  it.effect('clamps the heartbeat interval to half the lease minus the heartbeat timeout', () =>
     Effect.gen(function* () {
       const probe = makeProbe()
       const memory = makeInMemoryToolLedgerStore()
@@ -1203,7 +1230,7 @@ describe('tool ledger', () => {
       const running = yield* Effect.forkChild(
         execute([noteTool(probe, { sleep: '5 seconds' })], noteCall(), {
           store,
-          leaseMs: 4_000,
+          leaseMs: 6_000,
           heartbeatIntervalMs: 60_000
         })
       )
@@ -1211,7 +1238,143 @@ describe('tool ledger', () => {
       yield* TestClock.adjust('5 seconds')
       yield* Fiber.join(running)
 
-      expect(heartbeats).toEqual([6_000, 8_000])
+      // Heartbeat timeout 1 s (a sixth of the lease), so the interval is 3 s - 1 s = 2 s.
+      expect(heartbeats).toEqual([8_000, 10_000])
+    })
+  )
+
+  // yolk-sdk #299, #300: one hung or failed heartbeat must not let the lease of a running call
+  // lapse, so a duplicate claiming right after the claim lease waits and replays instead of
+  // reporting the call as abandoned while it runs and then succeeds.
+  const firstHeartbeatFaulty = (
+    fault: 'hangs' | 'fails after 1 s',
+    renewalLatency: Duration.Input = 0
+  ) => {
+    const memory = makeInMemoryToolLedgerStore()
+    let heartbeats = 0
+
+    const store: ToolLedgerStore = {
+      ...memory,
+      heartbeat: request => {
+        heartbeats += 1
+
+        if (heartbeats === 2) {
+          return Effect.sleep(renewalLatency).pipe(Effect.andThen(memory.heartbeat(request)))
+        }
+
+        if (heartbeats > 2) return memory.heartbeat(request)
+
+        return fault === 'hangs'
+          ? Effect.never
+          : Effect.sleep('1 second').pipe(
+              Effect.andThen(Effect.fail(new ToolLedgerError({ message: 'connection reset' })))
+            )
+      }
+    }
+
+    return { memory, store }
+  }
+
+  const duplicateAfterFaultyHeartbeat = (input: {
+    readonly ledger: Omit<ToolLedgerOptions, 'store'>
+    readonly fault: 'hangs' | 'fails after 1 s'
+    /** How long the heartbeat after the faulty one takes to land. Default 0. */
+    readonly renewalLatency?: Duration.Input
+    readonly runFor: Duration.Input
+    readonly duplicateAt: Duration.Input
+    readonly thenWait: Duration.Input
+  }) =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const { memory, store } = firstHeartbeatFaulty(input.fault, input.renewalLatency)
+      const tools = [noteTool(probe, { sleep: input.runFor })]
+      const ledger: ToolLedgerOptions = { ...input.ledger, store }
+
+      const first = yield* Effect.forkChild(execute(tools, noteCall(), ledger))
+
+      yield* TestClock.adjust(input.duplicateAt)
+
+      const duplicate = yield* Effect.forkChild(execute(tools, noteCall(), ledger))
+
+      yield* TestClock.adjust(input.thenWait)
+
+      const firstResult = yield* Fiber.join(first)
+      const duplicateResult = yield* Fiber.join(duplicate)
+      const [entry] = yield* memory.entries
+
+      expect(firstResult.content).toBe('appended hot lead (1)')
+      expect(duplicateResult).toEqual(firstResult)
+      expect(probe.runs).toEqual(['hot lead'])
+      expect(entry?.outcome?._tag).toBe('Succeeded')
+    })
+
+  it.effect('keeps a 6 s lease through a hung heartbeat (#300)', () =>
+    // Interval 2 s, heartbeat timeout 1 s: the heartbeat hung at 2 s ends at 3 s, the next one at
+    // 5 s renews the lease before it ends at 6 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 6_000 },
+      fault: 'hangs',
+      runFor: '10 seconds',
+      duplicateAt: '6 seconds',
+      thenWait: '5 seconds'
+    })
+  )
+
+  it.effect('keeps a 14 s lease through a hung heartbeat (#300)', () =>
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 14_000 },
+      fault: 'hangs',
+      runFor: '20 seconds',
+      duplicateAt: '14100 millis',
+      thenWait: '7 seconds'
+    })
+  )
+
+  it.effect('keeps the lease through a hung heartbeat at a half-lease interval (#299)', () =>
+    // The 15 s interval is clamped to 10 s: the heartbeat hung at 10 s ends at 15 s, the next one
+    // at 25 s renews the lease before it ends at 30 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { heartbeatIntervalMs: 15_000 },
+      fault: 'hangs',
+      runFor: '40 seconds',
+      duplicateAt: '31 seconds',
+      thenWait: '10 seconds'
+    })
+  )
+
+  it.effect('keeps the lease through a failed heartbeat at a half-lease interval (#299)', () =>
+    duplicateAfterFaultyHeartbeat({
+      ledger: { heartbeatIntervalMs: 15_000 },
+      fault: 'fails after 1 s',
+      runFor: '40 seconds',
+      duplicateAt: '30500 millis',
+      thenWait: '11 seconds'
+    })
+  )
+
+  it.effect('keeps a 6 s lease when the heartbeat after a hung one is slow', () =>
+    // Interval 2 s, timeout 1 s: the heartbeat hung at 2 s ends at 3 s, the next one starts at 5 s
+    // and lands 999 ms later, 1 ms before the claim lease ends; the duplicate claims at 6 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: { leaseMs: 6_000 },
+      fault: 'hangs',
+      renewalLatency: '999 millis',
+      runFor: '10 seconds',
+      duplicateAt: '6 seconds',
+      thenWait: '5 seconds'
+    })
+  )
+
+  it.effect('keeps the default lease when the heartbeat after a hung one is slow', () =>
+    // Zero margin at the defaults: the heartbeat hung at 10 s ends at 15 s, the next one starts at
+    // 25 s and lands 4999 ms later, 1 ms before the claim lease ends; the duplicate claims at 30 s.
+    duplicateAfterFaultyHeartbeat({
+      ledger: {},
+      fault: 'hangs',
+      renewalLatency: `${toolLedgerCompleteTimeoutMs - 1} millis`,
+      runFor: '40 seconds',
+      duplicateAt: '30 seconds',
+      thenWait: '11 seconds'
     })
   )
 
@@ -1418,6 +1581,117 @@ describe('tool ledger', () => {
     expect(stored.nestedCalls).toBeUndefined()
     expect(resultText(stored)).toContain('reduced to fit')
   })
+
+  // Regression: replays read the stored copy, which once dropped the marker and cut the
+  // review call off the end of the text, so a replayed paused call read as an ordinary failure.
+  it('keeps the input-required marker and its review call when it cuts a stored result', () => {
+    const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
+    const ref = { reviewToolName: 'review_input', pauseIds: ['pause_1'] }
+    const reviewCall = `It has not completed. To continue, call review_input({"pauseIds":["pause_1"]}): a person answers, then the call finishes. Do not call the tool again for the same work.`
+
+    const live = makeInputRequiredToolResult({
+      toolCallId: 'call_1',
+      content: `Remote tool paused: ${'form text '.repeat(400)}`,
+      reviewToolName: 'review_input',
+      pauseIds: ['pause_1']
+    })
+
+    const stored = toolLedgerResult(live, 1_000)
+
+    expect(bytes(live)).toBeGreaterThan(1_000)
+    expect(bytes(stored)).toBeLessThanOrEqual(1_000)
+    expect(stored.isError).toBe(true)
+    expect(stored.structuredContent).toEqual({ code: 'input_required', inputRequired: ref })
+    expect(toolInputRequired(stored)).toEqual(Option.some(ref))
+    expect(resultText(stored)).toMatch(/^Remote tool paused: (form text )+[^\n]*…\n/)
+    expect(resultText(stored)).toContain(
+      `…\n${reviewCall}\n\n[The stored copy of this result was reduced to fit the tool ledger bound.]`
+    )
+
+    // Extra structured fields go; the marker stays. Below its own size, so does the review call.
+    const extra = ToolResult.make({
+      toolCallId: 'call_1',
+      content: [TextPart.make({ text: 'x'.repeat(2_000) })],
+      isError: true,
+      structuredContent: { code: 'input_required', inputRequired: ref, form: 'f'.repeat(2_000) }
+    })
+
+    const cut = toolLedgerResult(extra, 1_000)
+
+    expect(bytes(cut)).toBeLessThanOrEqual(1_000)
+    expect(cut.structuredContent).toEqual({ code: 'input_required', inputRequired: ref })
+    expect(resultText(cut)).toContain(`…\n${reviewCall}\n\n[The stored copy`)
+
+    expect(toolLedgerResult(live, 10)).toEqual(
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content: reviewCall,
+        isError: true,
+        structuredContent: { code: 'input_required', inputRequired: ref }
+      })
+    )
+  })
+
+  it('keeps code mode pause refs only with the notice code mode wrote', () => {
+    const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+    const notice = `1 call needs a person's input and has not completed. To continue, call:\n- review_input({"pauseIds":["p1"]})`
+
+    const result = (content: string) =>
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content,
+        structuredContent: { codemode: { ok: true, inputRequired: pauses, extra: 'e'.repeat(500) } }
+      })
+
+    const codeMode = toolLedgerResult(result(`${'x'.repeat(2_000)}\n\n${notice}`), 1_000)
+
+    expect(codeMode.structuredContent).toEqual({ codemode: { ok: true, inputRequired: pauses } })
+    expect(resultText(codeMode)).toContain(`…\n\n${notice}\n\n[The stored copy`)
+
+    // Another tool (a remote MCP tool, say) returning the same shape without the notice: the
+    // ledger neither keeps its refs nor writes a notice from its data.
+    const other = toolLedgerResult(result('x'.repeat(2_000)), 1_000)
+
+    expect(other.structuredContent).toBeUndefined()
+    expect(resultText(other)).not.toContain('review_input')
+    expect(resultText(other)).toMatch(/^x+…\n\n\[The stored copy/)
+  })
+
+  it.effect('replays a large input-required result as input-required', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore({ scope: 'run_1' })
+
+      const paused = makeTool<TestContext, typeof NoteParams>({
+        name: 'append_note',
+        description: 'Append a note',
+        parameters: NoteParams,
+        access: 'write',
+        execute: ({ call, params }) =>
+          Effect.sync(() => {
+            probe.runs.push(params.note)
+
+            return makeInputRequiredToolResult({
+              toolCallId: call.id,
+              content: `Remote tool paused: ${'form text '.repeat(400)}`,
+              reviewToolName: 'review_input',
+              pauseIds: ['pause_1']
+            })
+          })
+      })
+
+      const ledger: ToolLedgerOptions = { store, maxResultBytes: 1_000 }
+      const first = yield* execute([paused], noteCall(), ledger)
+      const replayed = yield* execute([paused], noteCall(), ledger)
+
+      expect(probe.runs).toEqual(['hot lead'])
+      expect(toolInputRequired(first)).toEqual(
+        Option.some({ reviewToolName: 'review_input', pauseIds: ['pause_1'] })
+      )
+      expect(toolInputRequired(replayed)).toEqual(toolInputRequired(first))
+      expect(resultText(replayed)).toContain('call review_input({"pauseIds":["pause_1"]})')
+    })
+  )
 
   it.effect('stores bounded, wire-safe results that round-trip through the JSON codec', () =>
     Effect.gen(function* () {

@@ -69,7 +69,9 @@ Do not use the Effect API inside a `'use workflow'` function. Keep it in routes,
 
 When `runToolBatchStep` returns `awaitingInput`, the package calls `awaitInput`, waits for the hook result, then reruns the same tool batch with accumulated HITL responses.
 
-Your app owns hook tokens, route auth, response validation, and request matching.
+Your app owns hook tokens, route auth, response validation, and request matching. Give each pause
+its own token, and do not read `resumeHook` success as "the answer was used": record the answer
+durably first ([HITL resume](./hitl-resume)).
 
 ## Emit replay-safe stream events
 

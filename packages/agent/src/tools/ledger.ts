@@ -8,7 +8,12 @@ import {
   type Content,
   type ContentPart,
   type FilePart,
-  type ToolCall
+  type ToolCall,
+  inputRequiredNotice,
+  type ToolInputRequired,
+  toolInputRequired,
+  toolInputRequiredCode,
+  ToolInputRequiredRef
 } from '@yolk-sdk/agent/protocol'
 import {
   compactToolArguments,
@@ -16,6 +21,7 @@ import {
   truncationMarker,
   utf8ByteLength
 } from '../protocol/bounded-text.ts'
+import { inputRequiredInstruction } from '../protocol/input-required.ts'
 import { subagentToolName } from '../protocol/tool.ts'
 import type { ToolAccess } from './registry.ts'
 import { sha256HexSync } from './sha256.ts'
@@ -153,10 +159,10 @@ type ClaimRequestFields = {
  *
  * Every operation must be interruptible, for example `Effect.tryPromise` passing its
  * `AbortSignal` to the driver. The ledger's timeouts (polls within the wait, each `heartbeat` and
- * `complete` attempt bounded by `toolLedgerCompleteTimeoutMs`) interrupt the operation and wait
- * for it to stop, so they cannot cut uninterruptible store work: an `Effect.uninterruptible`
- * section, or a release or rollback that blocks, holds the wait, heartbeat, or completion (and
- * the call's interruption) until it ends.
+ * `complete` attempt bounded by `toolLedgerCompleteTimeoutMs`, a heartbeat by a sixth of the lease
+ * when shorter) interrupt the operation and wait for it to stop, so they cannot cut
+ * uninterruptible store work: an `Effect.uninterruptible` section, or a release or rollback that
+ * blocks, holds the wait, heartbeat, or completion (and the call's interruption) until it ends.
  */
 export type ToolLedgerStore = {
   /** Host scope (for example the Workflow run id); the prefix of every idempotency key. */
@@ -275,9 +281,20 @@ export type ToolLedgerOptions = {
    * built-in `subagent` tool).
    */
   readonly isLedgered?: (input: ToolLedgerPolicyInput) => boolean
-  /** Lease of a running call. Default 30000. */
+  /**
+   * Lease of a running call. Default 30000. Each heartbeat is cut at the shorter of
+   * `toolLedgerCompleteTimeoutMs` and a sixth of the lease, so heartbeat (and claim) latency must
+   * stay under `min(5000, leaseMs / 6)`: a slower store needs a longer lease, or every heartbeat
+   * times out and the lease of a running call lapses.
+   */
   readonly leaseMs?: number
-  /** Heartbeat interval while a call runs. Default a third of `leaseMs`; at most half of it. */
+  /**
+   * Heartbeat interval while a call runs. Default a third of `leaseMs`. Longer values are clamped
+   * to half the lease minus the heartbeat timeout (the shorter of `toolLedgerCompleteTimeoutMs` and
+   * a sixth of `leaseMs`), so a heartbeat that fails at its timeout and the next one both land
+   * within the lease. A margin for one late heartbeat with a fast claim and fast store (latency
+   * under that timeout; see `leaseMs`), not a guarantee: it is zero at the defaults.
+   */
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */
   readonly pollIntervalMs?: number
@@ -316,8 +333,9 @@ export const defaultToolLedgerMaxWaitMs = 150_000
 
 export const defaultToolLedgerMaxResultBytes = 1024 * 1024
 
-/** Timeout of one `store.complete` attempt (three attempts at most) and of each `store.heartbeat`.
- * It only cuts interruptible store work (see `ToolLedgerStore`).
+/** Timeout of one `store.complete` attempt (three attempts at most), and of each `store.heartbeat`
+ * unless a sixth of `leaseMs` is shorter. It only cuts interruptible store work (see
+ * `ToolLedgerStore`).
  */
 export const toolLedgerCompleteTimeoutMs = 5_000
 
@@ -478,17 +496,22 @@ const codeUnitPrefix = (text: string, maxUnits: number) => {
 
 // The whole `text` when it fits, else its longest prefix (whole code points) whose cut content
 // keeps the result within `maxBytes`, measured on the actual serialized JSON (escapes such as
-// `\u0001` take six bytes). The `File` parts follow the text, structural. Below that: the note
-// alone (with the file parts, then without), then an empty content; `files` stays either way.
+// `\u0001` take six bytes). The `tail` follows the text, uncut, then the note; the `File` parts
+// follow, structural. Below that: the tail and note alone (with the file parts, then without),
+// then the tail alone or an empty content; `files` stays either way.
 const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number): ToolResult => {
-  const { text, files } = reduced
+  const { text, tail, files } = reduced
+
+  const note = tail === undefined ? reducedNote : `${tail.text}\n\n${reducedNote}`
 
   const withFiles = (kept: string): Content =>
     files.length === 0 ? kept : [TextPart.make({ text: kept }), ...files]
 
   const withText = (kept: string): StoredResultFields => ({
     ...base,
-    content: withFiles(`${kept}\n\n${reducedNote}`)
+    content: withFiles(
+      `${kept}${tail === undefined ? '' : `${tail.separator}${tail.text}`}\n\n${reducedNote}`
+    )
   })
 
   const whole = withText(text)
@@ -504,12 +527,15 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
 
   if (resultBytes(cut(0)) > maxBytes) {
     const fallbacks: ReadonlyArray<StoredResultFields> = [
-      { ...base, content: withFiles(reducedNote) },
-      { ...base, content: reducedNote }
+      { ...base, content: withFiles(note) },
+      { ...base, content: note }
     ]
 
     return ToolResult.make(
-      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? { ...base, content: '' }
+      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? {
+        ...base,
+        content: tail?.text ?? ''
+      }
     )
   }
 
@@ -542,9 +568,18 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * fixed error result (`typedResultTooLargeMessage`). `File` parts without inline bytes (`Ref`,
  * `Omitted`) and `files` stay through every step: the text cut keeps them after the text, as
  * parts, so their labels never become text a code mode script reads; only a bound too small for
- * them leaves the note alone. A bound smaller than the identifying fields (`toolCallId`,
- * `isError`, `acceptance`, `usage`) leaves an empty content. The live call still returns the
- * original result; only replays see the stored copy.
+ * them leaves the note alone. A result that names pauses (ADR 0014) keeps them through every
+ * step, with the text that tells the model to review them after the cut text (rebuilt from the
+ * marker when the text does not end with it), so a replay still names its pauses: an
+ * input-required error result keeps its marker `{ code, inputRequired }` and its review call
+ * (`inputRequiredInstruction`); a code mode result keeps `{ codemode: { ok, inputRequired } }` and
+ * its notice (`inputRequiredNotice`) only when its text ends with that notice (never rebuilt, so
+ * another tool returning that shape gets no notice the ledger wrote; its refs are dropped). Their
+ * other `structuredContent` fields are dropped. The kept refs and their text are never cut, so
+ * with many pause ids they can exceed `maxBytes`. A bound smaller than the identifying fields
+ * (`toolCallId`, `isError`, `acceptance`, `usage`, kept pause refs) leaves an empty content, or
+ * only the review text. The live call still returns the original result; only replays see the
+ * stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,
@@ -600,9 +635,65 @@ export const toolLedgerResult = (
 
   delete withoutStructured.structuredContent
 
+  const reduced = cutContent(result.content)
+
+  // Pause refs (ADR 0014) are how every replay finds paused calls: like `files`, they stay, and
+  // the cut keeps the text that tells the model to review them.
+  const pauses = keptPauses(full, reduced.text)
+
+  if (pauses !== undefined) withoutStructured.structuredContent = pauses.structuredContent
+
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  return fitText(withoutStructured, cutContent(result.content), maxBytes)
+  return fitText(
+    withoutStructured,
+    pauses === undefined ? reduced : withTail(reduced, pauses.tail),
+    maxBytes
+  )
+}
+
+// A code mode result's pauses (ADR 0014; `@yolk-sdk/codemode`, which this package never
+// imports): `structuredContent.codemode.inputRequired`, with `inputRequiredNotice` of them at the
+// end of its content (code mode always writes it there). Decoding keeps only these fields.
+const CodeModePauses = Schema.Struct({
+  codemode: Schema.Struct({
+    ok: Schema.Boolean,
+    inputRequired: Schema.NonEmptyArray(ToolInputRequiredRef)
+  })
+})
+
+const decodeCodeModePauses = Schema.decodeUnknownOption(CodeModePauses)
+
+type KeptPauses = {
+  /** The structured fields that name the pauses, alone. */
+  readonly structuredContent: ToolInputRequired | typeof CodeModePauses.Type
+  /** The text telling the model to review them, which the cut never removes. */
+  readonly tail: Tail
+}
+
+// What a result that names pauses keeps through every reduction: an input-required error result's
+// marker and review call (rebuilt when missing), or a code mode result's pause list and notice.
+// The shape alone does not prove a code mode result (any tool can return it), so code mode refs
+// are kept only when `text` already ends with their notice, which the ledger never writes itself.
+const keptPauses = (full: StoredResultFields, text: string): KeptPauses | undefined => {
+  const marker = toolInputRequired(full)
+
+  if (Option.isSome(marker)) {
+    return {
+      structuredContent: { code: toolInputRequiredCode, inputRequired: marker.value },
+      tail: { separator: '\n', text: inputRequiredInstruction(marker.value) }
+    }
+  }
+
+  return Option.getOrUndefined(
+    Option.flatMap(decodeCodeModePauses(full.structuredContent), codeMode => {
+      const notice = inputRequiredNotice(codeMode.codemode.inputRequired)
+
+      return text.endsWith(notice)
+        ? Option.some({ structuredContent: codeMode, tail: { separator: '\n\n', text: notice } })
+        : Option.none()
+    })
+  )
 }
 
 /** How `toolLedgerResult` reduces a result. */
@@ -631,8 +722,16 @@ const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
   return ToolResult.make(fields)
 }
 
+/** Text after the cut text that is never cut, joined to it by `separator`. */
+type Tail = {
+  readonly separator: string
+  readonly text: string
+}
+
 type CutContent = {
   readonly text: string
+  /** A result's pause review text (`keptPauses`). */
+  readonly tail: Tail | undefined
   readonly files: ReadonlyArray<FilePart>
 }
 
@@ -640,11 +739,32 @@ type CutContent = {
 // `File` parts, which it never cuts and never turns into text.
 const cutContent = (content: Content): CutContent =>
   Predicate.isString(content)
-    ? { text: content, files: [] }
+    ? { text: content, tail: undefined, files: [] }
     : {
         text: contentText(withoutMediaBytes(content.filter(part => !isStructuralFilePart(part)))),
+        tail: undefined,
         files: content.filter(isStructuralFilePart)
       }
+
+// Moves `tail` out of the text that is cut: taken off its end (with its separator) when the text
+// ends with it, as `makeInputRequiredToolResult` and code mode write it, else added after it (an
+// input-required marker's review call only; code mode notices are kept only when present).
+const withTail = (reduced: CutContent, tail: Tail): CutContent => {
+  const before = reduced.text.endsWith(tail.text)
+    ? reduced.text.slice(0, reduced.text.length - tail.text.length)
+    : undefined
+
+  return {
+    ...reduced,
+    text:
+      before === undefined
+        ? reduced.text
+        : before.endsWith(tail.separator)
+          ? before.slice(0, before.length - tail.separator.length)
+          : before,
+    tail
+  }
+}
 
 const nestedSeq = (key: string) => {
   const seq = Number(key.slice(key.lastIndexOf('/') + 1))
@@ -667,6 +787,8 @@ export type ResolvedToolLedgerOptions = {
   readonly isLedgered: (input: ToolLedgerPolicyInput) => boolean
   readonly leaseMs: number
   readonly heartbeatIntervalMs: number
+  /** Timeout of each `store.heartbeat` (see `resolveToolLedgerOptions`). */
+  readonly heartbeatTimeoutMs: number
   readonly pollIntervalMs: number
   readonly maxWaitMs: number
   readonly deadline: (() => number | undefined) | undefined
@@ -681,16 +803,27 @@ const positive = (value: number | undefined, fallback: number) =>
 export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedToolLedgerOptions => {
   const leaseMs = positive(options.leaseMs, defaultToolLedgerLeaseMs)
 
+  // Renewal margin so a single late heartbeat does not let the lease lapse: heartbeats run one
+  // interval after the previous one ends, so a heartbeat that fails at its timeout and the next
+  // one, which may take up to its timeout to land, must fit in the lease
+  // (2 * interval + 2 * timeout <= leaseMs). A sixth of the lease bounds the timeout, keeping the
+  // default third-of-lease interval within that at every lease (at the default 30 s lease: 5 s and
+  // 10 s, unchanged); a longer interval is clamped. Not a guarantee: a stalled process, a slow
+  // claim, or slow heartbeats that still succeed can let the lease expire.
+  const heartbeatTimeoutMs = Math.min(
+    toolLedgerCompleteTimeoutMs,
+    Math.max(1, Math.floor(leaseMs / 6))
+  )
+
   return {
     store: options.store,
     isLedgered: options.isLedgered ?? defaultToolLedgerPolicy,
     leaseMs,
-    // At most half the lease: renewal margin so a single late heartbeat does not let the lease
-    // lapse. Not a guarantee: a stalled process or store can still let it expire.
     heartbeatIntervalMs: Math.min(
       positive(options.heartbeatIntervalMs, Math.max(1, Math.floor(leaseMs / 3))),
-      Math.max(1, Math.floor(leaseMs / 2))
+      Math.max(1, Math.floor(leaseMs / 2) - heartbeatTimeoutMs)
     ),
+    heartbeatTimeoutMs,
     pollIntervalMs: positive(options.pollIntervalMs, defaultToolLedgerPollIntervalMs),
     maxWaitMs:
       options.maxWaitMs !== undefined && Number.isFinite(options.maxWaitMs)
@@ -811,19 +944,17 @@ const ledgerUnavailable = (call: ToolCall) => (error: ToolLedgerError) =>
     message: `The tool ledger is unavailable (${error.message}); ${call.name} was not run.`
   })
 
-// One store write, failing with a `ToolLedgerError` once `toolLedgerCompleteTimeoutMs` passes.
-// The timeout interrupts the operation and waits for it to stop, so it only bounds interruptible
-// store work (the `ToolLedgerStore` contract).
+// One store write, failing with a `ToolLedgerError` once `timeoutMs` passes. The timeout
+// interrupts the operation and waits for it to stop, so it only bounds interruptible store work
+// (the `ToolLedgerStore` contract).
 const boundedStoreWrite = <A>(
-  write: Effect.Effect<A, ToolLedgerError>
+  write: Effect.Effect<A, ToolLedgerError>,
+  timeoutMs: number
 ): Effect.Effect<A, ToolLedgerError> =>
   write.pipe(
     Effect.timeoutOrElse({
-      duration: Duration.millis(toolLedgerCompleteTimeoutMs),
-      orElse: () =>
-        Effect.fail(
-          new ToolLedgerError({ message: `timed out after ${toolLedgerCompleteTimeoutMs} ms` })
-        )
+      duration: Duration.millis(timeoutMs),
+      orElse: () => Effect.fail(new ToolLedgerError({ message: `timed out after ${timeoutMs} ms` }))
     })
   )
 
@@ -991,7 +1122,8 @@ export const executeLedgered = (input: {
           key,
           leaseExpiresAtMs: now + options.leaseMs,
           leaseMs: options.leaseMs
-        })
+        }),
+        options.heartbeatTimeoutMs
       )
     }).pipe(
       Effect.catch(error =>
@@ -1006,7 +1138,10 @@ export const executeLedgered = (input: {
       Effect.gen(function* () {
         const completedAtMs = yield* Clock.currentTimeMillis
 
-        yield* boundedStoreWrite(store.complete({ key, outcome, completedAtMs }))
+        yield* boundedStoreWrite(
+          store.complete({ key, outcome, completedAtMs }),
+          toolLedgerCompleteTimeoutMs
+        )
       }).pipe(
         Effect.retry({ times: 2 }),
         Effect.catch(error =>

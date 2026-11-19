@@ -85,7 +85,17 @@ const widerScope = (current: Promotable | undefined, next: Promotable): Promotab
   current === 'input' || next === 'input' ? 'input' : 'steer'
 
 export const makeCoordinator = <Key, E, Reason = never>(options: {
-  readonly drain: (key: Key, force: boolean, scope: Promotable) => Effect.Effect<void, E>
+  /**
+   * `stopping` reads this execution's stopping flag when run. The loop checks it
+   * before draining, but an interrupt can land after that check, so a drain
+   * re-checks it where it consumes intent (Inbox `beginDrain`, under its gate).
+   */
+  readonly drain: (
+    key: Key,
+    force: boolean,
+    scope: Promotable,
+    stopping: Effect.Effect<boolean>
+  ) => Effect.Effect<void, E>
   readonly started?: (key: Key) => Effect.Effect<void>
   readonly settled?: (key: Key, exit: Exit.Exit<void, E>, reason?: Reason) => Effect.Effect<void>
 }): Effect.Effect<Coordinator<Key, E, Reason>, never, Scope.Scope> =>
@@ -101,7 +111,12 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       Effect.suspend(() => {
         if (execution.stopping) return Effect.void
 
-        return options.drain(key, force, execution.scope)
+        return options.drain(
+          key,
+          force,
+          execution.scope,
+          Effect.sync(() => execution.stopping)
+        )
       }).pipe(
         Effect.andThen(
           Effect.suspend(() => {
@@ -297,13 +312,25 @@ export class RunCoordinator extends Context.Service<
   Coordinator<string, never, InterruptReason>
 >()('@yolk-sdk/harness/RunCoordinator') {
   static layer = (options?: {
-    readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+    readonly drain?: (
+      runId: string,
+      force: boolean,
+      scope: Promotable,
+      stopping: Effect.Effect<boolean>
+    ) => Effect.Effect<void>
+    /**
+     * Asked when an owner settles without interruption (success or a drain defect). `true`
+     * keeps the claim so `resumeSuspended` re-drives the run under its budget; the default
+     * releases it.
+     */
+    readonly keepClaimOnSettle?: (runId: string) => Effect.Effect<boolean>
   }): Layer.Layer<RunCoordinator, never, RunStore> =>
     Layer.effect(
       this,
       Effect.gen(function* () {
         const store = yield* RunStore
         const drain = options?.drain ?? ((_runId, _force, _scope) => Effect.void)
+        const keepClaimOnSettle = options?.keepClaimOnSettle ?? (_runId => Effect.succeed(false))
         const acquired = new Set<string>()
 
         return yield* makeCoordinator<string, never, InterruptReason>({
@@ -320,11 +347,12 @@ export class RunCoordinator extends Context.Service<
             Effect.suspend(() => {
               const owned = acquired.delete(runId)
 
-              if (
-                owned &&
-                (reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit)))
-              ) {
-                return store.release(runId)
+              if (owned && reason === 'user') return store.release(runId)
+
+              if (owned && reason === undefined && !Exit.hasInterrupts(exit)) {
+                return keepClaimOnSettle(runId).pipe(
+                  Effect.flatMap(keep => (keep ? Effect.void : store.release(runId)))
+                )
               }
 
               // Acquisition receipt guards automatic failed-start settlement only.

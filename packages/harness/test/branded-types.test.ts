@@ -138,7 +138,7 @@ describe('harness branded tokens', () => {
       expect(yield* inbox.acceptHitl('run_1', staleAdmission, Effect.void)).toEqual(
         HitlDecision.Stale()
       )
-      expect(yield* inbox.clearPark('run_1', ParkGeneration.make('stale'))).toBe(false)
+      expect(yield* inbox.clearPark('run_1', ParkGeneration.make('stale'), Effect.void)).toBe(false)
       expect(
         yield* inbox.acceptHitl(
           'run_1',
