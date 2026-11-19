@@ -8,7 +8,10 @@ import {
   type Content,
   type ContentPart,
   type FilePart,
-  type ToolCall
+  type ToolCall,
+  type ToolInputRequired,
+  toolInputRequired,
+  toolInputRequiredCode
 } from '@yolk-sdk/agent/protocol'
 import {
   compactToolArguments,
@@ -16,6 +19,7 @@ import {
   truncationMarker,
   utf8ByteLength
 } from '../protocol/bounded-text.ts'
+import { inputRequiredInstruction } from '../protocol/input-required.ts'
 import { subagentToolName } from '../protocol/tool.ts'
 import type { ToolAccess } from './registry.ts'
 import { sha256HexSync } from './sha256.ts'
@@ -478,17 +482,20 @@ const codeUnitPrefix = (text: string, maxUnits: number) => {
 
 // The whole `text` when it fits, else its longest prefix (whole code points) whose cut content
 // keeps the result within `maxBytes`, measured on the actual serialized JSON (escapes such as
-// `\u0001` take six bytes). The `File` parts follow the text, structural. Below that: the note
-// alone (with the file parts, then without), then an empty content; `files` stays either way.
+// `\u0001` take six bytes). The `tail` follows the text, uncut, then the note; the `File` parts
+// follow, structural. Below that: the tail and note alone (with the file parts, then without),
+// then the tail alone or an empty content; `files` stays either way.
 const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number): ToolResult => {
-  const { text, files } = reduced
+  const { text, tail, files } = reduced
+
+  const note = tail === undefined ? reducedNote : `${tail}\n\n${reducedNote}`
 
   const withFiles = (kept: string): Content =>
     files.length === 0 ? kept : [TextPart.make({ text: kept }), ...files]
 
   const withText = (kept: string): StoredResultFields => ({
     ...base,
-    content: withFiles(`${kept}\n\n${reducedNote}`)
+    content: withFiles(`${kept}${tail === undefined ? '' : `\n${tail}`}\n\n${reducedNote}`)
   })
 
   const whole = withText(text)
@@ -504,12 +511,12 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
 
   if (resultBytes(cut(0)) > maxBytes) {
     const fallbacks: ReadonlyArray<StoredResultFields> = [
-      { ...base, content: withFiles(reducedNote) },
-      { ...base, content: reducedNote }
+      { ...base, content: withFiles(note) },
+      { ...base, content: note }
     ]
 
     return ToolResult.make(
-      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? { ...base, content: '' }
+      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? { ...base, content: tail ?? '' }
     )
   }
 
@@ -542,8 +549,12 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * fixed error result (`typedResultTooLargeMessage`). `File` parts without inline bytes (`Ref`,
  * `Omitted`) and `files` stay through every step: the text cut keeps them after the text, as
  * parts, so their labels never become text a code mode script reads; only a bound too small for
- * them leaves the note alone. A bound smaller than the identifying fields (`toolCallId`,
- * `isError`, `acceptance`, `usage`) leaves an empty content. The live call still returns the
+ * them leaves the note alone. An input-required result (ADR 0014) keeps its marker (only the
+ * marker: other `structuredContent` fields are dropped) and its review call
+ * (`inputRequiredInstruction`, after the cut text, rebuilt from the marker when the text does not
+ * end with it), so a replay still reads as input-required and names its pauses. A bound smaller
+ * than the identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, an input-required
+ * marker) leaves an empty content, or only the review call. The live call still returns the
  * original result; only replays see the stored copy.
  */
 export const toolLedgerResult = (
@@ -600,6 +611,27 @@ export const toolLedgerResult = (
 
   delete withoutStructured.structuredContent
 
+  // An input-required marker (ADR 0014) is how every replay finds the paused call's pauses: like
+  // `files`, it stays (the marker alone, a few hundred bytes), and the cut keeps its review call.
+  const inputRequired = toolInputRequired(full)
+
+  if (Option.isSome(inputRequired)) {
+    const marker: ToolInputRequired = {
+      code: toolInputRequiredCode,
+      inputRequired: inputRequired.value
+    }
+
+    withoutStructured.structuredContent = marker
+
+    return resultBytes(withoutStructured) <= maxBytes
+      ? ToolResult.make(withoutStructured)
+      : fitText(
+          withoutStructured,
+          withTail(cutContent(result.content), inputRequiredInstruction(inputRequired.value)),
+          maxBytes
+        )
+  }
+
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
   return fitText(withoutStructured, cutContent(result.content), maxBytes)
@@ -633,6 +665,8 @@ const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
 
 type CutContent = {
   readonly text: string
+  /** Text after `text` that is never cut (an input-required result's review call). */
+  readonly tail: string | undefined
   readonly files: ReadonlyArray<FilePart>
 }
 
@@ -640,11 +674,22 @@ type CutContent = {
 // `File` parts, which it never cuts and never turns into text.
 const cutContent = (content: Content): CutContent =>
   Predicate.isString(content)
-    ? { text: content, files: [] }
+    ? { text: content, tail: undefined, files: [] }
     : {
         text: contentText(withoutMediaBytes(content.filter(part => !isStructuralFilePart(part)))),
+        tail: undefined,
         files: content.filter(isStructuralFilePart)
       }
+
+// Moves `tail` out of the text that is cut: taken off its end (with the line break before it) when
+// the text ends with it, as `makeInputRequiredToolResult` writes it, else added after it.
+const withTail = (reduced: CutContent, tail: string): CutContent => ({
+  ...reduced,
+  text: reduced.text.endsWith(tail)
+    ? reduced.text.slice(0, reduced.text.length - tail.length).replace(/\n$/, '')
+    : reduced.text,
+  tail
+})
 
 const nestedSeq = (key: string) => {
   const seq = Number(key.slice(key.lastIndexOf('/') + 1))

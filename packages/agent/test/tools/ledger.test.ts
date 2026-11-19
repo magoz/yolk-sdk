@@ -17,12 +17,14 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   ImagePart,
   inlineBase64AttachmentSource,
+  makeInputRequiredToolResult,
   NestedToolCallAccess,
   NestedToolCallRecord,
   NestedToolCalls,
   TextPart,
   ToolCall,
   ToolDef,
+  toolInputRequired,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -1418,6 +1420,92 @@ describe('tool ledger', () => {
     expect(stored.nestedCalls).toBeUndefined()
     expect(resultText(stored)).toContain('reduced to fit')
   })
+
+  // Regression (#298): replays read the stored copy, which once dropped the marker and cut the
+  // review call off the end of the text, so a replayed paused call read as an ordinary failure.
+  it('keeps the input-required marker and its review call when it cuts a stored result', () => {
+    const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
+    const ref = { reviewToolName: 'review_input', pauseIds: ['pause_1'] }
+    const reviewCall = `It has not completed. To continue, call review_input({"pauseIds":["pause_1"]}): a person answers, then the call finishes. Do not call the tool again for the same work.`
+
+    const live = makeInputRequiredToolResult({
+      toolCallId: 'call_1',
+      content: `Remote tool paused: ${'form text '.repeat(400)}`,
+      reviewToolName: 'review_input',
+      pauseIds: ['pause_1']
+    })
+
+    const stored = toolLedgerResult(live, 1_000)
+
+    expect(bytes(live)).toBeGreaterThan(1_000)
+    expect(bytes(stored)).toBeLessThanOrEqual(1_000)
+    expect(stored.isError).toBe(true)
+    expect(stored.structuredContent).toEqual({ code: 'input_required', inputRequired: ref })
+    expect(toolInputRequired(stored)).toEqual(Option.some(ref))
+    expect(resultText(stored)).toMatch(/^Remote tool paused: (form text )+[^\n]*…\n/)
+    expect(resultText(stored)).toContain(
+      `…\n${reviewCall}\n\n[The stored copy of this result was reduced to fit the tool ledger bound.]`
+    )
+
+    // Extra structured fields go; the marker stays. Below its own size, so does the review call.
+    const extra = ToolResult.make({
+      toolCallId: 'call_1',
+      content: [TextPart.make({ text: 'x'.repeat(2_000) })],
+      isError: true,
+      structuredContent: { code: 'input_required', inputRequired: ref, form: 'f'.repeat(2_000) }
+    })
+
+    const cut = toolLedgerResult(extra, 1_000)
+
+    expect(bytes(cut)).toBeLessThanOrEqual(1_000)
+    expect(cut.structuredContent).toEqual({ code: 'input_required', inputRequired: ref })
+    expect(resultText(cut)).toContain(`…\n${reviewCall}\n\n[The stored copy`)
+
+    expect(toolLedgerResult(live, 10)).toEqual(
+      ToolResult.make({
+        toolCallId: 'call_1',
+        content: reviewCall,
+        isError: true,
+        structuredContent: { code: 'input_required', inputRequired: ref }
+      })
+    )
+  })
+
+  it.effect('replays a large input-required result as input-required', () =>
+    Effect.gen(function* () {
+      const probe = makeProbe()
+      const store = makeInMemoryToolLedgerStore({ scope: 'run_1' })
+
+      const paused = makeTool<TestContext, typeof NoteParams>({
+        name: 'append_note',
+        description: 'Append a note',
+        parameters: NoteParams,
+        access: 'write',
+        execute: ({ call, params }) =>
+          Effect.sync(() => {
+            probe.runs.push(params.note)
+
+            return makeInputRequiredToolResult({
+              toolCallId: call.id,
+              content: `Remote tool paused: ${'form text '.repeat(400)}`,
+              reviewToolName: 'review_input',
+              pauseIds: ['pause_1']
+            })
+          })
+      })
+
+      const ledger: ToolLedgerOptions = { store, maxResultBytes: 1_000 }
+      const first = yield* execute([paused], noteCall(), ledger)
+      const replayed = yield* execute([paused], noteCall(), ledger)
+
+      expect(probe.runs).toEqual(['hot lead'])
+      expect(toolInputRequired(first)).toEqual(
+        Option.some({ reviewToolName: 'review_input', pauseIds: ['pause_1'] })
+      )
+      expect(toolInputRequired(replayed)).toEqual(toolInputRequired(first))
+      expect(resultText(replayed)).toContain('call review_input({"pauseIds":["pause_1"]})')
+    })
+  )
 
   it.effect('stores bounded, wire-safe results that round-trip through the JSON codec', () =>
     Effect.gen(function* () {

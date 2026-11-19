@@ -36,6 +36,12 @@ field would have to be threaded through the protocol class, the ledger's stored 
 bounding, transcripts and React. The marker needs two small changes (plan status and code mode
 reporting) and stays plain JSON.
 
+Every replay (a redelivered step, an interrupted plan apply's listing, code mode's abandoned-script
+listing) reads the ledger's stored copy, so the ledger's bounding (`toolLedgerResult`) keeps the
+marker, a few hundred bytes, the way it keeps `files`: over `maxResultBytes` it drops the other
+`structuredContent` fields and cuts the text before the review call, never the call itself
+(`inputRequiredInstruction`, rebuilt from the marker when the text does not end with it).
+
 Because the marker is plain JSON, a remote system must not be able to forge it: Yolk's MCP client
 keeps a remote error result's structured content that decodes as the marker under
 `remoteStructuredContent` (`toolCallResultToToolResult`), so a server's own failure never reads as
@@ -112,7 +118,8 @@ runs one round per request:
 `packages/agent/test/tools/input-review.test.ts` (marker helpers, call validation against stored
 pauses and outages, admission, resume and new pauses, a refused review, crash listing),
 `packages/agent/test/tools/plan.test.ts` (`input_required` status, apply continuing past it,
-interrupted listing, older outcomes decoding), `packages/codemode/test/pi-executor.test.ts` (caught
+interrupted listing, older outcomes decoding), `packages/agent/test/tools/ledger.test.ts` (a stored
+copy over the bound keeps the marker and the review call), `packages/codemode/test/pi-executor.test.ts` (caught
 pauses still reported), `packages/mcp/test/server/forward.test.ts` (forward and resume through the
 real resumable client, cancel, clients without form elicitation, no approvals, approval first,
 stale state, the JSON path).

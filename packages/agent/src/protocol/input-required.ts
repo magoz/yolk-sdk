@@ -44,9 +44,17 @@ export const inputReviewCallText = (ref: ToolInputRequiredRef) =>
   `${ref.reviewToolName}(${JSON.stringify({ pauseIds: ref.pauseIds })})`
 
 /**
+ * The model-visible sentence `makeInputRequiredToolResult` appends: how to continue (the review
+ * call, and never calling the tool again for the same work). The tool ledger keeps it when it cuts
+ * a stored copy.
+ * @internal
+ */
+export const inputRequiredInstruction = (ref: ToolInputRequiredRef) =>
+  `It has not completed. To continue, call ${inputReviewCallText(ref)}: a person answers, then the call finishes. Do not call the tool again for the same work.`
+
+/**
  * An error result saying the call needs a person's input and has not completed. `content` says
- * what paused it; the result appends how to continue (the review call, and never calling the tool
- * again for the same work).
+ * what paused it; the result appends how to continue (`inputRequiredInstruction`).
  */
 export const makeInputRequiredToolResult = (input: {
   readonly toolCallId: string
@@ -63,7 +71,7 @@ export const makeInputRequiredToolResult = (input: {
 
   return ToolResult.make({
     toolCallId: input.toolCallId,
-    content: `${input.content}\nIt has not completed. To continue, call ${inputReviewCallText(ref)}: a person answers, then the call finishes. Do not call the tool again for the same work.`,
+    content: `${input.content}\n${inputRequiredInstruction(ref)}`,
     isError: true,
     structuredContent
   })
