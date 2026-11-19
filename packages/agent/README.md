@@ -732,19 +732,25 @@ tool-batch event on the last earlier part holding the same call (id, name and ar
 answer (question, input or interaction response, approval denial) on the last earlier part holding
 the request it answers (a denial: a pending approval), else on nothing. A request (including
 `AgentAwaitingInput`'s requests) never reopens a call past its request: a part answered,
-cancelled, denied, running or finished keeps its state against a request for the same call, with
-or without event id. The loop asks for a call only until it settles: an invalid input answer
-re-pends the same request while the part is still pending (only a valid payload emits
-`InputSubmitted`), and a later turn reusing the id asks on its own part. Tool-batch and request
-events must therefore carry the call exactly as the model emitted it: a host that normalizes
-arguments between the model's events and its own adds a second card for a replayed or late event.
-Until a start is
-seen (and after `AgentStart`), and always in `applyAgentEventToChatMessages`, a tool event matches
-the last message holding the call, so a reused id can still update an earlier turn's call there;
-answers, approval denials and added acceptance or interaction results update that one call, not
-every call with the id. `reduceAgentEvents` keeps one tool run per call id: a later turn's call
-replaces the earlier turn's run (whose result stays in `messages`), and a later call reusing the id
-of an accepted (background) call is taken for a replay of it.
+cancelled, denied or finished keeps its state against a request for the same call, with or without
+event id, and the `useAgentChat` reducer keeps its status when every request of an
+`AgentAwaitingInput` names such a call (a replayed pause does not block the run again). The loop
+asks for a call only until it has a result or used an answer: an invalid input answer re-pends the
+same request while the part is still pending (only a valid payload emits `InputSubmitted`), a
+running call has no result, so an abort leaves it running and the next run that resumes it asks
+again (the card shows), and a later turn reusing the id asks on its own part. Tool-batch and
+request events must therefore carry the call exactly as the model emitted it: a host that
+normalizes arguments between the model's events and its own adds a second card for a replayed or
+late event. Until a start is seen (and after `AgentStart`), and always in
+`applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a
+reused id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a
+later call reusing the id whose `AssistantMessage` arrives without `ToolInputStart`/`ToolInputEnd`
+while the earlier call's message is the last assistant message replaces that message, keeps the
+earlier call's settled state and ignores its own request; the loop always emits `ToolInputEnd`,
+which resets the part); answers, approval denials and added acceptance or interaction results
+update that one call, not every call with the id. `reduceAgentEvents` keeps one tool run per call
+id: a later turn's call replaces the earlier turn's run (whose result stays in `messages`), and a
+later call reusing the id of an accepted (background) call is taken for a replay of it.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the

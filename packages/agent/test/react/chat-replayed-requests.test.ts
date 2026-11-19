@@ -25,15 +25,18 @@ import {
   QuestionRequested,
   QuestionResponse,
   ToolApprovalDenied,
+  ToolApprovalPolicy,
   ToolApprovalGranted,
   ToolApprovalRequest,
   ToolApprovalRequested,
   ToolApprovalResponse,
   ToolCall,
+  ToolDef,
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
   ToolResult,
+  UserMessage,
   interactionRequestId,
   zeroAgentUsage,
   type AgentEvent,
@@ -41,8 +44,8 @@ import {
   type HitlResponse,
   type InputToolHandler
 } from '@yolk-sdk/agent/protocol'
-import { LoopConfig, runToolBatch } from '../../src/loop/index.ts'
-import { TestToolExecutor } from '../../src/loop/testing/index.ts'
+import { ContextTransformer, LoopConfig, run, runToolBatch } from '../../src/loop/index.ts'
+import { FauxProvider, TestToolExecutor } from '../../src/loop/testing/index.ts'
 import { AgentChatAction } from '../../src/react/chat-actions.ts'
 import {
   applyAgentEventToChatProjection,
@@ -165,14 +168,6 @@ const approval = (): Kind => {
             reason: 'Not now',
             response: response('denied')
           })
-        ]
-      },
-      {
-        name: 'granted and running',
-        state: 'Running',
-        events: eventId => [
-          granted(eventId),
-          ToolExecutionStarted.make({ eventId: eventId('started'), call })
         ]
       },
       {
@@ -451,6 +446,8 @@ describe('a replayed request after its call settled', () => {
 
     expect(replayed.projection.chatMessages).toEqual(settled.projection.chatMessages)
     expect(replayed.chat.chatMessages).toEqual(settled.chat.chatMessages)
+    // A replayed pause naming only such calls does not block the run again.
+    expect(replayed.chat.status).toEqual(settled.chat.status)
   })
 })
 
@@ -583,6 +580,83 @@ describe('an invalid input answer', () => {
 
       expect(replayed.projection.chatMessages).toEqual(settled.projection.chatMessages)
       expect(replayed.chat.chatMessages).toEqual(settled.chat.chatMessages)
+    })
+  )
+})
+
+describe('a call the run stopped while it ran', () => {
+  // A running call has no result: after an abort, the next run resumes it and asks again.
+  const kind = approval()
+
+  const gated = ToolDef.make({
+    name: kind.call.name,
+    description: 'Deploy.',
+    parameters: {},
+    approval: ToolApprovalPolicy.make({ mode: 'manual' })
+  })
+
+  const goOn = UserMessage.make({ content: 'Go on' })
+
+  const approved = ToolApprovalResponse.make({
+    requestId: kind.request.requestId,
+    toolCallId,
+    decision: 'approved',
+    source: 'user'
+  })
+
+  it.effect('shows the approval card again and waits for it', () =>
+    Effect.gen(function* () {
+      // The loop's own events for the next run: the transcript holds the call without a result.
+      const resumed = yield* run({
+        messages: [UserMessage.make({ content: 'Deploy' }), ask(kind.call), goOn],
+        systemPrompt: 'Deploy.',
+        tools: [gated],
+        model: 'faux',
+        resume: true
+      }).pipe(
+        Stream.runCollect,
+        Effect.map(chunk => Array.from(chunk)),
+        Effect.provide(
+          Layer.mergeAll(
+            ContextTransformer.identity,
+            LoopConfig.defaultLayer,
+            FauxProvider.layer(),
+            TestToolExecutor.layer({})
+          )
+        )
+      )
+
+      expect(resumed.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'ToolApprovalRequested',
+        'AgentAwaitingInput'
+      ])
+
+      const paused = applyEvents(initialChats, [
+        LLMStreamStart.make({ eventId: 'run:start-1', turn: 1 }),
+        AssistantMessageEvent.make({ eventId: 'run:message-1', message: ask(kind.call) }),
+        kind.requested('run:request'),
+        awaiting(kind.request, 'run:pause')
+      ])
+
+      const running = applyEvents(submit(paused, approved), [
+        ToolApprovalGranted.make({ eventId: 'run:granted', toolCallId, response: approved }),
+        ToolExecutionStarted.make({ eventId: 'run:started', call: kind.call })
+      ])
+
+      expect(stateTags(running)).toEqual(both(['Running']))
+
+      const stopped = reduceAgentChatState(running.chat, AgentChatAction.Abort())
+
+      const next: Chats = {
+        ...running,
+        chat: reduceAgentChatState(stopped, AgentChatAction.Submit({ message: goOn }))
+      }
+
+      const asked = applyEvents(next, resumed)
+
+      expect(stateTags(asked)).toEqual(both(['ApprovalRequested']))
+      expect(asked.chat.status).toMatchObject({ _tag: 'Blocked', kind: 'permission' })
     })
   )
 })

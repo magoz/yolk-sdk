@@ -33,6 +33,7 @@ import {
   executionTurnAnchor,
   hostToolCallMessage,
   isLatestTurnAnchor,
+  isPastRequestToolCall,
   replaceWithCommittedAnswer,
   deleteChatTurn,
   editChatUserMessage,
@@ -611,10 +612,15 @@ export const reduceAgentChatState = (
 
       if (!routed.applied) return rememberEvent(projected, current.event)
 
-      // A replayed start of an already settled call must not reopen the run.
+      // A replayed start of an already settled call, or a replayed pause whose every request names
+      // a call past its request (the chat keeps those calls as they are), must not reopen the run.
       const fenced =
-        Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
-        isSettledToolCall(state, current.event.call)
+        (Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
+          isSettledToolCall(state, current.event.call)) ||
+        (Predicate.isTagged(current.event, 'AgentAwaitingInput') &&
+          current.event.requests.every(request =>
+            isPastRequestToolCall(state.chatMessages, request.call, state.turnStart?.after)
+          ))
 
       return rememberEvent(
         fenced

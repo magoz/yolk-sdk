@@ -1254,7 +1254,6 @@ const appendToolCallPart = (
   })
 }
 
-/** A pending human request: approval, question, typed input or interaction. */
 const isRequestToolState = (state: ChatToolState) =>
   Predicate.isTagged(state, 'ApprovalRequested') ||
   Predicate.isTagged(state, 'QuestionRequested') ||
@@ -1263,8 +1262,9 @@ const isRequestToolState = (state: ChatToolState) =>
 
 /**
  * Whether a call is past its human request: the request answered or cancelled, the approval
- * decided (denied, or granted: the call runs), or the call finished (completed, accepted, errored,
- * provider result). Before it: the model's stream and pending requests.
+ * denied, or the call finished (completed, accepted, errored, provider result). Before it: the
+ * model's stream, pending requests, and a running call, which has no result yet, so the loop asks
+ * again when a run stopped while it ran (an abort) and the next one resumes it.
  */
 const isPastRequestToolState = (state: ChatToolState): boolean =>
   Match.value(state).pipe(
@@ -1275,6 +1275,7 @@ const isPastRequestToolState = (state: ChatToolState): boolean =>
       'QuestionRequested',
       'InputRequested',
       'InteractionRequested',
+      'Running',
       () => false
     ),
     Match.tag(
@@ -1285,7 +1286,6 @@ const isPastRequestToolState = (state: ChatToolState): boolean =>
       'InputCancelled',
       'InteractionSubmitted',
       'InteractionCancelled',
-      'Running',
       'Completed',
       'Accepted',
       'Errored',
@@ -1298,15 +1298,33 @@ const isPastRequestToolState = (state: ChatToolState): boolean =>
 /**
  * Whether a call's part keeps its state when an event sets `state` for `call`: an accepted call
  * ignores open states (replays of its start or request), and a call past its request ignores a
- * request for the same call. The loop asks for a call only until it settles: an invalid input
- * re-pends the same request while the part still pends (the server emits `InputSubmitted` only for
- * a valid payload, and the chat reducer never applies an input or interaction answer locally), and
- * a later turn reusing the id asks on its own part. So such a request, with or without event id,
- * is a replay; a request naming another call with the id is that call's and applies.
+ * request for the same call. The loop asks for a call only until it has a result or an answer it
+ * used: an invalid input re-pends the same request while the part still pends (the server emits
+ * `InputSubmitted` only for a valid payload, and the chat reducer never applies an input or
+ * interaction answer locally), and a later turn reusing the id asks on its own part. So such a
+ * request, with or without event id, is a replay; a request naming another call with the id is
+ * that call's and applies. Hosts never re-ask a call whose answer or denial the chat applied
+ * locally (`patterns/AGENT_HITL.md`).
  */
 const keepsToolState = (part: ToolCallPart, call: ToolCall, state: ChatToolState) =>
   (Predicate.isTagged(part.state, 'Accepted') && isOpenToolState(state)) ||
-  (isRequestToolState(state) && isPastRequestToolState(part.state) && Equal.equals(part.call, call))
+  (isRequestToolState(state) && isPastRequestToolState(part.state) && sameCall(call)(part))
+
+/**
+ * Whether the call a request names (`call`, of the latest turn started after `anchor`) is already
+ * past its request (`hostToolCallMessage`): such a request is a replay and changes nothing.
+ */
+export const isPastRequestToolCall = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  call: ToolCall,
+  anchor: ChatTurnAnchor
+) =>
+  hostToolCallMessage(messages, call, anchor)?.parts.some(
+    part =>
+      Predicate.isTagged(part, 'ToolCall') &&
+      sameCall(call)(part) &&
+      isPastRequestToolState(part.state)
+  ) === true
 
 /** Sets a call's state in its turn (`scope`), or adds the call there when the turn has none. */
 const upsertToolCallPart = (
