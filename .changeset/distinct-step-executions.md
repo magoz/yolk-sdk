@@ -3,7 +3,7 @@
 '@yolk-sdk/agent': minor
 ---
 
-Retried and redelivered model steps no longer splice two answers in the client, and a final turn that ran more than once shows the committed answer, when the host tags its model events with `executionId` and clients are on this release (#305). One case stays open (below).
+Retried and redelivered model steps no longer splice two answers in the client, and a final turn that ran more than once shows the committed answer, when the host tags its model events with `executionId` and clients are on this release (#305). Open cases remain (below).
 
 - `@yolk-sdk/vercel-workflows`: `sequenceDurableAgentEvent`, `writeDurableAgentEvent` and `durableAgentEventId` take an optional `executionId`. It is appended to the id (`${streamId}:${turn}:${eventSequence}:${executionId}`) and set as the event's `executionId` field (removed without it; ids are then unchanged). Every written event now also carries a `streamId` field, so a terminal event closes its own run. A blank or padded `executionId` or (with it) `streamId` throws (a defect in `writeDurableAgentEvent`). Every execution of a step starts from the same `eventSequence`, so before, a retried model step (`modelStepRetry`, platform `fn.maxRetries`, queue redelivery) wrote a different answer under the first execution's ids and `eventId` de-dupe showed parts of both.
 - `@yolk-sdk/agent`: events have optional `executionId` and `streamId`. `reduceAgentEvents`, `applyAgentEventToChatProjection` and the `useAgentChat` reducer keep the executions they saw (`executions` on their state, typed `AgentExecution`), per run (`streamId`) and turn (`LLMStreamStart.turn`):
