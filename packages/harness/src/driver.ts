@@ -217,9 +217,12 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
         const inboxLayer = Layer.succeed(Inbox, inbox)
 
         const coordinator = RunCoordinator.layer({
-          drain: (runId, force, scope) =>
-            inbox.beginDrain(runId, scope).pipe(
-              Effect.flatMap(begun => {
+          // Token issue and endDrain are one acquire/release, so an interrupt
+          // cannot land between them and leave the token live with no owner.
+          drain: (runId, force, scope, stopping) =>
+            Effect.acquireUseRelease(
+              inbox.beginDrain(runId, scope, stopping),
+              begun => {
                 if (DrainBegin.$is('Skip')(begun)) return Effect.void
 
                 return Effect.suspend(() =>
@@ -227,14 +230,12 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                     drainToken: begun.drainToken,
                     readyResponses: begun.readyResponses
                   })
-                ).pipe(
-                  Effect.provideService(Inbox, inbox),
-                  Effect.provideService(RunStore, store),
-                  Effect.onExit(exit =>
-                    inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
-                  )
-                )
-              })
+                ).pipe(Effect.provideService(Inbox, inbox), Effect.provideService(RunStore, store))
+              },
+              (begun, exit) =>
+                DrainBegin.$is('Skip')(begun)
+                  ? Effect.void
+                  : inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
             )
         }).pipe(Layer.provide(storeLayer))
 

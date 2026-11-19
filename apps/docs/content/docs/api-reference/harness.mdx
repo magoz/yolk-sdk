@@ -67,6 +67,8 @@ service dependencies. `makeInMemoryInboxLayer` delegates to it.
 
 `takePromotable(runId, scope, drainToken)` requires the live `beginDrain` token. Missing, empty, inactive, stale, or wrong-run tokens return `undefined` and do not dequeue.
 
+`beginDrain(runId, scope, stopping?)` returns `Skip` without consuming pending intent when `stopping` reads true under the admission gate. Driver passes the owner's stopping flag, so a message admitted right after an interrupt drains in the successor. Custom Inbox wrappers must forward `stopping`.
+
 ## Driver
 
 `@yolk-sdk/harness/driver`
