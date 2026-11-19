@@ -3,7 +3,7 @@ import { accessSync, constants } from 'node:fs'
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from '@effect/vitest'
 import { Effect, Exit, Fiber, Layer, Option } from 'effect'
@@ -269,6 +269,29 @@ describe('syncModel', () => {
 
 const launcher = everystateLauncher(repositoryRoot)
 
+// The installed native checker the script selects here, when this platform has one. Every test
+// passes its own environment (empty, or naming its own checker), so a developer's
+// `EVERYSTATE_BINARY` never applies.
+const nativeChecker = Option.liftPredicate(
+  everystateChecker(launcher, {}),
+  EverystateChecker.$is('Native')
+).pipe(Option.map(checker => checker.file))
+
+// Executables the tests write live here, not in `tmpdir()`: a `noexec` `/tmp` would refuse to run
+// them. `node_modules` is gitignored; each test removes its own folder.
+const executableScratch = join(repositoryRoot, 'node_modules', '.cache', 'yolk-models-check')
+
+const withExecutableScratch = <A, E>(test: (directory: string) => Effect.Effect<A, E>) =>
+  Effect.acquireUseRelease(
+    Effect.promise(async () => {
+      await mkdir(executableScratch, { recursive: true })
+
+      return mkdtemp(join(executableScratch, 'run-'))
+    }),
+    test,
+    directory => Effect.promise(() => rm(directory, { recursive: true, force: true }))
+  )
+
 const writeTree = (root: string, files: Readonly<Record<string, string>>) =>
   Effect.promise(async () => {
     for (const [path, text] of Object.entries(files)) {
@@ -339,7 +362,7 @@ describe('ModelsCheckAt', () => {
 
         expect(yield* files.manifests).toEqual([counterManifestPath])
         expect(yield* files.read('packages/counter/gone.ts')).toBeUndefined()
-      }).pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+      }).pipe(Effect.provide(ModelsCheckAt(root, launcher, { environment: {} })))
     )
   )
 
@@ -347,7 +370,7 @@ describe('ModelsCheckAt', () => {
     withRepository({ 'packages/counter/src/counter.ts': counterCode }, root =>
       Effect.gen(function* () {
         expect(yield* runModelsCheck).toEqual(ModelsCheckOutcome.NoModels())
-      }).pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+      }).pipe(Effect.provide(ModelsCheckAt(root, launcher, { environment: {} })))
     )
   )
 
@@ -360,7 +383,7 @@ describe('ModelsCheckAt', () => {
           'CounterHigh.cfg: violates Below, as it must'
         )
         expect(modelsCheckSucceeded(outcome)).toBe(true)
-      }).pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+      }).pipe(Effect.provide(ModelsCheckAt(root, launcher, { environment: {} })))
     )
   )
 
@@ -373,7 +396,7 @@ describe('ModelsCheckAt', () => {
         expect(yield* Effect.promise(() => readFile(join(root, counterManifestPath), 'utf8'))).toBe(
           counterManifest(sha256(counterCode))
         )
-      }).pipe(Effect.provide(ModelsCheckAt(root, launcher)))
+      }).pipe(Effect.provide(ModelsCheckAt(root, launcher, { environment: {} })))
     )
   )
 })
@@ -387,9 +410,8 @@ const withEverystateCopy = <A, E>(
   native: { readonly from: string; readonly mode: number } | undefined,
   test: (copy: { readonly launcher: string; readonly native: string }) => Effect.Effect<A, E>
 ) =>
-  Effect.acquireUseRelease(
+  withExecutableScratch(copy =>
     Effect.promise(async () => {
-      const copy = await mkdtemp(join(tmpdir(), 'yolk-everystate-copy-'))
       const copiedLauncher = join(copy, 'bin', 'everystate.mjs')
       const nativeFile = join(copy, 'native', `${process.platform}-${process.arch}`, 'everystate')
 
@@ -402,10 +424,8 @@ const withEverystateCopy = <A, E>(
         await chmod(nativeFile, native.mode)
       }
 
-      return { root: copy, launcher: copiedLauncher, native: nativeFile }
-    }),
-    copy => test(copy),
-    copy => Effect.promise(() => rm(copy.root, { recursive: true, force: true }))
+      return { launcher: copiedLauncher, native: nativeFile }
+    }).pipe(Effect.flatMap(test))
   )
 
 const isExecutable = (file: string) => {
@@ -458,6 +478,28 @@ describe.skipIf(process.platform === 'win32')('everystateChecker', () => {
       })
     )
   )
+
+  it.effect('resolves a relative EVERYSTATE_BINARY against the working directory', () =>
+    withEverystateCopy({ from: script, mode: 0o755 }, copy =>
+      Effect.sync(() => {
+        expect(
+          everystateChecker(copy.launcher, {
+            EVERYSTATE_BINARY: relative(process.cwd(), copy.native)
+          })
+        ).toEqual(EverystateChecker.Native({ file: copy.native }))
+      })
+    )
+  )
+
+  it('refuses a bare EVERYSTATE_BINARY name instead of looking it up on PATH', () => {
+    expect(everystateChecker(launcher, { EVERYSTATE_BINARY: 'everystate' })).toEqual(
+      EverystateChecker.Unusable({
+        message:
+          'EVERYSTATE_BINARY (everystate) is a bare name, not a path; set it to the ' +
+          "checker's absolute path, or a path relative to where the command runs"
+      })
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -562,14 +604,8 @@ const withSpinningModel = <A, E>(test: (root: string, marker: string) => Effect.
   )
 }
 
-// The checker the script selects here, without `EVERYSTATE_BINARY` (the tests pass the same empty
-// environment). The WebAssembly build runs inside the launcher's process, so only a native
-// checker can outlive what the script kills; there is nothing to test without one.
-const nativeChecker = Option.liftPredicate(
-  everystateChecker(launcher, {}),
-  EverystateChecker.$is('Native')
-).pipe(Option.map(checker => checker.file))
-
+// The WebAssembly build runs inside the launcher's process, so only a native checker
+// (`nativeChecker`) can outlive what the script kills; there is nothing to test without one.
 describe.skipIf(process.platform === 'win32' || Option.isNone(nativeChecker))(
   'stopping everystate',
   () => {
@@ -636,6 +672,69 @@ describe.skipIf(process.platform === 'win32' || Option.isNone(nativeChecker))(
     )
   }
 )
+
+// ---------------------------------------------------------------------------------------------
+// Running the checker EVERYSTATE_BINARY names
+// ---------------------------------------------------------------------------------------------
+
+describe.skipIf(process.platform === 'win32')('EVERYSTATE_BINARY', () => {
+  // Each configuration runs in its model's folder, so a path relative to where the command runs
+  // must still find the checker there.
+  it.live.skipIf(Option.isNone(nativeChecker))(
+    'runs a checker given by a path relative to the working directory',
+    () =>
+      withRepository(counterRepository(sha256(counterCode)), root =>
+        Effect.gen(function* () {
+          const native = Option.getOrElse(nativeChecker, () => '')
+          const environment = { EVERYSTATE_BINARY: relative(process.cwd(), native) }
+
+          const outcome = yield* runModelsCheck.pipe(
+            Effect.provide(ModelsCheckAt(root, launcher, { environment }))
+          )
+
+          expect(renderModelsCheckOutcome(outcome)).toContain(
+            'CounterHigh.cfg: violates Below, as it must'
+          )
+          expect(modelsCheckSucceeded(outcome)).toBe(true)
+        })
+      )
+  )
+
+  it.live('reports a checker that prints past the output buffer, and stops it', () =>
+    withExecutableScratch(directory => {
+      const marker = `Flood${randomUUID().replaceAll('-', '')}`
+      const flood = join(directory, 'flood')
+
+      return Effect.promise(async () => {
+        // `exec`, so the kill reaches the printer itself; `marker` finds it by command line.
+        await writeFile(flood, `#!/bin/sh\nexec yes ${marker}\n`)
+        await chmod(flood, 0o755)
+      }).pipe(
+        Effect.andThen(
+          withRepository(counterRepository(sha256(counterCode)), root =>
+            Effect.gen(function* () {
+              const outcome = yield* runModelsCheck.pipe(
+                Effect.provide(
+                  ModelsCheckAt(root, launcher, { environment: { EVERYSTATE_BINARY: flood } })
+                )
+              )
+
+              const rendered = renderModelsCheckOutcome(outcome)
+
+              expect(modelsCheckSucceeded(outcome)).toBe(false)
+              expect(rendered).toContain('Counter.cfg: everystate printed more than 64 MiB')
+              expect(rendered).toContain('CounterHigh.cfg: everystate printed more than 64 MiB')
+              expect(yield* pollProcesses(marker, running => running.length === 0, 5_000)).toEqual(
+                []
+              )
+            })
+          )
+        ),
+        Effect.ensuring(processesWith(marker).pipe(Effect.flatMap(killAll)))
+      )
+    })
+  )
+})
 
 // ---------------------------------------------------------------------------------------------
 // The CLI
