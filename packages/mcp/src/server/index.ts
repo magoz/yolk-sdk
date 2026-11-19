@@ -13,11 +13,22 @@ export {
 
 export type {
   McpServerApprovalOptions,
+  McpServerCallOutcome,
   McpServerElicitation,
   McpServerToolAnswered,
   McpServerToolApprovalPolicy,
   McpServerToolApproved
 } from './approval.ts'
+
+export {
+  forwardEmptyPauseMessage,
+  forwardMalformedMessage,
+  forwardOversizedMessage,
+  forwardStaleMessage,
+  forwardUnsupportedMessage,
+  mcpForwardMaxStateBytes,
+  McpForwardRound
+} from './forward.ts'
 
 export { mcpFormBoolean, mcpFormChoice, mcpFormMultiSelect, mcpServerForm } from './form.ts'
 
@@ -36,6 +47,7 @@ export type {
   McpServerApprovalTool,
   McpServerDirectTool,
   McpServerElicitedTool,
+  McpServerForwardingTool,
   McpServerTool,
   McpServerToolAnnotations,
   McpToolServer

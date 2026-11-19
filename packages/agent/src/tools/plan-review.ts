@@ -90,7 +90,8 @@ const decodedResponse = (data: unknown) =>
  * - The apply action claims the plan once (`ToolPlanStore.claim`), then runs the selected calls in
  *   staged order through the registry's execute path (decoding, wrappers, the tool ledger under
  *   `<reviewCallId>/<n>` with the review call as parent), calling `beforeCall` first. Unselected
- *   calls are `skipped`; under `onFailure: 'stop'` calls after a failure are `not_run`. A partial
+ *   calls are `skipped`; under `onFailure: 'stop'` calls after a failure are `not_run`; a call
+ *   that paused for input (ADR 0014) is `input_required` and never stops the apply. A partial
  *   apply is a `completed` outcome listing every call. Another execution of a started review
  *   never runs it again: with a tool ledger it waits behind the apply fence and returns the real
  *   outcome, otherwise (or past the wait) it lists each call, `not_run` only when provable (ADR

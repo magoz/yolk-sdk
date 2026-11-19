@@ -86,6 +86,12 @@ export type McpServerToolAnswered<A> = {
 }
 
 /**
+ * What one round of a tool call answers: a result, or (a forwarding tool, `forward.ts`) another
+ * MRTR `InputRequiredResult` asking the client.
+ */
+export type McpServerCallOutcome = ToolResult | InputRequiredResult
+
+/**
  * The prompt an asking tool shows for one call, its answer type erased: `run` decodes an accepted
  * answer and returns the call's execution, or none when the answer does not fit the form.
  */
@@ -95,7 +101,7 @@ export type McpServerPrompt<R = never> = {
   readonly run: (
     content: unknown,
     elicitationId: string
-  ) => Option.Option<Effect.Effect<ToolResult, McpServerError, R>>
+  ) => Option.Option<Effect.Effect<McpServerCallOutcome, McpServerError, R>>
 }
 
 /** Most UTF-8 bytes of a prompt's message plus form (JSON): a larger prompt is refused, never cut. */
@@ -156,7 +162,13 @@ export const declaresFormElicitation = (envelope: unknown) =>
 export type McpServerApprovals = Data.TaggedEnum<{
   Unconfigured: Record<never, never>
   Misconfigured: { readonly message: string }
-  Configured: { readonly codec: RequestStateCodec<ApprovalState> }
+  Configured: {
+    readonly codec: RequestStateCodec<ApprovalState>
+    /** Signs forwarded rounds (`forward.ts`): same key and principal, its own binding. */
+    readonly forwardCodec: RequestStateCodec<unknown>
+    /** How long a prompt stays answerable; a forwarded prompt asked again keeps its first expiry. */
+    readonly ttlSeconds: number
+  }
 }>
 
 export const McpServerApprovals = Data.taggedEnum<McpServerApprovals>()
@@ -185,25 +197,32 @@ export const makeMcpServerApprovals = (
     })
   }
 
-  const codec = Result.try({
-    try: () =>
-      createRequestStateCodec<ApprovalState>({
+  const codecs = Result.try({
+    try: () => ({
+      ttlSeconds,
+      codec: createRequestStateCodec<ApprovalState>({
         key: options.key,
         ttlSeconds,
         bind: ctx => `${serverName}\0${principal}\0${ctx.mcpReq.method}`
       }),
+      forwardCodec: createRequestStateCodec<unknown>({
+        key: options.key,
+        ttlSeconds,
+        bind: ctx => `${serverName}\0${principal}\0${ctx.mcpReq.method}\0forward`
+      })
+    }),
     catch: error => (error instanceof Error ? error.message : String(error))
   })
 
-  return Result.match(codec, {
+  return Result.match(codecs, {
     onFailure: message => McpServerApprovals.Misconfigured({ message }),
-    onSuccess: configured => McpServerApprovals.Configured({ codec: configured })
+    onSuccess: configured => McpServerApprovals.Configured(configured)
   })
 }
 
 /** The outcome of one asking round: run the call, answer with a result, or ask the user. */
 export type McpApprovalRound<R> = Data.TaggedEnum<{
-  Run: { readonly execution: Effect.Effect<ToolResult, McpServerError, R> }
+  Run: { readonly execution: Effect.Effect<McpServerCallOutcome, McpServerError, R> }
   Answer: { readonly message: string }
   Ask: { readonly result: InputRequiredResult }
 }>
@@ -285,7 +304,7 @@ export const approvalPrompt = <R>(input: {
   readonly execute: (
     call: ToolCall,
     approved: McpServerToolApproved
-  ) => Effect.Effect<ToolResult, McpServerError, R>
+  ) => Effect.Effect<McpServerCallOutcome, McpServerError, R>
   readonly call: ToolCall
 }): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
   elicitedPrompt({
@@ -294,7 +313,7 @@ export const approvalPrompt = <R>(input: {
     execute: (call, answered) =>
       answered.answer.decision === 'approve'
         ? input.execute(call, { approvalId: answered.elicitationId })
-        : Effect.succeed(
+        : Effect.succeed<McpServerCallOutcome>(
             ToolResult.make({
               toolCallId: call.id,
               content: declinedApprovalMessage,
@@ -310,7 +329,7 @@ export const elicitedPrompt = <A, R>(input: {
   readonly execute: (
     call: ToolCall,
     answered: McpServerToolAnswered<A>
-  ) => Effect.Effect<ToolResult, McpServerError, R>
+  ) => Effect.Effect<McpServerCallOutcome, McpServerError, R>
   readonly call: ToolCall
 }): Effect.Effect<McpServerPrompt<R>, McpServerError, R> =>
   Effect.flatMap(input.elicit(input.call), elicitation =>

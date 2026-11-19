@@ -154,6 +154,29 @@ export {
 
 export type { MakePlanReviewToolOptions } from './plan-review.ts'
 
+export {
+  InputPauseResolution,
+  inputReviewActionId,
+  InputReviewOutcome,
+  InputReviewParams,
+  InputReviewPauseOutcome,
+  InputReviewPauseStatus,
+  inputReviewRenderer,
+  InputReviewResponse,
+  inputReviewResult,
+  inputReviewToolName,
+  makeInputReviewTool
+} from './input-review.ts'
+
+export { maxInputReviewPauses } from '@yolk-sdk/agent/protocol'
+
+export type {
+  InputPause,
+  InputPauseEntry,
+  InputReviewHost,
+  MakeInputReviewToolOptions
+} from './input-review.ts'
+
 export { withToolArgumentsErrorHint } from '../protocol/tool-argument-hints.ts'
 
 export { makeInputTool, makeInputToolDef, makeInputToolModule } from './input.ts'

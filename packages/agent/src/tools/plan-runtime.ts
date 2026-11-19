@@ -1,4 +1,4 @@
-import { Effect, Match, Option, Predicate, Result } from 'effect'
+import { Data, Effect, Match, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -8,9 +8,12 @@ import {
   interactionRequestId,
   InteractionHostError,
   InteractionValidationError,
+  inputRequiredNotice,
   ToolCall,
+  toolInputRequired,
   ToolResult,
   type InteractionHost,
+  type ToolInputRequiredRef,
   type InteractionReceipt,
   type ToolChangePreview,
   type ToolChangePreviewError
@@ -392,7 +395,8 @@ const countsOf = (calls: ReadonlyArray<ToolPlanCallOutcome>): ToolPlanCallCounts
     failed: count('failed'),
     skipped: count('skipped'),
     not_run: count('not_run'),
-    unknown: count('unknown')
+    unknown: count('unknown'),
+    input_required: count('input_required')
   }
 }
 
@@ -414,7 +418,16 @@ const notableLines = (calls: ReadonlyArray<ToolPlanCallOutcome>) => {
 }
 
 const countsText = (counts: ToolPlanCallCounts) =>
-  `${counts.applied} applied, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.not_run} not run`
+  `${counts.applied} applied, ${counts.failed} failed, ${counts.skipped} skipped, ${counts.not_run} not run${(counts.input_required ?? 0) > 0 ? `, ${counts.input_required} waiting for input` : ''}`
+
+/** The review calls that finish the plan's `input_required` calls, or nothing. */
+const inputRequiredLines = (calls: ReadonlyArray<ToolPlanCallOutcome>) => {
+  const refs = calls.flatMap(call =>
+    call.status === 'input_required' && call.inputRequired !== undefined ? [call.inputRequired] : []
+  )
+
+  return refs.length === 0 ? [] : [inputRequiredNotice(refs)]
+}
 
 /** Appended to refusals caused by an outage before the plan was claimed: the review attempt
  * ended, but the plan is intact and a new review can apply it.
@@ -450,6 +463,7 @@ type CallOutcomeFields = {
   status: ToolPlanCallStatus
   callId?: string
   error?: string
+  inputRequired?: ToolInputRequiredRef
 }
 
 const callOutcome = (fields: CallOutcomeFields): ToolPlanCallOutcome => {
@@ -464,7 +478,28 @@ const callOutcome = (fields: CallOutcomeFields): ToolPlanCallOutcome => {
   if (fields.error !== undefined)
     outcome.error = truncateCodePoints(fields.error, nestedToolCallMaxErrorChars)
 
+  if (fields.inputRequired !== undefined) outcome.inputRequired = fields.inputRequired
+
   return outcome
+}
+
+/** What one executed staged call came to: applied, failed with its text, or paused for input. */
+type AttemptOutcome = Data.TaggedEnum<{
+  Applied: Record<never, never>
+  Failed: { readonly error: string }
+  InputRequired: { readonly ref: ToolInputRequiredRef }
+}>
+
+const AttemptOutcome = Data.taggedEnum<AttemptOutcome>()
+
+const resultAttempt = (result: ToolResult): AttemptOutcome => {
+  if (result.isError !== true) return AttemptOutcome.Applied()
+
+  const paused = toolInputRequired(result)
+
+  return Option.isSome(paused)
+    ? AttemptOutcome.InputRequired({ ref: paused.value })
+    : AttemptOutcome.Failed({ error: resultText(result) })
 }
 
 const decodeReviewParams = Schema.decodeUnknownOption(ToolPlanReviewParams)
@@ -515,24 +550,28 @@ const receiptMatches = (
   )
 }
 
-const ledgerStatus = (entry: ToolLedgerEntry): ToolPlanCallStatus => {
+/** A ledger entry's call as an outcome: its status, error text, and input-required marker. */
+const ledgerCallFields = (
+  entry: ToolLedgerEntry
+): Pick<CallOutcomeFields, 'status' | 'error' | 'inputRequired'> => {
   const outcome = entry.outcome
 
-  if (outcome === undefined) return 'unknown'
+  if (outcome === undefined) return { status: 'unknown' }
 
-  if (Predicate.isTagged(outcome, 'Failed')) return 'failed'
+  if (Predicate.isTagged(outcome, 'Failed'))
+    return { status: 'failed', error: outcome.error.message }
 
-  return outcome.result.isError === true ? 'failed' : 'applied'
-}
-
-const ledgerError = (entry: ToolLedgerEntry) => {
-  const outcome = entry.outcome
-
-  if (outcome === undefined) return undefined
-
-  if (Predicate.isTagged(outcome, 'Failed')) return outcome.error.message
-
-  return outcome.result.isError === true ? resultText(outcome.result) : undefined
+  return AttemptOutcome.$match(resultAttempt(outcome.result), {
+    Applied: (): Pick<CallOutcomeFields, 'status'> => ({ status: 'applied' }),
+    Failed: ({ error }): Pick<CallOutcomeFields, 'status' | 'error'> => ({
+      status: 'failed',
+      error
+    }),
+    InputRequired: ({ ref }): Pick<CallOutcomeFields, 'status' | 'inputRequired'> => ({
+      status: 'input_required',
+      inputRequired: ref
+    })
+  })
 }
 
 /** The plan capabilities bound into plan review registrations. */
@@ -663,16 +702,8 @@ export const makeToolPlanRuntime = <Context>(
   }): ToolPlanApplyResult => {
     const { reviewCall, plan, selection, entries } = input
 
-    const fromEntry = (key: string, entry: ToolLedgerEntry) => {
-      const error = ledgerError(entry)
-      const fields = { key, toolName: entry.toolName, status: ledgerStatus(entry) }
-
-      return callOutcome(
-        error === undefined
-          ? { ...fields, callId: entry.key }
-          : { ...fields, callId: entry.key, error }
-      )
-    }
+    const fromEntry = (key: string, entry: ToolLedgerEntry) =>
+      callOutcome({ key, toolName: entry.toolName, callId: entry.key, ...ledgerCallFields(entry) })
 
     const neverRuns = (staged: StagedCall, callId: string) => {
       if (input.claimedBy !== undefined && input.claimedBy !== input.submissionId) return true
@@ -749,8 +780,9 @@ export const makeToolPlanRuntime = <Context>(
           ? 'Its calls cannot be listed (no tool ledger is available), so any selected call may already have been applied.'
           : 'The tool ledger recorded no applied calls for it.'
         : [
-            `Calls as recorded now (none were undone): ${counts.applied} applied, ${counts.failed} failed, ${counts.unknown} unknown, ${counts.not_run} not started.`,
-            ...notableLines(calls)
+            `Calls as recorded now (none were undone): ${counts.applied} applied, ${counts.failed} failed, ${counts.unknown} unknown, ${counts.not_run} not started${(counts.input_required ?? 0) > 0 ? `, ${counts.input_required} waiting for input` : ''}.`,
+            ...notableLines(calls),
+            ...inputRequiredLines(calls)
           ].join('\n')
 
     const outcome: ToolPlanOutcome = {
@@ -998,7 +1030,7 @@ export const makeToolPlanRuntime = <Context>(
             continue
           }
 
-          const attempt: Effect.Effect<string | undefined> = Effect.gen(function* () {
+          const attempt: Effect.Effect<AttemptOutcome> = Effect.gen(function* () {
             const call = ToolCall.make({
               id: callId,
               name: staged.toolName,
@@ -1012,27 +1044,33 @@ export const makeToolPlanRuntime = <Context>(
                 beforeCall({ call, staged, context: resolution.context })
               ).pipe(Effect.result)
 
-              if (Result.isFailure(admitted)) return admitted.failure
+              if (Result.isFailure(admitted))
+                return AttemptOutcome.Failed({ error: admitted.failure })
             }
 
             const executed = yield* resolution
               .execute(registration, call, reviewCall.id)
               .pipe(Effect.result)
 
-            if (Result.isFailure(executed)) return executed.failure.message
+            if (Result.isFailure(executed))
+              return AttemptOutcome.Failed({ error: executed.failure.message })
 
-            return executed.success.isError === true ? resultText(executed.success) : undefined
+            return resultAttempt(executed.success)
           })
 
-          const error = yield* attempt
+          const attempted = yield* attempt
 
-          if (error === undefined) {
-            outcomes.push(callOutcome({ ...base, status: 'applied', callId }))
-          } else {
-            outcomes.push(callOutcome({ ...base, status: 'failed', callId, error }))
+          outcomes.push(
+            AttemptOutcome.$match(attempted, {
+              Applied: () => callOutcome({ ...base, status: 'applied', callId }),
+              // Paused for input: it did not fail, so the apply goes on.
+              InputRequired: ({ ref }) =>
+                callOutcome({ ...base, status: 'input_required', callId, inputRequired: ref }),
+              Failed: ({ error }) => callOutcome({ ...base, status: 'failed', callId, error })
+            })
+          )
 
-            if (input.onFailure === 'stop') stopped = true
-          }
+          if (Predicate.isTagged(attempted, 'Failed') && input.onFailure === 'stop') stopped = true
         }
 
         const counts = countsOf(outcomes)
@@ -1048,11 +1086,12 @@ export const makeToolPlanRuntime = <Context>(
         return {
           outcome: 'completed',
           content: [
-            `Applied plan ${planId}: ${countsText(counts)}.${counts.applied === 0 ? ' No call reported success.' : ''}`,
+            `Applied plan ${planId}: ${countsText(counts)}.${counts.applied === 0 && counts.input_required === 0 ? ' No call reported success.' : ''}`,
             ...notableLines(outcomes),
             ...(counts.not_run > 0
               ? ['Calls marked not run were skipped after a failure; nothing was undone.']
-              : [])
+              : []),
+            ...inputRequiredLines(outcomes)
           ].join('\n'),
           structuredContent
         }

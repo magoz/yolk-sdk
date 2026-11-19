@@ -325,6 +325,18 @@ export {
 export { truncateCodePoints } from './bounded-text.ts'
 
 export {
+  inputRequiredNotice,
+  inputReviewCallText,
+  makeInputRequiredToolResult,
+  maxInputReviewPauses,
+  mergeInputRequiredRefs,
+  ToolInputRequired,
+  toolInputRequired,
+  toolInputRequiredCode,
+  ToolInputRequiredRef
+} from './input-required.ts'
+
+export {
   ToolChangeCut,
   ToolChangeItem,
   ToolChangePreview,

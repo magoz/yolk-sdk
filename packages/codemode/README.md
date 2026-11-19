@@ -116,6 +116,13 @@ const program = Effect.gen(function* () {
   (cancelled, for example still running when the script ended). Calls rejected before running are
   not reported. A failing hook (a failure, a defect, or a synchronous throw) is logged and never
   changes the call's result.
+- A nested call that paused for a person's input (its error result carries the
+  `input_required` marker, `toolInputRequired` from `@yolk-sdk/agent/protocol`) rejects with
+  `error.code === 'input_required'`. It has not completed: whether or not the script caught the
+  rejection, `structuredContent.codemode.inputRequired` lists every such pause
+  (`ToolInputRequiredRef`s, merged per review tool) and a notice after the bounded output names the
+  review call (`review_input({"pauseIds":[...]})`). See
+  [ADR 0014](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0014-input-required-tool-calls.md).
 - A nested call that is interrupted rejects with `<label> was cancelled.`; a defect rejects with
   `<label> failed unexpectedly.` (the same label as above). If an executor misses its deadline, the tool returns a `timeout` failure
   `timeoutMs` + 5 s after the start and aborts it.
@@ -164,7 +171,8 @@ it is never declared to the model, scripts find it with `searchTools()` (hits ma
 [ADR 0007](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0007-tool-exposure-and-catalog.md).
 
 Applied plan calls run inside the review action: they bypass `beforeNestedCall` and `ToolExecutor`
-decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. Review screens
+decorators. Wire the same per-call check as `makePlanReviewTool({ beforeCall })`. An applied call
+that pauses for input is reported `input_required` and does not stop the apply. Review screens
 show each staged call with the tool's `changePreview` from `@yolk-sdk/agent/tools`. See
 [ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md) and
 [ADR 0006](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0006-tool-change-previews.md).

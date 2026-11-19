@@ -199,6 +199,11 @@ const step = Effect.gen(function* () {
   `unsupported_era`) and `McpClientCapabilityRequiredError` for MCP `-32021`.
 - Legacy-era elicitation (a server-initiated request answered while the call's stream is open) is
   not supported; resuming against a legacy connection fails with `unsupported_era`.
+- In an agent session, a registration stores the pause and returns `makeInputRequiredToolResult`
+  (`@yolk-sdk/agent/protocol`); a person answers through `makeInputReviewTool`
+  (`@yolk-sdk/agent/tools`), whose host checks each answer with `toMcpInputResponses` and resumes
+  the pause once with `resumeRemoteMcpServerToolCall`. See
+  [Finish calls that ask for input](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/integrations/mcp-tools.mdx#finish-calls-that-ask-for-input).
 
 ### Files in tool results
 
@@ -407,6 +412,76 @@ const apply = makeMcpServerElicitedTool({
 - A `default` only preselects in the client: a missing field is never filled from it.
 - Everything else (signing, binding, era and capability rules, once-only on `elicitationId`) is as
   for approval tools above.
+
+### Forward a remote tool's forms
+
+A forwarding tool (`McpServerForwardingTool`: `forward: true`, optional `approval`) proxies a remote
+MCP tool and passes the remote server's form elicitation on to this server's client. `execute`
+runs one round (`McpForwardRound`) and answers the remote `McpToolCallOutcome`:
+
+```ts
+import { Effect } from 'effect'
+import {
+  callRemoteMcpServerToolResumable,
+  resumeRemoteMcpServerToolCall
+} from '@yolk-sdk/mcp/client'
+import { McpForwardRound, McpServerError, type McpServerTool } from '@yolk-sdk/mcp/server'
+
+const proxyDelete: McpServerTool = {
+  def,
+  forward: true,
+  execute: (call, round) => {
+    const remote = {
+      config: remoteConfig,
+      mcpToolName: 'delete',
+      toolCallId: call.id,
+      params: call.params
+    }
+
+    return McpForwardRound.$match(round, {
+      Initial: ({ clientElicitation }) =>
+        callRemoteMcpServerToolResumable({
+          ...remote,
+          options: clientElicitation ? { elicitation: { form: true } } : {}
+        }),
+      // Resume at most once per `roundId`.
+      Resume: ({ inputRequired, responses }) =>
+        resumeRemoteMcpServerToolCall({
+          ...remote,
+          inputRequired,
+          responses,
+          options: { elicitation: { form: true } }
+        })
+    }).pipe(
+      Effect.provide(httpClientLayer),
+      Effect.mapError(error => new McpServerError({ message: error.message, cause: 'tool_error' }))
+    )
+  }
+}
+```
+
+- `Initial({ clientElicitation, approvalId })`: call the remote tool. `clientElicitation` is true
+  only on a `2026-07-28` request that declares form elicitation, with `approvals` configured; opt
+  the remote call into elicitation only then, so a remote server that needs input refuses to run
+  instead of pausing a call nobody can answer.
+- A remote pause is answered as this server's `InputRequiredResult` (the remote forms under their
+  keys) with a `requestState` signed by the approvals key under its own binding (server name,
+  principal, method, forward purpose; signed, not encrypted), holding the tool, the arguments
+  digest, the pause's `roundId` and expiry (`ttlSeconds` after it was first forwarded), the approval
+  id and the remote pause, bounded by `mcpForwardMaxStateBytes` (64 KiB of JSON).
+- `Resume({ roundId, inputRequired, responses, approvalId })`: only a round whose verified state
+  matches the call and answers every forwarded form (checked against the forms) resumes; other
+  rounds are asked again in the same round (same `roundId` and expiry). A state that does not verify answers `forwardStaleMessage` without calling the
+  remote tool (with `approval`, the approval is asked again). The server keeps no state: key
+  once-only resumption on `roundId`.
+- With `approval`, the tool is offered like an approval tool and runs its approval round first;
+  every forward round carries its `approvalId`. Without it, the tool is listed everywhere, and
+  2025-era requests and the header-less JSON path run only `Initial` with
+  `clientElicitation: false`.
+- A pause that cannot be forwarded answers an error result: `forwardUnsupportedMessage`,
+  `forwardEmptyPauseMessage` (no form), `forwardOversizedMessage`, or `forwardMalformedMessage`.
+- `McpServerCallOutcome` (a `ToolResult` or an `InputRequiredResult`) is what one round of an
+  asking or forwarding tool answers.
 
 ## Conformance cases (experimental)
 

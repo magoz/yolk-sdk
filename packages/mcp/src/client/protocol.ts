@@ -21,7 +21,8 @@ import {
   ToolJsonSchemaObject,
   ToolResult,
   decodeToolJsonSchemaObject,
-  inlineBase64Source
+  inlineBase64Source,
+  toolInputRequired
 } from '@yolk-sdk/agent/protocol'
 import type {
   Content,
@@ -513,9 +514,20 @@ export const toolCallResultToToolResult = (input: {
     toolCallId: input.toolCallId,
     content: resultContent,
     isError: input.result.isError,
-    structuredContent: input.result.structuredContent
+    structuredContent: remoteStructuredContent(input.result)
   })
 }
+
+/**
+ * A remote error result's structured content, never read as Yolk's input-required marker (ADR
+ * 0014): a server cannot make its own failure look like a paused call (which plan apply does not
+ * stop on, and whose review ids the model would be told to use). Such content is kept under
+ * `remoteStructuredContent`.
+ */
+const remoteStructuredContent = (result: ToolCallResult) =>
+  Option.isSome(toolInputRequired(result))
+    ? { remoteStructuredContent: result.structuredContent }
+    : result.structuredContent
 
 type McpFileBlock = {
   readonly data: string

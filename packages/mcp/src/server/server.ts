@@ -8,7 +8,6 @@ import {
   originValidationResponse,
   type CallToolResult as SdkCallToolResult,
   type ContentBlock as SdkContentBlock,
-  type InputRequiredResult,
   type ServerContext
 } from '@modelcontextprotocol/server'
 import {
@@ -36,9 +35,18 @@ import {
   type McpServerToolAnswered,
   type McpServerToolApprovalPolicy,
   type McpServerToolApproved,
+  type McpServerCallOutcome,
   staleApprovalMessage
 } from './approval.ts'
 import { McpServerError } from './errors.ts'
+import {
+  answersRound,
+  forwardAnswerRound,
+  forwardInitialRound,
+  forwardStaleMessage,
+  type McpForwardRound
+} from './forward.ts'
+import type { McpToolCallOutcome } from '@yolk-sdk/mcp/client'
 
 type JsonRpcRequest = {
   readonly jsonrpc: '2.0'
@@ -324,7 +332,30 @@ export type McpServerDirectTool<R = never> = {
   readonly annotations?: McpServerToolAnnotations
   readonly approval?: undefined
   readonly prompt?: undefined
+  readonly forward?: undefined
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, McpServerError, R>
+}
+
+/**
+ * A tool proxying a remote MCP tool whose own form elicitation is forwarded to this server's client
+ * (`forward.ts`). `execute` runs one round: `Initial` calls the remote tool, `Resume` resumes its
+ * pause with the client's answers (key once-only resumption on `roundId`); it answers the remote
+ * outcome (`callRemoteMcpServerToolResumable` / `resumeRemoteMcpServerToolCall`), and a pause is
+ * forwarded on `2026-07-28` requests that declare form elicitation, with `approvals` configured.
+ * With `approval` the call first asks this server's approval (offered like an approval tool), and
+ * every round names its `approvalId`. Without it the tool is listed everywhere; requests that
+ * cannot carry an elicitation run it without forwarding (`clientElicitation: false`).
+ */
+export type McpServerForwardingTool<R = never> = {
+  readonly def: ToolDef
+  readonly annotations?: McpServerToolAnnotations
+  readonly approval?: McpServerToolApprovalPolicy<R> | undefined
+  readonly prompt?: undefined
+  readonly forward: true
+  readonly execute: (
+    call: ToolCall,
+    round: McpForwardRound
+  ) => Effect.Effect<McpToolCallOutcome, McpServerError, R>
 }
 
 /**
@@ -337,6 +368,7 @@ export type McpServerApprovalTool<R = never> = {
   readonly annotations?: McpServerToolAnnotations
   readonly approval: McpServerToolApprovalPolicy<R>
   readonly prompt?: undefined
+  readonly forward?: undefined
   readonly execute: (
     call: ToolCall,
     approved: McpServerToolApproved
@@ -355,6 +387,7 @@ export type McpServerElicitedTool<R = never> = {
   readonly def: ToolDef
   readonly annotations?: McpServerToolAnnotations
   readonly approval?: undefined
+  readonly forward?: undefined
   readonly [mcpElicitedToolBrand]: true
   readonly prompt: (call: ToolCall) => Effect.Effect<McpServerPrompt<R>, McpServerError, R>
 }
@@ -385,6 +418,7 @@ export type McpServerTool<R = never> =
   | McpServerDirectTool<R>
   | McpServerApprovalTool<R>
   | McpServerElicitedTool<R>
+  | McpServerForwardingTool<R>
 
 const asks = <R>(tool: McpServerTool<R>) => tool.approval !== undefined || tool.prompt !== undefined
 
@@ -395,7 +429,7 @@ const approvalUnavailableResult = () =>
       'with form elicitation. Nothing ran.'
   )
 
-type ToolCallOutcome = ToolResult | SdkCallToolResult | InputRequiredResult
+type ToolCallOutcome = McpServerCallOutcome | SdkCallToolResult
 
 /** Runs one tool call's Effect as a fiber of the current HTTP request. */
 type ToolRunner<R> = (
@@ -503,14 +537,80 @@ const promptOf = <R>(tool: McpServerApprovalTool<R> | McpServerElicitedTool<R>) 
   return (call: ToolCall) => approvalPrompt({ policy: approval, execute, call })
 }
 
+const approvalRunOutcome = <R>(
+  round: McpApprovalRound<R>
+): Effect.Effect<ToolCallOutcome, McpServerError, R> =>
+  McpApprovalRound.$match(round, {
+    Run: ({ execution }) => execution,
+    Answer: ({ message }) => Effect.succeed(mcpErrorResult(message)),
+    Ask: ({ result }) => Effect.succeed(result)
+  })
+
+/**
+ * One call of a forwarding tool through the SDK: a round answering a forwarded prompt resumes the
+ * remote call; otherwise its approval round (with `approval`) or its first round runs. A request
+ * carrying a state that is no forward state of this call answers why nothing more ran (a tool
+ * without approval asks nothing of its own).
+ */
+const sdkForwardingCall = <R>(input: {
+  readonly tool: McpServerForwardingTool<R>
+  readonly approvals: McpServerApprovals
+  readonly call: ToolCall
+  readonly ctx: ServerContext
+  readonly modern: boolean
+}): Effect.Effect<ToolCallOutcome, McpServerError, R> =>
+  Effect.gen(function* () {
+    const { tool, approvals, call, ctx } = input
+
+    const answered = input.modern
+      ? yield* forwardAnswerRound({ approvals, execute: tool.execute, call, ctx })
+      : Option.none()
+
+    if (Option.isSome(answered)) return answered.value
+
+    const initial = (approvalId: string | undefined) =>
+      forwardInitialRound({
+        approvals,
+        execute: tool.execute,
+        call,
+        approvalId,
+        ctx,
+        modern: input.modern
+      })
+
+    const approval = tool.approval
+
+    if (approval === undefined)
+      return answersRound(ctx) || answersApproval(ctx)
+        ? mcpErrorResult(forwardStaleMessage)
+        : yield* initial(undefined)
+
+    const round = yield* approvalRound({
+      approvals,
+      prompt: current =>
+        approvalPrompt({
+          policy: approval,
+          execute: (_, approved) => initial(approved.approvalId),
+          call: current
+        }),
+      call,
+      ctx
+    })
+
+    return yield* approvalRunOutcome(round)
+  })
+
 /** One call of a tool through the SDK: a direct tool runs; an asking tool runs one round. */
 const sdkToolCall = <R>(input: {
   readonly tool: McpServerTool<R>
   readonly approvals: McpServerApprovals
   readonly call: ToolCall
   readonly ctx: ServerContext
+  readonly modern: boolean
 }): Effect.Effect<ToolCallOutcome, McpServerError, R> => {
   const { tool, call } = input
+
+  if (tool.forward === true) return sdkForwardingCall({ ...input, tool })
 
   if (tool.approval === undefined && tool.prompt === undefined) {
     return answersApproval(input.ctx)
@@ -525,15 +625,7 @@ const sdkToolCall = <R>(input: {
     prompt,
     call,
     ctx: input.ctx
-  }).pipe(
-    Effect.flatMap((round): Effect.Effect<ToolCallOutcome, McpServerError, R> =>
-      McpApprovalRound.$match(round, {
-        Run: ({ execution }) => execution,
-        Answer: ({ message }) => Effect.succeed(mcpErrorResult(message)),
-        Ask: ({ result }) => Effect.succeed(result)
-      })
-    )
-  )
+  }).pipe(Effect.flatMap(approvalRunOutcome))
 }
 
 /**
@@ -607,7 +699,8 @@ export const makeMcpToolServer = <R>(input: {
               name: tool.def.name,
               params: args
             }),
-            ctx: sdkContext
+            ctx: sdkContext,
+            modern: era === 'modern'
           }).pipe(
             Effect.catch(error =>
               Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
@@ -657,19 +750,30 @@ export const makeMcpToolServer = <R>(input: {
             return successResponse(request.id, approvalUnavailableResult())
           }
 
-          const result = yield* found
-            .execute(
-              ToolCall.make({
-                id: String(request.id),
-                name: params.name,
-                params: params.arguments ?? {}
-              })
+          const call = ToolCall.make({
+            id: String(request.id),
+            name: params.name,
+            params: params.arguments ?? {}
+          })
+
+          // This path cannot carry an elicitation: a forwarding tool runs its first round only.
+          const execution: Effect.Effect<McpServerCallOutcome, McpServerError, R> =
+            found.forward === true
+              ? forwardInitialRound({
+                  approvals,
+                  execute: found.execute,
+                  call,
+                  approvalId: undefined,
+                  ctx: undefined,
+                  modern: false
+                })
+              : found.execute(call)
+
+          const result = yield* execution.pipe(
+            Effect.catch(error =>
+              Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
             )
-            .pipe(
-              Effect.catch(error =>
-                Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
-              )
-            )
+          )
 
           return successResponse(
             request.id,

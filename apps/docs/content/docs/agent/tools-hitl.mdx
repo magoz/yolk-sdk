@@ -677,9 +677,13 @@ const resolveHostTools = (context: HostContext) =>
   correctness.
 - On execution Yolk re-reads the receipt, claims the plan once (`ToolPlanStore.claim`), and runs
   the selected calls in staged order through the resolved execute path and ledger, with ids
-  `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, `not_run`, or
-  `unknown` in `structuredContent.result` (`state` is `applied`, `refused`, or `interrupted`);
-  decode it with the `ToolPlanOutcome` Schema.
+  `<reviewCallId>/<n>`. The result lists each call as `applied`, `failed`, `skipped`, `not_run`,
+  `unknown`, or `input_required` in `structuredContent.result` (`state` is `applied`, `refused`, or
+  `interrupted`); decode it with the `ToolPlanOutcome` Schema.
+- An `input_required` call ran and [paused for a person's input](#finish-calls-that-paused-for-input):
+  it has not completed, carries its `inputRequired` ref (`{ reviewToolName, pauseIds }`), and never
+  stops the apply under `onFailure: 'stop'`. The result text names the review call that finishes
+  it. `ToolPlanCallCounts.input_required` is optional, so outcomes recorded before it still decode.
 - **Per-call authority:** applied calls run inside the review action, so code mode's
   `beforeNestedCall` and decorators around your `ToolExecutor` never see them. `beforeCall` is the
   only per-call hook: wire the same run-authority or write authorizer you use for nested calls.
@@ -707,7 +711,8 @@ const resolveHostTools = (context: HostContext) =>
   (lower `staging.maxCalls` on the code mode tool).
 - After the review settles, show each call from `ToolPlanOutcome.calls`, not the pending diff:
   `applied` shows the `after` state, `skipped`, `not_run`, and `failed` show "not applied" with no
-  pending diff, and `unknown` says the call may have been applied.
+  pending diff, `unknown` says the call may have been applied, and `input_required` says it waits
+  for a person's input.
 
 `ToolPlanStore` is a port over host storage:
 
@@ -724,6 +729,112 @@ const resolveHostTools = (context: HostContext) =>
 
 `makeInMemoryToolPlanStore` is a non-durable reference. There is no atomic batch: a partial apply
 reports exactly which calls ran.
+
+## Finish calls that paused for input
+
+A remote system can pause a call after it was made: an MCP server answers a `tools/call` with a
+form (for example a confirmation before a delete) and finishes only when the form is answered.
+A tool's `execute` never pauses. It stores the pause in host storage and returns an
+input-required result; a person later answers through the input review interaction, whose action
+resumes each stored pause once
+([ADR 0014](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0014-input-required-tool-calls.md)).
+For MCP tools, see [Finish calls that ask for input](../integrations/mcp-tools#finish-calls-that-ask-for-input).
+
+Fragment: `pauseStore` is host-owned.
+
+```ts
+import { makeInputRequiredToolResult } from '@yolk-sdk/agent/protocol'
+import { inputReviewToolName } from '@yolk-sdk/agent/tools'
+
+// In the tool's execute, after the remote system paused the call:
+const pauseId = yield * pauseStore.save({ call, pause: remotePause }) // host-owned
+
+return makeInputRequiredToolResult({
+  toolCallId: call.id,
+  content: 'The server asks to confirm deleting invoice 42.',
+  reviewToolName: inputReviewToolName, // 'review_input'
+  pauseIds: [pauseId]
+})
+```
+
+The result is an error result whose `structuredContent` is
+`{ code: 'input_required', inputRequired: { reviewToolName, pauseIds } }`, and its content tells the
+model to call `review_input({ pauseIds })` and not to call the tool again. Being an error result,
+the call is over: output checks skip it, the [tool ledger](#ledger-writes-for-re-executed-steps)
+records it (it never runs again), [code mode](../integrations/code-mode#what-scripts-see) rejects
+the nested call with `error.code === 'input_required'`, and a staged plan reports it
+`input_required`. `toolInputRequired(result)` reads the ref back (`Option<ToolInputRequiredRef>`);
+`mergeInputRequiredRefs` merges refs per review tool and splits them into reviews of at most
+`maxInputReviewPauses` (50); `inputRequiredNotice` renders the model-visible notice, listing every
+review to call in turn. A remote MCP error result never carries the marker: Yolk's MCP
+client keeps such content under `remoteStructuredContent`.
+
+Register one input review tool next to your other interactions. Fragment: the `pauseStore` methods
+are host-owned.
+
+```ts
+import {
+  makeInputReviewTool,
+  resolveTools,
+  type InputPause,
+  type InputReviewHost
+} from '@yolk-sdk/agent/tools'
+
+// Your stored pause: `id`, a person-readable `label`, and whatever resuming needs.
+type HostPause = InputPause & { readonly form: RemoteForm }
+
+const pauses: InputReviewHost<HostPause> = {
+  // The listed pauses, in order: in this session's scope and still waiting.
+  load: pauseIds => pauseStore.loadWaiting(pauseIds),
+  // Side-effect free: does the answer fit the pause's form?
+  validateAnswer: ({ pause, answer }) => pauseStore.check(pause, answer),
+  // Claim the pause for `submissionId`, send once, record and return an InputPauseResolution.
+  resume: ({ pause, answer, submissionId }) => pauseStore.resumeOnce(pause, answer, submissionId),
+  // Optional: the recorded resolutions of a review that crashed after its claim.
+  recorded: ({ pauseIds, submissionId }) => pauseStore.recorded(pauseIds, submissionId)
+}
+
+const toolSet =
+  yield *
+  resolveTools(
+    [{ id: 'host', tools: [makeInputReviewTool<HostContext, HostPause>({ host: pauses })] }],
+    context,
+    { interactionHost: scopedReceipts } // host-owned
+  )
+```
+
+- The model calls `review_input({ pauseIds })` (`InputReviewParams`: at most
+  `maxInputReviewPauses`, 50, no repeats). Call validation loads them through `load`: a missing,
+  foreign, or answered id is an `InteractionValidationError`, and a storage outage an
+  `InteractionHostError`, never a verdict. The model passes only ids, so forms are rendered only
+  from stored pauses.
+- Render the `input_review` kind (`inputReviewRenderer`) from the stored pauses. The person submits
+  action `submit` (`inputReviewActionId`, label `Send answers`) with `{ answers }`
+  (`InputReviewResponse`): exactly one JSON answer per listed pause, keyed by pause id. Admission
+  checks each with `validateAnswer`; an invalid answer is never accepted and consumes nothing.
+  Cancel sends nothing, and the pauses stay reviewable.
+- The action resumes the pauses in review order through `resume`. The host claims each pause before
+  sending and never sends after a claim. `resume` answers an `InputPauseResolution`:
+  `Completed({ result })` (the remote result, even an error result), `InputRequired({ pauseIds })`
+  (asked again: the new pauses are stored), `NotSent({ message })` (refused before sending), or
+  `Unknown({ message })` (it may have run; a claim found without a recorded resolution is this).
+- The result lists every pause with its outcome, each completed call's own result content (files
+  included), then the review call for any new pauses. `structuredContent.result` is an
+  `InputReviewOutcome`: `{ type: 'input_review_outcome', pauses, interrupted? }`, each pause
+  `{ pauseId, label, status, isError?, inputRequired?, error? }` with `status` `completed`,
+  `input_required`, `not_sent`, or `unknown`. The interaction outcome is `unknown` when any pause is
+  unknown, `failed` when none was sent, else `completed`.
+- A review that started without a recorded outcome (a crash after the claim, or a redelivered step
+  finding the receipt started) lists what `recorded` returns, with `interrupted: true`, and sends
+  nothing again. Only a replay where every pause has a recorded resolution reports a proven outcome;
+  without `recorded`, the result is a generic unknown notice.
+- The original call stays input-required in the transcript; the review result is its completion. A
+  script that needed the value continues in a new script from the review result, never by calling
+  the tool again.
+- Options: `name` (default `review_input`), `description`, `renderer`, `title`,
+  `interactionDescription`, `actionLabel`, and `access` (default `write`: answers are sent to the
+  system that paused the calls). Wire the interaction like any other: `interactionHost` in
+  `resolveTools`, and `toolSet.interactions` plus `toolSet.interactionHost` in loop/runtime config.
 
 ## Let the model choose background execution
 
