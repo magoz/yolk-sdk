@@ -1,4 +1,4 @@
-import { Effect, Match, Predicate, Stream, type Data } from 'effect'
+import { Array as Arr, Effect, Match, Predicate, Stream, type Data } from 'effect'
 import {
   HitlMatch as hitlMatch,
   OverflowCompactionResult as overflowCompactionResult,
@@ -64,7 +64,8 @@ export type StepOutcome = Data.TaggedEnum<{
     readonly overflowCompactionAttempt: number
   }
   AwaitingInput: {
-    readonly requests: ReadonlyArray<HitlRequest>
+    /** Non-empty, so `Arr.map` of its request ids fits `Driver.pause` without a guard. */
+    readonly requests: Arr.NonEmptyReadonlyArray<HitlRequest>
     readonly usage: AgentUsage
   }
 }>
@@ -295,7 +296,7 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
       }
     ),
     Effect.map((result): ToolBatchOutcome => {
-      if (result.requests.length === 0) {
+      if (!Arr.isReadonlyArrayNonEmpty(result.requests)) {
         const needsContinuation = result.toolCalls.length > 0
 
         return StepOutcome.Completed({

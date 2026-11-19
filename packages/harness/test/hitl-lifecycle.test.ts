@@ -1,11 +1,37 @@
-import { Deferred, Effect, Fiber, Layer, Ref } from 'effect'
+import { Deferred, Effect, Fiber, Layer, Ref, type Array as Arr } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { admit, Driver, makeDriverLayer, StopDecision } from '../src/driver.ts'
+import { expectTypeOf } from 'vitest'
+import type { HitlRequest } from '@yolk-sdk/agent/protocol'
+import { admit, Driver, makeDriverLayer, StopDecision, type DriverApi } from '../src/driver.ts'
 import { makeInMemoryHarnessLayer } from '../src/driver/memory.ts'
-import { DrainToken, Inbox, makeInMemoryInboxLayer, ParkGeneration } from '../src/inbox.ts'
+import {
+  DrainToken,
+  Inbox,
+  makeInMemoryInboxLayer,
+  ParkGeneration,
+  type InboxApi,
+  type ParkedState
+} from '../src/inbox.ts'
+import type { ToolBatchOutcome } from '../src/outcome.ts'
 import { makeInMemoryRunStoreLayer, RunStore } from '../src/store.ts'
 
 describe('HITL park lifecycle', () => {
+  // Issue #321: a park with no request ids was Ready at once, so the drain that paused kept the
+  // claim (keepClaimOnSettle) and nothing woke the run. A pause names at least one request.
+  it('refuses an empty pause request list (checked by pnpm tsc)', () => {
+    type PauseRequestIds = Parameters<InboxApi['park']>[1]
+
+    expectTypeOf<PauseRequestIds>().toEqualTypeOf<Arr.NonEmptyReadonlyArray<string>>()
+    expectTypeOf<Parameters<DriverApi['pause']>[1]>().toEqualTypeOf<PauseRequestIds>()
+    expectTypeOf<readonly []>().not.toExtend<PauseRequestIds>()
+    expectTypeOf<ReadonlyArray<string>>().not.toExtend<PauseRequestIds>()
+    expectTypeOf<ParkedState['requestIds']>().toEqualTypeOf<PauseRequestIds>()
+    // A tool batch's requests map straight to a pause.
+    expectTypeOf<
+      Extract<ToolBatchOutcome, { readonly _tag: 'AwaitingInput' }>['requests']
+    >().toEqualTypeOf<Arr.NonEmptyReadonlyArray<HitlRequest>>()
+  })
+
   it.effect('parks two siblings, accepts partial without wake, then Ready wakes once', () =>
     Effect.gen(function* () {
       const drains = yield* Ref.make(0)

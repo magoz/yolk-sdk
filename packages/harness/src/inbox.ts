@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore } from 'effect'
+import { Context, Data, Effect, Layer, Predicate, Ref, Semaphore, type Array as Arr } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { CapturedRun, Promotable } from './coordinator.ts'
 
@@ -29,7 +29,7 @@ export type ParkedResponse = {
 
 export type ParkedState = {
   readonly generation: ParkGeneration
-  readonly requestIds: ReadonlyArray<string>
+  readonly requestIds: Arr.NonEmptyReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly ready: boolean
 }
@@ -89,9 +89,13 @@ export type InboxApi = {
   ) => Effect.Effect<InboxItem | undefined>
   readonly pending: (runId: string) => Effect.Effect<ReadonlyArray<InboxItem>>
   readonly parked: (runId: string) => Effect.Effect<ParkedState | undefined>
+  /**
+   * Parks the run on these HITL request ids. The list is non-empty: a park with nothing to wait
+   * for would count as Ready at once and keep the claim with nothing left to wake the run.
+   */
   readonly park: (
     runId: string,
-    requestIds: ReadonlyArray<string>,
+    requestIds: Arr.NonEmptyReadonlyArray<string>,
     drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly acceptHitl: (
@@ -155,7 +159,7 @@ const isPromotableAt = (item: InboxItem, scope: Promotable) => {
 
 type Park = {
   readonly generation: ParkGeneration
-  readonly requestIds: ReadonlyArray<string>
+  readonly requestIds: Arr.NonEmptyReadonlyArray<string>
   readonly responses: ReadonlyArray<ParkedResponse>
   readonly readyWoken: boolean
 }
