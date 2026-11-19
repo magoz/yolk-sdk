@@ -137,6 +137,39 @@ export async function packageHookSameRunConflictWorkflow(token: string): Promise
   return [refused, await first]
 }
 
+// Creates the next hook before disposing the one holding its token: the run applies the disposal
+// first when it suspends, so the next hook takes the token.
+export async function packageHookDisposeAfterCreateWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  const previous = createHook<string>({ token })
+  const first = await previous
+  using next = createHook<string>({ token })
+
+  previous[Symbol.dispose]()
+
+  return [first, await next]
+}
+
+// As above, but the run suspends on a step before the disposal, while the token is still held.
+export async function packageHookDisposeAfterStepWorkflow(token: string): Promise<Array<string>> {
+  'use workflow'
+
+  const previous = createHook<string>({ token })
+  const first = await previous
+  using next = createHook<string>({ token })
+
+  await packageWriteStreamStep('between hooks')
+  previous[Symbol.dispose]()
+
+  const refused = await next.then(
+    answer => `answer: ${answer}`,
+    (error: unknown) => String(error)
+  )
+
+  return [first, refused]
+}
+
 export async function packageCancellableWorkflow(): Promise<string> {
   'use workflow'
 

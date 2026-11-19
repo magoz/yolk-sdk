@@ -35,7 +35,8 @@ Do not mix versions unless a release note explicitly says it is safe.
 `TestWorkflowWorld` now refuses a hook whose token another live hook holds, in another run or the
 same one, as Vercel does. Creating it succeeds, but awaiting it rejects with
 `TestWorkflowHookConflictError` (named `HookConflictError`, with `token` and `conflictingRunId`),
-and the holder keeps the token. Before, the world registered both. Update host tests in which two
+and the holder keeps the token. As on Vercel, the conflict is decided when the run next yields, so a
+disposal made before then frees the token for the new hook. Before, the world registered both. Update host tests in which two
 live runs, or two live hooks of one run, share a token: give each pause its own token, or let the
 holder dispose its hook or end its run first. `TestWorkflowHookConflictError` is no longer
 deprecated ([Hooks](./vercel-workflows/testing#hooks)).

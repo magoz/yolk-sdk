@@ -67,8 +67,9 @@ export class TestWorkflowHookNotFoundError extends Error {
 }
 
 /**
- * The platform's `HookConflictError`: awaiting a hook created while another live hook (of any run,
- * this one included) held its token fails with it. The refused hook never takes the token.
+ * The platform's `HookConflictError` (its message, without the platform's docs link): awaiting a
+ * hook fails with it when another live hook (of any run, this one included) still held its token
+ * once the code that created it yielded. The refused hook never takes the token.
  */
 export class TestWorkflowHookConflictError extends Error {
   override readonly name = 'HookConflictError'
@@ -693,23 +694,15 @@ export class TestWorkflowWorld {
     })
   }
 
-  // As on the platform, a token another live hook holds (of any run, this one included) is
-  // refused: creating the hook succeeds, awaiting it fails with the conflict, and it never takes
-  // the token, so disposing it changes nothing. Left unawaited, it fails nothing.
+  // The platform creates a hook when its run next suspends, applying the run's disposals since
+  // first (in creation order), and refuses a token another live hook holds then (of any run, this
+  // one included). The emulator decides once the code that created the hook yields: a hook of the
+  // same run disposed before that frees the token first. A refused hook rejects when awaited, never
+  // takes the token, and left unawaited fails nothing.
   private makeHook<T>(run: TestWorkflowRunRecord, token: string): TestWorkflowHook<T> {
-    const holder = this.liveHook(token)
-
-    if (holder !== undefined) {
-      const refused = Promise.reject<T>(new TestWorkflowHookConflictError(token, holder.run.runId))
-
-      refused.catch(() => {})
-
-      return Object.assign(refused, { [Symbol.dispose]: () => {} })
-    }
-
     let resolveHook: (payload: unknown) => void = () => {}
 
-    let rejectHook: (error: TestWorkflowRunCancelledError) => void = () => {}
+    let rejectHook: (error: Error) => void = () => {}
 
     const promise = new Promise<T>((resolve, reject) => {
       // SAFETY: Hook payloads are caller-typed on the platform (`createHook<T>`).
@@ -719,11 +712,28 @@ export class TestWorkflowWorld {
     })
 
     const hook: HookRecord = { resolve: resolveHook, reject: rejectHook }
+    let disposed = false
 
-    run.hooks.set(token, hook)
+    queueMicrotask(() => {
+      // Created and disposed before it was created: it never holds the token.
+      if (disposed) return
+
+      const holder = this.liveHook(token)
+
+      if (holder === undefined) {
+        run.hooks.set(token, hook)
+
+        return
+      }
+
+      promise.catch(() => {})
+      rejectHook(new TestWorkflowHookConflictError(token, holder.run.runId))
+    })
 
     return Object.assign(promise, {
       [Symbol.dispose]: () => {
+        disposed = true
+
         // Frees the token only while this hook holds it, never a later hook that took it since.
         if (run.hooks.get(token) === hook) run.hooks.delete(token)
       }

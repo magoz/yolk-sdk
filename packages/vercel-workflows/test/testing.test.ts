@@ -914,6 +914,8 @@ describe('TestWorkflowWorld hooks', () => {
 
       using second = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
 
+      // Once the second hook holds the token.
+      await Promise.resolve()
       first[Symbol.dispose]()
       received.push(await second)
     }, [])
@@ -925,6 +927,57 @@ describe('TestWorkflowWorld hooks', () => {
     await world.settled(runId)
 
     expect(received).toEqual(['answer-1', 'answer-2'])
+  })
+
+  // The platform creates a hook when its run next suspends, after the disposals made since.
+  it('lets the next hook take a token its run disposes after creating the next hook', async () => {
+    const world = new TestWorkflowWorld()
+    const received: Array<string> = []
+
+    const { runId } = world.start(async () => {
+      const previous = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      received.push(await previous)
+
+      using next = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      previous[Symbol.dispose]()
+      received.push(await next)
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('pause-1', 'first answer')
+    await nextTask()
+    await world.resumeHook('pause-1', 'next answer')
+    await world.settled(runId)
+
+    expect(received).toEqual(['first answer', 'next answer'])
+  })
+
+  it('refuses the next hook when its run suspends before disposing the token holder', async () => {
+    const world = new TestWorkflowWorld()
+    let refusal: unknown
+
+    const { runId } = world.start(async () => {
+      const previous = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      await previous
+
+      using next = TestWorkflowWorld.createHook<string>({ token: 'pause-1' })
+
+      await world.runStep(async () => undefined, [], 'between-hooks')
+      previous[Symbol.dispose]()
+      refusal = await next.then(
+        () => undefined,
+        (error: unknown) => error
+      )
+    }, [])
+
+    await nextTask()
+    await world.resumeHook('pause-1', 'first answer')
+    await world.settled(runId)
+
+    expect(refusal).toMatchObject({ name: 'HookConflictError', conflictingRunId: runId })
   })
 
   it('fails resuming an unknown hook token', async () => {

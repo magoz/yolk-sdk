@@ -30,7 +30,9 @@ answers the batch already took is unique per pause; a token built only from pend
 repeats when a request re-pends after an invalid answer, and one token per run or session is reused
 by every pause. A disposed hook frees its token and `resumeHook` routes by token alone, so a reused
 token hands a late duplicate of an earlier answer (a client retry, a double submit) to the next
-pause as its answer. The loop does not check tokens.
+pause as its answer. The loop does not check tokens. A token another live hook still holds when
+the run suspends (another run's pause, or a hook of this run not yet disposed) is refused: awaiting
+the new hook fails with `HookConflictError`, and the loop returns `AwaitInputFailed`.
 
 Filtering answers by request id at the hook boundary, as the Next example's `awaitInput` does
 (discard an answer no pending request matches and wait on a fresh hook), also keeps a late
@@ -127,12 +129,13 @@ This keeps durable `eventId`s monotonic across pause/resume.
 
 ## Failure modes
 
-| Failure                         | Result                                  |
-| ------------------------------- | --------------------------------------- |
-| no `awaitInput` handler         | `AwaitInputFailed`                      |
-| hook rejected                   | `AwaitInputFailed`                      |
-| resume route denied             | workflow keeps waiting                  |
-| no resumable hook for the token | `resumeHook` fails: `HookNotFoundError` |
-| tool batch fails after resume   | `ToolBatchStepFailed`                   |
+| Failure                         | Result                                   |
+| ------------------------------- | ---------------------------------------- |
+| no `awaitInput` handler         | `AwaitInputFailed`                       |
+| hook rejected                   | `AwaitInputFailed`                       |
+| token held by another live hook | `AwaitInputFailed` (`HookConflictError`) |
+| resume route denied             | workflow keeps waiting                   |
+| no resumable hook for the token | `resumeHook` fails: `HookNotFoundError`  |
+| tool batch fails after resume   | `ToolBatchStepFailed`                    |
 
 Call `writeError` with safe terminal error events. Never include raw provider/tool secrets in resume errors.

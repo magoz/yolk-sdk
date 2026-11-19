@@ -15,6 +15,8 @@ import {
   packageHitlDirectiveWorkflow,
   packageHookAnswersWorkflow,
   packageHookConflictWorkflow,
+  packageHookDisposeAfterCreateWorkflow,
+  packageHookDisposeAfterStepWorkflow,
   packageHookOnceWorkflow,
   packageHookSameRunConflictWorkflow,
   packageHookTwoPausesWorkflow,
@@ -247,6 +249,34 @@ describe('package-owned workflow directives', () => {
         `HookConflictError: Hook token "${token}" is already in use by another workflow (run "${run.runId}")`
       ),
       'first answer'
+    ])
+  })
+
+  it('lets the next hook take a token its run disposes after creating the next hook', async () => {
+    const token = `package-hook-dispose-after-create:${crypto.randomUUID()}`
+    const run = await start(packageHookDisposeAfterCreateWorkflow, [token])
+
+    await waitForHook(run, { token })
+    await resumeHook(token, 'first answer')
+    // Waits for the next hook (the previous one has received its payload).
+    await waitForHook(run, { token })
+    await resumeHook(token, 'next answer')
+
+    await expect(run.returnValue).resolves.toEqual(['first answer', 'next answer'])
+  })
+
+  it('refuses the next hook when its run suspends before disposing the token holder', async () => {
+    const token = `package-hook-dispose-after-step:${crypto.randomUUID()}`
+    const run = await start(packageHookDisposeAfterStepWorkflow, [token])
+
+    await waitForHook(run, { token })
+    await resumeHook(token, 'first answer')
+
+    await expect(run.returnValue).resolves.toEqual([
+      'first answer',
+      expect.stringContaining(
+        `HookConflictError: Hook token "${token}" is already in use by another workflow (run "${run.runId}")`
+      )
     ])
   })
 
