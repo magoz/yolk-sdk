@@ -1666,7 +1666,7 @@ describe('tool ledger', () => {
     const output = 'x'.repeat(2_000)
     const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length
 
-    const stored = (content: string, withPauses: boolean) =>
+    const stored = (content: string, withPauses: boolean, maxBytes = 1_000) =>
       toolLedgerResult(
         ToolResult.make({
           toolCallId: 'call_1',
@@ -1677,7 +1677,7 @@ describe('tool ledger', () => {
               : { ok: true, storeWrites: { set: {}, delete: ['k'] }, plan }
           }
         }),
-        1_000
+        maxBytes
       )
 
     expect(stagedToolPlanNotice(plan)).toBe(planNotice)
@@ -1689,13 +1689,34 @@ describe('tool ledger', () => {
     expect(resultText(staged)).toMatch(/^x+…\n\nStaged 2 calls/)
     expect(resultText(staged)).toContain(`${planNotice}\n\n[The stored copy`)
 
+    // Below the plan tail's own size, the content is the plan notice alone.
+    const tiny = stored(`${output}\n\n${planNotice}`, false, 10)
+
+    expect(tiny.structuredContent).toEqual({ codemode: { ok: true, plan } })
+    expect(tiny.content).toBe(planNotice)
+
     // Code mode writes the plan notice, then the pause notice: both stay, in that order.
     const both = stored(`${output}\n\n${planNotice}\n\n${pauseNotice}`, true)
 
     expect(both.structuredContent).toEqual({ codemode: { ok: true, plan, inputRequired: pauses } })
     expect(resultText(both)).toContain(`…\n\n${planNotice}\n\n${pauseNotice}\n\n[The stored copy`)
 
-    // A plan notice that is not where code mode writes it keeps neither the plan nor its notice.
+    const tinyBoth = stored(`${output}\n\n${planNotice}\n\n${pauseNotice}`, true, 10)
+
+    expect(tinyBoth.structuredContent).toEqual({
+      codemode: { ok: true, plan, inputRequired: pauses }
+    })
+    expect(tinyBoth.content).toBe(`${planNotice}\n\n${pauseNotice}`)
+
+    // A plan notice last while the result names pauses without their notice: code mode never
+    // writes that layout (its pause notice follows the plan notice), so nothing is kept.
+    const pausesUnnoticed = stored(`${output}\n\n${planNotice}`, true)
+
+    expect(pausesUnnoticed.structuredContent).toBeUndefined()
+    expect(resultText(pausesUnnoticed)).toMatch(/^x+…\n\n\[The stored copy/)
+
+    // A plan notice that is not where code mode writes it does not keep the plan: the notice is
+    // only part of the text that is cut, never a kept tail.
     const misplaced = stored(`${planNotice}\n\n${output}\n\n${pauseNotice}`, true)
 
     expect(misplaced.structuredContent).toEqual({ codemode: { ok: true, inputRequired: pauses } })

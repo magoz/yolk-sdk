@@ -23,7 +23,7 @@ import {
 } from '../protocol/bounded-text.ts'
 import { inputRequiredInstruction } from '../protocol/input-required.ts'
 import { subagentToolName } from '../protocol/tool.ts'
-import { stagedToolPlanNotice } from './plan-notice.ts'
+import { StagedToolPlanRef, stagedToolPlanNotice } from './plan-notice.ts'
 import type { ToolAccess } from './registry.ts'
 import { sha256HexSync } from './sha256.ts'
 
@@ -659,19 +659,12 @@ export const toolLedgerResult = (
 // `codemode.inputRequired`, its pauses (ADR 0014). Code mode writes their notices last, in that
 // order, each after a blank line: `stagedToolPlanNotice`, then `inputRequiredNotice`. Decoding
 // keeps only these fields.
-const CodeModeStagedPlan = Schema.Struct({
-  id: Schema.String,
-  digest: Schema.String,
-  count: Schema.Number,
-  reviewToolName: Schema.String
-})
-
 const CodeModePauses = Schema.NonEmptyArray(ToolInputRequiredRef)
 
 const CodeModeReviewRefs = Schema.Struct({
   codemode: Schema.Struct({
     ok: Schema.Boolean,
-    plan: Schema.optionalKey(CodeModeStagedPlan),
+    plan: Schema.optionalKey(StagedToolPlanRef),
     inputRequired: Schema.optionalKey(CodeModePauses)
   })
 })
@@ -680,7 +673,7 @@ const decodeCodeModeReviewRefs = Schema.decodeUnknownOption(CodeModeReviewRefs)
 
 type CodeModeReviewRefsFields = {
   ok: boolean
-  plan?: typeof CodeModeStagedPlan.Type
+  plan?: StagedToolPlanRef
   inputRequired?: typeof CodeModePauses.Type
 }
 
@@ -695,7 +688,8 @@ type KeptReviewRefs = {
 // result's marker and review call (rebuilt when missing), or a code mode result's staged plan and
 // pauses with their notices. The shape alone does not prove a code mode result (any tool can return
 // it), so each code mode ref is kept only when `text` already ends with its notice where code mode
-// writes it (the plan's before the pauses' when both are kept); the ledger never writes them itself.
+// writes it (the plan's last, or just before the pauses' when the result has pauses, which are then
+// kept too); the ledger never writes them itself.
 const keptReviewRefs = (full: StoredResultFields, text: string): KeptReviewRefs | undefined => {
   const marker = toolInputRequired(full)
 
@@ -720,8 +714,11 @@ const keptReviewRefs = (full: StoredResultFields, text: string): KeptReviewRefs 
           ? undefined
           : { plan: codemode.plan, notice: stagedToolPlanNotice(codemode.plan) }
 
+      // A plan notice last while pauses go unkept is a layout code mode never writes: the pause
+      // notice always follows the plan notice.
       const keptPlan =
         staged !== undefined &&
+        (pauses === undefined || keptPauses !== undefined) &&
         text.endsWith(
           keptPauses === undefined ? staged.notice : `${staged.notice}\n\n${keptPauses.notice}`
         )

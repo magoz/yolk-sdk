@@ -1,12 +1,16 @@
+import * as Schema from 'effect/Schema'
+
 /** A saved staged tool plan as a staging result names it (code mode's
  * `structuredContent.codemode.plan`): the review tool and what the model passes to it.
  */
-export type StagedToolPlanRef = {
-  readonly id: string
-  readonly digest: string
-  readonly count: number
-  readonly reviewToolName: string
-}
+export const StagedToolPlanRef = Schema.Struct({
+  id: Schema.String,
+  digest: Schema.String,
+  count: Schema.Number,
+  reviewToolName: Schema.String
+})
+
+export type StagedToolPlanRef = typeof StagedToolPlanRef.Type
 
 /**
  * The model-visible sentence naming a saved staged plan and the review call that applies it
