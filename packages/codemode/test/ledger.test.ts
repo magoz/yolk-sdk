@@ -36,6 +36,7 @@ import {
   type ToolLedgerOptions,
   type ToolLedgerStore,
   type ToolModule,
+  type ToolPlanOptions,
   type ToolPlanStore,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
@@ -225,6 +226,81 @@ const InterruptedContent = Schema.Struct({
     })
   })
 })
+
+/** A one-call plan `crm_link({ note: 'deal_1' })` saved for `call_1`, with fields to corrupt. */
+const abandonedPlan = (
+  fields: { readonly id?: string; readonly scope?: string; readonly digest?: string } = {}
+) => {
+  const id = fields.id ?? 'call_1'
+
+  const staged = StagedCall.make({
+    key: `${id}/s1`,
+    toolName: 'crm_link',
+    params: { note: 'deal_1' },
+    argsDigest: toolLedgerArgs({ note: 'deal_1' }).argsDigest
+  })
+
+  return ToolPlan.make({
+    id,
+    scope: fields.scope ?? 'memory',
+    digest: fields.digest ?? toolPlanDigest([staged]),
+    calls: [staged]
+  })
+}
+
+/** A ledger whose `call_1` codemode entry was claimed and its lease has expired: abandoned. */
+const abandonedCodeModeLedger = Effect.gen(function* () {
+  const store = makeInMemoryToolLedgerStore()
+
+  yield* store.claim({
+    key: 'call_1',
+    toolName: 'codemode',
+    ...toolLedgerArgs({ code: 'script' }),
+    nowMs: 0,
+    leaseExpiresAtMs: 1_000,
+    leaseMs: 1_000
+  })
+
+  yield* TestClock.adjust('2 seconds')
+
+  return store
+})
+
+/** Re-executes the abandoned `call_1`; `staging: false` resolves without an interaction host. */
+const runAbandonedCodeMode = (
+  store: ToolLedgerStore,
+  options: { readonly plans: ToolPlanOptions; readonly staging: boolean }
+) =>
+  Effect.gen(function* () {
+    const { executor } = scriptedExecutor(async () => 'never runs')
+
+    const toolSet = yield* resolveTools(
+      [
+        moduleOf('host', [
+          makeCodeModeTool<TestContext>({ executor }),
+          makePlanReviewTool<TestContext>()
+        ]),
+        moduleOf('crm', [stageableLink])
+      ],
+      context,
+      options.staging
+        ? { ledger: { store }, plans: options.plans, interactionHost: unusedInteractionHost }
+        : { ledger: { store }, plans: options.plans }
+    )
+
+    return yield* toolSet.execute(
+      ToolCall.make({ id: 'call_1', name: 'codemode', params: { code: 'script' } })
+    )
+  })
+
+/** An abandoned script's structured content with no nested calls and no plan. */
+const unnamedAbandonedContent = {
+  codemode: {
+    ok: false,
+    interrupted: true,
+    interruptedCalls: { calls: [], complete: true, counts: { applied: 0, failed: 0, unknown: 0 } }
+  }
+}
 
 describe('code mode with a tool ledger', () => {
   it.effect('never re-runs a crashed script and reports its applied and unknown writes', () =>
@@ -783,6 +859,100 @@ describe('code mode with a tool ledger', () => {
           expect(text(result.content)).not.toContain('Staged')
         }
       })
+  )
+
+  // Each guard of the abandoned path's plan lookup (`savedToolPlanRef`): the plan comes only from
+  // an intact, unclaimed plan in the store's scope under the host plan id of the call.
+  it.effect.each<{
+    readonly name: string
+    readonly plan: ToolPlan
+    readonly planId?: (input: { readonly call: ToolCall }) => string
+    readonly staging?: false
+    readonly named?: true
+    readonly reads: number
+  }>([
+    { name: 'an intact plan (control)', plan: abandonedPlan(), named: true, reads: 1 },
+    { name: 'a plan in another scope', plan: abandonedPlan({ scope: 'elsewhere' }), reads: 1 },
+    {
+      name: 'a plan failing the integrity check',
+      plan: abandonedPlan({ digest: 'tampered' }),
+      reads: 1
+    },
+    { name: 'a stored plan with another id', plan: abandonedPlan({ id: 'call_2' }), reads: 1 },
+    {
+      name: 'a host plan id that throws',
+      plan: abandonedPlan(),
+      planId: () => {
+        throw new Error('no run id')
+      },
+      reads: 0
+    },
+    { name: 'an empty host plan id', plan: abandonedPlan(), planId: () => '', reads: 0 },
+    { name: 'a resolution without staging', plan: abandonedPlan(), staging: false, reads: 0 }
+  ])('names the abandoned plan only when valid: $name', row =>
+    Effect.gen(function* () {
+      const store = yield* abandonedCodeModeLedger
+      const reads = { count: 0 }
+
+      // Answers every read with the row's plan, whatever the id, so only the guards decide.
+      const plans: ToolPlanStore = {
+        ...makeInMemoryToolPlanStore(),
+        get: () =>
+          Effect.sync(() => {
+            reads.count++
+
+            return { plan: row.plan }
+          })
+      }
+
+      const result = yield* runAbandonedCodeMode(store, {
+        plans: row.planId === undefined ? { store: plans } : { store: plans, planId: row.planId },
+        staging: row.staging !== false
+      })
+
+      expect(reads.count).toBe(row.reads)
+      expect(result.isError).toBe(true)
+
+      if (row.named === true) {
+        expect(result.structuredContent).toMatchObject({
+          codemode: { interrupted: true, plan: { id: 'call_1', count: 1 } }
+        })
+      } else {
+        expect(result.structuredContent).toEqual(unnamedAbandonedContent)
+        expect(text(result.content)).not.toContain('Staged')
+      }
+    })
+  )
+
+  it.effect('names no plan when the plan store read outlasts its bound', () =>
+    Effect.gen(function* () {
+      const store = yield* abandonedCodeModeLedger
+      const messages: Array<unknown> = []
+      const logger = Logger.layer([Logger.make(options => messages.push(options.message))])
+
+      // A read that never answers (interruptible, as the `ToolPlanStore` contract requires).
+      const plans: ToolPlanStore = { ...makeInMemoryToolPlanStore(), get: () => Effect.never }
+
+      const fiber = yield* Effect.forkChild(
+        runAbandonedCodeMode(store, { plans: { store: plans }, staging: true }).pipe(
+          Effect.provide(logger)
+        )
+      )
+
+      yield* TestClock.adjust('4999 millis')
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust('1 millis')
+
+      const result = yield* Fiber.join(fiber)
+
+      expect(result.isError).toBe(true)
+      expect(result.structuredContent).toEqual(unnamedAbandonedContent)
+      expect(messages).toContainEqual([
+        expect.stringContaining(
+          'Plan store could not read the plan of abandoned call_1: timed out after 5000 ms'
+        )
+      ])
+    })
   )
 
   it.effect('marks interrupted calls incomplete when the ledger already cut their arguments', () =>

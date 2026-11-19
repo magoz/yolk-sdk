@@ -234,8 +234,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   interrupted listing and `interruptedCalls` and runs nothing, a failing `list`, arguments the
   ledger already cut, `interruptedCalls` bounds, long-script conflicts, completed replay,
   concurrent duplicates wait, replays over the bound keeping pauses and the staged plan, an
-  abandoned script naming the plan it saved, read under the host plan id and not when unreadable or
-  claimed), records past 256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
+  abandoned script naming the plan it saved, read under the host plan id, and not when the read
+  fails or times out, the plan is claimed, or a lookup guard rejects it), records past 256 calls with `maxNestedCalls` 768, and `afterNestedCall` outcomes.
 - `test/plan.test.ts`: staging through code mode (saved plan, nothing applied, description,
   fail-closed direct calls, failed scripts discard, ordering guardrails, invalid/duplicate/limit
   stages, ledgered replay, save conflicts, and the pi executor end to end).
