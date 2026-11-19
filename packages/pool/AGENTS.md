@@ -38,6 +38,11 @@ windows (`windowDurationMinutes`, `models`) come from `@yolk-sdk/agent`.
   unless nothing else is left; stale-cooldown clearing reads account-wide windows only (model-scoped
   windows block their models through ranking).
 - Cooldowns are trusted only when finite and at most `poolMaxCooldownMs` ahead.
+- One cooldown per account: one that ended before the next began gives way to it; overlapping ones
+  merge into the later end and its kind, with the newest failure's `startedAtMs` (never let an
+  ended or absorbed auth failure make a quota cooldown auth). An absorbed auth failure's end is the
+  quota cooldown's `authUntilMs`: readings never vouch for a rejected credential, so none clears it
+  before then. Only the observed quota cooldown is cleared.
 - Logs and spans name pools, routes, account ids, and store operations only; never tokens, emails, or host store error messages (they may carry connection details).
 - `poolStoreContract` cases are the store semantics; change them only together with the ADR and
   `makeMemoryPoolStore`.

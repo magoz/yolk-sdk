@@ -405,24 +405,25 @@ describe('makePool', () => {
   )
 
   // Issue #301: a longer cooldown absorbs a newer, shorter failure; a reading taken between the two
-  // must not clear the cooldown, or the next request goes straight back to the failed account. An
-  // absorbed auth failure keeps the cooldown an auth one, which no reading clears.
+  // must not clear the cooldown, or the next request goes straight back to the failed account. A
+  // reading taken after a newer quota failure may clear it; an absorbed auth failure blocks readings
+  // until it ends, since a reading proves nothing about the rejected credential.
   it.effect.each([
     {
       failure: 'quota',
       newer: quotaExhausted(t0 + 5 * hour),
-      kept: 'PoolQuotaCooldown',
+      authUntilMs: undefined,
       afterNewerReading: 'from primary'
     },
     {
       failure: 'auth',
       newer: llmError({ kind: 'auth' }),
-      kept: 'PoolAuthCooldown',
+      authUntilMs: t0 + 2 * minute + poolAuthCooldownMs,
       afterNewerReading: 'from backup'
     }
   ] as const)(
     'keeps a newer $failure failure from concurrent requests that a longer cooldown absorbed',
-    ({ newer, kept, afterNewerReading }) =>
+    ({ newer, authUntilMs, afterNewerReading }) =>
       Effect.gen(function* () {
         const entered = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
@@ -460,11 +461,11 @@ describe('makePool', () => {
         yield* Deferred.succeed(release, undefined)
         expect(texts(yield* Fiber.join(second))).toEqual(['from backup'])
 
-        expect((yield* pool.state).accounts[0]?.cooldown).toMatchObject({
-          _tag: kept,
-          startedAtMs: t0 + 2 * minute,
-          untilMs: t0 + 3 * day
-        })
+        const kept = { accountId: 'primary', startedAtMs: t0 + 2 * minute, untilMs: t0 + 3 * day }
+
+        expect((yield* pool.state).accounts[0]?.cooldown).toEqual(
+          PoolQuotaCooldown.make(authUntilMs === undefined ? kept : { ...kept, authUntilMs })
+        )
 
         // The next request skips primary: it failed after the reading.
         expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
@@ -472,13 +473,69 @@ describe('makePool', () => {
         ])
         expect(primary.calls).toHaveLength(2)
 
-        // A reading taken after the newer failure clears a quota cooldown, never an auth one.
+        // A reading taken after the newer failure clears a quota failure, not an active auth one.
         yield* TestClock.adjust(minute)
         yield* pool.recordReading('primary', snapshot(t0 + 3 * minute, weekly(0, t0 + 6 * day)))
         expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
           afterNewerReading
         ])
+
+        // Once the auth failure has ended, a fresh reading clears it too.
+        yield* TestClock.adjust(poolAuthCooldownMs)
+
+        const later = t0 + 3 * minute + poolAuthCooldownMs
+
+        yield* pool.recordReading('primary', snapshot(later, weekly(0, t0 + 6 * day)))
+        expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+          'from primary'
+        ])
       })
+  )
+
+  it.effect('lets a quota cooldown after an ended auth cooldown clear on a newer reading', () =>
+    Effect.gen(function* () {
+      const primary = scripted('primary', 10, [
+        fail(llmError({ kind: 'auth' })),
+        fail(quotaExhausted(t0 + 3 * day))
+      ])
+
+      const backup = scripted('backup', 0)
+      const { pool } = yield* setup({ accounts: [primary.account, backup.account] })
+
+      const record = (fetchedAtMs: number) =>
+        Effect.all([
+          pool.recordReading('primary', snapshot(fetchedAtMs, weekly(10, t0 + 2 * day))),
+          pool.recordReading('backup', snapshot(fetchedAtMs, weekly(10, t0 + 5 * day)))
+        ])
+
+      // Readings rank primary first; its credentials are rejected once.
+      yield* record(t0)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+
+      // After the auth cooldown ends, primary hits its quota: a quota cooldown, not an auth one.
+      yield* TestClock.adjust(poolAuthCooldownMs + minute)
+      yield* record(t0 + poolAuthCooldownMs + minute)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from backup'
+      ])
+      expect((yield* pool.state).accounts[0]?.cooldown).toEqual(
+        PoolQuotaCooldown.make({
+          accountId: 'primary',
+          startedAtMs: t0 + poolAuthCooldownMs + minute,
+          untilMs: t0 + 3 * day
+        })
+      )
+
+      // A newer reading shows quota left, so it clears.
+      yield* TestClock.adjust(minute)
+      yield* record(t0 + poolAuthCooldownMs + 2 * minute)
+      expect(texts(yield* Stream.runCollect(pool.provider.stream(request)))).toEqual([
+        'from primary'
+      ])
+      expect(primary.calls).toHaveLength(3)
+    })
   )
 
   it.effect('keeps a newer failure from the loop’s retry after a store read failed', () =>

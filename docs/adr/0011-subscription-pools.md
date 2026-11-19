@@ -70,7 +70,8 @@ A fresh reading with `fetchedAt` later than a quota cooldown's `startedAt` that 
 every account-wide window (none started and fully used; model-scoped windows block only their
 models, through ranking) clears that cooldown (a limit reset was spent, or the
 provider reset early). A reading from before the lockout never clears it, and readings never clear
-an auth cooldown.
+an auth cooldown, nor a quota cooldown before an auth failure it absorbed has ended. A quota
+cooldown counts from the newest failure it absorbed (see State).
 
 Windows without a length (OpenCode Go's billing month) still make a used-up account unusable but
 never rank it; an account whose applicable windows all lack a length ranks as not started.
@@ -106,17 +107,32 @@ its database:
 - pins: `(poolId, route) → accountId, pinnedAt`, created if absent and moved by compare-and-set on
   the expected account, so concurrent instances converge;
 - cooldowns: one per account, a tagged union `PoolQuotaCooldown` or `PoolAuthCooldown` with
-  `startedAtMs` and `untilMs`; writing keeps the one that ends later (of two that end together, the
-  later-started one) with the later `startedAtMs` of the two, and as an auth cooldown when either
-  is one. The kept cooldown thus carries the newest failure's time, so a reading taken before that
-  failure never clears it even when a longer cooldown absorbed a shorter, newer failure, and an
-  auth failure is never absorbed into a quota cooldown a reading may clear (the merged cooldown
-  sits out until the later end, even when that was a quota reset a reading could have cleared
-  early); clearing requires the observed `startedAtMs` and never removes an auth cooldown (two
-  failures in the same millisecond share a start, so the start alone cannot tell them apart).
+  `startedAtMs` and `untilMs`. Writing one over another:
+  - a cooldown that ended before the other began gives way to it, so an ended cooldown (an old
+    auth blip) never shapes a later one;
+  - two that overlap merge: the later end and that cooldown's kind (of two that end together, the
+    later-started one's), with the later `startedAtMs` of the two;
+  - the kept cooldown thus carries the newest failure's time: a reading taken before that failure
+    never clears it, even when a longer cooldown absorbed a shorter, newer failure;
+  - a kept quota cooldown records the end of an auth failure it absorbed as `authUntilMs`
+    (dropped once that ended by the kept start), and no reading clears it before then. A reading
+    cannot vouch for the rejected credential: the host records any snapshot it likes, possibly
+    fetched with another grant of the account (separate logins are separate grants, see
+    Ownership), and the pool never learns which credential fetched it. The kind stays quota, so
+    an exhausted pool still reports the quota reset, and auth exhaustion still means rejected
+    credentials only;
+  - concurrent writes for one account are normal (two requests failing on the same account), so
+    host stores merge atomically (one statement: an upsert with the greatest start and a `CASE`
+    on which ends later), never a read followed by a write.
+
+  Clearing removes only a quota cooldown, and only the observed one (same `startedAtMs` and
+  `authUntilMs`). Two failures in the same millisecond share a start; absorbing an auth failure
+  either makes the cooldown an auth one or sets `authUntilMs`, so a clear observed before that
+  merge fails.
   Model-scoped exhaustion is handled through readings (model-scoped windows), not cooldowns:
   Claude's model-only rejections carry no quota reset, and a Codex quota error does not say whether
   it is model-scoped, so it cools the whole account;
+
 - readings: the latest `ProviderSubscriptionUsageSnapshot` per account.
 
 The in-memory store serves tests and single-process hosts. `poolStoreContract` pins the semantics

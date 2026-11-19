@@ -103,13 +103,20 @@ skipping accounts a fresh reading shows used up unless nothing else is left.
 ## Store
 
 `PoolStoreApi` holds pins (per pool and route), one cooldown per account, and the latest reading
-per account. Implementations must be atomic per key (`movePin` is a compare-and-set). Writing a
-cooldown keeps the one that ends later, stamped with the newer `startedAtMs` of the two and kept
-as a `PoolAuthCooldown` when either is one, and `clearCooldown` never removes a
-`PoolAuthCooldown`, so a reading taken before the latest failure never clears it and no reading
-clears an auth failure. Run every case of `poolStoreContract` against a fresh store of your
-implementation in your tests. Store failures never fail a request: the pool routes fill-first
-without state and logs a warning.
+per account. Implementations must be atomic per key (`movePin` is a compare-and-set).
+
+`putCooldown` over an existing cooldown: one that ended before the other began gives way to it;
+two that overlap merge into the later end and its kind, with the later `startedAtMs` of the two
+(the newest failure), so a reading taken before that failure never clears it. A kept quota
+cooldown records the end of an auth failure it absorbed as `authUntilMs`; readings do not clear it
+before then (a reading cannot vouch for the rejected credential). `clearCooldown` removes only the
+observed `PoolQuotaCooldown` (same `startedAtMs` and `authUntilMs`), never a `PoolAuthCooldown`.
+Two requests failing on one account write concurrently, so merge in one atomic statement (for
+example an upsert with the greatest start and a `CASE` on which ends later), not a read followed by
+a write.
+
+Run every case of `poolStoreContract` against a fresh store of your implementation in your tests.
+Store failures never fail a request: the pool routes fill-first without state and logs a warning.
 
 ## Host responsibilities
 
