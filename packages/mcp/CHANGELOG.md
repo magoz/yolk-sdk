@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.142
+
+### Patch Changes
+
+- 8a3c032: Advance in lockstep with `@yolk-sdk/vercel-workflows` and `@yolk-sdk/codemode`, which add Cloudflare Workers runtimes (`@yolk-sdk/vercel-workflows/cloudflare*` and `@yolk-sdk/codemode/cloudflare`). These packages have no direct changes in this release.
+- Updated dependencies [8a3c032]
+  - @yolk-sdk/agent@0.1.0-canary.142
+  - @yolk-sdk/conformance@0.1.0-canary.142
+
 ## 0.1.0-canary.141
 
 ### Patch Changes
