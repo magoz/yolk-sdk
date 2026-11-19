@@ -244,6 +244,14 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
   details yet. `ToolResult.nestedCalls` records the tool's own message without the prefix.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; one whose tool fails
   with a defect rejects with `<label> failed unexpectedly.` and is recorded as `error`.
+- A nested call that [paused for a person's input](../agent/tools-hitl#finish-calls-that-paused-for-input)
+  (an MCP server asking a form) rejects like any error result, with
+  `error.code === 'input_required'`. It has not completed. Whether or not
+  the script caught the rejection, the result's `structuredContent.codemode.inputRequired` lists
+  every such pause (`ToolInputRequiredRef`s `{ reviewToolName, pauseIds }`, merged per review tool),
+  and a notice after the bounded output names the review call, for example
+  `review_input({"pauseIds":["p1"]})`. Work that needs the value continues in a new script from the
+  review result, never by calling the tool again.
 - Globals: `text()`, `console.log()`, `image()`, `exit()`, `ALL_TOOLS`,
   `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`,
   and `store(key, value)` / `load(key)`. `searchTools` hits include a one-line `signature`
@@ -371,7 +379,8 @@ return records.length
 
 The review is an [action-backed interaction](../agent/tools-hitl#review-a-staged-plan): render the
 `tool_plan_review` kind, accept `{ selectedKeys }`, and resume as for any interaction. Yolk then
-applies exactly the selected calls in staged order, once. Each staged call is previewed with the
+applies exactly the selected calls in staged order, once; a call that pauses for input is reported
+`input_required` and does not stop the apply. Each staged call is previewed with the
 tool's `changePreview`, the same [change preview](../agent/tools-hitl#preview-the-change) direct
 approvals show.
 

@@ -95,6 +95,111 @@ Local stdio calls list the tools first in the same session and check `structured
 the listed `outputSchema` before trusting it; a listing that fails or lacks the tool runs the call
 without that check.
 
+## Finish calls that ask for input
+
+A server can pause a `tools/call` with a form (MCP form elicitation over `2026-07-28` multi
+round-trip requests, see [Confirm tool calls with form elicitation](../mcp#confirm-tool-calls-with-form-elicitation)).
+In an agent session the registration stores the pause and returns an input-required result; a
+person answers the form through the input review interaction, which resumes the remote call once
+([Finish calls that paused for input](../agent/tools-hitl#finish-calls-that-paused-for-input)).
+
+Fragment continuing the registration above: `pauseStore` (session-scoped pause storage with an
+atomic claim) is host-owned.
+
+```ts
+import * as Schema from 'effect/Schema'
+import { InteractionValidationError, makeInputRequiredToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  inputReviewToolName,
+  makeInputReviewTool,
+  type InputPause,
+  type InputReviewHost
+} from '@yolk-sdk/agent/tools'
+import {
+  callRemoteMcpServerToolResumable,
+  McpElicitationResponses,
+  toMcpInputResponses,
+  type McpInputRequired
+} from '@yolk-sdk/mcp/client'
+
+// One stored pause per paused call: the remote pause and the call it resumes.
+type McpPause = InputPause & {
+  readonly inputRequired: McpInputRequired
+  readonly toolCallId: string
+  readonly params: unknown
+}
+
+const registration = (resolved: McpResolvedTool): ToolRegistration<HostContext> => ({
+  def: resolved.def,
+  access: 'write', // host policy
+  decodeOutput: mcpToolOutputDecoder,
+  execute: ({ call }) =>
+    callRemoteMcpServerToolResumable({
+      config: server,
+      mcpToolName: resolved.mcpToolName,
+      toolCallId: call.id,
+      params: call.params,
+      options: { elicitation: { form: true } }
+    }).pipe(
+      Effect.flatMap(outcome =>
+        outcome._tag === 'Complete'
+          ? Effect.succeed(outcome.result)
+          : pauseStore.save({ call, inputRequired: outcome.inputRequired }).pipe(
+              Effect.map(pauseId =>
+                makeInputRequiredToolResult({
+                  toolCallId: call.id,
+                  content: `${server.name} asks for input before ${call.name} can finish.`,
+                  reviewToolName: inputReviewToolName,
+                  pauseIds: [pauseId]
+                })
+              )
+            )
+      ),
+      Effect.provide(FetchHttpClient.layer),
+      Effect.mapError(
+        error => new ToolError({ tool: call.name, message: error.message, cause: 'execution' })
+      )
+    )
+})
+
+const decodeAnswer = Schema.decodeUnknownEffect(McpElicitationResponses)
+
+const mcpPauses: InputReviewHost<McpPause> = {
+  load: pauseIds => pauseStore.loadWaiting(pauseIds), // in this session, still waiting, in order
+  // One answer per pause: its responses keyed by form `key`, checked against the forms.
+  validateAnswer: ({ pause, answer }) =>
+    decodeAnswer(answer).pipe(
+      Effect.flatMap(responses =>
+        toMcpInputResponses({ server: server.name, inputRequired: pause.inputRequired, responses })
+      ),
+      Effect.asVoid,
+      Effect.mapError(error => new InteractionValidationError({ message: error.message }))
+    ),
+  // Claim, then resumeRemoteMcpServerToolCall, then record (below).
+  resume: input => pauseStore.resumeOnce(input),
+  recorded: input => pauseStore.recorded(input)
+}
+
+const reviewInput = makeInputReviewTool<HostContext, McpPause>({ host: mcpPauses })
+```
+
+`resume` claims the pause for `submissionId` before sending, then calls
+`resumeRemoteMcpServerToolCall({ config, mcpToolName, toolCallId, params, options, inputRequired, responses })`
+with the stored call and the person's responses, records the resolution, and returns it:
+
+- `Complete` becomes `InputPauseResolution.Completed({ result })`.
+- `InputRequired` (the server asked again): store the new pause and return
+  `InputPauseResolution.InputRequired({ pauseIds: [newPauseId] })`.
+- A failure checked before sending (`McpInputRequiredError` `invalid_responses` or
+  `mismatched_resume`), or a refusal before sending (the target changed, or the pause was already
+  answered), is `NotSent({ message })`.
+- Any other failure after the claim is `Unknown({ message })`: the call may have run. Never send a
+  claimed pause again; `recorded` reports what was recorded after a crash.
+
+The review action provides the resolution's file capture (`resolveTools` `files`), so a resume run
+in `resume`'s Effect stores its blobs like a registration's; a resume run elsewhere passes
+`fileCapture`.
+
 ## Host responsibilities
 
 Persist server config, credentials, auth headers, and allow/deny policy in your app. Keep local stdio behind Node-only hosts via `@yolk-sdk/mcp/client/node`.

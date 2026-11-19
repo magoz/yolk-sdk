@@ -58,6 +58,18 @@ A plan review (`makePlanReviewTool`) is an action-backed interaction too: a pers
 mode script's staged approval-gated calls once and selects the calls to apply. Follow
 [Review a staged plan](../agent/tools-hitl#review-a-staged-plan).
 
+## Finish calls that paused for input
+
+Some calls pause after they were made: a remote MCP server asks a form before it finishes. The
+tool stores the pause host-side and returns `makeInputRequiredToolResult`, an error result marked
+`{ code: 'input_required', inputRequired: { reviewToolName, pauseIds } }`. The model then calls the
+input review interaction (`makeInputReviewTool`, default `review_input({ pauseIds })`, renderer
+`input_review`): your host loads the stored pauses through `InputReviewHost`, a person answers each
+form (action `submit` with `{ answers }`, one per pause), and the action resumes each pause once,
+reporting it `completed`, `input_required` (asked again), `not_sent`, or `unknown`
+(`InputReviewOutcome`). Follow
+[Finish calls that paused for input](../agent/tools-hitl#finish-calls-that-paused-for-input).
+
 ## Related APIs
 
 - `AgentAwaitingInput` from `@yolk-sdk/agent/protocol`
@@ -69,6 +81,8 @@ mode script's staged approval-gated calls once and selects the calls to apply. F
 - `validateInteractionSubmission` from `@yolk-sdk/agent/protocol`
 - `makeInteractionTool` from `@yolk-sdk/agent/tools`
 - `makePlanReviewTool`, `previewStoredToolPlan` from `@yolk-sdk/agent/tools`
+- `makeInputRequiredToolResult`, `toolInputRequired` from `@yolk-sdk/agent/protocol`
+- `makeInputReviewTool`, `InputReviewHost`, `InputPauseResolution`, `InputReviewOutcome` from `@yolk-sdk/agent/tools`
 - `ToolChangePreview`, `groupToolChangePreviews` from `@yolk-sdk/agent/tools`
 - `loadInteractionReceipts` from `@yolk-sdk/agent/loop`
 - `plainHitlResponse` from `@yolk-sdk/agent/protocol`

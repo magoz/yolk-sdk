@@ -195,6 +195,10 @@ Legacy (pre-`2026-07-28`) elicitation is a server-initiated request that must be
 call is open, so it is not supported: an opted-in host never declares elicitation on a legacy
 connection. `callRemoteMcpServerTool` keeps its behavior and never declares it.
 
+In an agent session, a registration stores the pause and returns an input-required result, and a
+person answers through the input review interaction: see
+[Finish calls that ask for input](../integrations/mcp-tools#finish-calls-that-ask-for-input).
+
 ## Use local stdio MCP
 
 Use `@yolk-sdk/mcp/client/node` only in Node hosts:
@@ -229,6 +233,77 @@ Use `makeMcpToolServer` from `@yolk-sdk/mcp/server` to expose a tool-only Yolk a
 A request that carries `MCP-Protocol-Version` with a body over `maxRequestBodySize` (default 4 MiB) is answered `413`; a host that accepts larger bodies passes its own cap to `makeMcpToolServer`. The header-less JSON path reads the body unbounded, so the host caps it.
 
 To ask the user before a tool runs, give the tool an `approval` policy and the server `approvals` (a signing key of at least 32 bytes and the request's authenticated principal). The first call answers an MCP form elicitation over multi round-trip requests (`2026-07-28`), one required approve/deny choice (never an empty form, which some clients accept without showing it), with a signed, expiring `requestState`; only a retry that approves it for the same principal, tool, arguments and prompt runs the tool, with an `approvalId` to run it at most once. The prompt is built again on the retry, so build it deterministically: an accept of a prompt that changed since the user saw it runs nothing. To ask a form instead (yes/no, one choice, or a multi-select of titled options), build the tool with `makeMcpServerElicitedTool` and `mcpServerForm`: `execute` gets the answer decoded with the form's schema, and an answer that does not fit asks again. Clients that do not declare form elicitation get an error result, and 2025-era requests are not offered approval or elicited tools. See the [package README](https://github.com/magoz/yolk-sdk/blob/main/packages/mcp/README.md#ask-the-user-before-a-tool-runs).
+
+### Forward a remote tool's forms
+
+A tool that proxies a remote MCP tool can pass the remote server's form elicitation on to this
+server's own client. Give it `forward: true` (an `McpServerForwardingTool`, optionally with its own
+`approval`) and the server `approvals`. `execute(call, round)` runs one round and answers the remote
+`McpToolCallOutcome`:
+
+Fragment: `remoteConfig`, `def`, and the `HttpClient` layer are host-owned.
+
+```ts
+import { Effect } from 'effect'
+import {
+  callRemoteMcpServerToolResumable,
+  resumeRemoteMcpServerToolCall
+} from '@yolk-sdk/mcp/client'
+import { McpForwardRound, McpServerError, type McpServerTool } from '@yolk-sdk/mcp/server'
+
+const proxyDelete: McpServerTool = {
+  def,
+  forward: true,
+  execute: (call, round) => {
+    const remote = {
+      config: remoteConfig,
+      mcpToolName: 'delete',
+      toolCallId: call.id,
+      params: call.params
+    }
+
+    return McpForwardRound.$match(round, {
+      // Opt into elicitation only when this server can forward a pause.
+      Initial: ({ clientElicitation }) =>
+        callRemoteMcpServerToolResumable({
+          ...remote,
+          options: clientElicitation ? { elicitation: { form: true } } : {}
+        }),
+      // Key once-only resumption on `roundId` (host-owned).
+      Resume: ({ inputRequired, responses }) =>
+        resumeRemoteMcpServerToolCall({
+          ...remote,
+          inputRequired,
+          responses,
+          options: { elicitation: { form: true } }
+        })
+    }).pipe(
+      Effect.provide(httpClientLayer),
+      Effect.mapError(error => new McpServerError({ message: error.message, cause: 'tool_error' }))
+    )
+  }
+}
+```
+
+- `McpForwardRound.Initial({ clientElicitation, approvalId })` calls the remote tool.
+  `clientElicitation` is true only on a `2026-07-28` request that declares form elicitation, with
+  `approvals` configured: without it, a remote server that needs input refuses to run instead of
+  pausing a call nobody can answer.
+- A remote pause is answered as this server's own `InputRequiredResult` (the remote forms under
+  their keys) with a `requestState` signed by the approvals key under its own binding. It holds the
+  tool, the arguments digest, a fresh `roundId`, the approval id, and the remote pause, at most
+  `mcpForwardMaxStateBytes` (64 KiB) of JSON.
+- `McpForwardRound.Resume({ roundId, inputRequired, responses, approvalId })` runs only for a round
+  whose verified state matches the call and answers every forwarded form (checked against the
+  forms); other rounds ask again. A state that does not verify answers `forwardStaleMessage` and
+  calls nothing (with `approval`, the approval is asked again). The server keeps no state, so a replayed answered round arrives again with the
+  same `roundId`: key once-only resumption on it.
+- With `approval`, the tool is offered like an approval tool: the approval round runs first and
+  every forward round carries its `approvalId`. Without it, the tool is listed everywhere; 2025-era
+  requests and the header-less JSON path run only `Initial` with `clientElicitation: false`.
+- A remote pause that cannot be forwarded answers an error result: `forwardUnsupportedMessage` (the
+  client cannot answer forms), `forwardEmptyPauseMessage` (a pause without a form),
+  `forwardOversizedMessage`, or `forwardMalformedMessage`.
 
 No tool call outlives `handleHttpRequest`'s Effect, so you can provide its requirements from a scoped request layer. When an answer other than `subscriptions/listen` is an SSE stream (always for 2025-era requests), it is read to its end first and returned with the same status, headers and events (a read failure answers 500 with `-32603`), and a tool still running when the Effect ends is interrupted and awaited. A `subscriptions/listen` request is answered with its acknowledgement and a `complete` result: this server has no change notifications to stream. For requests that carry `MCP-Protocol-Version`, a client cancellation (on Streamable HTTP, closing the response stream) interrupts the tool's Effect.
 

@@ -766,6 +766,7 @@ HITL is protocol-level, not UI-level:
 - Use `makeInteractionTool` when a person must edit proposed values and authorize one server-defined action. Unlike data-only inputs, interactions execute the selected action on the exact validated values before the next model turn. Hosts own renderers, authentication, scoped immutable receipt storage, and atomic acceptance; browser responses alone never authorize execution. Pass `interactionHost` to `resolveTools`, then both `toolSet.interactions` and `toolSet.interactionHost` to loop/runtime configs. Durable hosts load `loadInteractionReceipts` before passing `interactionReceipts` to `prepareToolBatch`.
 - Submit interactions with `submitInteractionResponse`, `streamInteractionResponseEventStream`, or WebSocket `InteractionResponseInput`; the host must authenticate and atomically accept the response server-side before SDK resume. Submission is not completion; only real server results settle the UI. An `unknown` outcome needs host reconciliation, never automatic action retry. Voice/realtime and background activation are unsupported. See [action-backed interactions](https://github.com/magoz/yolk-sdk/blob/main/packages/agent/src/tools/README.md#action-backed-interactions) for registration and host-boundary details.
 - Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse` / `InputResponse` / `InteractionResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
+- A call a remote system paused for input (an MCP server's form) returns `makeInputRequiredToolResult`; a person finishes it through the `makeInputReviewTool` interaction. See [Input-required tool calls](#input-required-tool-calls).
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
 - Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive. Typed input and interaction submissions stay pending until server acceptance; accepted interactions stay active until the actual outcome. Never synthesize an interaction result from local submission or acceptance.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
@@ -1114,8 +1115,32 @@ Applied calls bypass `beforeNestedCall` and `ToolExecutor` decorators: wire your
 as `makePlanReviewTool({ beforeCall })`. With a ledger, a redelivered review waits for an in-flight
 apply and returns its real outcome. `previewStoredToolPlan` pages each staged call's arguments
 with the tool's change preview (the same `changePreview` hook approvals use) for review screens;
-`ToolPlanOutcome` and `ToolPlanPreviewPage` are Effect Schemas. See
+`ToolPlanOutcome` and `ToolPlanPreviewPage` are Effect Schemas. Each call is `applied`, `failed`,
+`skipped`, `not_run`, `unknown`, or `input_required` (it paused for input, below; it carries its
+`inputRequired` ref and never stops the apply). See
 [ADR 0005](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0005-staged-tool-plans.md).
+
+## Input-required tool calls
+
+A remote system can pause a call for a person's input after it was made (an MCP server asking a
+form). A tool never pauses: it stores the pause host-side and returns
+`makeInputRequiredToolResult({ toolCallId, content, reviewToolName, pauseIds })` from
+`@yolk-sdk/agent/protocol`, an error result whose `structuredContent` is
+`{ code: 'input_required', inputRequired: { reviewToolName, pauseIds } }` (`toolInputRequired`
+reads it back). The call is over: output checks skip it, the ledger records it, code mode rejects
+the nested call with `error.code === 'input_required'`, and plan apply reports it
+`input_required`.
+
+`makeInputReviewTool({ host })` from `@yolk-sdk/agent/tools` is the interaction that finishes such
+calls (`review_input({ pauseIds })`, renderer `input_review`, action `submit` with
+`{ answers }`, one JSON answer per pause). The host implements `InputReviewHost`: `load` (the
+listed pauses, in this scope and still waiting), `validateAnswer`, `resume` (claim the pause for
+the submission before sending, never send after a claim, return an `InputPauseResolution`:
+`Completed`, `InputRequired`, `NotSent`, or `Unknown`), and optional `recorded` (resolutions of a
+review interrupted after its claim). The result lists each pause as `completed`, `input_required`,
+`not_sent`, or `unknown` with each completed call's own result content; `InputReviewOutcome` is
+its Effect Schema. The SDK stores nothing. See
+[ADR 0014](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0014-input-required-tool-calls.md).
 
 ## Tool failures
 
@@ -1157,6 +1182,8 @@ aborts, and implementation bugs outside typed tool execution.
 - Durable hosts driving `runModelTurn` append and persist `instructionMessages(...)` before each
   model step (see Host instructions).
 - Executor decorators outside `ResolvedToolSet.execute` do not see nested code mode calls.
+- For input-required calls, store pauses scoped to the session and claim each one atomically before
+  resuming it (`InputReviewHost`).
 - Compact context and decide memory/search policy.
 
 ## Boundaries
