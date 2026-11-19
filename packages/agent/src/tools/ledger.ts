@@ -153,10 +153,10 @@ type ClaimRequestFields = {
  *
  * Every operation must be interruptible, for example `Effect.tryPromise` passing its
  * `AbortSignal` to the driver. The ledger's timeouts (polls within the wait, each `heartbeat` and
- * `complete` attempt bounded by `toolLedgerCompleteTimeoutMs`) interrupt the operation and wait
- * for it to stop, so they cannot cut uninterruptible store work: an `Effect.uninterruptible`
- * section, or a release or rollback that blocks, holds the wait, heartbeat, or completion (and
- * the call's interruption) until it ends.
+ * `complete` attempt bounded by `toolLedgerCompleteTimeoutMs`, a heartbeat by a sixth of the lease
+ * when shorter) interrupt the operation and wait for it to stop, so they cannot cut
+ * uninterruptible store work: an `Effect.uninterruptible` section, or a release or rollback that
+ * blocks, holds the wait, heartbeat, or completion (and the call's interruption) until it ends.
  */
 export type ToolLedgerStore = {
   /** Host scope (for example the Workflow run id); the prefix of every idempotency key. */
@@ -275,9 +275,20 @@ export type ToolLedgerOptions = {
    * built-in `subagent` tool).
    */
   readonly isLedgered?: (input: ToolLedgerPolicyInput) => boolean
-  /** Lease of a running call. Default 30000. */
+  /**
+   * Lease of a running call. Default 30000. Each heartbeat is cut at the shorter of
+   * `toolLedgerCompleteTimeoutMs` and a sixth of the lease, so heartbeat (and claim) latency must
+   * stay under `min(5000, leaseMs / 6)`: a slower store needs a longer lease, or every heartbeat
+   * times out and the lease of a running call lapses.
+   */
   readonly leaseMs?: number
-  /** Heartbeat interval while a call runs. Default a third of `leaseMs`; at most half of it. */
+  /**
+   * Heartbeat interval while a call runs. Default a third of `leaseMs`. Longer values are clamped
+   * to half the lease minus the heartbeat timeout (the shorter of `toolLedgerCompleteTimeoutMs` and
+   * a sixth of `leaseMs`), so a heartbeat that fails at its timeout and the next one both land
+   * within the lease. A margin for one late heartbeat with a fast claim and fast store (latency
+   * under that timeout; see `leaseMs`), not a guarantee: it is zero at the defaults.
+   */
   readonly heartbeatIntervalMs?: number
   /** Poll interval while waiting for an in-flight call. Default 1000. */
   readonly pollIntervalMs?: number
@@ -316,8 +327,9 @@ export const defaultToolLedgerMaxWaitMs = 150_000
 
 export const defaultToolLedgerMaxResultBytes = 1024 * 1024
 
-/** Timeout of one `store.complete` attempt (three attempts at most) and of each `store.heartbeat`.
- * It only cuts interruptible store work (see `ToolLedgerStore`).
+/** Timeout of one `store.complete` attempt (three attempts at most), and of each `store.heartbeat`
+ * unless a sixth of `leaseMs` is shorter. It only cuts interruptible store work (see
+ * `ToolLedgerStore`).
  */
 export const toolLedgerCompleteTimeoutMs = 5_000
 
@@ -667,6 +679,8 @@ export type ResolvedToolLedgerOptions = {
   readonly isLedgered: (input: ToolLedgerPolicyInput) => boolean
   readonly leaseMs: number
   readonly heartbeatIntervalMs: number
+  /** Timeout of each `store.heartbeat` (see `resolveToolLedgerOptions`). */
+  readonly heartbeatTimeoutMs: number
   readonly pollIntervalMs: number
   readonly maxWaitMs: number
   readonly deadline: (() => number | undefined) | undefined
@@ -681,16 +695,27 @@ const positive = (value: number | undefined, fallback: number) =>
 export const resolveToolLedgerOptions = (options: ToolLedgerOptions): ResolvedToolLedgerOptions => {
   const leaseMs = positive(options.leaseMs, defaultToolLedgerLeaseMs)
 
+  // Renewal margin so a single late heartbeat does not let the lease lapse: heartbeats run one
+  // interval after the previous one ends, so a heartbeat that fails at its timeout and the next
+  // one, which may take up to its timeout to land, must fit in the lease
+  // (2 * interval + 2 * timeout <= leaseMs). A sixth of the lease bounds the timeout, keeping the
+  // default third-of-lease interval within that at every lease (at the default 30 s lease: 5 s and
+  // 10 s, unchanged); a longer interval is clamped. Not a guarantee: a stalled process, a slow
+  // claim, or slow heartbeats that still succeed can let the lease expire.
+  const heartbeatTimeoutMs = Math.min(
+    toolLedgerCompleteTimeoutMs,
+    Math.max(1, Math.floor(leaseMs / 6))
+  )
+
   return {
     store: options.store,
     isLedgered: options.isLedgered ?? defaultToolLedgerPolicy,
     leaseMs,
-    // At most half the lease: renewal margin so a single late heartbeat does not let the lease
-    // lapse. Not a guarantee: a stalled process or store can still let it expire.
     heartbeatIntervalMs: Math.min(
       positive(options.heartbeatIntervalMs, Math.max(1, Math.floor(leaseMs / 3))),
-      Math.max(1, Math.floor(leaseMs / 2))
+      Math.max(1, Math.floor(leaseMs / 2) - heartbeatTimeoutMs)
     ),
+    heartbeatTimeoutMs,
     pollIntervalMs: positive(options.pollIntervalMs, defaultToolLedgerPollIntervalMs),
     maxWaitMs:
       options.maxWaitMs !== undefined && Number.isFinite(options.maxWaitMs)
@@ -811,19 +836,17 @@ const ledgerUnavailable = (call: ToolCall) => (error: ToolLedgerError) =>
     message: `The tool ledger is unavailable (${error.message}); ${call.name} was not run.`
   })
 
-// One store write, failing with a `ToolLedgerError` once `toolLedgerCompleteTimeoutMs` passes.
-// The timeout interrupts the operation and waits for it to stop, so it only bounds interruptible
-// store work (the `ToolLedgerStore` contract).
+// One store write, failing with a `ToolLedgerError` once `timeoutMs` passes. The timeout
+// interrupts the operation and waits for it to stop, so it only bounds interruptible store work
+// (the `ToolLedgerStore` contract).
 const boundedStoreWrite = <A>(
-  write: Effect.Effect<A, ToolLedgerError>
+  write: Effect.Effect<A, ToolLedgerError>,
+  timeoutMs: number
 ): Effect.Effect<A, ToolLedgerError> =>
   write.pipe(
     Effect.timeoutOrElse({
-      duration: Duration.millis(toolLedgerCompleteTimeoutMs),
-      orElse: () =>
-        Effect.fail(
-          new ToolLedgerError({ message: `timed out after ${toolLedgerCompleteTimeoutMs} ms` })
-        )
+      duration: Duration.millis(timeoutMs),
+      orElse: () => Effect.fail(new ToolLedgerError({ message: `timed out after ${timeoutMs} ms` }))
     })
   )
 
@@ -991,7 +1014,8 @@ export const executeLedgered = (input: {
           key,
           leaseExpiresAtMs: now + options.leaseMs,
           leaseMs: options.leaseMs
-        })
+        }),
+        options.heartbeatTimeoutMs
       )
     }).pipe(
       Effect.catch(error =>
@@ -1006,7 +1030,10 @@ export const executeLedgered = (input: {
       Effect.gen(function* () {
         const completedAtMs = yield* Clock.currentTimeMillis
 
-        yield* boundedStoreWrite(store.complete({ key, outcome, completedAtMs }))
+        yield* boundedStoreWrite(
+          store.complete({ key, outcome, completedAtMs }),
+          toolLedgerCompleteTimeoutMs
+        )
       }).pipe(
         Effect.retry({ times: 2 }),
         Effect.catch(error =>

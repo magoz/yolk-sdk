@@ -313,9 +313,12 @@ durable side effects to the host), so Yolk adds a ledger in `@yolk-sdk/agent/too
   remaining wait. `Abandoned` never re-executes: it returns a model-visible result saying the call
   may already have been applied and must be verified. A different tool name or `argsDigest` under
   the same key is a model-visible conflict (never decided by the bounded preview). Claim failures,
-  polls included, fail closed (nothing runs); heartbeat and completion failures (each heartbeat and
-  each of up to three `complete` attempts bounded to 5 s) are logged and leave the entry claimed
-  (later read as abandoned), never masking the live result. `deadline` bounds only the wait for a
+  polls included, fail closed (nothing runs); heartbeat and completion failures (each of up to
+  three `complete` attempts bounded to 5 s, each heartbeat to 5 s or a sixth of `leaseMs` when
+  shorter) are logged and leave the entry claimed (later read as abandoned), never masking the live
+  result. The heartbeat interval (default a third of the lease) is clamped to half the lease minus
+  the heartbeat bound, so after one heartbeat fails at its bound the next one still lands within
+  the lease; a stalled process can still let it lapse. `deadline` bounds only the wait for a
   duplicate: completion can add about 15 s after the call returns, which hosts reserve in the step
   budget. Every returned result or `ToolError` is recorded before an interruption takes effect (a
   `ToolError` also when its cause carries interruptions); defects, and interruption without a
