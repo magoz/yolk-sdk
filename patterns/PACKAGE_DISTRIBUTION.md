@@ -158,6 +158,8 @@ Host-owned singletons/platform deps to revisit before stable releases:
 Current exceptions:
 
 - `@yolk-sdk/agent` keeps `react` as an optional peer for the `./react` subpath.
+- `@yolk-sdk/vercel-workflows` keeps `vite` (`>=6`) as an optional peer: only `./cloudflare/vite`
+  uses it, for types.
 - `@yolk-sdk/extractors` keeps SheetJS (`xlsx`, `>=0.20.3`) as an optional peer, loaded lazily by
   `./node` only when an XLSX file is extracted. Fixed SheetJS releases ship only as a tarball from
   `cdn.sheetjs.com` (npm `xlsx` stops at the vulnerable 0.18.5), and a published package must not

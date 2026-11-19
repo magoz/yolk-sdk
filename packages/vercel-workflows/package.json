@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/vercel-workflows",
   "version": "0.1.0-canary.141",
-  "description": "Vercel Workflow orchestration primitives for Yolk agent loops.",
+  "description": "Vercel Workflow orchestration primitives for Yolk agent loops, plus a Workflow-compatible durable runtime on Cloudflare Durable Objects.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -19,7 +19,9 @@
     "workflow",
     "agents",
     "runtime",
-    "effect"
+    "effect",
+    "cloudflare",
+    "durable-objects"
   ],
   "engines": {
     "node": ">=22"
@@ -41,12 +43,33 @@
     "./testing": {
       "types": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./cloudflare": {
+      "types": "./src/cloudflare/index.ts",
+      "default": "./src/cloudflare/index.ts"
+    },
+    "./cloudflare/workflow": {
+      "types": "./src/cloudflare/workflow.ts",
+      "default": "./src/cloudflare/workflow.ts"
+    },
+    "./cloudflare/api": {
+      "types": "./src/cloudflare/api.ts",
+      "default": "./src/cloudflare/api.ts"
+    },
+    "./cloudflare/directives": {
+      "types": "./src/cloudflare/directives.ts",
+      "default": "./src/cloudflare/directives.ts"
+    },
+    "./cloudflare/vite": {
+      "types": "./src/cloudflare/vite.ts",
+      "default": "./src/cloudflare/vite.ts"
     }
   },
   "files": [
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "!src/**/*.test.tsx",
+    "!src/**/*.d.ts",
     "dist/**/*",
     "README.md"
   ],
@@ -74,6 +97,31 @@
         "types": "./dist/testing/index.d.mts",
         "import": "./dist/testing/index.mjs",
         "default": "./dist/testing/index.mjs"
+      },
+      "./cloudflare": {
+        "types": "./dist/cloudflare/index.d.mts",
+        "import": "./dist/cloudflare/index.mjs",
+        "default": "./dist/cloudflare/index.mjs"
+      },
+      "./cloudflare/workflow": {
+        "types": "./dist/cloudflare/workflow.d.mts",
+        "import": "./dist/cloudflare/workflow.mjs",
+        "default": "./dist/cloudflare/workflow.mjs"
+      },
+      "./cloudflare/api": {
+        "types": "./dist/cloudflare/api.d.mts",
+        "import": "./dist/cloudflare/api.mjs",
+        "default": "./dist/cloudflare/api.mjs"
+      },
+      "./cloudflare/directives": {
+        "types": "./dist/cloudflare/directives.d.mts",
+        "import": "./dist/cloudflare/directives.mjs",
+        "default": "./dist/cloudflare/directives.mjs"
+      },
+      "./cloudflare/vite": {
+        "types": "./dist/cloudflare/vite.d.mts",
+        "import": "./dist/cloudflare/vite.mjs",
+        "default": "./dist/cloudflare/vite.mjs"
       }
     }
   },
@@ -85,12 +133,22 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "devalue": "^6.0.3",
     "effect": "catalog:",
     "workflow": "^5.0.0-beta.42"
+  },
+  "peerDependencies": {
+    "vite": ">=6"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@workflow/vitest": "^5.0.0-beta.42",
+    "vite": "^8.3.0",
     "vitest": "catalog:"
   }
 }

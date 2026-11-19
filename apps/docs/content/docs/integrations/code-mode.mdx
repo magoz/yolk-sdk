@@ -15,14 +15,16 @@ Install:
 pnpm add @yolk-sdk/codemode@canary @yolk-sdk/agent@canary effect@4.1.4
 ```
 
-Requires Node.js 22.19 or later. The executor is server-only.
+Requires Node.js 22.19 or later. The executors are server-only: `./node` on Node, `./cloudflare`
+in a Cloudflare Worker.
 
 ## Subpaths
 
-| Subpath                   | Use for                                                                                                                                                                           |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`      | `makeCodeModeTool` (with the `stage` global for staged plans), the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
-| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                                                                          |
+| Subpath                         | Use for                                                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`            | `makeCodeModeTool` (with the `stage` global for staged plans), the `CodeModeExecutor` interface, catalog and search helpers, `codeModeStoreFromToolResults`, `makeClassifierTool` |
+| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: a fresh QuickJS (WebAssembly) VM in a worker thread per script                                                                                          |
+| `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`: a fresh Dynamic Worker isolate without network access per script ([Cloudflare Workers](#cloudflare-workers))                                 |
 
 ## Set up
 
@@ -53,6 +55,28 @@ const program = Effect.gen(function* () {
 Pass `toolSet.tools` and the executor layer to the loop as usual. By default the resolved
 `codemode` definition lists the tools scripts can call; with many or changing tools, deliver that
 catalog as an instruction instead (see [Deliver the catalog as instructions](#deliver-the-catalog-as-instructions)).
+
+### Cloudflare Workers
+
+A Worker cannot start the pi executor's worker thread. Run scripts in Dynamic Workers instead: each
+execution loads a fresh isolate with no network access through a Worker Loader binding, evaluates
+the same prelude, tools guard, and rejection codes as the Node executor, and calls your tools back
+over RPC.
+
+```ts
+import { env } from 'cloudflare:workers'
+import { makeCodeModeTool } from '@yolk-sdk/codemode'
+import { makeDynamicWorkerCodeModeExecutor } from '@yolk-sdk/codemode/cloudflare'
+
+// The binding is read when a script runs, so the executor can live at module scope.
+const executor = makeDynamicWorkerCodeModeExecutor({ loader: () => env.LOADER })
+
+const codemode = makeCodeModeTool<HostContext>({ executor })
+```
+
+Declare the Worker Loader binding in the Worker's configuration (`"worker_loaders": [{ "binding":
+"LOADER" }]` in Wrangler; the binding name is yours). The timeout and abort signal end an execution
+from the calling Worker; `memoryLimitBytes` and a concurrency cap do not apply.
 
 ### Next.js
 

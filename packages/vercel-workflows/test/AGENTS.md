@@ -4,16 +4,20 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 
 ## Files
 
-| File                                     | Role                                                           |
-| ---------------------------------------- | -------------------------------------------------------------- |
-| `workflow-loop.test.ts`                  | Pure contract tests with fake step callbacks                   |
-| `workflow-events.test.ts`                | Durable event sequencing and terminal commit barrier tests     |
-| `workflow-event-executions.test.ts`      | Retried model-step executions keep distinct event ids          |
-| `effect.test.ts`                         | Fake `workflow/api` SDK unit tests for `./effect` client/layer |
-| `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/hook/cancel tests    |
-| `testing.test.ts`                        | `TestWorkflowWorld` emulator contract, step-error fidelity     |
-| `testing-workflow-mock.test.ts`          | `TestWorkflowWorld` under `vi.mock('workflow')`                |
-| `fixtures/workflow-fixture.ts`           | Test-only workflow/step directive fixture; not published       |
+| File                                     | Role                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| `workflow-loop.test.ts`                  | Pure contract tests with fake step callbacks                      |
+| `workflow-events.test.ts`                | Durable event sequencing and terminal commit barrier tests        |
+| `workflow-event-executions.test.ts`      | Retried model-step executions keep distinct event ids             |
+| `effect.test.ts`                         | Fake `workflow/api` SDK unit tests for `./effect` client/layer    |
+| `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/hook/cancel tests       |
+| `testing.test.ts`                        | `TestWorkflowWorld` emulator contract, step-error fidelity        |
+| `testing-workflow-mock.test.ts`          | `TestWorkflowWorld` under `vi.mock('workflow')`                   |
+| `fixtures/workflow-fixture.ts`           | Test-only workflow/step directive fixture; not published          |
+| `cloudflare-execution.test.ts`           | Cloudflare runtime execution over the memory run store            |
+| `cloudflare-runtime.test.ts`             | `WorkflowRun` on `node:sqlite` through the `workflow/api` drop-in |
+| `cloudflare-fakes.ts`                    | Fake `WORKFLOW_RUNS` namespace and Durable Object SQL             |
+| `cloudflare-workers-stub.ts`             | `cloudflare:workers` stub the package Vitest aliases              |
 
 ## Rules
 

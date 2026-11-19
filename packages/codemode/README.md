@@ -11,14 +11,16 @@ pnpm add @yolk-sdk/codemode@canary @yolk-sdk/agent@canary effect@4.1.4
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Use the SDK's matching Effect version (`4.1.4`) in host code.
-Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is server-only.
+Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is server-only;
+`@yolk-sdk/codemode/cloudflare` runs only in a Cloudflare Worker.
 
 ## Subpaths
 
-| Subpath                   | Purpose                                                                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`      | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
-| `@yolk-sdk/codemode/node` | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                     |
+| Subpath                         | Purpose                                                                                                                                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`            | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
+| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                     |
+| `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`: a fresh Dynamic Worker isolate (Worker Loader binding) per script, without network access                            |
 
 ## Example
 
@@ -199,6 +201,37 @@ cached request prefix. Hosts with their own compaction keep `latestInstructionMe
 | `maxImages`        | 8       | Later images are dropped with a note                                     |
 | `maxImageBytes`    | 4 MiB   | Base64 characters of images in total                                     |
 
+## Cloudflare Workers
+
+A Worker cannot start worker threads, so `makePiCodeModeExecutor` does not run there.
+`makeDynamicWorkerCodeModeExecutor` runs each script in a fresh
+[Dynamic Worker](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/)
+isolate instead, with `globalOutbound: null` (no network access). The isolate evaluates pi's prelude
+(vendored from `@earendil-works/pi-codemode` 1.0.0, MIT) around the script, so scripts see the same
+globals (`tools`, `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`/`load`) and the same
+tools guard and rejection codes as on Node. Tool and global calls come back to the calling Worker
+over RPC. TypeScript annotations are stripped with Sucrase first.
+
+```ts
+import { env } from 'cloudflare:workers'
+import { makeCodeModeTool } from '@yolk-sdk/codemode'
+import { makeDynamicWorkerCodeModeExecutor } from '@yolk-sdk/codemode/cloudflare'
+
+// The binding is read when a script runs, so the executor can live at module scope.
+const executor = makeDynamicWorkerCodeModeExecutor({ loader: () => env.LOADER })
+
+const codemode = makeCodeModeTool<HostContext>({ executor })
+```
+
+The Worker declares a Worker Loader binding (`"worker_loaders": [{ "binding": "LOADER" }]` in
+Wrangler; the name is the host's). `env.LOADER` typed by Workers types satisfies `WorkerLoader`.
+`compatibilityDate` (default `2026-05-12`) sets the script isolate's date.
+
+Differences from the Node executor: the timeout and abort signal end the execution on the calling
+side (running tool calls see their signal abort); `memoryLimitBytes` does not apply (Workers bound
+isolate memory themselves); there is no per-executor concurrency cap; stack frames are not
+filtered.
+
 ## Classifier tool
 
 `makeClassifierTool({ classify })` wraps a `ClassifierModel` from `@yolk-sdk/agent/classification`
@@ -228,7 +261,8 @@ permits. Nested-call records carry token usage; cost stays in the result's
 
 - The root is runtime-neutral (no Node builtins) and depends only on `@yolk-sdk/agent` and the pure
   declaration renderer of `@earendil-works/pi-codemode`; the worker-thread engine lives behind
-  `./node`. `@yolk-sdk/agent` never imports code mode.
+  `./node`, and the Dynamic Worker engine (`cloudflare:workers`, Sucrase) behind `./cloudflare`.
+  `@yolk-sdk/agent` never imports code mode.
 - The pi worker inherits a copy of `process.env`; scripts cannot read it (the VM has no `process`).
 - pi buffers script text and image output on the host thread without a limit while the script
   runs; only the timeout bounds it. Results are bounded afterwards (`maxOutputChars`,

@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/codemode",
   "version": "0.1.0-canary.141",
-  "description": "Code mode for Yolk agents: one tool that runs model-written JavaScript calling the host's resolved tools, plus a Node executor on a confined QuickJS sandbox.",
+  "description": "Code mode for Yolk agents: one tool that runs model-written JavaScript calling the host's resolved tools, plus executors on a confined QuickJS sandbox (Node) and Cloudflare Dynamic Workers.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -20,7 +20,8 @@
     "tools",
     "sandbox",
     "quickjs",
-    "effect"
+    "effect",
+    "cloudflare"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -34,12 +35,17 @@
     "./node": {
       "types": "./src/node.ts",
       "default": "./src/node.ts"
+    },
+    "./cloudflare": {
+      "types": "./src/cloudflare.ts",
+      "default": "./src/cloudflare.ts"
     }
   },
   "files": [
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "!src/**/*.test.tsx",
+    "!src/**/*.d.ts",
     "dist/**/*",
     "README.md"
   ],
@@ -57,6 +63,11 @@
         "types": "./dist/node.d.mts",
         "import": "./dist/node.mjs",
         "default": "./dist/node.mjs"
+      },
+      "./cloudflare": {
+        "types": "./dist/cloudflare.d.mts",
+        "import": "./dist/cloudflare.mjs",
+        "default": "./dist/cloudflare.mjs"
       }
     }
   },
@@ -69,6 +80,7 @@
   "dependencies": {
     "@earendil-works/pi-codemode": "1.0.0",
     "@yolk-sdk/agent": "workspace:^",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "sucrase": "^3.35.1"
   }
 }

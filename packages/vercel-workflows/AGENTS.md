@@ -88,6 +88,30 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Run `pnpm --filter @yolk-sdk/vercel-workflows test:workflow` after touching package-owned directive fixtures.
 - Use fake step callbacks for pure contract tests; use `@workflow/vitest` for real directive transform/start behavior.
 
+## Cloudflare runtime
+
+- `src/cloudflare/**` is a Vercel Workflow-compatible runtime on Durable Objects, exported as
+  `./cloudflare` (`WorkflowRun`, `registerWorkflowModules`, `WorkflowExecution`, stores, errors),
+  `./cloudflare/workflow` and `./cloudflare/api` (drop-ins hosts alias `workflow` and `workflow/api`
+  to), `./cloudflare/directives` (what compiled directives import), and `./cloudflare/vite` (the
+  `workflowDirectives` plugin). README "Cloudflare runtime" documents the semantics and wiring.
+- It never imports `workflow`, `@workflow/*`, or the package's Vercel side (hosts alias `workflow`
+  to it), and the Vercel side never imports it, `cloudflare:workers`, devalue, or Vite (both
+  boundary-enforced). Type `cloudflare:workers` only through `src/cloudflare/cloudflare-workers.d.ts`
+  (type check only, not shipped), never `@cloudflare/workers-types` (its globals clash with the DOM
+  library); `vite` is an optional peer used for types only.
+- Keep its semantics aligned with the platform: devalue serialization of values and errors
+  (`fatal`, `retryAfter`, `cause`), at-least-once steps, `maxRetries` (default 3) with exhaustion
+  wrapped in `FatalError`, journal keys `<kind>:<id>#<call count>` replayed in order, durable
+  sleeps, deterministic default hook tokens. A journal or key format change strands in-flight runs.
+- All `./cloudflare*` modules share module state (`AsyncLocalStorage` scopes, the registry): one
+  copy per Worker.
+- Tests: `test/cloudflare-execution.test.ts` (execution over the memory store) and
+  `test/cloudflare-runtime.test.ts` (`WorkflowRun` over `node:sqlite` through the `workflow/api`
+  module, evictions, alarms, hooks, streams, cancel, lazy modules, the SQLite store, serialization,
+  the directive compiler). The package Vitest aliases `cloudflare:workers` to
+  `test/cloudflare-workers-stub.ts`; `test/cloudflare-fakes.ts` is the fake namespace.
+
 ## Independent children
 
 - `orchestrateWorkflowToolBatch` and `awaitWorkflowChild` are Workflow-safe generic callback seams, exported from root and `./workflow`; no new subpath.

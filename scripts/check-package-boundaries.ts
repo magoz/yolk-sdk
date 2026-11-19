@@ -301,6 +301,38 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/codemode/src/node.ts']
   },
   {
+    // workerd's `cloudflare:workers` and Sucrase stay behind `@yolk-sdk/codemode/cloudflare` (the
+    // Dynamic Worker executor); the rest of the package never imports it.
+    packageDir: 'packages/codemode/src',
+    forbiddenImports: ['cloudflare:workers', 'sucrase', '@yolk-sdk/codemode/cloudflare'],
+    excludedDirs: ['packages/codemode/src/cloudflare.ts']
+  },
+  {
+    // The Cloudflare Workflow runtime (`src/cloudflare/**`) stays behind the `./cloudflare*`
+    // subpaths: the Vercel Workflow side never loads workerd modules, devalue, or Vite.
+    packageDir: 'packages/vercel-workflows/src',
+    forbiddenImports: [
+      'cloudflare:workers',
+      'devalue',
+      'vite',
+      '@yolk-sdk/vercel-workflows/cloudflare'
+    ],
+    excludedDirs: ['packages/vercel-workflows/src/cloudflare']
+  },
+  {
+    // Hosts alias `workflow` and `workflow/api` to the Cloudflare runtime, so it never imports the
+    // Vercel Workflow packages (or the package's Vercel side, which does).
+    packageDir: 'packages/vercel-workflows/src/cloudflare',
+    forbiddenImports: [
+      'workflow',
+      '@workflow',
+      '@yolk-sdk/vercel-workflows$',
+      '@yolk-sdk/vercel-workflows/workflow',
+      '@yolk-sdk/vercel-workflows/effect',
+      '@yolk-sdk/vercel-workflows/testing'
+    ]
+  },
+  {
     packageDir: 'packages/extractors/src',
     forbiddenImports: extractorsForbiddenImports
   },
