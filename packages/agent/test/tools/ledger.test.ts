@@ -1421,7 +1421,7 @@ describe('tool ledger', () => {
     expect(resultText(stored)).toContain('reduced to fit')
   })
 
-  // Regression (#298): replays read the stored copy, which once dropped the marker and cut the
+  // Regression: replays read the stored copy, which once dropped the marker and cut the
   // review call off the end of the text, so a replayed paused call read as an ordinary failure.
   it('keeps the input-required marker and its review call when it cuts a stored result', () => {
     const bytes = (result: ToolResult) => new TextEncoder().encode(JSON.stringify(result)).length

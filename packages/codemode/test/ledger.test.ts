@@ -409,6 +409,54 @@ describe('code mode with a tool ledger', () => {
     })
   )
 
+  // Regression: a replay reads the stored copy, which once dropped `codemode.inputRequired` and cut
+  // the notice off the end of a long result, so a replayed script named no pauses.
+  it.effect("keeps a replayed script's pauses when its stored result is over the bound", () =>
+    Effect.gen(function* () {
+      const store = makeInMemoryToolLedgerStore()
+
+      const paused = makeTool<TestContext, typeof NoteParams>({
+        name: 'crm_delete',
+        description: 'Delete a deal',
+        parameters: NoteParams,
+        access: 'write',
+        execute: ({ call }) =>
+          Effect.succeed(
+            makeInputRequiredToolResult({
+              toolCallId: call.id,
+              content: 'The CRM asks to confirm.',
+              reviewToolName: 'review_input',
+              pauseIds: ['p1']
+            })
+          )
+      })
+
+      const { executor, state } = scriptedExecutor(async call => {
+        await call('crm_delete', { note: 'deal_1' }).catch(() => undefined)
+
+        return 'report '.repeat(1_000)
+      })
+
+      const modules = codeModeModules(executor, [paused])
+      const ledger: ToolLedgerOptions = { store, maxResultBytes: 2_000 }
+      const pauses = [{ reviewToolName: 'review_input', pauseIds: ['p1'] }]
+      const notice = 'To continue, call:\n- review_input({"pauseIds":["p1"]})'
+
+      const first = yield* runLedgered(modules, ledger)
+      const replayed = yield* runLedgered(modules, ledger)
+
+      expect(state.runs).toBe(1)
+      expect(new TextEncoder().encode(JSON.stringify(first)).length).toBeGreaterThan(2_000)
+      expect(text(first.content)).toContain(notice)
+      expect(new TextEncoder().encode(JSON.stringify(replayed)).length).toBeLessThanOrEqual(2_000)
+      expect(replayed.structuredContent).toEqual({ codemode: { ok: true, inputRequired: pauses } })
+      expect(text(replayed.content)).toMatch(
+        /^Script completed[\s\S]*…\n\n1 call needs a person's input/
+      )
+      expect(text(replayed.content)).toContain(`${notice}\n\n[The stored copy of this result`)
+    })
+  )
+
   it.effect('marks interrupted calls incomplete when the ledger already cut their arguments', () =>
     Effect.gen(function* () {
       const log: WriteLog = []

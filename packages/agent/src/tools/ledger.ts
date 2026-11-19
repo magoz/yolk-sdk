@@ -9,9 +9,11 @@ import {
   type ContentPart,
   type FilePart,
   type ToolCall,
+  inputRequiredNotice,
   type ToolInputRequired,
   toolInputRequired,
-  toolInputRequiredCode
+  toolInputRequiredCode,
+  ToolInputRequiredRef
 } from '@yolk-sdk/agent/protocol'
 import {
   compactToolArguments,
@@ -488,14 +490,16 @@ const codeUnitPrefix = (text: string, maxUnits: number) => {
 const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number): ToolResult => {
   const { text, tail, files } = reduced
 
-  const note = tail === undefined ? reducedNote : `${tail}\n\n${reducedNote}`
+  const note = tail === undefined ? reducedNote : `${tail.text}\n\n${reducedNote}`
 
   const withFiles = (kept: string): Content =>
     files.length === 0 ? kept : [TextPart.make({ text: kept }), ...files]
 
   const withText = (kept: string): StoredResultFields => ({
     ...base,
-    content: withFiles(`${kept}${tail === undefined ? '' : `\n${tail}`}\n\n${reducedNote}`)
+    content: withFiles(
+      `${kept}${tail === undefined ? '' : `${tail.separator}${tail.text}`}\n\n${reducedNote}`
+    )
   })
 
   const whole = withText(text)
@@ -516,7 +520,10 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
     ]
 
     return ToolResult.make(
-      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? { ...base, content: tail ?? '' }
+      fallbacks.find(fields => resultBytes(fields) <= maxBytes) ?? {
+        ...base,
+        content: tail?.text ?? ''
+      }
     )
   }
 
@@ -549,12 +556,15 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * fixed error result (`typedResultTooLargeMessage`). `File` parts without inline bytes (`Ref`,
  * `Omitted`) and `files` stay through every step: the text cut keeps them after the text, as
  * parts, so their labels never become text a code mode script reads; only a bound too small for
- * them leaves the note alone. An input-required result (ADR 0014) keeps its marker (only the
- * marker: other `structuredContent` fields are dropped) and its review call
- * (`inputRequiredInstruction`, after the cut text, rebuilt from the marker when the text does not
- * end with it), so a replay still reads as input-required and names its pauses. A bound smaller
- * than the identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, an input-required
- * marker) leaves an empty content, or only the review call. The live call still returns the
+ * them leaves the note alone. A result that names pauses (ADR 0014) keeps them through every
+ * step, with the text that tells the model to review them after the cut text (rebuilt from the
+ * kept refs when the text does not end with it), so a replay still names its pauses: an
+ * input-required error result keeps its marker `{ code, inputRequired }` and its review call
+ * (`inputRequiredInstruction`); a code mode result keeps `{ codemode: { ok, inputRequired } }` and
+ * its notice (`inputRequiredNotice`). Their other `structuredContent` fields are dropped. The
+ * kept refs and their text are never cut, so with many pause ids they can exceed `maxBytes`. A
+ * bound smaller than the identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, kept
+ * pause refs) leaves an empty content, or only the review text. The live call still returns the
  * original result; only replays see the stored copy.
  */
 export const toolLedgerResult = (
@@ -611,30 +621,60 @@ export const toolLedgerResult = (
 
   delete withoutStructured.structuredContent
 
-  // An input-required marker (ADR 0014) is how every replay finds the paused call's pauses: like
-  // `files`, it stays (the marker alone, a few hundred bytes), and the cut keeps its review call.
-  const inputRequired = toolInputRequired(full)
+  // Pause refs (ADR 0014) are how every replay finds paused calls: like `files`, they stay, and
+  // the cut keeps the text that tells the model to review them.
+  const pauses = keptPauses(full)
 
-  if (Option.isSome(inputRequired)) {
-    const marker: ToolInputRequired = {
-      code: toolInputRequiredCode,
-      inputRequired: inputRequired.value
-    }
-
-    withoutStructured.structuredContent = marker
-
-    return resultBytes(withoutStructured) <= maxBytes
-      ? ToolResult.make(withoutStructured)
-      : fitText(
-          withoutStructured,
-          withTail(cutContent(result.content), inputRequiredInstruction(inputRequired.value)),
-          maxBytes
-        )
-  }
+  if (pauses !== undefined) withoutStructured.structuredContent = pauses.structuredContent
 
   if (resultBytes(withoutStructured) <= maxBytes) return ToolResult.make(withoutStructured)
 
-  return fitText(withoutStructured, cutContent(result.content), maxBytes)
+  const reduced = cutContent(result.content)
+
+  return fitText(
+    withoutStructured,
+    pauses === undefined ? reduced : withTail(reduced, pauses.tail),
+    maxBytes
+  )
+}
+
+// A code mode result's pauses (ADR 0014; `@yolk-sdk/codemode`, which this package never
+// imports): `structuredContent.codemode.inputRequired`, with `inputRequiredNotice` of them at the
+// end of its content. Decoding keeps only these fields.
+const CodeModePauses = Schema.Struct({
+  codemode: Schema.Struct({
+    ok: Schema.Boolean,
+    inputRequired: Schema.NonEmptyArray(ToolInputRequiredRef)
+  })
+})
+
+const decodeCodeModePauses = Schema.decodeUnknownOption(CodeModePauses)
+
+type KeptPauses = {
+  /** The structured fields that name the pauses, alone. */
+  readonly structuredContent: ToolInputRequired | typeof CodeModePauses.Type
+  /** The text telling the model to review them, which the cut never removes. */
+  readonly tail: Tail
+}
+
+// What a result that names pauses keeps through every reduction: an input-required error result's
+// marker and review call, or a code mode result's pause list and notice.
+const keptPauses = (full: StoredResultFields): KeptPauses | undefined => {
+  const marker = toolInputRequired(full)
+
+  if (Option.isSome(marker)) {
+    return {
+      structuredContent: { code: toolInputRequiredCode, inputRequired: marker.value },
+      tail: { separator: '\n', text: inputRequiredInstruction(marker.value) }
+    }
+  }
+
+  return Option.getOrUndefined(
+    Option.map(decodeCodeModePauses(full.structuredContent), codeMode => ({
+      structuredContent: codeMode,
+      tail: { separator: '\n\n', text: inputRequiredNotice(codeMode.codemode.inputRequired) }
+    }))
+  )
 }
 
 /** How `toolLedgerResult` reduces a result. */
@@ -663,10 +703,16 @@ const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
   return ToolResult.make(fields)
 }
 
+/** Text after the cut text that is never cut, joined to it by `separator`. */
+type Tail = {
+  readonly separator: string
+  readonly text: string
+}
+
 type CutContent = {
   readonly text: string
-  /** Text after `text` that is never cut (an input-required result's review call). */
-  readonly tail: string | undefined
+  /** A result's pause review text (`keptPauses`). */
+  readonly tail: Tail | undefined
   readonly files: ReadonlyArray<FilePart>
 }
 
@@ -681,15 +727,24 @@ const cutContent = (content: Content): CutContent =>
         files: content.filter(isStructuralFilePart)
       }
 
-// Moves `tail` out of the text that is cut: taken off its end (with the line break before it) when
-// the text ends with it, as `makeInputRequiredToolResult` writes it, else added after it.
-const withTail = (reduced: CutContent, tail: string): CutContent => ({
-  ...reduced,
-  text: reduced.text.endsWith(tail)
-    ? reduced.text.slice(0, reduced.text.length - tail.length).replace(/\n$/, '')
-    : reduced.text,
-  tail
-})
+// Moves `tail` out of the text that is cut: taken off its end (with its separator) when the text
+// ends with it, as `makeInputRequiredToolResult` and code mode write it, else added after it.
+const withTail = (reduced: CutContent, tail: Tail): CutContent => {
+  const before = reduced.text.endsWith(tail.text)
+    ? reduced.text.slice(0, reduced.text.length - tail.text.length)
+    : undefined
+
+  return {
+    ...reduced,
+    text:
+      before === undefined
+        ? reduced.text
+        : before.endsWith(tail.separator)
+          ? before.slice(0, before.length - tail.separator.length)
+          : before,
+    tail
+  }
+}
 
 const nestedSeq = (key: string) => {
   const seq = Number(key.slice(key.lastIndexOf('/') + 1))
