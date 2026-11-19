@@ -10,6 +10,7 @@ import {
   type HitlDecision,
   type InboxItem,
   type ParkedResponse,
+  type ParkGeneration,
   type PauseDecision
 } from './inbox.ts'
 import { RunStore } from './store.ts'
@@ -71,6 +72,8 @@ export type DriverApi = {
     drainToken: DrainToken
   ) => Effect.Effect<PauseDecision>
   readonly resumeHitl: (runId: string, admission: HitlAdmission) => Effect.Effect<HitlDecision>
+  /** Drops that park generation and wakes the run for input admitted while it blocked. */
+  readonly clearPark: (runId: string, generation: ParkGeneration) => Effect.Effect<boolean>
   readonly stop: (runId: string) => Effect.Effect<StopDecision>
 }
 
@@ -166,6 +169,8 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
           pause: (runId, requestIds, drainToken) => inbox.park(runId, requestIds, drainToken),
           resumeHitl: (runId, admission) =>
             inbox.acceptHitl(runId, admission, coordinator.wake(runId, 'input')),
+          clearPark: (runId, generation) =>
+            inbox.clearPark(runId, generation, coordinator.wake(runId, 'input')),
           stop: runId =>
             inbox
               .invalidate(
@@ -236,7 +241,12 @@ export class Driver extends Context.Service<Driver, DriverApi>()('@yolk-sdk/harn
                 DrainBegin.$is('Skip')(begun)
                   ? Effect.void
                   : inbox.endDrain(runId, begun.drainToken, Exit.isSuccess(exit))
-            )
+            ),
+          // A Ready park still here at settlement is unacknowledged: its continuation died, or
+          // a successor queued behind that defect skipped with no pending intent. Keep the
+          // claim so resumeSuspended re-delivers it (bounded) instead of stranding it.
+          keepClaimOnSettle: runId =>
+            inbox.parked(runId).pipe(Effect.map(parked => parked?.ready === true))
         }).pipe(Layer.provide(storeLayer))
 
         return Driver.layer({ maxResumeAttempts }).pipe(
