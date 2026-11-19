@@ -142,6 +142,8 @@ const transitionHitl = (state: WorkflowRegistry, command: HitlCommand): Workflow
 
   if (command.type === 'pause') {
     // A redelivered tool step records its pause again: keep the answer already recorded for it.
+    // Its pauseId is the same: a batch that pauses runs no tool first, so the redelivered step
+    // writes the same events before the pause event and its id (the one the client names) holds.
     if (pause?.hookToken === command.pause.hookToken) return state
 
     if (pause === undefined) return WorkflowRegistry.make({ ...state, hitlPause: command.pause })
