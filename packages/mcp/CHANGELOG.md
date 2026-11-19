@@ -1,5 +1,16 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.141
+
+### Patch Changes
+
+- 7dca81c: A forwarding tool (`forward: true`) no longer forwards one remote pause under two rounds. The forwarded prompt's `roundId` was random each time a pause was forwarded, so a host that answers a retried accept (once-only on `approvalId`) or a retried `McpForwardRound.Resume` (once-only on `roundId`) with the outcome it stored forwarded the same remote pause again under a new `roundId`, and answering both prompts resumed that remote pause twice (a remote `delete` ran twice). A remote pause's `roundId` is now the digest of where it came from (the approval, or the round it resumed) and the pause, hashed as canonical JSON (keys sorted at every level, so a store that reorders keys keeps the round), so a replayed pause is asked in the same round and the host's `roundId` key resumes it once. A replay is accepted only while its origin (the approval or round state) is still valid, and the replayed pause then gets a fresh expiry. A first round without `approval` has no once-only key, so its pause keeps a random `roundId`. `roundId` stays an opaque string; it is no longer a UUID.
+- Updated dependencies [d634a02]
+- Updated dependencies [38f38cf]
+- Updated dependencies [3fe00ec]
+  - @yolk-sdk/agent@0.1.0-canary.141
+  - @yolk-sdk/conformance@0.1.0-canary.141
+
 ## 0.1.0-canary.140
 
 ### Minor Changes
