@@ -1,6 +1,7 @@
 import { Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolInputRequiredRef } from '@yolk-sdk/agent/protocol'
+import type { StagedToolPlanRef } from '@yolk-sdk/agent/tools'
 import type { CodeModeStore, CodeModeStoreWrites } from './executor.ts'
 import { codeModeToolName } from './tool.ts'
 
@@ -32,12 +33,7 @@ export type CodeModeStructuredContent = {
 /** A saved staged tool plan: review it with the `reviewToolName` tool and `{ planId: id,
  * planDigest: digest }`.
  */
-export type CodeModeStagedPlan = {
-  readonly id: string
-  readonly digest: string
-  readonly count: number
-  readonly reviewToolName: string
-}
+export type CodeModeStagedPlan = StagedToolPlanRef
 
 /** What an abandoned execution's ledgered nested call is known to have done: `applied` (recorded
  * a result), `failed` (recorded a `ToolError` or an `isError` result), or `unknown` (started, no

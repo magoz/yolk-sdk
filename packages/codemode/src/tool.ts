@@ -37,6 +37,7 @@ import {
 import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import {
   makeTool,
+  stagedToolPlanNotice,
   type NestedTool,
   type NestedToolExecutor,
   type NestedToolInstructor,
@@ -468,9 +469,6 @@ const stageOnlyRejections = (stageOnly: ReadonlyArray<CodeModeCatalogTool>) =>
         ]
   })
 
-const planNotice = (plan: CodeModeStagedPlan) =>
-  `\n\nStaged ${plan.count} call${plan.count === 1 ? '' : 's'} as plan ${plan.id}; nothing was applied yet. To apply them, call ${plan.reviewToolName}(${JSON.stringify({ planId: plan.id, planDigest: plan.digest })}): a person reviews the plan and selects the calls to apply.`
-
 const hasStoreWrites = (result: CodeModeExecutionResult) =>
   result.storeWrites !== undefined &&
   (Object.keys(result.storeWrites.set).length > 0 || result.storeWrites.delete.length > 0)
@@ -806,7 +804,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
                   ? `\n\nThe script staged ${stagedCount} call${plural}, but the plan could not be saved (${planFailure.message}); nothing was applied. Run the script again.`
                   : savedPlan === undefined
                     ? undefined
-                    : planNotice(savedPlan)
+                    : `\n\n${stagedToolPlanNotice(savedPlan)}`
 
           const recorded = records.map((record): NestedToolCallInput => {
             const fields: RecordedCallFields = {
