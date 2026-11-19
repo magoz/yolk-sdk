@@ -215,10 +215,10 @@ const encodePauseIdentity = Schema.encodeUnknownEffect(Schema.toCodecJson(PauseI
  * The `roundId` of a new remote pause: the digest of its origin and the pause (its forms, remote
  * `requestState` and binding; not the listed tool definition). The pause is encoded as a JSON value
  * and `mcpArgumentsDigest` hashes canonical JSON (keys sorted at every level), so a host store that
- * reorders keys (JSONB) keeps the round. A host that answers a retried round
- * (an accepted approval, a `Resume`) with the outcome it stored forwards the same pause from the
- * same origin, so it is asked in the same round, and the host's once-only key on `roundId` still
- * resumes it once. A fresh `roundId` there would open a second resume of one remote pause. A first
+ * reorders keys (JSONB) keeps the round. A host that answers a retried round (an accepted
+ * approval, a `Resume`) with the outcome it stored forwards the same pause from the same origin,
+ * so it is asked in the same round, and the host's once-only key on `roundId` still resumes it
+ * once. A fresh `roundId` there would open a second resume of one remote pause. A first
  * round without approval has no once-only key, so its round is random.
  */
 const newRoundId = (origin: ForwardOrigin, pause: McpInputRequired) => {
