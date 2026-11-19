@@ -18,8 +18,9 @@ export const emptyHitlPauses: HitlPauses = new Map()
 /**
  * Records the pause an `AgentAwaitingInput` names for each request it holds; every other event
  * returns `pauses` unchanged. Feed it every event of every stream that reads the run (start, HITL
- * resume, replay), in stream order: the latest pause wins per request. A replay from an earlier
- * index applies the later pauses again too, so it still ends at the latest. A pause without an
+ * resume, replay), in stream order: the latest pause wins per request. Feed pauses you already saw
+ * too (never skip them by `eventId`): a replay from an earlier index re-applies the later pauses
+ * after the earlier ones, so it ends at the latest. A pause without an
  * `eventId` names nothing, so its requests forget the earlier pause that held them (an answer then
  * names no pause instead of a stale one).
  */

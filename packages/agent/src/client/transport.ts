@@ -81,7 +81,9 @@ export type StreamAgentRunHitlResponseEventsRequest = {
   /**
    * The pause the answer is for: the `eventId` of the `AgentAwaitingInput` that asked
    * (`hitlPauseFor`). Sent as the `pause` query parameter of the POST only; continuation reads
-   * use `endpoint` as given.
+   * use `endpoint` (plus `startIndex`). With it, the POST URL is rewritten like those reads:
+   * write `endpoint` absolute, `//host/path` or `/path` (a path-relative one resolves against the
+   * root), and expect its query re-serialized (`%20` becomes `+`).
    */
   readonly pause?: string
   readonly signal?: AbortSignal
@@ -232,10 +234,17 @@ export const agentRunEndpointWithStartIndex = (endpoint: string, startIndex?: nu
   return serializeEndpoint(parsed)
 }
 
+/**
+ * How an endpoint was written, kept when the client adds a query parameter (`startIndex`,
+ * `pause`) or a run id: absolute (`https://host/path`), network-path (`//host/path`, the page's
+ * scheme), path-absolute (`/path`), or path-relative (`path`, resolved against the root: `../x`
+ * becomes `x`).
+ */
+type EndpointForm = 'absolute' | 'network-path' | 'path-absolute' | 'path-relative'
+
 type ParsedEndpoint = {
   readonly url: URL
-  readonly absolute: boolean
-  readonly leadingSlash: boolean
+  readonly form: EndpointForm
 }
 
 const absoluteUrlPattern = /^[A-Za-z][A-Za-z\d+.-]*:/
@@ -246,11 +255,19 @@ const invalidAgentRunEndpointError = (endpoint: string) =>
     cause: endpoint
   })
 
+const endpointForm = (endpoint: string): EndpointForm =>
+  absoluteUrlPattern.test(endpoint)
+    ? 'absolute'
+    : endpoint.startsWith('//')
+      ? 'network-path'
+      : endpoint.startsWith('/')
+        ? 'path-absolute'
+        : 'path-relative'
+
 const parseEndpoint = (endpoint: string): ParsedEndpoint | undefined =>
   Result.try(() => ({
     url: new URL(endpoint, relativeEndpointBase),
-    absolute: absoluteUrlPattern.test(endpoint),
-    leadingSlash: endpoint.startsWith('/')
+    form: endpointForm(endpoint)
   })).pipe(
     Result.match({
       onFailure: () => undefined,
@@ -277,13 +294,15 @@ const parseEndpointEffect = (endpoint: string) => {
 }
 
 const serializeEndpoint = (endpoint: ParsedEndpoint) => {
-  if (endpoint.absolute) {
-    return endpoint.url.toString()
-  }
+  const path = `${endpoint.url.pathname}${endpoint.url.search}${endpoint.url.hash}`
 
-  const serialized = `${endpoint.url.pathname}${endpoint.url.search}${endpoint.url.hash}`
-
-  return endpoint.leadingSlash ? serialized : serialized.slice(1)
+  return Match.value(endpoint.form).pipe(
+    Match.when('absolute', () => endpoint.url.toString()),
+    Match.when('network-path', () => `//${endpoint.url.host}${path}`),
+    Match.when('path-absolute', () => path),
+    Match.when('path-relative', () => path.slice(1)),
+    Match.exhaustive
+  )
 }
 
 const appendEncodedPathSegment = (endpoint: string, segment: string) => {

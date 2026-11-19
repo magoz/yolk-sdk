@@ -62,8 +62,9 @@ failures and pending retries are statuses (`Failed`, `Working(Retrying)`), not s
 A durable host matches an answer to the pause that asked, not to its request id alone (requests
 pend again after an invalid answer, and providers reuse call ids;
 [HITL resume](../vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)). `useAgentChat`
-remembers, per request id, the `eventId` of the latest `AgentAwaitingInput` it applied that holds the
-request (`state.hitlPauses`, from your transport's streams and from `applyEvent` replays), and gives
+remembers, per request id, the `eventId` of the latest `AgentAwaitingInput` that holds the request
+(`state.hitlPauses`, from your transport's streams and from `applyEvent` replays; every pause counts,
+seen or not, so a replay from an earlier index ends at the latest), and gives
 an answer's transport request that pause as `request.pause` (absent when no such pause had an
 `eventId`). A durable transport passes it on (fragment; the full transport is in
 [HITL resume](../vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)):

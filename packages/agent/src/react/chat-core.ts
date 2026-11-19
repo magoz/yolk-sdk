@@ -66,9 +66,9 @@ export type AgentChatState = {
   /** The latest model turn's start; see `AgentChatEventProjectionState`. */
   readonly turnStart?: AgentChatTurnStart
   /**
-   * The pause each request was last asked in (`rememberHitlPause`) on this stream: `useAgentChat`
-   * puts it on the transport request of an answer (`pause`). Reset with `seenEventIds`; absent in
-   * states built before it.
+   * The pause each request was last asked in (`rememberHitlPause` over every `AgentAwaitingInput`,
+   * seen or not): `useAgentChat` puts it on the transport request of an answer (`pause`). Reset
+   * with `seenEventIds`; absent in states built before it.
    */
   readonly hitlPauses?: HitlPauses
 }
@@ -496,7 +496,11 @@ const restarted = (state: AgentChatState) => ({
   executions: []
 })
 
-/** Records the pause an applied `AgentAwaitingInput` names (`rememberHitlPause`). */
+/**
+ * Records the pause every `AgentAwaitingInput` names (`rememberHitlPause`), seen or not: a replay
+ * from an earlier index re-reads the later pauses after the earlier ones, so it ends at the latest
+ * even when an answer cleared `seenEventIds` and only the earlier pauses read as new.
+ */
 const rememberPause = (state: AgentChatState, event: AgentEvent): AgentChatState => {
   const pauses = state.hitlPauses ?? emptyHitlPauses
   const next = rememberHitlPause(pauses, event)
@@ -613,14 +617,16 @@ export const reduceAgentChatState = (
       )
     ),
     Match.tag('Event', current => {
-      if (hasSeenEvent(state, current.event)) {
-        return state
+      const paused = rememberPause(state, current.event)
+
+      if (hasSeenEvent(paused, current.event)) {
+        return paused
       }
 
-      const routed = projectExecutionEvent(state, current.event, current)
+      const routed = projectExecutionEvent(paused, current.event, current)
 
       const projected: AgentChatState = {
-        ...Struct.omit(state, ['executions', 'turnStart']),
+        ...Struct.omit(paused, ['executions', 'turnStart']),
         ...projectionFields(routed)
       }
 
@@ -629,15 +635,12 @@ export const reduceAgentChatState = (
       // A replayed start of an already settled call must not reopen the run.
       const fenced =
         Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
-        isSettledToolCall(state, current.event.call)
+        isSettledToolCall(paused, current.event.call)
 
       return rememberEvent(
-        rememberPause(
-          fenced
-            ? projected
-            : withStatusTree(projected, nextAgentStatusTree(statusTree(state), current.event)),
-          current.event
-        ),
+        fenced
+          ? projected
+          : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), current.event)),
         current.event
       )
     }),

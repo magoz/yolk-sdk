@@ -22,6 +22,10 @@ Framework-agnostic client transport and state helpers for Yolk agents.
   as `?pause=<eventId>` on the POST only; continuation reads use `endpoint` as given. Track it with
   `rememberHitlPause` (fold every event of every stream that reads the run: start, HITL resume,
   replay) and read it with `hitlPauseFor` (below). A blank `pause` fails before the POST.
+- Endpoints the client rewrites (`startIndex` reads, the `pause` POST, the run id path) keep how
+  they were written: absolute (`https://host/path`), network-path (`//host/path`) or `/path`. A
+  path-relative endpoint resolves against the root (`../run` becomes `run`), and the query is
+  re-serialized (`%20` becomes `+`), so put only values the route decodes as form data there.
 
 ## Name the pause an answer is for
 
@@ -55,8 +59,9 @@ const answer = (runId: string, response: HitlResponse) =>
 ```
 
 The latest pause wins per request: a request that pends again (after an invalid answer, or a
-provider reusing a call id in a later turn) moves to its new pause. A replay from an earlier index
-applies the later pauses again, so it still ends at the latest. A pause without an `eventId` names
+provider reusing a call id in a later turn) moves to its new pause. Fold pauses you already saw
+too (never skip them by `eventId`): a replay from an earlier index re-applies the later pauses after
+the earlier ones, so it ends at the latest. A pause without an `eventId` names
 nothing: its requests forget the earlier pause, and their answers name none (the route refuses
 them rather than taking them for a stale pause). Start from `emptyHitlPauses` for each new run.
 

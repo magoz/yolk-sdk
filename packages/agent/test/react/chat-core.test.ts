@@ -422,7 +422,7 @@ describe('agent chat core', () => {
     )
   })
 
-  it('remembers the pause of each request per stream, and forgets it when a new one starts', () => {
+  it('remembers the latest pause of each request, seen or not, and forgets it per stream', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'write', params: {} })
 
     const request = ToolApprovalRequest.make({
@@ -447,7 +447,8 @@ describe('agent chat core', () => {
       source: 'user'
     })
 
-    const asked = [paused('run:4'), paused('run:9'), paused('run:4')].reduce(
+    // A replay from the start re-reads both pauses, already seen: it ends at the latest.
+    const asked = [paused('run:4'), paused('run:9'), paused('run:4'), paused('run:9')].reduce(
       (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
       reduceAgentChatState(
         initialAgentChatState,
@@ -455,8 +456,8 @@ describe('agent chat core', () => {
       )
     )
 
-    // The replayed `run:4` was already seen: the latest pause stays.
     expect(hitlPauseFor(asked.hitlPauses ?? emptyHitlPauses, response)).toBe('run:9')
+    expect(asked.seenEventIds).toEqual(['run:4', 'run:9'])
 
     for (const action of [
       AgentChatAction.SubmitHitlResponse({ response }),

@@ -45,7 +45,6 @@ const pauseFields = (ids: readonly [string, ...string[]]) => ({
 const awaiting = (eventId: string, ids: readonly [string, ...string[]]) =>
   AgentAwaitingInput.make({ eventId, ...pauseFields(ids) })
 
-/** A pause whose host gave its event no id. */
 const unnamedAwaiting = (ids: readonly [string, ...string[]]) =>
   AgentAwaitingInput.make(pauseFields(ids))
 
