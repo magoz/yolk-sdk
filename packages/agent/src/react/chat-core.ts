@@ -1,4 +1,4 @@
-import { Match, Option, Predicate } from 'effect'
+import { Match, Option, Predicate, Struct } from 'effect'
 import {
   AgentFailed,
   hitlResponseEvent,
@@ -20,6 +20,7 @@ import {
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
+  type AgentExecutionRoute,
   type AgentExecutions
 } from '../client/executions.ts'
 import {
@@ -28,14 +29,18 @@ import {
   applyExecutionEventToChatMessages,
   AgentChatExecutionOutput,
   discardChatExecutionOutput,
+  executionTurnAnchor,
+  isLatestTurnAnchor,
   replaceWithCommittedAnswer,
   deleteChatTurn,
   editChatUserMessage,
   markChatError,
   regenerateChatMessagesFrom,
+  turnToolCallMessage,
   type AgentChatMessage,
   type AgentChatPart,
-  type ApplyAgentEventToChatMessagesOptions
+  type ApplyAgentEventToChatMessagesOptions,
+  type ChatTurnAnchor
 } from './chat-messages.ts'
 import {
   MessagesRegenerated,
@@ -55,6 +60,22 @@ export type AgentChatState = {
   readonly seenEventIds: ReadonlyArray<string>
   /** Model-step executions seen on this stream; see `AgentChatEventProjectionState`. */
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
+  /** The latest model turn's start; see `AgentChatEventProjectionState`. */
+  readonly turnStart?: AgentChatTurnStart
+}
+
+/**
+ * The start of the latest model turn a chat projection saw (its `LLMStreamStart`, tagged or not).
+ * Providers reuse tool call ids across turns, so the turn's tool events match a call only in the
+ * messages after `after`: the model's stream (its own execution's start, when tagged) and host
+ * events (the tool batch, approvals, questions and their answers act on the latest turn's calls).
+ */
+export type AgentChatTurnStart = {
+  /** The start's `streamId` (`''` when none). */
+  readonly streamId: string
+  readonly turn: number
+  /** The turn's output follows this chat message (none: the chat was empty). */
+  readonly after: Option.Option<string>
 }
 
 export type AgentChatEventProjectionState = {
@@ -66,6 +87,12 @@ export type AgentChatEventProjectionState = {
    * in states built before it.
    */
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
+  /**
+   * The latest model turn's start (`AgentChatTurnStart`); carry it with `seenEventIds`. Absent
+   * until a start is seen and after `AgentStart`: tool events then match the last message holding
+   * a call, in any turn.
+   */
+  readonly turnStart?: AgentChatTurnStart
 }
 
 export const initialAgentChatState: AgentChatState = {
@@ -100,15 +127,14 @@ const withStatusTree = (state: AgentChatState, tree: AgentStatusTree): AgentChat
     ? state
     : { ...state, status: tree.root, subagents: tree.subagents }
 
-const isSettledToolCall = (messages: ReadonlyArray<AgentChatMessage>, toolCallId: string) =>
-  messages.some(message =>
-    message.parts.some(
-      part =>
-        Predicate.isTagged(part, 'ToolCall') &&
-        part.call.id === toolCallId &&
-        (Predicate.isTagged(part.state, 'Completed') || Predicate.isTagged(part.state, 'Accepted'))
-    )
-  )
+/** Whether the call a host event acts on in the latest turn already settled. */
+const isSettledToolCall = (state: AgentChatState, toolCallId: string) =>
+  turnToolCallMessage(state.chatMessages, toolCallId, state.turnStart?.after)?.parts.some(
+    part =>
+      Predicate.isTagged(part, 'ToolCall') &&
+      part.call.id === toolCallId &&
+      (Predicate.isTagged(part.state, 'Completed') || Predicate.isTagged(part.state, 'Accepted'))
+  ) === true
 
 const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
   withStatusTree(next, startAgentStatusTree(statusTree(state)))
@@ -136,16 +162,30 @@ export const applyAgentEventToChatProjection = (
   }
 
   const seenEventIds = rememberEventId(state.seenEventIds, event)
-  const projected = projectExecutionEvent(state, event, options)
 
-  return projected.executions === undefined
-    ? { chatMessages: projected.chatMessages, seenEventIds }
-    : { chatMessages: projected.chatMessages, seenEventIds, executions: projected.executions }
+  return { ...projectionFields(projectExecutionEvent(state, event, options)), seenEventIds }
 }
 
 type ExecutionProjection = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
+  readonly turnStart?: AgentChatTurnStart
+}
+
+type ExecutionProjectionFields = {
+  chatMessages: ReadonlyArray<AgentChatMessage>
+  executions?: AgentExecutions<AgentChatExecutionOutput>
+  turnStart?: AgentChatTurnStart
+}
+
+const projectionFields = (projection: ExecutionProjection): ExecutionProjection => {
+  const fields: ExecutionProjectionFields = { chatMessages: projection.chatMessages }
+
+  if (projection.executions !== undefined) fields.executions = projection.executions
+
+  if (projection.turnStart !== undefined) fields.turnStart = projection.turnStart
+
+  return fields
 }
 
 type ProjectedExecutionEvent = ExecutionProjection & {
@@ -157,7 +197,8 @@ type ProjectedExecutionEvent = ExecutionProjection & {
  * Applies one event with model-step execution routing (`executionId`): drops a superseded,
  * settled or stale execution's events, removes a superseded execution's provisional output when a
  * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` shows the committed
- * answer of every turn of the run that ran more than once and shows another one.
+ * answer of every turn of the run that ran more than once and shows another one. Tool events match
+ * a call only in their turn: an owned event's execution's, any other the latest turn's.
  */
 const projectExecutionEvent = (
   projection: ExecutionProjection,
@@ -172,11 +213,11 @@ const projectExecutionEvent = (
 
     return recorded === executions
       ? { ...projection, applied: false }
-      : { chatMessages: projection.chatMessages, executions: recorded, applied: false }
+      : { ...projection, executions: recorded, applied: false }
   }
 
   if (Predicate.isTagged(route, 'Stale')) {
-    return { chatMessages: projection.chatMessages, executions: route.executions, applied: false }
+    return { ...projection, executions: route.executions, applied: false }
   }
 
   const started = Predicate.isTagged(route, 'Start')
@@ -187,13 +228,15 @@ const projectExecutionEvent = (
       )
     : projection.chatMessages
 
+  const latest = projection.turnStart
+
   const committed =
     Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput')
       ? disputedAgentTurns(executions, event).reduce(
           (messages, turn) =>
             replaceWithCommittedAnswer(
               messages,
-              turn.shown.output,
+              disputedTurnOutput(executions, turn.shown, latest),
               new Set(turn.shown.calls),
               turn.committed
             ),
@@ -207,17 +250,19 @@ const projectExecutionEvent = (
       ? route.started
       : undefined
 
-  const chatMessages =
-    owner === undefined
-      ? applyAgentEventToChatMessages(committed, event, options)
-      : applyExecutionEventToChatMessages(
-          committed,
-          event,
-          options,
-          foreignMessages(executions, owner)
-        )
+  const startAnchor = Predicate.isTagged(route, 'Start')
+    ? turnAnchor(route.superseded, started)
+    : undefined
 
-  const anchor = Predicate.isTagged(route, 'Start') ? [turnAnchor(route.superseded, started)] : []
+  const turn =
+    startAnchor ??
+    (owner === undefined ? undefined : executionTurnAnchor(owner.output)) ??
+    latest?.after
+
+  const chatMessages = applyExecutionEventToChatMessages(committed, event, options, {
+    foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
+    turn
+  })
 
   const after = recordAgentExecutionEvent(
     Predicate.isTagged(route, 'Start')
@@ -227,12 +272,53 @@ const projectExecutionEvent = (
     route,
     owner === undefined
       ? []
-      : [...anchor, ...chatExecutionOutput(owner, event, committed, chatMessages)]
+      : [
+          ...(startAnchor === undefined
+            ? []
+            : [AgentChatExecutionOutput.After({ messageId: startAnchor })]),
+          ...chatExecutionOutput(owner, event, committed, chatMessages, turn)
+        ]
   )
 
-  return after === executions
-    ? { ...projection, chatMessages, applied: true }
-    : { chatMessages, executions: after, applied: true }
+  const turnStart = nextTurnStart(latest, event, route, startAnchor, chatMessages)
+
+  const projected: ExecutionProjectionFields = { chatMessages }
+
+  if (after !== executions || projection.executions !== undefined) projected.executions = after
+
+  if (turnStart !== undefined) projected.turnStart = turnStart
+
+  return { ...projected, applied: true }
+}
+
+/**
+ * The latest turn's start after an event: an `LLMStreamStart` records its turn (a tagged one where
+ * its execution's turn starts; an untagged retry of the latest turn keeps that turn's start), and
+ * `AgentStart` clears it (a run's turns are numbered afresh).
+ */
+const nextTurnStart = (
+  latest: AgentChatTurnStart | undefined,
+  event: AgentEvent,
+  route: AgentExecutionRoute<AgentChatExecutionOutput>,
+  startAnchor: Option.Option<string> | undefined,
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentChatTurnStart | undefined => {
+  if (Predicate.isTagged(event, 'AgentStart')) return undefined
+
+  if (!Predicate.isTagged(event, 'LLMStreamStart') || Predicate.isTagged(route, 'Owned')) {
+    return latest
+  }
+
+  const streamId = event.streamId ?? ''
+
+  if (startAnchor !== undefined) return { streamId, turn: event.turn, after: startAnchor }
+
+  return latest !== undefined &&
+    latest.streamId === streamId &&
+    latest.turn === event.turn &&
+    isLatestTurnAnchor(messages, latest.after)
+    ? latest
+    : { streamId, turn: event.turn, after: Option.fromNullishOr(messages.at(-1)?.id) }
 }
 
 /**
@@ -242,11 +328,27 @@ const projectExecutionEvent = (
 const turnAnchor = (
   superseded: ReadonlyArray<AgentExecution<AgentChatExecutionOutput>>,
   messages: ReadonlyArray<AgentChatMessage>
-): AgentChatExecutionOutput =>
-  superseded
-    .flatMap(execution => execution.output)
-    .find(output => Predicate.isTagged(output, 'After')) ??
-  AgentChatExecutionOutput.After({ messageId: Option.fromNullishOr(messages.at(-1)?.id) })
+): Option.Option<string> =>
+  executionTurnAnchor(superseded.flatMap(execution => execution.output)) ??
+  Option.fromNullishOr(messages.at(-1)?.id)
+
+/**
+ * A disputed turn's output with where the turn ends: its `Until`, else, when the chat saw a later
+ * turn of its run start without one (an untagged start), that turn's start.
+ */
+const disputedTurnOutput = (
+  executions: AgentExecutions<AgentChatExecutionOutput>,
+  shown: AgentExecution<AgentChatExecutionOutput>,
+  latest: AgentChatTurnStart | undefined
+): ReadonlyArray<AgentChatExecutionOutput> =>
+  latest === undefined ||
+  latest.turn <= shown.turn ||
+  shown.output.some(output => Predicate.isTagged(output, 'Until')) ||
+  !executions.some(
+    run => run.streamId === latest.streamId && !run.retired && run.executions.includes(shown)
+  )
+    ? shown.output
+    : [...shown.output, AgentChatExecutionOutput.Until({ messageId: latest.after })]
 
 /**
  * The chat messages other executions still hold as their output (an earlier turn's answer kept
@@ -300,23 +402,21 @@ const endEarlierTurns = (
   )
 }
 
-const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
-  messages
-    .filter(message =>
-      message.parts.some(part => Predicate.isTagged(part, 'ToolCall') && part.call.id === callId)
-    )
-    .at(-1)
-
 /**
  * What an execution's event produced: the chat messages it created, and each tool part it touched
- * first, with the part it replaced (providers reuse call ids across turns) so removal can restore it.
+ * first in its turn (`turn`), with the part it replaced (a provider can reuse a call id within a
+ * turn) so removal can restore it.
  */
 const chatExecutionOutput = (
   execution: AgentExecution<AgentChatExecutionOutput>,
   event: AgentEvent,
   before: ReadonlyArray<AgentChatMessage>,
-  after: ReadonlyArray<AgentChatMessage>
+  after: ReadonlyArray<AgentChatMessage>,
+  turn: ChatTurnAnchor
 ): ReadonlyArray<AgentChatExecutionOutput> => {
+  const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
+    turnToolCallMessage(messages, callId, turn)
+
   const known = new Set(before.map(message => message.id))
 
   const touched = new Set(
@@ -393,6 +493,13 @@ export type AgentChatAction =
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
+/** A new stream starts: its event ids, executions and turns are its own. */
+const restarted = (state: AgentChatState) => ({
+  ...Struct.omit(state, ['turnStart']),
+  seenEventIds: [],
+  executions: []
+})
+
 const withoutFailure = (state: AgentChatState): AgentChatState =>
   Predicate.isTagged(state.status, 'Failed') ? { ...state, status: idleAgentStatus } : state
 
@@ -410,9 +517,7 @@ export const reduceAgentChatState = (
     ),
     Match.tag('Submit', current =>
       started(state, {
-        ...state,
-        seenEventIds: [],
-        executions: [],
+        ...restarted(state),
         chatMessages: appendProtocolMessage(state.chatMessages, current.message),
         sessionEvents: [
           ...state.sessionEvents,
@@ -432,9 +537,7 @@ export const reduceAgentChatState = (
     ),
     Match.tag('SubmitHitlResponse', current =>
       started(state, {
-        ...state,
-        seenEventIds: [],
-        executions: [],
+        ...restarted(state),
         // User data is not a validated tool result until the server accepts it. Keep the
         // form mounted while submitting and never replay an optimistic invalid payload.
         chatMessages:
@@ -470,9 +573,7 @@ export const reduceAgentChatState = (
         Match.tag('NotFound', () => state),
         Match.tag('Regenerated', next =>
           started(state, {
-            ...state,
-            seenEventIds: [],
-            executions: [],
+            ...restarted(state),
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -492,9 +593,7 @@ export const reduceAgentChatState = (
         Match.tag('NotFound', 'NotUserMessage', () => state),
         Match.tag('Edited', next =>
           started(state, {
-            ...state,
-            seenEventIds: [],
-            executions: [],
+            ...restarted(state),
             chatMessages: next.messages,
             sessionEvents: [
               ...state.sessionEvents,
@@ -516,17 +615,17 @@ export const reduceAgentChatState = (
 
       const routed = projectExecutionEvent(state, current.event, current)
 
-      const projected =
-        routed.executions === undefined
-          ? { ...state, chatMessages: routed.chatMessages }
-          : { ...state, chatMessages: routed.chatMessages, executions: routed.executions }
+      const projected: AgentChatState = {
+        ...Struct.omit(state, ['executions', 'turnStart']),
+        ...projectionFields(routed)
+      }
 
       if (!routed.applied) return rememberEvent(projected, current.event)
 
       // A replayed start of an already settled call must not reopen the run.
       const fenced =
         Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
-        isSettledToolCall(state.chatMessages, current.event.call.id)
+        isSettledToolCall(state, current.event.call.id)
 
       return rememberEvent(
         fenced

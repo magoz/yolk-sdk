@@ -96,7 +96,7 @@ and, at `AgentEnd` or `AgentAwaitingInput`, show the committed answer and the ca
 ran for each turn in which a newer execution superseded an older one (limits: a turn retried after a
 user message shows both answers; a client that connects mid-turn sees the earlier execution as
 plain events; the committed answer is matched by value across the run; call ids reused across turns
-can mix calls). Tool-batch steps are out of scope (read calls are
+can mix calls until the client sees a turn start). Tool-batch steps are out of scope (read calls are
 not ledgered and can rerun differently). Upgrade clients with the server: older clients show both
 executions back to back.
 

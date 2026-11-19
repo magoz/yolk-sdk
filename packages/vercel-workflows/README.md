@@ -441,11 +441,13 @@ Open cases:
   deterministic `eventId` (de-duplicated by the client) are not affected. A client that connects
   mid-turn never saw the earlier execution's start, so its events take the plain path. The committed
   answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
-  another committed message of the run (same text, same call ids) counts as committed. Tool events
-  find a call by id, so a provider that reuses call ids across turns can have a later turn's call
-  update an earlier turn's call of that id (#335). A turn kept for reconciling protects the messages
-  its executions created, not an earlier message one of them overwrote through a reused id. A client
-  that never saw a later turn's start (it joined late) also has no bound on where that turn ends.
+  another committed message of the run (same text, same call ids) counts as committed. Providers
+  can reuse call ids across turns: the chat projections match a turn's tool events only after the
+  latest turn start they saw, so until a client sees a start (it joined mid-turn) or after
+  `AgentStart`, a reused id can still update an earlier turn's call, and `reduceAgentEvents` keeps
+  one tool run per call id (the latest turn's; a reused id of an accepted call counts as its
+  replay). A client that never saw a later turn's start has no bound on where a reconciled turn
+  ends; the committed answer takes the first part of each of its calls after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.
