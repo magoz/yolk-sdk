@@ -63,6 +63,11 @@ export class TestWorkflowHookNotFoundError extends Error {
   }
 }
 
+/**
+ * Not thrown by `resumeHook`: like the platform, it accepts every payload sent to a live hook. The
+ * platform's `HookConflictError` comes from creating a hook whose token another live hook holds,
+ * which this world does not emulate.
+ */
 export class TestWorkflowHookConflictError extends Error {
   override readonly name = 'HookConflictError'
 
@@ -488,20 +493,23 @@ export class TestWorkflowWorld {
     this.notifyChange(run)
   }
 
+  // As on the platform, a hook accepts every payload until it is disposed (or its run ends) and
+  // `resumeHook` succeeds for each: success never means the payload was read. `await hook` reads
+  // the first; later payloads stay unread (a settled promise ignores them) and are dropped with
+  // the hook. A disposed hook's token is free again, for a later hook of any run.
   async resumeHook(token: string, payload: unknown): Promise<void> {
     for (const run of this.runs.values()) {
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
+        continue
+      }
+
       const hook = run.hooks.get(token)
 
       if (hook !== undefined) {
-        run.hooks.delete(token)
         run.resumedHookTokens.add(token)
         hook.resolve(payload)
 
         return
-      }
-
-      if (run.resumedHookTokens.has(token)) {
-        throw new TestWorkflowHookConflictError(token)
       }
     }
 

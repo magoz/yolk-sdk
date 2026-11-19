@@ -14,7 +14,7 @@ return {
   messages: [],
   createdMessages: input.createdMessages,
   awaitingInput: {
-    hookToken: `agent:${runId}:tool:${toolCallId}`,
+    hookToken: `agent:${runId}:hitl:${input.turn}:${input.hitlResponses.length}`,
     requests: pendingRequests,
     messages: input.createdMessages,
     usage: input.usage,
@@ -25,8 +25,15 @@ return {
 }
 ```
 
-Persist enough state for your UI and resume route to verify the request. To show approvers a
-before → after diff, pass `approvalPreviews: toolSet.approvalPreviews` to the `prepareToolBatch`
+Use one token per pause: no earlier pause of the run may have used it. The turn plus the number of
+answers the batch already took is unique per pause; a token built only from pending request ids
+repeats when a request re-pends after an invalid answer, and one token per run or session is reused
+by every pause. A disposed hook frees its token and `resumeHook` routes by token alone, so a reused
+token hands a late duplicate of an earlier answer (a client retry, a double submit) to the next
+pause as its answer. The loop does not check tokens.
+
+Persist enough state for your UI and resume route to verify the request, including the pause's
+token. To show approvers a before → after diff, pass `approvalPreviews: toolSet.approvalPreviews` to the `prepareToolBatch`
 or `runToolBatch` call in your tool step; pending `ToolApprovalRequest`s of tools with a
 `changePreview` hook then carry `preview`, or `previewError` (render the arguments instead). Previews are recomputed whenever the batch reruns with siblings still pending, so render
 the latest request per call. See [Preview the change](../agent/tools-hitl#preview-the-change).
@@ -52,16 +59,26 @@ must write the safe error and close.
 ```ts
 const hitlResponse = await decodeSingleHitlResponse(hitlResponses)
 
-await assertPendingHitlRequest({
+// Host-owned: finds the stored pause that holds this request and records the answer durably.
+const pause = await recordPendingHitlAnswer({
   runId,
   requestId: hitlResponse.requestId,
-  toolCallId: hitlResponse.toolCallId
+  toolCallId: hitlResponse.toolCallId,
+  response: hitlResponse
 })
 
-await resumeHook(hookToken, hitlResponse)
+await resumeHook(pause.hookToken, hitlResponse)
 ```
 
 `hitlResponses` is the `@yolk-sdk/agent/client` request body field. Do not resume only by hook token. Match run ownership, request id, tool call id, and response type.
+
+`resumeHook` success does not mean the answer was used. A hook accepts every payload until the
+workflow disposes it, and `resumeHook` succeeds for each; `await hook` reads the first and the rest
+are dropped with the hook. After disposal, or once the run ended, it fails with
+`HookNotFoundError`. Two tabs answering the same pause both see success. So before resuming, record
+the answer durably for the stored pause that holds its request: an identical retry reuses the
+record, a different answer is refused. Resume that pause's token, and tell the user what was
+recorded, not what `resumeHook` returned.
 
 ## Event sequence rule
 
@@ -75,11 +92,12 @@ This keeps durable `eventId`s monotonic across pause/resume.
 
 ## Failure modes
 
-| Failure                       | Result                 |
-| ----------------------------- | ---------------------- |
-| no `awaitInput` handler       | `AwaitInputFailed`     |
-| hook rejected                 | `AwaitInputFailed`     |
-| resume route denied           | workflow keeps waiting |
-| tool batch fails after resume | `ToolBatchStepFailed`  |
+| Failure                              | Result                                  |
+| ------------------------------------ | --------------------------------------- |
+| no `awaitInput` handler              | `AwaitInputFailed`                      |
+| hook rejected                        | `AwaitInputFailed`                      |
+| resume route denied                  | workflow keeps waiting                  |
+| resume after the hook's disposal/end | `resumeHook` fails: `HookNotFoundError` |
+| tool batch fails after resume        | `ToolBatchStepFailed`                   |
 
 Call `writeError` with safe terminal error events. Never include raw provider/tool secrets in resume errors.

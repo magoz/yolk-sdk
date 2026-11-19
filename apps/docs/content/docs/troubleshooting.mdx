@@ -737,6 +737,12 @@ older SDK.
 
 Your host owns hook tokens, route auth, run ownership, and pending request matching. The package only carries serializable awaiting-input state.
 
+An answer that `resumeHook` accepted but the run never used went to a hook that had already taken
+another answer (a live hook accepts every payload and the workflow reads the first), or to the next
+pause through a token several pauses share. Use one token per pause and record answers durably before
+resuming ([HITL resume](./vercel-workflows/hitl-resume)). `HookNotFoundError` means the pause's hook
+was already disposed or its run ended.
+
 ### Terminal event missing
 
 For `AgentEnd`, commit durable state, write the event, then let `closeStream` close. For

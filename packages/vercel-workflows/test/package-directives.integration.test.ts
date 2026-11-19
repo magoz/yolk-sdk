@@ -1,7 +1,7 @@
 import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { getRun } from 'workflow/api'
-import { WorkflowRunCancelledError } from 'workflow/errors'
+import { getRun, resumeHook, start } from 'workflow/api'
+import { HookNotFoundError, WorkflowRunCancelledError } from 'workflow/errors'
 import { getWorld } from 'workflow/runtime'
 import { waitForHook, waitForSleep } from '@workflow/vitest'
 import { VercelAgentWorkflowRunResult } from '@yolk-sdk/vercel-workflows'
@@ -13,6 +13,9 @@ import {
 import {
   packageCancellableWorkflow,
   packageHitlDirectiveWorkflow,
+  packageHookAnswersWorkflow,
+  packageHookOnceWorkflow,
+  packageHookTwoPausesWorkflow,
   packageOwnedDirectiveWorkflow,
   packageStreamHitlWorkflow,
   packageStreamWorkflow
@@ -153,6 +156,56 @@ describe('package-owned workflow directives', () => {
         api.getReadable<string>(run.runId, { startIndex: tailIndex + 1 })
       ).then(collectReadable)
     ).resolves.toEqual(['after-approved'])
+  })
+
+  // The platform side of `TestWorkflowWorld` hook answers (issues #304, #306).
+  it('accepts every answer to a live hook, delivers the first, then answers HookNotFoundError', async () => {
+    const token = `package-hook-answers:${crypto.randomUUID()}`
+    const run = await start(packageHookAnswersWorkflow, [token])
+
+    await waitForHook(run, { token })
+    await resumeHook(token, 'first')
+    const holding = await waitForSleep(run)
+
+    // Read once, not yet disposed: the platform accepts the answer and never delivers it.
+    await expect(resumeHook(token, 'second')).resolves.toMatchObject({ token })
+    await run.wakeUp({ correlationIds: [holding] })
+
+    // The run suspends on its second sleep only after it recorded the hook's disposal.
+    const disposed = await waitForSleep(run)
+
+    expect(disposed).not.toBe(holding)
+    await expect(resumeHook(token, 'third')).rejects.toSatisfy(HookNotFoundError.is)
+    await run.wakeUp({ correlationIds: [disposed] })
+    await expect(run.returnValue).resolves.toBe('first')
+  })
+
+  it('delivers a late duplicate to the next pause that reuses the token', async () => {
+    const token = `package-hook-two-pauses:${crypto.randomUUID()}`
+    const run = await start(packageHookTwoPausesWorkflow, [token])
+
+    await waitForHook(run, { token })
+    await resumeHook(token, 'answer-for-pause-1')
+    // Waits for the second pause's hook (the first one has received its payload).
+    await waitForHook(run, { token })
+    await resumeHook(token, 'answer-for-pause-1')
+
+    await expect(run.returnValue).resolves.toEqual(['answer-for-pause-1', 'answer-for-pause-1'])
+  })
+
+  it('lets a later run reuse the token of an ended run', async () => {
+    const token = `package-hook-once:${crypto.randomUUID()}`
+    const first = await start(packageHookOnceWorkflow, [token])
+
+    await waitForHook(first, { token })
+    await resumeHook(token, 'run-1 answer')
+    await expect(first.returnValue).resolves.toBe('run-1 answer')
+
+    const second = await start(packageHookOnceWorkflow, [token])
+
+    await waitForHook(second, { token })
+    await resumeHook(token, 'run-2 answer')
+    await expect(second.returnValue).resolves.toBe('run-2 answer')
   })
 
   it('cancels package-owned workflow runs', async () => {

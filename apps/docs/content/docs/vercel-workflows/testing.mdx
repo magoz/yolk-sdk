@@ -52,6 +52,16 @@ attempts, step attempts, status, run errors, `unstorableStepErrors` (`stepName`,
 rejects fails the start there too. Use `world.sdk` with `VercelWorkflows.layerFromSdk` when testing
 Effect route/service boundaries.
 
+### Hooks
+
+Hooks behave as on the platform. `world.resumeHook` (and `world.sdk.resumeHook`) succeeds for every
+payload sent to a live hook; `await hook` reads the first, and the rest are dropped when `using`
+disposes the hook. Once the hook is disposed, or its run ended, resuming its token fails with
+`TestWorkflowHookNotFoundError` until a hook of any run takes the token again. So a test can show a
+second answer being accepted and never used, or a late duplicate reaching the next pause that
+reuses a token ([HITL resume](./hitl-resume)). The world does not model the platform's
+`HookConflictError` for a token another live hook holds, nor reading one hook more than once.
+
 ### Step errors
 
 Step errors cross the platform boundary as they do in a deployment. `world.runStep` stores each
