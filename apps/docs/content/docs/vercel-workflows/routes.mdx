@@ -142,6 +142,8 @@ run before building it, so refusals keep their status: once the blank line is se
 
 ## Resume HITL
 
+Route fragment (host-owned helpers):
+
 ```ts
 import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
@@ -168,6 +170,8 @@ export const resumeProgram = (request: Request, runId: string) =>
     )
 
     if (recorded.status === 'refused') return refusedAnswerResponse(recorded.reason)
+    // Out of resume attempts: the answer stays recorded; a retryable 503 says retrying is safe.
+    if (recorded.status === 'hook-pending') return answerRecordedRetryResponse(recorded)
 
     // Replay from the recorded tail, so every retry of this answer replays the same continuation.
     const readable = yield* workflows.getReadable<Uint8Array>(runId, {

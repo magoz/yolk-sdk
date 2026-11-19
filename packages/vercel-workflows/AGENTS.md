@@ -43,8 +43,9 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
-  Document that each pause needs its own token and that `resumeHook` success does not mean the
-  payload was read (a live hook accepts every payload; the rest drop on dispose). The loop does not
+  Document that each pause needs its own token, that `resumeHook` success does not mean the
+  payload was read (a live hook accepts every payload; the rest drop on dispose), and that an
+  answer names its pause (its `AgentAwaitingInput` `eventId`); request ids alone are ambiguous. The loop does not
   refuse a reused token: hosts that key tokens per run or by pending request id would fail runs
   that today only risk a late duplicate.
 - `TestWorkflowWorld` hooks match the platform: every resume of a live hook succeeds, `await hook`

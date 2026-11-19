@@ -336,7 +336,7 @@ resolve to `{ value, files }`: `value` is the metadata output, `files` the attac
 
 ### Approval pauses forever
 
-If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.
+If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses (Workflow hosts: match the named pause; see [HITL resume](./vercel-workflows/hitl-resume#name-the-pause-an-answer-is-for)).
 
 ## Streaming errors
 
