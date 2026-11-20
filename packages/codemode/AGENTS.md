@@ -116,6 +116,22 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   function wrapper (positions preserved) and maps failures to `script` errors; one sandbox (worker +
   VM) per execution, closed in `finally`; the per-executor concurrency cap counts queue time against
   the timeout.
+- The Dynamic Worker executor (`cloudflare.ts`) loads one Worker per execution (`load()`, one
+  billed Dynamic Worker) with `globalOutbound: null` and `limits.cpuMs` (`cpuMs`, default 500): the
+  CPU limit is the real ceiling, since the host timeout and abort only answer early and cannot stop
+  a synchronous loop. An isolate failure that names the CPU limit maps to `timeout` (`Execution
+exceeded its CPU limit of <cpuMs> ms`). One `AbortController` is the execution's lifetime,
+  aborted in `finally` whatever ends it: `ToolHost` answers calls still pending at once with the
+  fixed "ended" rejection (encoded for tools, plain for globals) and later calls the same way
+  without running them, so an unawaited call never keeps the Dynamic Worker in flight (4 per
+  request, 10 per Durable Object); then the entrypoint and Worker stubs are disposed when they have
+  `Symbol.dispose` (never throwing). `ToolHost` never rejects across RPC; it answers with a reply.
+  No concurrency cap (owner decision: no hard caps).
+- Error text: both executors pass through what the script controls (its thrown error's name,
+  message and stack, TypeScript parse errors, tool rejections, global rejections as pi gives
+  them). The Dynamic Worker executor's own failures use fixed messages and never forward loader,
+  isolate, or RPC error text (`Could not load the script sandbox.`, `The script sandbox failed.`,
+  `The call could not reach the host.`).
 - Tool arguments make a JSON round trip. The pi executor runs the script in an inner
   `(async (tools, console) => {...})` whose `tools` is a guard proxy (`toolsGuardSource` in
   `node.ts`): the prefix shares line 1 (only line-1 columns shift) and the guard follows the
@@ -224,7 +240,9 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - `test/cloudflare-executor.test.ts`: the Dynamic Worker executor with fake Worker Loaders: the
   built module evaluated in a fresh `node:vm` context (tools, globals, output, store writes, the
   guard, unbound tools, script and parse errors, timeout aborting tool calls), a loader whose `run`
-  the test controls (abort, malformed replies, output decoding), and code mode end to end.
+  the test controls (abort, malformed replies, output decoding), `limits.cpuMs`, pending calls
+  answered on return, timeout and abort, late calls never run, disposal, fixed failure messages
+  (loader, isolate, CPU limit, failed host RPC), and code mode end to end.
 - `test/pi-prelude.test.ts`: the vendored prelude equals the installed pi's.
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search, call labels.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,

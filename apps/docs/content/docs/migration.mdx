@@ -51,6 +51,17 @@ in `toOpenAiRequestBody` without a format, a request with an effort now fails wi
 included), or stop sending the effort. Vercel AI Gateway and OpenCode Go set their format already;
 the Gateway's `reasoningEffortFormat` also accepts `'omit'`.
 
+### Canary.149: Dynamic Worker code mode CPU limit
+
+`makeDynamicWorkerCodeModeExecutor` (`@yolk-sdk/codemode/cloudflare`) now loads every script with
+`limits.cpuMs` (new option `cpuMs`, default 500). A script that used more CPU time before now fails
+with a `timeout` (`Execution exceeded its CPU limit of <cpuMs> ms`): raise `cpuMs` if your scripts
+compute more. A tool or global call the script left pending is rejected when the execution ends,
+and calls arriving afterwards are rejected without running. Loader and isolate failures now carry
+fixed messages (`Could not load the script sandbox.`, `The script sandbox failed.`) instead of the
+runtime's error text after `The script sandbox failed: `; code matching that prefix needs the new
+messages. A custom `WorkerLoader` now receives `limits` in `WorkerLoaderCode`.
+
 ### Canary.145: Cloudflare runtime hook token conflicts
 
 The Cloudflare runtime (`@yolk-sdk/vercel-workflows/cloudflare*`) now refuses a hook whose token
