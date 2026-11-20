@@ -431,7 +431,10 @@ export const mcpConformanceServerPingRequestId = 'server-ping-1'
  * (`mcpConformanceServerPingRequestId`) before the response; the pinned SDK answers it with an
  * empty result (`{"result":{},"jsonrpc":"2.0","id":"server-ping-1"}`, its member order) on a new
  * POST carrying the session but no `mcp-protocol-version` (the initialize result is not processed
- * yet), sent before `notifications/initialized`; the server accepts it with 202 and no body.
+ * yet); the server accepts it with 202 and no body. The fixture lists the answer before
+ * `notifications/initialized`, but the client sends the two concurrently, so either may arrive
+ * first (replay matches per method and URL in order, and both recorded answers are 202 with no
+ * body).
  */
 export const legacyServerPingListingExchanges = (): ReadonlyArray<WireExchange> => {
   const url = mcpConformanceSyntheticLegacyUrl

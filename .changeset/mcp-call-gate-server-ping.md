@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/mcp': patch
+---
+
+`@yolk-sdk/mcp/conformance`: the fail-closed call gate now understands one server request, a plain server `ping` (#382). The calling cases (`mcp.tools.call-read`, `mcp.tools.call-tool-error`, `mcp.errors.unknown-tool`) used to refuse any legacy server that pings during `initialize`, which MCP `2025-11-25` allows. A ping in a POST's answer now counts as understood only when it has `jsonrpc: "2.0"`, a string or number id, `method: "ping"` and no other member, with params absent or empty; the client answered it exactly once, after it, with a POST holding only the empty result; and the server accepted that answer with 202 and no body. A ping has no side effects (basic/utilities/ping: its only answer is an empty result, and the SDK's handler returns `{}`). It resolves none of the client's requests and carries no listing, and the accepted answer sends nothing back. Any other server request, a ping with params, a ping not answered exactly once, and an answer with no status yet, rejected, or with a body still refuse.

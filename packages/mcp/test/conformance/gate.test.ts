@@ -6,22 +6,32 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { Deferred, Effect, Layer, Predicate, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Layer, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientResponse } from 'effect/http'
+import {
+  HttpClient,
+  HttpClientError,
+  type HttpClientRequest,
+  HttpClientResponse
+} from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { WireExchange, WireFixture, WireResponse } from '@yolk-sdk/conformance/fixture'
-import type { ReplayLedgerApi } from '@yolk-sdk/conformance/replay'
+import { makeReplayHttpClient, type ReplayLedgerApi } from '@yolk-sdk/conformance/replay'
 import { EventSourceParserStream } from 'eventsource-parser/stream'
 import {
+  legacyServerPingListingExchanges,
   mcpCallReadCase,
+  mcpCallReadLegacyFixture,
   mcpCallReadModernFixture,
   mcpCallToolErrorCase,
+  mcpCallToolErrorLegacyFixture,
   mcpCallToolErrorModernFixture,
   mcpConformanceDiscoverRequestId,
   mcpConformanceLegacyInitializeResult,
   mcpConformanceModernDiscoverResult,
+  mcpConformanceSyntheticLegacyUrl,
   mcpConformanceSyntheticModernUrl,
+  mcpConformanceSyntheticReadCall,
   mcpConformanceSyntheticReadTool,
   mcpConformanceSyntheticTarget,
   mcpConformanceSyntheticTools,
@@ -32,11 +42,14 @@ import {
   mcpResponseEncodingLegacyFixture,
   mcpResponseEncodingModernFixture,
   mcpUnknownToolCase,
+  mcpUnknownToolLegacyFixture,
   mcpUnknownToolModernFixture,
   modernCallExchanges,
   modernListingExchanges,
   type McpConformanceCase
 } from '../../src/conformance/index.ts'
+import { gateVerdict, type McpCallGate } from '../../src/conformance/call-gate.ts'
+import type { McpObservedExchange } from '../../src/conformance/observe.ts'
 import {
   decodeAsTextDecoderStream,
   sseAllPayloads,
@@ -479,6 +492,502 @@ describe('a refused client retry is reported as a retry, not as zero forwarded c
       expect(methods.filter(method => method === 'tools/call')).toHaveLength(1)
     })
   )
+})
+
+/** A legacy calling case and its committed fixture. */
+const legacyCalling: ReadonlyArray<{
+  readonly testCase: McpConformanceCase
+  readonly fixture: WireFixture
+}> = [
+  { testCase: mcpCallReadCase, fixture: mcpCallReadLegacyFixture },
+  { testCase: mcpCallToolErrorCase, fixture: mcpCallToolErrorLegacyFixture },
+  { testCase: mcpUnknownToolCase, fixture: mcpUnknownToolLegacyFixture }
+]
+
+/** Whether a request body is a client-sent response (a JSON-RPC message without `method`). */
+const isClientResponse = (body: unknown) =>
+  Predicate.hasProperty(body, 'jsonrpc') && !Predicate.hasProperty(body, 'method')
+
+/**
+ * The listing of a server that pings during `initialize`, without the client's answer: the test
+ * client answers it (replay matches per method and URL in order, and the client sends the answer
+ * concurrently with `notifications/initialized`, so a recorded answer could go to either).
+ */
+const pingListing = legacyServerPingListingExchanges().filter(
+  exchange => !isClientResponse(exchange.request.body)
+)
+
+/** `fixture` (a legacy calling fixture) against a server that pings during every `initialize`. */
+const pinging = (fixture: WireFixture, callInitialize?: WireResponse): WireFixture => {
+  const call = fixture.exchanges.at(-1)
+  const [discover, initialize, ...rest] = pingListing
+
+  if (call === undefined || discover === undefined || initialize === undefined) {
+    throw new Error('empty fixture')
+  }
+
+  return drillFixture(fixture.caseId, 'legacy', [
+    ...pingListing,
+    discover,
+    callInitialize === undefined ? initialize : { ...initialize, response: callInitialize },
+    ...rest,
+    call
+  ])
+}
+
+/** An `initialize` answer that sends `serverRequest` before its response. */
+const initializeSending = (serverRequest: object): WireResponse => ({
+  status: 200,
+  headers: {
+    'content-type': 'text/event-stream',
+    'mcp-session-id': 'yolk-synthetic-session-0001'
+  },
+  chunks: [
+    `event: message\nid: evt-1\ndata: ${JSON.stringify(serverRequest)}\n\n`,
+    `event: message\nid: evt-2\ndata: ${JSON.stringify({
+      jsonrpc: '2.0',
+      id: 0,
+      result: mcpConformanceLegacyInitializeResult
+    })}\n\n`
+  ]
+})
+
+type ServerAnswer = (
+  request: HttpClientRequest.HttpClientRequest
+) => Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.HttpClientError>
+
+const answerWith =
+  (
+    status: number,
+    body: string | null = null,
+    headers: Record<string, string> = {}
+  ): ServerAnswer =>
+  request =>
+    Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body, { status, headers })))
+
+const accepted = answerWith(202)
+
+/**
+ * Run `testCase` against `fixture` replayed, with every client-sent response answered by
+ * `serverAnswer` (the call operation's by `callAnswer`); count the client's answers and calls.
+ */
+const runPinged = (
+  testCase: McpConformanceCase,
+  fixture: WireFixture,
+  callAnswer: ServerAnswer = accepted
+) =>
+  Effect.gen(function* () {
+    const answers = yield* Ref.make(0)
+    const calls = yield* Ref.make(0)
+    const replay = yield* makeReplayHttpClient([fixture])
+
+    const client = HttpClient.make(request =>
+      Effect.gen(function* () {
+        const text = Predicate.isTagged(request.body, 'Uint8Array')
+          ? new TextDecoder().decode(request.body.body)
+          : '{}'
+
+        const body = yield* parseBody(text).pipe(Effect.orDie)
+
+        if (isClientResponse(body)) {
+          const answered = yield* Ref.updateAndGet(answers, count => count + 1)
+
+          // The first answer is the precondition listing's; the second the call operation's.
+          return yield* (answered === 1 ? accepted : callAnswer)(request)
+        }
+
+        if (Predicate.hasProperty(body, 'method') && body.method === 'tools/call') {
+          yield* Ref.update(calls, count => count + 1)
+        }
+
+        return yield* replay.client.execute(request)
+      })
+    )
+
+    const exit = yield* testCase.run.pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HttpClient.HttpClient, client),
+          caseServices(mcpConformanceSyntheticTarget('legacy'))
+        )
+      ),
+      Effect.exit
+    )
+
+    return { exit, answers: yield* Ref.get(answers), calls: yield* Ref.get(calls) }
+  })
+
+describe('a server ping during initialize (#382)', () => {
+  it.effect('the calling cases forward their call once the answer was accepted', () =>
+    Effect.gen(function* () {
+      for (const { testCase, fixture } of legacyCalling) {
+        const { exit, answers, calls } = yield* runPinged(testCase, pinging(fixture))
+
+        expect(Exit.isSuccess(exit), `${testCase.id}: ${String(exit)}`).toBe(true)
+        // Both handshakes pinged, and the client answered each.
+        expect(answers, testCase.id).toBe(2)
+        expect(calls, testCase.id).toBe(1)
+      }
+    })
+  )
+
+  const transportFailure: ServerAnswer = request =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: 'synthetic drop' })
+      })
+    )
+
+  const refusals: ReadonlyArray<{
+    readonly label: string
+    readonly callInitialize?: WireResponse
+    readonly callAnswer?: ServerAnswer
+  }> = [
+    { label: 'the server rejects the answer to its ping (400)', callAnswer: answerWith(400) },
+    {
+      label: 'the server answers the ping answer 202 with a body',
+      callAnswer: answerWith(202, '{}', { 'content-type': 'application/json' })
+    },
+    { label: 'the answer never reaches the server (no status)', callAnswer: transportFailure },
+    {
+      label: 'the ping carries params',
+      callInitialize: initializeSending({
+        jsonrpc: '2.0',
+        id: 'server-ping-1',
+        method: 'ping',
+        params: { reason: 'synthetic' }
+      })
+    },
+    {
+      label: 'the server sends roots/list instead (answered with an error)',
+      callInitialize: initializeSending({
+        jsonrpc: '2.0',
+        id: 'server-roots-1',
+        method: 'roots/list'
+      })
+    }
+  ]
+
+  for (const { label, callInitialize, callAnswer } of refusals) {
+    it.effect(`refuses with zero forwarded calls when ${label}`, () =>
+      Effect.gen(function* () {
+        for (const { testCase, fixture } of legacyCalling) {
+          const { exit, answers, calls } = yield* runPinged(
+            testCase,
+            pinging(fixture, callInitialize),
+            callAnswer
+          )
+
+          expect(Exit.isFailure(exit), testCase.id).toBe(true)
+
+          if (Exit.isFailure(exit)) {
+            expect(Cause.squash(exit.cause), testCase.id).toMatchObject({
+              message: refusedMessage('uncertain-exchange')
+            })
+          }
+
+          // The client still answered the server request of the call operation.
+          expect(answers, testCase.id).toBe(2)
+          expect(calls, testCase.id).toBe(0)
+        }
+      })
+    )
+  }
+})
+
+const legacyUrl = mcpConformanceSyntheticLegacyUrl
+
+const readGate: McpCallGate = { kind: 'read-only', name: mcpConformanceSyntheticReadCall.name }
+
+const ssePayloads = (messages: ReadonlyArray<object>) =>
+  messages.map(message => `event: message\ndata: ${JSON.stringify(message)}\n\n`).join('')
+
+/** An observed POST: its JSON-RPC body and, when answered, the status and the whole body. */
+const observedPost = (
+  requestBody: Schema.Json,
+  answer?: { readonly status: number; readonly body: string; readonly mediaType?: string }
+): McpObservedExchange => {
+  const sent: McpObservedExchange = {
+    method: 'POST',
+    url: legacyUrl,
+    requestHeaders: {},
+    requestBody
+  }
+
+  if (answer === undefined) {
+    return sent
+  }
+
+  const answered = { ...sent, status: answer.status, responseBody: answer.body }
+
+  return answer.mediaType === undefined ? answered : { ...answered, mediaType: answer.mediaType }
+}
+
+const sseAnswered = (messages: ReadonlyArray<object>) => ({
+  status: 200,
+  body: ssePayloads(messages),
+  mediaType: 'text/event-stream'
+})
+
+const serverPing = (id: string | number = 'server-ping-1'): Schema.JsonObject => ({
+  jsonrpc: '2.0',
+  id,
+  method: 'ping'
+})
+
+const probe = observedPost(
+  { jsonrpc: '2.0', id: mcpConformanceDiscoverRequestId, method: 'server/discover' },
+  {
+    status: 400,
+    body: '{"jsonrpc":"2.0","error":{"code":-32000,"message":"Bad Request"},"id":null}',
+    mediaType: 'application/json'
+  }
+)
+
+/** `initialize` (id 0) answered over SSE: `before` (server requests), then its response. */
+const initialize = (before: ReadonlyArray<object>) =>
+  observedPost(
+    { jsonrpc: '2.0', id: 0, method: 'initialize', params: {} },
+    sseAnswered([
+      ...before,
+      { jsonrpc: '2.0', id: 0, result: mcpConformanceLegacyInitializeResult }
+    ])
+  )
+
+/** The client's empty-result answer to server request `id`, accepted (202, no body) by default. */
+const pingAnswer = (
+  id: string | number,
+  answer: { readonly status: number; readonly body: string } = { status: 202, body: '' }
+) => observedPost({ result: {}, jsonrpc: '2.0', id }, answer)
+
+/** The same answer while the server has not answered it yet (no status, no body). */
+const pingAnswerInFlight = (id: string | number) => observedPost({ result: {}, jsonrpc: '2.0', id })
+
+const initialized = observedPost(
+  { jsonrpc: '2.0', method: 'notifications/initialized' },
+  { status: 202, body: '' }
+)
+
+/** The standing GET answered 405, or 200 with an event stream carrying `body`. */
+const standingGet = (body = ''): McpObservedExchange => {
+  const sent = { method: 'GET', url: legacyUrl, requestHeaders: {} }
+
+  return body === ''
+    ? { ...sent, status: 405, responseBody: '' }
+    : { ...sent, status: 200, responseBody: body, mediaType: 'text/event-stream' }
+}
+
+const listing = (before: ReadonlyArray<object> = []) =>
+  observedPost(
+    { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    sseAnswered([
+      ...before,
+      { jsonrpc: '2.0', id: 1, result: { tools: [...mcpConformanceSyntheticTools] } }
+    ])
+  )
+
+const call = observedPost({
+  jsonrpc: '2.0',
+  id: 2,
+  method: 'tools/call',
+  params: { ...mcpConformanceSyntheticReadCall }
+})
+
+/** The call operation of a server that pings once during `initialize`, answered and accepted. */
+const pingedOperation: ReadonlyArray<McpObservedExchange> = [
+  probe,
+  initialize([serverPing()]),
+  pingAnswer('server-ping-1'),
+  initialized,
+  standingGet(),
+  listing()
+]
+
+const verdictOf = (earlier: ReadonlyArray<McpObservedExchange>) =>
+  gateVerdict(readGate, call, earlier, () => undefined)
+
+describe('the gate understands only an accepted answer to a plain server ping (#382)', () => {
+  const forwarded: ReadonlyArray<{
+    readonly label: string
+    readonly earlier: ReadonlyArray<McpObservedExchange>
+  }> = [
+    {
+      label: 'no ping at all',
+      earlier: [probe, initialize([]), initialized, standingGet(), listing()]
+    },
+    { label: 'a ping answered and accepted', earlier: pingedOperation },
+    {
+      label: 'a ping with empty params and a numeric id',
+      earlier: [
+        probe,
+        initialize([{ ...serverPing(7), params: {} }]),
+        pingAnswer(7),
+        initialized,
+        standingGet(),
+        listing()
+      ]
+    },
+    {
+      label: 'two pings, each answered once',
+      earlier: [
+        probe,
+        initialize([serverPing('a'), serverPing('b')]),
+        pingAnswer('b'),
+        pingAnswer('a'),
+        initialized,
+        standingGet(),
+        listing()
+      ]
+    },
+    {
+      label: 'a ping in the listing answer, answered before the call',
+      earlier: [
+        probe,
+        initialize([]),
+        initialized,
+        standingGet(),
+        listing([serverPing()]),
+        pingAnswer('server-ping-1')
+      ]
+    }
+  ]
+
+  for (const { label, earlier } of forwarded) {
+    it(`forwards: ${label}`, () => {
+      expect(verdictOf(earlier)).toBeUndefined()
+    })
+  }
+
+  /** `pingedOperation` with the exchange at `index` replaced (or removed with no exchanges). */
+  const replaced = (index: number, ...exchanges: ReadonlyArray<McpObservedExchange>) => [
+    ...pingedOperation.slice(0, index),
+    ...exchanges,
+    ...pingedOperation.slice(index + 1)
+  ]
+
+  const otherRequests: ReadonlyArray<Schema.JsonObject> = [
+    { jsonrpc: '2.0', id: 'server-roots-1', method: 'roots/list' },
+    { jsonrpc: '2.0', id: 'server-sampling-1', method: 'sampling/createMessage', params: {} },
+    { jsonrpc: '2.0', id: 'server-elicit-1', method: 'elicitation/create', params: {} },
+    { jsonrpc: '2.0', id: 'server-ping-1', method: 'Ping' }
+  ]
+
+  const refused: ReadonlyArray<{
+    readonly label: string
+    readonly earlier: ReadonlyArray<McpObservedExchange>
+  }> = [
+    { label: 'a ping the client never answered', earlier: replaced(2) },
+    {
+      label: 'an answer still in flight (no status)',
+      earlier: replaced(2, pingAnswerInFlight('server-ping-1'))
+    },
+    {
+      label: 'an answer the server rejected (400)',
+      earlier: replaced(2, pingAnswer('server-ping-1', { status: 400, body: '' }))
+    },
+    {
+      label: 'an answer accepted 200 instead of 202',
+      earlier: replaced(2, pingAnswer('server-ping-1', { status: 200, body: '' }))
+    },
+    {
+      label: 'an answer accepted 202 with a body',
+      earlier: replaced(2, pingAnswer('server-ping-1', { status: 202, body: '{}' }))
+    },
+    {
+      label: 'an answer with a non-empty result',
+      earlier: replaced(
+        2,
+        observedPost(
+          { result: { ok: true }, jsonrpc: '2.0', id: 'server-ping-1' },
+          {
+            status: 202,
+            body: ''
+          }
+        )
+      )
+    },
+    {
+      label: 'an error answer',
+      earlier: replaced(
+        2,
+        observedPost(
+          { jsonrpc: '2.0', id: 'server-ping-1', error: { code: -32_601, message: 'x' } },
+          { status: 202, body: '' }
+        )
+      )
+    },
+    {
+      label: 'an answer with an extra member',
+      earlier: replaced(
+        2,
+        observedPost(
+          { result: {}, jsonrpc: '2.0', id: 'server-ping-1', extra: 1 },
+          {
+            status: 202,
+            body: ''
+          }
+        )
+      )
+    },
+    { label: 'an answer to another id', earlier: replaced(2, pingAnswer('server-ping-2')) },
+    {
+      label: 'the ping answered twice',
+      earlier: replaced(2, pingAnswer('server-ping-1'), pingAnswer('server-ping-1'))
+    },
+    {
+      label: 'two pings with one id, answered once',
+      earlier: replaced(1, initialize([serverPing(), serverPing()]))
+    },
+    {
+      label: 'an answer sent before the ping',
+      earlier: [
+        probe,
+        pingAnswer('server-ping-1'),
+        initialize([serverPing()]),
+        initialized,
+        standingGet(),
+        listing()
+      ]
+    },
+    {
+      label: 'an answer with no ping at all',
+      earlier: [probe, initialize([]), pingAnswer('x'), initialized, standingGet(), listing()]
+    },
+    {
+      label: 'a ping with params',
+      earlier: replaced(1, initialize([{ ...serverPing(), params: { reason: 'synthetic' } }]))
+    },
+    {
+      label: 'a ping with _meta params',
+      earlier: replaced(1, initialize([{ ...serverPing(), params: { _meta: {} } }]))
+    },
+    {
+      label: 'a ping with null params',
+      earlier: replaced(1, initialize([{ ...serverPing(), params: null }]))
+    },
+    {
+      label: 'a ping with an extra member',
+      earlier: replaced(1, initialize([{ ...serverPing(), result: {} }]))
+    },
+    {
+      label: 'a ping without jsonrpc',
+      earlier: replaced(1, initialize([{ id: 'server-ping-1', method: 'ping' }]))
+    },
+    {
+      label: 'a ping on the standing GET',
+      earlier: replaced(4, standingGet(ssePayloads([serverPing()])))
+    },
+    ...otherRequests.map(request => ({
+      label: `a ${String(request['method'])} request answered with an accepted empty result`,
+      earlier: replaced(1, initialize([request]))
+    }))
+  ]
+
+  for (const { label, earlier } of refused) {
+    it(`refuses (uncertain-exchange): ${label}`, () => {
+      expect(verdictOf(earlier)).toBe('uncertain-exchange')
+    })
+  }
 })
 
 describe('eventsource-parser is the copy the client parses with', () => {

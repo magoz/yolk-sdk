@@ -182,7 +182,15 @@
   request, a message on a GET, an unparseable body, an unterminated stream, two responses for one
   id, an unknown shape, or an era probe whose 2xx answer holds anything but its own response,
   notifications and error responses (after the probe window closes, the rest of the probe stream
-  reaches the client's protocol `onmessage`). A refusal is answered locally with a transport
+  reaches the client's protocol `onmessage`), or any server request but one: a plain server
+  `ping` in a POST's answer (`jsonrpc: "2.0"`, a string or number id, no member but `params`,
+  which is absent or empty) that the client answered exactly once, after it, with a POST whose
+  body is only the empty result, accepted with 202 and no body (`pingsSettled`). A ping is
+  side-effect free (`2025-11-25` basic/utilities/ping: its only answer is an empty result; the
+  SDK's handler returns `{}`), resolves no client request, carries no listing, and its accepted
+  answer delivers nothing back (#382). A ping with params, a ping not answered exactly once, an
+  answer with no status yet, rejected, or with a body, any other server request, and any other
+  client-sent response stay uncertainty. A refusal is answered locally with a transport
   failure and recorded with its `refused` reason. A refusal before any forwarded `tools/call`
   fails the precondition with zero forwarded calls (drills assert this); a refused client retry
   after a forwarded call (a `HeaderMismatch` retry or an input-required re-send) is reported as
@@ -220,8 +228,8 @@
   SSE stream carrying it ends (a server waiting for the answer before ending the stream stalls
   until the timeout; unverified live, as is a ping on the standing GET). The local stdio client
   does not answer pings: it reads stdout lines as responses only, so a server `ping` line fails the
-  call as a broken session (#386). A pinging server also makes the calling cases
-  refuse: the call gate treats any server request as uncertainty (#382).
+  call as a broken session (#386). The calling cases run against a pinging server: the call gate
+  understands an accepted answer to a plain ping (#382; see "Call safety" above).
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
   - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
@@ -281,7 +289,13 @@
   `1e400` listing, an incomplete listing, a `readOnlyHint` downgrade or removal, a `ï»¿`-prefixed
   unsafe listing followed by a safe one for both gate kinds, a probe stream carrying a
   `tools/list`-shaped tail), each with zero forwarded calls; the refused `HeaderMismatch` retry
-  (one forwarded call, reported as a retry); the `JSON.parse`, dispatch-schema and terminal-CR
+  (one forwarded call, reported as a retry); the server ping (#382): the three legacy calling cases
+  forwarding their call against a server pinging in every `initialize` whose answer is accepted,
+  and refusing with zero forwarded calls when that answer is rejected, bodied or dropped, the ping
+  carries params, or the server sends `roots/list` instead, plus `gateVerdict` tables over
+  observed exchanges (unanswered, in-flight, twice-answered, early, mismatched or non-empty
+  answers; malformed pings; pings on the standing GET; other server requests answered with an
+  accepted empty result); the `JSON.parse`, dispatch-schema and terminal-CR
   edge cases; the `eventsource-parser` copy parity test; the decoder-and-parser parity with the
   real pipeline; and the decoder-flush regressions through the real client.
   `observer.test.ts` covers the header allowlist, session evidence and bodies kept as received.
