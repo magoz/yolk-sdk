@@ -218,13 +218,28 @@ What differs:
 - Streaming uses the plain OpenAI framing: one event per network chunk, a
   `{ role: 'assistant', content: '' }` opening delta, and usage in a trailing chunk with empty
   `choices`, without the Gateway's metadata fields.
-- `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`).
+- `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`,
+  `gpt-6-luna`); `reasoningModels` defaults to `openAiEmulatorDefaultReasoningModels`
+  (`gpt-6-luna`), and `/_emulate/state` lists them.
 - Errors use the OpenAI envelope `{ error: { message, type, param, code } }`; an unknown model gets
   404 with code `model_not_found`, and a missing `Authorization: Bearer <non-empty>` header gets
   401 with code `invalid_api_key`. The token is never checked or stored.
 - The ledger records `max_completion_tokens` as `maxCompletionTokens` (never validated).
-- Reasoning models are not emulated yet: no default output streams reasoning, scripted turns
-  reject `reasoning`, `reasoningField`, and `order`, and `/_emulate/state` has no `reasoningModels`.
+- Reasoning models follow the three synthetic reasoning fixtures in
+  `@yolk-sdk/agent/providers/openai/conformance`: a reasoning model takes `reasoning_effort` and
+  `max_completion_tokens`, sends no reasoning text, and reports its reasoning only as
+  `usage.completion_tokens_details.reasoning_tokens`, counted in `completion_tokens`. Other models
+  keep the plain usage (no `completion_tokens_details`). Synthetic, not fixture-backed:
+  `reasoning_effort: 'none'` reports 0 reasoning tokens.
+- A reasoning model answers a non-null `max_tokens` with the unsupported-parameter fixture's 400
+  `{ error: { message, type: 'invalid_request_error', param: 'max_tokens', code:
+'unsupported_parameter' } }` after model validation (never for a scripted turn), uses up no
+  fault, and sets the ledger's `unsupportedParameter`. Not emulated until a fixture backs them:
+  sampling parameter rules (`temperature`, `top_p`, `logprobs`, `top_logprobs` are accepted),
+  `reasoning_effort` on a model that does not reason (recorded and ignored), and per-model effort
+  values (not checked).
+- Scripted turns reject `reasoning`, `reasoningField`, and `order` (the wire has no reasoning
+  text); script a reasoning model's reasoning as `usage.reasoningTokens`.
 - Invalid faults or turns throw `OpenAiEmulatorInputInvalid`.
 
 ```ts

@@ -248,14 +248,27 @@ There is no root export or barrel.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, and scripted completions on top of the kernel. Each subpath supplies only its path and manifest, model lists, error envelope
   and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
-  `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, its
+  `maxCompletionTokens`, never validated), whether and how reasoning is emulated, the parameters
+  its models reject, its turn schema, its
   input-invalid error, and its wire profile (`ChatWireProfile`; omitted is the plain OpenAI wire).
   The Gateway profile must match its verified recordings structurally (keys and value types; values synthetic);
   the wire fields it sends are listed once in `README.md` (Gateway emulator). Any core
   change is a profile or config parameter: keep the OpenAI wire unchanged (`test/openai.test.ts`
   and `test/openai-conformance.test.ts` are the guards) and the Gateway matching its recordings
-  (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). `/openai` does not emulate reasoning yet: its turn
-  schema rejects reasoning fields and `/_emulate/state` omits `reasoningModels`.
+  (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). Reasoning is a config parameter:
+  `reasoningOutput: 'requested-deltas'` (the Gateway; reasoning text streamed on request) or
+  `'hidden'` (`/openai`: reasoning models reason unless `reasoning_effort` is `none`, send no
+  reasoning text, and report `completion_tokens_details.reasoning_tokens`), and
+  `reasoningModelUnsupportedParameters` (the 400 a reasoning model answers to a present non-null
+  parameter, after model validation, never for a scripted turn, using up no fault). `/openai`
+  follows its three reasoning fixtures: reasoning models take `reasoning_effort` and
+  `max_completion_tokens`, send no reasoning text, report `completion_tokens_details.reasoning_tokens`,
+  and reject `max_tokens` with the unsupported-parameter fixture's envelope (copied as data); its
+  turn schema rejects reasoning text fields (the fixtures have none; script `usage.reasoningTokens`).
+  Synthetic, not fixture-backed: `reasoning_effort: 'none'` reports 0 reasoning tokens. Known
+  leniency, not emulated until a fixture backs it: sampling parameter rules on reasoning models
+  (`temperature`, `top_p`, `logprobs`, `top_logprobs` are accepted), `reasoning_effort` on a model
+  that does not reason (recorded and ignored), and per-model effort values (not checked).
 - `/anthropic` uses `src/messages.ts`: Messages request parsing (`model`, a positive integer
   `max_tokens` or 400, `system`, `messages`, `tools`, `tool_choice`, `thinking`, `stream`), SSE in
   the real event order (`message_start`; per block `content_block_start`, deltas,

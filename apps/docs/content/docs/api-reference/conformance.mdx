@@ -232,16 +232,24 @@ arrays: `vercelAiGatewayClassifierBooleanCase`, `vercelAiGatewayClassifierChoice
 
 `@yolk-sdk/agent/providers/openai/conformance` does the same for the generic OpenAI-compatible chat
 provider against OpenAI Chat Completions (`https://api.openai.com/v1/chat/completions`,
-`max_completion_tokens`): four synthetic fixtures (`openAiChatPlainTextFixture`,
+`max_completion_tokens`): seven synthetic fixtures (`openAiChatPlainTextFixture`,
 `openAiChatToolCallDeltasFixture`, `openAiChatErrorEnvelopeFixture`,
-`openAiChatJsonPlainTextFixture`, and `openAiConformanceFixtures`) and four `read` cases
-(`openAiChatPlainTextCase`, `openAiChatToolCallDeltasCase`, `openAiChatErrorEnvelopeCase`,
-`openAiChatJsonPlainTextCase`, and `openAiConformanceCases`). They require an `HttpClient` and the
-`OpenAiConformanceConfig` service (API key, `maxCompletionTokens`, and model ids;
+`openAiChatJsonPlainTextFixture`, `openAiChatReasoningEffortFixture`,
+`openAiChatJsonReasoningUsageFixture`, `openAiChatUnsupportedParameterFixture`, and
+`openAiConformanceFixtures`) and seven `read` cases (`openAiChatPlainTextCase`,
+`openAiChatToolCallDeltasCase`, `openAiChatErrorEnvelopeCase`, `openAiChatJsonPlainTextCase`,
+`openAiChatReasoningEffortCase`, `openAiChatJsonReasoningUsageCase`,
+`openAiChatUnsupportedParameterCase`, and `openAiConformanceCases`). They require an `HttpClient`
+and the `OpenAiConformanceConfig` service (API key, `maxCompletionTokens`, the reasoning cases'
+`reasoningMaxCompletionTokens` and `reasoningEffort`, and model ids;
 `openAiConformanceDefaultModels` holds the fixture model ids). The tool-call case forces its one
 tool with `tool_choice`. The error-envelope case requires provider code `model_not_found` with
 status 404 (or 400, which OpenAI has also used) and fails any other code, a 401/403, or an `auth`
-failure; the JSON case covers `stream: false`.
+failure; the JSON case covers `stream: false`. The reasoning cases send `reasoning_effort` to the
+reasoning model (streamed and JSON) and require no reasoning text and a usage report counting
+reasoning tokens (`completion_tokens_details.reasoning_tokens`); the unsupported-parameter case
+sends `max_tokens` to the reasoning model and requires a non-retryable 400 with provider code
+`unsupported_parameter`.
 
 `@yolk-sdk/agent/providers/anthropic/conformance` covers Anthropic Messages
 (`https://api.anthropic.com/v1/messages`) through the native Messages provider path OpenCode Go uses
