@@ -255,6 +255,8 @@
     "ledger-staged-plan-over-bound",
     "linkedin-search-conformance-cases",
     "mcp-approval-choice",
+    "mcp-call-gate-server-ping",
+    "mcp-client-ping-delete",
     "mcp-conformance-cases",
     "mcp-elicited-tools",
     "mcp-form-elicitation",
