@@ -3,8 +3,9 @@
  * replayed fixtures satisfy, through the real public providers, both in-process and over a
  * loopback socket; and wire faults must map correctly through those providers (429 `retry-after`,
  * a mid-stream `error` / `response.failed` event, a dropped connection, and truncation before
- * `response.completed`, which Grok rejects and Codex completes for EOF compatibility). Tests may
- * import SDK packages; the emulator source never does.
+ * `response.completed`, which Grok rejects as the loop's incomplete stream, `missing_done`, and
+ * Codex completes for EOF compatibility). Tests may import SDK packages; the emulator source
+ * never does.
  */
 import { Effect, Layer, Ref, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
@@ -15,7 +16,10 @@ import {
   LLMDone,
   LLMError,
   LLMProvider,
+  LLMTextDelta,
   LLMToolCall,
+  makeAgentLoopLayer,
+  runModelTurn,
   type LLMEvent,
   type LLMProviderError
 } from '@yolk-sdk/agent/loop'
@@ -158,6 +162,18 @@ const doneSignals = (events: Iterable<LLMEvent>) =>
 const expectLlmError = (error: unknown): LLMError =>
   error instanceof LLMError ? error : expect.fail(`expected an LLMError, got ${String(error)}`)
 
+const textOf = (events: Iterable<LLMEvent>) =>
+  Array.from(events)
+    .flatMap(event => (event instanceof LLMTextDelta ? [event.text] : []))
+    .join('')
+
+/** The loop's incomplete stream: no `Done`, so non-retryable `invalid_response` `missing_done`. */
+const expectMissingDone = (error: LLMError) => {
+  expect(error.cause).toBe('invalid_response')
+  expect(error.retryable).toBe(false)
+  expect(error.responseIssue).toBe('missing_done')
+}
+
 const describeFamily = <Req>(family: Family<Req>) => {
   const caseCount = family.cases.length
 
@@ -220,6 +236,30 @@ const describeFamily = <Req>(family: Family<Req>) => {
 
     return emulator
   }
+
+  /** Streams until the provider fails; returns the events it emitted first and the error. */
+  const failThroughProvider = <E>(
+    emulator: ResponsesEmulator,
+    transport: (emulator: ResponsesEmulator) => Layer.Layer<HttpClient.HttpClient, E>
+  ) =>
+    Effect.gen(function* () {
+      const llm = yield* LLMProvider
+      const seen = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
+
+      const error = yield* llm
+        .stream({
+          model: family.model,
+          systemPrompt: 'Reply in one short sentence.',
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          tools: []
+        })
+        .pipe(
+          Stream.runForEach(event => Ref.update(seen, events => [...events, event])),
+          Effect.flip
+        )
+
+      return { events: yield* Ref.get(seen), error: expectLlmError(error) }
+    }).pipe(Effect.provide(family.providerLayer().pipe(Layer.provide(transport(emulator)))))
 
   describe(`${family.name} cross-check A: in-process emulator`, () => {
     it.effect('passes every Responses conformance case', () =>
@@ -488,6 +528,34 @@ const describeFamily = <Req>(family: Family<Req>) => {
           })
       )
 
+      // Guard (#363): EOF completion emits a Done, so a cut Codex stream is never `missing_done`.
+      it.effect('a truncated stream completes the loop model turn through EOF completion', () =>
+        Effect.gen(function* () {
+          const events = yield* runModelTurn({
+            model: family.model,
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: [],
+            turn: 1
+          }).pipe(
+            Stream.runCollect,
+            Effect.provide(
+              makeAgentLoopLayer({
+                provider: family
+                  .providerLayer()
+                  .pipe(
+                    Layer.provide(
+                      inProcessLayer(withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]))
+                    )
+                  )
+              })
+            )
+          )
+
+          expect(Array.from(events).map(event => event._tag)).toContain('LLMStreamEnd')
+        })
+      )
+
       it.effect('never sends an output limit, which the emulated endpoint would reject', () =>
         Effect.gen(function* () {
           const emulator = family.makeEmulator()
@@ -510,6 +578,77 @@ const describeFamily = <Req>(family: Family<Req>) => {
           expect(error.retryable).toBe(false)
           expect(error.cause).toBe('invalid_response')
           expect(error.provider?.providerCode).toBe('incomplete_stream')
+          expect(error.responseIssue).toBe('missing_done')
+        })
+      )
+
+      // Issue #363: the loop's incomplete stream (no Done), as Messages reports a missing
+      // `message_stop`, so a harness host recovers (`Continue`) instead of failing the run.
+      it.effect('a stream cut mid-text fails as missing_done after the partial text', () =>
+        Effect.gen(function* () {
+          const { events, error } = yield* failThroughProvider(
+            withFaults([{ kind: 'truncate-after-chunks', chunks: 5 }]),
+            emulatedLayer
+          ).pipe(Effect.scoped)
+
+          expectMissingDone(error)
+          expect(textOf(events)).not.toBe('')
+          expect(doneReasons(events)).toEqual([])
+        })
+      )
+
+      it.effect('an empty stream fails as missing_done', () =>
+        Effect.gen(function* () {
+          const { events, error } = yield* failThroughProvider(
+            withFaults([{ kind: 'truncate-after-chunks', chunks: 0 }]),
+            inProcessLayer
+          )
+
+          expectMissingDone(error)
+          expect(events).toEqual([])
+        })
+      )
+
+      it.effect('a truncated stream fails the loop model turn as missing_done', () =>
+        Effect.gen(function* () {
+          const error = expectLlmError(
+            yield* runModelTurn({
+              model: family.model,
+              systemPrompt: 'Reply in one short sentence.',
+              messages: [UserMessage.make({ content: 'Say hello.' })],
+              tools: [],
+              turn: 1
+            }).pipe(
+              Stream.runDrain,
+              Effect.provide(
+                makeAgentLoopLayer({
+                  provider: family
+                    .providerLayer()
+                    .pipe(
+                      Layer.provide(
+                        inProcessLayer(withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]))
+                      )
+                    )
+                })
+              ),
+              Effect.flip
+            )
+          )
+
+          expectMissingDone(error)
+        })
+      )
+
+      // Guards: a provider terminal is not a missing Done.
+      it.effect('a mid-stream response.failed is its own error, not missing_done', () =>
+        Effect.gen(function* () {
+          const { error } = yield* failThroughProvider(
+            withFaults([{ kind: 'error-event-after-chunks', chunks: 5, event: 'response.failed' }]),
+            inProcessLayer
+          )
+
+          expect(error.provider?.providerCode).toBe('server_error')
+          expect(error.responseIssue).toBeUndefined()
         })
       )
 

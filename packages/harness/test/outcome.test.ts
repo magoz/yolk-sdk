@@ -1,4 +1,5 @@
 import { Cause, Duration, Effect, Exit, Fiber, Layer, Predicate, Ref, Result, Stream } from 'effect'
+import { HttpClient, HttpClientResponse } from 'effect/http'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -29,6 +30,8 @@ import {
   type LLMEvent
 } from '@yolk-sdk/agent/loop'
 import { makeContextOverflowRetryProvider } from '@yolk-sdk/agent/compaction'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import { makeXAiGrokProviderLayer } from '@yolk-sdk/agent/providers/xai/grok-provider'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import {
   attemptModelTurn,
@@ -454,6 +457,95 @@ describe('attemptModelTurn', () => {
       expect(outcome.toolCalls).toEqual([])
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
+
+  // Issue #363: the Responses providers report a stream cut before `response.completed` as the
+  // loop's incomplete stream too, so the real Grok provider's cut gets the same recovery.
+  describe('a Grok stream cut before response.completed', () => {
+    const sseEvent = <Event extends { readonly type: string }>(event: Event) =>
+      `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+
+    const created = sseEvent({
+      type: 'response.created',
+      response: { id: 'resp_synthetic_cut', status: 'in_progress', output: [] }
+    })
+
+    const partialText = sseEvent({
+      type: 'response.output_text.delta',
+      item_id: 'msg_synthetic_cut',
+      delta: 'partial'
+    })
+
+    /** The real Grok provider over a transport that answers every request with `body`. */
+    const grokAnswering = (body: string) =>
+      Layer.mergeAll(
+        makeXAiGrokProviderLayer({
+          token: new OAuthAccessToken({
+            provider: 'xai-grok',
+            accessToken: 'synthetic-grok-oauth-token',
+            expiresAt: 4_000_000_000_000
+          }),
+          clientVersion: '0.0.0-synthetic',
+          maxOutputTokens: 64
+        }).pipe(
+          Layer.provide(
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(request =>
+                Effect.succeed(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    new Response(body, {
+                      status: 200,
+                      headers: { 'content-type': 'text/event-stream' }
+                    })
+                  )
+                )
+              )
+            )
+          )
+        ),
+        noRetryLoopLayer
+      )
+
+    const expectIncompleteStream = (error: unknown) =>
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        responseIssue: 'missing_done',
+        provider: { provider: 'xai_grok', providerCode: 'incomplete_stream' }
+      })
+
+    it.effect('continues after the partial text', () =>
+      Effect.gen(function* () {
+        const outcome = yield* attemptModelTurn(turnConfig)
+
+        if (!Predicate.isTagged(outcome, 'Continue')) {
+          return expect.fail(`expected Continue, got ${outcome._tag}`)
+        }
+
+        expectIncompleteStream(outcome.error)
+        expect(outcome.toolCalls).toEqual([])
+
+        if (outcome.assistantMessage?._tag !== 'Assistant') {
+          return expect.fail('expected the partial assistant message')
+        }
+
+        expect(assistantContent(outcome.assistantMessage)).toBe('partial')
+      }).pipe(Effect.provide(grokAnswering(`${created}${partialText}`)))
+    )
+
+    it.effect('recovers in full when it ended before any output', () =>
+      Effect.gen(function* () {
+        const outcome = yield* attemptModelTurn(turnConfig)
+
+        if (!Predicate.isTagged(outcome, 'RecoverFull')) {
+          return expect.fail(`expected RecoverFull, got ${outcome._tag}`)
+        }
+
+        expectIncompleteStream(outcome.error)
+      }).pipe(Effect.provide(grokAnswering(created)))
+    )
+  })
 
   it.effect('does not recover content-filter terminals', () =>
     Effect.gen(function* () {

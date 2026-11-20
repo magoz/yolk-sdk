@@ -89,6 +89,9 @@ Retryability follows the structured fields: a provider code that names a failure
 `rate_limit_error` or `overloaded_error`), then the HTTP status (429, 408, 5xx, and 529
 retry; other 4xx do not). Upstream message text only refines that, and request values the upstream echoes back,
 such as the model id, are ignored, so a model id containing "overload" never makes a 404 retryable.
+Stream error events (Chat Completions error envelopes, Responses `error` / `response.failed`,
+Claude and Messages `error`) carry no status, so their text decides when their code names no failure; the requested model id is removed
+from that text too, so it never makes an in-stream error retryable.
 
 ### Claude rejects a model with claude_code_version_too_old
 
@@ -374,8 +377,12 @@ error is not a model-recovery outcome. Defects, interrupts, and mixed Causes sta
 those tags.
 
 Kernel `responseIssue: 'missing_done'` is an incomplete stream, not automatic provider/tool replay.
-Codex may synthesize `Done` only for its missing-final-`output` error; see
-[OpenAI Codex](./integrations/model-providers#openai-codex).
+Providers whose wire requires a terminal event set it too when the stream ends before any `Done`:
+Claude and native Messages without `message_stop`, Grok and OpenCode Go `responses` without
+`response.completed` (still `providerCode: 'incomplete_stream'`). Harness hosts then get `Continue`
+(output started) or `RecoverFull` (none) instead of a failed run. Codex completes a stream cut
+before `response.completed` (EOF compatibility) and recovers a final response with missing
+`output`; see [OpenAI Codex](./integrations/model-providers#openai-codex).
 
 `@yolk-sdk/harness/outcome` classifies one invocation after inner loop/provider retries. It does not
 add an outer retry loop. Hosts that opt in choose whether to schedule another physical attempt. See

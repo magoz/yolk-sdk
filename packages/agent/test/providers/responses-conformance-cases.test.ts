@@ -849,76 +849,107 @@ const describeFamily = <Req>(family: Family<Req>) => {
           })
       )
 
-      it.effect(
-        'recovers a response.completed without output, marking its unreadable usage unavailable',
-        () =>
-          Effect.gen(function* () {
-            const events = sseEvents(family.plainText.fixture)
+      /** The terminal event with its `response` edited (a deep copy). */
+      const withFinalResponse = (
+        fixture: WireFixture,
+        suffix: string,
+        update: (response: JsonRecord) => void
+      ) =>
+        withEvents(
+          fixture,
+          sseEvents(fixture).map(event =>
+            mapJson(event, json => {
+              if (json.type === 'response.completed' && isRecord(json.response)) {
+                update(json.response)
+              }
+            })
+          ),
+          suffix
+        )
 
-            // The recorded terminal event reports usage; only its `output` is dropped.
-            expect(events.some(event => isRecord(completedResponseOf(event)?.usage))).toBe(true)
-
-            const withoutOutput = events.map(event =>
-              mapJson(event, json => {
-                if (json.type === 'response.completed' && isRecord(json.response)) {
-                  delete json.response.output
-                }
-              })
+      it.effect('recovers a response.completed without output, reading its usage', () =>
+        Effect.gen(function* () {
+          // The recorded terminal event reports usage; only its `output` is dropped.
+          expect(
+            sseEvents(family.plainText.fixture).some(event =>
+              isRecord(completedResponseOf(event)?.usage)
             )
+          ).toBe(true)
 
-            const streamed = yield* streamFixture(
-              withEvents(family.plainText.fixture, withoutOutput, 'no-output')
-            )
+          const streamed = yield* streamFixture(
+            withFinalResponse(family.plainText.fixture, 'no-output', response => {
+              delete response.output
+            })
+          )
 
-            // The streamed text stands; the usage in the unreadable response never reached Usage.
-            expect(streamed.map(event => event._tag)).toContain('TextDelta')
-            expect(streamed.map(event => event._tag)).not.toContain('Usage')
-            expect(doneSignals(streamed)).toEqual([['stop', true]])
-          })
+          // The streamed text stands, and the usage that decodes is reported: Done is unmarked.
+          expect(streamed.map(event => event._tag)).toContain('TextDelta')
+          expect(streamed.map(event => event._tag)).toContain('Usage')
+          expect(doneSignals(streamed)).toEqual([['stop', undefined]])
+        })
       )
 
-      it.effect(
-        'recovers a response.completed whose output item lacks a required key, marked',
-        () =>
-          Effect.gen(function* () {
-            const events = sseEvents(family.functionCall.fixture)
+      it.effect('marks Done when the recovered response has no usage', () =>
+        Effect.gen(function* () {
+          const streamed = yield* streamFixture(
+            withFinalResponse(family.plainText.fixture, 'no-output-no-usage', response => {
+              delete response.output
+              delete response.usage
+            })
+          )
 
-            const withoutCallId = events.map(event =>
-              mapJson(event, json => {
-                if (json.type !== 'response.completed' || !isRecord(json.response)) return
-
-                const output = Array.isArray(json.response.output) ? json.response.output : []
-
-                for (const item of output) {
-                  if (isRecord(item) && item.type === 'function_call') delete item.call_id
-                }
-              })
-            )
-
-            // The terminal event records a function call (with usage) to strip the id from.
-            expect(
-              events.some(event => {
-                const output = completedResponseOf(event)?.output
-
-                return (
-                  Array.isArray(output) &&
-                  output.some(item => isRecord(item) && item.type === 'function_call')
-                )
-              })
-            ).toBe(true)
-
-            const streamed = yield* streamFixture(
-              withEvents(family.functionCall.fixture, withoutCallId, 'no-call-id')
-            )
-
-            // The streamed calls stand; the undecodable response's usage never reached Usage.
-            expect(streamed.map(event => event._tag)).toContain('ToolCall')
-            expect(streamed.map(event => event._tag)).not.toContain('Usage')
-            expect(doneSignals(streamed)).toEqual([['tool_use', true]])
-          })
+          expect(streamed.map(event => event._tag)).not.toContain('Usage')
+          expect(doneSignals(streamed)).toEqual([['stop', true]])
+        })
       )
 
-      it.effect('recovers a JSON response without output unmarked, as before', () =>
+      it.effect('marks Done when the recovered response has usage that does not decode', () =>
+        Effect.gen(function* () {
+          const streamed = yield* streamFixture(
+            withFinalResponse(family.plainText.fixture, 'no-output-bad-usage', response => {
+              delete response.output
+
+              if (isRecord(response.usage)) response.usage.input_tokens = 'many'
+            })
+          )
+
+          expect(streamed.map(event => event._tag)).not.toContain('Usage')
+          expect(doneSignals(streamed)).toEqual([['stop', true]])
+        })
+      )
+
+      it.effect('recovers a response.completed whose streamed calls replay without call_id', () =>
+        Effect.gen(function* () {
+          // The terminal event records a function call (with usage) to strip the id from.
+          expect(
+            sseEvents(family.functionCall.fixture).some(event => {
+              const output = completedResponseOf(event)?.output
+
+              return (
+                Array.isArray(output) &&
+                output.some(item => isRecord(item) && item.type === 'function_call')
+              )
+            })
+          ).toBe(true)
+
+          const streamed = yield* streamFixture(
+            withFinalResponse(family.functionCall.fixture, 'no-call-id', response => {
+              const output = Array.isArray(response.output) ? response.output : []
+
+              for (const item of output) {
+                if (isRecord(item) && item.type === 'function_call') delete item.call_id
+              }
+            })
+          )
+
+          // The streamed calls stand; the usage decodes on its own, so Done is unmarked.
+          expect(streamed.map(event => event._tag)).toContain('ToolCall')
+          expect(streamed.map(event => event._tag)).toContain('Usage')
+          expect(doneSignals(streamed)).toEqual([['tool_use', undefined]])
+        })
+      )
+
+      it.effect('recovers a JSON response without output, with its usage, unmarked', () =>
         Effect.gen(function* () {
           const completed = sseEvents(family.plainText.fixture).flatMap(event => {
             const response = completedResponseOf(event)
@@ -929,7 +960,6 @@ const describeFamily = <Req>(family: Family<Req>) => {
           const response = completed[0] ?? expect.fail('no response.completed')
           const { output: _output, ...withoutOutput } = response
 
-          // The JSON body still reports usage; recovery cannot read it, and JSON is never marked.
           expect(isRecord(withoutOutput.usage)).toBe(true)
 
           const events = yield* streamFixture(
@@ -941,10 +971,238 @@ const describeFamily = <Req>(family: Family<Req>) => {
             )
           )
 
-          expect(events.map(event => event._tag)).toEqual(['Done'])
+          expect(events.map(event => event._tag)).toEqual(['Done', 'Usage'])
           expect(doneSignals(events)).toEqual([['stop', undefined]])
         })
       )
+
+      // Issue #370: recovery reads the output items one by one, so a call the stream never
+      // emitted still runs, and it fails rather than drop a call or answer it cannot read.
+      describe('missing-output recovery keeps everything the model said', () => {
+        const recordedCall = (): JsonRecord => {
+          const output = sseEvents(family.functionCall.fixture).flatMap(event => {
+            const items = completedResponseOf(event)?.output
+
+            return Array.isArray(items) ? items : []
+          })
+
+          const call = output.find(item => isRecord(item) && item.type === 'function_call')
+
+          return isRecord(call) ? structuredClone(call) : expect.fail('no recorded function_call')
+        }
+
+        /** A second, valid call: never streamed by any drill. */
+        const siblingCall = () => ({
+          ...recordedCall(),
+          id: 'fc_synthetic_sibling_call',
+          call_id: 'call_synthetic_sibling_call',
+          arguments: '{"city":"Shelbyville"}'
+        })
+
+        const withoutKey = (item: JsonRecord, key: string): JsonRecord =>
+          Object.fromEntries(Object.entries(item).filter(([name]) => name !== key))
+
+        /** A message item without its required `content`. */
+        const contentlessMessage = {
+          id: 'msg_synthetic_contentless',
+          type: 'message',
+          role: 'assistant'
+        }
+
+        /** A reasoning item whose summary part lacks its required `text`. */
+        const textlessReasoning = {
+          id: 'rs_synthetic_textless',
+          type: 'reasoning',
+          summary: [{ type: 'summary_text' }]
+        }
+
+        const isStreamedCall = (event: SseEvent) =>
+          typeOf(event) === 'response.output_item.done' &&
+          isRecord(event.json) &&
+          isRecord(event.json.item) &&
+          event.json.item.type === 'function_call'
+
+        /** A stream with its final `output` replaced, its call streamed or not. */
+        const withFinalOutput = (
+          output: ReadonlyArray<JsonRecord>,
+          options: {
+            readonly fixture?: WireFixture
+            readonly streamCall: boolean
+            readonly suffix: string
+          }
+        ) => {
+          const fixture = options.fixture ?? family.functionCall.fixture
+
+          return withEvents(
+            fixture,
+            sseEvents(fixture)
+              .filter(event => options.streamCall || !isStreamedCall(event))
+              .map(event =>
+                mapJson(event, json => {
+                  if (json.type === 'response.completed' && isRecord(json.response)) {
+                    json.response.output = [...output]
+                  }
+                })
+              ),
+            options.suffix
+          )
+        }
+
+        /** A JSON body: the recorded final response with this `output`. */
+        const jsonWithOutput = (output: ReadonlyArray<JsonRecord>, suffix: string) => {
+          const response = sseEvents(family.functionCall.fixture)
+            .map(completedResponseOf)
+            .find(isRecord)
+
+          return withResponse(
+            family.functionCall.fixture,
+            suffix,
+            200,
+            JSON.stringify({ ...(response ?? expect.fail('no response.completed')), output })
+          )
+        }
+
+        const callIds = (events: ReadonlyArray<LLMEvent>) =>
+          events.flatMap(event => (Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []))
+
+        const expectUndecodable = (error: LLMError) => {
+          expect(error.cause).toBe('invalid_response')
+          expect(error.retryable).toBe(false)
+          expect(error.responseIssue).toBeUndefined()
+        }
+
+        it.effect('emits an unstreamed call beside a streamed call replayed without call_id', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              withFinalOutput([withoutKey(recordedCall(), 'call_id'), siblingCall()], {
+                streamCall: true,
+                suffix: 'sibling-of-malformed-replay'
+              })
+            )
+
+            // The replay matches the streamed call by its item id; the sibling is new.
+            expect(callIds(events)).toEqual([recordedCall().call_id, siblingCall().call_id])
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
+          })
+        )
+
+        it.effect('emits an unstreamed call beside a reasoning item that lacks a key', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              withFinalOutput([textlessReasoning, recordedCall()], {
+                streamCall: false,
+                suffix: 'call-beside-textless-reasoning'
+              })
+            )
+
+            expect(callIds(events)).toEqual([recordedCall().call_id])
+            expect(events.map(event => event._tag)).toContain('Usage')
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
+          })
+        )
+
+        it.effect(
+          'fails when an unstreamed call lacks a required key, even beside a valid one',
+          () =>
+            Effect.gen(function* () {
+              expectUndecodable(
+                expectLlmError(
+                  yield* streamFixture(
+                    withFinalOutput([withoutKey(recordedCall(), 'call_id'), siblingCall()], {
+                      streamCall: false,
+                      suffix: 'malformed-unstreamed-call'
+                    })
+                  ).pipe(Effect.flip)
+                )
+              )
+            })
+        )
+
+        it.effect('fails when a message lacks a required key and no text streamed', () =>
+          Effect.gen(function* () {
+            // The call streamed, so only the message (its text never streamed) would be lost.
+            expectUndecodable(
+              expectLlmError(
+                yield* streamFixture(
+                  withFinalOutput([contentlessMessage, recordedCall()], {
+                    streamCall: true,
+                    suffix: 'contentless-unstreamed-message'
+                  })
+                ).pipe(Effect.flip)
+              )
+            )
+          })
+        )
+
+        it.effect('drops a message that lacks a required key once its text streamed', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              withFinalOutput([contentlessMessage], {
+                fixture: family.plainText.fixture,
+                streamCall: true,
+                suffix: 'contentless-streamed-message'
+              })
+            )
+
+            expect(events.map(event => event._tag)).toContain('TextDelta')
+            expect(doneSignals(events)).toEqual([['stop', undefined]])
+          })
+        )
+
+        it.effect('JSON: emits a valid call beside a reasoning item that lacks a key', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              jsonWithOutput([textlessReasoning, siblingCall()], 'json-call-beside-textless')
+            )
+
+            expect(callIds(events)).toEqual([siblingCall().call_id])
+            expect(events.map(event => event._tag)).toContain('Usage')
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
+          })
+        )
+
+        it.effect('JSON: fails when a call lacks a required key, even beside a valid one', () =>
+          Effect.gen(function* () {
+            expectUndecodable(
+              expectLlmError(
+                yield* streamFixture(
+                  jsonWithOutput(
+                    [withoutKey(recordedCall(), 'call_id'), siblingCall()],
+                    'json-malformed-call'
+                  )
+                ).pipe(Effect.flip)
+              )
+            )
+          })
+        )
+
+        it.effect('JSON: fails when a message lacks a required key', () =>
+          Effect.gen(function* () {
+            expectUndecodable(
+              expectLlmError(
+                yield* streamFixture(
+                  jsonWithOutput([contentlessMessage, siblingCall()], 'json-contentless-message')
+                ).pipe(Effect.flip)
+              )
+            )
+          })
+        )
+
+        // Guard: recovery covers only a missing key under `output`.
+        it.effect('fails a response.completed whose usage lacks a required key', () =>
+          Effect.gen(function* () {
+            const error = expectLlmError(
+              yield* streamFixture(
+                withFinalResponse(family.plainText.fixture, 'usage-missing-key', response => {
+                  if (isRecord(response.usage)) delete response.usage.input_tokens
+                })
+              ).pipe(Effect.flip)
+            )
+
+            expect(error.cause).toBe('invalid_response')
+          })
+        )
+      })
     } else {
       it.effect('fails a response.completed without output instead of recovering it', () =>
         Effect.gen(function* () {
@@ -976,6 +1234,8 @@ const describeFamily = <Req>(family: Family<Req>) => {
             expect(error.cause).toBe('invalid_response')
             expect(error.retryable).toBe(false)
             expect(error.provider?.providerCode).toBe('incomplete_stream')
+            // No Done was emitted: the loop's incomplete stream, as Messages reports it (#363).
+            expect(error.responseIssue).toBe('missing_done')
 
             const result = yield* drill(family.terminal.testCase, withoutTerminal())
 

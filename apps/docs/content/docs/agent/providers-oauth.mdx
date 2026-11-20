@@ -80,14 +80,16 @@ Provider layers implement `LLMProvider`. The loop calls that service with messag
 
 A stream that completes without the usage report its request asked for still ends with `LLMDone`, marked `usageUnavailable: true`:
 
-| Provider                                                               | Marked when                                                                                                            |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Streamed chat (OpenAI-compatible, Vercel AI Gateway, OpenCode Go chat) | the stream ends after the finish chunk, without the `stream_options.include_usage` usage chunk                         |
-| Streamed Responses (OpenAI Codex, xAI Grok, OpenCode Go `responses`)   | `response.completed` carries no `usage`                                                                                |
-| OpenAI Codex                                                           | the stream ends without `response.completed`, or the `response.completed` `output` is missing or misses a required key |
-| Anthropic Claude, native Messages (OpenCode Go `messages`)             | `message_stop` arrives without a `message_delta` carrying an output count (only `message_start` usage, if any)         |
+| Provider                                                               | Marked when                                                                                                                                                          |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, OpenCode Go chat) | the stream ends after the finish chunk, without the `stream_options.include_usage` usage chunk                                                                       |
+| Streamed Responses (OpenAI Codex, xAI Grok, OpenCode Go `responses`)   | `response.completed` carries no `usage`                                                                                                                              |
+| OpenAI Codex                                                           | the stream ends without `response.completed`, or the `response.completed` `output` is missing or misses a required key and its `usage` is missing or does not decode |
+| Anthropic Claude, native Messages (OpenCode Go `messages`)             | `message_stop` arrives without a `message_delta` carrying an output count (only `message_start` usage, if any)                                                       |
 
-Non-streamed (JSON) responses are never marked. Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes without its terminal event. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
+Non-streamed (JSON) responses are never marked. Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes without its terminal event: such a stream emits no `LLMDone` and fails as non-retryable `invalid_response` with `responseIssue: 'missing_done'`, the loop's incomplete stream. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
+
+Codex's recovery of a final response with missing `output` (streamed or JSON) keeps its valid output items, so a function call the stream never emitted still runs, and reports its `usage` when that decodes (Done unmarked). A function call that does not decode must replay one the stream already emitted, and a message that does not decode must be one whose text already streamed; otherwise the response fails as `invalid_response` instead of ending the turn without it ([OpenAI Codex](../integrations/model-providers#openai-codex)).
 
 ## OpenAI JSON admission
 

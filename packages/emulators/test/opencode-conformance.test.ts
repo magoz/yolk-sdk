@@ -7,11 +7,18 @@
  * through the provider (429 `retry-after`, a stream cut before its terminal event).
  * Tests may import SDK packages; the emulator source never does.
  */
-import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
-import { LLMDone, LLMError, LLMProvider, LLMUsage, type LLMEvent } from '@yolk-sdk/agent/loop'
+import {
+  LLMDone,
+  LLMError,
+  LLMProvider,
+  LLMTextDelta,
+  LLMUsage,
+  type LLMEvent
+} from '@yolk-sdk/agent/loop'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { isWireStreamResponse } from '@yolk-sdk/conformance/fixture'
 import {
@@ -372,6 +379,93 @@ describe('OpenCode Go faults through the real provider', () => {
       expect(emulator.chat.ledger.entries()[0]?.fault).toBe('truncate-after-chunks')
     })
   )
+
+  // Issue #363: a Responses stream cut before `response.completed` emits no Done, the loop's
+  // incomplete stream, as `messages` reports a missing `message_stop`. The provider code stays
+  // `incomplete_stream`, so Go still re-routes a cut that came before any event.
+  describe('responses: a stream cut before response.completed', () => {
+    const failThroughProvider = (emulator: OpenCodeGoEmulator) =>
+      Effect.gen(function* () {
+        const llm = yield* LLMProvider
+        const seen = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
+
+        const error = yield* llm
+          .stream({
+            model: modelFor.responses,
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: []
+          })
+          .pipe(
+            Stream.runForEach(event => Ref.update(seen, events => [...events, event])),
+            Effect.flip
+          )
+
+        return { events: yield* Ref.get(seen), error }
+      }).pipe(
+        Effect.provide(
+          makeOpenCodeGoProviderLayer({ apiKey, protocol: 'responses', maxOutputTokens: 64 }).pipe(
+            Layer.provide(inProcessLayer(emulator))
+          )
+        )
+      )
+
+    const expectMissingDone = (error: unknown) =>
+      expect(error).toMatchObject({
+        cause: 'invalid_response',
+        retryable: false,
+        responseIssue: 'missing_done',
+        message: 'OpenCode Go invalid_response',
+        provider: { provider: 'opencode_go', providerCode: 'incomplete_stream' }
+      })
+
+    it.effect('after the text began fails as missing_done, without a re-route', () =>
+      Effect.gen(function* () {
+        const emulator = makeOpenCodeGoEmulator()
+
+        // Four events, then the first text delta: output started.
+        emulator.responses.faults.add({ kind: 'truncate-after-chunks', chunks: 5, count: 1 })
+
+        const { events, error } = yield* failThroughProvider(emulator)
+
+        expectMissingDone(error)
+        expect(events.some(event => event instanceof LLMTextDelta)).toBe(true)
+        expect(doneReasons(events)).toEqual([])
+        expect(emulator.responses.ledger.entries()).toHaveLength(1)
+      })
+    )
+
+    it.effect('before any event is re-routed once, then fails as missing_done', () =>
+      Effect.gen(function* () {
+        const emulator = makeOpenCodeGoEmulator()
+
+        // Every request: the first and its re-route.
+        emulator.responses.faults.add({ kind: 'truncate-after-chunks', chunks: 4 })
+
+        const { events, error } = yield* failThroughProvider(emulator)
+
+        expectMissingDone(error)
+        expect(events).toEqual([])
+        expect(emulator.responses.ledger.entries().map(entry => entry.fault)).toEqual([
+          'truncate-after-chunks',
+          'truncate-after-chunks'
+        ])
+      })
+    )
+
+    it.effect('before any event, once, is answered by the re-routed request', () =>
+      Effect.gen(function* () {
+        const emulator = makeOpenCodeGoEmulator()
+
+        emulator.responses.faults.add({ kind: 'truncate-after-chunks', chunks: 4, count: 1 })
+
+        const events = yield* streamThroughProvider('responses', inProcessLayer(emulator))
+
+        expect(doneReasons(events)).toEqual(['stop'])
+        expect(emulator.responses.ledger.entries()).toHaveLength(2)
+      })
+    )
+  })
 
   it.effect('chat-completions: Done stays unmarked when the usage chunk arrives', () =>
     Effect.gen(function* () {

@@ -1,18 +1,15 @@
-import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import {
   decorateLLMProvider,
-  LLMDone,
   LLMError,
   LLMProvider,
-  type LLMEvent,
   type LLMProviderError,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import type { HttpClientResponse } from 'effect/http'
 import {
-  isMissingResponsesFinalOutputError,
   makeOpenAiResponsesProviderLayer,
   streamOpenAiResponsesResponse,
   toOpenAiResponsesRequestBodyWithReasoning,
@@ -157,33 +154,6 @@ const normalizeCodexContextWindowError = (error: LLMError) =>
         })()
       )
 
-const noteCodexToolCall =
-  (hasToolCallRef: Ref.Ref<boolean>) =>
-  (event: LLMEvent): Effect.Effect<LLMEvent> => {
-    if (!Predicate.isTagged(event, 'ToolCall')) return Effect.succeed(event)
-
-    return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
-  }
-
-/**
- * A JSON fallback response whose `output` is missing or incomplete ends the turn as Done,
- * unmarked: JSON responses never carry the missing-usage mark. The parser recovers the same SSE
- * failure itself (`recoverMissingFinalOutput`) and marks its unreadable usage, so only JSON
- * responses reach this.
- */
-const recoverMissingCodexFinalOutput = (
-  hasToolCallRef: Ref.Ref<boolean>,
-  error: LLMError
-): Stream.Stream<LLMEvent, LLMProviderError> => {
-  if (!isMissingResponsesFinalOutputError(error)) return Stream.fail(error)
-
-  return Stream.fromEffect(
-    Ref.get(hasToolCallRef).pipe(
-      Effect.map(hasToolCall => LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
-    )
-  )
-}
-
 export const toOpenAiCodexRequestBody = (
   request: LLMRequest,
   config: {
@@ -214,22 +184,20 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
   // The Codex subscription endpoint rejects max_output_tokens.
   const { maxOutputTokens: _maxOutputTokens, ...sharedConfig } = config
 
+  // The parser itself recovers a final response with missing output, streamed or JSON
+  // (`recoverMissingFinalOutput`); the wrapper only names context-window failures.
   return decorateLLMProvider(provider =>
     LLMProvider.of({
       stream: request =>
-        Stream.fromEffect(Ref.make(false)).pipe(
-          Stream.flatMap(hasToolCallRef =>
-            provider.stream(request).pipe(
-              Stream.mapEffect(noteCodexToolCall(hasToolCallRef)),
-              Stream.catchTags({
-                LLMError: error =>
-                  isCodexContextWindowError(error)
-                    ? Stream.fail(normalizeCodexContextWindowError(error))
-                    : recoverMissingCodexFinalOutput(hasToolCallRef, error)
-              })
+        provider
+          .stream(request)
+          .pipe(
+            Stream.mapError((error): LLMProviderError =>
+              Predicate.isTagged(error, 'LLMError') && isCodexContextWindowError(error)
+                ? normalizeCodexContextWindowError(error)
+                : error
             )
           )
-        )
     })
   ).pipe(
     Layer.provide(

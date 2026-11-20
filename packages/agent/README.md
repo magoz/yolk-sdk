@@ -162,7 +162,7 @@ const program = run({
 Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
 Merge them with `makeAgentLoopLayer`. Omitted tools use `ToolExecutor.unavailable`; omitted transformer/config use identity and `LoopConfig.defaultLayer`.
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
-Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`; Anthropic Messages streams (Claude and OpenCode Go `messages`) that end without `message_stop` fail the same way at the provider.
+Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`; Anthropic Messages streams (Claude and OpenCode Go `messages`) that end without `message_stop`, and Grok and OpenCode Go `responses` streams that end without `response.completed`, fail the same way at the provider.
 
 ```ts
 import { makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
@@ -466,7 +466,8 @@ policy and emits protocol-visible retry/error state:
   retryable `network` failure). Upstream text only refines a status (an Anthropic 400 "prompt is too long" is
   `context_overflow`) and decides alone only when there is no status (stream error events); it
   never makes a 4xx such as a 404 model error retryable. Request values the upstream echoes (the
-  model id, the Gateway's `param.modelId`) are ignored in that text.
+  model id, the Gateway's `param.modelId`) are ignored in that text, in HTTP errors and in
+  Chat Completions, Responses and Claude/Messages stream error events alike.
 - Built-in providers reject a returned tool call whose id or name is empty or padded as a
   non-retryable `LLMError` (`invalid_response`) instead of a defect, so it reaches the loop's error
   handling (the loop does not retry it), host fallback models, and host failure handling. Chat
@@ -484,8 +485,10 @@ policy and emits protocol-visible retry/error state:
   compaction wrapper may compact and retry once.
 - Anthropic `max_tokens` and OpenAI-compatible `finish_reason: "length"` / `"content_filter"`
   completions fail as non-retryable `invalid_response` instead of reporting truncated or filtered
-  output as complete. Anthropic Messages streams cut before `message_stop` fail the same way, with
-  `responseIssue: 'missing_done'`.
+  output as complete. Anthropic Messages streams cut before `message_stop`, and Grok and OpenCode
+  Go `responses` streams cut before `response.completed`, fail the same way, with
+  `responseIssue: 'missing_done'` (Responses keep `providerCode: 'incomplete_stream'`). Codex
+  completes such a stream instead (EOF compatibility), so it never reports `missing_done`.
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
@@ -541,12 +544,12 @@ persist or display.
 A stream can complete without the usage report its request asked for (or its protocol always
 sends):
 
-| Provider                                                      | Completes without the final usage when                                                                     |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk              |
-| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                                    |
-| Codex                                                         | the stream ends without `response.completed`, or that event's `output` is missing or misses a required key |
-| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                                  |
+| Provider                                                      | Completes without the final usage when                                                                                                                   |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk                                                            |
+| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                                                                                  |
+| Codex                                                         | the stream ends without `response.completed`, or that event's `output` is missing or misses a required key and its `usage` is missing or does not decode |
+| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                                                                                |
 
 These streams completed successfully before the mark existed, and still do: failing them would
 re-run and re-bill the model. A chat stream cut after its finish chunk holds the whole answer;
@@ -558,6 +561,15 @@ how to account for it: estimate it, flag the total as a lower bound, or ignore i
 absent when the report arrived and on events recorded before it existed; non-streamed (JSON)
 responses are never marked. Grok and Go Responses streams fail without `response.completed`, and
 Messages streams fail without `message_stop`, so they never complete without a terminal event.
+
+Codex's missing-output recovery (streamed or JSON) reads the final `output` item by item: valid
+items still count, so a function call the stream never emitted still runs (`tool_use`), and items
+missing a required key are dropped. A function call that does not decode must replay one the stream
+already emitted (same `call_id` or item `id`), and a message that does not decode must be one whose
+text already streamed; otherwise the response fails as a non-retryable `invalid_response` rather
+than end the turn without it. The recovered response's `usage` is reported when it decodes (Done
+unmarked) and marked unavailable only when it is missing or does not decode. Recovery is decided
+from the decode issue (a missing key under `output`), never from the error message.
 
 ## Context compaction
 
