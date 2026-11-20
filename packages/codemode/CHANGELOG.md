@@ -1,5 +1,19 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.149
+
+### Minor Changes
+
+- c33874c: `makeDynamicWorkerCodeModeExecutor` (`@yolk-sdk/codemode/cloudflare`) loads every script with a CPU limit: new option `cpuMs` (default 500, `defaultDynamicWorkerCpuMs`) is passed as `limits.cpuMs` and is the real ceiling of a script, since the timeout and abort signal only answer the caller early and cannot stop a synchronous loop. A script past it fails with `timeout` (`Execution exceeded its CPU limit of <cpuMs> ms`). `WorkerLoaderCode` gains the required `limits` field, so a custom loader typed against it sees it. When an execution ends (result, timeout, abort, failure), tool and global calls still pending are rejected at once (`The script ended before this call settled; await every tool call before returning.`) and their signal aborts, later calls are rejected without running, and the loaded Worker and its entrypoint are disposed when they support `Symbol.dispose`, so an unawaited call no longer keeps a Dynamic Worker in flight. Loader, isolate, and host RPC failures now reach the caller and the script as fixed messages (`Could not load the script sandbox.`, `The script sandbox failed.`, `The call could not reach the host.`) instead of the runtime's error text; script-thrown errors are unchanged.
+
+### Patch Changes
+
+- Updated dependencies [c112350]
+- Updated dependencies [c112350]
+- Updated dependencies [22f42c0]
+- Updated dependencies [5039d29]
+  - @yolk-sdk/agent@0.1.0-canary.149
+
 ## 0.1.0-canary.148
 
 ### Patch Changes

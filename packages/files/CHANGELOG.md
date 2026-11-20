@@ -1,5 +1,15 @@
 # @yolk-sdk/files
 
+## 0.1.0-canary.149
+
+### Patch Changes
+
+- Updated dependencies [c112350]
+- Updated dependencies [c112350]
+- Updated dependencies [22f42c0]
+- Updated dependencies [5039d29]
+  - @yolk-sdk/agent@0.1.0-canary.149
+
 ## 0.1.0-canary.148
 
 ### Patch Changes
