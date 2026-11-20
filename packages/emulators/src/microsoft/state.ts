@@ -7,7 +7,10 @@
  * `microsoftConformanceFixtureSeeds`), never imported from SDK code. Where no fixture records a
  * value, the default is synthesized and says so below: the user id, the well-known mail folders
  * other than Drafts and Deleted Items, the attachment message itself, and the drive root and
- * `Sources` folder have no fixture.
+ * `Sources` folder have no fixture. The Teams and SharePoint site routes answer only their
+ * recorded fixtures (`teams-sites.ts`), not entities of this state, and only under the `default`
+ * profile (`recordedTeamsSites`); the state holds only that flag and the Teams chat messages the
+ * send route recorded.
  *
  * @experimental
  */
@@ -163,6 +166,18 @@ export const MicrosoftEmulatorDriveItem = Schema.Struct(driveItemFields)
 
 export type MicrosoftEmulatorDriveItem = typeof MicrosoftEmulatorDriveItem.Type
 
+/**
+ * A Teams chat message the send route recorded (a send cannot be undone on Graph, so it stays in
+ * the state): the chat, the minted message id, and the run id its text names.
+ */
+export const MicrosoftEmulatorChatMessageSent = Schema.Struct({
+  chatId: Schema.String,
+  id: Schema.String,
+  runId: Schema.String
+})
+
+export type MicrosoftEmulatorChatMessageSent = typeof MicrosoftEmulatorChatMessageSent.Type
+
 const Counter = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 
 const Counters = Schema.Struct({
@@ -173,7 +188,9 @@ const Counters = Schema.Struct({
   /** Next change key number (message and event writes). */
   nextChangeKeyNumber: Counter,
   /** Next number in created drive item ids. */
-  nextItemNumber: Counter
+  nextItemNumber: Counter,
+  /** Next number in sent Teams chat message ids (`1790000000101` for 101). */
+  nextChatMessageNumber: Counter
 })
 
 /** The whole emulator state (JSON-compatible; what `snapshot()` returns). */
@@ -186,6 +203,9 @@ export const MicrosoftEmulatorStateSchema = Schema.Struct({
   events: Schema.Array(MicrosoftEmulatorEvent),
   drive: MicrosoftEmulatorDrive,
   driveItems: Schema.Array(MicrosoftEmulatorDriveItem),
+  /** Whether the recorded Teams and SharePoint answers apply (the `default` profile only). */
+  recordedTeamsSites: Schema.Boolean,
+  chatMessagesSent: Schema.Array(MicrosoftEmulatorChatMessageSent),
   counters: Counters
 })
 
@@ -202,6 +222,13 @@ export type MicrosoftEmulatorState = {
   events: ReadonlyArray<MicrosoftEmulatorEvent>
   drive: MicrosoftEmulatorDrive
   driveItems: ReadonlyArray<MicrosoftEmulatorDriveItem>
+  /**
+   * Whether the Teams and SharePoint site routes answer their recorded fixtures: `true` under the
+   * `default` profile, `false` under `empty` (no fixture records an empty answer).
+   */
+  recordedTeamsSites: boolean
+  /** Teams chat messages sent since the seed (never seeded; a send cannot be undone). */
+  chatMessagesSent: ReadonlyArray<MicrosoftEmulatorChatMessageSent>
   counters: typeof Counters.Type
 }
 
@@ -796,11 +823,14 @@ const stateFromSeed = (seed: MicrosoftEmulatorSeed): MicrosoftEmulatorState | st
     events,
     drive: entities.drive,
     driveItems: entities.driveItems.map(driveItemFromSeed),
+    recordedTeamsSites: (seed.profile ?? 'default') === 'default',
+    chatMessagesSent: [],
     counters: {
       nextEventNumber: 101,
       nextMessageNumber: 1,
       nextChangeKeyNumber: 1001,
-      nextItemNumber: 1
+      nextItemNumber: 1,
+      nextChatMessageNumber: 101
     }
   }
 }

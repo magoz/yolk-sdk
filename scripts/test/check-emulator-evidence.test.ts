@@ -17,7 +17,10 @@ import { notionConformanceFixtures } from '../../packages/connectors/src/notion/
 import { githubConformanceFixtures } from '../../packages/connectors/src/github/conformance/index.ts'
 import { telegramConformanceFixtures } from '../../packages/connectors/src/telegram/conformance/index.ts'
 import { todoistConformanceFixtures } from '../../packages/connectors/src/todoist/conformance/index.ts'
-import { mcpConformanceFixtures } from '../../packages/mcp/src/conformance/index.ts'
+import {
+  mcpConformanceFixtures,
+  mcpConformanceServerPingFixtures
+} from '../../packages/mcp/src/conformance/index.ts'
 import { dropboxEmulatorRoutes } from '../../packages/emulators/src/dropbox.ts'
 import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { r2EmulatorRoutes } from '../../packages/emulators/src/r2.ts'
@@ -720,6 +723,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('google.gmail.send-practice-address')).toBe(true)
     expect(knownConformanceCaseIds.has('linkedin-search.errors.profile-not-found')).toBe(true)
     expect(knownConformanceCaseIds.has('mcp.auth.rejected')).toBe(true)
+    expect(knownConformanceCaseIds.has('mcp.legacy.server-ping')).toBe(true)
     expect(knownConformanceCaseIds.has('kie.tasks.create-video-task')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
@@ -797,7 +801,8 @@ describe('repo emulator manifests', () => {
     }
 
     // Each MCP case has a modern and a legacy fixture, plus a derived Afloat one and a synthetic
-    // Figma one (every case but mcp.modern.stateless), all unverified.
+    // Figma one (every case but mcp.modern.stateless), all unverified; the opt-in server ping has
+    // one legacy fixture, cited by the synthetic legacy rows.
     expect(mcpEmulatorRoutes.length).toBeGreaterThan(0)
 
     for (const route of mcpEmulatorRoutes) {
@@ -807,6 +812,7 @@ describe('repo emulator manifests', () => {
         expect(repoFixtureEvidenceByCase.get(caseId), `${route.path} ${caseId}`).toEqual(
           [
             ...mcpConformanceFixtures,
+            ...mcpConformanceServerPingFixtures,
             ...afloatMcpConformanceFixtures,
             ...figmaMcpConformanceFixtures
           ].flatMap(fixture => (fixture.caseId === caseId ? ['unverified'] : []))
@@ -861,7 +867,8 @@ describe('repo emulator manifests', () => {
       'POST /v1.0/$batch',
       'POST /v1.0/drives/{driveId}/items/{itemId}/children',
       'DELETE /v1.0/drives/{driveId}/items/{itemId}',
-      'POST /v1.0/drives/{driveId}/items/{itemId}/copy'
+      'POST /v1.0/drives/{driveId}/items/{itemId}/copy',
+      'POST /v1.0/chats/{chatId}/messages'
     ])
     expect(dropboxWriteRoutes).toEqual([
       'POST /2/files/create_folder_v2',

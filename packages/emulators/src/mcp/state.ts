@@ -1,8 +1,10 @@
 /**
  * MCP emulator state, seed, profiles, and minted value forms (internal).
  *
- * The state holds the modern listing the seed selects and the legacy sessions minted since the
- * last reset or seed (each bound to the profile that minted it); a seed holds no session, so no
+ * The state holds the modern listing and the synthetic legacy `initialize` answer the seed selects,
+ * and the legacy sessions minted since the last reset or seed (each bound to the profile that
+ * minted it, and marked while the ping its `initialize` answer sent awaits the client's answer); a
+ * seed holds no session, so no
  * seeded value can take the minted `yolk-emu-session-<n>` form. The session counter and the
  * cursor generation are runtime data that never reset (`McpRuntime`).
  *
@@ -68,14 +70,28 @@ export const McpEmulatorModernListing = Schema.Literals(['one-page', 'two-pages'
 export type McpEmulatorModernListing = typeof McpEmulatorModernListing.Type
 
 /**
+ * Which recorded `initialize` answer the synthetic legacy profile sends: `plain` (the handshake
+ * every default-suite legacy fixture records; the default) or `server-ping` (the opt-in
+ * `mcp.legacy.server-ping` fixture's, whose SSE answer pings before its response, so the session
+ * awaits the client's answer to that ping). Both come from fixtures; the Figma profile records only
+ * the plain one and ignores this choice.
+ */
+export const McpEmulatorLegacyInitialize = Schema.Literals(['plain', 'server-ping'])
+
+export type McpEmulatorLegacyInitialize = typeof McpEmulatorLegacyInitialize.Type
+
+/**
  * A legacy session: minted by `initialize`, ready after `notifications/initialized`, and bound to
  * the profile that minted it (`profile: 'figma'` on the Figma profile; absent on the synthetic
- * legacy profile), so a session is answered only on its own profile.
+ * legacy profile), so a session is answered only on its own profile. `awaitingPingAnswer` marks a
+ * session whose `initialize` answer sent the recorded server ping until the client's answer to it
+ * is accepted (in either phase), once.
  */
 export const McpEmulatorSession = Schema.Struct({
   id: Schema.String,
   phase: Schema.Literals(['initializing', 'ready']),
-  profile: Schema.optionalKey(Schema.Literal('figma'))
+  profile: Schema.optionalKey(Schema.Literal('figma')),
+  awaitingPingAnswer: Schema.optionalKey(Schema.Literal(true))
 })
 
 export type McpEmulatorSession = typeof McpEmulatorSession.Type
@@ -83,17 +99,20 @@ export type McpEmulatorSession = typeof McpEmulatorSession.Type
 /** The emulator state (a JSON value the core snapshots and restores). */
 export const McpEmulatorStateSchema = Schema.Struct({
   modernListing: McpEmulatorModernListing,
+  legacyInitialize: McpEmulatorLegacyInitialize,
   sessions: Schema.Array(McpEmulatorSession)
 })
 
 export type McpEmulatorState = {
   modernListing: McpEmulatorModernListing
+  legacyInitialize: McpEmulatorLegacyInitialize
   sessions: ReadonlyArray<McpEmulatorSession>
 }
 
-/** The typed seed: only the modern listing; it holds no session. */
+/** The typed seed: the modern listing and the legacy `initialize` answer; it holds no session. */
 export const McpEmulatorSeed = Schema.Struct({
-  modernListing: Schema.optionalKey(McpEmulatorModernListing)
+  modernListing: Schema.optionalKey(McpEmulatorModernListing),
+  legacyInitialize: Schema.optionalKey(McpEmulatorLegacyInitialize)
 })
 
 export type McpEmulatorSeed = typeof McpEmulatorSeed.Type
@@ -113,7 +132,11 @@ export const buildSeedState = (input: unknown): McpEmulatorState | string => {
 
   if (Result.isFailure(decoded)) return issueMessage(decoded.failure.issue)
 
-  return { modernListing: decoded.success.modernListing ?? 'one-page', sessions: [] }
+  return {
+    modernListing: decoded.success.modernListing ?? 'one-page',
+    legacyInitialize: decoded.success.legacyInitialize ?? 'plain',
+    sessions: []
+  }
 }
 
 /** Decode a whole state (the core's seed validation), or why it is invalid. */
@@ -122,7 +145,11 @@ export const decodeState = (input: unknown): McpEmulatorState | string => {
 
   return Result.isFailure(decoded)
     ? issueMessage(decoded.failure.issue)
-    : { modernListing: decoded.success.modernListing, sessions: decoded.success.sessions }
+    : {
+        modernListing: decoded.success.modernListing,
+        legacyInitialize: decoded.success.legacyInitialize,
+        sessions: decoded.success.sessions
+      }
 }
 
 /**

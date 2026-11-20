@@ -22,6 +22,7 @@ import {
 } from './elicitation-declaration.ts'
 import { mcpLegacySessionFixture } from './legacy-session.ts'
 import { mcpModernStatelessFixture } from './modern-stateless.ts'
+import { mcpServerPingLegacyFixture } from './server-ping.ts'
 import {
   mcpNegotiationEraLegacyFixture,
   mcpNegotiationEraModernFixture
@@ -43,6 +44,7 @@ export {
   mcpModernStatelessCase,
   mcpNegotiationEraCase,
   mcpResponseEncodingCase,
+  mcpServerPingCase,
   mcpToolsListCase,
   mcpUnknownToolCase,
   type McpConformanceCase,
@@ -84,6 +86,7 @@ export {
   legacyCallExchanges,
   legacyHandshakeExchanges,
   legacyListingExchanges,
+  legacyServerPingListingExchanges,
   legacySseAnswer,
   mcpConformanceDiscoverRequestId,
   mcpConformanceFixtureSeeds,
@@ -106,6 +109,7 @@ export {
   mcpConformanceSyntheticToolErrorResult,
   mcpConformanceSyntheticTools,
   mcpConformanceSyntheticWriteTool,
+  mcpConformanceServerPingRequestId,
   mcpConformanceUnauthorizedAnswer,
   mcpSyntheticFixture,
   modernCallExchanges,
@@ -130,6 +134,7 @@ export {
   mcpNegotiationEraModernFixture,
   mcpResponseEncodingLegacyFixture,
   mcpResponseEncodingModernFixture,
+  mcpServerPingLegacyFixture,
   mcpToolsListLegacyFixture,
   mcpToolsListModernFixture,
   mcpUnknownToolLegacyFixture,
@@ -143,6 +148,14 @@ export {
 export const mcpConformanceElicitationFixtures: ReadonlyArray<WireFixture> = [
   mcpElicitationDeclarationModernFixture,
   mcpElicitationDeclarationLegacyFixture
+]
+
+/**
+ * The fixture of the opt-in `mcpServerPingCase` (not in `mcpConformanceFixtures`, like the case is
+ * not in `mcpConformanceCases`): a legacy server that pings during `initialize`.
+ */
+export const mcpConformanceServerPingFixtures: ReadonlyArray<WireFixture> = [
+  mcpServerPingLegacyFixture
 ]
 
 /** Default-suite MCP wire fixtures, in case order (modern before legacy). */

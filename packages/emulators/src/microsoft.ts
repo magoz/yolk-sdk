@@ -5,8 +5,10 @@
  *
  * It never imports SDK code: its wire shapes and default seed are copied as data from the
  * synthetic Microsoft conformance fixtures, and every route names the conformance cases it
- * follows in `microsoftEmulatorRoutes`. Only the routes those eleven cases need are emulated;
- * everything else fails closed with the Graph error envelope.
+ * follows in `microsoftEmulatorRoutes`. Only the routes those nineteen cases need are emulated;
+ * everything else fails closed with the Graph error envelope. The SharePoint site and Teams routes
+ * are fixture-only: they answer only the recorded exchanges of their fixtures (copied as data in
+ * `src/microsoft/teams-sites-recordings.ts`); the one Teams send is recorded in the state.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeMicrosoftEmulator` (importing this module has no side effects).
@@ -62,6 +64,7 @@ export { microsoftEmulatorErrorCodes, type MicrosoftEmulatorDrills } from './mic
 
 export {
   MicrosoftEmulatorAttachment,
+  MicrosoftEmulatorChatMessageSent,
   MicrosoftEmulatorAttachmentSeed,
   MicrosoftEmulatorCalendar,
   MicrosoftEmulatorDrive,
@@ -462,7 +465,15 @@ export const makeMicrosoftEmulator = async (
         7,
         7
       ),
-      omitNextLink: options.drills?.omitNextLink ?? false
+      omitNextLink: options.drills?.omitNextLink ?? false,
+      siteSearchEmpty: options.drills?.siteSearchEmpty ?? false,
+      siteDrivesNoLibrary: options.drills?.siteDrivesNoLibrary ?? false,
+      chatsOmitMembers: options.drills?.chatsOmitMembers ?? false,
+      chatMessagesOmitNextLink: options.drills?.chatMessagesOmitNextLink ?? false,
+      joinedTeamsEmpty: options.drills?.joinedTeamsEmpty ?? false,
+      repliesOmitReplyToId: options.drills?.repliesOmitReplyToId ?? false,
+      transcriptsOtherMeeting: options.drills?.transcriptsOtherMeeting ?? false,
+      chatSendUnescaped: options.drills?.chatSendUnescaped ?? false
     },
     copyInProgressPolls: integerOption('copyInProgressPolls', options.copyInProgressPolls, 0, 100),
     conflictWindowMs: integerOption('conflictWindowMs', options.conflictWindowMs, 25, 10_000),

@@ -71,8 +71,16 @@
  *   name and enforces no annotation, and `callRemoteMcpServerTool` lists again on its own
  *   connection right before calling, so only that listing can prove a call safe.
  *
- * Not covered: `DELETE` (the client never sends it), `ping`, resources, prompts and logging
- * (never called), and URL policy, stdio and timeouts (unit tests).
+ * Opt-in cases (not in `mcpConformanceCases`): `mcp.elicitation.declaration` (a host opt-in) and
+ * `mcp.legacy.server-ping` (a server's ping answered by the client: `2025-11-25` lets a server ping
+ * but never requires it, and `2026-07-28` removed `ping`).
+ *
+ * Not covered, because the client never sends them (`listTools` and `callTool` only; spec sources
+ * in `AGENTS.md`): `DELETE` (`close()` only aborts; the SDK's `terminateSession()` is never
+ * called), the client's own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
+ * (removed in `2026-07-28`), `tasks/*` (no task capability is declared; an extension in
+ * `2026-07-28`), and JSON-RPC batches (removed in `2025-06-18`); servers' `notifications/message`
+ * are only ignored (the legacy fixtures carry one). URL policy, stdio and timeouts are unit tests.
  *
  * @experimental
  */
@@ -105,6 +113,7 @@ import {
 } from './elicitation-declaration.ts'
 import { mcpLegacySessionFixture } from './legacy-session.ts'
 import { mcpModernStatelessFixture } from './modern-stateless.ts'
+import { mcpServerPingLegacyFixture } from './server-ping.ts'
 import {
   mcpNegotiationEraLegacyFixture,
   mcpNegotiationEraModernFixture
@@ -259,6 +268,16 @@ const rpcParams = (exchange: McpObservedExchange): JsonObject | undefined => {
 
   return isRecord(params) ? params : undefined
 }
+
+/**
+ * Whether an observed request is a client-sent JSON-RPC response: an id, no `method`, and a
+ * `result` or `error` member (the client's answer to a server request such as `ping`).
+ */
+const isClientResponse = (exchange: McpObservedExchange): boolean =>
+  rpcMethod(exchange) === undefined &&
+  rpcId(exchange) !== undefined &&
+  isRecord(exchange.requestBody) &&
+  ('result' in exchange.requestBody || 'error' in exchange.requestBody)
 
 const parseJson = parseWireJson
 
@@ -833,7 +852,7 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
   title: 'answers are JSON or a finite SSE stream holding the response once; 202 has no body',
   safety: 'read',
   docs: 'The client dispatches on `content-type`: `application/json` holds the response; `text/event-stream` is read event by event (`_handleSseStream` over `EventSourceParserStream`, which dispatches only completed events and has no flush, so an unterminated final event is never read), skipping events with empty data (priming events) and events whose `event:` is neither absent nor `message`, and ignoring notifications before or after the response. The Effect fetch bridge (`makeEffectFetch`) buffers the whole body, so an SSE answer to a POST must END, or the call only fails at the request timeout. A 202 body is discarded.',
-  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 has an empty body. Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
+  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 has an empty body (a client-sent response, such as the answer to a server ping, is no request: only a 202 answering it is checked, so this case does not flag one answered 200 with a body; the opt-in `mcp.legacy.server-ping` requires its empty 202). Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
   fixtures: [mcpResponseEncodingModernFixture.id, mcpResponseEncodingLegacyFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -856,7 +875,16 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
 
       const id = rpcId(exchange)
 
-      if (id === undefined || status === undefined || status < 200 || status >= 300) {
+      // Only requests have answers to check: a notification has no id, and a client-sent response
+      // (to a server ping) is no request (only a 202 answering it is checked, above; the opt-in
+      // `mcp.legacy.server-ping` requires that 202).
+      if (
+        id === undefined ||
+        isClientResponse(exchange) ||
+        status === undefined ||
+        status < 200 ||
+        status >= 300
+      ) {
         continue
       }
 
@@ -1407,6 +1435,121 @@ export const mcpElicitationDeclarationCase: McpConformanceCase = defineConforman
       yield* expectConformance(
         field(field(rpcParams(exchange), '_meta'), clientCapabilitiesKey) === undefined,
         `expected no _meta client capabilities on legacy ${labelOf(exchange)}`
+      )
+    }
+  })
+})
+
+/** Whether a JSON-RPC message is a request with an id and `method` (`name` when given). */
+const isRequestMessage = (message: Json, name?: string): message is JsonObject =>
+  isRecord(message) &&
+  Predicate.isString(message['method']) &&
+  (name === undefined || message['method'] === name) &&
+  (Predicate.isString(message['id']) || Predicate.isNumber(message['id']))
+
+const acceptsBoth = (value: string | undefined): boolean => {
+  const types = (value ?? '').split(',').map(part => part.split(';')[0]?.trim().toLowerCase())
+
+  return types.includes('application/json') && types.includes('text/event-stream')
+}
+
+/**
+ * Opt-in (not in `mcpConformanceCases`): run it for a legacy target that pings its clients. A
+ * server MAY ping (MCP `2025-11-25`, basic/utilities/ping), so a server that never does fails its
+ * precondition; `2026-07-28` removed `ping` and every server-to-client request (changelog, major
+ * changes 5 and 7), so it applies to legacy targets only. Missing acceptance evidence (no status on
+ * the client's answer) fails. The call gate refuses calls against a pinging server (#382).
+ */
+export const mcpServerPingCase: McpConformanceCase = defineConformanceCase({
+  id: 'mcp.legacy.server-ping',
+  title: 'a server ping is answered with an empty result on a POST the server accepts with 202',
+  safety: 'read',
+  docs: 'MCP `2025-11-25` lets either side ping (basic/utilities/ping: "The receiver MUST respond promptly with an empty response"); a server MAY send requests on a POST\'s SSE stream before its response (basic/transports, "Sending Messages to the Server", item 6), and pings are the requests it may send before `notifications/initialized` (basic/lifecycle). The pinned SDK client registers a `ping` handler by default (`Protocol` constructor) and answers each ping with `{"result":{},"jsonrpc":"2.0","id":<ping id>}` on a new POST through the transport (with the session id it holds; before the initialize result is processed, without `mcp-protocol-version`). A server MUST answer an accepted client response 202 with no body (items 3 and 4). The client never surfaces a rejected answer: its send error only reaches `onerror`, so the listing succeeds either way and only the wire shows the rejection. The Effect fetch bridge (`makeEffectFetch`) buffers the whole answer before the SDK reads it, so the client reads, and answers, a ping only after the SSE stream carrying it ends: a server that waits for the ping\'s answer before finishing that stream (unverified: whether live servers do) stalls the operation until the client\'s timeout, and a ping on the standing GET stream is unverified (the fixtures answer that GET 405). Yolk sends no ping of its own, and its call gate treats any server request in an answer as uncertainty, so the calling cases refuse against a pinging server (#382).',
+  wire: 'Precondition: the target speaks the legacy era, and at least one answer of the listing holds a JSON-RPC `ping` request (an id and `method: "ping"`) among the messages the client reads; otherwise the case fails its precondition (this case needs a server that pings). The listing succeeds. For each server ping, the client sends exactly one JSON-RPC response with that id: a POST to the target URL whose body has `jsonrpc: "2.0"` and `result: {}` (no `error`), an `accept` listing both `application/json` and `text/event-stream`, and the session id `initialize` issued (when one was). Each such POST gets 202 with an empty body; an answer without that evidence (a transport failure, or the client closing before the server answered) fails. The client sends the answer in the background and closes once the listing ends, so a live server slower to answer it than to serve the rest of the listing can fail this way without having rejected the answer. The ping arrives on a POST\'s SSE stream that ends: the client answers only after the stream ends (unverified: a server that waits for the answer before ending the stream, or pings on the standing GET).',
+  fixtures: [mcpServerPingLegacyFixture.id],
+  run: Effect.gen(function* () {
+    const target = yield* McpConformanceTarget
+
+    yield* requireEra(target, 'legacy')
+
+    const { exit, exchanges } = yield* observe(
+      listRemoteMcpServerTools(remoteConfig(target), clientOptions(target))
+    )
+
+    if (Exit.isFailure(exit)) {
+      return yield* exit
+    }
+
+    const pingIds = exchanges.flatMap(exchange =>
+      answerMessages(exchange).flatMap(message => {
+        if (!isRequestMessage(message, 'ping')) return []
+
+        const id = message['id']
+
+        return Predicate.isString(id) || Predicate.isNumber(id) ? [id] : []
+      })
+    )
+
+    if (pingIds.length === 0) {
+      return yield* mismatch(
+        'precondition: no answer of the listing holds a ping request (this opt-in case needs a target that pings)'
+      )
+    }
+
+    const session = byMethod(exchanges, 'initialize').at(-1)?.responseSession
+    const responses = exchanges.filter(isClientResponse)
+
+    for (const [index, id] of pingIds.entries()) {
+      const label = `ping ${index + 1}`
+      const answers = responses.filter(exchange => rpcId(exchange) === id)
+
+      yield* expectEqual(
+        answers.length,
+        1,
+        `expected the client to answer server ${label} exactly once`
+      )
+
+      const [answer] = answers
+
+      if (answer === undefined) {
+        continue
+      }
+
+      const body = answer.requestBody
+      const result = field(body, 'result')
+
+      yield* expectConformance(
+        answer.method === 'POST' && answer.url === urlKey(target.url),
+        `expected the answer to server ${label} to be a POST to the target URL`
+      )
+      yield* expectConformance(
+        field(body, 'jsonrpc') === '2.0' &&
+          field(body, 'error') === undefined &&
+          isRecord(result) &&
+          Object.keys(result).length === 0,
+        `expected the answer to server ${label} to be an empty JSON-RPC result`
+      )
+      yield* expectConformance(
+        acceptsBoth(answer.requestHeaders['accept']),
+        `expected the answer to server ${label} to accept application/json and text/event-stream`
+      )
+      yield* expectConformance(
+        answer.requestSession?.id === session?.id,
+        session === undefined
+          ? `expected no mcp-session-id on the answer to server ${label} (none was issued)`
+          : `expected the issued session id on the answer to server ${label}`
+      )
+
+      // No status is no evidence of acceptance: the observer records the request before the
+      // transport answers, so a failed or abandoned POST has none, and the client hides it.
+      yield* expectConformance(
+        answer.status !== undefined,
+        `expected the server to accept the answer to ${label} with 202 and an empty body (no answer was observed: a transport failure, or the client closed first)`
+      )
+      yield* expectEqual(
+        [answer.status ?? null, answer.responseBody?.length ?? null],
+        [202, 0],
+        `expected the server to accept the answer to ${label} with 202 and an empty body ([status, body length])`
       )
     }
   })

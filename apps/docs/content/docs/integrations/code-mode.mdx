@@ -75,8 +75,17 @@ const codemode = makeCodeModeTool<HostContext>({ executor })
 ```
 
 Declare the Worker Loader binding in the Worker's configuration (`"worker_loaders": [{ "binding":
-"LOADER" }]` in Wrangler; the binding name is yours). The timeout and abort signal end an execution
-from the calling Worker; `memoryLimitBytes` and a concurrency cap do not apply.
+"LOADER" }]` in Wrangler; the binding name is yours). `memoryLimitBytes` and a concurrency cap do
+not apply.
+
+- `cpuMs` (default 500) becomes the isolate's CPU limit and is the real ceiling of a script; a
+  script past it fails with a `timeout`. The timeout and abort signal only answer the caller early:
+  a synchronous loop keeps running until its CPU limit.
+- When an execution ends, tool calls still pending are rejected at once and their signal aborts,
+  and later calls are rejected without running, so an unawaited call never keeps a Dynamic Worker
+  in flight (Cloudflare allows 4 per request, 10 per Durable Object).
+- Loader and isolate failures reach the caller as fixed messages, never the runtime's error text.
+- Every execution loads one Dynamic Worker, and each is billed.
 
 ### Next.js
 

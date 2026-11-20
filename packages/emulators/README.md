@@ -825,8 +825,8 @@ them to model Fortnox.
 
 `await makeMicrosoftEmulator(options?)` returns
 `{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`.
-Each call has its own state; `await close()` when done. It emulates only what the eleven Microsoft
-conformance cases need, so the Microsoft connector and the cases run unchanged against it.
+Each call has its own state; `await close()` when done. It emulates only what the nineteen
+Microsoft conformance cases need, so the Microsoft connector and the cases run unchanged against it.
 
 Route **two origins** to the same fetch handler: Graph (`https://graph.microsoft.com`) and the
 SharePoint host of the copy monitor URLs (`sharePointOrigin`, default
@@ -877,6 +877,40 @@ needs no credential (like the real capability URL). Its first poll runs the copy
 `copyInProgressPolls` (default 0) adds `inProgress` (202) answers before that. Monitors are runtime
 data like the ledger: not part of `snapshot()`, listed by `monitors()` and `/_emulate/state`, and
 cleared by `reset` and `seed`.
+
+SharePoint site and Teams routes (`/v1.0` prefix) are **fixture-only, without exceptions**: they
+answer only the recorded exchanges of the eight `microsoft.sharepoint.*` and `microsoft.teams.*`
+fixtures (synthetic, shaped from the Microsoft Graph v1.0 docs examples; copied as data in
+`src/microsoft/teams-sites-recordings.ts`, never imported), with the recorded status, content type,
+and body byte for byte. A read is answered when its raw path and its query parameters (decoded, in
+any order) equal a recorded request's. They read no entity of the state and answer only under the
+`default` profile (the state flag `recordedTeamsSites`); under `empty` every one of them answers the
+400 not emulated, since no fixture records an empty listing. Anything else answers 400
+`SyntheticValueNotEmulated` (or
+`SyntheticQueryNotEmulated` for a query key the route does not take) before anything is written or
+a fault is used:
+
+| Route (`/v1.0` prefix)                                                       | Recorded answers                                                                        |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET /sites?search=`, `GET /sites/{siteId}/drives`                           | The site search and the site's libraries                                                |
+| `GET /me/chats`, `GET /chats/{chatId}`                                       | Chats with `$expand=members`, and one chat                                              |
+| `GET /chats/{chatId}/messages`, `GET /chats/{chatId}/messages/{id}`          | Two pages (the second through the unencoded `@odata.nextLink`), one message, a sent one |
+| `POST /chats/{chatId}/messages`                                              | The recorded send (below)                                                               |
+| `GET /me/joinedTeams`, `GET /teams/{teamId}[/channels[/{channelId}]]`        | Joined teams, the team, its channels, and one channel (`$select` as recorded)           |
+| `GET /teams/{teamId}/channels/{channelId}/messages[/{id}[/replies]]`         | Top-level posts, one post, and its replies                                              |
+| `GET /me/onlineMeetings?$filter=`, `GET /me/onlineMeetings/{id}/transcripts` | The meeting found by its join link, and its transcripts                                 |
+
+The chat send answers only the recorded send chat (a dedicated chat, never the paging chat) and a
+body of exactly `{ body: { contentType: 'html', content } }` whose content is the recorded text with
+any run id (`run-` then lower-case letters, digits, and inner hyphens, at most 40 characters) in
+place of the run id the copied body names after the `yolk-conformance` marker (`run-synthetic`): the recorded 201 with that run id and a
+minted message id (`1790000000000` plus the `nextChatMessageNumber` counter, starting at the
+recorded `1790000000101`, which only advances), substituted in one pass. A
+send cannot be undone on Graph, so the emulator keeps it in the state (`chatMessagesSent`); a read
+of a sent message by its id answers the recorded readback with the same substitutions, and a
+listing of a chat holding a sent message is not emulated (no fixture lists one).
+`test/microsoft-teams-sharepoint.test.ts` fails when the data copy drifts from the connector
+fixtures and replays every exchange byte for byte.
 
 Wire behavior the cases claim:
 
@@ -931,7 +965,8 @@ invented wire behaviour) and the last, which is opt-in and off by default:
 
 Anything else fails closed with the Graph error envelope `{ error: { code, message, innerError } }`
 (`innerError` holds a synthetic `date`, `request-id`, and `client-request-id`): unknown routes and
-methods (including `/me` paths) get 404 `SyntheticRouteNotEmulated` and are ledgered; query keys a
+methods (including `/me` paths other than the Teams ones above) get 404
+`SyntheticRouteNotEmulated` and are ledgered; query keys a
 route does not emulate get 400 before the route runs (so a rejected write writes nothing), as do
 `$select` fields, body properties (including unknown keys inside `body`, recipients,
 `emailAddress`, `start`/`end`, and `parentReference`), and values it does not emulate. That covers
@@ -956,7 +991,9 @@ fault body) are documented Graph codes no fixture records; the `Synthetic*` ones
 codes.
 
 State and seeds: the mailbox user, mail folders, messages, file attachments (inline and regular),
-calendars and events, the drive and its items, and id counters. The default seed is the synthetic
+calendars and events, the drive and its items, whether the Teams and SharePoint site recordings
+apply (`recordedTeamsSites`, `true` only under the `default` profile), the Teams chat messages the
+send recorded (`chatMessagesSent`, never seeded), and id counters. The default seed is the synthetic
 fixture entities with the same ids as `microsoftConformanceFixtureSeeds` (mailbox
 `ada@example.test`, calendar, events, attachment message, paging folder with three messages, drive,
 parent folder, and copy source). Pass `seed: { profile?, user?, mailFolders?, messages?,
@@ -982,7 +1019,11 @@ Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `cove
 and `{ omitNextLink: true }` each make the emulator disagree with one claim, only to prove the
 matching conformance case catches it. The timestamp and paging knobs fail only their case; an empty
 view also fails the timestamp case's precondition, and an id-less create also fails the cancel
-case, which creates its event the same way.
+case, which creates its event the same way. One knob per SharePoint site and Teams case fails
+exactly that case: `siteSearchEmpty`, `siteDrivesNoLibrary`, `chatsOmitMembers`,
+`chatMessagesOmitNextLink`, `joinedTeamsEmpty`, `repliesOmitReplyToId`,
+`transcriptsOtherMeeting`, and `chatSendUnescaped` (the send answers the markup unescaped; the
+message is still recorded).
 
 ## Dropbox emulator
 
@@ -2080,6 +2121,16 @@ as `synthetic-figma-token-0001`; a token starting with a hex digit is not emulat
 reserved invalid credential `yolk-conformance-invalid-credential-0000` answers the Figma 401 on its
 era probe. Route `https://mcp.figma.com` to it, or serve `fetchOn(mcpEmulatorFigmaOrigin)`.
 
+The opt-in `mcp.legacy.server-ping` case of `@yolk-sdk/mcp/conformance` runs against
+`synthetic-legacy` seeded with `{ legacyInitialize: 'server-ping' }` (`McpEmulatorLegacyInitialize`;
+the default is `plain`): `initialize` then answers that case's fixture
+(`mcpEmulatorServerPingFixtures`), whose SSE answer sends a `ping` request before its response, and
+the session awaits the client's answer to that ping, which the `response:ping` row accepts once
+with the recorded 202, in either phase (over a socket it may arrive after
+`notifications/initialized`). The Figma profile records no ping and ignores the seed. The calling
+cases refuse a pinging server: their call gate treats any server request in an answer as
+uncertainty (#382).
+
 ```ts
 import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
 import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
@@ -2094,7 +2145,8 @@ await mcp.close()
 ```
 
 Routes (`mcpEmulatorRoutes`: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
-each profile, plus the legacy `GET` row; every row is a read, and every request needs
+each profile, plus the legacy `GET` row and the synthetic legacy `response:ping` row; every row is a
+read, and every request needs
 `Authorization: Bearer <token>`, a recognisable bearer):
 
 | Row                                     | Answer (the recorded bytes)                                                     |
@@ -2107,6 +2159,7 @@ each profile, plus the legacy `GET` row; every row is a read, and every request 
 | `/legacy/mcp#notifications/initialized` | 202, no body, on an initializing session (which becomes ready)                  |
 | `/legacy/mcp#tools/list`                | The SSE listing, on a ready session                                             |
 | `/legacy/mcp#tools/call`                | The three recorded SSE call answers, on a ready session                         |
+| `/legacy/mcp#response:ping`             | 202, no body: the answer to the server ping, once, on a session awaiting it     |
 | `GET /legacy/mcp`                       | 405, no body, on a ready session                                                |
 | `/{modern,legacy}/mcp#server/discover`  | With the reserved invalid credential: the recorded 401, byte for byte           |
 | `useafloat.com/mcp#server/discover`     | The Afloat discover result; with `afloat_yolkconformanceinvalid0000`, the 401   |
@@ -2185,14 +2238,16 @@ on the Afloat era probe.
   where the recording has an id; any non-empty `name` and `version` (and no other key) in the
   `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
   emulator minted on the same profile since the last reset or seed where the recording sends
-  `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise); and, with the
-  seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
-  second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
-  Everything else (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET`
-  on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on
-  the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one starting
-  with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
-  `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a JSON body
+  `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer to the
+  server ping, ready otherwise); and, with the seed's `two-pages` listing, the cursor this emulator
+  issued in the current generation on the second page. `Authorization` must be exactly
+  `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any query,
+  other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without
+  `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
+  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
+  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches, client-sent
+  responses other than the answer to the recorded server ping (exactly as recorded, the server's
+  ping id included, on a session awaiting it), other members, a JSON body
   repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
   (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
   the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
@@ -2205,8 +2260,9 @@ on the Afloat era probe.
   is not emulated.
 
 Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
-never sends it), `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
-JSON-RPC batches and client-sent responses, a JSON body repeating a key (compared after unescaping;
+never sends it), the client's own `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`,
+`tasks/*` (`@yolk-sdk/mcp/client` sends none of them), JSON-RPC batches, client-sent responses other
+than the answer to the recorded server ping, a JSON body repeating a key (compared after unescaping;
 the wrapper's opt-in `uniqueJsonKeys`), `mcp-*` headers no recording carries (such as
 `mcp-param-*`), cursors this emulator did not issue, any other tool or arguments, any other origin,
 path, or query, and a missing `Authorization` (no fixture records the answer to one). A closed
@@ -2231,9 +2287,12 @@ plane behave as in the Dropbox emulator; `/_emulate/state` also reports `nextSes
 
 **Drill knobs (tests only).** `drills: { discoverCarriesErrorResponse, discoverWithoutResultType,
 sessionIdNotVisibleAscii, discoverAnsweredTwice, writeToolMarkedReadOnly, readCallAnswersToolError,
-invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge }` (booleans) each
-make the emulator disagree with exactly one MCP conformance case, on every profile whose answers
-they change (the Afloat profile included, except the legacy-only session knob), only to prove that
+invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge,
+pingAnswerRejected }` (booleans) each make the emulator disagree with exactly one MCP conformance
+case, on every profile whose answers they change (the Afloat profile included, except the
+legacy-only session knob; `pingAnswerRejected` answers the client's answer to the server ping 400
+with no body, failing the opt-in `mcp.legacy.server-ping`, and changes nothing without the
+`server-ping` seed), only to prove that
 case catches it.
 
 ## Kie emulator
@@ -2361,7 +2420,7 @@ owner-approved live run against a practice bucket, through a host `R2ObjectClien
 implementation, verifies it.
 
 All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
-MCP routes are currently `unverified` (no live recording yet), including four Fortnox, eleven
+MCP routes are currently `unverified` (no live recording yet), including four Fortnox, twelve
 Microsoft, five Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google
 connector write routes (the three LinkedIn search routes and the twelve MCP rows are reads, so none
 of them needs an entry). Until an

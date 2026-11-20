@@ -229,10 +229,29 @@ The Worker declares a Worker Loader binding (`"worker_loaders": [{ "binding": "L
 Wrangler; the name is the host's). `env.LOADER` typed by Workers types satisfies `WorkerLoader`.
 `compatibilityDate` (default `2026-05-12`) sets the script isolate's date.
 
-Differences from the Node executor: the timeout and abort signal end the execution on the calling
-side (running tool calls see their signal abort); `memoryLimitBytes` does not apply (Workers bound
-isolate memory themselves); there is no per-executor concurrency cap; stack frames are not
-filtered.
+Limits and lifetime:
+
+- `cpuMs` (default 500, `defaultDynamicWorkerCpuMs`) is passed as the loaded Worker's
+  `limits.cpuMs` and is the real ceiling of a script. Time spent waiting for tool calls is not CPU
+  time. A script past it fails with `timeout` (`Execution exceeded its CPU limit of <cpuMs> ms`).
+- The timeout and abort signal only answer the caller early: a synchronous loop cannot be stopped
+  from the calling Worker, so the isolate may keep running (and billing) until its CPU limit.
+- When an execution ends (result, timeout, abort, failure), tool and global calls still pending
+  are answered at once with a fixed rejection (`The script ended before this call settled; await
+every tool call before returning.`) and their signal aborts; calls arriving later get the same
+  rejection without running. A Dynamic Worker counts as in flight while it waits on the host
+  (Cloudflare allows 4 per request, 10 per Durable Object), so an unawaited call never keeps one
+  open. The loaded Worker and its entrypoint are disposed (`Symbol.dispose`) right after.
+- Every execution is one `load()`, which Cloudflare bills as one Dynamic Worker.
+
+Errors: what the script controls reaches the caller as on Node (its thrown error's name, message
+and stack, parse errors, tool and global rejections). Failures of the loader or the isolate itself
+become fixed messages (`sandbox`: `Could not load the script sandbox.`, `The script sandbox
+failed.`; `timeout` past the CPU limit), and a call whose RPC to the host fails rejects with `The
+call could not reach the host.`; the runtime's error text never reaches the caller or the script.
+
+Other differences from the Node executor: `memoryLimitBytes` does not apply (Workers bound isolate
+memory themselves); there is no per-executor concurrency cap; stack frames are not filtered.
 
 ## Classifier tool
 

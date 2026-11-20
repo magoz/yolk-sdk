@@ -197,6 +197,22 @@ export type MicrosoftEmulatorDrills = {
   readonly timestampPrecisionDigits?: number
   /** `true`: folder message pages never carry `@odata.nextLink`. */
   readonly omitNextLink?: boolean
+  /** `true`: the SharePoint site search answers no sites. */
+  readonly siteSearchEmpty?: boolean
+  /** `true`: every site drive answers `driveType: business` (no document library). */
+  readonly siteDrivesNoLibrary?: boolean
+  /** `true`: the chat listing answers its chats without `members`. */
+  readonly chatsOmitMembers?: boolean
+  /** `true`: chat message pages never carry `@odata.nextLink`. */
+  readonly chatMessagesOmitNextLink?: boolean
+  /** `true`: the joined-teams listing answers no teams. */
+  readonly joinedTeamsEmpty?: boolean
+  /** `true`: channel post replies answer `replyToId: null`. */
+  readonly repliesOmitReplyToId?: boolean
+  /** `true`: meeting transcripts name another meeting id. */
+  readonly transcriptsOtherMeeting?: boolean
+  /** `true`: the chat send answers the sent markup unescaped (the message is still recorded). */
+  readonly chatSendUnescaped?: boolean
 }
 
 /** A OneDrive copy the monitor reports on (runtime-only, like the ledger; not in the state). */

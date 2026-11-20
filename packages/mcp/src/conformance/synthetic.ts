@@ -420,6 +420,64 @@ export const legacyListingExchanges = (): ReadonlyArray<WireExchange> => [
   legacyToolsList()
 ]
 
+/** The JSON-RPC id of the `ping` request the synthetic legacy server sends during `initialize`. */
+export const mcpConformanceServerPingRequestId = 'server-ping-1'
+
+/**
+ * The legacy handshake and listing of a server that pings (MCP `2025-11-25`, basic/utilities/ping
+ * and basic/transports "Sending Messages to the Server": the server MAY send requests before the
+ * response on a POST's SSE stream; basic/lifecycle: pings are the requests a server may send
+ * before `notifications/initialized`). The `initialize` answer carries a `ping` request
+ * (`mcpConformanceServerPingRequestId`) before the response; the pinned SDK answers it with an
+ * empty result (`{"result":{},"jsonrpc":"2.0","id":"server-ping-1"}`, its member order) on a new
+ * POST carrying the session but no `mcp-protocol-version` (the initialize result is not processed
+ * yet), sent before `notifications/initialized`; the server accepts it with 202 and no body.
+ */
+export const legacyServerPingListingExchanges = (): ReadonlyArray<WireExchange> => {
+  const url = mcpConformanceSyntheticLegacyUrl
+  const [discover, initialize, ...rest] = legacyListingExchanges()
+
+  if (discover === undefined || initialize === undefined) {
+    throw new Error('the legacy listing has no handshake')
+  }
+
+  const ping = { jsonrpc: '2.0', id: mcpConformanceServerPingRequestId, method: 'ping' }
+
+  return [
+    discover,
+    {
+      request: initialize.request,
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'mcp-session-id': mcpConformanceSyntheticSessionId
+        },
+        chunks: [
+          `event: message\nid: evt-1\ndata: ${JSON.stringify(ping)}\n\n`,
+          `event: message\nid: evt-2\ndata: ${JSON.stringify(
+            success(0, mcpConformanceLegacyInitializeResult)
+          )}\n\n`
+        ]
+      }
+    },
+    {
+      request: {
+        method: 'POST',
+        url,
+        headers: {
+          accept,
+          'content-type': 'application/json',
+          'mcp-session-id': mcpConformanceSyntheticSessionId
+        },
+        body: { result: {}, jsonrpc: '2.0', id: mcpConformanceServerPingRequestId }
+      },
+      response: { status: 202, headers: {}, body: '' }
+    },
+    ...rest
+  ]
+}
+
 /**
  * `callRemoteMcpServerTool` against the legacy server: the handshake, tools/list (id 1), and
  * tools/call (id 2). The answer is SSE with HTTP 200 (a legacy server answers a JSON-RPC error
