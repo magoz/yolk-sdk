@@ -1,4 +1,5 @@
 import {
+  AgentAwaitingInput,
   AgentFailed,
   idleAgentStatus,
   isTerminalAgentEvent,
@@ -22,7 +23,7 @@ import {
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { Data, Equal, Match, Option, Predicate, Struct } from 'effect'
+import { Array as Arr, Data, Equal, Match, Option, Predicate, Struct } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   agentEventToolCallIds,
@@ -179,6 +180,20 @@ export type AgentClientTurnStart = {
    * a new turn (a run that numbers its turns afresh), not a retry of this one.
    */
   readonly closed?: true
+  /**
+   * The starts of the earlier turns seen since `AgentStart` (oldest first; absent in states built
+   * before it): each earlier turn's runs run from its `firstRun` up to the next start's, so a
+   * reconciled earlier turn (`AgentAwaitingInput`, `AgentEnd`) only changes its own runs.
+   */
+  readonly earlier?: ReadonlyArray<AgentClientEarlierTurnStart>
+}
+
+/** An earlier turn's start (`AgentClientTurnStart.earlier`). */
+export type AgentClientEarlierTurnStart = {
+  readonly streamId: string
+  readonly turn: number
+  /** The index in `toolRuns` of the turn's first run. */
+  readonly firstRun: number
 }
 
 export type ApplyAgentEventOptions = {
@@ -295,14 +310,27 @@ const flatMapToolRuns = (
   if (unchanged) return state
 
   const toolRuns = rewritten.flat()
+  const turnStart = state.turnStart
 
-  if (state.turnStart === undefined) return { ...state, toolRuns }
+  if (turnStart === undefined) return { ...state, toolRuns }
 
-  const firstRun = rewritten
-    .slice(0, turnFirstRun(state))
-    .reduce((count, runs) => count + runs.length, 0)
+  // Where a run that was at `index` is now: after the runs the ones before it became.
+  const moved = (index: number) =>
+    rewritten.slice(0, Math.max(index, 0)).reduce((count, runs) => count + runs.length, 0)
 
-  return { ...state, toolRuns, turnStart: { ...state.turnStart, firstRun } }
+  const firstRun = moved(turnFirstRun(state))
+
+  return turnStart.earlier === undefined
+    ? { ...state, toolRuns, turnStart: { ...turnStart, firstRun } }
+    : {
+        ...state,
+        toolRuns,
+        turnStart: {
+          ...turnStart,
+          firstRun,
+          earlier: turnStart.earlier.map(start => ({ ...start, firstRun: moved(start.firstRun) }))
+        }
+      }
 }
 
 const retainSettledToolRuns = (state: AgentClientState) =>
@@ -451,8 +479,11 @@ const answerRunIndex = (
   replayed: ReplayedRun
 ): Option.Option<number> => {
   const index = toolRunIndex(state, callId, replayed)
+  const run = toolRunAt(state, index)
 
-  if (index !== -1) return Option.some(index)
+  // A run holding another request, with no run holding this one: a stale answer (its request's
+  // run was never seen, for example after hydration) answers nothing here.
+  if (run !== undefined) return replayed(run) === false ? Option.none() : Option.some(index)
 
   // A call another turn holds, whose request this answer does not answer: not this call's.
   return state.toolRuns.some(run => toolRunId(run) === callId) ? Option.none() : Option.some(-1)
@@ -467,8 +498,10 @@ const isRequestToolRun = (run: AgentToolRun) =>
 
 /**
  * Whether a call is past its human request: the request answered or cancelled, the approval
- * decided (denied, or granted: the call runs), or the call finished (completed, accepted, errored,
- * provider result). Before it: the model's stream and pending requests.
+ * denied, or the call finished (completed, accepted, errored, provider result). Before it: the
+ * model's stream, pending requests, and a running call: a run that stopped (aborted, failed or
+ * paused) while the call ran is resumed by asking the same call again (an approval, an
+ * interaction under the same request id), which must apply.
  */
 const isPastRequestToolRun = (run: AgentToolRun): boolean =>
   Match.value(run).pipe(
@@ -479,6 +512,7 @@ const isPastRequestToolRun = (run: AgentToolRun): boolean =>
       'QuestionRequested',
       'InputRequested',
       'InteractionRequested',
+      'Executing',
       () => false
     ),
     Match.tag(
@@ -489,7 +523,6 @@ const isPastRequestToolRun = (run: AgentToolRun): boolean =>
       'InputCancelled',
       'InteractionSubmitted',
       'InteractionCancelled',
-      'Executing',
       'Completed',
       'Accepted',
       'Errored',
@@ -499,17 +532,30 @@ const isPastRequestToolRun = (run: AgentToolRun): boolean =>
     Match.exhaustive
   )
 
+/** A finished call the tool batch ran: a replayed start of it must not reopen it. */
+const isFinishedToolRun = (run: AgentToolRun) =>
+  Predicate.isTagged(run, 'Completed') ||
+  Predicate.isTagged(run, 'Accepted') ||
+  Predicate.isTagged(run, 'Errored')
+
 /**
- * Whether a call's run keeps its state when an event sets `run`: an accepted call ignores active
- * runs (replays of its input, request or start), and a call past its request ignores a request for
- * the same call (id, name and arguments equal). The loop asks for a call only until it settles: an
- * invalid input re-pends the same request while the run still pends, and a later turn reusing the
- * id asks on its own run. So such a request, with or without event id, is a replay; a request
- * naming another call with the id is that call's and applies, as does one reaching a run that does
- * not know its call (an answer whose request was never seen).
+ * Whether a call's run keeps its state when an event sets `run`:
+ *
+ * - an accepted call ignores active runs (replays of its input, request or start);
+ * - a completed or errored call ignores a start of the same call (a replayed tool-batch event);
+ * - a call past its request ignores a request for the same call (id, name and arguments equal).
+ *   The loop asks for a call only until it settles: an invalid input re-pends the same request
+ *   while the run still pends, a stopped run asks a running call again, and a later turn reusing
+ *   the id asks on its own run. So such a request, with or without event id, is a replay; a
+ *   request naming another call with the id is that call's and applies, as does one reaching a
+ *   run that does not know its call (an answer whose request was never seen).
  */
 const keepsToolRun = (current: AgentToolRun, run: AgentToolRun) => {
   if (Predicate.isTagged(current, 'Accepted') && isActiveToolRun(run)) return true
+
+  if (Predicate.isTagged(run, 'Executing')) {
+    return isFinishedToolRun(current) && sameCall(run.call)(current) === true
+  }
 
   const requested = isRequestToolRun(run) ? toolRunCall(run) : undefined
 
@@ -778,7 +824,7 @@ export const applyAgentEventWithOptions = (
 
   // Latest first: a later execution's run replaced an earlier one's, which it restores first.
   const started = Predicate.isTagged(route, 'Start')
-    ? discardExecutionOutput(state, [...route.superseded].reverse())
+    ? discardExecutionOutput(state, [...route.superseded].reverse(), event.streamId ?? '')
     : state
 
   // The terminal's messages are the committed transcript; a turn that showed another execution's
@@ -787,7 +833,8 @@ export const applyAgentEventWithOptions = (
     Predicate.isTagged(event, 'AgentEnd') || Predicate.isTagged(event, 'AgentAwaitingInput')
       ? discardExecutionOutput(
           started,
-          disputedAgentTurns(executions, event).map(turn => turn.shown)
+          disputedAgentTurns(executions, event).map(turn => turn.shown),
+          event.streamId
         )
       : started
 
@@ -843,9 +890,22 @@ const nextTurnStart = (
     latest.streamId === streamId &&
     latest.turn === event.turn
 
-  return retried
-    ? state
-    : { ...state, turnStart: { streamId, turn: event.turn, firstRun: state.toolRuns.length } }
+  if (retried) return state
+
+  const started = { streamId, turn: event.turn, firstRun: state.toolRuns.length }
+
+  return latest === undefined
+    ? { ...state, turnStart: started }
+    : {
+        ...state,
+        turnStart: {
+          ...started,
+          earlier: [
+            ...(latest.earlier ?? []),
+            { streamId: latest.streamId, turn: latest.turn, firstRun: turnFirstRun(state) }
+          ]
+        }
+      }
 }
 
 /**
@@ -890,7 +950,8 @@ const executionOutput = (
  */
 const discardExecutionOutput = (
   state: AgentClientState,
-  discarded: ReadonlyArray<AgentExecution<AgentClientExecutionOutput>>
+  discarded: ReadonlyArray<AgentExecution<AgentClientExecutionOutput>>,
+  streamId: string | undefined
 ): AgentClientState => {
   if (discarded.length === 0) return state
 
@@ -900,17 +961,21 @@ const discardExecutionOutput = (
       .flatMap(output => (Predicate.isTagged(output, 'LiveMessage') ? [output.message] : []))
   )
 
-  return discarded.reduce(discardExecutionToolRuns, {
-    ...state,
-    text: '',
-    reasoning: '',
-    liveMessages: state.liveMessages.filter(message => !messages.has(message))
-  })
+  return discarded.reduce<AgentClientState>(
+    (current, execution) => discardExecutionToolRuns(current, execution, streamId),
+    {
+      ...state,
+      text: '',
+      reasoning: '',
+      liveMessages: state.liveMessages.filter(message => !messages.has(message))
+    }
+  )
 }
 
 const discardExecutionToolRuns = (
   state: AgentClientState,
-  execution: AgentExecution<AgentClientExecutionOutput>
+  execution: AgentExecution<AgentClientExecutionOutput>,
+  streamId: string | undefined
 ): AgentClientState => {
   const unacknowledged = new Set(execution.calls)
 
@@ -925,7 +990,7 @@ const discardExecutionToolRuns = (
 
   if (priors.size === 0) return state
 
-  const inTurn = executionTurnRuns(state, execution)
+  const inTurn = executionTurnRuns(state, execution.turn, streamId)
 
   return flatMapToolRuns(state, (run, index) => {
     const prior = inTurn(index) ? priors.get(toolRunId(run)) : undefined
@@ -936,18 +1001,40 @@ const discardExecutionToolRuns = (
 }
 
 /**
- * The runs of an execution's turn: the latest turn's when it is the latest start's turn, else the
- * earlier turns' (a reconciled earlier turn); every run when no start is known.
+ * The runs of an execution's turn (of the run `streamId`, any run when absent): the latest turn's
+ * when it is the latest start's turn; an earlier turn's from its start up to the next start's;
+ * every run when no start is known; none for an earlier turn whose start this state did not see.
  */
 const executionTurnRuns = (
   state: AgentClientState,
-  execution: AgentExecution<AgentClientExecutionOutput>
+  turn: number,
+  streamId: string | undefined
 ): ((index: number) => boolean) => {
-  if (state.turnStart === undefined) return () => true
+  const latest = state.turnStart
+
+  if (latest === undefined) return () => true
 
   const from = turnFirstRun(state)
 
-  return execution.turn === state.turnStart.turn ? index => index >= from : index => index < from
+  const sameRun = (start: { readonly streamId: string }) =>
+    streamId === undefined || start.streamId === streamId
+
+  if (latest.turn === turn && sameRun(latest)) return index => index >= from
+
+  const earlier = latest.earlier ?? []
+
+  const position = earlier.reduce(
+    (found, start, index) => (start.turn === turn && sameRun(start) ? index : found),
+    -1
+  )
+
+  const start = position === -1 ? undefined : earlier[position]
+
+  if (start === undefined) return () => false
+
+  const end = earlier[position + 1]?.firstRun ?? from
+
+  return index => index >= start.firstRun && index < end
 }
 
 /** A run only the model's stream produced (its input, a call, a provider result). */
@@ -971,13 +1058,64 @@ const applyAgentEventRouted = (
     )
   }
 
+  const applied = applyAgentEventUnchecked(state, event, nowMs)
+  const statusEvent = eventForStatus(applied, event)
+
   return rememberEvent(
-    withStatusTree(
-      applyAgentEventUnchecked(state, event, nowMs),
-      nextAgentStatusTree(statusTree(state), event)
-    ),
+    statusEvent === undefined
+      ? applied
+      : withStatusTree(applied, nextAgentStatusTree(statusTree(state), statusEvent)),
     event
   )
+}
+
+/** The run a host event naming `call` acts on (`toolRunIndex`), if any. */
+const hostToolRun = (state: AgentClientState, call: ToolCall) =>
+  toolRunAt(state, toolRunIndex(state, call.id, sameCall(call)))
+
+/** Whether the run of `call` is that call, past its request (`isPastRequestToolRun`). */
+const isPastRequestCall = (state: AgentClientState, call: ToolCall) => {
+  const run = hostToolRun(state, call)
+
+  return run !== undefined && isPastRequestToolRun(run) && sameCall(call)(run) === true
+}
+
+/** Whether the run of `call` is that call, finished (`isFinishedToolRun`). */
+const isFinishedCall = (state: AgentClientState, call: ToolCall) => {
+  const run = hostToolRun(state, call)
+
+  return run !== undefined && isFinishedToolRun(run) && sameCall(call)(run) === true
+}
+
+/**
+ * The event the run's status follows, `undefined` when it must not move it, decided from the
+ * result (`applied`): a start of a call already finished is a replay the state kept; a pause blocks
+ * only on its requests still pending, none (status unchanged) when every one names a call past its
+ * request (request events themselves never move the status).
+ */
+const eventForStatus = (applied: AgentClientState, event: AgentEvent): AgentEvent | undefined => {
+  if (Predicate.isTagged(event, 'ToolExecutionStarted')) {
+    return isFinishedCall(applied, event.call) ? undefined : event
+  }
+
+  if (!Predicate.isTagged(event, 'AgentAwaitingInput')) return event
+
+  const pending = event.requests.filter(request => !isPastRequestCall(applied, request.call))
+
+  if (pending.length === event.requests.length) return event
+
+  if (!Arr.isReadonlyArrayNonEmpty(pending)) return undefined
+
+  return AgentAwaitingInput.make({
+    eventId: event.eventId,
+    createdAtMs: event.createdAtMs,
+    executionId: event.executionId,
+    streamId: event.streamId,
+    requests: pending,
+    messages: event.messages,
+    turns: event.turns,
+    usage: event.usage
+  })
 }
 
 /**

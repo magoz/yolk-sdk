@@ -746,14 +746,21 @@ by id, the last is the latest). The model's events (input, provider results) act
 turn's run; host events act on it first, else a request or tool-batch event on the last earlier run
 holding the same call and an answer on the last earlier run holding its request; the latest turn's
 run also gives way to that earlier run when it holds another call or request (an answer for a call
-another turn holds with another request changes nothing). A replay without event id of an accepted
-(background) call's start or request still leaves its `Accepted` run alone, and with a turn start
-known, the transcript's acknowledgement fences only events naming the acknowledged call, not a later
-call reusing its id. A request event never reopens a run past its request (denied, answered,
-cancelled, submitted, running or finished) when it names the same call, with or without event id;
-a `Denied` run keeps the approval request it denies (`request`) for that check. Until a start is
-seen (and after `AgentStart` or a local submit), tool events act on the last run holding the call
-id, as before; a state built before `turnStart` behaves that way too.
+another turn holds with another request, or that only a run holding another request holds, changes
+nothing). A replay without event id of an accepted (background) call's start or request still leaves
+its `Accepted` run alone, and with a turn start known, the transcript's acknowledgement fences only
+events naming the acknowledged call, not a later call reusing its id. A request event never reopens
+a run past its request (denied, answered, cancelled, submitted or finished) when it names the same
+call, with or without event id; a `Denied` run keeps the approval request it denies (`request`) for
+that check. A running call is not past it: a run stopped while the call ran asks it again when it
+resumes (an approval, or an interaction under the same request id), and that request applies. A
+replayed start of the same call leaves a completed, errored or accepted run alone. The status
+follows only what applied: a pause blocks only on its requests still pending (none: the status
+stays), and a replayed start of a finished call leaves it. A turn reconciled after later turns
+started (`AgentAwaitingInput`, `AgentEnd`) changes only its own runs, between its start and the next
+(`turnStart.earlier`). Until a start is seen (and after `AgentStart` or a local submit), tool events
+act on the last run holding the call id, as before; a state built before `turnStart` behaves that
+way too.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the

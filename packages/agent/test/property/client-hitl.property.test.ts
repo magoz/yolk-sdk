@@ -416,6 +416,10 @@ describe('client HITL property tests', () => {
         AgentStart.make({}),
         ToolApprovalRequested.make({ call, request: approvalRequest }),
         QuestionRequested.make({ request: questionRequest }),
+        // An answer acts on the run holding its request: an input answer needs its request asked.
+        ...(kind === 'inputSubmitted' || kind === 'inputCancelled'
+          ? [InputRequested.make({ request: inputRequest })]
+          : []),
         terminalEvent(kind),
         terminalEvent(kind)
       ])

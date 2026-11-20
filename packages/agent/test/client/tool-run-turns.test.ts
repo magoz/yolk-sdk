@@ -42,9 +42,9 @@ import {
   applyAgentEvent,
   initialAgentClientState,
   reduceAgentEvents,
-  type AgentClientState,
-  type AgentToolRun
+  type AgentClientState
 } from '../../src/client'
+import { AgentToolRun } from '../../src/client/state.ts'
 
 // Providers that number calls per response reuse `call_0` in every turn: each turn's call gets its
 // own tool run, and replays without event ids of an earlier turn's events act on the earlier run.
@@ -546,6 +546,130 @@ describe('tool runs of calls that reuse an id across turns', () => {
       'call_0 {"q":"Oslo"}:ProviderCompleted',
       'call_0 {"city":"Lyon"}:InputReady'
     ])
+  })
+
+  it("reconciles an earlier turn's runs only, not an older turn's run with the id", () => {
+    // Turn 1 keeps a provider result under `call_0`. Turn 2 runs twice: the newer execution, shown,
+    // reuses `call_0`; the older one committed. Turn 3 starts, then the pause commits turn 2's
+    // older answer: only turn 2's call is removed.
+    const search = ToolCall.make({ id: 'call_0', name: 'web_search', params: { q: 'Oslo' } })
+    const found = ToolResult.make({ toolCallId: 'call_0', content: 'Oslo' })
+
+    const provided = AssistantAgentMessage.make({
+      parts: [
+        ProviderToolCallPart.make({ call: search }),
+        AssistantTextPart.make({ content: 'Found Oslo' })
+      ]
+    })
+
+    const committed = answer('Oslo it is')
+    const shown = answer('Now Lyon', [lyon])
+    const later = answer('Turn three')
+
+    const state = reduce([
+      LLMStreamStart.make({ ...identity('tagged', 'model-1:1'), turn: 1 }),
+      ProviderToolResult.make({ ...identity('tagged', 'model-1:1'), call: search, result: found }),
+      AssistantMessageEvent.make({ ...identity('tagged', 'model-1:1'), message: provided }),
+      LLMStreamStart.make({ ...identity('tagged', 'model-2:1'), turn: 2 }),
+      AssistantMessageEvent.make({ ...identity('tagged', 'model-2:1'), message: committed }),
+      LLMStreamStart.make({ ...identity('tagged', 'model-2:2'), turn: 2 }),
+      ToolInputEnd.make({ ...identity('tagged', 'model-2:2'), call: lyon }),
+      AssistantMessageEvent.make({ ...identity('tagged', 'model-2:2'), message: shown }),
+      LLMStreamStart.make({ ...identity('tagged', 'model-3:1'), turn: 3 }),
+      AssistantMessageEvent.make({ ...identity('tagged', 'model-3:1'), message: later })
+    ])
+
+    expect(runs(state)).toEqual([
+      'call_0 {"q":"Oslo"}:ProviderCompleted',
+      'call_0 {"city":"Lyon"}:InputReady'
+    ])
+
+    const paused = reduce(
+      [
+        AgentAwaitingInput.make({
+          ...host(),
+          requests: [
+            QuestionRequest.make({
+              requestId: 'question:call_7',
+              toolCallId: 'call_7',
+              call: ToolCall.make({ id: 'call_7', name: 'question', params: {} }),
+              questions: [QuestionPrompt.make({ id: 'go', prompt: 'Go on?' })]
+            })
+          ],
+          messages: [provided, committed, later],
+          turns: 3,
+          usage: zeroAgentUsage
+        })
+      ],
+      state
+    )
+
+    expect(runs(paused)).toEqual(['call_0 {"q":"Oslo"}:ProviderCompleted'])
+  })
+
+  describe("the latest turn's start after earlier runs are removed", () => {
+    it('still holds the turn when a fenced replay drops an earlier stale run', () => {
+      // A hydrated state holds a stale pending approval of the acknowledged call (turn 1).
+      const hydrated: AgentClientState = {
+        ...initialAgentClientState,
+        messages: [startedExport, acknowledged],
+        toolRuns: [
+          AgentToolRun.ApprovalRequested({
+            call: exporting,
+            request: ToolApprovalRequest.make({
+              requestId: 'approval:export',
+              toolCallId: 'call_0',
+              call: exporting
+            })
+          })
+        ]
+      }
+
+      const streaming = reduce(
+        [
+          LLMStreamStart.make({ ...host(), turn: 2 }),
+          ToolInputStart.make({ ...host(), id: 'call_1', name: 'weather' }),
+          // The replayed start of the acknowledged call drops the stale run before the turn's.
+          ToolExecutionStarted.make({ call: exporting })
+        ],
+        hydrated
+      )
+
+      expect(runs(streaming)).toEqual(['InputStreaming'])
+
+      const ended = reduce(
+        [
+          ToolInputDelta.make({ ...host(), id: 'call_1', delta: '{}' }),
+          ToolInputEnd.make({
+            ...host(),
+            call: ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+          })
+        ],
+        streaming
+      )
+
+      expect(runs(ended)).toEqual(['call_1 {}:InputReady'])
+    })
+
+    it('still holds the turn when a retried start drops an earlier unfinished input', () => {
+      const state: AgentClientState = {
+        ...initialAgentClientState,
+        toolRuns: [
+          AgentToolRun.InputStreaming({ id: 'call_9', name: 'weather', input: '{' }),
+          AgentToolRun.InputReady({ call: bergen })
+        ],
+        turnStart: { streamId: '', turn: 2, firstRun: 1 }
+      }
+
+      // An untagged retry of turn 2 drops the unfinished input, then streams its call again.
+      const retried = reduce(
+        [LLMStreamStart.make({ turn: 2 }), ToolInputEnd.make({ call: bergen })],
+        state
+      )
+
+      expect(runs(retried)).toEqual(['call_0 {"city":"Bergen"}:InputReady'])
+      expect(retried.turnStart?.firstRun).toBe(0)
+    })
   })
 
   it('keeps one run per call id until a turn start is seen (states built before turn tracking)', () => {

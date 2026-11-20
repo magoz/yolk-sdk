@@ -34,13 +34,26 @@ import {
   ToolResult,
   interactionRequestId,
   makeBackgroundToolAcceptedResult,
+  AgentAwaitingInput,
+  AgentStart,
+  ToolApprovalGranted,
+  zeroAgentUsage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
-import { reduceAgentEvents, type AgentClientState, type AgentToolRun } from '../../src/client'
+import {
+  applyAgentEvent,
+  initialAgentClientState,
+  markAgentAborted,
+  reduceAgentEvents,
+  toolRunsFromHitlRequests,
+  type AgentClientState,
+  type AgentToolRun
+} from '../../src/client'
 
 // A request event (approval, question, input, interaction) for a call already past its request
-// (answered, cancelled, denied, running or finished) is a replay: the loop asks for a call only
-// until it settles, and a later turn reusing the id asks on its own run.
+// (answered, cancelled, denied or finished) is a replay: the loop asks for a call only until it
+// settles, and a later turn reusing the id asks on its own run. A running call is not past it: a
+// run that stopped while the call ran asks it again when it resumes.
 
 const deploy = ToolCall.make({ id: 'call_0', name: 'deploy', params: { env: 'prod' } })
 
@@ -193,12 +206,6 @@ const settles: ReadonlyArray<Settle> = [
     tag: 'Denied'
   },
   {
-    title: 'approved call running',
-    kind: 'approval',
-    events: [ran(deploy).started],
-    tag: 'Executing'
-  },
-  {
     title: 'approved call completed',
     kind: 'approval',
     events: [ran(deploy).started, ran(deploy).completed],
@@ -260,15 +267,6 @@ const settles: ReadonlyArray<Settle> = [
       })
     ],
     tag: 'InteractionCancelled'
-  },
-  {
-    title: 'interaction running',
-    kind: 'interaction',
-    events: [
-      InteractionSubmitted.make({ eventId: eventId(), response: interactionResponse('submitted') }),
-      ran(doc).started
-    ],
-    tag: 'Executing'
   }
 ]
 
@@ -338,7 +336,12 @@ describe('a replayed request after its call settled', () => {
 
 describe('a request that is not a replay', () => {
   it('applies to a call reusing the id with other arguments', () => {
-    const settled = reduceAgentEvents([asks.approval.request(), ran(deploy).started])
+    const settled = reduceAgentEvents([
+      asks.approval.request(),
+      ran(deploy).started,
+      ran(deploy).completed
+    ])
+
     const staging = ToolCall.make({ id: 'call_0', name: 'deploy', params: { env: 'staging' } })
 
     const next = reduceAgentEvents(
@@ -379,5 +382,175 @@ describe('a request that is not a replay', () => {
     expect(repended.toolRuns).toMatchObject([
       { _tag: 'InputRequested', request: { requestId: 'input:2' } }
     ])
+  })
+})
+
+describe('a running call asked again', () => {
+  const granted = ToolApprovalResponse.make({
+    requestId: approval.requestId,
+    toolCallId: 'call_0',
+    decision: 'approved',
+    source: 'user'
+  })
+
+  const running = () =>
+    reduceAgentEvents([
+      ...asked('approval'),
+      ToolApprovalGranted.make({ eventId: eventId(), toolCallId: 'call_0', response: granted }),
+      ran(deploy).started
+    ])
+
+  it('applies an approval a resumed run asks again for a call it was running', () => {
+    // The run stopped while the call ran (no terminal event reached the client); its resumed step
+    // asks the same call again.
+    const asking = reduceAgentEvents([asks.approval.request(eventId())], running())
+
+    expect(asking.toolRuns).toMatchObject([{ _tag: 'ApprovalRequested', request: approval }])
+  })
+
+  it('applies an approval asked again after the person stopped the run and a new run started', () => {
+    const restarted = reduceAgentEvents(
+      [AgentStart.make({ eventId: eventId() }), asks.approval.request(eventId())],
+      markAgentAborted(running())
+    )
+
+    expect(tags(restarted)).toEqual(['ApprovalRequested'])
+  })
+
+  it('applies an interaction asked again after an aborted run kept its running call', () => {
+    // An accepted interaction runs (`Executing` with `interaction`); stopping keeps that run.
+    const interacting = reduceAgentEvents([
+      ...asked('interaction'),
+      InteractionSubmitted.make({ eventId: eventId(), response: interactionResponse('submitted') }),
+      ran(doc).started
+    ])
+
+    expect(interacting.toolRuns).toMatchObject([{ _tag: 'Executing', interaction: true }])
+
+    const restarted = reduceAgentEvents(
+      [AgentStart.make({ eventId: eventId() }), asks.interaction.request(eventId())],
+      markAgentAborted(interacting)
+    )
+
+    expect(restarted.toolRuns).toMatchObject([
+      { _tag: 'InteractionRequested', request: interaction }
+    ])
+  })
+})
+
+describe('a stale answer', () => {
+  it('leaves a run holding another request alone (an answer to a request never seen)', () => {
+    const later = QuestionRequest.make({
+      requestId: 'question:call_0:2',
+      toolCallId: 'call_0',
+      call: unit,
+      questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Kelvin?' })]
+    })
+
+    // Hydrated from the pending requests, without the earlier request's run.
+    const hydrated: AgentClientState = {
+      ...initialAgentClientState,
+      toolRuns: toolRunsFromHitlRequests([later])
+    }
+
+    const answered = applyAgentEvent(
+      hydrated,
+      QuestionAnswered.make({ response: questionResponse('answered') })
+    )
+
+    expect(answered.toolRuns).toEqual(hydrated.toolRuns)
+  })
+})
+
+describe('the run status for a replay', () => {
+  it('stays when a kept request names a call past its request (requests never move it)', () => {
+    const settled = reduceAgentEvents([
+      ...asked('question'),
+      QuestionAnswered.make({ eventId: eventId(), response: questionResponse('answered') })
+    ])
+
+    for (const ids of ['without', 'with'] as const) {
+      const replayed = reduceAgentEvents(
+        [asks.question.request(ids === 'with' ? eventId() : undefined)],
+        settled
+      )
+
+      expect(replayed.toolRuns).toEqual(settled.toolRuns)
+      expect(replayed.status).toEqual(settled.status)
+    }
+  })
+
+  it('stays when a pause asks only for calls past their request', () => {
+    const settled = reduceAgentEvents([
+      ...asked('question'),
+      QuestionAnswered.make({ eventId: eventId(), response: questionResponse('answered') })
+    ])
+
+    const paused = applyAgentEvent(
+      settled,
+      AgentAwaitingInput.make({
+        requests: [question],
+        messages: [],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+    )
+
+    expect(paused.status).toEqual(settled.status)
+  })
+
+  it('blocks only on the requests still pending in a pause', () => {
+    const other = ToolCall.make({ id: 'call_1', name: 'deploy', params: { env: 'staging' } })
+
+    const pending = ToolApprovalRequest.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      call: other
+    })
+
+    const state = reduceAgentEvents([
+      ...asked('question'),
+      QuestionAnswered.make({ eventId: eventId(), response: questionResponse('answered') }),
+      ToolApprovalRequested.make({ eventId: eventId(), call: other, request: pending }),
+      AgentAwaitingInput.make({
+        eventId: eventId(),
+        requests: [question, pending],
+        messages: [],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+    ])
+
+    expect(state.status).toMatchObject({
+      _tag: 'Blocked',
+      kind: 'permission',
+      requests: [pending]
+    })
+  })
+})
+
+describe('a replayed start of a finished call', () => {
+  it.each([
+    ['completed', ran(deploy).completed, 'Completed'],
+    ['errored', ran(deploy).errored, 'Errored']
+  ] as const)('keeps the %s run and the run status', (_, finished, tag) => {
+    const settled = reduceAgentEvents([asks.approval.request(), ran(deploy).started, finished])
+
+    expect(tags(settled)).toEqual([tag])
+
+    for (const ids of ['without', 'with'] as const) {
+      const replayed = reduceAgentEvents(
+        [
+          ToolExecutionStarted.make({
+            eventId: ids === 'with' ? eventId() : undefined,
+            call: deploy
+          })
+        ],
+        settled
+      )
+
+      expect(replayed.toolRuns).toEqual(settled.toolRuns)
+      expect(replayed.status).toEqual(settled.status)
+    }
   })
 })
