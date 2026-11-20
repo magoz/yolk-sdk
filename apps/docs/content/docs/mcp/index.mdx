@@ -320,7 +320,8 @@ No tool call outlives `handleHttpRequest`'s Effect, so you can provide its requi
 
 `@yolk-sdk/mcp/conformance` (experimental) holds nine read-only conformance cases that check the
 wire claims the remote client relies on, against any MCP server you point them at, plus the opt-in
-`mcpElicitationDeclarationCase` for hosts that declare form elicitation. See
+`mcpElicitationDeclarationCase` for hosts that declare form elicitation and the opt-in
+`mcpServerPingCase` for legacy servers that ping their clients. See
 [MCP conformance](../api-reference/conformance#mcp-conformance).
 
 ## Security defaults

@@ -20,31 +20,37 @@
  * route recorded on the arrival origin.
  *
  * It never imports SDK code: its answers are the sixteen synthetic `@yolk-sdk/mcp/conformance`
- * fixtures copied as data (`src/mcp/recordings.ts`) and the eight derived
- * `@yolk-sdk/connectors/afloat/conformance` fixtures copied as data
- * (`src/mcp/afloat-recordings.ts`; derived from the provider's source, not recorded live, all
- * unverified; one listing page of the published tool subset, the read call of `list-invoices`, its
- * tool error, the absent tool, and the 401; answering those two derived `tools/call` fixtures, not
- * only recorded calls, is in scope by the owner's decision), and every manifest row names the
- * conformance cases whose fixtures it answers (`mcpEmulatorRoutes`: one
+ * fixtures copied as data (`src/mcp/recordings.ts`, with the fixture of the opt-in
+ * `mcp.legacy.server-ping` case) and the eight derived `@yolk-sdk/connectors/afloat/conformance`
+ * fixtures copied as data (`src/mcp/afloat-recordings.ts`; derived from the provider's source, not
+ * recorded live, all unverified; one listing page of the published tool subset, the read call of
+ * `list-invoices`, its tool error, the absent tool, and the 401; answering those two derived
+ * `tools/call` fixtures, not only recorded calls, is in scope by the owner's decision), and every
+ * manifest row names the conformance cases whose fixtures it answers (`mcpEmulatorRoutes`: one
  * `RPC <origin><path>#<method>` row per recorded JSON-RPC method of each profile, plus the legacy
- * `GET` row; no row writes anything in a real service). Response behaviour comes only from the
- * fixtures, byte for byte: a JSON-RPC POST is answered only when it equals a recorded request
- * within the latitude below, with the recorded answer, the request id substituted at exactly the
- * recorded place (the top-level `id` of a JSON answer, or the `id` of the SSE response event's
- * payload; notification events and SSE `id:` lines stay byte for byte; an answer that does not
- * carry the recorded request id, such as the legacy era probe's `id: null` error, is unchanged).
- * The legacy `initialize` mints a session `yolk-emu-session-<n>` (`n` from a counter that never
- * resets, a form no seed holds), answered in the recorded `mcp-session-id` header;
- * `notifications/initialized` on that session answers the recorded 202 and makes it ready; on a
- * ready session `tools/list`, `tools/call`, and the standing `GET` (the recorded 405) answer the
- * recordings with the session's id. At most 256 sessions are held: another `initialize` is refused
- * before any fault. `reset` and `seed` clear the sessions. The seed only selects which recorded
- * modern listing `tools/list` answers (`modernListing`: `one-page`, the default, or `two-pages`,
- * whose first page issues the recorded cursor in the generation that first issues it, and
- * `<cursor>.g<generation>` after a reset or seed; the second page answers only the cursor issued in
- * the current generation). Every plan prepares its answer before anything is written; its commit
- * (minting a session, readying one, issuing a cursor) runs only when no fault answers the request.
+ * `GET` row and the synthetic legacy `response:ping` row; no row writes anything in a real
+ * service). Response behaviour comes only from the fixtures, byte for byte: a JSON-RPC POST is
+ * answered only when it equals a recorded request within the latitude below, with the recorded
+ * answer, the request id substituted at exactly the recorded place (the top-level `id` of a JSON
+ * answer, or the `id` of the SSE response event's payload; notification events and SSE `id:` lines
+ * stay byte for byte; an answer that does not carry the recorded request id, such as the legacy era
+ * probe's `id: null` error, is unchanged). The legacy `initialize` mints a session
+ * `yolk-emu-session-<n>` (`n` from a counter that never resets, a form no seed holds), answered in
+ * the recorded `mcp-session-id` header; `notifications/initialized` on that session answers the
+ * recorded 202 and makes it ready; on a ready session `tools/list`, `tools/call`, and the standing
+ * `GET` (the recorded 405) answer the recordings with the session's id. At most 256 sessions are
+ * held: another `initialize` is refused before any fault. `reset` and `seed` clear the sessions.
+ * The seed only selects which recorded modern listing `tools/list` answers (`modernListing`:
+ * `one-page`, the default, or `two-pages`, whose first page issues the recorded cursor in the
+ * generation that first issues it, and `<cursor>.g<generation>` after a reset or seed; the second
+ * page answers only the cursor issued in the current generation), and which recorded synthetic
+ * legacy `initialize` answer is sent (`legacyInitialize`: `plain`, the default, or `server-ping`,
+ * the opt-in server ping fixture's answer, which sends a `ping` request before its response; that
+ * session then awaits the client's answer to the ping, accepted once with the recorded 202, in
+ * either phase, on the `response:ping` row, whose commit clears the mark; the Figma profile records
+ * no ping and ignores the choice). Every plan prepares its answer before anything is written; its
+ * commit (minting a session, readying one, accepting the answer to a ping, issuing a cursor) runs
+ * only when no fault answers the request.
  * Status faults (400-599) and `truncate-after-chunks` faults apply only after a request is admitted
  * and planned, and a faulted request writes nothing: a truncation sends the prepared answer cut
  * short and never runs the commit, so a truncated `initialize` holds no session and leaves the
@@ -55,8 +61,10 @@
  * or body, a constant reason, and the route template or row), that writes nothing and uses up no
  * fault.
  *
- * Not emulated: `DELETE` (the client never sends it), `ping`, `resources/*`, `prompts/*`,
- * `logging/*`, `completion/*`, `tasks/*`, JSON-RPC batches and client-sent responses, a JSON body
+ * Not emulated: `DELETE` (the client never sends it), the client's own `ping`, `resources/*`,
+ * `prompts/*`, `logging/*`, `completion/*`, `tasks/*` (`@yolk-sdk/mcp/client` sends none of them),
+ * JSON-RPC batches, client-sent responses other than the answer to the recorded server ping, a JSON
+ * body
  * repeating a key (the wrapper's opt-in `uniqueJsonKeys`), `mcp-*` headers no recording carries
  * (such as `mcp-param-*`), cursors this emulator did not issue, any other tool or arguments, any
  * other origin or path, and a missing `Authorization` (no fixture records the answer to one).
@@ -109,14 +117,16 @@
  * characters where the recording has an id; any non-empty `name` and `version` (and no other key)
  * in the `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session
  * id this emulator minted on the same profile since the last reset or seed where the recording
- * sends `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise); and, with
- * the seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
- * second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
- * Everything else (another origin or path, any query, other HTTP methods such as `DELETE` or a
- * `GET` on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with
- * it on the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one
- * starting with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
- * `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a JSON body
+ * sends `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer
+ * to the server ping, ready otherwise); and, with the seed's `two-pages` listing, the cursor this
+ * emulator issued in the current generation on the second page. `Authorization` must be exactly
+ * `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any query,
+ * other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without
+ * `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
+ * remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
+ * fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches,
+ * client-sent responses other than the answer to the recorded server ping (exactly as recorded, the
+ * server's ping id included, on a session awaiting it), other members, a JSON body
  * repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
  * (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
  * the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
@@ -143,7 +153,7 @@ import {
 } from './mcp/api.ts'
 import { mcpEmulatorAfloatFixtures } from './mcp/afloat-recordings.ts'
 import { mcpEmulatorFigmaFixtures } from './mcp/figma-recordings.ts'
-import { mcpEmulatorFixtures } from './mcp/recordings.ts'
+import { mcpEmulatorFixtures, mcpEmulatorServerPingFixtures } from './mcp/recordings.ts'
 import {
   buildSeedState,
   decodeState,
@@ -181,6 +191,7 @@ export { emulatorEvidenceHeader } from './route-evidence.ts'
 export { isMcpEmulatedRequestId, mcpEmulatorDrillKnobs, type McpEmulatorDrills } from './mcp/api.ts'
 
 export {
+  McpEmulatorLegacyInitialize,
   McpEmulatorModernListing,
   McpEmulatorSeed,
   McpEmulatorSession,
@@ -206,6 +217,7 @@ export { mcpEmulatorFigmaFixtures } from './mcp/figma-recordings.ts'
 
 export {
   mcpEmulatorFixtures,
+  mcpEmulatorServerPingFixtures,
   type McpRecordedExchange,
   type McpRecordedFixture,
   type McpRecordedRequest,
@@ -214,7 +226,8 @@ export {
 
 /**
  * Route evidence manifest: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
- * each profile, plus the legacy `GET` row, with the conformance cases whose (synthetic,
+ * each profile, plus the legacy `GET` row and the synthetic legacy `response:ping` row (the
+ * client's answer to the recorded server ping), with the conformance cases whose (synthetic,
  * unverified) fixtures each answers. No row writes anything. Kept in sync with the handlers by
  * construction (both come from one route table).
  */
@@ -261,7 +274,10 @@ export class McpEmulatorInputInvalid extends Data.TaggedError('McpEmulatorInputI
 }
 
 export type McpEmulatorOptions = {
-  /** Typed seed; defaults to the one-page modern listing (sessions are never seeded). */
+  /**
+   * Typed seed; defaults to the one-page modern listing and the plain legacy `initialize` (sessions
+   * are never seeded).
+   */
   readonly seed?: McpEmulatorSeed
   /** Drill knobs (tests only): make the emulator disagree with one conformance claim. */
   readonly drills?: McpEmulatorDrills
@@ -314,6 +330,7 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
   // JSON form would answer other bytes, so it fails here, loudly.
   const recordingProblems = mcpRecordingProblems([
     ...mcpEmulatorFixtures,
+    ...mcpEmulatorServerPingFixtures,
     ...mcpEmulatorAfloatFixtures,
     ...mcpEmulatorFigmaFixtures
   ])
@@ -335,7 +352,8 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
       readCallAnswersToolError: drills.readCallAnswersToolError === true,
       invalidCallAnswersRpcError: drills.invalidCallAnswersRpcError === true,
       absentCallAnswersResult: drills.absentCallAnswersResult === true,
-      unauthorizedWithoutChallenge: drills.unauthorizedWithoutChallenge === true
+      unauthorizedWithoutChallenge: drills.unauthorizedWithoutChallenge === true,
+      pingAnswerRejected: drills.pingAnswerRejected === true
     },
     reservedDigest: mcpBearerDigest(mcpEmulatorReservedInvalidCredential, mcpEmulatorOrigin),
     afloatReservedDigest: mcpBearerDigest(afloatReservedRemainder, mcpEmulatorAfloatOrigin),
@@ -380,7 +398,10 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
         cursorGeneration: runtime.generation,
         issuedCursor: runtime.issuedCursor ?? null
       }),
-      seedSummary: state => ({ modernListing: state.modernListing }),
+      seedSummary: state => ({
+        modernListing: state.modernListing,
+        legacyInitialize: state.legacyInitialize
+      }),
       inputInvalid
     },
     statefulCoreRuntime({ name: 'mcp', initial, decodeState, inputInvalid })

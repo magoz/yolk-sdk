@@ -143,7 +143,10 @@
 - `src/conformance/` owns the generic MCP cases (`mcpConformanceCases`, nine `read` cases; plus
   the opt-in `mcpElicitationDeclarationCase` and its `mcpConformanceElicitationFixtures`, kept out
   of the default suite, the emulator copies and the provider fixtures because the declaration is a
-  host opt-in),
+  host opt-in; and the opt-in `mcpServerPingCase` (`mcp.legacy.server-ping`) and its
+  `mcpConformanceServerPingFixtures`, kept out of the default suite and the provider fixtures
+  because a server MAY ping but never must, copied into the emulator, which answers it on the
+  synthetic legacy profile under the seed `legacyInitialize: 'server-ping'`),
   `McpConformanceTarget`, `McpConformanceConfig`, the observing `HttpClient`, the era filter
   (`selectMcpConformanceCases`), and the synthetic fixtures. Only this directory may import
   `@yolk-sdk/conformance/*` (`scripts/check-package-boundaries.ts`); client and server code never
@@ -194,6 +197,23 @@
   test. The sixteen fixtures are copied as data into `packages/emulators/src/mcp/recordings.ts`
   (the `@yolk-sdk/emulators/mcp` emulator); `packages/emulators/test/mcp.test.ts` fails when the
   copy drifts, so a fixture change updates that copy in the same change.
+- Method coverage (spec: modelcontextprotocol.io, revisions `2025-11-25` and `2026-07-28`, the two
+  the pinned SDK speaks). The client sends only `server/discover`, `initialize`,
+  `notifications/initialized`, the standing GET, `tools/list` and `tools/call`, plus the SDK's
+  automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler; legacy
+  only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5 and 7,
+  and the SDK drops inbound requests on modern connections). That answer is the only client-sent
+  response a compliant server can provoke (Yolk declares no `roots`, `sampling` or legacy
+  `elicitation` capability), and `mcp.legacy.server-ping` covers it (`2025-11-25`
+  basic/utilities/ping, basic/transports "Sending Messages to the Server" items 3, 4 and 6,
+  basic/lifecycle). No case covers what the client never sends: `DELETE` (basic/transports,
+  "Session Management" item 5 says a client SHOULD terminate a session it no longer needs, but
+  `close()` only aborts and Yolk never calls the SDK's `terminateSession()`; `2026-07-28` has no
+  sessions), its own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
+  (removed in `2026-07-28`; servers' `notifications/message` are ignored and already in every legacy
+  fixture answer), `tasks/*` (task-augmented requests need a declared capability in `2025-11-25`;
+  an extension in `2026-07-28`) and JSON-RPC batches (removed in `2025-06-18`; basic/transports item
+  3 of `2025-11-25` allows one message per POST). Add a case when client code starts sending one.
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
   - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
@@ -261,3 +281,8 @@
   apply.
   `elicitation-declaration.test.ts` replays the opt-in elicitation case on both eras (exact
   requests), drills a rejected listing, and runs it in-process.
+  `server-ping.test.ts` replays the opt-in server ping case (exact requests and MCP headers), drills
+  a rejected or bodied 202, a server that never pings and a modern target, passes other ping ids,
+  and runs the default listing cases against the pinging server (`mcp.transport.response-encoding`
+  skips client-sent responses). It does not run in-process: `makeMcpToolServer` is modern and never
+  pings; the emulator's cross-checks cover it.
