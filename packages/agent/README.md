@@ -742,7 +742,12 @@ the request it answers (a denial: a pending approval), else on nothing. A reques
 cancelled, denied or finished keeps its state against a request for the same call, with or without
 event id, and the `useAgentChat` reducer keeps its status when every request of an
 `AgentAwaitingInput` names such a call (a replayed pause does not block the run again) and blocks
-only on the pending requests of a pause that names some. The loop asks for a call only until it
+only on the pending requests of a pause that names some. A host that folds status itself beside
+the projection uses `stepAgentChatProjection`: it applies the event as
+`applyAgentEventToChatProjection` does and returns `statusEvent`, the event the reducer's status
+follows (the pause with only its pending requests), or `undefined` when the status must not move
+(a seen or dropped event, a replayed start of a finished call, a pause naming only such calls); fold
+it with `nextAgentStatus` or collect it for `agentStatusFromEvents`. The loop asks for a call only until it
 has a result or used an answer: an invalid input answer re-pends the same request while the part
 is still pending (only a valid payload emits `InputSubmitted`), a running call has no result, so
 an abort leaves it running and the next run that resumes it asks again (the card shows), and a

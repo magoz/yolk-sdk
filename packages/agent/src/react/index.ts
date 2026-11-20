@@ -10,12 +10,14 @@ export {
   isCompletedChatToolPart,
   makeAgentChatEventProjectionState,
   markChatRunStart,
-  reduceAgentChatState
+  reduceAgentChatState,
+  stepAgentChatProjection
 } from './chat-core.ts'
 
 export type {
   ActiveChatToolPart,
   AgentChatEventProjectionState,
+  AgentChatProjectionStep,
   AgentChatState,
   AgentChatTurnStart,
   CompletedChatToolPart

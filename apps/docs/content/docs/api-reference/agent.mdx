@@ -493,6 +493,7 @@ helpers. Hosts own auth, pending-request matching, and server validation.
 | `useAgentChat`                                                                                                                        | headless chat hook                            |
 | `buildAgentChatItems`                                                                                                                 | render-friendly item model                    |
 | `applyAgentEventToChatProjection`                                                                                                     | replay-safe durable projection                |
+| `stepAgentChatProjection`, `AgentChatProjectionStep`                                                                                  | projection plus the event status follows      |
 | `makeAgentChatEventProjectionState`                                                                                                   | projection initial state                      |
 | `markChatRunStart`                                                                                                                    | run start after a snapshot rebuild            |
 | `applyAgentEventToChatMessages`                                                                                                       | ephemeral stream reducer                      |

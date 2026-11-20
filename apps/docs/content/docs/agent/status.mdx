@@ -59,9 +59,32 @@ pending `AgentRetry` while retrying.
 The `useAgentChat` reducer and `reduceAgentEvents` also fence replays without `eventId`: a replayed
 `AgentAwaitingInput` blocks only on the requests their chat or tool runs still show pending, and
 leaves the status as it was when every request names a call (same id, name and arguments) already
-answered, cancelled, denied or finished. A host that folds status itself beside
-`applyAgentEventToChatProjection` should skip such a pause the same way, or rely on `eventId`
-dedupe; otherwise the run shows `Blocked` with no card to answer.
+answered, cancelled, denied or finished. A replayed start of a finished call leaves it too.
+
+A host that keeps a chat projection and folds status itself gets the same fence from
+`stepAgentChatProjection` in `@yolk-sdk/agent/react`. It applies the event as
+`applyAgentEventToChatProjection` does and returns `statusEvent`: the event to fold, or
+`undefined` when the status must not move (an event seen before, one from a superseded or stale
+model step, a replayed start of a finished call, a pause whose every call is past its request).
+A pause naming some such calls comes back with only its pending requests. Folding every event
+instead would show `Blocked` with no card to answer.
+
+```ts
+import { idleAgentStatus, nextAgentStatus } from '@yolk-sdk/agent/protocol'
+import { makeAgentChatEventProjectionState, stepAgentChatProjection } from '@yolk-sdk/agent/react'
+
+let projection = makeAgentChatEventProjectionState()
+let status = idleAgentStatus
+
+for (const event of events) {
+  const step = stepAgentChatProjection(projection, event)
+  projection = step.projection
+  if (step.statusEvent !== undefined) status = nextAgentStatus(status, step.statusEvent)
+}
+```
+
+To use `agentStatusFromEvents` (or `agentStatusTreeFromEvents`), collect the `statusEvent`s that
+are not `undefined` and pass those instead of the raw events.
 
 ## From stored state
 
