@@ -136,7 +136,7 @@ never from the error message. It reads `output` item by item: valid items still 
 call the stream never emitted still runs, and the stop reason is `tool_use` when any call was
 emitted, otherwise `stop`; items that do not decode are dropped. A function call that does not decode
 must replay one the stream already emitted (same `call_id` or item `id`), and a message that does not
-decode must be one whose text already streamed: otherwise the response fails as a non-retryable
+decode and carries text must be one whose text already streamed: otherwise the response fails as a non-retryable
 `invalid_response`, since ending the turn would lose that call or answer. The response's `usage` is
 reported when it decodes; a streamed `Done` is marked `usageUnavailable` only when it is missing or
 does not decode. Unrelated invalid responses still fail. A stream cut before `response.completed` also completes (EOF

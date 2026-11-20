@@ -565,8 +565,8 @@ Messages streams fail without `message_stop`, so they never complete without a t
 Codex's missing-output recovery (streamed or JSON) reads the final `output` item by item: valid
 items still count, so a function call the stream never emitted still runs (`tool_use`), and items
 missing a required key are dropped. A function call that does not decode must replay one the stream
-already emitted (same `call_id` or item `id`), and a message that does not decode must be one whose
-text already streamed; otherwise the response fails as a non-retryable `invalid_response` rather
+already emitted (same `call_id` or item `id`), and a message that does not decode and carries text
+must be one whose text already streamed; otherwise the response fails as a non-retryable `invalid_response` rather
 than end the turn without it. The recovered response's `usage` is reported when it decodes (Done
 unmarked) and marked unavailable only when it is missing or does not decode. Recovery is decided
 from the decode issue (a missing key under `output`), never from the error message.

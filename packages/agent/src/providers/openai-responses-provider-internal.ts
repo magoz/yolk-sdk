@@ -228,6 +228,8 @@ class OpenAiResponsesFunctionCallOutput extends Schema.Class<OpenAiResponsesFunc
   'OpenAiResponsesFunctionCallOutput'
 )({
   type: Schema.Literals(['function_call']),
+  /** The output item id: a final `output` replays a streamed call under the same one. */
+  id: Schema.optional(Schema.String),
   call_id: Schema.String,
   name: Schema.String,
   arguments: Schema.String
@@ -1158,18 +1160,27 @@ const isEmittedFunctionCall = (item: Schema.Json, emitted: StreamedOutput) => {
   )
 }
 
+/** Whether a raw `message` item carries text: a content part with a non-empty `text`. */
+const carriesText = (item: Schema.Json) =>
+  jsonArrayField(item, 'content').some(part => {
+    const text = stringField(part, 'text')
+
+    return text !== undefined && text.length > 0
+  })
+
 /**
  * Whether dropping a raw output item that does not decode loses what the model said: a
- * `function_call` the stream never emitted (`isEmittedFunctionCall`), or a `message` when no text
- * streamed (once text streamed, every final message is a replay the parser drops anyway).
- * Reasoning and unknown items are dropped.
+ * `function_call` the stream never emitted (`isEmittedFunctionCall`), or a `message` carrying text
+ * when no text streamed (once text streamed, every final message is a replay the parser drops
+ * anyway; one without text, such as an empty preamble, says nothing). Reasoning and unknown items
+ * are dropped.
  */
 const losesUnstreamedOutput = (item: Schema.Json, streamed: StreamedOutput) => {
   switch (stringField(item, 'type')) {
     case 'function_call':
       return !isEmittedFunctionCall(item, streamed)
     case 'message':
-      return !streamed.hasTextDelta
+      return !streamed.hasTextDelta && carriesText(item)
     default:
       return false
   }
@@ -1414,14 +1425,20 @@ const eventsFromOutputItem = (
   }
 }
 
+/** The final response without the calls the stream already emitted (`call_id` or item `id`). */
 const responseWithoutReplayedToolCalls = (
   response: OpenAiResponsesResponse,
-  emittedCallIds: ReadonlySet<string>
+  streamed: StreamedOutput
 ): OpenAiResponsesResponse =>
   OpenAiResponsesResponse.make({
     ...response,
     output: response.output.filter(
-      item => item.type !== 'function_call' || !emittedCallIds.has(item.call_id)
+      item =>
+        item.type !== 'function_call' ||
+        !(
+          streamed.toolCallIds.has(item.call_id) ||
+          (item.id !== undefined && streamed.functionCallItemIds.has(item.id))
+        )
     )
   })
 
@@ -1435,13 +1452,10 @@ const finalResponseToEvents = (
     const parsedFinal = final.response
 
     // A recovered response completes even with nothing in it or streamed before it.
-    const finalEvents = yield* toLlmEvents(
-      responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
-      {
-        allowEmptyStop: final.recovered || state.hasTextDelta || hasToolCalls,
-        preserveOutputOrder
-      }
-    )
+    const finalEvents = yield* toLlmEvents(responseWithoutReplayedToolCalls(parsedFinal, state), {
+      allowEmptyStop: final.recovered || state.hasTextDelta || hasToolCalls,
+      preserveOutputOrder
+    })
 
     const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || hasToolCalls
     const dedupedEvents = shouldDedupe ? dedupeSseEvents(state, finalEvents) : finalEvents

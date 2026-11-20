@@ -89,7 +89,7 @@ A stream that completes without the usage report its request asked for still end
 
 Non-streamed (JSON) responses are never marked. Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes without its terminal event: such a stream emits no `LLMDone` and fails as non-retryable `invalid_response` with `responseIssue: 'missing_done'`, the loop's incomplete stream. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
 
-Codex's recovery of a final response with missing `output` (streamed or JSON) keeps its valid output items, so a function call the stream never emitted still runs, and reports its `usage` when that decodes (Done unmarked). A function call that does not decode must replay one the stream already emitted, and a message that does not decode must be one whose text already streamed; otherwise the response fails as `invalid_response` instead of ending the turn without it ([OpenAI Codex](../integrations/model-providers#openai-codex)).
+Codex's recovery of a final response with missing `output` (streamed or JSON) keeps its valid output items, so a function call the stream never emitted still runs, and reports its `usage` when that decodes (Done unmarked). A function call that does not decode must replay one the stream already emitted, and a message that does not decode and carries text must be one whose text already streamed; otherwise the response fails as `invalid_response` instead of ending the turn without it ([OpenAI Codex](../integrations/model-providers#openai-codex)).
 
 ## OpenAI JSON admission
 

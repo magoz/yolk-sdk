@@ -1009,6 +1009,14 @@ const describeFamily = <Req>(family: Family<Req>) => {
           role: 'assistant'
         }
 
+        /** A message carrying text whose content part lacks its required `type`. */
+        const untypedTextMessage = {
+          id: 'msg_synthetic_untyped_text',
+          type: 'message',
+          role: 'assistant',
+          content: [{ text: 'It is sunny in Springfield.' }]
+        }
+
         /** A reasoning item whose summary part lacks its required `text`. */
         const textlessReasoning = {
           id: 'rs_synthetic_textless',
@@ -1118,19 +1126,63 @@ const describeFamily = <Req>(family: Family<Req>) => {
             })
         )
 
-        it.effect('fails when a message lacks a required key and no text streamed', () =>
+        it.effect('completes a streamed call beside a broken message without text', () =>
+          Effect.gen(function* () {
+            // No text streamed, but the broken message (an empty preamble) carries none to lose.
+            const events = yield* streamFixture(
+              withFinalOutput([contentlessMessage, recordedCall()], {
+                streamCall: true,
+                suffix: 'streamed-call-beside-empty-message'
+              })
+            )
+
+            expect(callIds(events)).toEqual([recordedCall().call_id])
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
+          })
+        )
+
+        it.effect('fails when a broken message carries text and no text streamed', () =>
           Effect.gen(function* () {
             // The call streamed, so only the message (its text never streamed) would be lost.
             expectUndecodable(
               expectLlmError(
                 yield* streamFixture(
-                  withFinalOutput([contentlessMessage, recordedCall()], {
+                  withFinalOutput([untypedTextMessage, recordedCall()], {
                     streamCall: true,
-                    suffix: 'contentless-unstreamed-message'
+                    suffix: 'untyped-unstreamed-message'
                   })
                 ).pipe(Effect.flip)
               )
             )
+          })
+        )
+
+        it.effect('emits a repeat of a streamed call once, matched by its item id', () =>
+          Effect.gen(function* () {
+            // A valid repeat under another `call_id` beside a broken item (recovery runs).
+            const events = yield* streamFixture(
+              withFinalOutput(
+                [textlessReasoning, { ...recordedCall(), call_id: 'call_synthetic_renamed' }],
+                { streamCall: true, suffix: 'repeat-by-item-id' }
+              )
+            )
+
+            expect(callIds(events)).toEqual([recordedCall().call_id])
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
+          })
+        )
+
+        it.effect('emits a repeat of a streamed call once in a decodable final response', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              withFinalOutput([{ ...recordedCall(), call_id: 'call_synthetic_renamed' }], {
+                streamCall: true,
+                suffix: 'decodable-repeat-by-item-id'
+              })
+            )
+
+            expect(callIds(events)).toEqual([recordedCall().call_id])
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
           })
         )
 
@@ -1176,15 +1228,26 @@ const describeFamily = <Req>(family: Family<Req>) => {
           })
         )
 
-        it.effect('JSON: fails when a message lacks a required key', () =>
+        it.effect('JSON: fails when a broken message carries text', () =>
           Effect.gen(function* () {
             expectUndecodable(
               expectLlmError(
                 yield* streamFixture(
-                  jsonWithOutput([contentlessMessage, siblingCall()], 'json-contentless-message')
+                  jsonWithOutput([untypedTextMessage, siblingCall()], 'json-untyped-text-message')
                 ).pipe(Effect.flip)
               )
             )
+          })
+        )
+
+        it.effect('JSON: completes a call beside a broken message without text', () =>
+          Effect.gen(function* () {
+            const events = yield* streamFixture(
+              jsonWithOutput([contentlessMessage, siblingCall()], 'json-call-beside-empty-message')
+            )
+
+            expect(callIds(events)).toEqual([siblingCall().call_id])
+            expect(doneSignals(events)).toEqual([['tool_use', undefined]])
           })
         )
 

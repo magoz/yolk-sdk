@@ -14,7 +14,6 @@ const Response = Schema.Struct({
   usage: Schema.optional(Schema.Struct({ input_tokens: Schema.Number }))
 })
 
-/** The decode failure of `input` against `schema`. */
 const failureOf = <S extends Schema.Top>(schema: S, input: unknown) =>
   Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.flip,
