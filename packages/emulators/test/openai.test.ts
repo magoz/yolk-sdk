@@ -1,5 +1,7 @@
+import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vitest'
+import { openAiChatUnsupportedParameterFixture } from '@yolk-sdk/agent/providers/openai/conformance'
 import {
   OpenAiEmulatorInputInvalid,
   emulatorEvidenceHeader,
@@ -434,6 +436,32 @@ describe('openai emulator reasoning models', () => {
     expect(emulator.ledger.entries()).toMatchObject([
       { model: reasoningModel, status: 400, unsupportedParameter: 'max_tokens' }
     ])
+  })
+
+  it('answers the unsupported-parameter fixture request with its recorded status and body', async () => {
+    // Drift test: the emulator copies this fixture's envelope as data.
+    const [exchange] = openAiChatUnsupportedParameterFixture.exchanges
+    const recorded = exchange.response
+
+    if (!('body' in recorded) || !Predicate.isString(recorded.body)) {
+      return expect.fail('the unsupported-parameter fixture has no text body')
+    }
+
+    const emulator = makeOpenAiEmulator()
+
+    const response = await emulator.fetch(
+      new Request(exchange.request.url, {
+        method: exchange.request.method,
+        headers: {
+          ...exchange.request.headers,
+          authorization: 'Bearer synthetic-openai-key'
+        },
+        body: JSON.stringify(exchange.request.body)
+      })
+    )
+
+    expect(response.status).toBe(recorded.status)
+    expect(await response.json()).toEqual(JSON.parse(recorded.body))
   })
 
   it('does not emulate parameter rules no fixture backs: sampling parameters are accepted', async () => {
