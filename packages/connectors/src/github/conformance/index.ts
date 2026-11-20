@@ -18,6 +18,7 @@ import { githubIssueLabelsFixture } from './issue-labels.ts'
 import { githubIssueLifecycleFixture } from './issue-lifecycle.ts'
 import { githubLabelsPagingFixture } from './labels-paging.ts'
 import { githubNotFoundEnvelopeFixture } from './not-found-envelope.ts'
+import { githubOpenIssuesFixture } from './open-issues.ts'
 import { githubValidationEnvelopeFixture } from './validation-envelope.ts'
 
 export {
@@ -38,6 +39,7 @@ export {
   githubIssueLifecycleCase,
   githubLabelsPagingCase,
   githubNotFoundEnvelopeCase,
+  githubOpenIssuesCase,
   githubValidationEnvelopeCase,
   type GithubConformanceCase,
   type GithubConformanceError,
@@ -54,6 +56,7 @@ export {
   githubIssueLifecycleFixture,
   githubLabelsPagingFixture,
   githubNotFoundEnvelopeFixture,
+  githubOpenIssuesFixture,
   githubValidationEnvelopeFixture
 }
 
@@ -63,6 +66,7 @@ export const githubConformanceFixtures: ReadonlyArray<WireFixture> = [
   githubNotFoundEnvelopeFixture,
   githubValidationEnvelopeFixture,
   githubFileContentsFixture,
+  githubOpenIssuesFixture,
   githubCommentLifecycleFixture,
   githubIssueLabelsFixture,
   githubIssueLifecycleFixture

@@ -54,6 +54,14 @@ export type GoogleEmulatorDrills = {
   readonly getFileWithoutParents?: boolean
   /** Folder listings include trashed children. */
   readonly listIncludesTrashed?: boolean
+  /** The label listing leaves out every user label. */
+  readonly labelListingOmitsUserLabels?: boolean
+  /** The draft search answers `drafts: null`. */
+  readonly draftSearchDraftsNull?: boolean
+  /** The free-text event query ignores `q` and lists every live event of the calendar. */
+  readonly eventQueryIgnored?: boolean
+  /** A folder listing with trashed items answers only the trashed children. */
+  readonly trashedListingDropsUntrashed?: boolean
 }
 
 export const googleEmulatorDrillKnobs: ReadonlyArray<keyof GoogleEmulatorDrills> = [
@@ -71,7 +79,11 @@ export const googleEmulatorDrillKnobs: ReadonlyArray<keyof GoogleEmulatorDrills>
   'repeatedEventDeleteConflict',
   'drivePageRepeats',
   'getFileWithoutParents',
-  'listIncludesTrashed'
+  'listIncludesTrashed',
+  'labelListingOmitsUserLabels',
+  'draftSearchDraftsNull',
+  'eventQueryIgnored',
+  'trashedListingDropsUntrashed'
 ]
 
 /** A page token this emulator issued: where its list continues, and the list it was issued for. */

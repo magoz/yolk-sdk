@@ -64,17 +64,21 @@ import {
 import {
   calendarDeletedGoneCase,
   calendarEventLifecycleCase,
-  calendarListRangeCase
+  calendarListRangeCase,
+  calendarQueryCase
 } from './calendar-cases.ts'
 import {
   driveFolderLifecycleCase,
   driveGetFileFieldsCase,
-  driveListPagingCase
+  driveListPagingCase,
+  driveListTrashedCase
 } from './drive-cases.ts'
 import {
   gmailAttachmentCase,
   gmailDraftLifecycleCase,
+  gmailDraftSearchCase,
   gmailLabelLifecycleCase,
+  gmailLabelListingCase,
   gmailListPagingCase,
   gmailListThreadsPagingCase,
   gmailMetadataHeadersCase,
@@ -87,6 +91,7 @@ import {
   GoogleConformanceConfig,
   googleConformanceIntegration as integration,
   googleConformanceRunPrefix,
+  googleLeftoverLookup,
   successValue,
   type GoogleConformanceCase,
   type GoogleConformanceError,
@@ -114,7 +119,9 @@ export {
 export {
   gmailAttachmentCase,
   gmailDraftLifecycleCase,
+  gmailDraftSearchCase,
   gmailLabelLifecycleCase,
+  gmailLabelListingCase,
   gmailListPagingCase,
   gmailListThreadsPagingCase,
   gmailMetadataHeadersCase,
@@ -126,13 +133,15 @@ export {
 export {
   calendarDeletedGoneCase,
   calendarEventLifecycleCase,
-  calendarListRangeCase
+  calendarListRangeCase,
+  calendarQueryCase
 } from './calendar-cases.ts'
 
 export {
   driveFolderLifecycleCase,
   driveGetFileFieldsCase,
-  driveListPagingCase
+  driveListPagingCase,
+  driveListTrashedCase
 } from './drive-cases.ts'
 
 const GmailLabelsListing = Schema.Struct({
@@ -145,14 +154,14 @@ const GmailDraftsListing = Schema.Struct({
   drafts: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String })))
 })
 
-/** Pages read before giving up, and their sizes. */
-const leftoverPageCap = 4
-
-const leftoverDraftPageSize = 100
-
-const leftoverEventPageSize = 250
-
-const leftoverFilePageSize = 100
+const {
+  draftQuery: leftoverDraftQuery,
+  draftPageSize: leftoverDraftPageSize,
+  eventQuery: leftoverEventQuery,
+  eventPageSize: leftoverEventPageSize,
+  filePageSize: leftoverFilePageSize,
+  pageCap: leftoverPageCap
+} = googleLeftoverLookup
 
 /**
  * READ-ONLY and bounded: what earlier runs left behind in the practice account (a killed process,
@@ -198,7 +207,7 @@ export const findGoogleConformanceLeftovers: Effect.Effect<
       .executeTyped({
         integration,
         input: GmailListInput.make({
-          query: 'subject:yolk-conformance',
+          query: leftoverDraftQuery,
           maxResults: leftoverDraftPageSize
         })
       })
@@ -234,7 +243,7 @@ export const findGoogleConformanceLeftovers: Effect.Effect<
           integration,
           input: GoogleCalendarListEventsInput.make({
             calendarId: seeds.calendarId,
-            query: 'yolk-conformance',
+            query: leftoverEventQuery,
             maxResults: leftoverEventPageSize,
             pageToken
           })
@@ -306,14 +315,18 @@ export const googleConformanceCases: ReadonlyArray<GoogleConformanceCase> = [
   gmailNotFoundEnvelopeCase,
   gmailListThreadsPagingCase,
   gmailMetadataHeadersCase,
+  gmailLabelListingCase,
+  gmailDraftSearchCase,
   gmailLabelLifecycleCase,
   gmailDraftLifecycleCase,
   gmailTrashUntrashCase,
   gmailSendPracticeCase,
   calendarListRangeCase,
+  calendarQueryCase,
   calendarEventLifecycleCase,
   calendarDeletedGoneCase,
   driveListPagingCase,
   driveGetFileFieldsCase,
+  driveListTrashedCase,
   driveFolderLifecycleCase
 ]

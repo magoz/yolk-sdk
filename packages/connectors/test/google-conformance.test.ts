@@ -38,17 +38,21 @@ import {
   calendarEventLifecycleCase,
   calendarEventLifecycleFixture,
   calendarListRangeFixture,
+  calendarQueryFixture,
   driveFolderLifecycleCase,
   driveFolderLifecycleFixture,
   driveGetFileFieldsFixture,
   driveListPagingCase,
   driveListPagingFixture,
+  driveListTrashedFixture,
   findGoogleConformanceLeftovers,
   gmailAttachmentFixture,
   gmailDraftLifecycleCase,
   gmailDraftLifecycleFixture,
+  gmailDraftSearchFixture,
   gmailLabelLifecycleCase,
   gmailLabelLifecycleFixture,
+  gmailLabelListingFixture,
   gmailListPagingCase,
   gmailListPagingFixture,
   gmailListThreadsPagingFixture,
@@ -158,15 +162,19 @@ const caseIds = [
   ['google.gmail.not-found-envelope', 'read'],
   ['google.gmail.list-threads-page-token', 'read'],
   ['google.gmail.metadata-headers', 'read'],
+  ['google.gmail.label-listing', 'read'],
+  ['google.gmail.draft-search', 'read'],
   ['google.gmail.label-create-apply-delete', 'write-reversible'],
   ['google.gmail.draft-compose-update-delete', 'write-reversible'],
   ['google.gmail.trash-untrash', 'write-reversible'],
   ['google.gmail.send-practice-address', 'write-irreversible'],
   ['google.calendar.list-range-paging', 'read'],
+  ['google.calendar.free-text-query', 'read'],
   ['google.calendar.event-lifecycle', 'write-reversible'],
   ['google.calendar.deleted-event-gone', 'write-reversible'],
   ['google.drive.list-page-token', 'read'],
   ['google.drive.get-file-fields', 'read'],
+  ['google.drive.list-includes-trashed', 'read'],
   ['google.drive.folder-trash-delete', 'write-reversible']
 ] as const
 
@@ -231,9 +239,11 @@ describe('Google conformance cases', () => {
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
+      'google.calendar.free-text-query',
       'google.calendar.event-lifecycle',
       'google.calendar.deleted-event-gone',
-      'google.calendar.deleted-event-gone'
+      'google.calendar.deleted-event-gone',
+      'google.drive.list-includes-trashed'
     ])
   })
 
@@ -272,7 +282,7 @@ describe('Google conformance cases', () => {
       })
 
       expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 15,
+        passed: 19,
         failed: 0,
         skipped: 0
       })
@@ -299,7 +309,7 @@ describe('Google conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(15)
+      expect(report.summary.passed).toBe(19)
 
       for (const testCase of googleConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -549,6 +559,22 @@ const tampers: ReadonlyArray<{
       'expected get_message with metadataHeaders to answer exactly the selected headers of the unfiltered read'
   },
   {
+    // The listing leaves the seeded paging label out.
+    fixture: replaceResponse(
+      gmailLabelListingFixture,
+      0,
+      replaceInBody('"id":"Label_9001"', '"id":"Label_9002"')
+    ),
+    message:
+      'expected the label listing to include the seeded paging label (user) and INBOX (system)'
+  },
+  {
+    fixture: replaceResponse(gmailDraftSearchFixture, 0, () =>
+      json(200, { drafts: null, resultSizeEstimate: 0 })
+    ),
+    message: 'expected gmail.list_drafts to answer drafts'
+  },
+  {
     // The deleted label still shows on the message.
     fixture: replaceResponse(
       gmailLabelLifecycleFixture,
@@ -591,6 +617,15 @@ const tampers: ReadonlyArray<{
     message: 'expected the pages to list exactly the events of the single listing'
   },
   {
+    // The query is ignored: the practice calendar's events are listed.
+    fixture: replaceResponse(
+      calendarQueryFixture,
+      0,
+      () => exchangeAt(calendarListRangeFixture, 0).response
+    ),
+    message: 'expected every listed event to mention the query yolk-conformance'
+  },
+  {
     // The rename is ignored; the restore still deletes the event.
     fixture: withoutExchanges(
       replaceResponse(
@@ -624,6 +659,16 @@ const tampers: ReadonlyArray<{
       replaceInBody('Synthetic practice notes.txt', 'Other notes.txt')
     ),
     message: 'expected get_file to answer the same metadata as the list entry'
+  },
+  {
+    // The listing with trashed items drops an untrashed file.
+    fixture: replaceResponse(driveListTrashedFixture, 1, () =>
+      json(200, {
+        ...jsonOf(driveListTrashedFixture, 1),
+        files: jsonOf(driveListTrashedFixture, 1).files.slice(1)
+      })
+    ),
+    message: 'expected the listing with trashed items to answer every file of the default listing'
   },
   {
     // The trashed folder is still listed; the restore still deletes it.

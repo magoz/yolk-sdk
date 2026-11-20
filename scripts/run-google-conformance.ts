@@ -181,6 +181,22 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
     doc: 'The seeded attachment message read with `format=metadata`, again with the `Subject` and `From` `metadataHeaders` selection, then its thread with the same selection.'
   },
   {
+    caseId: 'google.gmail.label-listing',
+    seeds: ['pagingLabelId'],
+    optionalSeeds: [],
+    fileName: 'gmail-label-listing.ts',
+    exportName: 'gmailLabelListingFixture',
+    doc: 'The label listing, as the leftover lookup reads it: the system labels and the seeded paging label.'
+  },
+  {
+    caseId: 'google.gmail.draft-search',
+    seeds: [],
+    optionalSeeds: [],
+    fileName: 'gmail-draft-search.ts',
+    exportName: 'gmailDraftSearchFixture',
+    doc: "The leftover lookup's draft search (`subject:yolk-conformance`, `maxResults=100`)."
+  },
+  {
     caseId: 'google.gmail.label-create-apply-delete',
     seeds: ['workMessageId', 'runId'],
     optionalSeeds: [],
@@ -221,6 +237,14 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
     doc: 'The seeded range listed on one page, then in pages of two chained through `nextPageToken`.'
   },
   {
+    caseId: 'google.calendar.free-text-query',
+    seeds: ['calendarId'],
+    optionalSeeds: [],
+    fileName: 'calendar-query.ts',
+    exportName: 'calendarQueryFixture',
+    doc: "The leftover lookup's free-text event query (`q=yolk-conformance`, `maxResults=250`) on the practice calendar."
+  },
+  {
     caseId: 'google.calendar.event-lifecycle',
     seeds: ['calendarId', 'runId'],
     optionalSeeds: [],
@@ -251,6 +275,14 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
     fileName: 'drive-get-file-fields.ts',
     exportName: 'driveGetFileFieldsFixture',
     doc: '`drive.get_file` of the practice file, then the practice folder listing that holds it.'
+  },
+  {
+    caseId: 'google.drive.list-includes-trashed',
+    seeds: ['driveFolderId'],
+    optionalSeeds: [],
+    fileName: 'drive-list-trashed.ts',
+    exportName: 'driveListTrashedFixture',
+    doc: 'The practice folder listed without trashed items, then with them, as the leftover lookup lists it.'
   },
   {
     caseId: 'google.drive.folder-trash-delete',

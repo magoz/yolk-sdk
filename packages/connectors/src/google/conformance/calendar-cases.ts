@@ -27,10 +27,12 @@ import {
 import { calendarDeletedGoneFixture } from './calendar-deleted-gone.ts'
 import { calendarEventLifecycleFixture } from './calendar-event-lifecycle.ts'
 import { calendarListRangeFixture } from './calendar-list-range.ts'
+import { calendarQueryFixture } from './calendar-query.ts'
 import { calendarConformanceEventEnd, calendarConformanceEventStart } from './synthetic.ts'
 import {
   failureOf,
   googleConformanceIntegration as integration,
+  googleLeftoverLookup,
   outcomeOf,
   requireSeed,
   runText,
@@ -191,10 +193,77 @@ export const calendarListRangeCase: GoogleConformanceCase = defineConformanceCas
   })
 })
 
-// Write cases.
-
-/** The id of an owned event (a create answer without one is refused before this is read). */
+/** The id of an event (an owned create answer without one is refused before this is read). */
 const eventIdOf = (event: GoogleCalendarEvent): string => event.id ?? ''
+
+const {
+  eventQuery: leftoverQuery,
+  eventPageSize: leftoverPageSize,
+  pageCap: leftoverPageCap
+} = googleLeftoverLookup
+
+/** True when a decoded text field of `event` contains the query (case-insensitive). */
+const mentionsQuery = (event: GoogleCalendarEvent): boolean =>
+  [
+    event.summary,
+    event.description,
+    event.location,
+    ...(event.attendees ?? []).map(attendee => attendee.email)
+  ].some(text => text !== undefined && text.toLowerCase().includes(leftoverQuery))
+
+export const calendarQueryCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.calendar.free-text-query',
+  title: 'The free-text event query the leftover lookup sends lists only events that mention it',
+  safety: 'read',
+  docs: '`calendar.list_events` sends `query` as the `q` parameter (free-text search terms), with `maxResults` and an opaque `pageToken`, and decodes `items` and `nextPageToken`. `findGoogleConformanceLeftovers` queries the seeded calendar for `yolk-conformance` (`maxResults: 250`, at most 4 pages) and reports the events whose summary starts with the run prefix.',
+  wire: '`calendar.list_events` of the seeded calendar with `query: "yolk-conformance"` and `maxResults: 250` (the leftover lookup\'s request), followed through `nextPageToken`, answers no event twice, and every event it answers that is not `cancelled` mentions `yolk-conformance` (case-insensitive) in its summary, description, location, or an attendee address (unverified: that Google matches the query only where it occurs, here in the fields the connector decodes; Google also searches fields it does not decode, such as organizer and attendee names).',
+  fixtures: [calendarQueryFixture.id],
+  run: Effect.gen(function* () {
+    const calendarId = yield* requireSeed('calendarId')
+    const seen: Array<string> = []
+    let pageToken: string | undefined
+
+    for (let page = 1; ; page++) {
+      const listing = yield* listEvents(
+        pageToken === undefined
+          ? { calendarId, query: leftoverQuery, maxResults: leftoverPageSize }
+          : { calendarId, query: leftoverQuery, maxResults: leftoverPageSize, pageToken }
+      )
+
+      const items = listing.items ?? []
+      const ids = items.map(eventIdOf)
+
+      yield* expectConformance(
+        ids.every((id, index) => !seen.includes(id) && ids.indexOf(id) === index),
+        'expected no event repeated within or across pages'
+      )
+      seen.push(...ids)
+
+      yield* expectConformance(
+        items.every(event => event.status === 'cancelled' || mentionsQuery(event)),
+        'expected every listed event to mention the query yolk-conformance',
+        {
+          actual: items.filter(event => event.status !== 'cancelled' && !mentionsQuery(event))
+            .length
+        }
+      )
+
+      if (listing.nextPageToken === undefined) {
+        break
+      }
+
+      if (page >= leftoverPageCap) {
+        return yield* new ConformanceMismatch({
+          message: `precondition: the query answers more than ${leftoverPageCap * leftoverPageSize} events`
+        })
+      }
+
+      pageToken = listing.nextPageToken
+    }
+  })
+})
+
+// Write cases.
 
 /** Delete an event that may still exist, by id, then verify it reads gone. */
 const ensureEventGone = (calendarId: string, eventId: string) =>

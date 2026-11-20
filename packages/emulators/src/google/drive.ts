@@ -1,5 +1,6 @@
 /**
- * Drive routes of the Google emulator (internal): the folder listing with page tokens, file reads
+ * Drive routes of the Google emulator (internal): the folder listing with page tokens (untrashed
+ * children, or every child with the trashed ones, as the leftover lookup lists them), file reads
  * with the connector's full `fields` selection, and the lifecycle of a run-scoped folder (create,
  * trash, permanent delete, and the recorded 404 afterwards).
  *
@@ -48,6 +49,8 @@ const listCase = 'google.drive.list-page-token'
 const fieldsCase = 'google.drive.get-file-fields'
 
 const folderCase = 'google.drive.folder-trash-delete'
+
+const trashedListingCase = 'google.drive.list-includes-trashed'
 
 const fileIdSegment = /^[A-Za-z0-9_-]{10,200}$/
 
@@ -127,7 +130,11 @@ const fileFields = [
 
 const listFields = `kind,nextPageToken,incompleteSearch,files(${fileFields})`
 
-const parentQueryPattern = /^'([A-Za-z0-9_-]{10,200})' in parents and trashed = false$/
+/**
+ * The two recorded folder queries: untrashed children, and (the trashed-listing case, the leftover
+ * lookup's request) every child, Trash included.
+ */
+const parentQueryPattern = /^'([A-Za-z0-9_-]{10,200})' in parents( and trashed = false)?$/
 
 // Rendering, in the fixture key order.
 
@@ -220,12 +227,13 @@ const isCreatedHere = (file: GoogleEmulatorDriveFile): boolean =>
 
 type ListInput = {
   readonly parentId: string
+  readonly includeTrashed: boolean
   readonly pageSize: number
   readonly pageToken: string | undefined
 }
 
 const listFiles: GoogleRoute = statefulRoute(
-  drive('GET', '', false, [listCase, fieldsCase, folderCase], false),
+  drive('GET', '', false, [listCase, fieldsCase, folderCase, trashedListingCase], false),
   'none',
   (request): ListInput | NotEmulated => {
     const accepts = acceptsJson(request)
@@ -259,11 +267,16 @@ const listFiles: GoogleRoute = statefulRoute(
 
     if (recorded !== undefined) return recorded
 
-    const parentId = parentQueryPattern.exec(query['q'] ?? '')?.[1]
+    const parent = parentQueryPattern.exec(query['q'] ?? '')
+    const parentId = parent?.[1]
 
     if (parentId === undefined) {
-      return notEmulated(`q other than '<folder>' in parents and trashed = false is not emulated`)
+      return notEmulated(
+        `q other than '<folder>' in parents, with or without and trashed = false, is not emulated`
+      )
     }
+
+    const includeTrashed = parent?.[2] === undefined
 
     const size = pageSize(query['pageSize'], 'pageSize', 1, 1000)
 
@@ -273,27 +286,33 @@ const listFiles: GoogleRoute = statefulRoute(
 
     return pageToken === ''
       ? notEmulated('an empty pageToken is not emulated')
-      : { parentId, pageSize: size, pageToken }
+      : { parentId, includeTrashed, pageSize: size, pageToken }
   },
   (state, input, { env }) => {
     if (!isLiveFolder(state, input.parentId)) {
       return notEmulated('listing anything but a folder the state holds is not emulated')
     }
 
+    // The drill answers only the trashed children of a listing that includes them.
+    const dropsUntrashed = input.includeTrashed && env.drills.trashedListingDropsUntrashed
+
     const children = state.files.filter(
       file =>
-        file.parents.includes(input.parentId) && (env.drills.listIncludesTrashed || !file.trashed)
+        file.parents.includes(input.parentId) &&
+        (dropsUntrashed
+          ? file.trashed
+          : input.includeTrashed || env.drills.listIncludesTrashed || !file.trashed)
     )
 
     // Every recorded listing has children; an empty one is no fixture's answer.
-    if (children.length === 0) {
+    if (children.length === 0 && !dropsUntrashed) {
       return notEmulated('a folder listing without items is not emulated (no fixture records one)')
     }
 
     return listPage(
       env,
       'drive',
-      `drive\u0000${input.parentId}\u0000${input.pageSize}`,
+      `drive\u0000${input.parentId}\u0000${input.includeTrashed ? 'all' : 'untrashed'}\u0000${input.pageSize}`,
       children.map(file => renderFile(file)),
       input.pageSize,
       input.pageToken,

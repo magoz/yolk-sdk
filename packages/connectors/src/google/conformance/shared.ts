@@ -143,6 +143,21 @@ export const googleConformanceIntegration: ConnectorIntegration = makeIntegratio
   ]
 })
 
+/**
+ * The requests of the read-only leftover lookup (`findGoogleConformanceLeftovers`), which the
+ * label-listing, draft-search, free-text-query, and trashed-listing cases send exactly: the draft
+ * search and its page size, the event query and its page size, the Drive page size, and the pages
+ * the paged reads follow before giving up.
+ */
+export const googleLeftoverLookup = {
+  draftQuery: 'subject:yolk-conformance',
+  draftPageSize: 100,
+  eventQuery: 'yolk-conformance',
+  eventPageSize: 250,
+  filePageSize: 100,
+  pageCap: 4
+} as const
+
 /** Synthetic marker every case-written name, subject, and summary starts with. */
 export const googleConformanceMarker = 'yolk-conformance'
 

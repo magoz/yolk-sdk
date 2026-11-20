@@ -21,6 +21,7 @@ connector relies on. The claims are as currently understood; none is observed li
 | `todoist.tasks.list-cursor-paging`       | `read`             | `pagingProjectId`        | `limit=2` answers at most two tasks and a string `next_cursor`; the cursor with the same `project_id` returns the rest, ending with `next_cursor: null` |
 | `todoist.errors.not-found-envelope`      | `read`             | none                     | An unknown task id answers HTTP 404 (`todoist_not_found`) with a JSON `error` string that ends the connector message (both unverified)                  |
 | `todoist.labels.task-labels-are-names`   | `read`             | `labeledTaskId`          | A task's `labels` are label names, each the `name` of a personal label `todoist.list_labels` returns                                                    |
+| `todoist.projects.list-cursor-paging`    | `read`             | `pagingProjectId`        | The leftover lookup's `limit=200` listing answers every project once, the paging project among them; `limit=1` pages chain to the same projects         |
 | `todoist.tasks.lifecycle-close`          | `write-reversible` | `workProjectId`, `runId` | Create, get, and update answer the task; `close_task` answers 2xx; `list_tasks` then omits the closed task (active tasks only)                          |
 | `todoist.tasks.due-dates`                | `write-reversible` | `workProjectId`, `runId` | `due_date` and `due_datetime`, as the connector sends them, answer a task whose `due.date` starts with `2030-01-15` (timed form unverified)             |
 | `todoist.projects.parent-id`             | `write-reversible` | `workProjectId`, `runId` | `create_project` with a parent answers `parent_id`, and `get_project` reads it back                                                                     |
@@ -37,6 +38,8 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
   case fails without any connector fault.
 - A deleted project answers 404 rather than a body marked `is_deleted`.
 - Deleting a project deletes its tasks.
+- The project listing includes sub-projects (the leftover lookup needs it for the case projects
+  under the work project).
 
 The due-dates case checks that the due was applied, and nothing more: after each call the answer's
 `due` must be an object whose `date` starts with `2030-01-15`, so a due field Todoist ignored (for
@@ -128,6 +131,6 @@ write-irreversible Todoist cases. See
 
 For offline tests, the experimental [Todoist emulator](../api-reference/emulators#todoist-emulator)
 (`@yolk-sdk/emulators/todoist`) is a stateful, fixture-only stand-in that passes these cases
-through the real connector actions over the connector ports. No fixture records the leftover
-lookup's project listing, so against the emulator that lookup fails (HTTP 400 not-emulated) and a
-runner prints its lookup-failed WARN instead of leftover warnings.
+through the real connector actions over the connector ports. The project paging case records the
+leftover lookup's project listing, so against the emulator the lookup runs: it finds nothing on
+the default seed and reports a `yolk-conformance-run-*` project the emulator holds.

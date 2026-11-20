@@ -15,7 +15,8 @@ import {
   googleConformanceFixtures,
   googleConformanceFixtureSeeds,
   googleConformanceIntegration,
-  gmailAttachmentFixture
+  gmailAttachmentFixture,
+  gmailDraftLifecycleFixture
 } from '@yolk-sdk/connectors/google/conformance'
 import type { WireExchange, WireFixture } from '@yolk-sdk/conformance/fixture'
 import {
@@ -204,9 +205,11 @@ describe('route evidence manifest', () => {
       'POST /gmail/v1/users/me/messages/{messageId}/modify',
       'POST /gmail/v1/users/me/messages/{messageId}/trash',
       'POST /gmail/v1/users/me/messages/{messageId}/untrash',
+      'GET /gmail/v1/users/me/labels',
       'POST /gmail/v1/users/me/labels',
       'GET /gmail/v1/users/me/labels/{labelId}',
       'DELETE /gmail/v1/users/me/labels/{labelId}',
+      'GET /gmail/v1/users/me/drafts',
       'POST /gmail/v1/users/me/drafts',
       'PUT /gmail/v1/users/me/drafts/{draftId}',
       'DELETE /gmail/v1/users/me/drafts/{draftId}',
@@ -637,6 +640,165 @@ const folderBody = {
   parents: [practiceFolder]
 }
 
+describe('the leftover lookup reads (label listing, draft search, event query, trashed listing)', () => {
+  const draftCompose = gmailDraftLifecycleFixture.exchanges[0]?.request
+
+  /** Compose the recorded draft (the draft fixture's first request). */
+  const composeDraft = (target: GoogleEmulator) =>
+    draftCompose === undefined
+      ? expect.fail('the draft fixture records no compose')
+      : call(target, 'POST', draftCompose.url, { body: draftCompose.body })
+
+  const labels = (target: GoogleEmulator) => call(target, 'GET', `${gm}/labels`)
+
+  const draftSearch = `${gm}/drafts?q=subject%3Ayolk-conformance&maxResults=100`
+
+  const eventQuery = `${cal}?q=yolk-conformance&maxResults=250`
+
+  const trashedListing = (parent: string) => {
+    const query = listQuery(parent, 100)
+
+    query.set('q', `'${parent}' in parents`)
+
+    return `${drv}?${query}`
+  }
+
+  it('lists a label created here after the seeded labels, in the create answer shape', async () => {
+    const target = await emulator()
+
+    const created = await call(target, 'POST', `${gm}/labels`, {
+      body: { name: 'yolk-conformance run-abc label' }
+    })
+
+    expect(created.status).toBe(200)
+
+    const label = await created.json()
+    const listed = field(await (await labels(target)).json(), 'labels')
+
+    expect(listed).toEqual([
+      ...['INBOX', 'SENT', 'IMPORTANT', 'TRASH', 'DRAFT', 'SPAM', 'STARRED', 'UNREAD'].map(id =>
+        expect.objectContaining({ id, name: id, type: 'system' })
+      ),
+      expect.objectContaining({ id: 'Label_9001', type: 'user' }),
+      label
+    ])
+  })
+
+  it.each([
+    ['an implied label without a listed entry', { impliedLabelIds: ['Label_9001', 'Label_9002'] }],
+    ['a listed user label the state does not imply', { impliedLabelIds: [], impliedMessages: [] }],
+    ['no listed labels (the empty profile)', { profile: 'empty' }]
+  ] as const)('refuses the label listing with %s', async (label, seed) => {
+    const target = await emulator({ seed })
+
+    await expectNotEmulated(await labels(target), label)
+    expect(target.ledger.entries().at(-1)?.notEmulated).toBeDefined()
+  })
+
+  it('answers the draft search only while no draft exists', async () => {
+    const target = await emulator()
+    const empty = await call(target, 'GET', draftSearch)
+
+    expect(empty.status).toBe(200)
+    expect(await empty.text()).toBe('{"resultSizeEstimate":0}')
+    expect((await composeDraft(target)).status).toBe(200)
+
+    await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', draftSearch),
+      'a draft search while a draft exists',
+      'a draft search while the state holds a draft is not emulated'
+    )
+  })
+
+  it.each([
+    ['another q', `${gm}/drafts?q=subject%3Aother&maxResults=100`],
+    ['maxResults 501', `${gm}/drafts?q=subject%3Ayolk-conformance&maxResults=501`],
+    ['no maxResults', `${gm}/drafts?q=subject%3Ayolk-conformance`],
+    ['a pageToken', `${draftSearch}&pageToken=synthetic`]
+  ])('refuses a draft search with %s', async (label, url) => {
+    const target = await emulator()
+
+    await expectRefusedWithoutFault(target, () => call(target, 'GET', url), label)
+  })
+
+  it('answers the event query empty, and refuses it once an event might match', async () => {
+    const target = await emulator()
+    const empty = await call(target, 'GET', eventQuery)
+
+    expect(await empty.json()).toEqual({
+      kind: 'calendar#events',
+      summary: 'Synthetic practice calendar',
+      timeZone: 'UTC',
+      accessRole: 'owner',
+      items: []
+    })
+
+    // A run event, then the same event cancelled: neither is answered (no fixture records how
+    // Google matches or whether a cancelled event counts).
+    const created = await call(target, 'POST', cal, { body: eventBody })
+
+    expect(created.status).toBe(200)
+
+    await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', eventQuery),
+      'a calendar holding a run event',
+      'a free-text query of a calendar holding an event it might match is not emulated'
+    )
+
+    const id = String(field(await created.json(), 'id'))
+
+    expect((await call(target, 'DELETE', `${cal}/${id}`)).status).toBe(204)
+
+    await expectRefusedWithoutFault(
+      target,
+      () => call(target, 'GET', eventQuery),
+      'a calendar holding a cancelled run event'
+    )
+  })
+
+  it('refuses the event query when a seeded event mentions a query word in any case', async () => {
+    const target = await emulator()
+    const seeded = target.snapshot().events
+
+    await target.seed({
+      events: seeded.map((event, index) =>
+        index === 0 ? { ...event, description: 'A CONFORMANCE review' } : event
+      )
+    })
+
+    await expectRefusedWithoutFault(target, () => call(target, 'GET', eventQuery), 'description')
+  })
+
+  it('lists trashed children with the trashed listing, and only then', async () => {
+    const target = await emulator({ now: () => Date.parse('2026-09-30T12:00:02.000Z') })
+
+    const created = await call(target, 'POST', `${drv}?${fileQuery}`, {
+      headers: driveWrite,
+      body: folderBody
+    })
+
+    const id = String(field(await created.json(), 'id'))
+
+    const trashed = await call(target, 'PATCH', `${drv}/${id}?${fileQuery}`, {
+      headers: driveWrite,
+      body: { trashed: true }
+    })
+
+    const filesOf = async (url: string) =>
+      field(await (await call(target, 'GET', url, { headers: accept })).json(), 'files')
+
+    const untrashed = await filesOf(`${drv}?${listQuery(practiceFolder, 100)}`)
+
+    // The trashed folder is listed last, rendered as the trash answer renders it.
+    expect(await filesOf(trashedListing(practiceFolder))).toEqual([
+      ...(Array.isArray(untrashed) ? untrashed : expect.fail('no files')),
+      await trashed.json()
+    ])
+  })
+})
+
 describe('fail closed: 400 not-emulated, nothing written, a matching fault left unused', () => {
   type Row = readonly [string, (target: GoogleEmulator) => Promise<Response>]
 
@@ -950,8 +1112,25 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
         )
     ],
     [
-      'a free-text query (the leftover lookup)',
-      target => call(target, 'GET', `${cal}?q=yolk-conformance&maxResults=250`)
+      'a free-text query other than the recorded one',
+      target => call(target, 'GET', `${cal}?q=synthetic&maxResults=250`)
+    ],
+    [
+      'the free-text query with a pageToken',
+      target => call(target, 'GET', `${cal}?q=yolk-conformance&maxResults=250&pageToken=synthetic`)
+    ],
+    [
+      'the free-text query within a range',
+      target =>
+        call(
+          target,
+          'GET',
+          `${cal}?timeMin=2026-09-01T00:00:00Z&timeMax=2026-09-08T00:00:00Z&q=yolk-conformance&maxResults=250`
+        )
+    ],
+    [
+      'the free-text query with maxResults 2501',
+      target => call(target, 'GET', `${cal}?q=yolk-conformance&maxResults=2501`)
     ],
     [
       'a range without events',
@@ -1041,11 +1220,21 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       target => call(target, 'GET', `${drv}?${listQuery(practiceFolder, 2)}`)
     ],
     [
-      'a listing including trashed items (the leftover lookup)',
+      'a listing including trashed items of an empty folder',
+      target => {
+        const query = listQuery('synthetic-practice-folder-0002', 100)
+
+        query.set('q', `'synthetic-practice-folder-0002' in parents`)
+
+        return call(target, 'GET', `${drv}?${query}`, { headers: accept })
+      }
+    ],
+    [
+      'a listing of trashed items only',
       target => {
         const query = listQuery(practiceFolder, 100)
 
-        query.set('q', `'${practiceFolder}' in parents`)
+        query.set('q', `'${practiceFolder}' in parents and trashed = true`)
 
         return call(target, 'GET', `${drv}?${query}`, { headers: accept })
       }
@@ -1316,8 +1505,8 @@ const everythingSeen = async (target: GoogleEmulator, text: string): Promise<str
 
 describe('unrecognised requests are ledgered with constant text only', () => {
   it.each([
-    ['GET', `${gm}/labels?${token}=1`],
-    ['GET', `${gm}/drafts?q=subject:yolk-conformance&maxResults=100`],
+    ['GET', `${gm}/labels/${token}/extra`],
+    ['GET', `${gm}/settings/filters`],
     ['GET', `${apisOrigin}/calendar/v3/users/me/calendarList`],
     ['POST', `${gm}/messages/batchModify`],
     ['GET', `${gm}/messages/${token}/extra/segment`],
@@ -1375,8 +1564,8 @@ describe('unrecognised requests are ledgered with constant text only', () => {
 
     await expectRefusedWithoutFault(
       target,
-      () => call(target, 'GET', `${gm}/labels`),
-      'the leftover label listing',
+      () => call(target, 'GET', `${gm}/settings/filters`),
+      'a filter listing',
       unrecognisedReason
     )
   })
@@ -1939,7 +2128,7 @@ describe('clock-safe recovery', () => {
     }
 
     expect(target.snapshot()).toEqual(before)
-    await expectNotEmulated(await call(target, 'GET', `${gm}/labels`))
+    await expectNotEmulated(await call(target, 'GET', `${gm}/settings/filters`))
     expect((await readWork(target)).status).toBe(200)
   })
 
@@ -2743,7 +2932,7 @@ describe('control plane', () => {
 
     const coverage = await (await control('GET', 'coverage')).json()
 
-    expect(field(coverage, 'routes')).toHaveLength(25)
+    expect(field(coverage, 'routes')).toHaveLength(27)
 
     expect(await (await control('POST', 'seed', { profile: 'empty' })).json()).toEqual({
       seeded: true,

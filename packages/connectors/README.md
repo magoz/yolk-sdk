@@ -1468,13 +1468,14 @@ running a practice workspace by hand, `--allow-writes reversible` adds the write
 
 ### Todoist conformance cases (experimental)
 
-`@yolk-sdk/connectors/todoist/conformance` exports seven conformance cases for
+`@yolk-sdk/connectors/todoist/conformance` exports eight conformance cases for
 `@yolk-sdk/conformance/runner` (`todoistConformanceCases`), synthetic replay fixtures
 (`todoistConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
 (`todoistConformanceFixtureSeeds`). Every case runs the real connector actions over
 `ConnectorHttpClient` and `CredentialResolver` plus `TodoistConformanceConfig`, which holds
 host-supplied seed ids in a practice Todoist account. They cover filtered task list cursor paging,
-the HTTP 404 error body, task labels as label names, the create/get/update/close task lifecycle
+the HTTP 404 error body, task labels as label names, the project listing the leftover lookup reads
+(paged through `next_cursor`), the create/get/update/close task lifecycle
 (a closed task leaves the active list), `due_date` / `due_datetime` as the connector sends them
 answering a due dated 2030-01-15 (its representation unchecked), project `parent_id`, and delete then
 not-found. Credentials bind through `todoistConformanceIntegration` (`todoist.api_token`, credential
@@ -1505,8 +1506,8 @@ for owners running a practice account by hand, `--allow-writes reversible` adds 
 `--record` stages verified recordings all or nothing in `.conformance-recordings/todoist/<run>/`
 (gitignored) for manual scrubbing and promotion.
 For offline tests, the experimental Todoist emulator (`@yolk-sdk/emulators/todoist`) is a
-stateful, fixture-only stand-in that passes these cases; it does not emulate the leftover lookup's
-project listing (no fixture records it), so that lookup fails closed against it.
+stateful, fixture-only stand-in that passes these cases; the project listing case records the
+leftover lookup's listing, so that lookup runs against it.
 
 ### Telegram conformance cases (experimental)
 
@@ -1552,14 +1553,15 @@ keeps or echoes the bot token.
 
 ### GitHub conformance cases (experimental)
 
-`@yolk-sdk/connectors/github/conformance` exports seven conformance cases for
+`@yolk-sdk/connectors/github/conformance` exports eight conformance cases for
 `@yolk-sdk/conformance/runner` (`githubConformanceCases`), synthetic replay fixtures
 (`githubConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
 (`githubConformanceFixtureSeeds`). Every case runs the real connector actions over
 `ConnectorHttpClient` and `CredentialResolver` plus `GithubConformanceConfig`, which holds the
 practice repository's `owner` and `repo` and a few seeded items. They cover label list paging
 through `Link` `rel="next"`, the 404 and 422 error envelopes the connector maps, base64 file
-contents, a comment created and deleted by id, a label added and removed, and the issue
+contents, the open-issue and comment listings the leftover lookup reads, a comment created and
+deleted by id, a label added and removed, and the issue
 create/get/update/close lifecycle. Credentials bind through `githubConformanceIntegration(owner, repo)`
 (`github.token`, credential ref `github.conformance`). The case table, seeds, and claims live in the
 [GitHub conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/github.mdx#conformance-cases).
@@ -1587,12 +1589,12 @@ label cases, and `--record` keeps the `link` response header, refuses any record
 token survives, and stages verified recordings all or nothing in
 `.conformance-recordings/github/<run>/` (gitignored) for manual scrubbing and promotion.
 For offline tests, the experimental GitHub emulator (`@yolk-sdk/emulators/github`) is a stateful,
-fixture-only stand-in that passes these cases; it does not emulate the leftover lookup's open-issue
-listing (no fixture records it), so that lookup fails closed against it.
+fixture-only stand-in that passes these cases; the open-listing case records the leftover lookup's
+reads, so that lookup runs against it.
 
 ### Google conformance cases (experimental)
 
-`@yolk-sdk/connectors/google/conformance` exports fifteen conformance cases for
+`@yolk-sdk/connectors/google/conformance` exports nineteen conformance cases for
 `@yolk-sdk/conformance/runner` (`googleConformanceCases`), synthetic replay fixtures
 (`googleConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
 (`googleConformanceFixtureSeeds`). Every case runs the real Gmail, Calendar, and Drive actions over
@@ -1601,10 +1603,11 @@ practice mailbox address, practice messages and a label, a practice calendar and
 practice Drive folder and file. They cover `gmail.list` and `gmail.list_threads` paging through
 `nextPageToken` (the thread listing naming exactly the threads of the label's messages), base64url
 attachment data, the 404 error envelope, a `metadataHeaders` selection on `gmail.get_message` and
-`gmail.get_thread`, a label created, applied, and deleted, a draft composed, updated, and deleted,
-trash and untrash, a send to the practice address, Calendar range paging, an event lifecycle and its
-deleted state, Drive folder paging, the `get_file` field selection, and a folder trashed and
-deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
+`gmail.get_thread`, the label listing and draft search the leftover lookup reads, a label created,
+applied, and deleted, a draft composed, updated, and deleted, trash and untrash, a send to the
+practice address, Calendar range paging and the lookup's free-text event query, an event lifecycle
+and its deleted state, Drive folder paging and the lookup's listing with trashed items, the
+`get_file` field selection, and a folder trashed and deleted. Credentials bind through `googleConformanceIntegration` (`google.oauth`, credential ref
 `google.conformance`). The case table, seeds, and claims live in the
 [Google conformance guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/google.mdx#conformance-cases).
 
@@ -1636,8 +1639,9 @@ recordings all or nothing in `.conformance-recordings/google/<run>/` (gitignored
 scrubbing and promotion.
 For offline tests, the experimental Google emulator (`@yolk-sdk/emulators/google`) is a stateful,
 fixture-only stand-in that passes these cases, records the practice send in its state (never
-delivering it), and never keeps or echoes the access token; no fixture records the leftover
-lookup's reads, so that lookup fails closed against it.
+delivering it), and never keeps or echoes the access token; four read cases record the leftover
+lookup's reads, so that lookup runs against it (its draft search and event query are recorded only
+empty, so they fail closed once a draft or a possibly matching event exists).
 
 ### LinkedIn search conformance cases (experimental)
 

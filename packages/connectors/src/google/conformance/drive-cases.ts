@@ -24,10 +24,12 @@ import {
 import { driveFolderLifecycleFixture } from './drive-folder-lifecycle.ts'
 import { driveGetFileFieldsFixture } from './drive-get-file-fields.ts'
 import { driveListPagingFixture } from './drive-list-paging.ts'
+import { driveListTrashedFixture } from './drive-list-trashed.ts'
 import {
   GoogleConformanceConfig,
   googleConformanceIntegration as integration,
   googleConformanceMarker,
+  googleLeftoverLookup,
   isNotFound,
   outcomeOf,
   requireSeed,
@@ -178,6 +180,51 @@ export const driveGetFileFieldsCase: GoogleConformanceCase = defineConformanceCa
       [file.id, file.name, file.mimeType, parentsOf(file)],
       [entry.id, entry.name, entry.mimeType, parentsOf(entry)],
       'expected get_file to answer the same metadata as the list entry'
+    )
+  })
+})
+
+export const driveListTrashedCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.drive.list-includes-trashed',
+  title:
+    'A folder listing with trashed items keeps every untrashed child and adds only trashed ones',
+  safety: 'read',
+  docs: "`drive.list_files` with `includeTrashed: true` drops the `trashed = false` clause, so its `q` is `'<parentId>' in parents` alone; `findGoogleConformanceLeftovers` lists the seeded folder that way (`pageSize: 100`) to report run folders left in Trash, reading each file's `trashed`.",
+  wire: "For the seeded practice folder (at most 100 items, Trash included), `drive.list_files` with `parentId` and `pageSize: 100` and the same listing with `includeTrashed: true` (the leftover lookup's request) each answer one page; the second answers every file of the first (compared by id), each listing the folder among its `parents`, and every file it adds answers `trashed: true` (unverified: that `'<id>' in parents` without `trashed = false` lists the folder's trashed children too).",
+  fixtures: [driveListTrashedFixture.id],
+  run: Effect.gen(function* () {
+    const folderId = yield* requireSeed('driveFolderId')
+    const untrashed = yield* folderChildren(folderId)
+
+    const listing = yield* listFiles({
+      parentId: folderId,
+      pageSize: googleLeftoverLookup.filePageSize,
+      includeTrashed: true
+    })
+
+    if (listing.nextPageToken !== undefined) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: driveFolderId must hold at most ${googleLeftoverLookup.filePageSize} items, Trash included`
+      })
+    }
+
+    const listed = [...listing.files]
+    const ids = listed.map(file => file.id)
+
+    yield* expectConformance(
+      untrashed.every(file => ids.includes(file.id)),
+      'expected the listing with trashed items to answer every file of the default listing',
+      { actual: untrashed.filter(file => !ids.includes(file.id)).length }
+    )
+    yield* expectConformance(
+      listed.every(file => parentsOf(file).includes(folderId)),
+      'expected every file of the listing with trashed items to list the folder among its parents'
+    )
+    yield* expectConformance(
+      listed.every(
+        file => file.trashed === true || untrashed.some(candidate => candidate.id === file.id)
+      ),
+      'expected every file only the listing with trashed items answers to be trashed'
     )
   })
 })

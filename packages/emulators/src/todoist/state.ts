@@ -4,10 +4,8 @@
  *
  * Entity shapes and the default entities are copied as data from the synthetic Todoist
  * conformance fixtures (the same user, project, task, and label ids as
- * `todoistConformanceFixtureSeeds`), never imported from SDK code. Where no fixture records a
- * value, the default is synthesized and says so: the work and paging projects themselves (the
- * fixtures name only their ids) are the fixture project shape with synthetic names and
- * `parent_id: null`.
+ * `todoistConformanceFixtureSeeds`), never imported from SDK code. The work and paging projects
+ * themselves are the ones the project listing fixture (`projects-paging.ts`) records.
  *
  * @experimental
  */
@@ -211,7 +209,7 @@ const pagingProjectId = todoistPagingProjectId
 const seededAt = '2026-09-20T10:00:00.000000Z'
 
 const defaultProjects: ReadonlyArray<TodoistEmulatorProjectSeed> = [
-  // Synthesized: the fixtures name only the ids of these two projects.
+  // As the project listing fixture (`projects-paging.ts`) records them.
   { id: workProjectId, name: 'Synthetic work project', child_order: 1 },
   { id: pagingProjectId, name: 'Synthetic paging project', child_order: 2 }
 ]

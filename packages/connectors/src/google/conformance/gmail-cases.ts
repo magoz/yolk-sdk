@@ -33,7 +33,9 @@ import {
   gmailListAction,
   gmailListAttachmentsAction,
   GmailListAttachmentsInput,
+  gmailListDraftsAction,
   GmailListInput,
+  gmailListLabelsAction,
   gmailListThreadsAction,
   GmailListThreadsInput,
   GmailMessageIdInput,
@@ -45,7 +47,9 @@ import {
 } from '../gmail.ts'
 import { gmailAttachmentFixture } from './gmail-attachment.ts'
 import { gmailDraftLifecycleFixture } from './gmail-draft-lifecycle.ts'
+import { gmailDraftSearchFixture } from './gmail-draft-search.ts'
 import { gmailLabelLifecycleFixture } from './gmail-label-lifecycle.ts'
+import { gmailLabelListingFixture } from './gmail-label-listing.ts'
 import { gmailListPagingFixture } from './gmail-list-paging.ts'
 import { gmailListThreadsPagingFixture } from './gmail-list-threads-paging.ts'
 import { gmailMetadataHeadersFixture } from './gmail-metadata-headers.ts'
@@ -65,6 +69,7 @@ import {
   GoogleConformanceActionFailed,
   googleConformanceIntegration as integration,
   googleConformanceMarker,
+  googleLeftoverLookup,
   isNotFound,
   observed,
   outcomeOf,
@@ -532,6 +537,93 @@ export const gmailMetadataHeadersCase: GoogleConformanceCase = defineConformance
       headerLines(inThread.headers),
       expected,
       'expected get_thread with metadataHeaders to keep exactly the selected headers of the message'
+    )
+  })
+})
+
+/** A label listing entry: its `id`, `name`, and `type` (`system` or `user`). */
+const GmailLabelListing = Schema.Struct({
+  labels: Schema.Array(
+    Schema.Struct({
+      id: Schema.NonEmptyString,
+      name: Schema.NonEmptyString,
+      type: Schema.optionalKey(Schema.String)
+    })
+  )
+})
+
+export const gmailLabelListingCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.label-listing',
+  title: 'The label listing the leftover lookup reads names every user label',
+  safety: 'read',
+  docs: '`gmail.list_labels` sends GET /gmail/v1/users/me/labels and passes the JSON answer through undecoded; `findGoogleConformanceLeftovers` reads its `labels` (`id` and `name`) and reports the user labels named with the run prefix.',
+  wire: '`gmail.list_labels` answers `labels`, each with a non-empty `id` and `name`, no `id` twice, among them the seeded paging label with `type: "user"` (so the listing includes user labels, as the leftover lookup needs) and `INBOX` with `type: "system"`.',
+  fixtures: [gmailLabelListingFixture.id],
+  run: Effect.gen(function* () {
+    const pagingLabelId = yield* requireSeed('pagingLabelId')
+
+    const listing = yield* gmailListLabelsAction
+      .executeTyped({ integration, input: {} })
+      .pipe(
+        Effect.flatMap(successValue(gmailListLabelsAction.id)),
+        Effect.flatMap(decodeOutput(GmailLabelListing, 'gmail.list_labels to answer labels'))
+      )
+
+    const ids = listing.labels.map(label => label.id)
+
+    yield* expectConformance(
+      new Set(ids).size === ids.length,
+      'expected the label listing to name every label once'
+    )
+
+    const typeOf = (id: string) => listing.labels.find(label => label.id === id)?.type ?? null
+
+    yield* expectEqual(
+      [typeOf(pagingLabelId), typeOf('INBOX')],
+      ['user', 'system'],
+      'expected the label listing to include the seeded paging label (user) and INBOX (system)'
+    )
+  })
+})
+
+/** A draft search page: drafts (each with its message), when any match. */
+const GmailDraftSearch = Schema.Struct({
+  drafts: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        message: Schema.Struct({ id: Schema.NonEmptyString })
+      })
+    )
+  ),
+  resultSizeEstimate: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+})
+
+export const gmailDraftSearchCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.draft-search',
+  title: 'The draft search the leftover lookup sends is accepted and lists drafts by id',
+  safety: 'read',
+  docs: '`gmail.list_drafts` sends GET /gmail/v1/users/me/drafts with `q` (the Gmail search box syntax) and `maxResults`, and passes the JSON answer through undecoded; `findGoogleConformanceLeftovers` searches `subject:yolk-conformance` (`maxResults: 100`, one page) and reports every draft it answers by `id`, treating a missing `drafts` as none.',
+  wire: '`gmail.list_drafts` with `query: "subject:yolk-conformance"` and `maxResults: 100` (the leftover lookup\'s request) answers 2xx with at most 100 `drafts`, each with a non-empty `id` and a `message` with a non-empty `id`, or none (`drafts` absent or empty), and any `resultSizeEstimate` is a non-negative integer.',
+  fixtures: [gmailDraftSearchFixture.id],
+  run: Effect.gen(function* () {
+    const page = yield* gmailListDraftsAction
+      .executeTyped({
+        integration,
+        input: GmailListInput.make({
+          query: googleLeftoverLookup.draftQuery,
+          maxResults: googleLeftoverLookup.draftPageSize
+        })
+      })
+      .pipe(
+        Effect.flatMap(successValue(gmailListDraftsAction.id)),
+        Effect.flatMap(decodeOutput(GmailDraftSearch, 'gmail.list_drafts to answer drafts'))
+      )
+
+    yield* expectConformance(
+      (page.drafts ?? []).length <= googleLeftoverLookup.draftPageSize,
+      'expected the draft search to answer at most maxResults drafts',
+      { actual: (page.drafts ?? []).length }
     )
   })
 })

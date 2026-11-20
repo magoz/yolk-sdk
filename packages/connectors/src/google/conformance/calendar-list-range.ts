@@ -1,6 +1,5 @@
-import type * as Schema from 'effect/Schema'
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
-import { calendarListUrl, calendarSyntheticEvent, googleJson } from './synthetic.ts'
+import { calendarListUrl, calendarSyntheticEvent, calendarSyntheticPage } from './synthetic.ts'
 
 const range = {
   timeMin: '2026-09-01T00:00:00Z',
@@ -35,30 +34,7 @@ const events = [
   timed('syntheticrange0005', 'Synthetic late', '2026-09-07T23:00:00Z', '2026-09-08T01:00:00Z')
 ]
 
-type SyntheticEventsPage = {
-  readonly kind: string
-  readonly summary: string
-  readonly timeZone: string
-  readonly accessRole: string
-  readonly items: Array<Schema.Json>
-  nextPageToken?: string
-}
-
-const page = (items: ReadonlyArray<Schema.Json>, nextPageToken?: string) => {
-  const body: SyntheticEventsPage = {
-    kind: 'calendar#events',
-    summary: 'Synthetic practice calendar',
-    timeZone: 'UTC',
-    accessRole: 'owner',
-    items: [...items]
-  }
-
-  if (nextPageToken !== undefined) {
-    body.nextPageToken = nextPageToken
-  }
-
-  return googleJson(200, body)
-}
+const page = calendarSyntheticPage
 
 /**
  * The seeded range listed on one page (`maxResults=250`), then in pages of two chained through

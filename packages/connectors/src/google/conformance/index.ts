@@ -15,12 +15,16 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import { calendarDeletedGoneFixture } from './calendar-deleted-gone.ts'
 import { calendarEventLifecycleFixture } from './calendar-event-lifecycle.ts'
 import { calendarListRangeFixture } from './calendar-list-range.ts'
+import { calendarQueryFixture } from './calendar-query.ts'
 import { driveFolderLifecycleFixture } from './drive-folder-lifecycle.ts'
 import { driveGetFileFieldsFixture } from './drive-get-file-fields.ts'
 import { driveListPagingFixture } from './drive-list-paging.ts'
+import { driveListTrashedFixture } from './drive-list-trashed.ts'
 import { gmailAttachmentFixture } from './gmail-attachment.ts'
 import { gmailDraftLifecycleFixture } from './gmail-draft-lifecycle.ts'
+import { gmailDraftSearchFixture } from './gmail-draft-search.ts'
 import { gmailLabelLifecycleFixture } from './gmail-label-lifecycle.ts'
+import { gmailLabelListingFixture } from './gmail-label-listing.ts'
 import { gmailListPagingFixture } from './gmail-list-paging.ts'
 import { gmailListThreadsPagingFixture } from './gmail-list-threads-paging.ts'
 import { gmailMetadataHeadersFixture } from './gmail-metadata-headers.ts'
@@ -32,13 +36,17 @@ export {
   calendarDeletedGoneCase,
   calendarEventLifecycleCase,
   calendarListRangeCase,
+  calendarQueryCase,
   driveFolderLifecycleCase,
   driveGetFileFieldsCase,
   driveListPagingCase,
+  driveListTrashedCase,
   findGoogleConformanceLeftovers,
   gmailAttachmentCase,
   gmailDraftLifecycleCase,
+  gmailDraftSearchCase,
   gmailLabelLifecycleCase,
+  gmailLabelListingCase,
   gmailListPagingCase,
   gmailListThreadsPagingCase,
   gmailMetadataHeadersCase,
@@ -69,12 +77,16 @@ export {
   calendarDeletedGoneFixture,
   calendarEventLifecycleFixture,
   calendarListRangeFixture,
+  calendarQueryFixture,
   driveFolderLifecycleFixture,
   driveGetFileFieldsFixture,
   driveListPagingFixture,
+  driveListTrashedFixture,
   gmailAttachmentFixture,
   gmailDraftLifecycleFixture,
+  gmailDraftSearchFixture,
   gmailLabelLifecycleFixture,
+  gmailLabelListingFixture,
   gmailListPagingFixture,
   gmailListThreadsPagingFixture,
   gmailMetadataHeadersFixture,
@@ -90,14 +102,18 @@ export const googleConformanceFixtures: ReadonlyArray<WireFixture> = [
   gmailNotFoundEnvelopeFixture,
   gmailListThreadsPagingFixture,
   gmailMetadataHeadersFixture,
+  gmailLabelListingFixture,
+  gmailDraftSearchFixture,
   gmailLabelLifecycleFixture,
   gmailDraftLifecycleFixture,
   gmailTrashUntrashFixture,
   gmailSendPracticeFixture,
   calendarListRangeFixture,
+  calendarQueryFixture,
   calendarEventLifecycleFixture,
   calendarDeletedGoneFixture,
   driveListPagingFixture,
   driveGetFileFieldsFixture,
+  driveListTrashedFixture,
   driveFolderLifecycleFixture
 ]

@@ -109,7 +109,7 @@ const expectNotEmulated = async (response: Response, reason: string): Promise<st
 }
 
 describe('manifest', () => {
-  it('lists the nine emulated routes, unverified connector routes citing known case ids', () => {
+  it('lists the ten emulated routes, unverified connector routes citing known case ids', () => {
     expect(todoistEmulatorRoutes.map(route => [route.method, route.path, route.write])).toEqual([
       ['GET', '/api/v1/tasks', false],
       ['POST', '/api/v1/tasks', true],
@@ -117,6 +117,7 @@ describe('manifest', () => {
       ['POST', '/api/v1/tasks/{taskId}', true],
       ['POST', '/api/v1/tasks/{taskId}/close', true],
       ['GET', '/api/v1/labels', false],
+      ['GET', '/api/v1/projects', false],
       ['POST', '/api/v1/projects', true],
       ['GET', '/api/v1/projects/{projectId}', false],
       ['DELETE', '/api/v1/projects/{projectId}', true]
@@ -235,7 +236,8 @@ describe('drift: every fixture exchange answered as recorded', () => {
     for (const fixtureId of [
       'todoist.tasks.list-cursor-paging.synthetic',
       'todoist.errors.not-found-envelope.synthetic',
-      'todoist.labels.task-labels-are-names.synthetic'
+      'todoist.labels.task-labels-are-names.synthetic',
+      'todoist.projects.list-cursor-paging.synthetic'
     ]) {
       const fixture = todoistConformanceFixtures.find(candidate => candidate.id === fixtureId)
 
@@ -424,15 +426,18 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
     ['labels without limit', 'GET', api('/labels'), {}, 'without limit'],
     ['labels paging', 'GET', api('/labels?limit=2'), {}, 'paging labels'],
     ['labels with a cursor', 'GET', api('/labels?limit=200&cursor=x'), {}, 'cursor'],
+    ['projects without limit', 'GET', api('/projects'), {}, 'without limit'],
+    ['projects with a limit above 200', 'GET', api('/projects?limit=201'), {}, 'limit must be'],
     [
-      'the project listing (no fixture records it)',
+      'a project cursor this emulator did not issue',
       'GET',
-      api('/projects?limit=200'),
+      api('/projects?cursor=SyntheticProjectCursor0001&limit=1'),
       {},
-      'no emulated Todoist route for this method and path'
+      'did not issue'
     ],
+    ['projects with another query', 'GET', api('/projects?limit=200&ids=x'), {}, 'ids'],
     [
-      'reading the seeded work project (no fixture records its object)',
+      'reading the seeded work project (only the listing records its object)',
       'GET',
       api('/projects/6XSyntheticWork0'),
       {},
@@ -820,7 +825,7 @@ const createTaskThroughConnector = (target: TodoistEmulator) =>
 describe('unrecognised requests are ledgered without request text', () => {
   it.each([
     ['GET', api(`/sections?q=${token}`)],
-    ['GET', api(`/projects?limit=200&${token}=1`)],
+    ['GET', api(`/projects/archived?limit=200&${token}=1`)],
     ['GET', api('/tasks/6X%53yntheticLabel')],
     ['DELETE', api(`/tasks/${token}`)],
     ['PATCH', api('/tasks/6XSyntheticLabel')],

@@ -49,6 +49,7 @@ import {
   githubLabelsPagingCase,
   githubLabelsPagingFixture,
   githubNotFoundEnvelopeFixture,
+  githubOpenIssuesFixture,
   githubValidationEnvelopeFixture,
   type GithubConformanceCase,
   type GithubConformanceSeeds
@@ -134,6 +135,7 @@ const caseIds = [
   ['github.errors.not-found-envelope', 'read'],
   ['github.errors.validation-envelope', 'read'],
   ['github.contents.base64-file', 'read'],
+  ['github.issues.open-listing', 'read'],
   ['github.comments.create-delete', 'write-reversible'],
   ['github.labels.add-remove', 'write-reversible'],
   ['github.issues.lifecycle-close', 'write-irreversible']
@@ -189,6 +191,7 @@ describe('GitHub conformance cases', () => {
       'github.errors.not-found-envelope',
       'github.errors.validation-envelope',
       'github.contents.base64-file',
+      'github.issues.open-listing',
       'github.comments.create-delete',
       'github.comments.create-delete',
       'github.labels.add-remove'
@@ -231,7 +234,7 @@ describe('GitHub conformance cases', () => {
       })
 
       expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 7,
+        passed: 8,
         failed: 0,
         skipped: 0
       })
@@ -258,7 +261,7 @@ describe('GitHub conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(7)
+      expect(report.summary.passed).toBe(8)
 
       for (const testCase of githubConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -473,6 +476,18 @@ const tampers: ReadonlyArray<{
     message: 'expected size to equal the UTF-8 byte length of the decoded content'
   },
   {
+    // The open-issue listing advertises a next page while it fits one page.
+    fixture: replaceResponse(
+      githubOpenIssuesFixture,
+      0,
+      withHeaders({
+        'content-type': 'application/json; charset=utf-8',
+        link: '<https://api.github.com/repositories/100000001/issues?state=open&per_page=100&page=2>; rel="next"'
+      })
+    ),
+    message: 'expected a listing of fewer than per_page issues to report no next page'
+  },
+  {
     // A deleted comment deleted again answers 204 instead of not found.
     fixture: replaceResponse(githubCommentLifecycleFixture, 4, () => ({
       status: 204,
@@ -563,6 +578,20 @@ describe('GitHub conformance drills (one per case)', () => {
         withStatus(422, '{"message":"Validation Failed","documentation_url":"https://x.test"}')
       ),
       'expected the validation body to be JSON with a message and a non-empty errors array'
+    ],
+    [
+      'a closed item in the open-issue listing',
+      replaceResponse(
+        githubOpenIssuesFixture,
+        0,
+        replaceInBody('"state":"open"', '"state":"closed"')
+      ),
+      'expected the open-issue listing to answer only open items'
+    ],
+    [
+      'a comment count the comment listing disagrees with',
+      replaceResponse(githubOpenIssuesFixture, 0, replaceInBody('"comments":0', '"comments":1')),
+      'expected the comment listing to answer the listed comments count on one page'
     ],
     [
       'unfolded base64 content',

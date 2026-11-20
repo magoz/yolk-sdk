@@ -439,11 +439,13 @@ signal that the provider changed.
   fixture shows. They never guess a
   status or an error envelope.
 - **Limited leftover lookups.** The read-only GitHub, Google, and Todoist
-  `find*ConformanceLeftovers` lookups send listings no fixture records, so they always fail
-  not-emulated against the emulator. The Dropbox and Notion lookups fail against the default seed
-  (no fixture records an empty listing or search), but report a leftover in a recorded shape that a
-  seed or an earlier case left behind. The repository runners report a failed lookup as a
-  lookup-failed `WARN`, not as leftovers.
+  `find*ConformanceLeftovers` lookups send only reads a read case records, so they run against the
+  emulator and report a leftover the state holds. The Google draft search and free-text event
+  query are recorded only empty, so they fail not-emulated once the state holds a draft or an event
+  that might match (the event cases leave their cancelled run events). The Dropbox and Notion
+  lookups fail against the default seed (no fixture records an empty listing or search), but report
+  a leftover in a recorded shape that a seed or an earlier case left behind. The repository runners
+  report a failed lookup as a lookup-failed `WARN`, not as leftovers.
 - **No delivery.** Sends such as the Telegram message or the Gmail practice send are recorded in
   the emulator's state and never delivered anywhere.
 - **No production use.** The Fortnox through MCP subpaths and the loopback server are Node only,

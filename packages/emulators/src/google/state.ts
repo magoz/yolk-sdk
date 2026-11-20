@@ -11,7 +11,8 @@
  * listing names (`impliedThreads`, which only ever render as `{ id, snippet, historyId }` list
  * entries), and the practice Drive folder
  * (`impliedFolderIds`, a parent whose own metadata no fixture shows). References resolve through
- * them, but no answer renders them.
+ * them, but no answer renders them, except the label listing: it renders the seeded labels, the
+ * paging label among them, as the label listing fixture records them (`listedLabels`).
  *
  * A stored Gmail message keeps only the renderings a fixture records for it: `minimal` (no
  * payload), and the `metadata` and `full` payloads. A `format` with no recorded rendering is not
@@ -103,6 +104,20 @@ export const GoogleEmulatorGmailLabel = Schema.Struct({
 })
 
 export type GoogleEmulatorGmailLabel = typeof GoogleEmulatorGmailLabel.Type
+
+/**
+ * A seeded label as the label listing fixture records it (`users.labels.list`): a system label, or
+ * a user label the state implies (the visibilities only where the fixture shows them).
+ */
+export const GoogleEmulatorListedLabel = Schema.Struct({
+  id: GmailId,
+  name: Schema.String,
+  messageListVisibility: Schema.optionalKey(Schema.String),
+  labelListVisibility: Schema.optionalKey(Schema.String),
+  type: Schema.Literals(['system', 'user'])
+})
+
+export type GoogleEmulatorListedLabel = typeof GoogleEmulatorListedLabel.Type
 
 /** An attachment Gmail stores apart from its message: `size` bytes as base64url `data`. */
 export const GoogleEmulatorAttachment = Schema.Struct({
@@ -209,6 +224,7 @@ export const GoogleEmulatorStateSchema = Schema.Struct({
   impliedMessages: Schema.Array(GoogleEmulatorImpliedMessage),
   impliedThreads: Schema.Array(GoogleEmulatorImpliedThread),
   impliedLabelIds: Schema.Array(GmailId),
+  listedLabels: Schema.Array(GoogleEmulatorListedLabel),
   labels: Schema.Array(GoogleEmulatorGmailLabel),
   attachments: Schema.Array(GoogleEmulatorAttachment),
   drafts: Schema.Array(GoogleEmulatorDraft),
@@ -229,6 +245,8 @@ export type GoogleEmulatorState = {
   impliedMessages: ReadonlyArray<GoogleEmulatorImpliedMessage>
   impliedThreads: ReadonlyArray<GoogleEmulatorImpliedThread>
   impliedLabelIds: ReadonlyArray<string>
+  /** The seeded labels as the label listing renders them (system labels and implied labels). */
+  listedLabels: ReadonlyArray<GoogleEmulatorListedLabel>
   labels: ReadonlyArray<GoogleEmulatorGmailLabel>
   attachments: ReadonlyArray<GoogleEmulatorAttachment>
   drafts: ReadonlyArray<GoogleEmulatorDraft>
@@ -255,6 +273,7 @@ export const GoogleEmulatorSeed = Schema.Struct({
   impliedMessages: Schema.optionalKey(Schema.Array(GoogleEmulatorImpliedMessage)),
   impliedThreads: Schema.optionalKey(Schema.Array(GoogleEmulatorImpliedThread)),
   impliedLabelIds: Schema.optionalKey(Schema.Array(GmailId)),
+  listedLabels: Schema.optionalKey(Schema.Array(GoogleEmulatorListedLabel)),
   attachments: Schema.optionalKey(Schema.Array(GoogleEmulatorAttachment)),
   calendars: Schema.optionalKey(Schema.Array(GoogleEmulatorCalendar)),
   events: Schema.optionalKey(Schema.Array(GoogleEmulatorCalendarEvent)),
@@ -419,6 +438,37 @@ const pagingThreads: ReadonlyArray<GoogleEmulatorImpliedThread> = [1, 2, 3, 4, 5
   historyId: `90010${index}`
 }))
 
+/** A system label as the label listing fixture records it (some carry no visibilities). */
+const systemLabel = (id: string, hidden: boolean): GoogleEmulatorListedLabel =>
+  hidden
+    ? {
+        id,
+        name: id,
+        messageListVisibility: 'hide',
+        labelListVisibility: 'labelHide',
+        type: 'system'
+      }
+    : { id, name: id, type: 'system' }
+
+/** The label listing fixture's labels: eight system labels, then the paging label. */
+const listedLabels: ReadonlyArray<GoogleEmulatorListedLabel> = [
+  systemLabel('INBOX', false),
+  systemLabel('SENT', false),
+  systemLabel('IMPORTANT', true),
+  systemLabel('TRASH', true),
+  systemLabel('DRAFT', true),
+  systemLabel('SPAM', true),
+  systemLabel('STARRED', true),
+  systemLabel('UNREAD', false),
+  {
+    id: pagingLabelId,
+    name: 'Synthetic paging',
+    messageListVisibility: 'show',
+    labelListVisibility: 'labelShow',
+    type: 'user'
+  }
+]
+
 const calendarId = 'practice-calendar@example.test'
 
 const practiceCalendar: GoogleEmulatorCalendar = {
@@ -556,6 +606,7 @@ const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
         impliedMessages: pagingMessages,
         impliedThreads: pagingThreads,
         impliedLabelIds: [pagingLabelId],
+        listedLabels,
         attachments: [{ messageId: attachmentMessage.id, attachmentId, size: 6, data: '-_-_Pj_-' }],
         calendars: [practiceCalendar],
         events: rangeEvents,
@@ -568,6 +619,7 @@ const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
         impliedMessages: [],
         impliedThreads: [],
         impliedLabelIds: [],
+        listedLabels: [],
         attachments: [],
         calendars: [],
         events: [],
@@ -590,6 +642,7 @@ const seedProblem = (entities: ProfileEntities): string | undefined => {
   const duplicates: ReadonlyArray<readonly [string, string | undefined]> = [
     ['message id', duplicate(messageIds)],
     ['label id', duplicate(entities.impliedLabelIds)],
+    ['listed label id', duplicate(entities.listedLabels.map(label => label.id))],
     ['thread id', duplicate(entities.impliedThreads.map(thread => thread.id))],
     [
       'attachment',
@@ -677,6 +730,7 @@ const stateFromSeed = (seed: GoogleEmulatorSeed): GoogleEmulatorState | string =
     impliedMessages: seed.impliedMessages ?? profile.impliedMessages,
     impliedThreads: seed.impliedThreads ?? profile.impliedThreads,
     impliedLabelIds: seed.impliedLabelIds ?? profile.impliedLabelIds,
+    listedLabels: seed.listedLabels ?? profile.listedLabels,
     attachments: seed.attachments ?? profile.attachments,
     calendars: seed.calendars ?? profile.calendars,
     events: seed.events ?? profile.events,

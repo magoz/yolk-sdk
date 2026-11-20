@@ -77,6 +77,7 @@ import { todoistDueDatesFixture } from './due-dates.ts'
 import { todoistNotFoundEnvelopeFixture } from './not-found-envelope.ts'
 import { todoistProjectDeleteFixture } from './project-delete.ts'
 import { todoistProjectParentIdFixture } from './project-parent-id.ts'
+import { todoistProjectsPagingFixture } from './projects-paging.ts'
 import { todoistTaskLabelsFixture } from './task-labels.ts'
 import { todoistTaskLifecycleFixture } from './task-lifecycle.ts'
 import { todoistTasksPagingFixture } from './tasks-paging.ts'
@@ -721,6 +722,14 @@ export const todoistNotFoundEnvelopeCase: TodoistConformanceCase = defineConform
 /** Label listing page size (the Todoist maximum), and the page cap. */
 const labelPageSize = 200
 
+/**
+ * Project listing page size of the leftover lookup (the Todoist maximum), and the pages it reads
+ * before giving up.
+ */
+const leftoverPageSize = 200
+
+const leftoverPageCap = 20
+
 export const todoistTaskLabelsCase: TodoistConformanceCase = defineConformanceCase({
   id: 'todoist.labels.task-labels-are-names',
   title: 'Task labels are label names, matching the personal label list',
@@ -771,6 +780,84 @@ export const todoistTaskLabelsCase: TodoistConformanceCase = defineConformanceCa
       labels.every(label => names.includes(label)),
       'expected every task label to be the name of a listed personal label',
       { actual: labels.filter(label => !names.includes(label)).length }
+    )
+  })
+})
+
+/** Project listing page size of the small pages, and the pages the case reads before giving up. */
+const projectSmallPageSize = 1
+
+const projectPageCap = 50
+
+/**
+ * Every project id of a `todoist.list_projects` listing in pages of `limit`, reading at most `cap`
+ * pages.
+ */
+const listAllProjects = (limit: number, cap: number) =>
+  Effect.gen(function* () {
+    const ids: Array<string> = []
+    let cursor: string | undefined
+
+    for (let count = 1; ; count++) {
+      const page = yield* todoistListProjectsAction
+        .executeTyped({ integration, input: TodoistPaginationInput.make({ limit, cursor }) })
+        .pipe(Effect.flatMap(successValue(todoistListProjectsAction.id)))
+
+      const pageIds = page.projects.map(project => project.id)
+
+      yield* expectConformance(
+        pageIds.length <= limit,
+        'expected at most limit projects on every page',
+        { actual: pageIds.length }
+      )
+      yield* expectConformance(
+        pageIds.every(id => !ids.includes(id)) && new Set(pageIds).size === pageIds.length,
+        'expected a later page to repeat no project from an earlier page'
+      )
+      ids.push(...pageIds)
+
+      if (page.nextCursor === null) {
+        return ids
+      }
+
+      yield* expectConformance(
+        page.nextCursor.length > 0,
+        'expected a non-empty next_cursor while more projects remain'
+      )
+
+      if (count >= cap) {
+        return yield* new ConformanceMismatch({
+          message: `precondition: the account has more than ${cap * limit} active projects`
+        })
+      }
+
+      cursor = page.nextCursor
+    }
+  })
+
+export const todoistProjectsPagingCase: TodoistConformanceCase = defineConformanceCase({
+  id: 'todoist.projects.list-cursor-paging',
+  title: 'The project listing the leftover lookup reads pages through next_cursor',
+  safety: 'read',
+  docs: '`todoist.list_projects` sends GET /api/v1/projects with `cursor` and `limit` query parameters and decodes `{ results, next_cursor }`, requiring `next_cursor` (string or null) on every page; it returns `{ projects, nextCursor }` and never follows a cursor by itself. `findTodoistConformanceLeftovers` reads it with `limit: 200` and follows `next_cursor` until it is null.',
+  wire: "`todoist.list_projects` with `limit: 200` (the leftover lookup's request), followed through `next_cursor`, answers every active project once, including the seeded paging project, and its last page answers `next_cursor: null` present (not absent); the same listing with `limit: 1` answers one project per page, chains through string `next_cursor` values with no project repeated (compared by id), and ends with the same projects (unverified: that both listings include sub-projects, as the leftover lookup needs for the case projects under the seeded work project).",
+  fixtures: [todoistProjectsPagingFixture.id],
+  run: Effect.gen(function* () {
+    const pagingProjectId = yield* requireSeed('pagingProjectId')
+
+    const full = yield* listAllProjects(leftoverPageSize, leftoverPageCap)
+
+    yield* expectConformance(
+      full.includes(pagingProjectId),
+      'expected the project listing to include the seeded paging project'
+    )
+
+    const paged = yield* listAllProjects(projectSmallPageSize, projectPageCap)
+
+    yield* expectEqual(
+      [...paged].sort(),
+      [...full].sort(),
+      'expected the one-per-page listing to answer the same projects as the limit 200 listing'
     )
   })
 })
@@ -1010,11 +1097,6 @@ export const todoistProjectDeleteCase: TodoistConformanceCase = defineConformanc
   })
 })
 
-/** Project listing page size (the Todoist maximum), and the pages read before giving up. */
-const leftoverPageSize = 200
-
-const leftoverPageCap = 20
-
 /**
  * READ-ONLY and bounded: `name (id)` of every active project whose name starts with
  * `yolk-conformance-run-`, which earlier runs left behind (a killed process, a failed or ambiguous
@@ -1060,6 +1142,7 @@ export const todoistConformanceCases: ReadonlyArray<TodoistConformanceCase> = [
   todoistTasksPagingCase,
   todoistNotFoundEnvelopeCase,
   todoistTaskLabelsCase,
+  todoistProjectsPagingCase,
   todoistTaskLifecycleCase,
   todoistDueDatesCase,
   todoistProjectParentIdCase,

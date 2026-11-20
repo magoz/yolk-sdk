@@ -1,9 +1,11 @@
 /**
  * Cross-checks: the Google emulator must satisfy the same conformance cases the replayed fixtures
  * satisfy, through the REAL Google connector actions (Gmail, Calendar, Drive), both in-process (A)
- * and over loopback sockets (B, one per recorded origin); the read-only leftover lookup must fail
- * closed against it (no fixture records its reads); and each drill knob must make exactly its case
- * fail. Tests may import SDK packages; the emulator source never does.
+ * and over loopback sockets (B, one per recorded origin); the read-only leftover lookup must run
+ * against it (its reads are the ones the label-listing, draft-search, free-text-query, and
+ * trashed-listing cases record), list what an earlier run left, and fail closed where no fixture
+ * records the answer (an event query once the calendar holds a run event); and each drill knob must
+ * make exactly its case fail. Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
@@ -19,6 +21,7 @@ import {
   connectorHttpClientsFromEffectHttpClientLayer,
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
+import { googleDriveFileFields } from '@yolk-sdk/connectors/google'
 import {
   findGoogleConformanceLeftovers,
   GoogleConformanceConfig,
@@ -207,7 +210,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           const report = yield* runAll(emulators, { kind: 'in-process' }, inProcessLayer)
 
           expectAllPassed(report)
-          expect(readCaseIds).toHaveLength(8)
+          expect(readCaseIds).toHaveLength(12)
           expect(report.results.find(result => result.id === sendCaseId)?.safety, sendCaseId).toBe(
             'write-irreversible'
           )
@@ -296,7 +299,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
   )
 
   it.effect(
-    'passes every case sequentially on ONE emulator; the leftover lookup fails closed before and after',
+    'passes every case sequentially on ONE emulator; the leftover lookup finds nothing before, and fails closed after the event cases',
     () =>
       withEmulator({}, emulator =>
         Effect.gen(function* () {
@@ -304,26 +307,19 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             Effect.provide(portsOver(inProcessLayer(emulator)))
           )
 
-          // No fixture records the lookup's label listing (nor its draft search or free-text event
-          // query), so the read-only lookup fails with its action-failed error (the live runner
-          // prints its lookup-failed WARN) and writes nothing.
+          // The lookup's reads are the recorded ones: on the seed it finds nothing and writes
+          // nothing.
           const seeded = emulator.snapshot()
 
-          expect(yield* Effect.flip(lookup)).toMatchObject({
-            _tag: 'GoogleConformanceActionFailed',
-            actionId: 'gmail.list_labels',
-            code: 'gmail_list_labels_failed',
-            status: 400
-          })
-          expect(emulator.ledger.entries()).toEqual([
-            expect.objectContaining({
-              method: 'GET',
-              path: '/<unrecognised>',
-              query: {},
-              status: 400,
-              evidence: 'unknown-route',
-              notEmulated: 'no emulated Google route for this method and path'
-            })
+          expect(yield* lookup).toEqual([])
+          expect(
+            emulator.ledger.entries().map(entry => `${entry.method} ${entry.route} ${entry.status}`)
+          ).toEqual([
+            'GET /gmail/v1/users/me/labels 200',
+            'GET /gmail/v1/users/me/drafts 200',
+            'GET /gmail/v1/users/me/messages/{messageId} 200',
+            'GET /calendar/v3/calendars/{calendarId}/events 200',
+            'GET /drive/v3/files 200'
           ])
           expect(emulator.snapshot()).toEqual(seeded)
           emulator.ledger.clear()
@@ -358,16 +354,87 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             nextFolderNumber: seeded.counters.nextFolderNumber + 1
           })
 
+          // The event cases leave their cancelled run events (the fixtures read them back), and no
+          // fixture records how Google's free-text query treats them: the event query fails
+          // closed (the live runner prints its lookup-failed WARN), writing nothing.
           expect(yield* Effect.flip(lookup)).toMatchObject({
             _tag: 'GoogleConformanceActionFailed',
-            code: 'gmail_list_labels_failed',
+            actionId: 'calendar.list_events',
             status: 400
+          })
+          expect(emulator.ledger.entries().at(-1)).toMatchObject({
+            route: '/calendar/v3/calendars/{calendarId}/events',
+            status: 400,
+            notEmulated:
+              'a free-text query of a calendar holding an event it might match is not emulated'
           })
           expect(emulator.snapshot()).toEqual(after)
           expectNoToken(emulator)
         })
       ),
     60_000
+  )
+
+  it.effect('the leftover lookup lists a run label and a trashed run folder left behind', () =>
+    withEmulator({}, emulator =>
+      Effect.gen(function* () {
+        const send = (method: string, url: string, body: unknown, accept?: string) => {
+          const headers = new Headers({
+            authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json'
+          })
+
+          if (accept !== undefined) headers.set('accept', accept)
+
+          return Effect.promise(() =>
+            emulator.fetch(new Request(url, { method, headers, body: JSON.stringify(body) }))
+          )
+        }
+
+        const label = yield* send('POST', `${googleEmulatorGmailOrigin}/gmail/v1/users/me/labels`, {
+          name: 'yolk-conformance run-0a1b2c3d label'
+        })
+
+        expect(label.status).toBe(200)
+
+        const fields = `supportsAllDrives=true&fields=${encodeURIComponent(googleDriveFileFields)}`
+        const files = `${googleEmulatorApisOrigin}/drive/v3/files`
+
+        const folder = yield* send(
+          'POST',
+          `${files}?${fields}`,
+          {
+            name: 'yolk-conformance run-0a1b2c3d folder',
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: ['synthetic-practice-folder-0001']
+          },
+          'application/json'
+        )
+
+        expect(folder.status).toBe(200)
+
+        const trashed = yield* send(
+          'PATCH',
+          `${files}/synthetic-conformance-folder-0001?${fields}`,
+          { trashed: true },
+          'application/json'
+        )
+
+        expect(trashed.status).toBe(200)
+
+        const planted = emulator.snapshot()
+
+        expect(
+          yield* findGoogleConformanceLeftovers.pipe(
+            Effect.provide(portsOver(inProcessLayer(emulator)))
+          )
+        ).toEqual([
+          'Gmail label Label_9101 "yolk-conformance run-0a1b2c3d label"',
+          'Drive item synthetic-conformance-folder-0001 "yolk-conformance run-0a1b2c3d folder" (in Trash)'
+        ])
+        expect(emulator.snapshot()).toEqual(planted)
+      })
+    )
   )
 
   // Any run id of the fixtures' length (13 characters): the draft and sent messages carry the
@@ -509,6 +576,23 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       }
     ],
     [
+      { labelListingOmitsUserLabels: true },
+      {
+        id: 'google.gmail.label-listing',
+        tag: 'ConformanceMismatch',
+        message:
+          'expected the label listing to include the seeded paging label (user) and INBOX (system)'
+      }
+    ],
+    [
+      { draftSearchDraftsNull: true },
+      {
+        id: 'google.gmail.draft-search',
+        tag: 'ConformanceMismatch',
+        message: 'expected gmail.list_drafts to answer drafts'
+      }
+    ],
+    [
       { labelDeleteKeepsOnMessages: true },
       {
         id: 'google.gmail.label-create-apply-delete',
@@ -549,6 +633,14 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       }
     ],
     [
+      { eventQueryIgnored: true },
+      {
+        id: 'google.calendar.free-text-query',
+        tag: 'ConformanceMismatch',
+        message: 'expected every listed event to mention the query yolk-conformance'
+      }
+    ],
+    [
       { eventPatchKeepsSummary: true },
       {
         id: 'google.calendar.event-lifecycle',
@@ -579,6 +671,15 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
         tag: 'ConformanceMismatch',
         message:
           'expected get_file to answer the seeded id with the seeded folder among its parents'
+      }
+    ],
+    [
+      { trashedListingDropsUntrashed: true },
+      {
+        id: 'google.drive.list-includes-trashed',
+        tag: 'ConformanceMismatch',
+        message:
+          'expected the listing with trashed items to answer every file of the default listing'
       }
     ],
     [
