@@ -3,9 +3,10 @@
  * matching, and the registration of the stateful handlers on the `@emulators/core` app
  * (internal; re-exported by `src/microsoft.ts`).
  *
- * Only the routes the eleven Microsoft conformance cases need are emulated, plus the copy monitor
- * URL they require; everything else fails closed. Each route lists the cases whose claims it
- * follows.
+ * Only the routes the nineteen Microsoft conformance cases need are emulated, plus the copy
+ * monitor URL they require; everything else fails closed. Each route lists the cases whose claims
+ * it follows. The SharePoint site and Teams routes (`teams-sites.ts`) are fixture-only: they answer
+ * only their recorded exchanges.
  *
  * @experimental
  */
@@ -43,6 +44,20 @@ import {
   updateMessage
 } from './mail.ts'
 import type { MicrosoftEmulatorState } from './state.ts'
+import {
+  findOnlineMeeting,
+  getChat,
+  getChatMessage,
+  listChatMessages,
+  listChats,
+  listJoinedTeams,
+  listReplies,
+  listSiteDrives,
+  listTranscripts,
+  readTeams,
+  searchSites,
+  sendChatMessage
+} from './teams-sites.ts'
 
 export { microsoftEmulatorBasePath } from './graph.ts'
 
@@ -78,6 +93,22 @@ const concurrentCase = 'microsoft.outlook.concurrent-writes-same-message'
 const folderCase = 'microsoft.onedrive.create-folder-roundtrip'
 
 const copyCase = 'microsoft.onedrive.copy-accepted-monitor'
+
+const siteSearchCase = 'microsoft.sharepoint.search-finds-site'
+
+const siteDrivesCase = 'microsoft.sharepoint.site-drives-libraries'
+
+const chatsCase = 'microsoft.teams.chats-list-members'
+
+const chatPagingCase = 'microsoft.teams.chat-messages-paging'
+
+const teamChannelsCase = 'microsoft.teams.team-channels'
+
+const repliesCase = 'microsoft.teams.channel-message-replies'
+
+const meetingCase = 'microsoft.teams.meeting-transcripts'
+
+const chatSendCase = 'microsoft.teams.send-chat-message'
 
 const route = (
   method: string,
@@ -222,6 +253,69 @@ export const microsoftApiRoutes: ReadonlyArray<MicrosoftApiRoute> = [
     copyMonitor,
     [],
     false
+  ),
+  route('GET', graph('/sites'), false, [siteSearchCase], searchSites, ['search']),
+  route('GET', graph('/sites/{siteId}/drives'), false, [siteDrivesCase], listSiteDrives, [
+    '$select'
+  ]),
+  route('GET', graph('/me/chats'), false, [chatsCase], listChats, ['$expand', '$top']),
+  route('GET', graph('/chats/{chatId}'), false, [chatsCase], getChat, ['$expand']),
+  route('GET', graph('/chats/{chatId}/messages'), false, [chatPagingCase], listChatMessages, [
+    '$top',
+    '$orderby',
+    '$skiptoken'
+  ]),
+  route(
+    'GET',
+    graph('/chats/{chatId}/messages/{messageId}'),
+    false,
+    [chatPagingCase, chatSendCase],
+    getChatMessage
+  ),
+  route('POST', graph('/chats/{chatId}/messages'), true, [chatSendCase], sendChatMessage),
+  route('GET', graph('/me/joinedTeams'), false, [teamChannelsCase], listJoinedTeams),
+  route('GET', graph('/teams/{teamId}'), false, [teamChannelsCase], readTeams, ['$select']),
+  route('GET', graph('/teams/{teamId}/channels'), false, [teamChannelsCase], readTeams, [
+    '$select'
+  ]),
+  route(
+    'GET',
+    graph('/teams/{teamId}/channels/{channelId}'),
+    false,
+    [teamChannelsCase],
+    readTeams,
+    ['$select']
+  ),
+  route(
+    'GET',
+    graph('/teams/{teamId}/channels/{channelId}/messages'),
+    false,
+    [repliesCase],
+    readTeams,
+    ['$top']
+  ),
+  route(
+    'GET',
+    graph('/teams/{teamId}/channels/{channelId}/messages/{messageId}'),
+    false,
+    [repliesCase],
+    readTeams
+  ),
+  route(
+    'GET',
+    graph('/teams/{teamId}/channels/{channelId}/messages/{messageId}/replies'),
+    false,
+    [repliesCase],
+    listReplies,
+    ['$top']
+  ),
+  route('GET', graph('/me/onlineMeetings'), false, [meetingCase], findOnlineMeeting, ['$filter']),
+  route(
+    'GET',
+    graph('/me/onlineMeetings/{meetingId}/transcripts'),
+    false,
+    [meetingCase],
+    listTranscripts
   )
 ]
 

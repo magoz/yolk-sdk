@@ -170,6 +170,13 @@
       "expires": "2027-01-18"
     },
     {
+      "manifest": "microsoft",
+      "method": "POST",
+      "path": "/v1.0/chats/{chatId}/messages",
+      "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures shaped from the Graph docs; awaiting the owner-approved live run of microsoft.teams.send-chat-message (write-irreversible, run only by its exact id against a practice chat).",
+      "expires": "2027-01-18"
+    },
+    {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/create_folder_v2",

@@ -2,8 +2,8 @@
  * Microsoft Graph conformance cases for `@yolk-sdk/conformance/runner` and the wire fixtures that
  * back their replay (`@yolk-sdk/conformance/replay`).
  *
- * The Outlook and OneDrive cases run the real connector actions. The connector has no calendar
- * actions yet: the calendar cases send raw Graph v1.0 requests through the same connector ports and
+ * The Outlook, OneDrive, SharePoint site, and Teams cases run the real connector actions. The
+ * connector has no calendar actions yet: the calendar cases send raw Graph v1.0 requests through the same connector ports and
  * pin expected Graph behaviour (unverified until a live run) for hosts and the Microsoft Graph
  * emulator (`@yolk-sdk/emulators/microsoft`).
  *
@@ -27,6 +27,14 @@ import { microsoftOutlookAttachmentsListingFixture } from './outlook-attachments
 import { microsoftOutlookConcurrentWritesFixture } from './outlook-concurrent-writes.ts'
 import { microsoftOutlookImmutableIdFixture } from './outlook-immutable-id.ts'
 import { microsoftOutlookPagingNextLinkFixture } from './outlook-paging-next-link.ts'
+import { microsoftSharePointSearchSitesFixture } from './sharepoint-search-sites.ts'
+import { microsoftSharePointSiteDrivesFixture } from './sharepoint-site-drives.ts'
+import { microsoftTeamsChannelMessageRepliesFixture } from './teams-channel-replies.ts'
+import { microsoftTeamsChatMessagesPagingFixture } from './teams-chat-messages-paging.ts'
+import { microsoftTeamsChatsListMembersFixture } from './teams-chats-list.ts'
+import { microsoftTeamsMeetingTranscriptsFixture } from './teams-meeting-transcripts.ts'
+import { microsoftTeamsSendChatMessageFixture } from './teams-send-chat-message.ts'
+import { microsoftTeamsTeamChannelsFixture } from './teams-team-channels.ts'
 
 export {
   MicrosoftConformanceActionFailed,
@@ -48,6 +56,14 @@ export {
   microsoftOutlookConcurrentWritesCase,
   microsoftOutlookImmutableIdCase,
   microsoftOutlookPagingNextLinkCase,
+  microsoftSharePointSearchSitesCase,
+  microsoftSharePointSiteDrivesCase,
+  microsoftTeamsChannelMessageRepliesCase,
+  microsoftTeamsChatMessagesPagingCase,
+  microsoftTeamsChatsListMembersCase,
+  microsoftTeamsMeetingTranscriptsCase,
+  microsoftTeamsSendChatMessageCase,
+  microsoftTeamsTeamChannelsCase,
   type MicrosoftConformanceCase,
   type MicrosoftConformanceError,
   type MicrosoftConformanceRequirements,
@@ -67,7 +83,15 @@ export {
   microsoftOutlookAttachmentsListingFixture,
   microsoftOutlookConcurrentWritesFixture,
   microsoftOutlookImmutableIdFixture,
-  microsoftOutlookPagingNextLinkFixture
+  microsoftOutlookPagingNextLinkFixture,
+  microsoftSharePointSearchSitesFixture,
+  microsoftSharePointSiteDrivesFixture,
+  microsoftTeamsChannelMessageRepliesFixture,
+  microsoftTeamsChatMessagesPagingFixture,
+  microsoftTeamsChatsListMembersFixture,
+  microsoftTeamsMeetingTranscriptsFixture,
+  microsoftTeamsSendChatMessageFixture,
+  microsoftTeamsTeamChannelsFixture
 }
 
 /** Every Microsoft wire fixture, in case order, for replaying the whole suite at once. */
@@ -82,5 +106,13 @@ export const microsoftConformanceFixtures: ReadonlyArray<WireFixture> = [
   microsoftOutlookImmutableIdFixture,
   microsoftOutlookConcurrentWritesFixture,
   microsoftOneDriveCreateFolderFixture,
-  microsoftOneDriveCopyMonitorFixture
+  microsoftOneDriveCopyMonitorFixture,
+  microsoftSharePointSearchSitesFixture,
+  microsoftSharePointSiteDrivesFixture,
+  microsoftTeamsChatsListMembersFixture,
+  microsoftTeamsChatMessagesPagingFixture,
+  microsoftTeamsTeamChannelsFixture,
+  microsoftTeamsChannelMessageRepliesFixture,
+  microsoftTeamsMeetingTranscriptsFixture,
+  microsoftTeamsSendChatMessageFixture
 ]

@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from 'effect'
+import * as Schema from 'effect/Schema'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientError } from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -53,6 +54,22 @@ import {
   microsoftOutlookImmutableIdFixture,
   microsoftOutlookPagingNextLinkCase,
   microsoftOutlookPagingNextLinkFixture,
+  microsoftSharePointSearchSitesCase,
+  microsoftSharePointSearchSitesFixture,
+  microsoftSharePointSiteDrivesCase,
+  microsoftSharePointSiteDrivesFixture,
+  microsoftTeamsChannelMessageRepliesCase,
+  microsoftTeamsChannelMessageRepliesFixture,
+  microsoftTeamsChatMessagesPagingCase,
+  microsoftTeamsChatMessagesPagingFixture,
+  microsoftTeamsChatsListMembersCase,
+  microsoftTeamsChatsListMembersFixture,
+  microsoftTeamsMeetingTranscriptsCase,
+  microsoftTeamsMeetingTranscriptsFixture,
+  microsoftTeamsSendChatMessageCase,
+  microsoftTeamsSendChatMessageFixture,
+  microsoftTeamsTeamChannelsCase,
+  microsoftTeamsTeamChannelsFixture,
   type MicrosoftConformanceCase,
   type MicrosoftConformanceSeeds
 } from '@yolk-sdk/connectors/microsoft/conformance'
@@ -151,7 +168,15 @@ describe('Microsoft conformance cases', () => {
       ['microsoft.outlook.immutable-id-survives-move', 'write-reversible'],
       ['microsoft.outlook.concurrent-writes-same-message', 'write-reversible'],
       ['microsoft.onedrive.create-folder-roundtrip', 'write-reversible'],
-      ['microsoft.onedrive.copy-accepted-monitor', 'write-reversible']
+      ['microsoft.onedrive.copy-accepted-monitor', 'write-reversible'],
+      ['microsoft.sharepoint.search-finds-site', 'read'],
+      ['microsoft.sharepoint.site-drives-libraries', 'read'],
+      ['microsoft.teams.chats-list-members', 'read'],
+      ['microsoft.teams.chat-messages-paging', 'read'],
+      ['microsoft.teams.team-channels', 'read'],
+      ['microsoft.teams.channel-message-replies', 'read'],
+      ['microsoft.teams.meeting-transcripts', 'read'],
+      ['microsoft.teams.send-chat-message', 'write-irreversible']
     ])
     expect(microsoftConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
       microsoftConformanceCases.map(testCase => testCase.id)
@@ -226,7 +251,7 @@ describe('Microsoft conformance cases', () => {
         layer: replayCaseLayer
       })
 
-      expect(report.summary).toEqual({ passed: 11, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 19, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       for (const result of report.results) {
@@ -238,7 +263,7 @@ describe('Microsoft conformance cases', () => {
       }
 
       expect(formatConformanceReport(report).split('\n').at(-1)).toBe(
-        '11 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
+        '19 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
       )
     })
   )
@@ -255,7 +280,7 @@ describe('Microsoft conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(11)
+      expect(report.summary.passed).toBe(19)
 
       for (const testCase of microsoftConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -314,12 +339,20 @@ describe('Microsoft conformance safety on a live target', () => {
         ['microsoft.outlook.immutable-id-survives-move', 'skipped', 'writes-not-allowed'],
         ['microsoft.outlook.concurrent-writes-same-message', 'skipped', 'writes-not-allowed'],
         ['microsoft.onedrive.create-folder-roundtrip', 'skipped', 'writes-not-allowed'],
-        ['microsoft.onedrive.copy-accepted-monitor', 'skipped', 'writes-not-allowed']
+        ['microsoft.onedrive.copy-accepted-monitor', 'skipped', 'writes-not-allowed'],
+        ['microsoft.sharepoint.search-finds-site', 'passed', null],
+        ['microsoft.sharepoint.site-drives-libraries', 'passed', null],
+        ['microsoft.teams.chats-list-members', 'passed', null],
+        ['microsoft.teams.chat-messages-paging', 'passed', null],
+        ['microsoft.teams.team-channels', 'passed', null],
+        ['microsoft.teams.channel-message-replies', 'passed', null],
+        ['microsoft.teams.meeting-transcripts', 'passed', null],
+        ['microsoft.teams.send-chat-message', 'skipped', 'manual-only']
       ])
     })
   )
 
-  it.effect('runs every case when reversible writes are allowed', () =>
+  it.effect('runs every case but the Teams send when reversible writes are allowed', () =>
     Effect.gen(function* () {
       const results = yield* statuses({
         kind: 'live',
@@ -327,8 +360,27 @@ describe('Microsoft conformance safety on a live target', () => {
         allowWrites: 'reversible'
       })
 
-      expect(results.every(([, status]) => status === 'passed')).toBe(true)
-      expect(results).toHaveLength(11)
+      expect(results).toHaveLength(19)
+      expect(results.filter(([, status]) => status !== 'passed')).toEqual([
+        ['microsoft.teams.send-chat-message', 'skipped', 'manual-only']
+      ])
+    })
+  )
+
+  it.effect('runs the Teams send only when named by its exact id', () =>
+    Effect.gen(function* () {
+      const results = yield* statuses({
+        kind: 'live',
+        account: 'synthetic',
+        allowIrreversible: ['microsoft.teams.send-chat-message']
+      })
+
+      expect(results.find(([id]) => id === 'microsoft.teams.send-chat-message')).toEqual([
+        'microsoft.teams.send-chat-message',
+        'passed',
+        null
+      ])
+      expect(results.filter(([, , reason]) => reason === 'writes-not-allowed')).toHaveLength(6)
     })
   )
 })
@@ -1475,5 +1527,378 @@ describe('Microsoft conformance run interruption', () => {
         expect(warnings).toEqual([])
         expect(remaining).toEqual([])
       })
+  )
+})
+
+// Teams and SharePoint site cases: one disagreement drill per case, the nextLink and seed
+// preconditions, and the irreversible send's outcome classification.
+
+const isJsonObject = (value: Schema.Json | undefined): value is Schema.JsonObject =>
+  Predicate.isObject(value) && !Array.isArray(value)
+
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/** A response's JSON object body. */
+const jsonObjectBody = (response: WireResponse): Schema.JsonObject => {
+  const body = Option.getOrUndefined(decodeJson(textBody(response)))
+
+  return isJsonObject(body) ? body : expect.fail('expected a JSON object body')
+}
+
+/** Replace the parsed JSON body of a response with `edit(body)`. */
+const editBody =
+  (edit: (body: Schema.JsonObject) => Schema.JsonObject) =>
+  (response: WireResponse): WireResponse => ({
+    status: response.status,
+    headers: response.headers,
+    body: JSON.stringify(edit(jsonObjectBody(response)))
+  })
+
+/** Map every object entry of a body's `value` array. */
+const editValues =
+  (edit: (item: Schema.JsonObject) => Schema.JsonObject) =>
+  (body: Schema.JsonObject): Schema.JsonObject => ({
+    ...body,
+    value: Array.isArray(body.value)
+      ? body.value.map(item => (isJsonObject(item) ? edit(item) : item))
+      : (body.value ?? null)
+  })
+
+const actionFailed = (message: string) => ({
+  kind: 'failure',
+  tag: 'MicrosoftConformanceActionFailed',
+  message
+})
+
+const sendAdvice =
+  'the message may have been posted anyway: look for "yolk-conformance run-synthetic" in the seeded chat (the connector cannot remove it).'
+
+describe('Microsoft Teams and SharePoint conformance drills', () => {
+  it.effect('fails the site search case when the search leaves out the seeded site', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        microsoftSharePointSearchSitesCase,
+        replaceResponse(
+          microsoftSharePointSearchSitesFixture,
+          0,
+          editBody(body => ({ ...body, value: [] }))
+        )
+      )
+
+      expect(failure).toEqual(
+        mismatch('expected the seeded siteId among the sites the keyword search answers')
+      )
+    })
+  )
+
+  it.effect('fails the site drives case when no drive is a document library', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        microsoftSharePointSiteDrivesCase,
+        replaceResponse(
+          microsoftSharePointSiteDrivesFixture,
+          0,
+          editBody(editValues(drive => ({ ...drive, driveType: 'business' })))
+        )
+      )
+
+      expect(failure).toEqual(mismatch('expected a documentLibrary drive among the site drives'))
+    })
+  )
+
+  it.effect('fails the chats case when the listing leaves out the members', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsChatsListMembersCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsChatsListMembersFixture,
+            0,
+            editBody(editValues(({ members: _dropped, ...chat }) => chat))
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(
+        mismatch('expected every listed chat to carry its members ($expand=members)')
+      )
+      expect(exchangeIndices(entries)).toEqual(['GET 0'])
+    })
+  )
+
+  it.effect('fails the chat paging case when a larger chat returns no nextLink', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsChatMessagesPagingCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsChatMessagesPagingFixture,
+            0,
+            editBody(({ '@odata.nextLink': _dropped, ...body }) => body)
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(
+        mismatch('expected @odata.nextLink for a page of 2 from a chat seeded with more messages')
+      )
+      expect(exchangeIndices(entries)).toEqual(['GET 0'])
+    })
+  )
+
+  it.effect('refuses a chat nextLink for another chat before sending it', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsChatMessagesPagingCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsChatMessagesPagingFixture,
+            0,
+            replaceInBody(
+              'v1.0/chats/19:synthetic-chat-0001@thread.v2/messages?',
+              'v1.0/chats/19:synthetic-chat-0002@thread.v2/messages?'
+            )
+          ),
+          [0]
+        )
+      )
+
+      // The connector refuses the link itself (a validation failure), so nothing is requested.
+      expect(failure).toEqual({
+        kind: 'failure',
+        tag: 'ConnectorError',
+        message: 'Microsoft Graph nextLink must target the same Teams collection'
+      })
+      expect(exchangeIndices(entries)).toEqual(['GET 0'])
+    })
+  )
+
+  it.effect('fails the team channels case when the joined teams leave out the seeded team', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsTeamChannelsCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsTeamChannelsFixture,
+            0,
+            editBody(body => ({ ...body, value: [] }))
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(mismatch('expected the seeded teamId among the joined teams'))
+      expect(exchangeIndices(entries)).toEqual(['GET 0'])
+    })
+  )
+
+  it.effect('fails the replies case when a reply does not name its post', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        microsoftTeamsChannelMessageRepliesCase,
+        replaceResponse(
+          microsoftTeamsChannelMessageRepliesFixture,
+          2,
+          editBody(editValues(reply => ({ ...reply, replyToId: null })))
+        )
+      )
+
+      expect(failure).toEqual(mismatch('expected every reply to name the seeded post in replyToId'))
+    })
+  )
+
+  it.effect('fails the meeting case when a transcript names another meeting', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        microsoftTeamsMeetingTranscriptsCase,
+        replaceResponse(
+          microsoftTeamsMeetingTranscriptsFixture,
+          1,
+          editBody(editValues(transcript => ({ ...transcript, meetingId: 'MSpvdGhlcg' })))
+        )
+      )
+
+      expect(failure).toEqual(mismatch('expected every transcript to name the found meeting id'))
+    })
+  )
+
+  it.effect(
+    'reports a join link no meeting answers as not found, without a transcript request',
+    () =>
+      Effect.gen(function* () {
+        const { failure, entries } = yield* drill(
+          microsoftTeamsMeetingTranscriptsCase,
+          pickExchanges(
+            replaceResponse(
+              microsoftTeamsMeetingTranscriptsFixture,
+              0,
+              editBody(body => ({ ...body, value: [] }))
+            ),
+            [0]
+          )
+        )
+
+        expect(failure).toEqual(
+          actionFailed('teams.find_online_meeting failed: microsoft_not_found (HTTP 404)')
+        )
+        expect(exchangeIndices(entries)).toEqual(['GET 0'])
+      })
+  )
+
+  it.effect('fails the send case when Graph answers the markup unescaped', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsSendChatMessageFixture,
+            0,
+            replaceInBody('&lt;b&gt;not bold&lt;/b&gt;', '<b>not bold</b>')
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(
+        mismatch('expected the created message body to be the escaped HTML the connector sent')
+      )
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
+  it.effect('reports a 5xx send as an unknown outcome naming the run id', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsSendChatMessageFixture,
+            0,
+            withStatus(502, graphServerError)
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(
+        actionFailed(
+          `teams.send_chat_message failed: teams_send_chat_message_failed (HTTP 502); ${sendAdvice}`
+        )
+      )
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
+  it.effect('reports a 4xx send as a definitive rejection without the advice', () =>
+    Effect.gen(function* () {
+      const { failure } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsSendChatMessageFixture,
+            0,
+            withStatus(403, graphServerError)
+          ),
+          [0]
+        )
+      )
+
+      expect(failure).toEqual(
+        actionFailed('teams.send_chat_message failed: microsoft_unauthorized (HTTP 403)')
+      )
+    })
+  )
+
+  it.effect('reports a dropped send as an unknown outcome', () =>
+    Effect.gen(function* () {
+      const exit = yield* microsoftTeamsSendChatMessageCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, droppingHttpClient))),
+        Effect.exit
+      )
+
+      if (Exit.isSuccess(exit)) {
+        return expect.fail('expected the dropped send to fail the case')
+      }
+
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        _tag: 'MicrosoftConformanceActionFailed',
+        sendOutcome: 'unknown',
+        runId: 'run-synthetic'
+      })
+    })
+  )
+
+  it.effect('reports an ambiguous send answered while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const sent = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { warnings, reporter } = yield* capturingReporter
+
+      const { client } = yield* makeReplayHttpClient([
+        pickExchanges(
+          replaceResponse(
+            microsoftTeamsSendChatMessageFixture,
+            0,
+            withStatus(502, graphServerError)
+          ),
+          [0]
+        )
+      ])
+
+      const holding = yield* holdingFirst(client, isCreate, sent, release)
+
+      const fiber = yield* microsoftTeamsSendChatMessageCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+        Effect.provideService(ConformanceCleanupReporter, reporter),
+        Effect.forkChild
+      )
+
+      yield* Deferred.await(sent)
+
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(fiber))
+
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(interrupting)
+      yield* Fiber.await(fiber)
+
+      expect(yield* Ref.get(warnings)).toEqual([
+        `teams.send_chat_message failed: teams_send_chat_message_failed (HTTP 502); ${sendAdvice}`
+      ])
+    })
+  )
+
+  it.effect('fails with a precondition before any request without a run id', () =>
+    Effect.gen(function* () {
+      const { runId: _dropped, ...seeds } = microsoftConformanceFixtureSeeds
+
+      const { failure, entries } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        microsoftTeamsSendChatMessageFixture,
+        seeds
+      )
+
+      expect(failure).toEqual(
+        mismatch('precondition: MicrosoftConformanceConfig.runId is not configured')
+      )
+      expect(entries).toEqual([])
+    })
+  )
+
+  it.effect('fails with a precondition before any request for a chat id Teams cannot take', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        microsoftTeamsSendChatMessageFixture,
+        { ...microsoftConformanceFixtureSeeds, chatId: '19:synthetic/other@thread.v2' }
+      )
+
+      expect(failure).toEqual(
+        mismatch('precondition: MicrosoftConformanceConfig.chatId is not a valid Teams id')
+      )
+      expect(entries).toEqual([])
+    })
   )
 })

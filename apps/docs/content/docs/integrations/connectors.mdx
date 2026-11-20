@@ -995,8 +995,10 @@ user's calendar and not expired; tenants that turn off Graph access to transcrip
 
 `downloadTeamsMeetingTranscript` is a host-only download like `downloadOneDriveItem`: it reads the
 transcript's metadata (its id must match), then `content?$format=text/vtt` through the binary port,
-returning WebVTT bytes (`teamsTranscriptMimeType`) or a typed `ConnectorFileTransferError`. No
-conformance cases or emulator routes exist for Teams yet.
+returning WebVTT bytes (`teamsTranscriptMimeType`) or a typed `ConnectorFileTransferError`. The
+Teams reads and the chat send have unverified conformance cases and fixture-only emulator routes
+([Microsoft conformance](../connectors/microsoft#conformance-cases)); the channel sends and the
+transcript download have none yet.
 
 ### Host-only OneDrive original-byte download
 

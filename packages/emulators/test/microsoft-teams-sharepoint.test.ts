@@ -1,0 +1,363 @@
+/**
+ * The fixture-only SharePoint site and Teams routes of the Microsoft Graph emulator: the data copy
+ * equals the connector fixtures, every recorded exchange is answered byte for byte (alone and in
+ * suite order on one emulator), the send is recorded in the state under a minted id, and every
+ * request no fixture records is refused (400) before anything is written or a fault is used.
+ */
+import { Effect, Option } from 'effect'
+import * as Schema from 'effect/Schema'
+import { afterEach, describe, expect, it } from '@effect/vitest'
+import { microsoftConformanceFixtures } from '@yolk-sdk/connectors/microsoft/conformance'
+import {
+  emulatorEvidenceHeader,
+  makeMicrosoftEmulator,
+  microsoftEmulatorErrorCodes,
+  type MicrosoftEmulator,
+  type MicrosoftEmulatorOptions
+} from '../src/microsoft.ts'
+import {
+  microsoftTeamsSitesFixtures,
+  type MicrosoftRecordedExchange
+} from '../src/microsoft/teams-sites-recordings.ts'
+
+const now = Date.parse('2026-09-29T10:00:00.000Z')
+
+const token = 'synthetic-unit-test-token'
+
+const open: Array<MicrosoftEmulator> = []
+
+afterEach(async () => {
+  await Promise.all(open.splice(0).map(emulator => emulator.close()))
+})
+
+const emulator = async (options: MicrosoftEmulatorOptions = {}): Promise<MicrosoftEmulator> => {
+  const created = await makeMicrosoftEmulator({ now: () => now, ...options })
+
+  open.push(created)
+
+  return created
+}
+
+const teamsSitesSource = microsoftConformanceFixtures.filter(
+  fixture =>
+    fixture.caseId.startsWith('microsoft.sharepoint.') ||
+    fixture.caseId.startsWith('microsoft.teams.')
+)
+
+/** Send one recorded request (with a bearer the fixture never records). */
+const send = (target: MicrosoftEmulator, request: MicrosoftRecordedExchange['request']) =>
+  target.fetch(
+    new Request(request.url, {
+      method: request.method,
+      headers: { ...request.headers, authorization: `Bearer ${token}` },
+      body: request.body === undefined ? undefined : JSON.stringify(request.body)
+    })
+  )
+
+const expectRecorded = async (response: Response, recorded: MicrosoftRecordedExchange) => {
+  expect(response.status, recorded.request.url).toBe(recorded.response.status)
+  expect(response.headers.get('content-type')).toBe(recorded.response.headers['content-type'])
+  expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+  expect(await response.text(), recorded.request.url).toBe(recorded.response.body)
+}
+
+const sendFixture = microsoftTeamsSitesFixtures.find(
+  fixture => fixture.caseId === 'microsoft.teams.send-chat-message'
+)
+
+const sendExchanges = () => {
+  const [post, readback] = sendFixture?.exchanges ?? []
+
+  if (post === undefined || readback === undefined) {
+    return expect.fail('the send fixture records a POST and a readback')
+  }
+
+  return { post, readback }
+}
+
+const chatMessages =
+  'https://graph.microsoft.com/v1.0/chats/19%3Asynthetic-chat-0001%40thread.v2/messages'
+
+const sentContent =
+  'yolk-conformance run-synthetic: &lt;b&gt;not bold&lt;/b&gt; &amp; safe to ignore<br>second line'
+
+const sendBody = (content: string, extra: { readonly subject?: string } = {}) => ({
+  body: { contentType: 'html', content },
+  ...extra
+})
+
+const GraphErrorBody = Schema.Struct({ error: Schema.Struct({ code: Schema.String }) })
+
+/** The Graph error envelope's `error.code`, or `undefined` for another body. */
+const errorCode = async (response: Response): Promise<string | undefined> =>
+  Option.getOrUndefined(
+    Option.map(
+      Schema.decodeUnknownOption(GraphErrorBody)(await response.json()),
+      body => body.error.code
+    )
+  )
+
+describe('Microsoft Teams and SharePoint site routes', () => {
+  it('copy the eight connector fixtures as data, in suite order', () => {
+    expect(microsoftTeamsSitesFixtures).toEqual(teamsSitesSource)
+    expect(microsoftTeamsSitesFixtures.map(fixture => fixture.caseId)).toEqual([
+      'microsoft.sharepoint.search-finds-site',
+      'microsoft.sharepoint.site-drives-libraries',
+      'microsoft.teams.chats-list-members',
+      'microsoft.teams.chat-messages-paging',
+      'microsoft.teams.team-channels',
+      'microsoft.teams.channel-message-replies',
+      'microsoft.teams.meeting-transcripts',
+      'microsoft.teams.send-chat-message'
+    ])
+  })
+
+  it.effect('answer every fixture exchange byte for byte, each fixture on a fresh emulator', () =>
+    Effect.promise(async () => {
+      for (const fixture of microsoftTeamsSitesFixtures) {
+        const target = await emulator()
+
+        for (const exchange of fixture.exchanges) {
+          await expectRecorded(await send(target, exchange.request), exchange)
+        }
+      }
+    })
+  )
+
+  it.effect(
+    'answer every fixture in suite order on one emulator, ending at the seed plus the one send',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const seed = target.snapshot()
+
+        for (const fixture of microsoftTeamsSitesFixtures) {
+          for (const exchange of fixture.exchanges) {
+            await expectRecorded(await send(target, exchange.request), exchange)
+          }
+        }
+
+        expect(target.snapshot()).toEqual({
+          ...seed,
+          chatMessagesSent: [
+            {
+              chatId: '19:synthetic-chat-0001@thread.v2',
+              id: '1790000000101',
+              runId: 'run-synthetic'
+            }
+          ],
+          counters: { ...seed.counters, nextChatMessageNumber: 102 }
+        })
+        expect(target.ledger.entries().every(entry => entry.status < 300)).toBe(true)
+      })
+  )
+
+  it.effect('mint the next id for a later send and substitute only the run id and the id', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const { post, readback } = sendExchanges()
+
+      await expectRecorded(await send(target, post.request), post)
+
+      const content = sentContent.replace('run-synthetic', 'run-0f3a9c')
+
+      const second = await send(target, {
+        ...post.request,
+        body: sendBody(content)
+      })
+
+      const expected = (body: string) =>
+        body.replaceAll('run-synthetic', 'run-0f3a9c').replaceAll('1790000000101', '1790000000102')
+
+      expect(second.status).toBe(201)
+      expect(await second.text()).toBe(expected(post.response.body))
+
+      const read = await send(target, {
+        ...readback.request,
+        url: readback.request.url.replace('1790000000101', '1790000000102')
+      })
+
+      expect(await read.text()).toBe(expected(readback.response.body))
+      expect(target.snapshot().chatMessagesSent.map(message => message.runId)).toEqual([
+        'run-synthetic',
+        'run-0f3a9c'
+      ])
+    })
+  )
+
+  it.effect('answer the recorded reads under the empty profile too (they hold no entities)', () =>
+    Effect.promise(async () => {
+      const target = await emulator({ seed: { profile: 'empty' } })
+      const [fixture] = microsoftTeamsSitesFixtures
+      const [exchange] = fixture?.exchanges ?? []
+
+      if (exchange === undefined) return expect.fail('expected a recorded exchange')
+
+      await expectRecorded(await send(target, exchange.request), exchange)
+    })
+  )
+})
+
+type Refusal = {
+  readonly name: string
+  readonly method: string
+  readonly url: string
+  readonly body?: unknown
+  readonly code: string
+}
+
+const notEmulated = microsoftEmulatorErrorCodes.unsupportedValue
+
+const refusals: ReadonlyArray<Refusal> = [
+  {
+    name: 'a site search for another keyword',
+    method: 'GET',
+    url: 'https://graph.microsoft.com/v1.0/sites?search=other',
+    code: notEmulated
+  },
+  {
+    name: 'a query parameter the route does not take',
+    method: 'GET',
+    url: 'https://graph.microsoft.com/v1.0/sites?search=synthetic&%24top=5',
+    code: microsoftEmulatorErrorCodes.unsupportedQuery
+  },
+  {
+    name: 'another chat page size',
+    method: 'GET',
+    url: `${chatMessages}?%24top=3&%24orderby=lastModifiedDateTime+desc`,
+    code: notEmulated
+  },
+  {
+    name: 'a chat message no fixture records',
+    method: 'GET',
+    url: `${chatMessages}/1789900000099`,
+    code: notEmulated
+  },
+  {
+    name: 'a send to another chat',
+    method: 'POST',
+    url: 'https://graph.microsoft.com/v1.0/chats/19%3Asynthetic-chat-0002%40thread.v2/messages',
+    body: sendBody(sentContent),
+    code: notEmulated
+  },
+  {
+    name: 'a send of other text',
+    method: 'POST',
+    url: chatMessages,
+    body: sendBody('Hello'),
+    code: notEmulated
+  },
+  {
+    name: 'a send with a subject',
+    method: 'POST',
+    url: chatMessages,
+    body: sendBody(sentContent, { subject: 'Synthetic' }),
+    code: notEmulated
+  },
+  {
+    name: 'a send of a text body',
+    method: 'POST',
+    url: chatMessages,
+    body: { body: { contentType: 'text', content: sentContent } },
+    code: notEmulated
+  },
+  {
+    name: 'a send naming a run id over 40 characters',
+    method: 'POST',
+    url: chatMessages,
+    body: sendBody(sentContent.replace('run-synthetic', `run-${'a'.repeat(40)}`)),
+    code: notEmulated
+  }
+]
+
+describe('Microsoft Teams and SharePoint site refusals', () => {
+  for (const refusal of refusals) {
+    it.effect(`refuse ${refusal.name} before any write or fault`, () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const seed = target.snapshot()
+
+        target.faults.add({ kind: 'status', status: 503 })
+
+        const response = await target.fetch(
+          new Request(refusal.url, {
+            method: refusal.method,
+            headers: {
+              accept: 'application/json',
+              'content-type': 'application/json',
+              authorization: `Bearer ${token}`
+            },
+            body: refusal.body === undefined ? undefined : JSON.stringify(refusal.body)
+          })
+        )
+
+        expect(response.status).toBe(400)
+        expect(await errorCode(response)).toBe(refusal.code)
+        expect(target.snapshot()).toEqual(seed)
+        expect(target.faults.list()).toEqual([
+          expect.objectContaining({ applied: 0, remaining: undefined })
+        ])
+      })
+    )
+  }
+
+  it.effect('refuse a listing of the chat once it holds a sent message', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const { post } = sendExchanges()
+
+      const paging = microsoftTeamsSitesFixtures.find(
+        fixture => fixture.caseId === 'microsoft.teams.chat-messages-paging'
+      )
+
+      const [firstPage] = paging?.exchanges ?? []
+
+      if (firstPage === undefined) return expect.fail('expected the paging fixture')
+
+      await expectRecorded(await send(target, post.request), post)
+
+      const listing = await send(target, firstPage.request)
+
+      expect(listing.status).toBe(400)
+      expect(await errorCode(listing)).toBe(notEmulated)
+    })
+  )
+
+  it.effect('write nothing for a faulted send', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const seed = target.snapshot()
+      const { post } = sendExchanges()
+
+      target.faults.add({ kind: 'status', status: 503, match: { method: 'POST' }, count: 1 })
+
+      expect((await send(target, post.request)).status).toBe(503)
+      expect(target.snapshot()).toEqual(seed)
+
+      // The fault is used up: the same send now answers the recorded 201 under the first id.
+      await expectRecorded(await send(target, post.request), post)
+    })
+  )
+
+  it.effect('require a bearer and never ledger it', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const { post } = sendExchanges()
+
+      const response = await target.fetch(
+        new Request(post.request.url, {
+          method: 'POST',
+          headers: post.request.headers,
+          body: JSON.stringify(post.request.body)
+        })
+      )
+
+      expect(response.status).toBe(401)
+      expect(target.snapshot().chatMessagesSent).toEqual([])
+
+      await send(target, post.request)
+
+      expect(JSON.stringify(target.ledger.entries())).not.toContain(token)
+    })
+  )
+})

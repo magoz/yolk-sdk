@@ -156,13 +156,16 @@ const writeCaseIds = microsoftConformanceCases
   .filter(testCase => testCase.safety === 'write-reversible')
   .map(testCase => testCase.id)
 
+const sendCaseId = 'microsoft.teams.send-chat-message'
+
 describe('cross-check A: in-process emulator through the real connector', () => {
   // What "ends at the seed" means: every read case leaves the exact seed; every write-reversible
   // case removes what it created and ends at the seed except the id counters (event, message,
   // change-key, and drive-item numbers), which only ever advance so a later create never reuses
-  // a removed id. The test proves each write case moved at least one counter.
+  // a removed id. The test proves each write case moved at least one counter. The irreversible
+  // Teams send adds exactly its one recorded message and advances its id counter.
   it.effect(
-    'passes every Microsoft case; read cases leave the exact seed, write cases differ only in advanced id counters',
+    'passes every Microsoft case; read cases leave the exact seed, write cases differ only in advanced id counters (and the one Teams send)',
     () =>
       withEmulators({}, emulators =>
         Effect.gen(function* () {
@@ -174,8 +177,13 @@ describe('cross-check A: in-process emulator through the real connector', () => 
 
           expectAllPassed(report)
           expect(report.target).toEqual({ kind: 'in-process' })
-          expect(readCaseIds).toHaveLength(5)
+          expect(readCaseIds).toHaveLength(12)
           expect(writeCaseIds).toHaveLength(6)
+          expect(
+            microsoftConformanceCases
+              .filter(testCase => testCase.safety === 'write-irreversible')
+              .map(testCase => testCase.id)
+          ).toEqual([sendCaseId])
 
           const seedOf = (id: string): MicrosoftEmulatorState => {
             const seed = seeds.get(id)
@@ -209,6 +217,35 @@ describe('cross-check A: in-process emulator through the real connector', () => 
               expect(value, `${id} ${key}`).toBeGreaterThanOrEqual(before ?? 0)
             }
           }
+
+          // The send: exactly one recorded message, under the first minted id, and its readback.
+          const sendSeed = seedOf(sendCaseId)
+          const sendState = stateOf(sendCaseId)
+
+          expect(sendState).toEqual({
+            ...sendSeed,
+            chatMessagesSent: [
+              {
+                chatId: '19:synthetic-chat-0001@thread.v2',
+                id: '1790000000101',
+                runId: 'run-synthetic'
+              }
+            ],
+            counters: { ...sendSeed.counters, nextChatMessageNumber: 102 }
+          })
+          expect(requests(ledgerOf(sendCaseId))).toEqual([
+            'POST /v1.0/chats/{chatId}/messages 201',
+            'GET /v1.0/chats/{chatId}/messages/{messageId} 200'
+          ])
+
+          // Chat paging: the second page through the nextLink, whose chat id is unencoded.
+          expect(ledgerOf('microsoft.teams.chat-messages-paging').map(entry => entry.path)).toEqual(
+            [
+              '/v1.0/chats/19%3Asynthetic-chat-0001%40thread.v2/messages',
+              '/v1.0/chats/19:synthetic-chat-0001@thread.v2/messages',
+              '/v1.0/chats/19%3Asynthetic-chat-0001%40thread.v2/messages/1789900000003'
+            ]
+          )
 
           // Create, GET, PATCH, DELETE (204), GET (404).
           expect(requests(ledgerOf('microsoft.calendar.create-returns-event-id'))).toEqual([
@@ -419,6 +456,88 @@ describe('disagreement drills (tests-only knobs)', () => {
       }),
     60_000
   )
+
+  // One knob per Teams and SharePoint site case, each failing exactly that case.
+  const teamsSitesDrills: ReadonlyArray<{
+    readonly drills: MicrosoftEmulatorDrills
+    readonly failure: ExpectedFailure
+  }> = [
+    {
+      drills: { siteSearchEmpty: true },
+      failure: {
+        id: 'microsoft.sharepoint.search-finds-site',
+        tag: 'ConformanceMismatch',
+        message: 'expected the seeded siteId among the sites the keyword search answers'
+      }
+    },
+    {
+      drills: { siteDrivesNoLibrary: true },
+      failure: {
+        id: 'microsoft.sharepoint.site-drives-libraries',
+        tag: 'ConformanceMismatch',
+        message: 'expected a documentLibrary drive among the site drives'
+      }
+    },
+    {
+      drills: { chatsOmitMembers: true },
+      failure: {
+        id: 'microsoft.teams.chats-list-members',
+        tag: 'ConformanceMismatch',
+        message: 'expected every listed chat to carry its members'
+      }
+    },
+    {
+      drills: { chatMessagesOmitNextLink: true },
+      failure: {
+        id: 'microsoft.teams.chat-messages-paging',
+        tag: 'ConformanceMismatch',
+        message: 'expected @odata.nextLink for a page of 2 from a chat'
+      }
+    },
+    {
+      drills: { joinedTeamsEmpty: true },
+      failure: {
+        id: 'microsoft.teams.team-channels',
+        tag: 'ConformanceMismatch',
+        message: 'expected the seeded teamId among the joined teams'
+      }
+    },
+    {
+      drills: { repliesOmitReplyToId: true },
+      failure: {
+        id: 'microsoft.teams.channel-message-replies',
+        tag: 'ConformanceMismatch',
+        message: 'expected every reply to name the seeded post in replyToId'
+      }
+    },
+    {
+      drills: { transcriptsOtherMeeting: true },
+      failure: {
+        id: 'microsoft.teams.meeting-transcripts',
+        tag: 'ConformanceMismatch',
+        message: 'expected every transcript to name the found meeting id'
+      }
+    },
+    {
+      drills: { chatSendUnescaped: true },
+      failure: {
+        id: sendCaseId,
+        tag: 'ConformanceMismatch',
+        message: 'expected the created message body to be the escaped HTML the connector sent'
+      }
+    }
+  ]
+
+  for (const { drills, failure } of teamsSitesDrills) {
+    it.effect(
+      `${Object.keys(drills).join(', ')} fails only ${failure.id}`,
+      () =>
+        Effect.gen(function* () {
+          expectFailures(yield* drill(drills), [failure])
+        }),
+      60_000
+    )
+  }
 
   it.effect(
     'omitNextLink fails only the paging case',

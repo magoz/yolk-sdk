@@ -808,8 +808,8 @@ them to model Fortnox.
 
 `await makeMicrosoftEmulator(options?)` returns
 `{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`.
-Each call has its own state; `await close()` when done. It emulates only what the eleven Microsoft
-conformance cases need, so the Microsoft connector and the cases run unchanged against it.
+Each call has its own state; `await close()` when done. It emulates only what the nineteen
+Microsoft conformance cases need, so the Microsoft connector and the cases run unchanged against it.
 
 Route **two origins** to the same fetch handler: Graph (`https://graph.microsoft.com`) and the
 SharePoint host of the copy monitor URLs (`sharePointOrigin`, default
@@ -860,6 +860,37 @@ needs no credential (like the real capability URL). Its first poll runs the copy
 `copyInProgressPolls` (default 0) adds `inProgress` (202) answers before that. Monitors are runtime
 data like the ledger: not part of `snapshot()`, listed by `monitors()` and `/_emulate/state`, and
 cleared by `reset` and `seed`.
+
+SharePoint site and Teams routes (`/v1.0` prefix) are **fixture-only, without exceptions**: they
+answer only the recorded exchanges of the eight `microsoft.sharepoint.*` and `microsoft.teams.*`
+fixtures (synthetic, shaped from the Microsoft Graph v1.0 docs examples; copied as data in
+`src/microsoft/teams-sites-recordings.ts`, never imported), with the recorded status, content type,
+and body byte for byte. A read is answered when its raw path and its query parameters (decoded, in
+any order) equal a recorded request's; they read no entity of the state, so they answer under every
+profile and seed. Anything else answers 400 `SyntheticValueNotEmulated` (or
+`SyntheticQueryNotEmulated` for a query key the route does not take) before anything is written or
+a fault is used:
+
+| Route (`/v1.0` prefix)                                                       | Recorded answers                                                                        |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET /sites?search=`, `GET /sites/{siteId}/drives`                           | The site search and the site's libraries                                                |
+| `GET /me/chats`, `GET /chats/{chatId}`                                       | Chats with `$expand=members`, and one chat                                              |
+| `GET /chats/{chatId}/messages`, `GET /chats/{chatId}/messages/{id}`          | Two pages (the second through the unencoded `@odata.nextLink`), one message, a sent one |
+| `POST /chats/{chatId}/messages`                                              | The recorded send (below)                                                               |
+| `GET /me/joinedTeams`, `GET /teams/{teamId}[/channels[/{channelId}]]`        | Joined teams, the team, its channels, and one channel (`$select` as recorded)           |
+| `GET /teams/{teamId}/channels/{channelId}/messages[/{id}[/replies]]`         | Top-level posts, one post, and its replies                                              |
+| `GET /me/onlineMeetings?$filter=`, `GET /me/onlineMeetings/{id}/transcripts` | The meeting found by its join link, and its transcripts                                 |
+
+The chat send answers only the recorded chat and a body of exactly
+`{ body: { contentType: 'html', content } }` whose content is the recorded text with any run id
+(`run-` then lower-case letters, digits, and inner hyphens, at most 40 characters) in place of
+`run-synthetic`: the recorded 201 with that run id and a minted message id (`1790000000000` plus the
+`nextChatMessageNumber` counter, starting at the recorded `1790000000101`, which only advances). A
+send cannot be undone on Graph, so the emulator keeps it in the state (`chatMessagesSent`); a read
+of a sent message by its id answers the recorded readback with the same substitutions, and a
+listing of a chat holding a sent message is not emulated (no fixture lists one).
+`test/microsoft-teams-sharepoint.test.ts` fails when the data copy drifts from the connector
+fixtures and replays every exchange byte for byte.
 
 Wire behavior the cases claim:
 
@@ -914,7 +945,8 @@ invented wire behaviour) and the last, which is opt-in and off by default:
 
 Anything else fails closed with the Graph error envelope `{ error: { code, message, innerError } }`
 (`innerError` holds a synthetic `date`, `request-id`, and `client-request-id`): unknown routes and
-methods (including `/me` paths) get 404 `SyntheticRouteNotEmulated` and are ledgered; query keys a
+methods (including `/me` paths other than the Teams ones above) get 404
+`SyntheticRouteNotEmulated` and are ledgered; query keys a
 route does not emulate get 400 before the route runs (so a rejected write writes nothing), as do
 `$select` fields, body properties (including unknown keys inside `body`, recipients,
 `emailAddress`, `start`/`end`, and `parentReference`), and values it does not emulate. That covers
@@ -939,7 +971,8 @@ fault body) are documented Graph codes no fixture records; the `Synthetic*` ones
 codes.
 
 State and seeds: the mailbox user, mail folders, messages, file attachments (inline and regular),
-calendars and events, the drive and its items, and id counters. The default seed is the synthetic
+calendars and events, the drive and its items, the Teams chat messages the send recorded
+(`chatMessagesSent`, never seeded), and id counters. The default seed is the synthetic
 fixture entities with the same ids as `microsoftConformanceFixtureSeeds` (mailbox
 `ada@example.test`, calendar, events, attachment message, paging folder with three messages, drive,
 parent folder, and copy source). Pass `seed: { profile?, user?, mailFolders?, messages?,
@@ -965,7 +998,11 @@ Control plane: `/_emulate/ledger`, `faults`, `reset`, `state`, `seed`, and `cove
 and `{ omitNextLink: true }` each make the emulator disagree with one claim, only to prove the
 matching conformance case catches it. The timestamp and paging knobs fail only their case; an empty
 view also fails the timestamp case's precondition, and an id-less create also fails the cancel
-case, which creates its event the same way.
+case, which creates its event the same way. One knob per SharePoint site and Teams case fails
+exactly that case: `siteSearchEmpty`, `siteDrivesNoLibrary`, `chatsOmitMembers`,
+`chatMessagesOmitNextLink`, `joinedTeamsEmpty`, `repliesOmitReplyToId`,
+`transcriptsOtherMeeting`, and `chatSendUnescaped` (the send answers the markup unescaped; the
+message is still recorded).
 
 ## Dropbox emulator
 
@@ -2197,7 +2234,7 @@ owner-approved live run against a practice bucket, through a host `R2ObjectClien
 implementation, verifies it.
 
 All Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
-MCP routes are currently `unverified` (no live recording yet), including four Fortnox, eleven
+MCP routes are currently `unverified` (no live recording yet), including four Fortnox, twelve
 Microsoft, five Dropbox, two Notion, five Todoist, one Telegram, six GitHub, and fifteen Google
 connector write routes (the three LinkedIn search routes and the twelve MCP rows are reads, so none
 of them needs an entry). Until an

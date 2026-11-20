@@ -450,18 +450,23 @@ any invoice Fortnox unexpectedly creates for manual cancellation. See
 [Fortnox conformance cases](../connectors/fortnox#conformance-cases) for the case table, seeds, and
 claims.
 
-`@yolk-sdk/connectors/microsoft/conformance` exports eleven Microsoft Graph cases
+`@yolk-sdk/connectors/microsoft/conformance` exports nineteen Microsoft Graph cases
 (`microsoftConformanceCases`), their synthetic fixtures (`microsoftConformanceFixtures`), and the
 seeds they replay with (`microsoftConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
 `CredentialResolver`, and `MicrosoftConformanceConfig` (seed identities in a Microsoft 365 practice
-tenant). Outlook and OneDrive cases run the real connector actions. The connector has no calendar
-actions yet, so the four calendar cases send raw Graph requests through the same ports and pin
-expected Graph behaviour (unverified until a live run) for hosts and the Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Write
-cases create their own event, draft, or folder and remove it again automatically when its id is
-recoverable, failing with `MicrosoftConformanceRestoreFailed` when the removal fails or a create
-returns no id. An ambiguous create (transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails
-with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry
-manual-recovery advice. The create is not interruptible and the runner has no request timeout. See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).
+tenant). Outlook, OneDrive, SharePoint site, and Teams cases run the real connector actions. The
+connector has no calendar actions yet, so the four calendar cases send raw Graph requests through
+the same ports and pin expected Graph behaviour (unverified until a live run) for hosts and the
+Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Write cases create their own event,
+draft, or folder and remove it again automatically when its id is recoverable, failing with
+`MicrosoftConformanceRestoreFailed` when the removal fails or a create returns no id. An ambiguous
+create (transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
+`MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
+advice. The create is not interruptible and the runner has no request timeout. The one
+write-irreversible case, `microsoft.teams.send-chat-message`, posts a real Teams chat message naming
+the seeded `runId` and runs live only by its exact id; an ambiguous send fails with
+`MicrosoftConformanceActionFailed` (`sendOutcome: 'unknown'`). See [Microsoft conformance
+cases](../connectors/microsoft#conformance-cases).
 
 `@yolk-sdk/connectors/email/conformance` exports ten port-level email cases
 (`emailConformanceCases`), their synthetic `PortFixture`s (`emailConformanceFixtures`), and the seeds

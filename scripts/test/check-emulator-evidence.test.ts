@@ -843,7 +843,8 @@ describe('repo emulator manifests', () => {
       'POST /v1.0/$batch',
       'POST /v1.0/drives/{driveId}/items/{itemId}/children',
       'DELETE /v1.0/drives/{driveId}/items/{itemId}',
-      'POST /v1.0/drives/{driveId}/items/{itemId}/copy'
+      'POST /v1.0/drives/{driveId}/items/{itemId}/copy',
+      'POST /v1.0/chats/{chatId}/messages'
     ])
     expect(dropboxWriteRoutes).toEqual([
       'POST /2/files/create_folder_v2',
