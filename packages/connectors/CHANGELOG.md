@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.147
+
+### Patch Changes
+
+- Updated dependencies [e7bb9e6]
+- Updated dependencies [6dc0b32]
+- Updated dependencies [e7bb9e6]
+  - @yolk-sdk/agent@0.1.0-canary.147
+  - @yolk-sdk/conformance@0.1.0-canary.147
+
 ## 0.1.0-canary.146
 
 ### Patch Changes
