@@ -22,9 +22,9 @@ type ChatBody = {
   readonly stream?: boolean
   readonly stream_options?: { readonly include_usage: boolean } | undefined
   readonly max_completion_tokens?: number
-  readonly max_tokens?: number
+  readonly max_tokens?: number | null
   readonly reasoning_effort?: string | null
-  readonly temperature?: number | null
+  readonly temperature?: number
   readonly top_p?: number
   readonly logprobs?: boolean
   readonly top_logprobs?: number
@@ -340,15 +340,6 @@ const reasoningRequest = (overrides: ChatBody = {}): ChatBody =>
     ...overrides
   })
 
-const unsupportedParameterEnvelope = (parameter: string, message: string) => ({
-  error: {
-    message,
-    type: 'invalid_request_error',
-    param: parameter,
-    code: 'unsupported_parameter'
-  }
-})
-
 describe('openai emulator reasoning models', () => {
   it('reasons by default with gpt-6-luna, a known model', () => {
     expect(openAiEmulatorDefaultReasoningModels).toEqual([reasoningModel])
@@ -430,48 +421,36 @@ describe('openai emulator reasoning models', () => {
 
     expect(response.status).toBe(400)
     expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
-    expect(await response.json()).toEqual(
-      unsupportedParameterEnvelope(
-        'max_tokens',
-        "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
-      )
-    )
+    // The unsupported-parameter fixture's envelope.
+    expect(await response.json()).toEqual({
+      error: {
+        message:
+          "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+        type: 'invalid_request_error',
+        param: 'max_tokens',
+        code: 'unsupported_parameter'
+      }
+    })
     expect(emulator.ledger.entries()).toMatchObject([
       { model: reasoningModel, status: 400, unsupportedParameter: 'max_tokens' }
     ])
   })
 
-  it('rejects the sampling parameters reasoning models do not take, first listed first', async () => {
+  it('does not emulate parameter rules no fixture backs: sampling parameters are accepted', async () => {
     const emulator = makeOpenAiEmulator()
 
-    const samples: ReadonlyArray<readonly [string, ChatBody]> = [
-      ['temperature', { temperature: 0 }],
-      ['temperature', { temperature: 1 }],
-      ['top_p', { top_p: 0.5 }],
-      ['logprobs', { logprobs: true }],
-      ['top_logprobs', { top_logprobs: 2 }],
-      ['max_tokens', { max_tokens: 64, temperature: 0 }]
-    ]
+    const response = await chat(
+      emulator,
+      reasoningRequest({ temperature: 0, top_p: 0.5, logprobs: true, top_logprobs: 2 })
+    )
 
-    for (const [parameter, overrides] of samples) {
-      const response = await chat(emulator, reasoningRequest(overrides))
-
-      expect(response.status, parameter).toBe(400)
-      expect(await response.json(), parameter).toEqual(
-        unsupportedParameterEnvelope(
-          parameter,
-          parameter === 'max_tokens'
-            ? "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
-            : `Unsupported parameter: '${parameter}' is not supported with this model.`
-        )
-      )
-    }
-
-    // A null value counts as absent.
-    expect((await chat(emulator, reasoningRequest({ temperature: null }))).status).toBe(200)
+    expect(response.status).toBe(200)
+    expect(emulator.ledger.entries()[0]?.unsupportedParameter).toBeUndefined()
+    // A null `max_tokens` counts as absent.
+    expect((await chat(emulator, reasoningRequest({ max_tokens: null }))).status).toBe(200)
   })
 
-  it('takes the sampling parameters and max_tokens on a model that does not reason', async () => {
+  it('takes max_tokens and the sampling parameters on a model that does not reason', async () => {
     const emulator = makeOpenAiEmulator()
 
     const response = await chat(
@@ -483,32 +462,27 @@ describe('openai emulator reasoning models', () => {
     expect(emulator.ledger.entries()[0]?.unsupportedParameter).toBeUndefined()
   })
 
-  it('rejects reasoning_effort on a model that does not reason', async () => {
+  it('records and ignores reasoning_effort on a model that does not reason', async () => {
     const emulator = makeOpenAiEmulator()
 
     for (const stream of [true, false]) {
       const response = await chat(emulator, plainRequest({ stream, reasoning_effort: 'high' }))
+      const text = await response.text()
 
-      expect(response.status).toBe(400)
-      expect(await response.json()).toEqual(
-        unsupportedParameterEnvelope(
-          'reasoning_effort',
-          "Unsupported parameter: 'reasoning_effort' is not supported with this model."
-        )
-      )
+      expect(response.status).toBe(200)
+      expect(text).not.toContain('reasoning_content')
+      expect(text).not.toContain('"reasoning"')
+      expect(text).not.toContain('completion_tokens_details')
     }
 
     expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(['high', 'high'])
-    expect((await chat(emulator, plainRequest({ reasoning_effort: null }))).status).toBe(200)
   })
 
   it('answers the unknown model before checking parameters', async () => {
-    const emulator = makeOpenAiEmulator()
+    const emulator = makeOpenAiEmulator({ knownModels: ['gpt-4.1-nano'] })
 
-    const response = await chat(
-      emulator,
-      plainRequest({ model: 'yolk-conformance-model-does-not-exist', reasoning_effort: 'low' })
-    )
+    // `gpt-6-luna` is still a reasoning model here, but not a known one.
+    const response = await chat(emulator, reasoningRequest({ max_tokens: 64 }))
 
     expect(response.status).toBe(404)
     expect(await response.json()).toMatchObject({ error: { code: 'model_not_found' } })

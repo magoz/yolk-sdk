@@ -250,12 +250,16 @@ There is no root export or barrel.
   `reasoningOutput: 'requested-deltas'` (the Gateway; reasoning text streamed on request) or
   `'hidden'` (`/openai`: reasoning models reason unless `reasoning_effort` is `none`, send no
   reasoning text, and report `completion_tokens_details.reasoning_tokens`), and
-  `unsupportedParameters` (the 400 a model family answers to a present non-null parameter, after
-  model validation, never for a scripted turn, using up no fault). `/openai` follows the OpenAI
-  docs cited in its reasoning fixtures' notes: reasoning models reject `max_tokens`,
-  `temperature`, `top_p`, `logprobs`, and `top_logprobs`, other models reject `reasoning_effort`;
-  its turn schema rejects reasoning text fields (the wire has none; script `usage.reasoningTokens`).
-  Known leniency: effort values are not checked per model (some models reject `none`).
+  `reasoningModelUnsupportedParameters` (the 400 a reasoning model answers to a present non-null
+  parameter, after model validation, never for a scripted turn, using up no fault). `/openai`
+  follows its three reasoning fixtures: reasoning models take `reasoning_effort` and
+  `max_completion_tokens`, send no reasoning text, report `completion_tokens_details.reasoning_tokens`,
+  and reject `max_tokens` with the unsupported-parameter fixture's envelope (copied as data); its
+  turn schema rejects reasoning text fields (the fixtures have none; script `usage.reasoningTokens`).
+  Synthetic, not fixture-backed: `reasoning_effort: 'none'` reports 0 reasoning tokens. Known
+  leniency, not emulated until a fixture backs it: sampling parameter rules on reasoning models
+  (`temperature`, `top_p`, `logprobs`, `top_logprobs` are accepted), `reasoning_effort` on a model
+  that does not reason (recorded and ignored), and per-model effort values (not checked).
 - `/anthropic` uses `src/messages.ts`: Messages request parsing (`model`, a positive integer
   `max_tokens` or 400, `system`, `messages`, `tools`, `tool_choice`, `thinking`, `stream`), SSE in
   the real event order (`message_start`; per block `content_block_start`, deltas,

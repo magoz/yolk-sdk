@@ -158,13 +158,15 @@ missing bearer credential gets 401 `invalid_api_key` (the credential is never ch
 The ledger records `max_completion_tokens` as `maxCompletionTokens`.
 
 Reasoning models (`reasoningModels`, default `openAiEmulatorDefaultReasoningModels`) follow the
-OpenAI Chat Completions documentation: unless `reasoning_effort` is `none` they reason, send no
-reasoning text, and report it only as `usage.completion_tokens_details.reasoning_tokens` (0 for
-`none`), counted in `completion_tokens`. A reasoning model answers `max_tokens`, `temperature`,
-`top_p`, `logprobs`, or `top_logprobs`, and any other model answers `reasoning_effort`, with 400
-`{ error: { message, type: 'invalid_request_error', param, code: 'unsupported_parameter' } }`
-(after model validation, never for a scripted turn; the ledger's `unsupportedParameter`). Scripted
-turns reject reasoning text fields; script reasoning as `usage.reasoningTokens`.
+three synthetic OpenAI reasoning conformance fixtures: they take `reasoning_effort` and
+`max_completion_tokens`, send no reasoning text, and report it only as
+`usage.completion_tokens_details.reasoning_tokens`, counted in `completion_tokens`. A non-null
+`max_tokens` gets the fixture's 400 `{ error: { message, type: 'invalid_request_error', param:
+'max_tokens', code: 'unsupported_parameter' } }` (after model validation, never for a scripted
+turn; the ledger's `unsupportedParameter`). Scripted turns reject reasoning text fields; script
+reasoning as `usage.reasoningTokens`. Not emulated until a fixture backs them: sampling parameter
+rules, `reasoning_effort` on a model that does not reason (recorded and ignored), and per-model
+effort values. `reasoning_effort: 'none'` reporting 0 reasoning tokens is synthetic.
 
 ## Anthropic emulator
 

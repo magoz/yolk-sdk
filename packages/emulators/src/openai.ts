@@ -10,23 +10,19 @@
  * those conformance case ids in `openAiEmulatorRoutes`. The Chat Completions
  * machinery is shared with the Gateway emulator (`chat-completions.ts`).
  *
- * Reasoning models follow the OpenAI Chat Completions documentation (checked
- * 2026-11-20; the reasoning conformance fixtures' notes cite the sources):
- * they accept `reasoning_effort` and `max_completion_tokens`, never return
- * reasoning text, and report reasoning only as
- * `usage.completion_tokens_details.reasoning_tokens`; they reject
- * `max_tokens` and the sampling parameters `temperature`, `top_p`,
- * `logprobs`, and `top_logprobs` (400 `unsupported_parameter`), and other
- * models reject `reasoning_effort` the same way. Scripted turns cannot carry
- * reasoning text (the wire has none); script reasoning as
- * `usage.reasoningTokens`.
+ * Reasoning models follow the three synthetic reasoning fixtures (their notes
+ * cite the OpenAI docs they are shaped on): they take `reasoning_effort` and
+ * `max_completion_tokens`, return no reasoning text, report reasoning only as
+ * `usage.completion_tokens_details.reasoning_tokens`, and reject `max_tokens`
+ * (400 `unsupported_parameter`). Scripted turns cannot carry reasoning text
+ * (the fixtures have none); script reasoning as `usage.reasoningTokens`.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`,
  * `TextEncoder`, `URL`); no Effect runtime is required to use it.
  *
  * @experimental
  */
-import { Data, Predicate } from 'effect'
+import { Data } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ChatFault,
@@ -170,38 +166,21 @@ const openAiErrorEnvelope = (error: ChatWireError): Schema.Json => ({
 })
 
 /**
- * The OpenAI 400 for a parameter a model does not take: the envelope as publicly reported for
- * `max_tokens` and `reasoning_effort` (`type: 'invalid_request_error'`, `param` naming it,
- * `code: 'unsupported_parameter'`), and the same form for the sampling parameters.
- */
-const unsupportedParameter = (parameter: string, hint?: string): ChatUnsupportedParameter => ({
-  parameter,
-  error: {
-    message: [`Unsupported parameter: '${parameter}' is not supported with this model.`, hint]
-      .filter(Predicate.isString)
-      .join(' '),
-    type: 'invalid_request_error',
-    param: parameter,
-    code: 'unsupported_parameter'
-  }
-})
-
-/**
- * Rejected by reasoning models, checked in this order: `max_tokens` (deprecated in favour of
- * `max_completion_tokens` and not compatible with reasoning models), then the sampling
- * parameters the current models guide says to omit from Chat Completions requests.
+ * Rejected by reasoning models: only `max_tokens`, copied as data from the synthetic
+ * `openai.chat.stream.unsupported-parameter` fixture (its 400 envelope). Other parameter rules
+ * are not emulated until a fixture backs them.
  */
 const reasoningModelUnsupportedParameters: ReadonlyArray<ChatUnsupportedParameter> = [
-  unsupportedParameter('max_tokens', "Use 'max_completion_tokens' instead."),
-  unsupportedParameter('temperature'),
-  unsupportedParameter('top_p'),
-  unsupportedParameter('logprobs'),
-  unsupportedParameter('top_logprobs')
-]
-
-/** Rejected by models that do not reason. */
-const otherModelUnsupportedParameters: ReadonlyArray<ChatUnsupportedParameter> = [
-  unsupportedParameter('reasoning_effort')
+  {
+    parameter: 'max_tokens',
+    error: {
+      message:
+        "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+      type: 'invalid_request_error',
+      param: 'max_tokens',
+      code: 'unsupported_parameter'
+    }
+  }
 ]
 
 /**
@@ -223,13 +202,13 @@ const otherModelUnsupportedParameters: ReadonlyArray<ChatUnsupportedParameter> =
  * `none`, sends no reasoning text, and reports
  * `usage.completion_tokens_details.reasoning_tokens` (0 when it did not
  * reason), counted in `completion_tokens`; other models report no
- * `completion_tokens_details`, as before. A reasoning model answers
- * `max_tokens`, `temperature`, `top_p`, `logprobs`, or `top_logprobs` (any
- * non-null value), and any other known model answers `reasoning_effort`, with
- * 400 `{ error: { message, type: 'invalid_request_error', param, code:
- * 'unsupported_parameter' } }` (the first in that order; the ledger's
- * `unsupportedParameter`). `reasoning_effort` values are recorded, not
- * checked against a model's supported efforts.
+ * `completion_tokens_details`, as before. A reasoning model answers a non-null
+ * `max_tokens` with the unsupported-parameter fixture's 400 (`param:
+ * 'max_tokens'`, `code: 'unsupported_parameter'`; the ledger's
+ * `unsupportedParameter`). Not emulated until a fixture backs them: sampling
+ * parameter rules, `reasoning_effort` on a model that does not reason (it is
+ * recorded and ignored, as before), and per-model effort values (recorded,
+ * not checked).
  *
  * Precedence per chat request matches the Gateway emulator: authentication and
  * JSON validation, then the first matching `status` fault, then the next
@@ -244,10 +223,7 @@ export const makeOpenAiEmulator = (options: OpenAiEmulatorOptions = {}): OpenAiE
     knownModels: options.knownModels ?? openAiEmulatorDefaultModels,
     reasoningModels: options.reasoningModels ?? openAiEmulatorDefaultReasoningModels,
     reasoningOutput: 'hidden',
-    unsupportedParameters: {
-      reasoningModels: reasoningModelUnsupportedParameters,
-      otherModels: otherModelUnsupportedParameters
-    },
+    reasoningModelUnsupportedParameters,
     errorEnvelope: openAiErrorEnvelope,
     // Copied data shape of the synthetic OpenAI error-envelope fixture (unknown model id).
     unknownModel: {

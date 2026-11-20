@@ -117,9 +117,12 @@ describe('record-openai-fixtures arguments', () => {
     expect(() => parseProbeArgs(['--tool-model'])).toThrow('requires a value')
     expect(() => parseProbeArgs(['--max-tokens=0'])).toThrow('positive integer')
     expect(() => parseProbeArgs(['--reasoning-max-tokens=-1'])).toThrow('positive integer')
-    expect(() => parseProbeArgs(['--reasoning-effort=max'])).toThrow(
-      '--reasoning-effort must be one of minimal, low, medium, high, xhigh'
-    )
+
+    for (const effort of ['max', 'minimal']) {
+      expect(() => parseProbeArgs([`--reasoning-effort=${effort}`])).toThrow(
+        '--reasoning-effort must be one of low, medium, high, xhigh'
+      )
+    }
   })
 })
 
@@ -307,6 +310,22 @@ describe('record-openai-fixtures plan', () => {
     for (const model of Object.values(openAiConformanceDefaultModels)) {
       expect(report).toContain(`model ${model}`)
     }
+
+    const effortOf = (caseId: string) =>
+      report
+        .split('\n')
+        .find(line => line.startsWith(`- ${caseId} `))
+        ?.match(/reasoning effort (\w+(?: \w+)?)/)?.[1]
+
+    expect(caseIds.map(caseId => [caseId, effortOf(caseId)])).toEqual([
+      ['openai.chat.stream.plain-text', 'not sent'],
+      ['openai.chat.stream.tool-call-deltas', 'not sent'],
+      ['openai.chat.stream.error-envelope', 'not sent'],
+      ['openai.chat.json.plain-text', 'not sent'],
+      ['openai.chat.stream.reasoning-effort', 'medium'],
+      ['openai.chat.json.reasoning-usage', 'medium'],
+      ['openai.chat.stream.unsupported-parameter', 'not sent']
+    ])
   })
 
   it('renders a fixture module typed with the conformance fixture type', () => {

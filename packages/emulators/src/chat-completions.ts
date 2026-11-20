@@ -11,7 +11,7 @@
  * manifest, model lists, the error envelope and the unknown-model status and error, the 401
  * error, the completion-token request field, whether and how reasoning is emulated (streamed
  * reasoning text on request, or hidden reasoning reported only as usage reasoning tokens), the
- * request parameters a model family rejects, its scripted-turn schema, and its wire profile
+ * request parameters reasoning models reject, its scripted-turn schema, and its wire profile
  * (`ChatWireProfile`: events per network chunk, usage placement, the reasoning field, and extra
  * per-chunk fields). Without a profile the plain OpenAI Chat Completions wire is sent.
  *
@@ -288,16 +288,11 @@ export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedReasoningTurn
   /** How reasoning models reason; default `requested-deltas`. */
   readonly reasoningOutput?: ChatReasoningOutput
   /**
-   * Request parameters a known model rejects, checked in order after model validation (never for
-   * a scripted turn): the first present one answers 400 with its error, writes
-   * `unsupportedParameter` to the ledger, and uses up no fault. Default: none.
+   * Request parameters reasoning models (`reasoningModels`) reject, checked in order after model
+   * validation (never for a scripted turn): the first present one answers 400 with its error,
+   * writes `unsupportedParameter` to the ledger, and uses up no fault. Default: none.
    */
-  readonly unsupportedParameters?: {
-    /** Rejected by reasoning models (`reasoningModels`). */
-    readonly reasoningModels: ReadonlyArray<ChatUnsupportedParameter>
-    /** Rejected by every other known model. */
-    readonly otherModels: ReadonlyArray<ChatUnsupportedParameter>
-  }
+  readonly reasoningModelUnsupportedParameters?: ReadonlyArray<ChatUnsupportedParameter>
   /** Renders a wire error as the service's JSON error envelope. */
   readonly errorEnvelope: (error: ChatWireError) => Schema.Json
   /**
@@ -834,27 +829,25 @@ export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTu
   const reasoningOutput = config.reasoningOutput ?? 'requested-deltas'
   const wire = resolveWireProfile(config.wire)
 
-  const unsupportedParameters = {
-    reasoningModels: [...(config.unsupportedParameters?.reasoningModels ?? [])],
-    otherModels: [...(config.unsupportedParameters?.otherModels ?? [])]
-  }
+  const reasoningModelUnsupportedParameters = [
+    ...(config.reasoningModelUnsupportedParameters ?? [])
+  ]
 
   const isReasoningModel = (model: string | undefined): boolean =>
     model !== undefined && reasoningModels.includes(model)
 
-  /** The first listed parameter the request carries with a non-null value, if any. */
+  /** The first listed parameter a reasoning model's request carries with a non-null value. */
   const unsupportedParameterOf = (
     json: Schema.Json,
     model: string | undefined
   ): ChatUnsupportedParameter | undefined =>
-    (isReasoningModel(model)
-      ? unsupportedParameters.reasoningModels
-      : unsupportedParameters.otherModels
-    ).find(rule => {
-      const value = jsonField(json, rule.parameter)
+    isReasoningModel(model)
+      ? reasoningModelUnsupportedParameters.find(rule => {
+          const value = jsonField(json, rule.parameter)
 
-      return value !== undefined && value !== null
-    })
+          return value !== undefined && value !== null
+        })
+      : undefined
 
   const unknownModelResponse = (model: string | undefined): Response =>
     'body' in config.unknownModel

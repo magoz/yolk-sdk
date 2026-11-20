@@ -84,13 +84,12 @@ export const defaultProbeOptions: ProbeOptions = {
   account: undefined
 }
 
-const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh'
-]
+/**
+ * Efforts the reasoning cases accept. `minimal` is left out: a correct API may report 0 reasoning
+ * tokens at that effort, which fails the cases' `reasoning > 0` claim. `xhigh` needs a larger
+ * `--reasoning-max-tokens`, since the limit bounds reasoning and answer tokens together.
+ */
+const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = ['low', 'medium', 'high', 'xhigh']
 
 const defaultModels = defaultProbeOptions.models
 
@@ -123,7 +122,9 @@ Options:
   --reasoning-max-tokens <n>      default ${defaultProbeOptions.reasoningMaxTokens} (max_completion_tokens of the
                                   reasoning cases)
   --reasoning-effort <effort>     default ${defaultProbeOptions.reasoningEffort} (reasoning_effort of the reasoning
-                                  cases)
+                                  cases): low, medium, high, or xhigh (raise
+                                  --reasoning-max-tokens for xhigh); not minimal, which
+                                  may report no reasoning tokens
   --account <label>               required with --live: synthetic, non-identifying fixture
                                   account label (for example synthetic); never a real
                                   organization, project, or person name
@@ -371,7 +372,7 @@ export const dryRunReport = (options: ProbeOptions): string =>
         `- ${entry.testCase.id} [${entry.testCase.safety}]`,
         `model ${entry.model}`,
         `max completion tokens ${entry.maxTokens}`,
-        `reasoning effort ${entry.reasoningEffort ?? 'none'}`,
+        `reasoning effort ${entry.reasoningEffort ?? 'not sent'}`,
         `-> ${entry.fixtureModule.fileName}`
       ].join('  ')
     ),

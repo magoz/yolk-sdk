@@ -5,9 +5,9 @@
  * subscription provider).
  *
  * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
- * OpenAI Chat Completions (including a reasoning model) and Responses wires; live probes replace them with verified recordings
- * (`pnpm conformance:openai`; `pnpm conformance:codex`, subscription OAuth, owner approval
- * required).
+ * OpenAI Chat Completions (including a reasoning model) and Responses wires; live probes replace
+ * them with verified recordings (`pnpm conformance:openai`; `pnpm conformance:codex`,
+ * subscription OAuth, owner approval required).
  *
  * Also exports the Codex subscription-usage case and fixture (`openAiCodexUsageSnapshotCase`,
  * `OpenAiCodexUsageConformanceConfig`; `pnpm conformance:usage --family codex`), kept apart from

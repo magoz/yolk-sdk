@@ -256,16 +256,14 @@ describe('disagreement drill', () => {
 
   it.effect('fails both reasoning cases when the model is not a reasoning model', () =>
     Effect.gen(function* () {
-      // Without reasoning models the effort is an unsupported parameter: a 400 failure.
+      // Without reasoning models the effort is recorded and ignored: usage counts no reasoning.
       for (const testCase of [openAiChatReasoningEffortCase, openAiChatJsonReasoningUsageCase]) {
         const result = yield* runOn(testCase, () => makeOpenAiEmulator({ reasoningModels: [] }))
 
         expect(result?.status, testCase.id).toBe('failed')
-        expect(result?.failure, testCase.id).toEqual({
-          kind: 'failure',
-          tag: 'LLMError',
-          message: 'OpenAI returned 400'
-        })
+        expect(result?.failure?.message, testCase.id).toBe(
+          'expected the usage report to count reasoning tokens'
+        )
       }
     })
   )
