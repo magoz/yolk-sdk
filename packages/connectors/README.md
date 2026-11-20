@@ -28,6 +28,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port                                   |
 | `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge                                |
 | `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                                                             |
+| `@yolk-sdk/connectors/figma/conformance`           | Experimental Figma target, seeds, and synthetic fixtures for the `@yolk-sdk/mcp/conformance` cases                                           |
 | `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print, inbox, settings, profile actions |
 | `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                                                           |
 | `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                                               |
@@ -35,6 +36,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                          |
 | `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                        |
 | `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                       |
+| `@yolk-sdk/connectors/kie/conformance`             | Experimental Kie conformance cases, seed config, and synthetic replay fixtures                                                               |
 | `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
 | `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
 | `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint/Teams Graph actions, shared OAuth slots, host-only file and transcript download, upload, draft attachments       |
@@ -1680,6 +1682,40 @@ for review. **They hold real third parties' personal data, and this repository i
 promoting, replace each recorded 2xx body wholesale with a minimal synthetic body that keeps only
 the keys and types the case reads, never scrubbing field by field.
 
+### Kie conformance cases (experimental)
+
+`@yolk-sdk/connectors/kie/conformance` exports six conformance cases for
+`@yolk-sdk/conformance/runner` (`kieConformanceCases`), synthetic replay fixtures
+(`kieConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`kieConformanceFixtureSeeds`). Every case runs the real Kie actions over `ConnectorHttpClient` and
+`CredentialResolver` plus `KieConformanceConfig` (a finished `success` task id, a finished `fail`
+task id, a public first-frame URL, and a per-invocation run id). Four reads: a finished task reads
+back `success` with result URLs parsed from `resultJson`; a `fail` task is a successful read with a
+failure detail (never an action failure); an unknown task id answers Kie code 404 or 422 (Kie
+answers most failures with HTTP 200 and a non-200 envelope `code`), never a success or another code
+such as a 429 rate limit or a 455 outage; a synthetic invalid key answers `kie_unauthorized`. Two
+`write-irreversible` creates (a GPT Image 2 text-to-image task, square at `1K`, and a Wan 2.7
+image-to-video task, `720p` for 5 seconds), each claiming HTTP 200 exactly: every task spends Kie
+credits and the connector cannot cancel one, so a runner starts each only by its exact id. A create
+runs uninterruptibly with its classification: a definitive rejection is an HTTP 4xx, or at HTTP 2xx
+an envelope 4xx, other than 408 and Kie's 455; anything else that is not a 2xx with envelope `code`
+200 and a non-empty `taskId` is an unknown task outcome (`KieConformanceActionFailed` with
+`taskOutcome: 'unknown'`, naming the run id to look for in the Kie task log, also handed to the
+`ConformanceCleanupReporter` when interrupted). Every fixture body keeps only the keys the connector
+decodes, checked by an allowlist test. The case table, seeds, and claims live in the [Kie
+conformance
+guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/kie.mdx#conformance-cases).
+For offline tests, the experimental Kie emulator (`@yolk-sdk/emulators/kie`) is a stateful,
+fixture-only stand-in for the task read and create routes that passes these cases.
+
+`pnpm conformance:kie` in this repository dry-runs by default; `--live --owner-approved --account
+<label>` (refused whenever `CI` is non-empty) needs `KIE_API_KEY` from the environment only (refused
+before any request unless it has 16 to 256 letters, digits, `_`, or `-`) and the seeds of the cases
+that will run. The reads spend no credits; each create runs only with `--allow-irreversible <its
+exact id>`. `--record` stages verified recordings in `.conformance-recordings/kie/<run>/`
+(gitignored); before promoting, replace each recorded 2xx body wholesale with a minimal synthetic
+body.
+
 ### R2 conformance cases (experimental)
 
 `@yolk-sdk/connectors/r2-storage/conformance` exports six port-level conformance cases
@@ -1972,6 +2008,25 @@ from the environment), and `@yolk-sdk/emulators/mcp` serves the fixtures as prof
 
 Figma MCP auth reads `accessToken` plus optional `refreshToken`, `clientId`, and `clientSecret`
 from the runtime `OAuthCredential`. Keep these values in the host credential store.
+
+### Figma MCP conformance (experimental)
+
+`@yolk-sdk/connectors/figma/conformance` follows the Afloat pattern: it holds no case code and never
+imports `@yolk-sdk/mcp`, and supplies Figma's target and seeds for the generic
+`@yolk-sdk/mcp/conformance` cases. `makeFigmaMcpConformanceTarget()` runs the real `figma.mcp_auth`
+over the host's `CredentialResolver` (an `OAuthCredential` or `BearerTokenCredential`) and answers
+the target value: `https://mcp.figma.com/mcp`, the access token as `Authorization: Bearer` (never
+the refresh token or client credentials), the public reserved invalid credential for the auth case,
+and the legacy era with protocol `2025-11-25` (an `initialize` handshake with a session; unverified
+until a live run, since `figma.mcp_auth` names no protocol version). `figmaMcpConformanceLiveSeeds`
+name six known Figma tool names (`figmaMcpConformanceTools`: `get_design_context`, `get_metadata`,
+`get_screenshot`, `whoami`, `use_figma`, `create_new_file`, with synthetic placeholder schemas and
+descriptions, never Figma's) and the two that write, and no `readTool`;
+`figmaMcpConformanceFixtureSeeds` add a synthetic `get_metadata` call. The eight fixtures
+(`figmaMcpConformanceFixtures`, every case but `mcp.modern.stateless`) are synthetic placeholders,
+`evidence: 'unverified'`, not recorded and not derived from provider source. `pnpm conformance:mcp
+--target figma` stays refused until an owner-approved practice seat exists;
+`@yolk-sdk/emulators/mcp` serves the fixtures as profile `figma`.
 
 ## Host responsibilities
 

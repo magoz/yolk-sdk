@@ -70,6 +70,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './email',
       './email/conformance',
       './figma',
+      './figma/conformance',
       './fortnox',
       './fortnox/conformance',
       './github',
@@ -77,6 +78,7 @@ const packages: ReadonlyArray<PackageManifest> = [
       './google',
       './google/conformance',
       './kie',
+      './kie/conformance',
       './linkedin-search',
       './linkedin-search/conformance',
       './microsoft',
@@ -183,7 +185,8 @@ const packages: ReadonlyArray<PackageManifest> = [
       './github',
       './google',
       './linkedin-search',
-      './mcp'
+      './mcp',
+      './kie'
     ]
   }
 ]
@@ -396,6 +399,11 @@ const main = async () => {
           'if (mcpConformance.mcpElicitationDeclarationCase.id !== "mcp.elicitation.declaration" || mcpConformance.mcpElicitationDeclarationCase.safety !== "read" || mcpConformance.mcpConformanceCases.includes(mcpConformance.mcpElicitationDeclarationCase) || mcpConformance.mcpConformanceElicitationFixtures.length !== 2 || mcpConformance.mcpConformanceElicitationFixtures.some(fixture => fixture.caseId !== "mcp.elicitation.declaration")) throw new Error("Missing opt-in MCP elicitation conformance case/fixtures")',
           'const afloatMcpConformance = await import("@yolk-sdk/connectors/afloat/conformance")',
           'if (afloatMcpConformance.afloatMcpConformanceFixtures.length !== 8 || afloatMcpConformance.afloatMcpConformanceExpectedTools.length !== 9 || afloatMcpConformance.afloatMcpConformanceFixtures.some(fixture => fixture.endpoint !== "https://useafloat.com/mcp" || fixture.evidence !== "unverified") || afloatMcpConformance.afloatMcpConformanceNotApplicable.map(entry => entry.id).join() !== "mcp.legacy.session" || typeof afloatMcpConformance.makeAfloatMcpConformanceTarget !== "function") throw new Error("Missing Afloat MCP conformance target/fixtures")',
+          'const figmaMcpConformance = await import("@yolk-sdk/connectors/figma/conformance")',
+          'if (figmaMcpConformance.figmaMcpConformanceFixtures.length !== 8 || figmaMcpConformance.figmaMcpConformanceExpectedTools.length !== 6 || figmaMcpConformance.figmaMcpConformanceFixtures.some(fixture => fixture.endpoint !== "https://mcp.figma.com/mcp" || fixture.evidence !== "unverified") || figmaMcpConformance.figmaMcpConformanceNotApplicable.map(entry => entry.id).join() !== "mcp.modern.stateless" || typeof figmaMcpConformance.makeFigmaMcpConformanceTarget !== "function") throw new Error("Missing Figma MCP conformance target/fixtures")',
+          'const kieConformance = await import("@yolk-sdk/connectors/kie/conformance")',
+          'if (kieConformance.kieConformanceCases.length !== 6 || kieConformance.kieConformanceFixtures.length !== 6) throw new Error("Missing Kie conformance cases/fixtures")',
+          'if (kieConformance.kieConformanceCases.filter(testCase => testCase.safety === "read").length !== 4 || kieConformance.kieConformanceCases.filter(testCase => testCase.safety === "write-irreversible").map(testCase => testCase.id).join() !== "kie.tasks.create-image-task,kie.tasks.create-video-task") throw new Error("Kie conformance safety mismatch")',
           'const linkedInSearchConformance = await import("@yolk-sdk/connectors/linkedin-search/conformance")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.length !== 7 || linkedInSearchConformance.linkedInSearchConformanceFixtures.length !== 7) throw new Error("Missing LinkedIn search conformance cases/fixtures")',
           'if (linkedInSearchConformance.linkedInSearchConformanceCases.some(testCase => testCase.safety !== "read")) throw new Error("LinkedIn search conformance safety mismatch")',
@@ -615,7 +623,7 @@ const main = async () => {
           'if (linkedInRefused.status !== 400 || (await linkedInRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(linkedInEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("LinkedIn search emulator must fail closed without echoing the key")',
           'await linkedInEmulator.close()',
           'const mcpEmulatorModule = await import("@yolk-sdk/emulators/mcp")',
-          'if (mcpEmulatorModule.mcpEmulatorRoutes.length !== 12 || !mcpEmulatorModule.mcpEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("MCP emulator manifest mismatch")',
+          'if (mcpEmulatorModule.mcpEmulatorRoutes.length !== 18 || !mcpEmulatorModule.mcpEmulatorRoutes.every(route => route.evidence === "unverified" && !route.write)) throw new Error("MCP emulator manifest mismatch")',
           'const mcpEmulator = await mcpEmulatorModule.makeMcpEmulator()',
           'const mcpProbe = (bearer, url = "https://mcp.example.test/modern/mcp") => new Request(url, { method: "POST", headers: { authorization: `Bearer ${bearer}`, accept: "application/json, text/event-stream", "content-type": "application/json", "mcp-method": "server/discover", "mcp-protocol-version": "2026-07-28" }, body: JSON.stringify({ jsonrpc: "2.0", id: "smoke-probe", method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientInfo": { name: "yolk", version: "0.1.0" }, "io.modelcontextprotocol/clientCapabilities": {} } } }) })',
           'const mcpDiscovered = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token"))',
@@ -630,7 +638,22 @@ const main = async () => {
           'const afloatRejected = await mcpEmulator.fetch(mcpProbe(mcpEmulatorModule.mcpEmulatorAfloatReservedInvalidCredential, "https://useafloat.com/mcp"))',
           'if (afloatRejected.status !== 401 || afloatRejected.headers.get("www-authenticate") !== "Bearer") throw new Error("MCP emulator Afloat profile must answer the recorded 401")',
           'if ((await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token", "https://useafloat.com/mcp"))).status !== 400 || JSON.stringify(mcpEmulator.ledger.entries()).includes("synthetic-smoke-key-0001")) throw new Error("MCP emulator Afloat profile must refuse a bearer without afloat_ and never keep the key")',
-          'await mcpEmulator.close()'
+          'const figmaProbe = await mcpEmulator.fetch(mcpProbe("synthetic-smoke-token", "https://mcp.figma.com/mcp"))',
+          'if (figmaProbe.status !== 400 || figmaProbe.headers.get("x-emulator-evidence") !== "unverified" || (await figmaProbe.json()).error.code !== -32000) throw new Error("MCP emulator Figma profile must answer the recorded session-less probe")',
+          'const figmaRejected = await mcpEmulator.fetch(mcpProbe(mcpEmulatorModule.mcpEmulatorReservedInvalidCredential, "https://mcp.figma.com/mcp"))',
+          'if (figmaRejected.status !== 401 || !figmaRejected.headers.get("www-authenticate")?.startsWith("Bearer")) throw new Error("MCP emulator Figma profile must answer the recorded 401")',
+          'await mcpEmulator.close()',
+          'const kieEmulatorModule = await import("@yolk-sdk/emulators/kie")',
+          'if (kieEmulatorModule.kieEmulatorRoutes.length !== 2 || !kieEmulatorModule.kieEmulatorRoutes.every(route => route.evidence === "unverified") || kieEmulatorModule.kieEmulatorRoutes.filter(route => route.write).map(route => route.path).join() !== "/api/v1/jobs/createTask") throw new Error("Kie emulator manifest mismatch")',
+          'const kieEmulator = await kieEmulatorModule.makeKieEmulator()',
+          'const kieHeaders = { authorization: "Bearer synthetic-smoke-token", accept: "application/json" }',
+          'const kieTask = await kieEmulator.fetch(new Request("https://api.kie.ai/api/v1/jobs/recordInfo?taskId=yolk_synthetic_task_success_0001", { headers: kieHeaders }))',
+          'if (kieTask.status !== 200 || kieTask.headers.get("x-emulator-evidence") !== "unverified" || (await kieTask.json()).data.state !== "success") throw new Error("Kie emulator smoke failed")',
+          'const kieRejected = await kieEmulator.fetch(new Request("https://api.kie.ai/api/v1/jobs/recordInfo?taskId=x", { headers: { ...kieHeaders, authorization: "Bearer yolk-conformance-invalid-kie-key" } }))',
+          'if (kieRejected.status !== 401 || JSON.stringify([kieEmulator.ledger.entries(), kieEmulator.snapshot()]).includes("yolk-conformance-invalid-kie-key")) throw new Error("Kie emulator must answer the recorded 401 without keeping the key")',
+          'const kieRefused = await kieEmulator.fetch(new Request("https://api.kie.ai/api/v1/jobs/recordInfo?taskId=synthetic-smoke-token", { headers: kieHeaders }))',
+          'if (kieRefused.status !== 400 || (await kieRefused.text()).includes("synthetic-smoke-token") || JSON.stringify(kieEmulator.ledger.entries()).includes("synthetic-smoke-token")) throw new Error("Kie emulator must fail closed without echoing the key")',
+          'await kieEmulator.close()'
         ].join('\n')
     )
 

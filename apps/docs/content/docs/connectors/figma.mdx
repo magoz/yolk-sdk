@@ -1,0 +1,76 @@
+---
+title: Figma MCP conformance
+description: Experimental Figma MCP target, seeds, and synthetic fixtures for the MCP conformance cases, and the Figma emulator profile.
+---
+
+Figma's connector action (`figma.mcp_auth`) is documented in the
+[connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#figma). This page lists the experimental
+conformance target and the emulator profile only.
+
+## Conformance cases
+
+> **Experimental.** For tests; no live run exists yet.
+
+`@yolk-sdk/connectors/figma/conformance` holds no case code. The cases are the generic MCP cases of
+[`@yolk-sdk/mcp/conformance`](../api-reference/conformance#mcp-conformance), run through the real
+`@yolk-sdk/mcp/client`; this subpath supplies what Figma claims, as target and seed data. It never
+imports `@yolk-sdk/mcp`.
+
+- **Target.** `makeFigmaMcpConformanceTarget()` runs the real `figma.mcp_auth` action over the
+  host's `CredentialResolver` (an `OAuthCredential` or `BearerTokenCredential`) and builds the
+  `McpConformanceTarget` value from its output: server `figma`, `https://mcp.figma.com/mcp`, and the
+  access token as `Authorization: Bearer <token>`. The refresh token and client credentials of the
+  output are never sent. The auth case sends the public reserved invalid credential
+  `yolk-conformance-invalid-credential-0000` in the same header instead.
+- **Era.** The target is legacy-era with protocol `2025-11-25` (an `initialize` handshake with a
+  session), unverified until a live run: `figma.mcp_auth` names no protocol version.
+- **Seeds.** `figmaMcpConformanceLiveSeeds` name six known Figma tool names (`expectedTools`) and
+  the two that write (`notReadOnly`), and no `readTool`. `figmaMcpConformanceFixtureSeeds` add the
+  synthetic read call the fixtures replay with: `get_metadata` with `{ "nodeId": "0:1" }`, and
+  `{ "nodeId": 1 }` as the invalid arguments.
+- **Published tools.** `figmaMcpConformanceTools`: `get_design_context`, `get_metadata`,
+  `get_screenshot`, `whoami`, `use_figma`, and `create_new_file`, with synthetic placeholder input
+  schemas and descriptions, never Figma's (dynamic discovery owns the real contract). The four
+  reads are marked `readOnlyHint: true`, `use_figma` and `create_new_file` `readOnlyHint: false`.
+
+| Case id                           | Applies | Figma claim (as currently understood)                                                                   |
+| --------------------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `mcp.negotiation.era`             | yes     | `server/discover` answers 400 with a JSON-RPC error: the client falls back to the legacy era            |
+| `mcp.modern.stateless`            | no      | The target is legacy-era                                                                                |
+| `mcp.legacy.session`              | yes     | `initialize` issues a session id every later request echoes; initialized gets 202, the standing GET 405 |
+| `mcp.transport.response-encoding` | yes     | Every answer to a request is an SSE stream holding the response, then the end; 202 has no body          |
+| `mcp.tools.list`                  | yes     | One listing page holds every published tool; `use_figma` and `create_new_file` are never read-only      |
+| `mcp.tools.call-read`             | yes     | `get_metadata` answers a text tool result                                                               |
+| `mcp.tools.call-tool-error`       | yes     | Invalid arguments answer `isError: true` with text content, not a JSON-RPC error                        |
+| `mcp.errors.unknown-tool`         | yes     | An absent tool answers JSON-RPC `-32602` with the request id, inside an HTTP 200 SSE stream             |
+| `mcp.auth.rejected`               | yes     | The reserved invalid credential answers 401 with a `WWW-Authenticate` Bearer challenge                  |
+
+`figmaMcpConformanceNotApplicable` lists the case that does not apply and why;
+`selectMcpConformanceCases(cases, 'legacy')` gives the same split.
+
+**Fixtures.** `figmaMcpConformanceFixtures` holds one fixture per applicable case, on the real
+endpoint, `evidence: 'unverified'`, account `synthetic`. They are **synthetic placeholders**, neither
+recorded from a live service nor derived from provider source: the envelopes are the ones a pre-2026
+stateful server on the official MCP server SDK answers, the listing publishes known Figma tool names
+with synthetic schemas, and every `tools/call` answer is a minimal synthetic body checked by an
+allowlist test. Every claim is unverified, in particular the era and protocol version, whether the
+server answers over SSE or JSON, the real listing (it holds more tools, with Figma's schemas and
+annotations), and the 401 challenge.
+
+### Live runs
+
+There is none yet: `pnpm conformance:mcp --target figma` stays refused until an owner-approved
+practice seat exists.
+
+## Emulator profile
+
+`@yolk-sdk/emulators/mcp` serves profile `figma` on `https://mcp.figma.com/mcp` from a data copy of
+these fixtures (`mcpEmulatorFigmaFixtures`; a drift test fails when they differ), in the legacy era
+exactly as its synthetic legacy profile: a session-less era probe answered 400, `initialize`
+minting a session over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing
+page, the `get_metadata` call and its tool error, the absent tool, and the 401. Every legacy
+session is bound to the profile that minted it. The bearer follows the plain recognisable-bearer
+rule: use a synthetic token such as `synthetic-figma-token-0001`. Route `https://mcp.figma.com` to
+it (`mcpEmulatorFigmaOrigin`), or serve `fetchOn(mcpEmulatorFigmaOrigin)` behind a loopback rewrite.
+See the [MCP emulator](../api-reference/emulators#mcp-emulator).

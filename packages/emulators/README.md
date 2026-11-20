@@ -22,8 +22,9 @@ conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, L
 MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
 `/v1` routes, the Todoist API v1 routes, the Telegram Bot API routes, the GitHub REST routes, the
 Gmail, Calendar, and Drive routes, the Exa and Enrich Layer routes, and the two synthetic MCP
-servers and the Afloat MCP endpoint their conformance cases use: they answer only what the fixtures
-show and refuse everything else with a 400 not-emulated.
+servers and the Afloat and Figma MCP endpoints their conformance cases use: they answer only what
+the fixtures show and refuse everything else with a 400 not-emulated. The Kie emulator is a
+stateful, fixture-only stand-in for the Kie Market API task read and create routes.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
@@ -60,7 +61,8 @@ There is no root export. Import an explicit subpath:
 | `@yolk-sdk/emulators/github`          | `makeGithubEmulator`, `githubEmulatorRoutes`, seed and fault schemas (Node only)                                                       |
 | `@yolk-sdk/emulators/google`          | `makeGoogleEmulator`, `googleEmulatorRoutes`, seed and fault schemas (Gmail, Calendar, Drive; Node only)                               |
 | `@yolk-sdk/emulators/linkedin-search` | `makeLinkedInSearchEmulator`, `linkedInSearchEmulatorRoutes`, seed and fault schemas (Exa, Enrich Layer; Node only)                    |
-| `@yolk-sdk/emulators/mcp`             | `makeMcpEmulator`, `mcpEmulatorRoutes`, seed and fault schemas (synthetic and Afloat MCP servers; Node only)                           |
+| `@yolk-sdk/emulators/mcp`             | `makeMcpEmulator`, `mcpEmulatorRoutes`, seed and fault schemas (synthetic, Afloat, and Figma MCP servers; Node only)                   |
+| `@yolk-sdk/emulators/kie`             | `makeKieEmulator`, `kieEmulatorRoutes`, seed and fault schemas (Kie Market API task read and create; Node only)                        |
 
 ## Routing
 
@@ -2026,6 +2028,20 @@ until a live call is recorded. Route `https://useafloat.com` to it (or serve
 `fetchOn(mcpEmulatorAfloatOrigin)`), and send an Afloat-shaped synthetic key (see the credential
 rule below):
 
+A fourth profile, `figma`, answers on the provider endpoint `https://mcp.figma.com/mcp`
+(`mcpEmulatorFigmaOrigin` plus `mcpEmulatorFigmaPath`) from the eight
+`@yolk-sdk/connectors/figma/conformance` fixtures (`mcpEmulatorFigmaFixtures`; synthetic
+placeholders, not recorded live and not derived from provider source, unverified), in the legacy era
+exactly as `synthetic-legacy` (the session-less era probe answered 400, `initialize` minting a
+session over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing page of six
+known Figma tool names with synthetic schemas, the `get_metadata` read call, its tool error, the
+absent tool's SSE JSON-RPC error, and the 401). Every legacy session is bound to the profile that
+minted it (Figma sessions carry `profile: 'figma'` in the state), and a legacy profile answers only
+its own sessions. Its bearer follows the plain recognisable-bearer rule (send a synthetic token such
+as `synthetic-figma-token-0001`; a token starting with a hex digit is not emulated), and the public
+reserved invalid credential `yolk-conformance-invalid-credential-0000` answers the Figma 401 on its
+era probe. Route `https://mcp.figma.com` to it, or serve `fetchOn(mcpEmulatorFigmaOrigin)`.
+
 ```ts
 import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
 import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
@@ -2058,6 +2074,7 @@ each profile, plus the legacy `GET` row; every row is a read, and every request 
 | `useafloat.com/mcp#server/discover`     | The Afloat discover result; with `afloat_yolkconformanceinvalid0000`, the 401   |
 | `useafloat.com/mcp#tools/list`          | The Afloat listing (the published tool subset, one page)                        |
 | `useafloat.com/mcp#tools/call`          | The `list-invoices` result, its tool error, or the absent tool's error          |
+| `mcp.figma.com/mcp#...`, `GET`          | As the legacy rows, from the Figma fixtures, on a session minted by Figma       |
 
 Every answer comes from a fixture, byte for byte (the copies live in `mcpEmulatorFixtures`), with
 exactly three request-derived or minted substitutions:
@@ -2129,24 +2146,25 @@ on the Afloat era probe.
   JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters
   where the recording has an id; any non-empty `name` and `version` (and no other key) in the
   `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
-  emulator minted since the last reset or seed where the recording sends `mcp-session-id`
-  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
-  listing, the cursor this emulator issued in the current generation on the second page.
-  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
-  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
-  or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the synthetic
-  profiles, an Afloat key whose remainder fails the rule above (such as one starting with a hex
-  digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
-  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
-  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
-  arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
-  listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
-  `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
-  other than the recorded values or present where none is recorded, any other `mcp-*` header (such
-  as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
-  session or one in the wrong phase, a cursor not issued in the current generation, a reserved
-  invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
-  request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
+  emulator minted on the same profile since the last reset or seed where the recording sends
+  `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise); and, with the
+  seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
+  second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
+  Everything else (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET`
+  on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on
+  the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one starting
+  with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
+  `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a JSON body
+  repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
+  (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
+  the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
+  headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and
+  `last-event-id` other than the recorded values or present where none is recorded, any other
+  `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or present where
+  not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
+  a reserved invalid credential on anything but its profile's era probe, a bearer repeated anywhere
+  in the request, and a bearer an answer or a minted session id or cursor would repeat)
+  is not emulated.
 
 Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
 never sends it), `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
@@ -2179,6 +2197,99 @@ invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChalleng
 make the emulator disagree with exactly one MCP conformance case, on every profile whose answers
 they change (the Afloat profile included, except the legacy-only session knob), only to prove that
 case catches it.
+
+## Kie emulator
+
+> **Node only.** `@yolk-sdk/emulators/kie` runs on the same pinned `@emulators/core` runtime,
+> loaded lazily by `makeKieEmulator`, so importing the subpath has no side effects.
+
+`await makeKieEmulator(options?)` returns `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot,
+coverage, close }`. Each call has its own state; `await close()` when done. It emulates only the two
+Kie Market API routes the six Kie conformance cases send, on their recorded origin
+`https://api.kie.ai` (`kieEmulatorOrigin`), so the Kie connector actions and the cases run unchanged
+against it. `fetch` takes the origin from the request URL; behind a loopback rewrite, serve
+`fetchOn(kieEmulatorOrigin)`:
+
+```ts
+import { kieEmulatorOrigin, makeKieEmulator } from '@yolk-sdk/emulators/kie'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const kie = await makeKieEmulator()
+
+const httpLayer = InProcessHttpClient.layer([EmulatorRoute.handler(kieEmulatorOrigin, kie.fetch)])
+// ...run the code under test, then:
+await kie.close()
+```
+
+Routes (every request needs `Authorization: Bearer <key>`, a recognisable bearer, and
+`Accept: application/json`):
+
+| Route                          | Behavior                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `GET /api/v1/jobs/recordInfo`  | `taskId`: a held finished task's record, or the recorded `code` 422 for a seeded absent id |
+| `POST /api/v1/jobs/createTask` | The two recorded create flows: envelope `code` 200 with a minted `taskId` (a write)        |
+
+Every answer comes from a fixture, byte for byte, through the seed; the only minted values are the
+created task ids:
+
+- **Task reads.** `recordInfo` answers a held finished task's record in the fixtures' fields and key
+  order (the default seed: the fixtures' `success` task, whose `resultJson` lists one result URL,
+  and `fail` task, with `failCode` and `failMsg`), and a seeded absent task id the recorded
+  not-found envelope (`code` 422 at HTTP 200: Kie answers most failures with HTTP 200 and a non-200
+  envelope `code`). Any other task id, including a created one, is not emulated: no fixture records
+  a created task's `recordInfo`.
+- **Task creates.** `createTask` accepts only the recorded GPT Image 2 text-to-image create (square
+  at `1K`) and the recorded Wan 2.7 image-to-video create (`720p` for 5 seconds from a first frame),
+  and answers envelope `code` 200 with a minted `taskId`: `yolk_synthetic_task_created_<4 digits>`
+  from the state's `nextCreated` counter, which only advances (no seeded id may take that form; past
+  `_9999` a create is refused before any fault). In suite order on a fresh emulator the minted ids
+  are the fixtures'. A create is irreversible on Kie (it spends credits and the connector cannot
+  cancel it), so the emulator records each created task in `createdTasks`; a faulted create records
+  nothing and mints nothing.
+- **Rejected keys.** A key the seed marks as rejected answers the recorded 401 (envelope `code` 401)
+  for any well-formed `recordInfo` task id; a create with it is not emulated. The default seed
+  rejects the synthetic invalid key the unauthorized case sends
+  (`yolk-conformance-invalid-kie-key`). The error bodies are `kieEmulatorErrorBodies`.
+
+**Fail closed: the shared rule, and keys kept only as digests.** Kie follows the shared fail-closed
+rule of the stateful wrapper, exactly as the GitHub emulator states it above, with the opt-in
+`bearerDigest` as LinkedIn search uses it: routes see only SHA-256 of the origin, a space, and the
+key, which a plan compares with the digests of the seed's rejected keys, so a key a request carries
+as its bearer, a rejected one included, never reaches the state, a snapshot, or `/_emulate/*`.
+Refusals never echo a request's own query or body keys.
+
+- **Request-shape latitude (`/kie`, the only accepted deviations).** Any bearer value in the RFC
+  6750 `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a
+  character in `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside
+  `[0-9.eE+-]`, that occurs nowhere else in the request (never stored or ledgered; only its digest
+  is compared, with the digests of the keys the seed marks as rejected); extra request headers; JSON
+  key order; `content-type` media-type parameters on the create; with a key the seed marks as
+  rejected, any `recordInfo` task id of 1 to 128 letters, digits, underscores, or hyphens, answered
+  the recorded 401; any non-empty `prompt` within the connector's limit (20000 characters for GPT
+  Image 2, 5000 for Wan 2.7); and any absolute https `first_frame_url` without credentials or
+  whitespace of at most 2048 characters. `Authorization` must be exactly `Bearer <token>` (that
+  spelling, one space), and `Accept` `application/json`. Everything else (a request without
+  `Authorization`, other body keys or values, a `callBackUrl`, another model, aspect ratio,
+  resolution, or duration, `input_urls`, a task id the state holds neither as a finished task nor as
+  absent, a created task's `recordInfo`, a create with a rejected key, any query parameter on the
+  create, other, missing, or repeated query parameters on `recordInfo`, a query parameter name in
+  any but its plain form, empty query components such as a bare `?` or a stray `&`, another origin,
+  and a bearer repeated anywhere in the request) is not emulated.
+
+Anything else answers one ledgered 400 not-emulated and uses up no fault. State and seeds: `tasks`
+(the finished task records), `absentTaskIds`, the digests of the rejected keys
+(`rejectedKeyDigests`), `createdTasks`, and `nextCreated`. Pass `seed: { tasks?, absentTaskIds?,
+rejectedKeys? }`: each given list replaces the default seed's (the fixture entities); rejected keys
+are given as keys and kept only as their digests, and every seed error is constant text (a category
+and a field path). Faults and the control plane behave as in the Dropbox emulator (the ledger
+records the `accept` and `content-type` request headers). The connector maps every non-200 envelope
+`code` and every non-2xx status through `kieFailureCode`, so a 429 fault reaches it as
+`kie_rate_limited` with status 429.
+
+**Drill knobs (tests only).** `drills: { successWithoutResultUrls, failedTaskAsEnvelopeError,
+absentTaskAsSuccess, unauthorizedAs5xx, imageCreateInsufficientCredits, videoCreateEmptyTaskId }`
+(booleans) each make the emulator disagree with exactly one Kie case, only to prove that case
+catches it.
 
 ## Evidence
 

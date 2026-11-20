@@ -13,7 +13,7 @@ port-level fakes instead: plain-JSON backends for `EmailClient` and for `R2Presi
 conformance fixtures (verified recordings for the Gateway, synthetic placeholders elsewhere), and
 each emulated route names the conformance cases it follows. The package depends on `effect`; the
 Node-only `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, `google`,
-`linkedin-search`, and `mcp` subpaths also depend on the upstream `@emulators/core` runtime
+`linkedin-search`, `mcp`, and `kie` subpaths also depend on the upstream `@emulators/core` runtime
 (Apache-2.0, pinned to exactly `0.12.0`).
 
 There is no root export. Import an explicit subpath.
@@ -1239,14 +1239,15 @@ exactly the matching conformance case fail.
 `@yolk-sdk/emulators/mcp`
 
 > **Experimental, Node only.** A stateful, fixture-only stand-in for the two synthetic MCP servers
-> of the `@yolk-sdk/mcp/conformance` fixtures and for the Afloat MCP endpoint of the
-> `@yolk-sdk/connectors/afloat/conformance` fixtures, built on the same `@emulators/core` runtime
+> of the `@yolk-sdk/mcp/conformance` fixtures, for the Afloat MCP endpoint of the
+> `@yolk-sdk/connectors/afloat/conformance` fixtures, and for the Figma MCP endpoint of the
+> `@yolk-sdk/connectors/figma/conformance` fixtures, built on the same `@emulators/core` runtime
 > (loaded lazily when you create an emulator).
 
 | Export                                       | Purpose                                                                                     |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `makeMcpEmulator(options?)`                  | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`   |
-| `mcpEmulatorRoutes`                          | Route evidence manifest (12 rows: one `RPC <origin><path>#<method>` per method, plus `GET`) |
+| `mcpEmulatorRoutes`                          | Route evidence manifest (18 rows: one `RPC <origin><path>#<method>` per method, plus `GET`) |
 | `McpEmulatorSeed`                            | Typed seed schema (`modernListing`: `one-page` or `two-pages`; sessions are never seeded)   |
 | `McpFault`                                   | A status fault (400-599) or `{ kind: 'truncate-after-chunks', chunks, match?, count? }`     |
 | `McpEmulatorInputInvalid`                    | Invalid seed, fault, or option passed to the JS API                                         |
@@ -1258,6 +1259,9 @@ exactly the matching conformance case fail.
 | `mcpEmulatorAfloatKeyPrefix`                 | `afloat_`: the public key prefix; the remainder after it is the guarded secret              |
 | `mcpEmulatorAfloatReservedInvalidCredential` | `afloat_yolkconformanceinvalid0000`, answered the recorded 401 on the Afloat era probe      |
 | `mcpEmulatorAfloatFixtures`                  | The eight derived Afloat MCP fixtures, copied as data                                       |
+| `mcpEmulatorFigmaOrigin`                     | `https://mcp.figma.com`: the origin of the `figma` profile                                  |
+| `mcpEmulatorFigmaPath`                       | `/mcp`: the path of the `figma` profile (`https://mcp.figma.com/mcp`)                       |
+| `mcpEmulatorFigmaFixtures`                   | The eight synthetic Figma MCP fixtures, copied as data                                      |
 
 Setup fragment (not a runnable example): it builds the emulator and the `HttpClient` layer to
 provide to the code under test, which then targets `https://mcp.example.test/{modern,legacy}/mcp`
@@ -1293,6 +1297,17 @@ never stored, ledgered, or echoed. Use a synthetic key such as `afloat_synthetic
 real-format key whose remainder starts with a hex digit, a bearer without `afloat_` there, and an
 `afloat_` key on the synthetic origin are not emulated. Behind a loopback rewrite, serve
 `fetchOn(mcpEmulatorAfloatOrigin)`.
+
+It also serves profile `figma` on the provider endpoint `https://mcp.figma.com/mcp`, in the legacy
+era exactly as `synthetic-legacy` (the session-less era probe answered 400, `initialize` minting a
+session over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing page of six
+known Figma tool names with synthetic schemas, the `get_metadata` read call, its tool error, the
+absent tool's SSE JSON-RPC error, and the 401), all from the synthetic Figma fixtures (placeholders,
+not recorded live; unverified). Every legacy session is bound to the profile that minted it, and a
+legacy profile answers only its own sessions. Its bearer follows the plain recognisable-bearer rule
+(use a synthetic token such as `synthetic-figma-token-0001`), and the public reserved invalid
+credential answers the Figma 401 on its era probe. Behind a loopback rewrite, serve
+`fetchOn(mcpEmulatorFigmaOrigin)`.
 
 Every answer is a fixture's, byte for byte, with only the request id substituted at the recorded
 place (the top-level `id` of a JSON answer, or of the SSE response event's payload; notification
@@ -1332,25 +1347,25 @@ it writes nothing and uses up no fault.
   headers that the HTTP layer joins into the recorded value; JSON key order; any JSON-RPC request id
   that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the recording
   has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client info
-  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
-  since the last reset or seed where the recording sends `mcp-session-id` (initializing for
-  `notifications/initialized`, ready otherwise); and, with the seed's `two-pages` listing, the
-  cursor this emulator issued in the current generation on the second page. `Authorization` must be
-  exactly `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any
-  query, other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer
-  without `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
-  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
-  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches and
-  client-sent responses, other members, a JSON body repeating a key (compared after unescaping), a
-  `null`, negative, or fractional id, other params (other tools, arguments, protocol versions, or
-  capabilities, extra client-info keys, a cursor on the Afloat listing, and a legacy `initialize`
-  client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
-  `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
-  where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing
-  where recorded or present where not, an unknown session or one in the wrong phase, a cursor not
-  issued in the current generation, a reserved invalid credential on anything but its profile's era
-  probe, a bearer repeated anywhere in the request, and a bearer an answer or a minted session id or
-  cursor would repeat) is not emulated.
+  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted on
+  the same profile since the last reset or seed where the recording sends `mcp-session-id`
+  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
+  listing, the cursor this emulator issued in the current generation on the second page.
+  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
+  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
+  or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the synthetic
+  profiles, an Afloat key whose remainder fails the rule above (such as one starting with a hex
+  digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
+  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
+  arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
+  listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
+  `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
+  other than the recorded values or present where none is recorded, any other `mcp-*` header (such
+  as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
+  session or one in the wrong phase, a cursor not issued in the current generation, a reserved
+  invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
+  request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
 
 Not emulated: `DELETE`, `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
 JSON-RPC batches and client-sent responses, a JSON body repeating a key, `mcp-*` headers no
@@ -1366,6 +1381,66 @@ canonical JSON. The ledger, recovery, and the control plane behave as in the Dro
 `drills` option (nine booleans, one per MCP case) is a test-only knob that makes exactly the
 matching conformance case fail, on every profile whose answers it changes (the Afloat profile
 included, except the legacy-only session knob).
+
+## Kie emulator
+
+`@yolk-sdk/emulators/kie`
+
+> **Experimental, Node only.** A stateful, fixture-only stand-in for the Kie Market API task read
+> and create routes the Kie conformance cases use, built on the same `@emulators/core` runtime
+> (loaded lazily when you create an emulator).
+
+| Export                          | Purpose                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `makeKieEmulator(options?)`     | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`           |
+| `kieEmulatorRoutes`             | Route evidence manifest (2 routes, `unverified`; `POST /api/v1/jobs/createTask` is a write)         |
+| `KieEmulatorSeed`               | Typed seed schema (finished tasks, absent task ids, rejected keys)                                  |
+| `KieFault`                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }` |
+| `KieEmulatorInputInvalid`       | Invalid seed, fault, or option passed to the JS API                                                 |
+| `kieEmulatorOrigin`             | `https://api.kie.ai`                                                                                |
+| `kieEmulatorErrorBodies`        | The fixtures' not-found (`code` 422) and 401 bodies, byte for byte                                  |
+| `kieEmulatorCreatedId(counter)` | The minted created-task id form (`yolk_synthetic_task_created_0001`)                                |
+
+```ts
+import { kieEmulatorOrigin, makeKieEmulator } from '@yolk-sdk/emulators/kie'
+import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
+
+const kie = await makeKieEmulator()
+
+const httpLayer = InProcessHttpClient.layer([EmulatorRoute.handler(kieEmulatorOrigin, kie.fetch)])
+```
+
+It emulates only `GET /api/v1/jobs/recordInfo` and `POST /api/v1/jobs/createTask`, so the Kie
+connector actions and the Kie conformance cases run unchanged against it. `recordInfo` answers a
+held finished task's record (the default seed: the fixtures' `success` and `fail` tasks), the
+recorded not-found envelope (`code` 422 at HTTP 200) for a seeded absent task id, and, for a key the
+seed marks as rejected (kept only as its digest), the recorded 401 for any well-formed task id.
+`createTask` accepts only the two recorded create flows (GPT Image 2 text-to-image, square at `1K`;
+Wan 2.7 image-to-video, `720p` for 5 seconds) and answers envelope `code` 200 with a minted
+`yolk_synthetic_task_created_<n>` task id (in suite order on a fresh emulator, the fixtures' ids). A
+create is irreversible on Kie, so the emulator records each created task in the state, never
+readable; a faulted create records nothing. The create route is a connector write: its evidence
+stays pending until an owner-approved live run of the two create cases. Every request needs
+`Authorization: Bearer <key>` (a recognisable bearer) and `Accept: application/json`; anything else
+answers a ledgered 400 not-emulated.
+
+- Request-shape latitude (`/kie`, the only accepted deviations): any bearer value in the RFC 6750
+  `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
+  `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
+  occurs nowhere else in the request (never stored or ledgered; only its digest is compared, with
+  the digests of the keys the seed marks as rejected); extra request headers; JSON key order;
+  `content-type` media-type parameters on the create; with a key the seed marks as rejected, any
+  `recordInfo` task id of 1 to 128 letters, digits, underscores, or hyphens, answered the recorded
+  401; any non-empty `prompt` within the connector's limit (20000 characters for GPT Image 2, 5000
+  for Wan 2.7); and any absolute https `first_frame_url` without credentials or whitespace of at
+  most 2048 characters. `Authorization` must be exactly `Bearer <token>` (that spelling, one space),
+  and `Accept` `application/json`. Everything else (a request without `Authorization`, other body
+  keys or values, a `callBackUrl`, another model, aspect ratio, resolution, or duration,
+  `input_urls`, a task id the state holds neither as a finished task nor as absent, a created task's
+  `recordInfo`, a create with a rejected key, any query parameter on the create, other, missing, or
+  repeated query parameters on `recordInfo`, a query parameter name in any but its plain form, empty
+  query components such as a bare `?` or a stray `&`, another origin, and a bearer repeated anywhere
+  in the request) is not emulated.
 
 ## Node server
 

@@ -665,7 +665,8 @@ describe('emulators import rules', () => {
   })
 
   // The stateful Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
-  // LinkedIn search, and MCP emulators, and their shared core adapter (not the shared wrapper).
+  // LinkedIn search, MCP, and Kie emulators, and their shared core adapter (not the shared
+  // wrapper).
   it('allows node: and @emulators/core only in src/node.ts and the stateful emulators', () => {
     const root = fixtureDirectory()
 
@@ -699,6 +700,8 @@ describe('emulators import rules', () => {
       'packages/emulators/src/linkedin-search/state.ts',
       'packages/emulators/src/mcp.ts',
       'packages/emulators/src/mcp/state.ts',
+      'packages/emulators/src/kie.ts',
+      'packages/emulators/src/kie/state.ts',
       'packages/emulators/src/stateful-core.ts'
     ]
 
@@ -725,7 +728,9 @@ describe('emulators import rules', () => {
       'packages/emulators/src/linkedin-search-helpers.ts',
       'packages/emulators/src/linkedin/api.ts',
       'packages/emulators/src/mcp-helpers.ts',
-      'packages/emulators/src/mcpish/api.ts'
+      'packages/emulators/src/mcpish/api.ts',
+      'packages/emulators/src/kie-helpers.ts',
+      'packages/emulators/src/kieish/api.ts'
     ]
 
     for (const rel of [...allowed, ...forbidden]) {
