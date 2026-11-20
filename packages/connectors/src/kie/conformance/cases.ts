@@ -621,10 +621,11 @@ export const kieCreateImageTaskCase: KieConformanceCase = defineConformanceCase(
       },
       'expected kie.create_image_task to send the text-to-image model and input'
     )
-    yield* expectEqual(
-      created.status,
-      200,
-      'expected the createTask answer of kie.create_image_task to be HTTP 200'
+    // A 2xx other than 200 still created a (charged) task: name its id for recovery.
+    yield* expectConformance(
+      created.status === 200,
+      'expected the createTask answer of kie.create_image_task to be HTTP 200',
+      { expected: 200, actual: { status: created.status, taskId: created.output.taskId } }
     )
     yield* expectEqual(
       created.output.model,
@@ -673,10 +674,11 @@ export const kieCreateVideoTaskCase: KieConformanceCase = defineConformanceCase(
       },
       'expected kie.create_video_task to send the Wan 2.7 model and input'
     )
-    yield* expectEqual(
-      created.status,
-      200,
-      'expected the createTask answer of kie.create_video_task to be HTTP 200'
+    // A 2xx other than 200 still created a (charged) task: name its id for recovery.
+    yield* expectConformance(
+      created.status === 200,
+      'expected the createTask answer of kie.create_video_task to be HTTP 200',
+      { expected: 200, actual: { status: created.status, taskId: created.output.taskId } }
     )
     yield* expectEqual(
       created.output.model,

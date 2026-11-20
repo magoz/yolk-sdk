@@ -128,46 +128,48 @@ There is no root export or barrel.
   the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing the emulator's
   response shapes with them; the OpenAI, Anthropic, Codex, Grok, OpenCode Go, and subscription-usage
   ones are synthetic placeholders), copied as data, never imported. Each emulated route lists the
-  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`, `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`,
-  `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`,
-  `openCodeGoEmulatorRoutes`, `anthropicSubscriptionUsageEmulatorRoutes`,
-  `codexSubscriptionUsageEmulatorRoutes`, `xAiGrokSubscriptionUsageEmulatorRoutes`,
-  `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
-  `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`, `githubEmulatorRoutes`,
-  `googleEmulatorRoutes`, `linkedInSearchEmulatorRoutes`, `mcpEmulatorRoutes`, `kieEmulatorRoutes`).
-  Each manifest route needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
+  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`,
+  `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
+  `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
+  `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
+  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
+  `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`,
+  `telegramEmulatorRoutes`, `githubEmulatorRoutes`, `googleEmulatorRoutes`,
+  `linkedInSearchEmulatorRoutes`, `mcpEmulatorRoutes`, `kieEmulatorRoutes`). Each manifest route
+  needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
   (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped` for
   a manifest route without a handler or a handler without a manifest route; Fortnox, Microsoft,
   Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, and Kie derive both from
   one table (`src/fortnox/api.ts`, `src/microsoft/api.ts`, `src/dropbox/api.ts`,
   `src/notion/api.ts`, `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`,
   `src/google.ts` over `src/google/{gmail,calendar,drive}.ts`, `src/linkedin-search/api.ts`,
-  `src/mcp/api.ts`, whose routes list their JSON-RPC rows as variants, and `src/kie/api.ts`). Every Fortnox route cites a case. Besides the seven
-  invoice and customer cases, fourteen `read` cases cite `GET /3/companyinformation`,
-  `GET /3/customers` (and `GET /3/customers/{CustomerNumber}`), and the 34 read-only `GET` routes
-  of `src/fortnox/read-api.ts` (articles, price lists and prices, cost centers, customer and
-  supplier invoice payments, offers and the offer preview, print templates, the inbox, company
-  settings, the locked period, predefined accounts, labels, the five settings registers, `/me`).
-  As for every emulator, the wire shapes come from those conformance fixtures: synthetic bodies
-  shaped from the Fortnox OpenAPI spec and the archived resource pages' JSON examples (first
-  rendered by this emulator's default seed, which fixed their key order, `@url` links, and extra
-  fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends every read
-  fixture request to the default emulator and requires the fixture's status, content type, and body
-  byte for byte, so the emulator cannot drift from them; a fixture edit needs a cited spec or
-  live-run reason, never only an emulator change. The shapes stay minimal ones named after the connector's read fields, rendered in the wire types
-  the connector's schemas accept; like every `/fortnox` route, they also answer requests no fixture
-  records (other pages, filters, searches, ids) from the state. Their writes (and side-effecting
-  GETs such as `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a
-  connector write route needs verified evidence or a pending entry naming a conformance case's live
-  run, and none of them has a case yet. The owner-approved exception for fixtureless Fortnox reads
-  (PR #202) is retired: no Fortnox route is without a fixture, and no other emulator ever had a
-  fixtureless-route exception (the Microsoft emulator's legacy extrapolations, below, are
-  behaviours on fixture-backed routes, not routes without a fixture). The fixture-only `/todoist`,
-  `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`, and `/kie` emulators never add a
-  route without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
-  the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
-  draft search, free-text event query, and trashed-included Drive listing have no fixture, so they
-  are not emulated and the lookups fail closed until a fixture records them).
+  `src/mcp/api.ts`, whose routes list their JSON-RPC rows as variants, and `src/kie/api.ts`). Every
+  Fortnox route cites a case. Besides the seven invoice and customer cases, fourteen `read` cases
+  cite `GET /3/companyinformation`, `GET /3/customers` (and `GET /3/customers/{CustomerNumber}`),
+  and the 34 read-only `GET` routes of `src/fortnox/read-api.ts` (articles, price lists and prices,
+  cost centers, customer and supplier invoice payments, offers and the offer preview, print
+  templates, the inbox, company settings, the locked period, predefined accounts, labels, the five
+  settings registers, `/me`). As for every emulator, the wire shapes come from those conformance
+  fixtures: synthetic bodies shaped from the Fortnox OpenAPI spec and the archived resource pages'
+  JSON examples (first rendered by this emulator's default seed, which fixed their key order, `@url`
+  links, and extra fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends
+  every read fixture request to the default emulator and requires the fixture's status, content
+  type, and body byte for byte, so the emulator cannot drift from them; a fixture edit needs a cited
+  spec or live-run reason, never only an emulator change. The shapes stay minimal ones named after
+  the connector's read fields, rendered in the wire types the connector's schemas accept; like every
+  `/fortnox` route, they also answer requests no fixture records (other pages, filters, searches,
+  ids) from the state. Their writes (and side-effecting GETs such as
+  `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a connector write
+  route needs verified evidence or a pending entry naming a conformance case's live run, and none of
+  them has a case yet. The owner-approved exception for fixtureless Fortnox reads (PR #202) is
+  retired: no Fortnox route is without a fixture, and no other emulator ever had a fixtureless-route
+  exception (the Microsoft emulator's legacy extrapolations, below, are behaviours on fixture-backed
+  routes, not routes without a fixture). The fixture-only `/todoist`, `/telegram`, `/github`,
+  `/google`, `/linkedin-search`, `/mcp`, and `/kie` emulators never add a route without a fixture:
+  every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`, the GitHub one's
+  `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing, draft search,
+  free-text event query, and trashed-included Drive listing have no fixture, so they are not
+  emulated and the lookups fail closed until a fixture records them).
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content

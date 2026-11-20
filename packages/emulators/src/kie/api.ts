@@ -32,7 +32,6 @@ import {
   type KieEmulatorTask
 } from './state.ts'
 
-/** Content type of every answer, as the fixtures record it. */
 const contentType = 'application/json'
 
 /** Drill knobs (tests only): each makes the emulator disagree with one conformance claim. */
