@@ -331,8 +331,15 @@ const withRemoteSdkClient = <A>(
           ? Effect.void
           : endLegacySession(config.name, sdkClient, transport, options)
         ).pipe(
+          // A failed close is only logged: it never replaces the operation's own result.
           Effect.andThen(
-            Effect.promise(() => sdkClient.close()).pipe(Effect.catch(() => Effect.void))
+            Effect.tryPromise(() => sdkClient.close()).pipe(
+              Effect.catch(() =>
+                Effect.logDebug('MCP client close failed; the operation keeps its own result', {
+                  server: config.name
+                })
+              )
+            )
           )
         )
     )

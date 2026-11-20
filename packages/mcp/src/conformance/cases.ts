@@ -902,7 +902,7 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
   title: 'answers are JSON or a finite SSE stream holding the response once; 202 has no body',
   safety: 'read',
   docs: 'The client dispatches on `content-type`: `application/json` holds the response; `text/event-stream` is read event by event (`_handleSseStream` over `EventSourceParserStream`, which dispatches only completed events and has no flush, so an unterminated final event is never read), skipping events with empty data (priming events) and events whose `event:` is neither absent nor `message`, and ignoring notifications before or after the response. The Effect fetch bridge (`makeEffectFetch`) buffers the whole body, so an SSE answer to a POST must END, or the call only fails at the request timeout. A 202 body is discarded.',
-  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 has an empty body (a client-sent response, such as the answer to a server ping, is no request: only a 202 answering it is checked, so this case does not flag one answered 200 with a body; the opt-in `mcp.legacy.server-ping` requires its empty 202). Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
+  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 answering a POST has an empty body (a client-sent response, such as the answer to a server ping, is no request: only a 202 answering it is checked, so this case does not flag one answered 200 with a body; the opt-in `mcp.legacy.server-ping` requires its empty 202). Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
   fixtures: [mcpResponseEncodingModernFixture.id, mcpResponseEncodingLegacyFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -915,7 +915,9 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
       const label = labelOf(exchange)
       const status = exchange.status
 
-      if (status === 202) {
+      // basic/transports items 3 and 4: a POSTed notification or response accepted with 202 has
+      // no body. Nothing constrains the 202 of another method (the session-ending DELETE).
+      if (status === 202 && exchange.method === 'POST') {
         yield* expectConformance(
           exchange.responseBody === '',
           `expected 202 with no body (${label})`,

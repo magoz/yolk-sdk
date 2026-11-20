@@ -823,6 +823,8 @@ describe('MCP client', () => {
 
     const terminationFailed = 'MCP session termination failed; the server will expire the session'
 
+    const closeFailed = 'MCP client close failed; the operation keeps its own result'
+
     const deletes = (requests: ReadonlyArray<RecordedRequest>) =>
       requests.filter(request => request.method === 'DELETE')
 
@@ -1000,6 +1002,50 @@ describe('MCP client', () => {
         expect(messages).toEqual([[terminationFailed, { server: 'remote', outcome: 'defect' }]])
         expect(requests.some(request => request.rpcMethod === 'tools/list')).toBe(true)
       })
+    )
+
+    it.effect(
+      'a rejected close() never replaces the result: a listing returns, a call keeps its error',
+      () =>
+        Effect.gen(function* () {
+          const closeRejects: McpClientOptions = {
+            ...options,
+            configureClient: client => {
+              const close = client.close.bind(client)
+
+              client.close = async () => {
+                await close()
+
+                throw new Error('synthetic close failure')
+              }
+            }
+          }
+
+          const listing = yield* withDebugLogs(
+            listRemoteMcpServerTools(config, closeRejects).pipe(
+              Effect.provide(
+                makeSessionRemoteMcpLayer({ era: 'legacy', session: 'session-1', requests: [] })
+              )
+            )
+          )
+
+          expect(listing.result.map(tool => tool.def.name)).toEqual(['remote_search'])
+          expect(listing.messages).toEqual([[closeFailed, { server: 'remote' }]])
+
+          const failed = yield* call(closeRejects).pipe(
+            Effect.provide(
+              makeSessionRemoteMcpLayer({
+                era: 'legacy',
+                session: 'session-1',
+                callAnswersError: true,
+                requests: []
+              })
+            ),
+            Effect.result
+          )
+
+          expectMcpFailureCause(failed, 'protocol')
+        })
     )
 
     it.live('an interrupted operation closes at once and sends no DELETE', () =>

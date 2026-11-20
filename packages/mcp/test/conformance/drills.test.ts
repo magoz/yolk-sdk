@@ -503,6 +503,40 @@ describe('mcp.transport.response-encoding (the SDK SSE event selection)', () => 
     })
   )
 
+  it.effect('passes a DELETE answered 202 with a body (the 202 rule covers POSTs only)', () =>
+    passAgainst(
+      mcpResponseEncodingCase,
+      withExchange(
+        mcpResponseEncodingLegacyFixture,
+        mcpResponseEncodingLegacyFixture.exchanges.findIndex(
+          exchange => exchange.request.method === 'DELETE'
+        ),
+        exchange => ({
+          ...exchange,
+          response: {
+            status: 202,
+            headers: { 'content-type': 'application/json' },
+            body: '{"ended":true}'
+          }
+        })
+      )
+    )
+  )
+
+  it.effect('fails a POSTed notification answered 202 with a body', () =>
+    Effect.gen(function* () {
+      const drill = withResponse(
+        mcpResponseEncodingLegacyFixture,
+        lastIndexOf(mcpResponseEncodingLegacyFixture, 'notifications/initialized'),
+        { status: 202, headers: { 'content-type': 'application/json' }, body: '{}' }
+      )
+
+      const error = yield* failureAgainst(mcpResponseEncodingCase, drill)
+
+      expect(error.message).toBe('expected 202 with no body (POST notifications/initialized)')
+    })
+  )
+
   it.effect('passes a priming first event (empty data), as the official server sends', () =>
     passAgainst(
       mcpResponseEncodingCase,

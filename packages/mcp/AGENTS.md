@@ -212,13 +212,13 @@
   The remote client sends only `server/discover`, `initialize`,
   `notifications/initialized`, the standing GET, `tools/list`, `tools/call` and, closing a legacy
   connection that holds a session, `DELETE` (basic/transports, "Session Management" item 5: a
-  client SHOULD end a session it no longer needs; every operation is its own connection), plus the SDK's
-  automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler; legacy
-  only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5 and 7,
-  and the SDK drops inbound requests on modern connections). With Yolk's defaults (no host
-  `sdk.capabilities` or `configureClient`), that answer is the only client-sent response a
-  compliant server can provoke (Yolk then declares no `roots`, `sampling` or legacy `elicitation`
-  capability), and `mcp.legacy.server-ping` covers it (`2025-11-25`
+  client SHOULD end a session it no longer needs; every operation is its own connection), plus the
+  SDK's automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler;
+  legacy only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5
+  and 7, and the SDK drops inbound requests on modern connections). With Yolk's defaults (no host
+  `sdk.capabilities` or `configureClient`), that answer is the only client-sent response a compliant
+  server can provoke (Yolk then declares no `roots`, `sampling` or legacy `elicitation` capability),
+  and `mcp.legacy.server-ping` covers it (`2025-11-25`
   basic/utilities/ping, basic/transports "Sending Messages to the Server" items 3, 4 and 6,
   basic/lifecycle). The `DELETE` is the SDK's `terminateSession()`, best effort: at most 2 s
   (`sessionTerminationTimeoutMs`, capped by `timeoutMs`; a `DELETE` still in flight is aborted by
@@ -230,12 +230,13 @@
   connection (`2026-07-28` has no sessions). An operation interrupted before closing sends no
   `DELETE`; an interrupt that arrives during the `DELETE` waits at most 2 s. `mcp.legacy.session`
   covers it (exactly one `DELETE` after the last POST with the session id, answered 2xx, 404 or
-  405; none without a session), and every legacy fixture with a session ends with it (#381). No case covers what the client never sends: its own `ping`,
-  `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
-  (removed in `2026-07-28`; servers' `notifications/message` are ignored and already in every legacy
-  fixture answer), `tasks/*` (task-augmented requests need a declared capability in `2025-11-25`;
-  an extension in `2026-07-28`) and JSON-RPC batches (removed in `2025-06-18`; basic/transports item
-  3 of `2025-11-25` allows one message per POST). Add a case when client code starts sending one.
+  405; none without a session), and every legacy fixture with a session ends with it (#381). No
+  case covers what the client never sends: its own `ping`, `resources/*`, `prompts/*`,
+  `completion/*`, `logging/setLevel` (removed in `2026-07-28`; servers' `notifications/message` are
+  ignored and already in every legacy fixture answer), `tasks/*` (task-augmented requests need a
+  declared capability in `2025-11-25`; an extension in `2026-07-28`) and JSON-RPC batches (removed
+  in `2025-06-18`; basic/transports item 3 of `2025-11-25` allows one message per POST). Add a case
+  when client code starts sending one.
   `makeEffectFetch` buffers each whole answer, so the remote client answers a ping only after the
   SSE stream carrying it ends (a server waiting for the answer before ending the stream stalls
   until the timeout; unverified live, as is a ping on the standing GET). The local stdio client
