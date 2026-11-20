@@ -18,6 +18,28 @@
  *    the listing. Anything else is uncertainty: a 202 answer to a request, a message delivered on a
  *    GET, an unparseable body, an unterminated stream, an unanswered request, two responses for
  *    one id, or an unknown shape. SSE bodies are read with the SDK's own parser (`sse.ts`).
+ *    One server request is understood, and only with its whole round trip in view: a benign
+ *    server ping (`isBenignPing`) in a POST's answer, answered once by a later client POST whose
+ *    body is exactly the empty result to it (`jsonrpc`, `id` and `result: {}`), which the server
+ *    accepted with 202 and an empty body. Any other server request, a ping with params, a ping not
+ *    answered exactly once, or an answer without that acceptance (no status yet, a rejection, a
+ *    body) stays uncertainty, as does any other client-sent response.
+ *    Why a ping is safe (MCP `2025-11-25` basic/utilities/ping): it is a liveness check whose only
+ *    defined answer is an empty result ("The receiver MUST respond promptly with an empty
+ *    response"); the pinned SDK answers it with a handler that returns `{}` and touches no state
+ *    (`Protocol` constructor). A ping is a request, not a response, so it resolves none of the
+ *    client's requests and can carry no listing; the client's answer carries only the empty
+ *    result, and its 202 without a body delivers nothing back. So the round trip changes neither
+ *    what the client saw nor what the gate proves (#382). `2026-07-28` has no ping (changelog,
+ *    major changes 5 and 7): this matters for legacy servers only. The answer must also carry the
+ *    session of the exchange whose answer held the ping (its answer's session, else its
+ *    request's). The gate decides from what it has recorded when the call is about to be sent.
+ *    Pings during `initialize` and in the answers of earlier `tools/list` pages are normally
+ *    settled by then, since more round trips follow them (if not, the gate refuses). A ping in the LAST `tools/list` page's answer
+ *    almost always refuses against a live server: `makeEffectFetch` buffers the whole page, the
+ *    SDK sends the ping's answer and resolves `listTools` at almost the same moment, and the
+ *    client does no network I/O between `listTools` and `callTool`, so the call is gated before
+ *    the answer's 202 returns (fail closed).
  * 2. The operation's listing is complete: at least one `tools/list` page, each answered with a
  *    `result.tools` array, each page after the first sending the previous page's `nextCursor`,
  *    and the last page carrying no `nextCursor`.
@@ -95,6 +117,26 @@ const isNotification = (message: Json): boolean =>
 const isResponseTo = (message: Json, id: string | number): boolean =>
   isJsonObject(message) && message['id'] === id && ('result' in message || 'error' in message)
 
+type RpcId = string | number
+
+const isRpcId = (value: Json | undefined): value is RpcId =>
+  Predicate.isString(value) || Predicate.isNumber(value)
+
+const isEmptyObject = (value: Json | undefined): boolean =>
+  isJsonObject(value) && Object.keys(value).length === 0
+
+/**
+ * A benign server ping (see the module doc, rule 1): a JSON-RPC request with only the members
+ * `jsonrpc: "2.0"`, a string or number `id`, `method: "ping"`, and optionally empty `params`.
+ */
+const isBenignPing = (message: Json): message is JsonObject =>
+  isJsonObject(message) &&
+  Object.keys(message).every(key => ['jsonrpc', 'id', 'method', 'params'].includes(key)) &&
+  message['jsonrpc'] === '2.0' &&
+  isRpcId(message['id']) &&
+  message['method'] === 'ping' &&
+  (!('params' in message) || isEmptyObject(message['params']))
+
 /** An error response, whatever its id (`null` included): it cannot carry a listing. */
 const isErrorResponse = (message: Json): boolean =>
   isJsonObject(message) && 'error' in message && !('result' in message) && !('method' in message)
@@ -149,11 +191,90 @@ const soleResponse = (exchange: McpObservedExchange): JsonObject | undefined => 
   const responses = messages.filter(message => isResponseTo(message, id))
   const [response] = responses
 
+  // A benign ping counts only with its accepted answer (`pingsSettled`).
   return responses.length === 1 &&
-    messages.every(message => isResponseTo(message, id) || isNotification(message)) &&
+    messages.every(
+      message => isResponseTo(message, id) || isNotification(message) || isBenignPing(message)
+    ) &&
     isJsonObject(response)
     ? response
     : undefined
+}
+
+/**
+ * The ids of the benign pings in the answer to a POST request other than the era probe (the only
+ * answers `soleResponse` reads them in; elsewhere a ping stays uncertainty).
+ */
+const pingIdsOf = (exchange: McpObservedExchange): ReadonlyArray<RpcId> => {
+  const method = rpcMethodOf(exchange)
+  const body = exchange.responseBody
+
+  if (
+    exchange.method !== 'POST' ||
+    method === undefined ||
+    method === 'server/discover' ||
+    rpcIdOf(exchange) === undefined ||
+    body === undefined
+  ) {
+    return []
+  }
+
+  return (messagesOf(exchange, body) ?? []).flatMap(message => {
+    const id = isBenignPing(message) ? message['id'] : undefined
+
+    return isRpcId(id) ? [id] : []
+  })
+}
+
+/** The id a POST answers when its body is exactly the empty result to a request, else none. */
+const pingAnswerIdOf = (exchange: McpObservedExchange): RpcId | undefined => {
+  const body = exchange.requestBody
+  const id = field(body, 'id')
+
+  return exchange.method === 'POST' &&
+    isJsonObject(body) &&
+    Object.keys(body).length === 3 &&
+    body['jsonrpc'] === '2.0' &&
+    isEmptyObject(body['result']) &&
+    isRpcId(id)
+    ? id
+    : undefined
+}
+
+/**
+ * Whether every benign ping in `earlier` was answered exactly once, after it, in its session, with
+ * the empty result, and the server accepted that answer with 202 and an empty body; and whether every such
+ * answer answers exactly one of those pings (see the module doc, rule 1).
+ */
+const pingsSettled = (earlier: ReadonlyArray<McpObservedExchange>): boolean => {
+  const pings = earlier.flatMap((exchange, index) => {
+    // The session the ping belongs to: the one its carrier's answer issued, else the one sent.
+    const session = exchange.responseSession?.id ?? exchange.requestSession?.id
+
+    return pingIdsOf(exchange).map(id => ({ id, index, session }))
+  })
+
+  const answers = earlier.flatMap((exchange, index) => {
+    const id = pingAnswerIdOf(exchange)
+
+    return id === undefined ? [] : [{ id, index, exchange }]
+  })
+
+  return (
+    pings.every(ping => {
+      const matching = answers.filter(answer => answer.id === ping.id)
+      const [answer] = matching
+
+      return (
+        matching.length === 1 &&
+        answer !== undefined &&
+        answer.index > ping.index &&
+        answer.exchange.requestSession?.id === ping.session &&
+        answer.exchange.status === 202 &&
+        answer.exchange.responseBody === ''
+      )
+    }) && answers.every(answer => pings.filter(ping => ping.id === answer.id).length === 1)
+  )
 }
 
 /** Whether the SDK's view of `exchange` is fully accounted for (see the module doc, rule 1). */
@@ -245,7 +366,15 @@ export const gateVerdict = (
     return 'unexpected-call'
   }
 
-  if (!earlier.every((exchange, index) => isUnderstood(exchange, receivedSoFar(index)))) {
+  // A client answer to a ping is understood only through `pingsSettled`, which pairs it with its
+  // ping; every other exchange must be understood on its own.
+  if (
+    !earlier.every(
+      (exchange, index) =>
+        pingAnswerIdOf(exchange) !== undefined || isUnderstood(exchange, receivedSoFar(index))
+    ) ||
+    !pingsSettled(earlier)
+  ) {
     return 'uncertain-exchange'
   }
 

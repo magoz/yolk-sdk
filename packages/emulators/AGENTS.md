@@ -1297,9 +1297,11 @@ case on a fresh emulator ending exactly at its seed (every legacy operation ends
 sequence on one emulator; the paged listing across a reset; one drill per case failing exactly that
 case on every era it changes; an SSE answer truncated before its response failing as `McpError` at
 the timeout, not a hang; the opt-in `mcp.legacy.server-ping` on the synthetic legacy profile under
-its seed, alone and beside the non-calling cases twice on one emulator, the calling cases refusing a
-pinging server with no `tools/call` sent, and its drill failing only it; the session-end drill
-failing only `mcp.legacy.session` on both legacy profiles), and
+its seed, alone; every applicable legacy case under that seed, each on a fresh emulator and all
+beside it twice on one emulator, the calling cases forwarding their `tools/call` through the call
+gate (#382); and its drill failing only it among the listing cases while the calling cases refuse
+with no `tools/call` sent; the session-end drill failing only `mcp.legacy.session` on both legacy
+profiles), and
 `test/stateful-emulator.test.ts` (the shared wrapper's `{name+}`
 parameters, raw parameter patterns matched in full (alternation and lazy quantifiers included), the
 opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with constant text

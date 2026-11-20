@@ -2128,9 +2128,10 @@ the default is `plain`): `initialize` then answers that case's fixture
 (`mcpEmulatorServerPingFixtures`), whose SSE answer sends a `ping` request before its response, and
 the session awaits the client's answer to that ping, which the `response:ping` row accepts once
 with the recorded 202, in either phase (over a socket it may arrive after
-`notifications/initialized`). The Figma profile records no ping and ignores the seed. The calling
-cases refuse a pinging server: their call gate treats any server request in an answer as
-uncertainty (#382).
+`notifications/initialized`). The Figma profile records no ping and ignores the seed. Under that
+seed every applicable legacy case passes too: the call gate understands a plain ping whose answer
+the server accepted with 202 and no body, so the calling cases forward their `tools/call`; with the
+`pingAnswerRejected` drill the gate refuses them (#382).
 
 ```ts
 import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
