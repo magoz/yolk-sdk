@@ -6,6 +6,7 @@ import {
   AssistantAgentMessage,
   AssistantMessageEvent,
   AssistantTextPart,
+  BackgroundToolAccepted,
   HostToolCallPart,
   InputCancelled,
   InputRequest,
@@ -18,6 +19,7 @@ import {
   InteractionResponse,
   InteractionSubmitted,
   LLMStreamStart,
+  ProviderToolResult,
   QuestionAnswered,
   QuestionCancelled,
   QuestionPrompt,
@@ -32,12 +34,14 @@ import {
   ToolApprovalResponse,
   ToolCall,
   ToolDef,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
   ToolResult,
   UserMessage,
   interactionRequestId,
+  makeBackgroundToolAcceptedResult,
   zeroAgentUsage,
   type AgentEvent,
   type HitlRequest,
@@ -55,7 +59,13 @@ import {
   type AgentChatEventProjectionState,
   type AgentChatState
 } from '../../src/react/chat-core.ts'
-import type { AgentChatMessage, ChatToolState } from '../../src/react/chat-messages.ts'
+import { AgentToolRun } from '../../src/client/state.ts'
+import {
+  applyAgentEventToChatMessages,
+  buildAgentChatMessages,
+  type AgentChatMessage,
+  type ChatToolState
+} from '../../src/react/chat-messages.ts'
 import { makeInputToolDef } from '../../src/tools/index.ts'
 
 // A request event (or `AgentAwaitingInput` request) replayed after its call settled must not set
@@ -1042,4 +1052,238 @@ describe('a call the run stopped while it ran', () => {
       expect(asked.chat.status).toMatchObject({ _tag: 'Blocked', kind: 'permission' })
     })
   )
+})
+
+describe('the request an answer reaches', () => {
+  // The chat reads a part's request as the client does: an answered or cancelled part by its
+  // response, a denial by the approval it denies; a part with its result is never the one an answer
+  // replays. A replayed earlier turn's answer then reaches its own part, and a stale one nothing.
+  const asked = question()
+  const answeredSettle = asked.settles[0]
+
+  if (answeredSettle === undefined) throw new Error('expected an answered settle')
+
+  const answeredQ1 = answeredSettle
+    .events(step => `run:${step}`)
+    .flatMap(answerReplay)
+    .at(0)
+
+  if (answeredQ1 === undefined) throw new Error('expected an answer')
+
+  /** Turn 1 answered its question; turn 3 reuses `call_0` for `events`. */
+  const afterTurnOne = (events: ReadonlyArray<AgentEvent>) =>
+    applyEvents(settledChats(asked, answeredSettle, 'after the next turn started'), [
+      LLMStreamStart.make({ eventId: 'run:start-3', turn: 3 }),
+      ...events
+    ])
+
+  /** Only turn 3: no part holds turn 1's request, so its answer is stale. */
+  const alone = (events: ReadonlyArray<AgentEvent>) =>
+    applyEvents(initialChats, [LLMStreamStart.make({ eventId: 'run:start-3', turn: 3 }), ...events])
+
+  const expectUnchanged = (chats: Chats, event: AgentEvent) => {
+    const replayed = applyEvent(chats, event)
+
+    expect(replayed.projection.chatMessages).toEqual(chats.projection.chatMessages)
+    expect(replayed.chat.chatMessages).toEqual(chats.chat.chatMessages)
+    expect(replayed.chat.status).toEqual(chats.chat.status)
+  }
+
+  const deploy = reused(approval(), { env: 'staging' })
+
+  const denied: ReadonlyArray<AgentEvent> = [
+    AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(deploy.call) }),
+    deploy.requested('run:request-3'),
+    awaiting(deploy.request, 'run:pause-3'),
+    ToolApprovalDenied.make({
+      eventId: 'run:denied-3',
+      toolCallId,
+      reason: 'Not now',
+      response: ToolApprovalResponse.make({
+        requestId: deploy.request.requestId,
+        toolCallId,
+        decision: 'denied',
+        source: 'user'
+      })
+    })
+  ]
+
+  it('keeps the approval a denial denies, and a later denied card for an earlier answer', () => {
+    const chats = afterTurnOne(denied)
+
+    expect(toolStates(chats.projection.chatMessages)).toMatchObject([
+      { _tag: 'QuestionAnswered' },
+      { _tag: 'Denied', request: deploy.request }
+    ])
+
+    expectUnchanged(chats, answeredQ1)
+    expectUnchanged(alone(denied), answeredQ1)
+  })
+
+  // An input answered on its `Called` part keeps only its response.
+  const word = input()
+
+  const submittedWithoutRequest: ReadonlyArray<AgentEvent> = [
+    AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(word.call) }),
+    InputSubmitted.make({
+      eventId: 'run:submitted-3',
+      response: InputResponse.make({
+        requestId: word.request.requestId,
+        toolCallId,
+        outcome: 'submitted',
+        source: 'user',
+        data: 'kind'
+      })
+    })
+  ]
+
+  const staleInteraction = InteractionSubmitted.make({
+    response: InteractionResponse.make({
+      requestId: interactionRequestId(interaction().call),
+      toolCallId,
+      outcome: 'submitted',
+      source: 'user',
+      actionId: 'publish',
+      data: {}
+    })
+  })
+
+  it('reads an answered part without its request by its response', () => {
+    const chats = afterTurnOne(submittedWithoutRequest)
+    const states = toolStates(chats.projection.chatMessages)
+
+    expect(states).toMatchObject([{ _tag: 'QuestionAnswered' }, { _tag: 'InputSubmitted' }])
+    expect(states.at(-1)).not.toHaveProperty('request')
+
+    // The replayed earlier answer gives way to turn 1's part; a stale one changes nothing.
+    expectUnchanged(chats, answeredQ1)
+    expectUnchanged(chats, staleInteraction)
+  })
+
+  it('reads a snapshot part holding only its response by its response', () => {
+    const messages = buildAgentChatMessages({
+      messages: [UserMessage.make({ content: 'A word?' }), ask(word.call)],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [
+        AgentToolRun.InputSubmitted({
+          response: InputResponse.make({
+            requestId: word.request.requestId,
+            toolCallId,
+            outcome: 'submitted',
+            source: 'user',
+            data: 'kind'
+          })
+        })
+      ],
+      error: null
+    })
+
+    const chats: Chats = {
+      projection: makeAgentChatEventProjectionState(messages),
+      chat: { ...initialAgentChatState, chatMessages: messages }
+    }
+
+    expect(toolStates(messages)).toMatchObject([{ _tag: 'InputSubmitted' }])
+
+    expectUnchanged(chats, staleInteraction)
+  })
+
+  const export_ = ToolCall.make({ id: toolCallId, name: 'export', params: { format: 'csv' } })
+  const search = ToolCall.make({ id: toolCallId, name: 'web_search', params: { q: 'Oslo' } })
+
+  const finished: ReadonlyArray<{
+    readonly state: ChatToolState['_tag']
+    readonly events: ReadonlyArray<AgentEvent>
+  }> = [
+    {
+      state: 'Completed',
+      events: [
+        AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(deploy.call) }),
+        ...ran(deploy.call, step => `run:${step}-3`)
+      ]
+    },
+    {
+      state: 'Accepted',
+      events: [
+        AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(export_) }),
+        ToolExecutionStarted.make({ eventId: 'run:started-3', call: export_ }),
+        ToolExecutionAccepted.make({
+          eventId: 'run:accepted-3',
+          call: export_,
+          result: makeBackgroundToolAcceptedResult({
+            toolCallId,
+            acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:export' })
+          })
+        })
+      ]
+    },
+    {
+      state: 'Errored',
+      events: [
+        AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(deploy.call) }),
+        ToolExecutionStarted.make({ eventId: 'run:started-3', call: deploy.call }),
+        ToolExecutionError.make({
+          eventId: 'run:error-3',
+          call: deploy.call,
+          message: 'Deploy failed',
+          code: 'tool_error'
+        })
+      ]
+    },
+    {
+      state: 'ProviderCompleted',
+      events: [
+        ProviderToolResult.make({
+          eventId: 'run:provider-3',
+          call: search,
+          result: ToolResult.make({ toolCallId, content: 'Oslo' })
+        })
+      ]
+    }
+  ]
+
+  it.each(finished)(
+    'leaves the $state part alone for a replayed or stale answer',
+    ({ state, events }) => {
+      const chats = afterTurnOne(events)
+
+      expect(stateTags(chats)).toEqual(both(['QuestionAnswered', state]))
+
+      expectUnchanged(chats, answeredQ1)
+      expectUnchanged(alone(events), answeredQ1)
+    }
+  )
+
+  it('still answers a running part (an answer can precede its request there)', () => {
+    const chats = applyEvents(initialChats, [
+      LLMStreamStart.make({ eventId: 'run:start-1', turn: 1 }),
+      AssistantMessageEvent.make({ eventId: 'run:message-1', message: ask(asked.call) }),
+      ToolExecutionStarted.make({ eventId: 'run:started', call: asked.call }),
+      answeredQ1
+    ])
+
+    expect(stateTags(chats)).toEqual(both(['QuestionAnswered']))
+  })
+
+  describe('applyAgentEventToChatMessages', () => {
+    // No turn start: the last message holding the call. A stale answer still changes nothing.
+    const fold = (events: ReadonlyArray<AgentEvent>) =>
+      events.reduce<ReadonlyArray<AgentChatMessage>>(
+        (messages, event) => applyAgentEventToChatMessages(messages, event),
+        []
+      )
+
+    it.each([
+      { state: 'ApprovalRequested', events: denied.slice(0, 3) },
+      { state: 'Denied', events: denied },
+      ...finished.map(({ state, events }) => ({ state, events }))
+    ])('drops a stale answer reaching the $state part', ({ state, events }) => {
+      const messages = fold(events)
+
+      expect(toolStates(messages).map(current => current._tag)).toEqual([state])
+      expect(applyAgentEventToChatMessages(messages, answeredQ1)).toEqual(messages)
+    })
+  })
 })

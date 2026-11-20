@@ -490,10 +490,24 @@ const sameCall =
     return held === undefined ? undefined : Equal.equals(held, call)
   }
 
-/** An answer replays the run holding the request it answers. */
+/** A call with its result: completed, accepted, errored, or the provider's result. */
+const hasToolResultRun = (run: AgentToolRun) =>
+  Predicate.isTagged(run, 'Completed') ||
+  Predicate.isTagged(run, 'Accepted') ||
+  Predicate.isTagged(run, 'Errored') ||
+  Predicate.isTagged(run, 'ProviderCompleted')
+
+/**
+ * An answer replays the run holding the request it answers. A run with its result is never the
+ * one (the loop asks only before a result, so an answer reaching it is a replay; for an accepted
+ * call it would drop the background fence); a running call does not say (an answer can precede
+ * its request there). The chat's `answeredRequest` keeps the same rule.
+ */
 const answeredRequest =
   (requestId: string): ReplayedRun =>
   run => {
+    if (hasToolResultRun(run)) return false
+
     const held = toolRunRequestId(run)
 
     return held === undefined ? undefined : held === requestId

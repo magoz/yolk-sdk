@@ -43,7 +43,12 @@ export type ChatToolState =
   | { readonly _tag: 'Called' }
   | { readonly _tag: 'InputStreaming'; readonly input: string }
   | { readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest }
-  | { readonly _tag: 'Denied'; readonly reason: string }
+  | {
+      readonly _tag: 'Denied'
+      readonly reason: string
+      /** The approval request it denies, when that was seen (it names the denied call). */
+      readonly request?: ToolApprovalRequest
+    }
   | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
   | {
       readonly _tag: 'QuestionAnswered'
@@ -625,6 +630,18 @@ const preserveInteractionRequest = (
 ): InteractionTerminalState =>
   state.request !== undefined || request === undefined ? state : { ...state, request }
 
+/** The approval request a call's state carries (pending, or the one a denial denied). */
+const approvalRequestOf = (state: ChatToolState): ToolApprovalRequest | undefined =>
+  Predicate.isTagged(state, 'ApprovalRequested') || Predicate.isTagged(state, 'Denied')
+    ? state.request
+    : undefined
+
+/** A denial, keeping the approval request it denies (as the client's `Denied` run). */
+const deniedState = (reason: string, request: ToolApprovalRequest | undefined): ChatToolState =>
+  request === undefined
+    ? ChatToolState.Denied({ reason })
+    : ChatToolState.Denied({ reason, request })
+
 const toolStateFor = (
   run: AgentToolRun | undefined,
   message: ToolResultMessage | undefined
@@ -649,7 +666,7 @@ const toolStateFor = (
   }
 
   if (Predicate.isTagged(run, 'Denied')) {
-    return ChatToolState.Denied({ reason: run.reason })
+    return deniedState(run.reason, run.request)
   }
 
   if (Predicate.isTagged(run, 'InputRequested')) {
@@ -934,16 +951,7 @@ const sameCall =
 /** The request a call's state carries (pending or answered), if any. */
 const toolStateRequestId = (state: ChatToolState): string | undefined =>
   Match.value(state).pipe(
-    Match.tag(
-      'ApprovalRequested',
-      'QuestionAnswered',
-      'QuestionCancelled',
-      'InputSubmitted',
-      'InputCancelled',
-      'InteractionSubmitted',
-      'InteractionCancelled',
-      current => current.request?.requestId
-    ),
+    Match.tag('ApprovalRequested', 'Denied', current => current.request?.requestId),
     Match.tag(
       'QuestionRequested',
       'InputRequested',
@@ -951,9 +959,17 @@ const toolStateRequestId = (state: ChatToolState): string | undefined =>
       current => current.request.requestId
     ),
     Match.tag(
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InputSubmitted',
+      'InputCancelled',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      current => current.response.requestId
+    ),
+    Match.tag(
       'Called',
       'InputStreaming',
-      'Denied',
       'Running',
       'Accepted',
       'Completed',
@@ -964,10 +980,23 @@ const toolStateRequestId = (state: ChatToolState): string | undefined =>
     Match.exhaustive
   )
 
-/** An answer replays the part holding the request it answers. */
+/** A call with its result: completed, accepted, errored, or the provider's result. */
+const hasToolResultState = (state: ChatToolState) =>
+  Predicate.isTagged(state, 'Completed') ||
+  Predicate.isTagged(state, 'Accepted') ||
+  Predicate.isTagged(state, 'Errored') ||
+  Predicate.isTagged(state, 'ProviderCompleted')
+
+/**
+ * An answer replays the part holding the request it answers. A part with its result is never the
+ * one (the loop asks only before a result, so an answer reaching it is a replay), as the client's
+ * `answeredRequest`; a running part does not say (an answer can precede its request there).
+ */
 const answeredRequest =
   (requestId: string): ReplayedPart =>
   part => {
+    if (hasToolResultState(part.state)) return false
+
     const held = toolStateRequestId(part.state)
 
     return held === undefined ? undefined : held === requestId
@@ -2219,7 +2248,8 @@ export const markChatError = (
  * Prefer `applyAgentEventToChatProjection` for durable streams that can replay
  * or overlap. Append-only text and reasoning deltas are not idempotent here.
  * Without the projection's turn starts, tool events match the last message holding a call, so a
- * call id a provider reused can update an earlier turn's call.
+ * call id a provider reused can update an earlier turn's call. An answer reaching a call known not
+ * to be its own (another request, or a call with its result) changes nothing.
  */
 export const applyAgentEventToChatMessages = (
   messages: ReadonlyArray<AgentChatMessage>,
@@ -2354,8 +2384,8 @@ export const applyExecutionEventToChatMessages = (
     )
     .pipe(
       Match.tag('ToolApprovalDenied', current =>
-        updateToolCallState(messages, current.toolCallId, host, pendingApproval, () =>
-          ChatToolState.Denied({ reason: current.reason })
+        updateToolCallState(messages, current.toolCallId, host, pendingApproval, state =>
+          deniedState(current.reason, approvalRequestOf(state))
         )
       ),
       Match.tag('QuestionRequested', current =>

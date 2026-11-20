@@ -25,6 +25,7 @@ import {
   ToolCall,
   ToolExecutionAccepted,
   ToolExecutionCompleted,
+  ToolExecutionError,
   ToolExecutionStarted,
   ToolInputDelta,
   ToolInputEnd,
@@ -467,6 +468,82 @@ describe('tool runs of calls that reuse an id across turns', () => {
         'call_0 {"city":"Oslo"}:QuestionAnswered',
         'call_0 {"city":"Bergen"}:QuestionRequested'
       ])
+    })
+
+    // The latest turn's `call_0` has its result: an answer reaching it is a replay (the loop asks
+    // only before a result). A replayed answer to turn 1's question acts on turn 1's run, a stale
+    // one changes nothing, and an accepted call keeps its background fence.
+    const search = ToolCall.make({ id: 'call_0', name: 'web_search', params: { q: 'Bergen' } })
+
+    const finished = [
+      {
+        state: 'Completed',
+        events: [
+          ...modelTurn('tagged', 'model-2:1', 2, turnTwo, bergen),
+          ...batch(bergen, result('9C'))
+        ]
+      },
+      {
+        state: 'Accepted',
+        events: [...modelTurn('tagged', 'model-2:1', 2, startedExport, exporting), ...background()]
+      },
+      {
+        state: 'Errored',
+        events: [
+          ...modelTurn('tagged', 'model-2:1', 2, turnTwo, bergen),
+          ToolExecutionStarted.make({ ...host(), call: bergen }),
+          ToolExecutionError.make({
+            ...host(),
+            call: bergen,
+            message: 'Weather is down',
+            code: 'tool_error'
+          })
+        ]
+      },
+      {
+        state: 'ProviderCompleted',
+        events: [
+          LLMStreamStart.make({ ...identity('tagged', 'model-2:1'), turn: 2 }),
+          ProviderToolResult.make({
+            ...identity('tagged', 'model-2:1'),
+            call: search,
+            result: result('Bergen')
+          })
+        ]
+      }
+    ]
+
+    it.each(finished)(
+      "leaves the latest turn's $state run alone for a replayed or stale answer",
+      ({ state, events }) => {
+        const answeredFirst = reduce([
+          ...modelTurn('tagged', 'model-1:1', 1, answer('Which unit?', [unit]), unit),
+          QuestionRequested.make({ ...host(), request: question }),
+          QuestionAnswered.make({ ...host(), response: answered }),
+          ...events
+        ])
+
+        expect(answeredFirst.toolRuns.map(run => run._tag)).toEqual(['QuestionAnswered', state])
+
+        const replay = QuestionAnswered.make({ response: answered })
+
+        expect(applyAgentEvent(answeredFirst, replay).toolRuns).toEqual(answeredFirst.toolRuns)
+
+        const latestOnly = reduce(events)
+
+        expect(applyAgentEvent(latestOnly, replay).toolRuns).toEqual(latestOnly.toolRuns)
+      }
+    )
+
+    it('still answers a running call (an answer can precede its request there)', () => {
+      const running = reduce([
+        ...modelTurn('tagged', 'model-1:1', 1, answer('Which unit?', [unit]), unit),
+        ToolExecutionStarted.make({ ...host(), call: unit })
+      ])
+
+      const state = applyAgentEvent(running, QuestionAnswered.make({ response: answered }))
+
+      expect(state.toolRuns.map(run => run._tag)).toEqual(['QuestionAnswered'])
     })
 
     it('keeps the transcript fence when a later turn holds another call with the id', () => {
