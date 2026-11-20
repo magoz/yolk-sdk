@@ -22,7 +22,7 @@ The claims are as currently understood; none is observed live yet.
 | ----------------------------- | -------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `kie.tasks.get-success`       | `read`               | `successTaskId`          | One GET `recordInfo?taskId=` answered HTTP 200, envelope `code` 200, `state: success`, and https result URLs in `resultJson`      |
 | `kie.tasks.get-failed`        | `read`               | `failedTaskId`           | A failed task reads HTTP 200 with envelope `code` 200 and `state: fail`, no result URLs, and a non-empty `failMsg` or `failCode`  |
-| `kie.errors.task-not-found`   | `read`               | none                     | An unknown task id answers a 4xx envelope `code` (not 401 or 402), never a success; the HTTP status is not checked                |
+| `kie.errors.task-not-found`   | `read`               | none                     | An unknown task id answers Kie code 404 or 422 (any other code, such as 429 or 455, fails), never a success                       |
 | `kie.errors.unauthorized`     | `read`               | none                     | A synthetic invalid key answers code 401 (`kie_unauthorized`), whether as HTTP 401 or as an envelope at HTTP 200                  |
 | `kie.tasks.create-image-task` | `write-irreversible` | `runId`                  | One POST `createTask` (GPT Image 2 text-to-image, square at `1K`) answered HTTP 200, envelope `code` 200, a non-empty `taskId`    |
 | `kie.tasks.create-video-task` | `write-irreversible` | `firstFrameUrl`, `runId` | One POST `createTask` (Wan 2.7 image-to-video, `720p` for 5 seconds) answered HTTP 200, envelope `code` 200, a non-empty `taskId` |
@@ -61,11 +61,12 @@ live runner's `--allow-irreversible kie.tasks.create-image-task` or
 - A definitive rejection created nothing: an HTTP 4xx, or at HTTP 2xx an envelope 4xx (Kie answers
   most failures with HTTP 200 and a non-200 envelope `code`), other than 408 and Kie's 455 (service
   unavailable). The case fails without advice.
-- Anything else that is not a 2xx with envelope `code` 200 (a transport or decoding failure, no
-  status, a 408, 455, or 5xx) is ambiguous: a task may exist and spend credits. The case fails with
-  `KieConformanceActionFailed` (`taskOutcome: 'unknown'`) naming the run id to look for in the Kie
-  task log; when that happens while the case is being interrupted, the message is also handed to
-  `ConformanceCleanupReporter`, which the live runner prints as a WARN line.
+- Anything else that is not a 2xx with envelope `code` 200 and a non-empty `taskId` (a transport or
+  decoding failure, no status, a 408, 455, or 5xx, an empty `taskId`) is ambiguous: a task may exist
+  and spend credits. The case fails with `KieConformanceActionFailed` (`taskOutcome: 'unknown'`)
+  naming the run id to look for in the Kie task log; when that happens while the case is being
+  interrupted, the message is also handed to `ConformanceCleanupReporter`, which the live runner
+  prints as a WARN line.
 
 There is no leftover lookup: the connector reads no task listing, and there is nothing to clean up.
 

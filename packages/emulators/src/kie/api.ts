@@ -107,17 +107,13 @@ const evidence = (
 const json = (status: number, body: Schema.Json): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': contentType } })
 
-/** A read-only commit. */
 const answer =
   (response: () => Response): Commit =>
   () =>
     response()
 
-/** Whether the request's bearer digest is one a seed marks as rejected. */
 const rejected = (state: KieEmulatorState, digest: string | undefined): boolean =>
   digest !== undefined && state.rejectedKeyDigests.includes(digest)
-
-// recordInfo.
 
 type RecordInput = { readonly taskId: string; readonly bearerDigest: string | undefined }
 
@@ -198,9 +194,7 @@ const recordInfo: Route = statefulRoute(
   }
 )
 
-// createTask.
-
-/** The recorded create flows: the model and the exact input keys each sends. */
+/** The two models the create fixtures record. */
 const imageModel = 'gpt-image-2-text-to-image'
 
 const videoModel = 'wan/2-7-image-to-video'
@@ -214,13 +208,11 @@ type CreateInput = {
   readonly bearerDigest: string | undefined
 }
 
-/** A non-empty prompt within the model's limit. */
 const promptProblem = (value: Schema.Json | undefined, model: string): NotEmulated | undefined =>
   Predicate.isString(value) && value.length > 0 && value.length <= promptLimitOf(model)
     ? undefined
     : notEmulated('prompt must be a non-empty string within the model limit')
 
-/** An absolute https URL without credentials or whitespace, at most 2048 characters. */
 const isHttpsUrl = (value: Schema.Json | undefined): boolean => {
   if (!Predicate.isString(value) || value.length > 2048 || /\s/u.test(value)) return false
 
@@ -333,5 +325,4 @@ const createTask: Route = statefulRoute(
   }
 )
 
-/** Every emulated route, in manifest order. */
 export const kieApiRoutes: ReadonlyArray<Route> = [recordInfo, createTask]

@@ -628,10 +628,21 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
 
   const templateKeys = routes.map(route => emulatorRouteKey(route.method, route.path))
 
-  // Templates two routes share (each on its own recorded origin, checked above).
+  // Templates two routes share: allowed only when each is recorded on its own origin.
   const sharedTemplates = new Set(
     templateKeys.filter((key, index) => templateKeys.indexOf(key) !== index)
   )
+
+  const unbound = routes.find(
+    route =>
+      route.origin === undefined && sharedTemplates.has(emulatorRouteKey(route.method, route.path))
+  )
+
+  if (unbound !== undefined) {
+    const key = emulatorRouteKey(unbound.method, unbound.path)
+
+    throw new Error(`shared emulator route ${key} needs a recorded origin on every route`)
+  }
 
   const matchIn = (
     candidates: typeof compiled,
@@ -2501,13 +2512,16 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
    * emulator error, tagged with the matched route's evidence when there is one (in resolved mode,
    * whose own resolution may be what failed, never).
    */
-  const lastResort = (request: Request): Response => {
-    const path = URL.canParse(request.url) ? new URL(request.url).pathname : undefined
+  const lastResort = (request: Request, origin: string | undefined): Response => {
+    const url = URL.canParse(request.url) ? new URL(request.url) : undefined
     const failed = emulatorError(500, errorTexts.unhandled)
 
-    if (path === undefined || isControlPath(path) || resolveRequest !== undefined) return failed
+    if (url === undefined || isControlPath(url.pathname) || resolveRequest !== undefined) {
+      return failed
+    }
 
-    const matched = match(request.method, path, new URL(request.url).origin)
+    // The origin the request arrived on (`fetchOn`), as `handle` uses it, never a loopback URL's.
+    const matched = match(request.method, url.pathname, origin ?? url.origin)
 
     return matched === undefined ? failed : withEvidence(failed, matched.route.evidence)
   }
@@ -2527,7 +2541,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
   const fetchOn =
     (origin: string | undefined) =>
     (request: Request): Promise<Response> =>
-      handle(request, origin).catch(() => lastResort(request))
+      handle(request, origin).catch(() => lastResort(request, origin))
 
   return {
     fetch: fetchOn(undefined),

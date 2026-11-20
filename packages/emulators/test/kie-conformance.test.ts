@@ -349,8 +349,8 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       { videoCreateEmptyTaskId: true },
       {
         id: 'kie.tasks.create-video-task',
-        tag: 'ConformanceMismatch',
-        message: 'expected a non-empty taskId and the Wan 2.7 model'
+        tag: 'KieConformanceActionFailed',
+        message: 'kie.create_video_task failed: empty_task_id (HTTP 200); task outcome unknown'
       }
     ]
   ]

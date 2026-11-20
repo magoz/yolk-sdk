@@ -496,12 +496,14 @@ const tampers: ReadonlyArray<{
     )
   },
   {
-    // An empty taskId: the connector decodes it, the claim does not hold.
+    // An empty taskId: a task may still have been created and charged, so the outcome is unknown.
     fixture: replaceResponse(
       kieCreateVideoTaskFixture,
       replaceInBody('"taskId":"yolk_synthetic_task_created_0002"', '"taskId":""')
     ),
-    failure: mismatch('expected a non-empty taskId and the Wan 2.7 model')
+    failure: actionFailed(
+      `kie.create_video_task failed: empty_task_id (HTTP 200); ${unknownTaskAdvice}`
+    )
   }
 ]
 
@@ -544,7 +546,7 @@ describe('Kie conformance drills (one per case)', () => {
     })
   )
 
-  it.effect('the not-found claim holds for an HTTP 404, and fails for an envelope 401', () =>
+  it.effect('the not-found claim holds for an HTTP 404, and fails for any other Kie code', () =>
     Effect.gen(function* () {
       expect(
         yield* suiteFailures(
@@ -553,20 +555,32 @@ describe('Kie conformance drills (one per case)', () => {
           )
         )
       ).toEqual([])
-      expect(
-        yield* suiteFailures(
-          withReplaced(
-            replaceResponse(kieTaskNotFoundFixture, withStatus(200, envelope(401, 'Unauthorized')))
-          )
-        )
-      ).toEqual([
-        {
-          id: 'kie.errors.task-not-found',
-          failure: mismatch(
-            'expected an unknown task id to answer a 4xx Kie code other than 401 and 402'
-          )
-        }
-      ])
+
+      // A rate limit, an outage, a timeout, or a credential problem says nothing about the task id.
+      for (const [status, code, msg] of [
+        [200, 401, 'Unauthorized'],
+        [200, 455, 'Service unavailable'],
+        [200, 429, 'Rate limited'],
+        [200, 408, 'Timeout'],
+        [429, 429, 'Rate limited'],
+        [200, 400, 'Bad request']
+      ] as const) {
+        expect(
+          yield* suiteFailures(
+            withReplaced(
+              replaceResponse(kieTaskNotFoundFixture, withStatus(status, envelope(code, msg)))
+            )
+          ),
+          `${status} ${code}`
+        ).toEqual([
+          {
+            id: 'kie.errors.task-not-found',
+            failure: mismatch(
+              'expected an unknown task id to answer Kie code 404 (kie_not_found) or 422 (kie_validation)'
+            )
+          }
+        ])
+      }
     })
   )
 
@@ -666,6 +680,30 @@ describe('Kie conformance irreversible create safety', () => {
       'kie.create_image_task failed: kie_request_failed (HTTP 200) (Kie code 408)'
     ],
     [
+      'an HTTP 408',
+      408,
+      'Request Timeout',
+      'kie.create_image_task failed: kie_request_failed (HTTP 408) (Kie code 408)'
+    ],
+    [
+      'an HTTP 455 (service unavailable)',
+      455,
+      envelope(455, 'Service unavailable'),
+      'kie.create_image_task failed: kie_unavailable (HTTP 455) (Kie code 455)'
+    ],
+    [
+      'a code 200 answer without a task id',
+      200,
+      envelope(200, 'success', { taskId: '' }),
+      'kie.create_image_task failed: empty_task_id (HTTP 200)'
+    ],
+    [
+      'a code 200 answer with a blank task id',
+      200,
+      envelope(200, 'success', { taskId: '   ' }),
+      'kie.create_image_task failed: empty_task_id (HTTP 200)'
+    ],
+    [
       'a 2xx that is not JSON',
       200,
       'not json at all',
@@ -679,6 +717,45 @@ describe('Kie conformance irreversible create safety', () => {
         expect(failure).toEqual(actionFailed(`${message}; ${unknownTaskAdvice}`))
       })
     )
+  }
+
+  for (const [caseId, testCase, fixture, action] of [
+    [
+      'kie.tasks.create-image-task',
+      kieCreateImageTaskCase,
+      kieCreateImageTaskFixture,
+      'kie.create_image_task'
+    ],
+    [
+      'kie.tasks.create-video-task',
+      kieCreateVideoTaskCase,
+      kieCreateVideoTaskFixture,
+      'kie.create_video_task'
+    ]
+  ] as const) {
+    for (const status of [201, 202]) {
+      it.effect(
+        `${caseId}: a code 200 create answered HTTP ${status} fails the HTTP 200 claim`,
+        () =>
+          Effect.gen(function* () {
+            yield* atTestNow
+
+            const report = yield* runConformance([testCase], {
+              target: { kind: 'replay' },
+              now,
+              layer: replayLayerOver([
+                replaceResponse(fixture, original =>
+                  withStatus(status, textBody(original))(original)
+                )
+              ])
+            })
+
+            expect(report.results[0]?.failure).toEqual(
+              mismatch(`expected the createTask answer of ${action} to be HTTP 200`)
+            )
+          })
+      )
+    }
   }
 
   it.effect('a create that fails in transport is ambiguous, and no failure carries the key', () =>
@@ -826,6 +903,31 @@ describe('Kie conformance interruption reporting', () => {
 
       expect(yield* Ref.get(warnings)).toEqual([
         `kie.create_image_task failed: kie_request_failed (HTTP 502) (Kie code 502); ${unknownTaskAdvice}`
+      ])
+    })
+  )
+
+  it.effect('reports a create answered without a task id while the case is being interrupted', () =>
+    Effect.gen(function* () {
+      const { warnings, reporter } = yield* capturingReporter
+
+      const { sent, release, holding } = yield* holdingCreate(
+        replaceResponse(
+          kieCreateImageTaskFixture,
+          replaceInBody('"taskId":"yolk_synthetic_task_created_0001"', '"taskId":""')
+        )
+      )
+
+      const fiber = yield* kieCreateImageTaskCase.run.pipe(
+        Effect.provide(portsOver(Layer.succeed(HttpClient.HttpClient, holding))),
+        Effect.provideService(ConformanceCleanupReporter, reporter),
+        Effect.forkChild
+      )
+
+      yield* interruptAfter(fiber, sent, release)
+
+      expect(yield* Ref.get(warnings)).toEqual([
+        `kie.create_image_task failed: empty_task_id (HTTP 200); ${unknownTaskAdvice}`
       ])
     })
   )

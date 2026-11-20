@@ -15,13 +15,14 @@
  * person names its exact id. Their prompts name the `runId` seed, a per-invocation `run-<hex>`
  * value, so a created task can be told apart. The create, its classification, and the decoding of
  * its observed answer run uninterruptibly together. Kie answers most failures with HTTP 200 and a
- * non-200 envelope `code`, so the classification reads the envelope code too: a definitive
- * rejection (an HTTP 4xx, or at HTTP 2xx an envelope 4xx, other than 408 and Kie's 455 "service
- * unavailable") created nothing; anything else that is not a 2xx with envelope `code` 200 (a
- * transport or decoding failure, no status, a 408, 455, or 5xx) is ambiguous: the case fails with
- * `KieConformanceActionFailed` (`taskOutcome: 'unknown'`) naming the run id to look for in the Kie
- * task log, and hands it to the `ConformanceCleanupReporter` when the case is being interrupted.
- * There is nothing to clean up, and no leftover lookup: the connector reads no task listing.
+ * non-200 envelope `code`, so the classification reads the envelope code too, and a created task
+ * must carry a non-empty `taskId`: a definitive rejection (an HTTP 4xx, or at HTTP 2xx an envelope
+ * 4xx, other than 408 and Kie's 455 "service unavailable") created nothing; anything else that is
+ * not a 2xx with envelope `code` 200 (a transport or decoding failure, no status, a 408, 455, or
+ * 5xx, an empty `taskId`) is ambiguous: the case fails with `KieConformanceActionFailed`
+ * (`taskOutcome: 'unknown'`) naming the run id to look for in the Kie task log, and hands it to the
+ * `ConformanceCleanupReporter` when the case is being interrupted. There is nothing to clean up,
+ * and no leftover lookup: the connector reads no task listing.
  */
 import { Cause, Context, Data, Effect, Exit, Option, Predicate, Ref, Result } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -375,16 +376,25 @@ export const kieGetFailedTaskCase: KieConformanceCase = defineConformanceCase({
   })
 })
 
-/** A code in the 4xx range. */
-const isClientErrorCode = (code: number | undefined): boolean =>
-  code !== undefined && code >= 400 && code < 500
+/**
+ * The not-found answers the case accepts: Kie code 404 (`kie_not_found`) or 422 (`kie_validation`).
+ * Any other 4xx (429 rate limited, 455 unavailable, 408) says nothing about the task id.
+ */
+const isNotFoundAnswer = (failure: ProviderFailure): boolean => {
+  const kieCode = kieCodeOf(failure)
+
+  return (
+    (kieCode === 404 && failure.code === 'kie_not_found') ||
+    (kieCode === 422 && failure.code === 'kie_validation')
+  )
+}
 
 export const kieTaskNotFoundCase: KieConformanceCase = defineConformanceCase({
   id: 'kie.errors.task-not-found',
-  title: 'recordInfo of an unknown task id is an envelope 4xx, never a success',
+  title: 'recordInfo of an unknown task id answers Kie code 404 or 422, never a success',
   safety: 'read',
   docs: 'Kie answers most failures with HTTP 200 and a non-200 envelope `code`. The connector maps a non-200 envelope `code` (and any non-2xx status) through `kieFailureCode` to a `ProviderFailure` (`kie_not_found` for 404, `kie_validation` for 422, `kie_request_failed` for an unlisted code) with `underlying: { kieCode, msg }`, never a success; a 200 envelope without a task record would be a `validation_failed` connector error.',
-  wire: '`kie.get_task` of a synthetic task id no account holds sends one GET `recordInfo`, and Kie answers with a 4xx envelope `code` (unverified: 422 `recordInfo is null` at HTTP 200, or 404), so the connector reports a provider failure whose `kieCode` is 4xx and whose code is neither `kie_unauthorized` nor `kie_insufficient_credits`. The HTTP status is not checked: the connector maps both forms.',
+  wire: '`kie.get_task` of a synthetic task id no account holds sends one GET `recordInfo`, and Kie answers with envelope `code` 404 or 422 (unverified: 422 `recordInfo is null` at HTTP 200, or 404), so the connector reports `kie_not_found` with `kieCode` 404 or `kie_validation` with `kieCode` 422; any other code (a 429 rate limit, a 455 outage, a 408 timeout, 401, 402) fails the case, since it says nothing about the task id. The HTTP status is not checked: the connector maps both forms.',
   fixtures: [kieTaskNotFoundFixture.id],
   run: Effect.gen(function* () {
     const { value, exchanges } = yield* observed(getTask(kieConformanceAbsentTaskId))
@@ -403,10 +413,8 @@ export const kieTaskNotFoundCase: KieConformanceCase = defineConformanceCase({
     }
 
     yield* expectConformance(
-      isClientErrorCode(kieCodeOf(failure)) &&
-        failure.code !== 'kie_unauthorized' &&
-        failure.code !== 'kie_insufficient_credits',
-      'expected an unknown task id to answer a 4xx Kie code other than 401 and 402',
+      isNotFoundAnswer(failure),
+      'expected an unknown task id to answer Kie code 404 (kie_not_found) or 422 (kie_validation)',
       { actual: outcomeOf(value) }
     )
   })
@@ -468,7 +476,7 @@ type ObservedCreate = {
 /**
  * Classify a create from its exit and its observed answer. A definitive rejection is an HTTP 4xx
  * or, at HTTP 2xx, an envelope 4xx (other than 408 and 455); a success is a 2xx with envelope
- * `code` 200 that the connector decoded. Everything else is ambiguous.
+ * `code` 200 and a non-empty `taskId` that the connector decoded. Everything else is ambiguous.
  */
 const classifyCreate = (
   actionId: string,
@@ -527,9 +535,12 @@ const classifyCreate = (
       return unknown({ code: 'undecodable_answer', status: answer.status })
     }
 
-    return code === 200
+    if (code !== 200) return unknown({ code: 'undecodable_answer', status: answer.status })
+
+    // A 2xx code 200 without a task id may still have created (and charged) a task.
+    return value.value.taskId.trim().length > 0
       ? { kind: 'created', output: value.value }
-      : unknown({ code: 'undecodable_answer', status: answer.status })
+      : unknown({ code: 'empty_task_id', status: answer.status })
   })
 
 /** Run one create uninterruptibly with its classification (see the module header). */
@@ -548,9 +559,12 @@ const createOnce = (
       const outcome = yield* classifyCreate(actionId, runId, exit)
 
       if (outcome.kind === 'created') {
+        const exchanges = Exit.isSuccess(exit) ? exit.value.exchanges : []
+
         return {
           output: outcome.output,
-          exchanges: Exit.isSuccess(exit) ? exit.value.exchanges : []
+          exchanges,
+          status: exchanges.at(-1)?.response.status ?? null
         }
       }
 
@@ -579,7 +593,7 @@ export const kieCreateImageTaskCase: KieConformanceCase = defineConformanceCase(
   title: 'createTask of a GPT Image 2 text-to-image task answers code 200 with a taskId',
   safety: 'write-irreversible',
   docs: '`kie.create_image_task` without `inputUrls` sends POST https://api.kie.ai/api/v1/jobs/createTask with `{ model: "gpt-image-2-text-to-image", input: { prompt, aspect_ratio, resolution } }` (undefined fields omitted) and returns `{ taskId, model }` from an envelope `code` 200 whose `data.taskId` is a string. Each task spends Kie credits, and the connector cannot cancel or delete one.',
-  wire: '`kie.create_image_task` of a short synthetic prompt naming the run id, square (`1:1`) at `1K`, sends exactly one POST `createTask` with that model and input, and Kie answers HTTP 200 with envelope `code` 200 and a non-empty `data.taskId` (observed at the `ConnectorHttpClient` port and decoded inside the uninterruptible create, so a 2xx without `code` 200 is reported as an unknown task outcome), so the connector reports the task id and the text-to-image model (unverified: that Kie accepts the task before generating it, so a later generation failure shows only in `kie.get_task`). The task stays in the account: this case is write-irreversible and runs only when requested by its exact id.',
+  wire: '`kie.create_image_task` of a short synthetic prompt naming the run id, square (`1:1`) at `1K`, sends exactly one POST `createTask` with that model and input, and Kie answers HTTP 200 with envelope `code` 200 and a non-empty `data.taskId` (observed at the `ConnectorHttpClient` port and decoded inside the uninterruptible create, so a 2xx without `code` 200 or without a task id is reported as an unknown task outcome), so the connector reports the task id and the text-to-image model (unverified: that Kie accepts the task before generating it, so a later generation failure shows only in `kie.get_task`). The task stays in the account: this case is write-irreversible and runs only when requested by its exact id.',
   fixtures: [kieCreateImageTaskFixture.id],
   run: Effect.gen(function* () {
     const runId = yield* requireSeed('runId')
@@ -607,9 +621,15 @@ export const kieCreateImageTaskCase: KieConformanceCase = defineConformanceCase(
       },
       'expected kie.create_image_task to send the text-to-image model and input'
     )
-    yield* expectConformance(
-      created.output.taskId.length > 0 && created.output.model === kieGptImage2TextToImageModel,
-      'expected a non-empty taskId and the text-to-image model'
+    yield* expectEqual(
+      created.status,
+      200,
+      'expected the createTask answer of kie.create_image_task to be HTTP 200'
+    )
+    yield* expectEqual(
+      created.output.model,
+      kieGptImage2TextToImageModel,
+      'expected kie.create_image_task to report the text-to-image model'
     )
   })
 })
@@ -653,9 +673,15 @@ export const kieCreateVideoTaskCase: KieConformanceCase = defineConformanceCase(
       },
       'expected kie.create_video_task to send the Wan 2.7 model and input'
     )
-    yield* expectConformance(
-      created.output.taskId.length > 0 && created.output.model === kieWan27ImageToVideoModel,
-      'expected a non-empty taskId and the Wan 2.7 model'
+    yield* expectEqual(
+      created.status,
+      200,
+      'expected the createTask answer of kie.create_video_task to be HTTP 200'
+    )
+    yield* expectEqual(
+      created.output.model,
+      kieWan27ImageToVideoModel,
+      'expected kie.create_video_task to report the Wan 2.7 model'
     )
   })
 })

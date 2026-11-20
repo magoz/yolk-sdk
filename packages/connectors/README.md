@@ -1691,15 +1691,16 @@ the keys and types the case reads, never scrubbing field by field.
 `CredentialResolver` plus `KieConformanceConfig` (a finished `success` task id, a finished `fail`
 task id, a public first-frame URL, and a per-invocation run id). Four reads: a finished task reads
 back `success` with result URLs parsed from `resultJson`; a `fail` task is a successful read with a
-failure detail (never an action failure); an unknown task id answers a 4xx envelope `code` (Kie
-answers most failures with HTTP 200 and a non-200 envelope `code`), never a success; a synthetic
-invalid key answers `kie_unauthorized`. Two `write-irreversible` creates (a GPT Image 2
-text-to-image task, square at `1K`, and a Wan 2.7 image-to-video task, `720p` for 5 seconds): every
-task spends Kie credits and the connector cannot cancel one, so a runner starts each only by its
-exact id. A create runs uninterruptibly with its classification: a definitive rejection is an HTTP
-4xx, or at HTTP 2xx an envelope 4xx, other than 408 and Kie's 455; anything else that is not a 2xx
-with envelope `code` 200 is an unknown task outcome (`KieConformanceActionFailed` with `taskOutcome:
-'unknown'`, naming the run id to look for in the Kie task log, also handed to the
+failure detail (never an action failure); an unknown task id answers Kie code 404 or 422 (Kie
+answers most failures with HTTP 200 and a non-200 envelope `code`), never a success or another code
+such as a 429 rate limit or a 455 outage; a synthetic invalid key answers `kie_unauthorized`. Two
+`write-irreversible` creates (a GPT Image 2 text-to-image task, square at `1K`, and a Wan 2.7
+image-to-video task, `720p` for 5 seconds), each claiming HTTP 200 exactly: every task spends Kie
+credits and the connector cannot cancel one, so a runner starts each only by its exact id. A create
+runs uninterruptibly with its classification: a definitive rejection is an HTTP 4xx, or at HTTP 2xx
+an envelope 4xx, other than 408 and Kie's 455; anything else that is not a 2xx with envelope `code`
+200 and a non-empty `taskId` is an unknown task outcome (`KieConformanceActionFailed` with
+`taskOutcome: 'unknown'`, naming the run id to look for in the Kie task log, also handed to the
 `ConformanceCleanupReporter` when interrupted). Every fixture body keeps only the keys the connector
 decodes, checked by an allowlist test. The case table, seeds, and claims live in the [Kie
 conformance

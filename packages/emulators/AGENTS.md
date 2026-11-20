@@ -236,17 +236,18 @@ There is no root export or barrel.
   throws, answers an evidence-tagged 500 in the service's error envelope, recorded in the ledger
   (`responseError`); that recovery never depends on the injectable clock (a clock that throws falls
   back to a fixed synthetic date). The fixture-only `/dropbox`, `/notion`, `/todoist`, `/telegram`,
-  `/github`, `/google`, `/linkedin-search`, `/mcp`, and `/kie` answer `{ error: { type:
-'emulator_error' } }` instead and their recovery reads no clock at all (see below).
+  `/github`, `/google`, `/linkedin-search`, `/mcp`, and `/kie` answer
+  `{ error: { type: 'emulator_error' } }` instead and their recovery reads no clock at all (see
+  below).
 - Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
   `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
-  `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, and
-  `/mcp` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
-  decoding), the ledger, pull-driven bodies with
-  `error-after-chunks` / `truncate-after-chunks`, status-fault and scripted-error responses, the
-  `/_emulate/*` control plane, coverage, evidence tagging, and route binding (`serve` throws
-  `EmulatorRouteUnmapped`). Wire cores add only request parsing, framing, their ledger fields, and
-  wire-specific faults; do not re-implement kernel pieces in a core.
+  `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`,
+  and `/kie` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
+  decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
+  status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
+  tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request
+  parsing, framing, their ledger fields, and wire-specific faults; do not re-implement kernel pieces
+  in a core.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, and scripted completions on top of the kernel. Each subpath supplies only its path and manifest, model lists, error envelope
   and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
@@ -922,10 +923,11 @@ There is no root export or barrel.
   wrapper's route matcher (`routeMatcher`) allows one method and template on two recorded origins
   and picks the route recorded on the arrival origin, falling back to the first route of the table
   (whose origin check refuses the request); a table without such a pair matches exactly as before,
-  and the same template twice on one origin is still refused at build. The legacy-era drills fail
-  exactly their case on the Figma profile too; no knob can break only `mcp.negotiation.era` or
-  `mcp.transport.response-encoding` on a legacy profile (every case starts with the probe and a
-  listing), so the connectors tests drill those two on the replayed fixtures.
+  and the same template twice on one origin, or a shared template with a route on no recorded
+  origin, is refused at build. The legacy-era drills fail exactly their case on the Figma profile
+  too; no knob can break only `mcp.negotiation.era` or `mcp.transport.response-encoding` on a
+  legacy profile (every case starts with the probe and a listing), so the connectors tests drill
+  those two on the replayed fixtures.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (on the
@@ -1191,7 +1193,16 @@ no session, cursor, or counter change, checked against the real response text an
 session lifecycle and cap, cursor issuance across resets and seeds, a stale cursor refused before
 any fault, row-matched status and truncation faults (a truncated `initialize` mints no session and
 moves no counter; a truncated first page issues no cursor), seeds, control plane),
-`test/mcp-conformance.test.ts` (every applicable case per profile through the real
+`test/kie.test.ts` (manifest, the data copies and error bodies, the drift test replaying every
+fixture byte for byte in suite order on one emulator and each alone substituting only the minted
+task id, the reads ending at the seed and each create recording exactly its task, the latitude,
+every fail-closed refusal asserting a ledgered 400, an unchanged state, and an unused match-all
+fault, constant-text unrecognised shapes, the bearer and the rejected key never ledgered, stored, or
+echoed, a faulted create recording nothing and minting nothing, seed errors in constant text,
+reset), `test/kie-conformance.test.ts` (cross-checks A and B: all six cases in-process and over a
+loopback socket, each on its own emulator and twice in sequence on one, the reads ending at the seed
+and the creates recording only their tasks, no key anywhere; one drill per case failing exactly that
+case), `test/mcp-conformance.test.ts` (every applicable case per profile through the real
 `@yolk-sdk/mcp/client`, its observer, and its call gate, in-process and over a loopback socket, each
 case on a fresh emulator ending at its seed except the minted sessions, and all cases twice in
 sequence on one emulator; the paged listing across a reset; one drill per case failing exactly that
@@ -1208,8 +1219,11 @@ bearer absent from every response, the ledger, the snapshot, and every `/_emulat
 digest that throws, repeats the bearer, or is no string answering the 500 with no fault used), the
 constant-reason `exactBodyKeys` and `exactQuery` (with `rawNames` comparing raw parameter names, and
 the raw query the wrapper hands routes), route variants (manifest rows, ledger routes, coverage,
-`match.route`, build checks), truncation faults on streamed commits (`makeChunkedStatefulEmulator`;
-a truncated writing row writes nothing; one that cannot apply answers 500 unused), `match.route`
+`match.route`, build checks), the origin-aware route matcher (one method and template on two
+recorded origins picks the arrival origin's route, a shared template with a route on no recorded
+origin refused at build, and the last-resort 500 behind a loopback rewrite tagged with the `fetchOn`
+origin's route evidence), truncation faults on streamed commits (`makeChunkedStatefulEmulator`; a
+truncated writing row writes nothing; one that cannot apply answers 500 unused), `match.route`
 naming a manifest row (a template on an emulator without variants; an unknown route or a variant
 route's template rejected at `faults.add` and over `/_emulate/faults`), `constantRefusals` (no
 request text before admission, a match-all fault unused), `guardOutput` (a prepared answer header, a
@@ -1221,15 +1235,15 @@ the opt-in resolved mode (`resolveRequest`: refused with fail-closed mode at bui
 requests ledgered as constants with the method as sent; a refused resolution answered before the
 body is read, its fields scrubbed; a path-carried token and its secret part repeated in the query,
 the guarded path, a body value, a JSON-escaped value, a key, an exponent-notation number, or a
-percent-encoded body refused with no body kept, no fault used, and nothing written; faults
-matching, and the core seeing, only the ledgered path; the query recorded as sent), `json-or-empty`
-bodies, `makeHeaderlessStatefulEmulator` (no `headers` field), `errorTexts`, and the unchanged
-behaviour without these options and without fail-closed mode; resolved mode also: routes seeing
-the ledgered path and no header names, `recordHeaders` and a throwing resolution, consumed and
-locked bodies, the body read once (a body repeat consumes it, a query repeat does not), a core
-answering without dispatching when closed meanwhile, header rules reading `content-type` only,
-fault answers and refusals readable after a reset or a close over a core that cancels its own
-bodies, and an unencodable plan reason answering the 500), and
-`test/stateful-public-types.test.ts` (compile coverage of the public Todoist and Telegram fault,
-fault-match, fault-state, ledger-entry, and coverage types: old-shaped values, status-only ledger
-faults, no `headers` field). Loopback sockets only; never call real services.
+percent-encoded body refused with no body kept, no fault used, and nothing written; faults matching,
+and the core seeing, only the ledgered path; the query recorded as sent), `json-or-empty` bodies,
+`makeHeaderlessStatefulEmulator` (no `headers` field), `errorTexts`, and the unchanged behaviour
+without these options and without fail-closed mode; resolved mode also: routes seeing the ledgered
+path and no header names, `recordHeaders` and a throwing resolution, consumed and locked bodies, the
+body read once (a body repeat consumes it, a query repeat does not), a core answering without
+dispatching when closed meanwhile, header rules reading `content-type` only, fault answers and
+refusals readable after a reset or a close over a core that cancels its own bodies, and an
+unencodable plan reason answering the 500), and `test/stateful-public-types.test.ts` (compile
+coverage of the public Todoist and Telegram fault, fault-match, fault-state, ledger-entry, and
+coverage types: old-shaped values, status-only ledger faults, no `headers` field). Loopback sockets
+only; never call real services.

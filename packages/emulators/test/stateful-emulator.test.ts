@@ -258,6 +258,56 @@ describe('route templates', () => {
       'duplicate emulator route'
     )
     expect(() => routeMatcher([on(undefined), on(undefined)])).toThrow('duplicate emulator route')
+
+    // A shared template needs a recorded origin on every route that shares it.
+    for (const routes of [
+      [first, on(undefined)],
+      [on(undefined), second],
+      [first, second, on(undefined)]
+    ]) {
+      expect(() => routeMatcher(routes)).toThrow(
+        'shared emulator route GET /mcp needs a recorded origin on every route'
+      )
+    }
+  })
+
+  it('a handling failure behind a loopback rewrite is tagged with the arrival origin route', async () => {
+    const on = (origin: string, evidence: 'verified' | 'unverified') =>
+      statefulRoute<State, undefined, string>(
+        { ...echo, path: '/mcp', params: {}, origin, evidence },
+        'none',
+        () => '',
+        () => () => new Response('')
+      )
+
+    const api = await build(
+      [on('https://one.example.test', 'verified'), on('https://two.example.test', 'unverified')],
+      false
+    )
+
+    // Only unverified evidence is tagged (a verified route's answer carries no header).
+    for (const [origin, evidence] of [
+      ['https://one.example.test', null],
+      ['https://two.example.test', 'unverified']
+    ] as const) {
+      // The loopback URL's own origin is never the recorded one: `fetchOn` names it. Headers that
+      // cannot be read make handling itself fail, so the last-resort 500 answers.
+      const request = new Request('http://127.0.0.1:4000/mcp')
+
+      Object.defineProperty(request, 'headers', {
+        get: () => {
+          throw new Error('synthetic handling failure')
+        }
+      })
+
+      const failed = await api.fetchOn(origin)(request)
+
+      expect(failed.status, origin).toBe(500)
+      expect(await failed.json(), origin).toEqual({
+        error: { type: 'emulator_error', message: 'the emulator failed to handle the request' }
+      })
+      expect(failed.headers.get('x-emulator-evidence'), origin).toBe(evidence)
+    }
   })
 })
 
