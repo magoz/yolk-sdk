@@ -1,5 +1,11 @@
 # @yolk-sdk/pool
 
+## 0.1.0-canary.152
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.152
+
 ## 0.1.0-canary.151
 
 ### Patch Changes

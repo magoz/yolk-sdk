@@ -1,5 +1,7 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.152
+
 ## 0.1.0-canary.151
 
 ## 0.1.0-canary.150
