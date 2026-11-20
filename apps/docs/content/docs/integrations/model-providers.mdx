@@ -195,6 +195,10 @@ const ProviderLayer = makeAnthropicClaudeProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
+Like native Messages, Claude requires `message_stop`: a stream that ends without it, even after a
+`message_delta` with a stop reason, emits no `Done` and fails as non-retryable `invalid_response`
+with `responseIssue: 'missing_done'` (earlier releases completed it as a normal answer).
+
 OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and the exact `@yolk-sdk/agent/providers/anthropic/claude` subpath:
 
 - `makeAnthropicClaudeAuthorizationUrl`

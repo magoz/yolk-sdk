@@ -162,7 +162,7 @@ const program = run({
 Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
 Merge them with `makeAgentLoopLayer`. Omitted tools use `ToolExecutor.unavailable`; omitted transformer/config use identity and `LoopConfig.defaultLayer`.
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
-Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`.
+Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`; Anthropic Messages streams (Claude and OpenCode Go `messages`) that end without `message_stop` fail the same way at the provider.
 
 ```ts
 import { makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
@@ -475,7 +475,8 @@ policy and emits protocol-visible retry/error state:
   compaction wrapper may compact and retry once.
 - Anthropic `max_tokens` and OpenAI-compatible `finish_reason: "length"` / `"content_filter"`
   completions fail as non-retryable `invalid_response` instead of reporting truncated or filtered
-  output as complete.
+  output as complete. Anthropic Messages streams cut before `message_stop` fail the same way, with
+  `responseIssue: 'missing_done'`.
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.

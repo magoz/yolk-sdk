@@ -212,7 +212,10 @@ const runMinimalProviderRequest = (
         : { ...providerConfig, extraHeaders: input.extraHeaders }
     ).pipe(
       Layer.provide(
-        makeHttpClientLayer(input.response ?? new Response('', { status: 200 }), requests)
+        makeHttpClientLayer(
+          input.response ?? new Response('data: {"type":"message_stop"}\n\n', { status: 200 }),
+          requests
+        )
       )
     )
 
