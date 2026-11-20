@@ -79,8 +79,8 @@ export type CodeModeError = {
 /**
  * Where an executor's own failure happened, when it answered with a fixed message instead of the
  * runtime's error text:
- * - `load`: the sandbox could not be created or loaded (Dynamic Workers: the `loader()` binding,
- *   `load()` or `getEntrypoint()`; pi: `new CodemodeSandbox`).
+ * - `load`: the sandbox could not be created or loaded (Dynamic Workers: loading Sucrase, the
+ *   `loader()` binding, `load()` or `getEntrypoint()`; pi: `new CodemodeSandbox`).
  * - `isolate`: the sandbox failed while running the script (Dynamic Workers: the isolate's `run`;
  *   pi: a `sandbox` failure of its worker or QuickJS VM).
  * - `cpu-limit`: the Dynamic Worker isolate failed for its CPU limit (the result is a `timeout`).

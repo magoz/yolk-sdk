@@ -67,6 +67,13 @@ await Effect.runPromise(
 )
 ```
 
+`DefaultKnowledgeChunkerLive` splits with `gpt-tokenizer`'s `o200k_base` encoding, about 2 MB of
+code. It loads lazily: importing `@yolk-sdk/knowledge/chunking` or `./ingestion` and providing the
+layer evaluate none of it, and the first chunked document loads it once per process or Worker
+isolate. Providing the layer on every request is cheap. To count tokens or chunk text yourself, run
+the Effects `countKnowledgeChunkTokens(text)` and `chunkKnowledgeText(input, maxTokens)` from the
+same subpath.
+
 `loadedSource` is host-owned source metadata/content from `@yolk-sdk/knowledge/extraction`.
 The package does not fetch `Url` sources or resolve `File.ref`; load bytes/text before ingestion.
 `KnowledgeFileBlobStore` is not consumed automatically by `ingestKnowledgeDocument`.

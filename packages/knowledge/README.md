@@ -82,7 +82,7 @@ ids at their boundary and use `.make` for trusted constants and minted values.
 | `@yolk-sdk/knowledge/files`         | File blob-store contract                                               |
 | `@yolk-sdk/knowledge/store`         | Document store and search-index store contracts                        |
 | `@yolk-sdk/knowledge/context`       | Pinned context builder                                                 |
-| `@yolk-sdk/knowledge/chunking`      | Text chunker contracts and defaults                                    |
+| `@yolk-sdk/knowledge/chunking`      | Text chunker contract and the default chunker (lazy tokenizer)         |
 | `@yolk-sdk/knowledge/embeddings`    | Embedder contract and vector types                                     |
 | `@yolk-sdk/knowledge/extraction`    | Source/extractor contract                                              |
 | `@yolk-sdk/knowledge/ingestion`     | Extract/chunk/embed/summarize/index pipeline                           |
@@ -157,6 +157,40 @@ the index record `ready`.
 `DefaultKnowledgeChunkerLive` uses the bundled `gpt-tokenizer` `o200k_base` encoding for default
 chunk boundaries and token counts. Hosts can provide another `KnowledgeChunker` layer when they
 need model-specific tokenization.
+
+The tokenizer is about 2 MB of code evaluated at import, so `@yolk-sdk/knowledge/chunking` loads it
+lazily: importing the subpath (including through `./ingestion`) or building
+`DefaultKnowledgeChunkerLive` does not evaluate it. A dynamic `import()` loads it the first time
+text is chunked or counted, once per process or isolate. Bundlers (Vite/Rolldown, esbuild,
+webpack) keep it out of the importer's chunk, so a request that never chunks does not pay for it.
+
+```ts
+import { Effect } from 'effect'
+import {
+  chunkKnowledgeText,
+  countKnowledgeChunkTokens,
+  DefaultKnowledgeChunkerLive,
+  KnowledgeChunker,
+  type ChunkKnowledgeDocumentInput
+} from '@yolk-sdk/knowledge/chunking'
+
+// Require the chunker in your program...
+const chunkDocument = (document: ChunkKnowledgeDocumentInput) =>
+  Effect.gen(function* () {
+    const chunker = yield* KnowledgeChunker
+    return yield* chunker.chunk(document)
+  })
+
+// ...and provide the default (or your own) layer at the edge. Cheap: nothing loads yet.
+const ChunkerLayer = DefaultKnowledgeChunkerLive({ maxTokens: 512 })
+
+// The helpers return Effects; the first one to run loads the tokenizer.
+const tokens = countKnowledgeChunkTokens('hello world') // Effect<number, KnowledgeChunkingError>
+const chunks = (document: ChunkKnowledgeDocumentInput) => chunkKnowledgeText(document, 256)
+```
+
+A tokenizer that cannot load fails the Effect with `KnowledgeChunkingError` (`Failed to load the
+default tokenizer`, with the cause), which ingestion reports at its `chunk` stage.
 
 Failures are returned as `KnowledgeIngestionError` with a `store`, `extract`, `chunk`, `embed`, or
 `summarize` stage. The pipeline then best-effort calls `markDocumentError` with the error message;

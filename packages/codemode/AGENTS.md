@@ -27,7 +27,9 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
 - Root code is runtime-neutral: no Node builtins, no pi runtime (`@earendil-works/pi-codemode` root
   or `/worker`, `quickjs-wasi`), and no `./node` import. Only the pure
   `@earendil-works/pi-codemode/declarations` (and `/source`) subpaths are allowed. Boundary-enforced.
-- `cloudflare:workers` and Sucrase stay in `src/cloudflare.ts` (boundary-enforced); the package's
+- `cloudflare:workers` and Sucrase stay in `src/cloudflare.ts` (boundary-enforced). Sucrase is a type-only
+  static import plus a dynamic `import('sucrase')` when a script runs, so the subpath does not
+  evaluate it on import (`test/cloudflare-executor.test.ts` checks); the package's
   Vitest aliases `cloudflare:workers` to `test/cloudflare-workers-stub.ts`. Type `cloudflare:workers`
   only through `src/cloudflare-workers.d.ts`, never `@cloudflare/workers-types` (its globals clash
   with the DOM library).

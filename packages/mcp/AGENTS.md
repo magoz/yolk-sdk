@@ -18,7 +18,7 @@
 
 - MCP is external protocol infrastructure, not agent-core.
 - App auth, persisted config, credential storage, policy, and product catalogs stay outside this package. Generic MCP OAuth protocol helpers may be re-exported from the official SDK.
-- Keep NodeServices convenience wrappers behind `@yolk-sdk/mcp/client/node`; local client core stays in `@yolk-sdk/mcp/client`.
+- Keep NodeServices convenience wrappers behind `@yolk-sdk/mcp/client/node`; local client core stays in `@yolk-sdk/mcp/client`. Import `NodeServices` from `@effect/platform-node/NodeServices`, not the package root, which evaluates every Node platform module (HTTP, sockets, Redis; about 2.6 MB and 190 ms on import).
 - Client/server may use `@yolk-sdk/agent/protocol` for generic tool/content adapters; agent loop/providers remain MCP-agnostic.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 

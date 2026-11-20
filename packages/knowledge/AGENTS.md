@@ -48,7 +48,7 @@ the search-index document through `SearchIndexStore`; hosts coordinate it with `
 | `@yolk-sdk/knowledge/files`         | File blob-store contract                                                  |
 | `@yolk-sdk/knowledge/store`         | Document store and search-index store contracts                           |
 | `@yolk-sdk/knowledge/context`       | Pinned context assembly helpers                                           |
-| `@yolk-sdk/knowledge/chunking`      | Chunker contracts and defaults                                            |
+| `@yolk-sdk/knowledge/chunking`      | Chunker contract and the default chunker (lazy tokenizer)                 |
 | `@yolk-sdk/knowledge/embeddings`    | Embedder contract and vector types                                        |
 | `@yolk-sdk/knowledge/extraction`    | Loaded source/extractor contract                                          |
 | `@yolk-sdk/knowledge/ingestion`     | Extract/chunk/embed/index ingestion pipeline                              |
@@ -70,4 +70,12 @@ the search-index document through `SearchIndexStore`; hosts coordinate it with `
   ids at their boundary.
 - Keep root exports explicit; do not use broad `export *` barrels.
 - Keep package APIs generic; host apps own all policy and IO.
+- `gpt-tokenizer` lives only in `src/chunking-tokenizer.ts` (boundary-enforced), an internal module
+  (no subpath) that `src/chunking.ts` loads with a dynamic `import()` when text is first chunked or
+  counted. Keep it that way: a static import or re-export of it from any entry evaluates megabytes
+  of rank tables in every importer (hosts import `KnowledgeChunker` and
+  `DefaultKnowledgeChunkerLive` on requests that never chunk). Tokenizer helpers return Effects
+  (`countKnowledgeChunkTokens`, `chunkKnowledgeText`); invalid chunk input fails before the load.
+  Tests: `test/lazy-tokenizer.test.ts` (no source entry evaluates it; it loads on first use) and
+  `pnpm packages:smoke` (built dist, and a Vite bundle keeps it in a lazy chunk).
 - Do not reintroduce previous graph-model concepts into core knowledge without explicit product need.
