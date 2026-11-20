@@ -619,9 +619,9 @@ describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
   )
 })
 
-describe('the session-end drill (sessionEndRejected): the DELETE answered 404', () => {
+describe('the session-end drill (sessionEndRejected): the DELETE answered 500', () => {
   const message =
-    'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)'
+    'expected the DELETE to be answered 2xx (the session ended), 404 (it was already gone) or 405 (the server does not let clients end sessions)'
 
   const expectOnlySessionCase = (report: ConformanceReport) => {
     const failed = report.results.filter(result => result.status === 'failed')

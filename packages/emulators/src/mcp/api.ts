@@ -83,7 +83,7 @@ export type McpEmulatorDrills = {
   readonly unauthorizedWithoutChallenge?: boolean
   /** `mcp.legacy.server-ping`: the client's answer to the server ping is refused 400. */
   readonly pingAnswerRejected?: boolean
-  /** `mcp.legacy.session`: the `DELETE` that ends a session is answered 404 (it stays held). */
+  /** `mcp.legacy.session`: the `DELETE` that ends a session is answered 500 (it stays held). */
   readonly sessionEndRejected?: boolean
 }
 
@@ -1118,7 +1118,7 @@ const matchPingAnswer = (request: EmulatedRequest, key: RecordedKey): Matched | 
 
 /**
  * The `DELETE` that ends a ready session of `profile`: the recorded answer (200, no body), and the
- * commit drops the session, so every later request on it is refused. The drill answers 404 and
+ * commit drops the session, so every later request on it is refused. The drill answers 500 and
  * keeps it.
  */
 const planSessionEnd =
@@ -1129,7 +1129,7 @@ const planSessionEnd =
     if (session === undefined) return unknownSession('ready')
 
     // The recorded answer carries no request id, so the drill applies here, not in `drilled`.
-    if (env.drills.sessionEndRejected) return answerOnly({ status: 404, headers: {}, chunks: [] })
+    if (env.drills.sessionEndRejected) return answerOnly({ status: 500, headers: {}, chunks: [] })
 
     return streamedCommit(recordedAnswer(profile.keys.end, undefined, env), () => {
       state.sessions = state.sessions.filter(held => held.id !== session.id)

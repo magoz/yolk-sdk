@@ -1446,7 +1446,7 @@ one manifest row; a `route` naming no row is rejected when the fault is added. `
 throws when a copied recording is not canonical JSON. The ledger, recovery, and the control plane
 behave as in the Dropbox emulator. The `drills` option (eleven booleans: one per MCP case, the
 opt-in server ping included, and `sessionEndRejected`, a second `mcp.legacy.session` knob that
-answers the `DELETE` 404) is a test-only knob that makes exactly the matching conformance case fail,
+answers the `DELETE` 500) is a test-only knob that makes exactly the matching conformance case fail,
 on every profile whose answers it changes (the Afloat profile included, except the legacy-only
 session knob; `pingAnswerRejected` changes nothing without the `server-ping` seed).
 

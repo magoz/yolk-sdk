@@ -29,7 +29,7 @@
 - Full-core server HTTP uses `createMcpHandler`; modern stdio uses `serveStdio` from the Node subpath. Both preserve legacy serving unless explicitly rejected.
 - Remote MCP requires `https:` by default; `http://localhost` is dev-policy gated.
 - Local stdio client core uses Effect platform process/stream APIs, not raw `node:child_process`; Node wrappers only provide `NodeServices.layer`.
-- Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id. Listings and calls share one session runner (`withLocalSession`) that keeps stdin open until the operation has its answers. Each stdout line is classified as JSON-RPC 2.0 does (MCP `2025-11-25` basic/transports, stdio: a line is one request, notification, or response, and nothing else may reach stdout): a server `ping` is answered `{"jsonrpc":"2.0","id":<id>,"result":{}}` on stdin (basic/utilities/ping: MUST respond promptly; basic/lifecycle: even before `notifications/initialized`), any other server request JSON-RPC `-32601` (the client declares no capability, so `roots/list`, `sampling/createMessage` or `elicitation/create` are not for it), and a notification is ignored (basic/index: no response); a line that is none of them (not JSON, no `method` and no `result`/`error`, a request `id` that is `null`) still breaks the session. Server and client ids are separate spaces (a server ping may reuse a client id). Tests: `test/client/client.test.ts` ("local servers may ping, ask, and notify"; a real process that waits for each answer).
+- Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id. Listings and calls share one session runner (`withLocalSession`) that keeps stdin open until the operation has its answers. Each stdout line is classified as JSON-RPC 2.0 does (MCP `2025-11-25` basic/transports, stdio: a line is one request, notification, or response, and nothing else may reach stdout): a server `ping` is answered `{"jsonrpc":"2.0","id":<id>,"result":{}}` on stdin (basic/utilities/ping: MUST respond promptly; basic/lifecycle: even before `notifications/initialized`), any other server request JSON-RPC `-32601` (the client declares no capability, so `roots/list`, `sampling/createMessage` or `elicitation/create` are not for it), and a notification is ignored (basic/index: no response); a line that is none of them (not JSON, no `method` and no `result`/`error`, a request `id` that is `null`, a request or notification whose `params` is not an object) still breaks the session. Server and client ids are separate spaces (a server ping may reuse a client id). Tests: `test/client/client.test.ts` ("local servers may ping, ask, and notify"; a real process that waits for each answer).
 - Decode wire JSON in two steps: JSON string → unknown (`Schema.fromJsonString(Schema.Unknown)`) → protocol schema.
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server body bound: `makeMcpToolServer`'s `maxRequestBodySize` goes to `createMcpHandler` (both eras answer `413` over it; default 4 MiB) and to `isLegacyRequest` in `isListenRequest`, so both read under one bound. An unusable value answers 500 (`-32603`, naming the field) on the SDK path instead of the SDK's `RangeError` on every request. The header-less JSON path is unbounded: hosts cap it. Tests: `test/server/body-size.test.ts`.
@@ -212,13 +212,15 @@
   basic/utilities/ping, basic/transports "Sending Messages to the Server" items 3, 4 and 6,
   basic/lifecycle). The `DELETE` is the SDK's `terminateSession()`, best effort: at most 2 s
   (`sessionTerminationTimeoutMs`, capped by `timeoutMs`; a `DELETE` still in flight is aborted by
-  `close()`), a 405 accepted silently (the server MAY refuse to end sessions), any other failure
-  only logged at debug level with no server text, never failing or changing the operation's
-  result (it is awaited: one more round trip per legacy operation with a session); nothing is
-  sent without a session id, on a modern connection (`2026-07-28` has no sessions), or when the
-  operation was interrupted (an interrupt is never delayed). `mcp.legacy.session` covers it (exactly one `DELETE` after the last POST with the
-  session id, answered 2xx or 405; none without a session), and every legacy fixture with a
-  session ends with it (#381). No case covers what the client never sends: its own `ping`,
+  `close()`), a 405 (the server MAY refuse to end sessions) or 404 (the session is already gone:
+  a server MUST answer 404 to a session it ended; servers that do not route `DELETE` may answer
+  it too) accepted silently, any other failure (a defect included) only logged at debug level with
+  no server text, never failing or changing the operation's result (it is awaited: one more round
+  trip per legacy operation with a session); nothing is sent without a session id or on a modern
+  connection (`2026-07-28` has no sessions). An operation interrupted before closing sends no
+  `DELETE`; an interrupt that arrives during the `DELETE` waits at most 2 s. `mcp.legacy.session`
+  covers it (exactly one `DELETE` after the last POST with the session id, answered 2xx, 404 or
+  405; none without a session), and every legacy fixture with a session ends with it (#381). No case covers what the client never sends: its own `ping`,
   `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
   (removed in `2026-07-28`; servers' `notifications/message` are ignored and already in every legacy
   fixture answer), `tasks/*` (task-augmented requests need a declared capability in `2025-11-25`;
@@ -284,8 +286,9 @@
   holds the disagreement drills (at least one per case) and passing variants of real SDK behaviour
   (legacy fallbacks, the corrective probe retry, priming and non-message SSE events, an encoded
   `mcp-name`, stripped annotation keys) and header values that collide with wire values.
-  The `mcp.legacy.session` drills also pin the session end: a `DELETE` answered 405 passes, 400,
-  404 or 500 fails, an unanswered one fails, and a server that issues no session id gets none.
+  The `mcp.legacy.session` drills also pin the session end: a `DELETE` answered 404 or 405
+  passes, 400, 410 or 500 fails, an unanswered one fails, and a server that issues no session id
+  gets none.
   `gate.test.ts` holds the call-gate refusals (standing-GET delivery, priming then GET replay, a
   `1e400` listing, an incomplete listing, a `readOnlyHint` downgrade or removal, a `ï»¿`-prefixed
   unsafe listing followed by a safe one for both gate kinds, a probe stream carrying a

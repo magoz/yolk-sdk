@@ -978,7 +978,7 @@ There is no root export or barrel.
   order). Drill knobs (`drills`, booleans) each fail exactly one case, on every era and profile
   whose answers they change (`pingAnswerRejected` answers the client's answer to the server ping 400
   with no body and changes nothing without the `server-ping` seed; `sessionEndRejected` answers the
-  `DELETE` 404 with no body and ends nothing, failing only `mcp.legacy.session` on both legacy
+  `DELETE` 500 with no body and ends nothing, failing only `mcp.legacy.session` on both legacy
   profiles); `test/mcp-conformance.test.ts` runs every applicable case per profile (the Afloat
   target built by the real `afloat.mcp_auth`; the opt-in server ping on the synthetic legacy profile
   under its seed) in-process and over loopback.

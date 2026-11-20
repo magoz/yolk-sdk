@@ -226,16 +226,32 @@ const logSessionTermination = (server: string, outcome: string) =>
     outcome
   })
 
+/** Why ending a session did not settle cleanly (a 404 means it was already gone). */
+type SessionEndFailure =
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'failed'; readonly outcome: string }
+
+const sessionEndFailure = (error: unknown): SessionEndFailure => {
+  if (!(error instanceof SdkHttpError)) return { kind: 'failed', outcome: 'transport failure' }
+
+  return error.status === 404
+    ? { kind: 'gone' }
+    : { kind: 'failed', outcome: `HTTP ${error.status}` }
+}
+
 /**
  * Ends the session of a closing legacy-era client. MCP `2025-11-25` basic/transports, "Session
  * Management" item 5: a client that no longer needs a session SHOULD send an HTTP `DELETE` with
  * its `MCP-Session-Id`, and the server MAY answer 405 (it does not let clients end sessions;
- * `terminateSession` accepts that answer). Every operation builds its own SDK client, so its
- * session is never needed again. Best effort: bounded by a short timeout (a `DELETE` still in
- * flight is aborted when the client closes), a failure only logged at debug level with no server
- * text, and the operation's own result unchanged. Nothing is sent without a session id (a
- * stateless legacy server issues none), on a modern connection (`2026-07-28` has no sessions), or
- * when the operation was interrupted (the session is left to expire).
+ * `terminateSession` accepts that answer). A 404 is accepted silently too: item 3 has a server
+ * answer 404 to a session it already ended, and servers that do not route `DELETE` may answer it.
+ * Every operation builds its own SDK client, so its session is never needed again. Best effort:
+ * bounded by a short timeout (a `DELETE` still in flight is aborted when the client closes), any
+ * other failure only logged at debug level with no server text, and the operation's own result
+ * unchanged, even when reading the client's state throws (a defect here is logged, never
+ * raised). Nothing is sent without a session id (a stateless legacy server issues none), on a
+ * modern connection (`2026-07-28` has no sessions), or when the operation was interrupted before
+ * closing (the session is left to expire).
  */
 const endLegacySession = (
   server: string,
@@ -243,24 +259,27 @@ const endLegacySession = (
   transport: StreamableHTTPClientTransport,
   options: McpClientOptions | undefined
 ): Effect.Effect<void> =>
-  client.getProtocolEra() !== 'legacy' || transport.sessionId === undefined
-    ? Effect.void
-    : Effect.tryPromise({
-        try: () => transport.terminateSession(),
-        catch: error =>
-          error instanceof SdkHttpError ? `HTTP ${error.status}` : 'transport failure'
-      }).pipe(
-        Effect.timeoutOption(
-          Duration.millis(Math.min(sessionTerminationTimeoutMs, timeoutMs(options)))
-        ),
-        Effect.flatMap(
-          Option.match({
-            onNone: () => logSessionTermination(server, 'timed out'),
-            onSome: () => Effect.void
-          })
-        ),
-        Effect.catch(outcome => logSessionTermination(server, outcome))
-      )
+  Effect.suspend(() =>
+    client.getProtocolEra() !== 'legacy' || transport.sessionId === undefined
+      ? Effect.void
+      : Effect.tryPromise({
+          try: () => transport.terminateSession(),
+          catch: sessionEndFailure
+        }).pipe(
+          Effect.timeoutOption(
+            Duration.millis(Math.min(sessionTerminationTimeoutMs, timeoutMs(options)))
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () => logSessionTermination(server, 'timed out'),
+              onSome: () => Effect.void
+            })
+          ),
+          Effect.catch(failure =>
+            failure.kind === 'gone' ? Effect.void : logSessionTermination(server, failure.outcome)
+          )
+        )
+  ).pipe(Effect.catchDefect(() => logSessionTermination(server, 'defect')))
 
 const withRemoteSdkClient = <A>(
   config: McpRemoteServerConfig,
@@ -420,9 +439,20 @@ type LocalServerMessage =
 
 const decodeLocalJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
 
-const decodeLocalRequest = Schema.decodeUnknownEffect(JsonRpcRequest)
+/**
+ * MCP params are an object (basic/index: `params?: { [key: string]: unknown }`), so an inbound
+ * request or notification whose `params` is a scalar or an array is malformed; the shared
+ * `JsonRpcRequest`/`JsonRpcNotification` schemas leave `params` unknown for outbound use.
+ */
+const InboundParams = Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 
-const decodeLocalNotification = Schema.decodeUnknownEffect(JsonRpcNotification)
+const decodeLocalRequest = Schema.decodeUnknownEffect(
+  Schema.Struct({ ...JsonRpcRequest.fields, params: InboundParams })
+)
+
+const decodeLocalNotification = Schema.decodeUnknownEffect(
+  Schema.Struct({ ...JsonRpcNotification.fields, params: InboundParams })
+)
 
 /**
  * Classifies a stdout line by its members, as JSON-RPC 2.0 does: a `method` makes it a request

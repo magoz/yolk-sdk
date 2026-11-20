@@ -2297,7 +2297,7 @@ pingAnswerRejected, sessionEndRejected }` (booleans) each make the emulator disa
 one MCP conformance case, on every profile whose answers they change (the Afloat profile included,
 except the legacy-only session knobs; `pingAnswerRejected` answers the client's answer to the server
 ping 400 with no body, failing the opt-in `mcp.legacy.server-ping`, and changes nothing without the
-`server-ping` seed; `sessionEndRejected` answers the `DELETE` 404 with no body and ends nothing,
+`server-ping` seed; `sessionEndRejected` answers the `DELETE` 500 with no body and ends nothing,
 failing `mcp.legacy.session` on both legacy profiles), only to prove that case catches it.
 
 ## Kie emulator

@@ -525,6 +525,7 @@ type DeleteAnswer = { readonly status: number } | 'never'
 
 type RecordedRequest = {
   readonly method: string
+  readonly authorization: string | undefined
   readonly rpcMethod: string | undefined
   readonly session: string | undefined
   readonly protocolVersion: string | undefined
@@ -554,6 +555,7 @@ const makeSessionRemoteMcpLayer = (input: {
 
         input.requests.push({
           method: request.method,
+          authorization: request.headers['authorization'],
           rpcMethod,
           session: request.headers['mcp-session-id'],
           protocolVersion: request.headers['mcp-protocol-version']
@@ -799,10 +801,13 @@ describe('MCP client', () => {
   )
 
   describe('a closing legacy client ends its session with DELETE', () => {
+    const authorization = 'Bearer synthetic-remote-token'
+
     const config: McpRemoteServerConfig = {
       name: 'remote',
       type: 'remote',
-      url: 'https://example.com/mcp'
+      url: 'https://example.com/mcp',
+      headers: { authorization }
     }
 
     const options = { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
@@ -843,6 +848,7 @@ describe('MCP client', () => {
 
         expect(requests.at(-1)).toEqual({
           method: 'DELETE',
+          authorization,
           rpcMethod: undefined,
           session: 'session-1',
           protocolVersion: '2025-11-25'
@@ -886,6 +892,7 @@ describe('MCP client', () => {
         expect(deletes(requests)).toEqual([
           {
             method: 'DELETE',
+            authorization,
             rpcMethod: undefined,
             session: 'session-1',
             protocolVersion: '2025-11-25'
@@ -894,11 +901,13 @@ describe('MCP client', () => {
       })
     )
 
-    it.effect('a 405 is accepted silently; another answer only logs at debug level', () =>
+    it.effect('a 405 or 404 is accepted silently; another answer only logs at debug level', () =>
       Effect.gen(function* () {
+        // 405: the server does not let clients end sessions; 404: the session is already gone.
         const answers: ReadonlyArray<readonly [number, boolean]> = [
           [405, false],
-          [404, true],
+          [404, false],
+          [400, true],
           [500, true]
         ]
 
@@ -949,6 +958,47 @@ describe('MCP client', () => {
         expect(deletes(requests)).toHaveLength(1)
         expect(messages).toEqual([[terminationFailed, { server: 'remote', outcome: 'timed out' }]])
         expect(Date.now() - started).toBeLessThan(2_000)
+      })
+    )
+
+    it.effect('a throwing client while ending the session never replaces the result', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+
+        const { result, messages } = yield* withDebugLogs(
+          listRemoteMcpServerTools(config, {
+            ...options,
+            configureClient: client => {
+              // The era reads throw once the listing is done: only the session end reads it then.
+              let listed = false
+              const listTools = client.listTools.bind(client)
+              const era = client.getProtocolEra.bind(client)
+
+              client.listTools = async (...args: Parameters<typeof listTools>) => {
+                const listing = await listTools(...args)
+
+                listed = true
+
+                return listing
+              }
+
+              client.getProtocolEra = () => {
+                if (listed) throw new Error('synthetic getter failure')
+
+                return era()
+              }
+            }
+          }).pipe(
+            Effect.provide(
+              makeSessionRemoteMcpLayer({ era: 'legacy', session: 'session-1', requests })
+            )
+          )
+        )
+
+        expect(result.map(tool => tool.def.name)).toEqual(['remote_search'])
+        expect(deletes(requests)).toEqual([])
+        expect(messages).toEqual([[terminationFailed, { server: 'remote', outcome: 'defect' }]])
+        expect(requests.some(request => request.rpcMethod === 'tools/list')).toBe(true)
       })
     )
 
@@ -1507,6 +1557,10 @@ describe('MCP client', () => {
           // MCP forbids a null request id: not a notification either.
           ['{"jsonrpc":"2.0","id":null,"method":"ping"}', 'validation'],
           ['{"jsonrpc":"2.0","method":7}', 'validation'],
+          // MCP params are an object: scalar params make a request or notification malformed.
+          ['{"jsonrpc":"2.0","id":7,"method":"ping","params":42}', 'validation'],
+          ['{"jsonrpc":"2.0","method":"notifications/message","params":"log"}', 'validation'],
+          ['{"jsonrpc":"2.0","id":"srv-2","method":"roots/list","params":[1]}', 'validation'],
           ['{"jsonrpc":"2.0","id":7}', 'validation'],
           ['42', 'validation'],
           ['server log line, not JSON-RPC', 'parse']

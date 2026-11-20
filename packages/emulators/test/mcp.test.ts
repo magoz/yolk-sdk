@@ -1758,7 +1758,7 @@ describe('legacy sessions', () => {
     }
   })
 
-  it('a faulted or truncated DELETE ends nothing; the drill answers 404 and ends nothing', async () => {
+  it('a faulted or truncated DELETE ends nothing; the drill answers 500 and ends nothing', async () => {
     await withEmulator({}, async emulator => {
       const session = await handshake(emulator)
       const before = emulator.snapshot()
@@ -1795,7 +1795,7 @@ describe('legacy sessions', () => {
       const before = emulator.snapshot()
       const answer = await emulator.fetch(onSession(recorded.legacyEnd, session))
 
-      expect(answer.status).toBe(404)
+      expect(answer.status).toBe(500)
       expect(await answer.text()).toBe('')
       expect(emulator.snapshot()).toEqual(before)
     })

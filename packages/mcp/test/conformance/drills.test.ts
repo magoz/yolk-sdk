@@ -412,13 +412,17 @@ describe('mcp.legacy.session', () => {
     passAgainst(mcpLegacySessionCase, deleteAnswered(405))
   )
 
+  it.effect('passes a DELETE answered 404 (the session is already gone)', () =>
+    passAgainst(mcpLegacySessionCase, deleteAnswered(404))
+  )
+
   it.effect('fails a DELETE answered with another status, the listing unchanged', () =>
     Effect.gen(function* () {
-      for (const status of [400, 404, 500]) {
+      for (const status of [400, 410, 500]) {
         const error = yield* failureAgainst(mcpLegacySessionCase, deleteAnswered(status))
 
         expect(error.message, String(status)).toBe(
-          'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)'
+          'expected the DELETE to be answered 2xx (the session ended), 404 (it was already gone) or 405 (the server does not let clients end sessions)'
         )
       }
     })

@@ -770,8 +770,8 @@ export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
   title:
     'the legacy handshake issues a usable session, acknowledges initialized with 202, and the client ends the session',
   safety: 'read',
-  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request. Each operation is its own connection, so the client no longer needs the session when it closes: it sends `DELETE` with the session id (MCP `2025-11-25` basic/transports, "Session Management" item 5: a client SHOULD; the server MAY answer 405), awaited but best effort with a short timeout (at most 2 s), never changing the operation\'s result. Without a session id, or when the operation was interrupted, it sends none.',
-  wire: "`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live). With a session issued, the client sends exactly one `DELETE` to the target URL, after its last POST, carrying the session id; the server answers it 2xx (the session ended) or 405 (it does not let clients end sessions) within the client's termination timeout (no answer is no evidence, and fails). Without one, the client sends no `DELETE`.",
+  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request. Each operation is its own connection, so the client no longer needs the session when it closes: it sends `DELETE` with the session id (MCP `2025-11-25` basic/transports, "Session Management" item 5: a client SHOULD; the server MAY answer 405, and a 404 means the session is already gone), awaited but best effort with a short timeout (at most 2 s), never changing the operation\'s result. Without a session id, or when the operation was interrupted, it sends none.',
+  wire: "`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live). With a session issued, the client sends exactly one `DELETE` to the target URL, after its last POST, carrying the session id; the server answers it 2xx (the session ended), 404 (the session is already gone: a server MUST answer 404 to a session it ended, and some servers that do not route `DELETE` answer it too) or 405 (it does not let clients end sessions) within the client's termination timeout (no answer is no evidence, and fails). Without one, the client sends no `DELETE`.",
   fixtures: [mcpLegacySessionFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -887,8 +887,11 @@ export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
       "expected the server to answer the DELETE (no answer was observed: a transport failure, or the client's termination timeout)"
     )
     yield* expectConformance(
-      end.status === undefined || (end.status >= 200 && end.status < 300) || end.status === 405,
-      'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)',
+      end.status === undefined ||
+        (end.status >= 200 && end.status < 300) ||
+        end.status === 404 ||
+        end.status === 405,
+      'expected the DELETE to be answered 2xx (the session ended), 404 (it was already gone) or 405 (the server does not let clients end sessions)',
       { actual: end.status ?? null }
     )
   })
