@@ -13,9 +13,9 @@ the other code-mode-callable tools of the same `resolveTools` resolution. The ag
 | `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                 |
 | `@yolk-sdk/codemode/cloudflare` | `src/cloudflare.ts` | `makeDynamicWorkerCodeModeExecutor` on Cloudflare Dynamic Workers (Worker Loader)         |
 
-Files: `executor.ts` (engine-neutral `CodeModeExecutor` types), `catalog.ts` (nested tool catalog,
-fair listing, description), `search.ts` (BM25 `searchTools`), `output.ts` (result text, head-and-tail
-bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
+Files: `executor.ts` (engine-neutral `CodeModeExecutor` types, `reportInternalError`),
+`catalog.ts` (nested tool catalog, fair listing, description), `search.ts` (BM25 `searchTools`),
+`output.ts` (result text, head-and-tail bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
 (`makeCodeModeTool`), `classifier-tool.ts` (`makeClassifierTool`), `node.ts` (pi executor),
 `guard.ts` (the in-VM tools guard and tool-rejection encoding both executors share),
 `cloudflare.ts` (Dynamic Worker executor), `pi-prelude.ts` (pi's in-VM prelude, vendored: pi does
@@ -129,9 +129,17 @@ exceeded its CPU limit of <cpuMs> ms`). One `AbortController` is the execution's
   No concurrency cap (owner decision: no hard caps).
 - Error text: both executors pass through what the script controls (its thrown error's name,
   message and stack, TypeScript parse errors, tool rejections, global rejections as pi gives
-  them). The Dynamic Worker executor's own failures use fixed messages and never forward loader,
-  isolate, or RPC error text (`Could not load the script sandbox.`, `The script sandbox failed.`,
-  `The call could not reach the host.`).
+  them). Their own failures use fixed messages and never forward loader, isolate, pi, or RPC error
+  text (Dynamic Workers: `Could not load the script sandbox.`, `The script sandbox failed.`, `The
+call could not reach the host.`; pi: `Could not create the sandbox.`, `The script sandbox
+failed.` for every pi `sandbox` result). The original error goes only to the host's
+  `onInternalError` (`CodeModeInternalError` in `executor.ts`, one shared closed `stage` union:
+  `load`, `isolate`, `cpu-limit`, `host-call`), through `reportInternalError`, which ignores what
+  the observer throws or rejects with. Report exactly the failures that settle the execution (an
+  isolate failing after the timeout or abort already answered is not reported), never script
+  errors, timeouts, or aborts. A new fixed message gets a stage. `host-call` failures happen in the
+  isolate, which reports them over RPC (`ToolHost.reportCallFailure`); the script shares the
+  isolate and can fake them, so they are capped (`maxDynamicWorkerHostCallFailureReports`).
 - Tool arguments make a JSON round trip. The pi executor runs the script in an inner
   `(async (tools, console) => {...})` whose `tools` is a guard proxy (`toolsGuardSource` in
   `node.ts`): the prefix shares line 1 (only line-1 columns shift) and the guard follows the
@@ -236,13 +244,17 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   limits, cancellation, the executor concurrency cap, argument JSON rules and the guard (a
   table-driven case per rejection and allowed shape, snapshot semantics for getters and `toJSON`,
   value and depth limits; never executed or recorded), the unknown-key hint, call labels from the
-  guard and the host (`"123"`, identifier collisions), line numbers, `return`, and `exit()`.
+  guard and the host (`"123"`, identifier collisions), line numbers, `return`, `exit()`, and
+  `onInternalError` (`load`, `isolate`, fixed messages, a throwing observer, never for script
+  errors, timeouts, or aborts).
 - `test/cloudflare-executor.test.ts`: the Dynamic Worker executor with fake Worker Loaders: the
   built module evaluated in a fresh `node:vm` context (tools, globals, output, store writes, the
   guard, unbound tools, script and parse errors, timeout aborting tool calls), a loader whose `run`
   the test controls (abort, malformed replies, output decoding), `limits.cpuMs`, pending calls
   answered on return, timeout and abort, late calls never run, disposal, fixed failure messages
-  (loader, isolate, CPU limit, failed host RPC), and code mode end to end.
+  (loader, isolate, CPU limit, failed host RPC), `onInternalError` (every stage with its original
+  error, the `host-call` cap, a throwing observer, never for script errors, rejections, timeouts,
+  aborts, or late isolate failures), and code mode end to end.
 - `test/pi-prelude.test.ts`: the vendored prelude equals the installed pi's.
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search, call labels.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,

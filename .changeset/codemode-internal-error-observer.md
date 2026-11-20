@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/codemode': minor
+---
+
+`makeDynamicWorkerCodeModeExecutor` (`@yolk-sdk/codemode/cloudflare`) and `makePiCodeModeExecutor` (`@yolk-sdk/codemode/node`) take a new option `onInternalError` (`CodeModeInternalErrorObserver`: `(error: CodeModeInternalError) => void`, `CodeModeInternalError` being `{ stage, cause }`), so the host can log the original error behind a failure that the result and the script only see as a fixed message. `stage` (`CodeModeInternalErrorStage`) is `load` (the sandbox could not be created or loaded), `isolate` (it failed while running), `cpu-limit` (a Dynamic Worker past its CPU limit), or `host-call` (a Dynamic Worker call's RPC to the host failed; at most `maxDynamicWorkerHostCallFailureReports`, 10, per execution, since the script's isolate reports it and a script could fake one). It is called once per such failure with the original error, never for script errors, parse errors, tool and global rejections, timeouts, or aborts, and whatever it throws or rejects with is ignored. The cause never reaches the script, the result, or the model.

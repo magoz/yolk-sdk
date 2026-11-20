@@ -8,14 +8,16 @@ import {
   type CodemodeTool,
   type CodemodeWasmModule
 } from '@earendil-works/pi-codemode'
-import type {
-  CodeModeError,
-  CodeModeExecuteOptions,
-  CodeModeExecutionResult,
-  CodeModeExecutor,
-  CodeModeExecutorGlobal,
-  CodeModeExecutorTool,
-  CodeModeStoreWrites
+import {
+  reportInternalError,
+  type CodeModeError,
+  type CodeModeExecuteOptions,
+  type CodeModeExecutionResult,
+  type CodeModeExecutor,
+  type CodeModeExecutorGlobal,
+  type CodeModeExecutorTool,
+  type CodeModeInternalErrorObserver,
+  type CodeModeStoreWrites
 } from './executor.ts'
 import { encodedRejection, guardPrefix, guardSuffix } from './guard.ts'
 
@@ -35,6 +37,14 @@ export type PiCodeModeExecutorOptions = {
   readonly workerUrl?: string | URL
   /** Concurrent executions of this executor; more wait for a free slot. Default 4. */
   readonly maxConcurrentExecutions?: number
+  /**
+   * Observes the executor's own failures, which the result only shows as fixed messages: `load`
+   * (`new CodemodeSandbox` threw; `Could not create the sandbox.`) with the thrown error, and
+   * `isolate` (pi's worker or QuickJS VM failed; `The script sandbox failed.`) with pi's `sandbox`
+   * error record. Called once per failure, never for script errors, timeouts or aborts; what it
+   * throws is ignored. For host logs: the cause may carry host details and must not reach the model.
+   */
+  readonly onInternalError?: CodeModeInternalErrorObserver
 }
 
 type SlotOutcome = 'acquired' | 'aborted' | 'timeout'
@@ -231,7 +241,11 @@ type MutableExecutionResult = {
   storeWrites?: CodeModeStoreWrites
 }
 
-const fromPiResult = (result: CodemodeResult, scriptLines: number): CodeModeExecutionResult => {
+const fromPiResult = (
+  result: CodemodeResult,
+  scriptLines: number,
+  onInternalError: CodeModeInternalErrorObserver | undefined
+): CodeModeExecutionResult => {
   if (result.ok) {
     const storeWrites = decodeStoreWrites(result.storeWrites)
 
@@ -253,6 +267,17 @@ const fromPiResult = (result: CodemodeResult, scriptLines: number): CodeModeExec
     return converted
   }
 
+  // pi's own failures (QuickJS load, worker start, crash, exit) carry runtime text, not the script's.
+  if (result.error.kind === 'sandbox') {
+    reportInternalError(onInternalError, { stage: 'isolate', cause: result.error })
+
+    return {
+      ok: false,
+      error: { kind: 'sandbox', message: 'The script sandbox failed.' },
+      output: result.output
+    }
+  }
+
   const { kind, name, message, stack } = result.error
   const named = name !== undefined && name.length > 0 && !message.startsWith(name)
 
@@ -266,8 +291,6 @@ const fromPiResult = (result: CodemodeResult, scriptLines: number): CodeModeExec
   return { ok: false, error, output: result.output }
 }
 
-const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error))
-
 /**
  * A `CodeModeExecutor` on `@earendil-works/pi-codemode`: every execution gets a fresh QuickJS VM
  * (WebAssembly) in a fresh worker thread, closed when the execution ends. Applies the timeout,
@@ -275,6 +298,10 @@ const describeError = (error: unknown) => (error instanceof Error ? error.messag
  * that JSON would silently change inside the script (see `CodeModeExecutorTool`), and caps concurrent
  * executions per executor; create one executor per process (module scope) so the cap is
  * per process.
+ *
+ * Errors: what the script controls reaches the caller (its thrown error's name, message and stack,
+ * parse errors, tool and global rejections). Failures of the sandbox itself become fixed messages
+ * (`sandbox`), never pi's or the runtime's text; `onInternalError` receives the original error.
  *
  * Node only. The worker inherits a copy of `process.env` (scripts cannot read it: the VM has no
  * `process`). Under Next.js, list `@yolk-sdk/codemode`, `@earendil-works/pi-codemode`, and
@@ -318,10 +345,9 @@ export const makePiCodeModeExecutor = (
     try {
       sandbox = new CodemodeSandbox(sandboxOptions)
     } catch (error) {
-      return failure({
-        kind: 'sandbox',
-        message: `Could not create the sandbox: ${describeError(error)}`
-      })
+      reportInternalError(options.onInternalError, { stage: 'load', cause: error })
+
+      return failure({ kind: 'sandbox', message: 'Could not create the sandbox.' })
     }
 
     try {
@@ -334,7 +360,8 @@ export const makePiCodeModeExecutor = (
             timeoutMs
           }
         ),
-        scriptLineCount(stripped.code)
+        scriptLineCount(stripped.code),
+        options.onInternalError
       )
     } finally {
       await sandbox.close()
