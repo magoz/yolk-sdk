@@ -549,13 +549,13 @@ describe('repo emulator manifests', () => {
       .toISOString()
       .slice(0, 10)
 
+  const today = new Date().toISOString().slice(0, 10)
   const expiries = repoPending.entries.map(entry => entry.expires).toSorted()
-  const earliestExpiry = expiries[0] ?? new Date().toISOString().slice(0, 10)
+  const earliestExpiry = expiries[0] ?? today
   const latestExpiry = expiries.at(-1) ?? earliestExpiry
   const checkDay = earliestExpiry
   const checkNow = new Date(`${checkDay}T12:00:00.000Z`)
 
-  /** A manifest's latest expiry: its last day with every entry allowed. */
   const latestExpiryOf = (manifest: string) => {
     const expiry = repoPending.entries
       .filter(entry => entry.manifest === manifest)
@@ -572,12 +572,46 @@ describe('repo emulator manifests', () => {
   const dayAfterExpiryOf = (manifest: string) =>
     new Date(`${addDays(latestExpiryOf(manifest), 1)}T00:00:00.000Z`)
 
-  /** Each expiry is at most the cap after the check date, so all are within it of one another. */
+  /**
+   * Each expiry is within the cap of today (a bound that only loosens as time passes, so it never
+   * starts failing by itself) and of the check date, so all are within it of one another.
+   */
   const expectWithinPendingCap = (entry: PendingEvidenceEntry) => {
-    expect(
-      entry.expires >= checkDay && entry.expires <= addDays(checkDay, defaultMaxPendingDays),
-      `${entry.manifest} ${entry.method} ${entry.path} expires ${entry.expires}`
-    ).toBe(true)
+    const label = `${entry.manifest} ${entry.method} ${entry.path} expires ${entry.expires}`
+
+    expect(entry.expires <= addDays(today, defaultMaxPendingDays), label).toBe(true)
+    expect(entry.expires <= addDays(checkDay, defaultMaxPendingDays), label).toBe(true)
+  }
+
+  /**
+   * Checks each of a manifest's write routes on its own entry's dates, so renewing some entries
+   * needs no test edits: on every expiry day of the manifest, exactly the routes whose entries
+   * expired earlier fail; the day after, the routes whose entries expire that day fail too.
+   */
+  const expectEachRouteExpiresOnItsOwnDate = (manifest: string) => {
+    const entries = repoPending.entries.filter(entry => entry.manifest === manifest)
+
+    const routesExpired = (on: (expires: string) => boolean) =>
+      entries
+        .filter(entry => on(entry.expires))
+        .map(entry => `${entry.method} ${entry.path}`)
+        .toSorted()
+
+    expect(entries.length, manifest).toBeGreaterThan(0)
+
+    for (const expiry of new Set(entries.map(entry => entry.expires))) {
+      expect(
+        failedRoutes(repoCheck(new Date(`${expiry}T12:00:00.000Z`)), manifest).toSorted(),
+        `${manifest} on ${expiry}`
+      ).toEqual(routesExpired(expires => expires < expiry))
+
+      const dayAfter = addDays(expiry, 1)
+
+      expect(
+        failedRoutes(repoCheck(new Date(`${dayAfter}T00:00:00.000Z`)), manifest).toSorted(),
+        `${manifest} on ${dayAfter}`
+      ).toEqual(routesExpired(expires => expires <= expiry))
+    }
   }
 
   /** The CLI's PENDING prefix for a route, with the expiry its pending entry names. */
@@ -889,10 +923,11 @@ describe('repo emulator manifests', () => {
   })
 
   it('fails the unverified email write routes without the pending file or after it expires', () => {
-    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('email'))]) {
-      expect(evidenceReportFailed(report)).toBe(true)
-      expect(failedRoutes(report, 'email')).toEqual(emailWriteRoutes)
-    }
+    const report = repoCheck(checkNow, [])
+
+    expect(evidenceReportFailed(report)).toBe(true)
+    expect(failedRoutes(report, 'email')).toEqual(emailWriteRoutes)
+    expectEachRouteExpiresOnItsOwnDate('email')
   })
 
   it('ships one pending entry per R2 write route, at most 60 days out, naming the live run', () => {
@@ -922,10 +957,11 @@ describe('repo emulator manifests', () => {
   })
 
   it('fails the unverified R2 write route without the pending file or after it expires', () => {
-    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('r2'))]) {
-      expect(evidenceReportFailed(report)).toBe(true)
-      expect(failedRoutes(report, 'r2')).toEqual(r2WriteRoutes)
-    }
+    const report = repoCheck(checkNow, [])
+
+    expect(evidenceReportFailed(report)).toBe(true)
+    expect(failedRoutes(report, 'r2')).toEqual(r2WriteRoutes)
+    expectEachRouteExpiresOnItsOwnDate('r2')
   })
 
   it('ships one pending entry per Fortnox write route, at most 60 days out, naming the live run', () => {
@@ -941,10 +977,11 @@ describe('repo emulator manifests', () => {
   })
 
   it('fails the unverified Fortnox write routes without the pending file or after it expires', () => {
-    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('fortnox'))]) {
-      expect(evidenceReportFailed(report)).toBe(true)
-      expect(failedRoutes(report, 'fortnox')).toEqual(fortnoxWriteRoutes)
-    }
+    const report = repoCheck(checkNow, [])
+
+    expect(evidenceReportFailed(report)).toBe(true)
+    expect(failedRoutes(report, 'fortnox')).toEqual(fortnoxWriteRoutes)
+    expectEachRouteExpiresOnItsOwnDate('fortnox')
   })
 
   it('ships one pending entry per Microsoft write route, at most 60 days out, naming the live run', () => {
@@ -962,26 +999,31 @@ describe('repo emulator manifests', () => {
   })
 
   it('fails the unverified Microsoft write routes without the pending file or after it expires', () => {
-    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('microsoft'))]) {
-      expect(evidenceReportFailed(report)).toBe(true)
-      expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
-    }
+    const report = repoCheck(checkNow, [])
 
-    // Each allowance is independent (dates from the pending file): on the day after the EARLIER of
-    // the Fortnox and Microsoft expiries, the other emulator's routes, still within their own
-    // allowance, do not fail. (The Fortnox test above checks its routes fail after their expiry.)
-    const fortnoxExpiry = latestExpiryOf('fortnox')
-    const microsoftExpiry = latestExpiryOf('microsoft')
+    expect(evidenceReportFailed(report)).toBe(true)
+    expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
+    expectEachRouteExpiresOnItsOwnDate('microsoft')
 
-    const [earlier, later] =
-      fortnoxExpiry < microsoftExpiry
-        ? (['fortnox', 'microsoft'] as const)
-        : (['microsoft', 'fortnox'] as const)
+    // Each allowance is independent across manifests too (dates from the pending file): once every
+    // entry of one of Fortnox and Microsoft has expired, exactly the other's routes whose own
+    // entries have expired by then fail. (Equal dates make every route fail; the unit test
+    // 'expires each entry on its own date' covers independence without the repository's dates.)
+    for (const [expired, other] of [
+      ['fortnox', 'microsoft'],
+      ['microsoft', 'fortnox']
+    ] as const) {
+      const lastDay = latestExpiryOf(expired)
 
-    // Equal dates leave no day in between; the unit test 'expires each entry on its own date'
-    // covers independence without depending on the repository's dates.
-    if (fortnoxExpiry !== microsoftExpiry) {
-      expect(failedRoutes(repoCheck(dayAfterExpiryOf(earlier)), later)).toEqual([])
+      expect(
+        failedRoutes(repoCheck(dayAfterExpiryOf(expired)), other).toSorted(),
+        `${other} after ${expired} expires`
+      ).toEqual(
+        repoPending.entries
+          .filter(entry => entry.manifest === other && entry.expires <= lastDay)
+          .map(entry => `${entry.method} ${entry.path}`)
+          .toSorted()
+      )
     }
   })
 
@@ -1018,15 +1060,11 @@ describe('repo emulator manifests', () => {
   ] as const)(
     'fails the unverified %s write routes without the pending file or after it expires',
     (manifest, writeRoutes) => {
-      for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf(manifest))]) {
-        expect(evidenceReportFailed(report)).toBe(true)
-        expect(failedRoutes(report, manifest)).toEqual(writeRoutes())
-      }
+      const report = repoCheck(checkNow, [])
 
-      // On its last allowed day the routes still pass.
-      expect(
-        failedRoutes(repoCheck(new Date(`${latestExpiryOf(manifest)}T12:00:00.000Z`)), manifest)
-      ).toEqual([])
+      expect(evidenceReportFailed(report)).toBe(true)
+      expect(failedRoutes(report, manifest)).toEqual(writeRoutes())
+      expectEachRouteExpiresOnItsOwnDate(manifest)
     }
   )
 
