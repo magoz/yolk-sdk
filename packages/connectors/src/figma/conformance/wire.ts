@@ -5,7 +5,8 @@
  * Provenance: synthetic placeholders, not a live recording and not derived from provider source.
  * The envelopes are the ones a pre-2026 stateful MCP server built on the official server SDK
  * answers (the era probe refused 400 without a session, `initialize` answered over SSE with an
- * `mcp-session-id`, `notifications/initialized` 202, the standing GET 405); the tool listing
+ * `mcp-session-id`, `notifications/initialized` 202, the standing GET 405, and the `DELETE` that
+ * ends the session answered 200 with no body, as that SDK answers it); the tool listing
  * publishes a small subset of tool NAMES the Figma remote MCP server is known to offer, with
  * synthetic placeholder schemas and descriptions (never Figma's; dynamic discovery owns the real
  * contract); the tool results and the 401 are minimal synthetic bodies. The requests are the ones
@@ -177,10 +178,31 @@ const toolsList = (): WireExchange => ({
   response: sseAnswer(success(1, { tools: [...figmaMcpConformanceTools] }))
 })
 
-/** `listRemoteMcpServerTools`: the handshake, then tools/list (id 1) on the session. */
+/**
+ * The client ending its session as it closes (MCP `2025-11-25` basic/transports, "Session
+ * Management" item 5): `DELETE` with the session and `mcp-protocol-version` headers, no body,
+ * answered 200 with no body. Every operation ends with it, after its last POST.
+ */
+const sessionEnd = (): WireExchange => ({
+  request: {
+    method: 'DELETE',
+    url: figmaMcpServerUrl,
+    headers: {
+      'mcp-protocol-version': figmaMcpConformanceProtocolVersion,
+      'mcp-session-id': figmaMcpConformanceSessionId
+    }
+  },
+  response: { status: 200, headers: {}, body: '' }
+})
+
+/**
+ * `listRemoteMcpServerTools`: the handshake, tools/list (id 1) on the session, and the `DELETE`
+ * that ends it.
+ */
 export const figmaListingExchanges = (): ReadonlyArray<WireExchange> => [
   ...handshakeExchanges(),
-  toolsList()
+  toolsList(),
+  sessionEnd()
 ]
 
 /** How the server answers one tools/call: a tool result, or a JSON-RPC error event. */
@@ -189,14 +211,16 @@ export type FigmaMcpCallAnswer =
   | { readonly kind: 'error'; readonly code: number; readonly message: string }
 
 /**
- * `callRemoteMcpServerTool`: the handshake, tools/list (id 1), and tools/call (id 2), all on the
- * session. A JSON-RPC error is answered HTTP 200 inside the SSE stream, as a legacy server does.
+ * `callRemoteMcpServerTool`: the handshake, tools/list (id 1), tools/call (id 2), all on the
+ * session, and the `DELETE` that ends it. A JSON-RPC error is answered HTTP 200 inside the SSE
+ * stream, as a legacy server does.
  */
 export const figmaCallExchanges = (
   call: { readonly name: string; readonly arguments: Schema.JsonObject },
   answer: FigmaMcpCallAnswer
 ): ReadonlyArray<WireExchange> => [
-  ...figmaListingExchanges(),
+  ...handshakeExchanges(),
+  toolsList(),
   {
     request: {
       method: 'POST',
@@ -212,7 +236,8 @@ export const figmaCallExchanges = (
     response: sseAnswer(
       answer.kind === 'result' ? success(2, answer.result) : failure(2, answer.code, answer.message)
     )
-  }
+  },
+  sessionEnd()
 ]
 
 /** The answer to an unknown tool: JSON-RPC -32602 (invalid params). */

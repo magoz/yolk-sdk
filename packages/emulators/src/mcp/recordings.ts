@@ -271,6 +271,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -599,6 +614,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -821,6 +851,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -1079,6 +1124,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -1413,6 +1473,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
       },
       {
         request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
           method: 'POST',
           url: 'https://mcp.example.test/legacy/mcp',
           headers: {
@@ -1576,6 +1651,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"Synthetic note note-0001."}],"structuredContent":{"noteId":"note-0001","text":"Synthetic note note-0001."}}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -1910,6 +2000,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
       },
       {
         request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
           method: 'POST',
           url: 'https://mcp.example.test/legacy/mcp',
           headers: {
@@ -2073,6 +2178,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"Invalid arguments: noteId must be a string."}],"isError":true}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -2405,6 +2525,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
       },
       {
         request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
           method: 'POST',
           url: 'https://mcp.example.test/legacy/mcp',
           headers: {
@@ -2566,6 +2701,21 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Tool yolk_conformance_absent not found"}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -2833,6 +2983,21 @@ export const mcpEmulatorServerPingFixtures: ReadonlyArray<McpRecordedFixture> = 
             'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
             'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]

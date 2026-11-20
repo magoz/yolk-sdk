@@ -3,9 +3,11 @@ import {
   Effect,
   Fiber,
   Layer,
+  Logger,
   Option,
   Predicate,
   Queue,
+  References,
   Sink,
   Stream,
   type Cause,
@@ -41,7 +43,12 @@ import {
   listLocalMcpServerToolsNode,
   listMcpToolsNode
 } from '../../src/client/node.ts'
-import type { McpClientOptions, McpServerConfig } from '../../src/client'
+import type {
+  McpClientOptions,
+  McpLocalServerConfig,
+  McpRemoteServerConfig,
+  McpServerConfig
+} from '../../src/client'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
   ? join(process.cwd(), 'test/server/fixtures/fake-stdio-mcp-server.ts')
@@ -51,19 +58,71 @@ const tsxCliPath = process.cwd().endsWith(join('packages', 'mcp'))
   ? join(process.cwd(), '../../node_modules/tsx/dist/cli.mjs')
   : join(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
 
-const outOfOrderStdioScript = `
-process.stdin.resume();
-process.stdin.on('end', () => {
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] } }) + '\\n');
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'local', version: '0' } } }) + '\\n');
+// Runs `answer` once the client has written `initialize`, `notifications/initialized` and
+// `tools/list` (the client keeps stdin open until it has its answers).
+const afterListingRequestsStdioScript = (answer: string) => `
+let buffer = '';
+let lines = 0;
+process.stdin.on('data', chunk => {
+  buffer += chunk;
+  const parts = buffer.split('\\n');
+  buffer = parts.pop();
+  lines += parts.filter(part => part.length > 0).length;
+  if (lines === 3) {
+    ${answer}
+  }
 });
 `
 
-const initializeErrorStdioScript = `
-process.stdin.resume();
-process.stdin.on('end', () => {
+const outOfOrderStdioScript = afterListingRequestsStdioScript(`
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'local', version: '0' } } }) + '\\n');
+`)
+
+const initializeErrorStdioScript = afterListingRequestsStdioScript(`
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] } }) + '\\n');
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'init failed' } }) + '\\n');
+`)
+
+/**
+ * A stdio server that pings, logs, and asks for roots, and answers each client request only after
+ * the client has answered its own request on stdin: `initialize` after an empty result to its
+ * `ping`, `tools/list` after "Method not found" for `roots/list`, `tools/call` after an empty
+ * result to a ping whose id (1) equals a client request id.
+ */
+const requestingStdioScript = `
+const readline = require('node:readline');
+const write = message => process.stdout.write(JSON.stringify(message) + '\\n');
+const waiting = new Map();
+const ask = (request, check, then) => {
+  waiting.set(request.id, reply => { if (check(reply)) then(); });
+  write({ jsonrpc: '2.0', ...request });
+};
+const emptyResult = id => reply => JSON.stringify(reply) === JSON.stringify({ jsonrpc: '2.0', id, result: {} });
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const message = JSON.parse(line);
+  if (message.method === undefined) {
+    const next = waiting.get(message.id);
+    waiting.delete(message.id);
+    if (next !== undefined) next(message);
+    return;
+  }
+  if (message.id === undefined) return;
+  const answer = result => write({ jsonrpc: '2.0', id: message.id, result });
+  if (message.method === 'initialize') {
+    ask({ id: 'srv-ping', method: 'ping' }, emptyResult('srv-ping'), () => {
+      write({ jsonrpc: '2.0', method: 'notifications/message', params: { level: 'info', data: 'ready' } });
+      answer({ protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'local', version: '0' } });
+    });
+  } else if (message.method === 'tools/list') {
+    ask({ id: 'srv-roots', method: 'roots/list' }, reply => reply.error && reply.error.code === -32601, () =>
+      answer({ tools: [{ name: 'echo', inputSchema: { type: 'object' } }] })
+    );
+  } else if (message.method === 'tools/call') {
+    ask({ id: 1, method: 'ping' }, emptyResult(1), () =>
+      answer({ content: [{ type: 'text', text: 'answered after a ping' }] })
+    );
+  }
 });
 `
 
@@ -111,19 +170,26 @@ const capturedReceipt = {
 
 const decodeStdinMessage = Schema.decodeUnknownOption(Schema.fromJsonString(JsonRpcMessage))
 
-type LocalAnswer =
+type LocalAnswer = (
   | { readonly result: unknown }
   | { readonly error: unknown }
   // A stdout line written as is instead of a JSON-RPC response.
   | { readonly line: string }
+) & {
+  // Stdout lines written before the answer (a server's own requests and notifications).
+  readonly before?: ReadonlyArray<string>
+}
 
 /**
  * A local stdio server that answers each request it reads on stdin by method, so a test sees
  * exactly which requests were sent (`sent`) and in which order. Requests without an answer get none.
+ * Stdin lines that are no request or notification (the client's answers to server requests) are
+ * kept as written in `replies`.
  */
 const makeScriptedLocalMcpLayer = (
   answers: Readonly<Record<string, LocalAnswer>>,
-  sent: Array<string>
+  sent: Array<string>,
+  replies: Array<string> = []
 ) =>
   Layer.effect(
     ChildProcessSpawner.ChildProcessSpawner,
@@ -158,7 +224,7 @@ const makeScriptedLocalMcpLayer = (
             Stream.filter(line => line.length > 0),
             Stream.runForEach(line =>
               Option.match(decodeStdinMessage(line), {
-                onNone: () => Effect.void,
+                onNone: () => Effect.sync(() => replies.push(line)),
                 onSome: message => {
                   sent.push(message.method)
 
@@ -166,11 +232,20 @@ const makeScriptedLocalMcpLayer = (
 
                   if (!('id' in message) || answer === undefined) return Effect.void
 
-                  return Queue.offer(
-                    out,
+                  const reply =
                     'line' in answer
-                      ? `${answer.line}\n`
-                      : `${JSON.stringify({ jsonrpc: '2.0', id: message.id, ...answer })}\n`
+                      ? answer.line
+                      : JSON.stringify({
+                          jsonrpc: '2.0',
+                          id: message.id,
+                          ...('result' in answer
+                            ? { result: answer.result }
+                            : { error: answer.error })
+                        })
+
+                  return Queue.offerAll(
+                    out,
+                    [...(answer.before ?? []), reply].map(written => `${written}\n`)
                   )
                 }
               })
@@ -445,6 +520,117 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
   )
 }
 
+/** How the fake legacy server answers the client's `DELETE` of its session. */
+type DeleteAnswer = { readonly status: number } | 'never'
+
+type RecordedRequest = {
+  readonly method: string
+  readonly authorization: string | undefined
+  readonly rpcMethod: string | undefined
+  readonly session: string | undefined
+  readonly protocolVersion: string | undefined
+}
+
+/**
+ * A remote server that records every request: legacy (the era probe refused, an `initialize`
+ * handshake issuing `session` when given, the standing GET 405, the `DELETE` answered as told), or
+ * modern (stateless, though every answer carries `mcp-session-id: session` when given). Answers
+ * are JSON.
+ */
+const makeSessionRemoteMcpLayer = (input: {
+  readonly era: 'legacy' | 'modern'
+  readonly session?: string
+  readonly deleteAnswer?: DeleteAnswer
+  readonly callAnswersError?: boolean
+  /** `tools/call` is never answered (the operation hangs until it is interrupted). */
+  readonly callHangs?: boolean
+  readonly requests: Array<RecordedRequest>
+}): Layer.Layer<HttpClient.HttpClient> =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.gen(function* () {
+        const message = yield* requestMessage(request)
+        const rpcMethod = request.method === 'POST' ? message.method : undefined
+
+        input.requests.push({
+          method: request.method,
+          authorization: request.headers['authorization'],
+          rpcMethod,
+          session: request.headers['mcp-session-id'],
+          protocolVersion: request.headers['mcp-protocol-version']
+        })
+
+        const sessionHeaders: Record<string, string> =
+          input.session === undefined ? {} : { 'mcp-session-id': input.session }
+
+        const answer = (status: number, body?: unknown, headers: Record<string, string> = {}) =>
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(body === undefined ? null : JSON.stringify(body), {
+              status,
+              headers:
+                body === undefined ? headers : { 'content-type': 'application/json', ...headers }
+            })
+          )
+
+        if (request.method === 'DELETE') {
+          const deleteAnswer = input.deleteAnswer ?? { status: 200 }
+
+          return deleteAnswer === 'never' ? yield* Effect.never : answer(deleteAnswer.status)
+        }
+
+        if (request.method === 'GET') return answer(405)
+
+        if (rpcMethod === 'tools/call' && input.callHangs === true) return yield* Effect.never
+
+        if (rpcMethod === 'notifications/initialized') return answer(202)
+
+        const modern = input.era === 'modern'
+
+        if (rpcMethod === 'server/discover' && !modern) {
+          return answer(400, {
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32_000, message: 'Bad Request: Server not initialized' }
+          })
+        }
+
+        const complete = modern ? { resultType: 'complete', ttlMs: 0, cacheScope: 'private' } : {}
+
+        const result = () => {
+          switch (rpcMethod) {
+            case 'server/discover':
+              return {
+                ...complete,
+                supportedVersions: ['2026-07-28'],
+                capabilities: { tools: {} },
+                _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'remote', version: '0' } }
+              }
+            case 'initialize':
+              return {
+                protocolVersion: '2025-11-25',
+                capabilities: { tools: {} },
+                serverInfo: { name: 'remote', version: '0' }
+              }
+            case 'tools/list':
+              return { ...complete, tools: [{ name: 'search', inputSchema: { type: 'object' } }] }
+            default:
+              return { ...complete, content: [{ type: 'text', text: 'remote result' }] }
+          }
+        }
+
+        return answer(
+          200,
+          rpcMethod === 'tools/call' && input.callAnswersError === true
+            ? { jsonrpc: '2.0', id: message.id, error: { code: -32_603, message: 'boom' } }
+            : { jsonrpc: '2.0', id: message.id, result: result() },
+          sessionHeaders
+        )
+      })
+    )
+  )
+
 const expectMcpFailureCause = (
   result: Result.Result<unknown, McpError>,
   cause: McpError['cause']
@@ -613,6 +799,320 @@ describe('MCP client', () => {
       })
     })
   )
+
+  describe('a closing legacy client ends its session with DELETE', () => {
+    const authorization = 'Bearer synthetic-remote-token'
+
+    const config: McpRemoteServerConfig = {
+      name: 'remote',
+      type: 'remote',
+      url: 'https://example.com/mcp',
+      headers: { authorization }
+    }
+
+    const options = { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+
+    const call = (callOptions: McpClientOptions = options) =>
+      callRemoteMcpServerTool({
+        config,
+        mcpToolName: 'search',
+        toolCallId: 'call_1',
+        params: {},
+        options: callOptions
+      })
+
+    const terminationFailed = 'MCP session termination failed; the server will expire the session'
+
+    const closeFailed = 'MCP client close failed; the operation keeps its own result'
+
+    const deletes = (requests: ReadonlyArray<RecordedRequest>) =>
+      requests.filter(request => request.method === 'DELETE')
+
+    // The messages (with their values) of the debug logs written while `effect` runs.
+    const withDebugLogs = <A, E>(effect: Effect.Effect<A, E>) =>
+      Effect.gen(function* () {
+        const messages: Array<unknown> = []
+
+        const result = yield* effect.pipe(
+          Effect.provide(Logger.layer([Logger.make(entry => messages.push(entry.message))])),
+          Effect.provideService(References.MinimumLogLevel, 'Debug')
+        )
+
+        return { result, messages }
+      })
+
+    it.effect('after a listing and after a call, with the session id', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+        const layer = makeSessionRemoteMcpLayer({ era: 'legacy', session: 'session-1', requests })
+
+        yield* listRemoteMcpServerTools(config, options).pipe(Effect.provide(layer))
+
+        expect(requests.at(-1)).toEqual({
+          method: 'DELETE',
+          authorization,
+          rpcMethod: undefined,
+          session: 'session-1',
+          protocolVersion: '2025-11-25'
+        })
+
+        requests.length = 0
+
+        const result = yield* call().pipe(Effect.provide(layer))
+
+        expect(result.content).toBe('remote result')
+        expect(requests.map(request => request.rpcMethod ?? request.method)).toEqual([
+          'server/discover',
+          'initialize',
+          'notifications/initialized',
+          'GET',
+          'tools/list',
+          'tools/call',
+          'DELETE'
+        ])
+        expect(deletes(requests)).toHaveLength(1)
+      })
+    )
+
+    it.effect('after a failed call too, which still fails as before', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+
+        const result = yield* call().pipe(
+          Effect.provide(
+            makeSessionRemoteMcpLayer({
+              era: 'legacy',
+              session: 'session-1',
+              callAnswersError: true,
+              requests
+            })
+          ),
+          Effect.result
+        )
+
+        expectMcpFailureCause(result, 'protocol')
+        expect(deletes(requests)).toEqual([
+          {
+            method: 'DELETE',
+            authorization,
+            rpcMethod: undefined,
+            session: 'session-1',
+            protocolVersion: '2025-11-25'
+          }
+        ])
+      })
+    )
+
+    it.effect('a 405 or 404 is accepted silently; another answer only logs at debug level', () =>
+      Effect.gen(function* () {
+        // 405: the server does not let clients end sessions; 404: the session is already gone.
+        const answers: ReadonlyArray<readonly [number, boolean]> = [
+          [405, false],
+          [404, false],
+          [400, true],
+          [500, true]
+        ]
+
+        for (const [status, logged] of answers) {
+          const requests: Array<RecordedRequest> = []
+
+          const { result, messages } = yield* withDebugLogs(
+            call().pipe(
+              Effect.provide(
+                makeSessionRemoteMcpLayer({
+                  era: 'legacy',
+                  session: 'session-1',
+                  deleteAnswer: { status },
+                  requests
+                })
+              )
+            )
+          )
+
+          expect(result.content, String(status)).toBe('remote result')
+          expect(deletes(requests), String(status)).toHaveLength(1)
+          expect(messages, String(status)).toEqual(
+            logged ? [[terminationFailed, { server: 'remote', outcome: `HTTP ${status}` }]] : []
+          )
+        }
+      })
+    )
+
+    it.live('a DELETE left unanswered delays the result only up to its short timeout', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+        const started = Date.now()
+
+        const { result, messages } = yield* withDebugLogs(
+          call({ ...options, timeoutMs: 300 }).pipe(
+            Effect.provide(
+              makeSessionRemoteMcpLayer({
+                era: 'legacy',
+                session: 'session-1',
+                deleteAnswer: 'never',
+                requests
+              })
+            )
+          )
+        )
+
+        expect(result.content).toBe('remote result')
+        expect(deletes(requests)).toHaveLength(1)
+        expect(messages).toEqual([[terminationFailed, { server: 'remote', outcome: 'timed out' }]])
+        expect(Date.now() - started).toBeLessThan(2_000)
+      })
+    )
+
+    it.effect('a throwing client while ending the session never replaces the result', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+
+        const { result, messages } = yield* withDebugLogs(
+          listRemoteMcpServerTools(config, {
+            ...options,
+            configureClient: client => {
+              // The era reads throw once the listing is done: only the session end reads it then.
+              let listed = false
+              const listTools = client.listTools.bind(client)
+              const era = client.getProtocolEra.bind(client)
+
+              client.listTools = async (...args: Parameters<typeof listTools>) => {
+                const listing = await listTools(...args)
+
+                listed = true
+
+                return listing
+              }
+
+              client.getProtocolEra = () => {
+                if (listed) throw new Error('synthetic getter failure')
+
+                return era()
+              }
+            }
+          }).pipe(
+            Effect.provide(
+              makeSessionRemoteMcpLayer({ era: 'legacy', session: 'session-1', requests })
+            )
+          )
+        )
+
+        expect(result.map(tool => tool.def.name)).toEqual(['remote_search'])
+        expect(deletes(requests)).toEqual([])
+        expect(messages).toEqual([[terminationFailed, { server: 'remote', outcome: 'defect' }]])
+        expect(requests.some(request => request.rpcMethod === 'tools/list')).toBe(true)
+      })
+    )
+
+    it.effect(
+      'a rejected close() never replaces the result: a listing returns, a call keeps its error',
+      () =>
+        Effect.gen(function* () {
+          const closeRejects: McpClientOptions = {
+            ...options,
+            configureClient: client => {
+              const close = client.close.bind(client)
+
+              client.close = async () => {
+                await close()
+
+                throw new Error('synthetic close failure')
+              }
+            }
+          }
+
+          const listing = yield* withDebugLogs(
+            listRemoteMcpServerTools(config, closeRejects).pipe(
+              Effect.provide(
+                makeSessionRemoteMcpLayer({ era: 'legacy', session: 'session-1', requests: [] })
+              )
+            )
+          )
+
+          expect(listing.result.map(tool => tool.def.name)).toEqual(['remote_search'])
+          expect(listing.messages).toEqual([[closeFailed, { server: 'remote' }]])
+
+          const failed = yield* call(closeRejects).pipe(
+            Effect.provide(
+              makeSessionRemoteMcpLayer({
+                era: 'legacy',
+                session: 'session-1',
+                callAnswersError: true,
+                requests: []
+              })
+            ),
+            Effect.result
+          )
+
+          expectMcpFailureCause(failed, 'protocol')
+        })
+    )
+
+    it.live('an interrupted operation closes at once and sends no DELETE', () =>
+      Effect.gen(function* () {
+        const requests: Array<RecordedRequest> = []
+
+        const fiber = yield* call({ ...options, timeoutMs: 10_000 }).pipe(
+          Effect.provide(
+            makeSessionRemoteMcpLayer({
+              era: 'legacy',
+              session: 'session-1',
+              // Were a DELETE sent, it would hold the interrupt for its whole timeout.
+              deleteAnswer: 'never',
+              callHangs: true,
+              requests
+            })
+          ),
+          Effect.forkChild
+        )
+
+        while (!requests.some(request => request.rpcMethod === 'tools/call')) {
+          yield* Effect.sleep(Duration.millis(5))
+        }
+
+        const started = Date.now()
+
+        yield* Fiber.interrupt(fiber)
+
+        expect(Date.now() - started).toBeLessThan(1_000)
+        expect(deletes(requests)).toEqual([])
+      })
+    )
+
+    it.effect('nothing is sent without a session id, or on a modern connection', () =>
+      Effect.gen(function* () {
+        const sessionless: Array<RecordedRequest> = []
+
+        yield* call().pipe(
+          Effect.provide(makeSessionRemoteMcpLayer({ era: 'legacy', requests: sessionless }))
+        )
+
+        expect(sessionless.map(request => request.rpcMethod ?? request.method)).toEqual([
+          'server/discover',
+          'initialize',
+          'notifications/initialized',
+          'GET',
+          'tools/list',
+          'tools/call'
+        ])
+
+        // A modern answer carrying a session id does not make the connection stateful.
+        const modern: Array<RecordedRequest> = []
+
+        yield* call().pipe(
+          Effect.provide(
+            makeSessionRemoteMcpLayer({ era: 'modern', session: 'session-1', requests: modern })
+          )
+        )
+
+        expect(modern.map(request => request.rpcMethod ?? request.method)).toEqual([
+          'server/discover',
+          'tools/list',
+          'tools/call'
+        ])
+      })
+    )
+  })
 
   it.effect('maps remote non-2xx responses to transport errors', () =>
     Effect.gen(function* () {
@@ -966,6 +1466,195 @@ describe('MCP client', () => {
           files: [capturedReceipt]
         })
       })
+    )
+  })
+
+  describe('local servers may ping, ask, and notify', () => {
+    const localOptions = {
+      securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false }
+    }
+
+    const config: McpLocalServerConfig = { name: 'local', type: 'local', command: ['fake-mcp'] }
+
+    const initialized = {
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        serverInfo: { name: 'local', version: '0' }
+      }
+    }
+
+    const listing = { result: { tools: [{ name: 'sum', inputSchema: { type: 'object' } }] } }
+
+    const answered = { result: { content: [{ type: 'text', text: 'done' }] } }
+
+    const ping = (id: string | number) => JSON.stringify({ jsonrpc: '2.0', id, method: 'ping' })
+
+    const pong = (id: string | number) => JSON.stringify({ jsonrpc: '2.0', id, result: {} })
+
+    const log = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+      params: { level: 'info', data: 'server log' }
+    })
+
+    const roots = JSON.stringify({ jsonrpc: '2.0', id: 'srv-roots', method: 'roots/list' })
+
+    const methodNotFound = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'srv-roots',
+      error: { code: -32601, message: 'Method not found' }
+    })
+
+    // Runs `effect` against the scripted server and drains its stdin reader before its scope ends.
+    const scripted = <A>(
+      answers: Readonly<Record<string, LocalAnswer>>,
+      effect: Effect.Effect<A, McpError, ChildProcessSpawner.ChildProcessSpawner>
+    ) =>
+      Effect.gen(function* () {
+        const sent: Array<string> = []
+        const replies: Array<string> = []
+
+        const result = yield* Effect.gen(function* () {
+          const outcome = yield* Effect.result(effect)
+
+          for (let turn = 0; turn < 20; turn++) yield* Effect.yieldNow
+
+          return outcome
+        }).pipe(Effect.provide(makeScriptedLocalMcpLayer(answers, sent, replies)))
+
+        return { result, sent, replies }
+      })
+
+    const call = callLocalMcpServerTool({
+      config,
+      mcpToolName: 'sum',
+      toolCallId: 'call_1',
+      params: {},
+      options: localOptions
+    })
+
+    it.effect('a call answers pings before and between responses and ignores notifications', () =>
+      Effect.gen(function* () {
+        const { result, sent, replies } = yield* scripted(
+          {
+            initialize: { ...initialized, before: [ping('srv-1'), log] },
+            // A server request id may equal a client request id: they are separate id spaces.
+            'tools/list': { ...listing, before: [ping(1)] },
+            'tools/call': { ...answered, before: [log, ping('srv-3'), log] }
+          },
+          call
+        )
+
+        expect(Predicate.isTagged(result, 'Success') && result.success.content).toBe('done')
+        expect(sent).toEqual([
+          'initialize',
+          'notifications/initialized',
+          'tools/list',
+          'tools/call'
+        ])
+        expect(replies).toEqual([pong('srv-1'), pong(1), pong('srv-3')])
+      })
+    )
+
+    it.effect('a listing answers pings and other server requests, and ignores notifications', () =>
+      Effect.gen(function* () {
+        const { result, sent, replies } = yield* scripted(
+          {
+            initialize: { ...initialized, before: [log, ping('srv-1')] },
+            'tools/list': { ...listing, before: [roots, log] }
+          },
+          listLocalMcpServerTools(config, localOptions)
+        )
+
+        expect(
+          Predicate.isTagged(result, 'Success') && result.success.map(tool => tool.def.name)
+        ).toEqual(['local_sum'])
+        expect(sent).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
+        expect(replies).toEqual([pong('srv-1'), methodNotFound])
+      })
+    )
+
+    it.effect('a server request other than ping gets Method not found and the call goes on', () =>
+      Effect.gen(function* () {
+        const { result, sent, replies } = yield* scripted(
+          {
+            initialize: initialized,
+            'tools/list': listing,
+            'tools/call': { ...answered, before: [roots] }
+          },
+          call
+        )
+
+        expect(Predicate.isTagged(result, 'Success')).toBe(true)
+        expect(sent).toEqual([
+          'initialize',
+          'notifications/initialized',
+          'tools/list',
+          'tools/call'
+        ])
+        expect(replies).toEqual([methodNotFound])
+      })
+    )
+
+    it.effect('a line that is no JSON-RPC message still breaks the session before the call', () =>
+      Effect.gen(function* () {
+        const malformed: ReadonlyArray<[string, McpError['cause']]> = [
+          // MCP forbids a null request id: not a notification either.
+          ['{"jsonrpc":"2.0","id":null,"method":"ping"}', 'validation'],
+          ['{"jsonrpc":"2.0","method":7}', 'validation'],
+          // MCP params are an object: scalar params make a request or notification malformed.
+          ['{"jsonrpc":"2.0","id":7,"method":"ping","params":42}', 'validation'],
+          ['{"jsonrpc":"2.0","method":"notifications/message","params":"log"}', 'validation'],
+          ['{"jsonrpc":"2.0","id":"srv-2","method":"roots/list","params":[1]}', 'validation'],
+          ['{"jsonrpc":"2.0","id":7}', 'validation'],
+          ['42', 'validation'],
+          ['server log line, not JSON-RPC', 'parse']
+        ]
+
+        for (const [line, cause] of malformed) {
+          const { result, sent, replies } = yield* scripted(
+            {
+              initialize: initialized,
+              'tools/list': { ...listing, before: [line] },
+              'tools/call': answered
+            },
+            call
+          )
+
+          expectMcpFailureCause(result, cause)
+          expect(sent, line).toEqual(['initialize', 'notifications/initialized', 'tools/list'])
+          expect(replies, line).toEqual([])
+        }
+      })
+    )
+
+    it.live(
+      'a real server that waits for the answers to its requests is served',
+      () =>
+        Effect.gen(function* () {
+          const local: McpServerConfig = {
+            name: 'local',
+            type: 'local',
+            command: [process.execPath, '-e', requestingStdioScript]
+          }
+
+          const options = { ...localOptions, timeoutMs: 10_000 }
+          const tools = yield* listLocalMcpServerToolsNode(local, options)
+
+          expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
+
+          const result = yield* callLocalMcpServerToolNode({
+            config: local,
+            mcpToolName: 'echo',
+            toolCallId: 'call_1',
+            params: {},
+            options
+          })
+
+          expect(result.content).toBe('answered after a ping')
+        }),
+      30_000
     )
   })
 

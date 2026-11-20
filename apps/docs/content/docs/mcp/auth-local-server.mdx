@@ -61,6 +61,13 @@ Local stdio uses explicit environment only; host environment inheritance is disa
 absolute executable such as `execPath`. If a bare executable or `/usr/bin/env` shebang is required,
 pass an explicitly allowlisted `PATH`; never pass the host process environment wholesale.
 
+The client keeps the server's stdin open until it has its answers, and reads every stdout line as
+one JSON-RPC message (MCP `2025-11-25`, stdio transport). It answers a server `ping` with an empty
+result, answers any other server request with JSON-RPC error `-32601` (it declares no client
+capability), and ignores notifications such as `notifications/message`. A line that is not a
+JSON-RPC message (including a request or notification whose `params` is not an object) fails the
+operation; write logs to stderr, which the client ignores.
+
 ## Tool name mapping
 
 MCP tool names become model-visible Yolk tool names by prefixing the sanitized server name:

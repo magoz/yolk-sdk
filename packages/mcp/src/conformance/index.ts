@@ -87,6 +87,7 @@ export {
   legacyHandshakeExchanges,
   legacyListingExchanges,
   legacyServerPingListingExchanges,
+  legacySessionEndExchange,
   legacySseAnswer,
   mcpConformanceDiscoverRequestId,
   mcpConformanceFixtureSeeds,

@@ -28,8 +28,8 @@
  * `tools/call` fixtures, not only recorded calls, is in scope by the owner's decision), and every
  * manifest row names the conformance cases whose fixtures it answers (`mcpEmulatorRoutes`: one
  * `RPC <origin><path>#<method>` row per recorded JSON-RPC method of each profile, plus the legacy
- * `GET` row and the synthetic legacy `response:ping` row; no row writes anything in a real
- * service). Response behaviour comes only from the fixtures, byte for byte: a JSON-RPC POST is
+ * `GET` and `DELETE` rows and the synthetic legacy `response:ping` row; no row writes anything in a
+ * real service). Response behaviour comes only from the fixtures, byte for byte: a JSON-RPC POST is
  * answered only when it equals a recorded request within the latitude below, with the recorded
  * answer, the request id substituted at exactly the recorded place (the top-level `id` of a JSON
  * answer, or the `id` of the SSE response event's payload; notification events and SSE `id:` lines
@@ -38,30 +38,32 @@
  * `yolk-emu-session-<n>` (`n` from a counter that never resets, a form no seed holds), answered in
  * the recorded `mcp-session-id` header; `notifications/initialized` on that session answers the
  * recorded 202 and makes it ready; on a ready session `tools/list`, `tools/call`, and the standing
- * `GET` (the recorded 405) answer the recordings with the session's id. At most 256 sessions are
- * held: another `initialize` is refused before any fault. `reset` and `seed` clear the sessions.
- * The seed only selects which recorded modern listing `tools/list` answers (`modernListing`:
- * `one-page`, the default, or `two-pages`, whose first page issues the recorded cursor in the
- * generation that first issues it, and `<cursor>.g<generation>` after a reset or seed; the second
- * page answers only the cursor issued in the current generation), and which recorded synthetic
- * legacy `initialize` answer is sent (`legacyInitialize`: `plain`, the default, or `server-ping`,
- * the opt-in server ping fixture's answer, which sends a `ping` request before its response; that
- * session then awaits the client's answer to the ping, accepted once with the recorded 202, in
- * either phase, on the `response:ping` row, whose commit clears the mark; the Figma profile records
- * no ping and ignores the choice). Every plan prepares its answer before anything is written; its
- * commit (minting a session, readying one, accepting the answer to a ping, issuing a cursor) runs
- * only when no fault answers the request.
- * Status faults (400-599) and `truncate-after-chunks` faults apply only after a request is admitted
- * and planned, and a faulted request writes nothing: a truncation sends the prepared answer cut
- * short and never runs the commit, so a truncated `initialize` holds no session and leaves the
- * counter and the cap where they were, and a truncated first page issues no cursor. `match.route`
- * selects one manifest row (a value naming no row is rejected when the fault is added);
- * `match.method` is the HTTP method. Anything else answers one 400 not-emulated, ledgered with
- * constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty query, no headers
- * or body, a constant reason, and the route template or row), that writes nothing and uses up no
- * fault.
+ * `GET` (the recorded 405) answer the recordings with the session's id, and the `DELETE` that ends
+ * a session (MCP `2025-11-25` basic/transports, "Session Management" item 5; every legacy fixture
+ * with a session records it after its last POST) answers the recorded 200 and drops the session, so
+ * later requests on it are refused. At most 256 sessions are held: another `initialize` is refused
+ * before any fault. `reset` and `seed` clear the sessions. The seed only selects which recorded
+ * modern listing `tools/list` answers (`modernListing`: `one-page`, the default, or `two-pages`,
+ * whose first page issues the recorded cursor in the generation that first issues it, and
+ * `<cursor>.g<generation>` after a reset or seed; the second page answers only the cursor issued in
+ * the current generation), and which recorded synthetic legacy `initialize` answer is sent
+ * (`legacyInitialize`: `plain`, the default, or `server-ping`, the opt-in server ping fixture's
+ * answer, which sends a `ping` request before its response; that session then awaits the client's
+ * answer to the ping, accepted once with the recorded 202, in either phase, on the `response:ping`
+ * row, whose commit clears the mark; the Figma profile records no ping and ignores the choice).
+ * Every plan prepares its answer before anything is written; its commit (minting a session,
+ * readying one, accepting the answer to a ping, ending one, issuing a cursor) runs only when no
+ * fault answers the request. Status faults (400-599) and `truncate-after-chunks` faults apply only
+ * after a request is admitted and planned, and a faulted request writes nothing: a truncation sends
+ * the prepared answer cut short and never runs the commit, so a truncated `initialize` holds no
+ * session and leaves the counter and the cap where they were, and a truncated first page issues no
+ * cursor. `match.route` selects one manifest row (a value naming no row is rejected when the fault
+ * is added); `match.method` is the HTTP method. Anything else answers one 400 not-emulated,
+ * ledgered with constant text only (`/<unrecognised>`, a standard method or `<other>`, an empty
+ * query, no headers or body, a constant reason, and the route template or row), that writes nothing
+ * and uses up no fault.
  *
- * Not emulated: `DELETE` (the client never sends it), the client's own `ping`, `resources/*`,
+ * Not emulated: the client's own `ping`, `resources/*`,
  * `prompts/*`, `logging/*`, `completion/*`, `tasks/*` (`@yolk-sdk/mcp/client` sends none of them),
  * JSON-RPC batches, client-sent responses other than the answer to the recorded server ping, a JSON
  * body
@@ -116,27 +118,28 @@
  * any JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII
  * characters where the recording has an id; any non-empty `name` and `version` (and no other key)
  * in the `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session
- * id this emulator minted on the same profile since the last reset or seed where the recording
- * sends `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer
- * to the server ping, ready otherwise); and, with the seed's `two-pages` listing, the cursor this
+ * id this emulator minted on the same profile since the last reset or seed, and that no `DELETE`
+ * has ended, where the recording sends `mcp-session-id` (initializing for
+ * `notifications/initialized`, either phase for the answer to the server ping, ready otherwise); on
+ * the `DELETE` that ends a session, an `accept` of any media type (the Fetch default an HTTP layer
+ * adds where the recording sends none); and, with the seed's `two-pages` listing, the cursor this
  * emulator issued in the current generation on the second page. `Authorization` must be exactly
  * `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any query,
- * other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without
+ * other HTTP methods, a `GET` or `DELETE` on the modern or Afloat profile, a bearer without
  * `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
  * remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
  * fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches,
  * client-sent responses other than the answer to the recorded server ping (exactly as recorded, the
- * server's ping id included, on a session awaiting it), other members, a JSON body
- * repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
- * (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
- * the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
- * headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and
- * `last-event-id` other than the recorded values or present where none is recorded, any other
- * `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or present where
- * not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
- * a reserved invalid credential on anything but its profile's era probe, a bearer repeated anywhere
- * in the request, and a bearer an answer or a minted session id or cursor would repeat)
- * is not emulated.
+ * server's ping id included, on a session awaiting it), other members, a JSON body repeating a key
+ * (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
+ * arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
+ * listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
+ * `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
+ * other than the recorded values or present where none is recorded, any other `mcp-*` header (such
+ * as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
+ * session or one in the wrong phase, a cursor not issued in the current generation, a reserved
+ * invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
+ * request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeMcpEmulator` (importing this module has no side effects).
@@ -226,18 +229,18 @@ export {
 
 /**
  * Route evidence manifest: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
- * each profile, plus the legacy `GET` row and the synthetic legacy `response:ping` row (the
- * client's answer to the recorded server ping), with the conformance cases whose (synthetic,
- * unverified) fixtures each answers. No row writes anything. Kept in sync with the handlers by
- * construction (both come from one route table).
+ * each profile, plus the legacy `GET` and `DELETE` (`#session-end`) rows and the synthetic legacy
+ * `response:ping` row (the client's answer to the recorded server ping), with the conformance cases
+ * whose (synthetic, unverified) fixtures each answers. No row writes anything. Kept in sync with
+ * the handlers by construction (both come from one route table).
  */
 export const mcpEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> =
   mcpApiRoutes.flatMap(routeManifest)
 
 /**
  * Optional fault filter; an omitted field matches every request. `method` is the HTTP method
- * (`POST` or `GET`, never a row's `RPC`); `path` is the raw request path (ending in `*`, a
- * prefix); `route` is a manifest row path (for example
+ * (`POST`, `GET`, or `DELETE`, never a row's `RPC`); `path` is the raw request path (ending in `*`,
+ * a prefix); `route` is a manifest row path (for example
  * `https://mcp.example.test/legacy/mcp#tools/list`), and a value naming no row is rejected when
  * the fault is added.
  */
@@ -353,7 +356,8 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
       invalidCallAnswersRpcError: drills.invalidCallAnswersRpcError === true,
       absentCallAnswersResult: drills.absentCallAnswersResult === true,
       unauthorizedWithoutChallenge: drills.unauthorizedWithoutChallenge === true,
-      pingAnswerRejected: drills.pingAnswerRejected === true
+      pingAnswerRejected: drills.pingAnswerRejected === true,
+      sessionEndRejected: drills.sessionEndRejected === true
     },
     reservedDigest: mcpBearerDigest(mcpEmulatorReservedInvalidCredential, mcpEmulatorOrigin),
     afloatReservedDigest: mcpBearerDigest(afloatReservedRemainder, mcpEmulatorAfloatOrigin),

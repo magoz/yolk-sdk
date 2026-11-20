@@ -75,12 +75,16 @@
  * `mcp.legacy.server-ping` (a server's ping answered by the client: `2025-11-25` lets a server ping
  * but never requires it, and `2026-07-28` removed `ping`).
  *
+ * Closing a legacy client that holds a session sends `DELETE` with it (`terminateSession()`,
+ * best effort, at most 2 s; basic/transports "Session Management" item 5): `mcp.legacy.session`
+ * covers it, and every legacy fixture with a session ends with it.
+ *
  * Not covered, because the client never sends them (`listTools` and `callTool` only; spec sources
- * in `AGENTS.md`): `DELETE` (`close()` only aborts; the SDK's `terminateSession()` is never
- * called), the client's own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
- * (removed in `2026-07-28`), `tasks/*` (no task capability is declared; an extension in
- * `2026-07-28`), and JSON-RPC batches (removed in `2025-06-18`); servers' `notifications/message`
- * are only ignored (the legacy fixtures carry one). URL policy, stdio and timeouts are unit tests.
+ * in `AGENTS.md`): the client's own `ping`, `resources/*`, `prompts/*`, `completion/*`,
+ * `logging/setLevel` (removed in `2026-07-28`), `tasks/*` (no task capability is declared; an
+ * extension in `2026-07-28`), and JSON-RPC batches (removed in `2025-06-18`); servers'
+ * `notifications/message` are only ignored (the legacy fixtures carry one). URL policy, stdio and
+ * timeouts are unit tests.
  *
  * @experimental
  */
@@ -763,10 +767,11 @@ export const mcpModernStatelessCase: McpConformanceCase = defineConformanceCase(
 
 export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
   id: 'mcp.legacy.session',
-  title: 'the legacy handshake issues a usable session and acknowledges initialized with 202',
+  title:
+    'the legacy handshake issues a usable session, acknowledges initialized with 202, and the client ends the session',
   safety: 'read',
-  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request.',
-  wire: '`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live).',
+  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request. Each operation is its own connection, so the client no longer needs the session when it closes: it sends `DELETE` with the session id (MCP `2025-11-25` basic/transports, "Session Management" item 5: a client SHOULD; the server MAY answer 405, and a 404 means the session is already gone), awaited but best effort with a short timeout (at most 2 s), never changing the operation\'s result. Without a session id, or when the operation was interrupted, it sends none.',
+  wire: "`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live). With a session issued, the client sends exactly one `DELETE` to the target URL, after its last POST, carrying the session id; the server answers it 2xx (the session ended), 404 (the session is already gone: a server MUST answer 404 to a session it ended, and some servers that do not route `DELETE` answer it too) or 405 (it does not let clients end sessions) within the client's termination timeout (no answer is no evidence, and fails). Without one, the client sends no `DELETE`.",
   fixtures: [mcpLegacySessionFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -844,6 +849,51 @@ export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
     if (Exit.isFailure(exit)) {
       return yield* exit
     }
+
+    // The session end (basic/transports, "Session Management" item 5); its session echo is
+    // checked above with every later request.
+    const deletes = exchanges.filter(exchange => exchange.method === 'DELETE')
+
+    if (session === undefined) {
+      return yield* expectEqual(
+        deletes.length,
+        0,
+        'expected no DELETE when initialize issued no session id'
+      )
+    }
+
+    yield* expectEqual(
+      deletes.length,
+      1,
+      'expected the client to end the issued session with one DELETE'
+    )
+
+    const [end] = deletes
+
+    if (end === undefined) {
+      return
+    }
+
+    yield* expectConformance(
+      end.url === urlKey(target.url) &&
+        exchanges.indexOf(end) > exchanges.map(exchange => exchange.method).lastIndexOf('POST'),
+      'expected the DELETE to go to the target URL after the last POST'
+    )
+
+    // No status is no evidence: the observer records the request before the transport answers,
+    // and the client gives up on the DELETE after its short timeout without failing.
+    yield* expectConformance(
+      end.status !== undefined,
+      "expected the server to answer the DELETE (no answer was observed: a transport failure, or the client's termination timeout)"
+    )
+    yield* expectConformance(
+      end.status === undefined ||
+        (end.status >= 200 && end.status < 300) ||
+        end.status === 404 ||
+        end.status === 405,
+      'expected the DELETE to be answered 2xx (the session ended), 404 (it was already gone) or 405 (the server does not let clients end sessions)',
+      { actual: end.status ?? null }
+    )
   })
 })
 
@@ -852,7 +902,7 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
   title: 'answers are JSON or a finite SSE stream holding the response once; 202 has no body',
   safety: 'read',
   docs: 'The client dispatches on `content-type`: `application/json` holds the response; `text/event-stream` is read event by event (`_handleSseStream` over `EventSourceParserStream`, which dispatches only completed events and has no flush, so an unterminated final event is never read), skipping events with empty data (priming events) and events whose `event:` is neither absent nor `message`, and ignoring notifications before or after the response. The Effect fetch bridge (`makeEffectFetch`) buffers the whole body, so an SSE answer to a POST must END, or the call only fails at the request timeout. A 202 body is discarded.',
-  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 has an empty body (a client-sent response, such as the answer to a server ping, is no request: only a 202 answering it is checked, so this case does not flag one answered 200 with a body; the opt-in `mcp.legacy.server-ping` requires its empty 202). Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
+  wire: 'Over a listing, every 2xx answer to a JSON-RPC request is `application/json` or `text/event-stream`. A JSON answer holds the response with the request id. An SSE answer ends (the client reads it to the end) and, among the events the client reads (completed, non-empty data, no `event:` or `event: message`; an unterminated final block is not an event), holds the response with the request id exactly once, every one of them JSON; priming events, other event types, and notifications before or after the response are allowed (unverified: that live servers send any). A 202 answering a POST has an empty body (a client-sent response, such as the answer to a server ping, is no request: only a 202 answering it is checked, so this case does not flag one answered 200 with a body; the opt-in `mcp.legacy.server-ping` requires its empty 202). Each response arrives on its own POST answer (unverified: SEP-1699 resumption, where the server primes, closes the POST stream and delivers the response on a `last-event-id` GET, is not accepted, although the SDK accepts it).',
   fixtures: [mcpResponseEncodingModernFixture.id, mcpResponseEncodingLegacyFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -865,7 +915,9 @@ export const mcpResponseEncodingCase: McpConformanceCase = defineConformanceCase
       const label = labelOf(exchange)
       const status = exchange.status
 
-      if (status === 202) {
+      // basic/transports items 3 and 4: a POSTed notification or response accepted with 202 has
+      // no body. Nothing constrains the 202 of another method (the session-ending DELETE).
+      if (status === 202 && exchange.method === 'POST') {
         yield* expectConformance(
           exchange.responseBody === '',
           `expected 202 with no body (${label})`,

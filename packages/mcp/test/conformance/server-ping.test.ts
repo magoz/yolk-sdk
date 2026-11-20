@@ -243,6 +243,13 @@ describe('mcp.legacy.server-ping (opt-in)', () => {
       )
       expect(entries).toHaveLength(fixture.exchanges.length)
 
+      // The listing ends its session with one DELETE, after its last POST (the ping's answer
+      // included), wherever the standing GET arrived.
+      const methods = entries.map(entry => entry.method)
+
+      expect(methods.filter(method => method === 'DELETE')).toEqual(['DELETE'])
+      expect(methods.indexOf('DELETE')).toBeGreaterThan(methods.lastIndexOf('POST'))
+
       for (const entry of entries) {
         if (entry.match.outcome !== 'matched') {
           return expect.fail(`unmatched ${entry.method} ${entry.url}`)

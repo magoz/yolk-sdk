@@ -1,4 +1,15 @@
-import { Cause, Duration, Effect, Option, Queue, Result, Stream, Struct } from 'effect'
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Option,
+  Predicate,
+  Queue,
+  Result,
+  Stream,
+  Struct
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   CLIENT_CAPABILITIES_META_KEY,
@@ -15,6 +26,7 @@ import {
   ProtocolErrorCode,
   SdkError,
   SdkErrorCode,
+  SdkHttpError,
   StreamableHTTPClientTransport,
   type CallToolRequestOptions,
   type CallToolRequestParams,
@@ -53,7 +65,7 @@ import {
 } from './elicitation.ts'
 import { McpClientCapabilityRequiredError, McpError, McpInputRequiredError } from './errors.ts'
 import {
-  decodeJsonRpcResponseFromJson,
+  decodeJsonRpcResponse,
   decodeToolCallResult,
   decodeToolsListResult,
   encodeJsonRpcMessage,
@@ -61,6 +73,7 @@ import {
   InitializeParams,
   InitializedNotification,
   jsonRpcErrorToMcpError,
+  JsonRpcNotification,
   JsonRpcRequest,
   legacyMcpProtocolVersion,
   mcpToolToToolDef,
@@ -68,7 +81,6 @@ import {
   ToolsCallParams,
   type McpToolAnnotations,
   type McpToolExposureResolver,
-  type JsonRpcNotification,
   type JsonRpcResponse,
   type ToolsListResult
 } from './protocol.ts'
@@ -205,6 +217,70 @@ const mapSdkError = (server: string, operation: string) => (error: unknown) =>
         cause: sdkFailureCause(error)
       })
 
+/** How long a closing legacy client waits for its `DELETE` (capped by `timeoutMs`). */
+const sessionTerminationTimeoutMs = 2_000
+
+const logSessionTermination = (server: string, outcome: string) =>
+  Effect.logDebug('MCP session termination failed; the server will expire the session', {
+    server,
+    outcome
+  })
+
+/** Why ending a session did not settle cleanly (a 404 means it was already gone). */
+type SessionEndFailure =
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'failed'; readonly outcome: string }
+
+const sessionEndFailure = (error: unknown): SessionEndFailure => {
+  if (!(error instanceof SdkHttpError)) return { kind: 'failed', outcome: 'transport failure' }
+
+  return error.status === 404
+    ? { kind: 'gone' }
+    : { kind: 'failed', outcome: `HTTP ${error.status}` }
+}
+
+/**
+ * Ends the session of a closing legacy-era client. MCP `2025-11-25` basic/transports, "Session
+ * Management" item 5: a client that no longer needs a session SHOULD send an HTTP `DELETE` with
+ * its `MCP-Session-Id`, and the server MAY answer 405 (it does not let clients end sessions;
+ * `terminateSession` accepts that answer). A 404 is accepted silently too: item 3 has a server
+ * answer 404 to a session it already ended, and servers that do not route `DELETE` may answer it.
+ * Every operation builds its own SDK client, so its session is never needed again. Best effort:
+ * bounded by a short timeout (a `DELETE` still in flight is aborted when the client closes), any
+ * other failure only logged at debug level with no server text, and the operation's own result
+ * unchanged, even when reading the client's state throws (a defect here is logged, never
+ * raised). Nothing is sent without a session id (a stateless legacy server issues none), on a
+ * modern connection (`2026-07-28` has no sessions), or when the operation was interrupted before
+ * closing (the session is left to expire).
+ */
+const endLegacySession = (
+  server: string,
+  client: SdkClient,
+  transport: StreamableHTTPClientTransport,
+  options: McpClientOptions | undefined
+): Effect.Effect<void> =>
+  Effect.suspend(() =>
+    client.getProtocolEra() !== 'legacy' || transport.sessionId === undefined
+      ? Effect.void
+      : Effect.tryPromise({
+          try: () => transport.terminateSession(),
+          catch: sessionEndFailure
+        }).pipe(
+          Effect.timeoutOption(
+            Duration.millis(Math.min(sessionTerminationTimeoutMs, timeoutMs(options)))
+          ),
+          Effect.flatMap(
+            Option.match({
+              onNone: () => logSessionTermination(server, 'timed out'),
+              onSome: () => Effect.void
+            })
+          ),
+          Effect.catch(failure =>
+            failure.kind === 'gone' ? Effect.void : logSessionTermination(server, failure.outcome)
+          )
+        )
+  ).pipe(Effect.catchDefect(() => logSessionTermination(server, 'defect')))
+
 const withRemoteSdkClient = <A>(
   config: McpRemoteServerConfig,
   options: McpClientOptions | undefined,
@@ -249,7 +325,23 @@ const withRemoteSdkClient = <A>(
           try: () => run(sdkClient),
           catch: mapSdkError(config.name, 'MCP request failed')
         }),
-      () => Effect.promise(() => sdkClient.close()).pipe(Effect.catch(() => Effect.void))
+      (_, exit) =>
+        // An interrupted operation closes at once: ending its session must never delay that.
+        (Exit.hasInterrupts(exit)
+          ? Effect.void
+          : endLegacySession(config.name, sdkClient, transport, options)
+        ).pipe(
+          // A failed close is only logged: it never replaces the operation's own result.
+          Effect.andThen(
+            Effect.tryPromise(() => sdkClient.close()).pipe(
+              Effect.catch(() =>
+                Effect.logDebug('MCP client close failed; the operation keeps its own result', {
+                  server: config.name
+                })
+              )
+            )
+          )
+        )
     )
   })
 
@@ -302,84 +394,6 @@ const elicitationMeta = (client: SdkClient, options: McpClientOptions | undefine
         })
       }
 
-type EncodedLocalMessage = {
-  readonly message: JsonRpcRequest | JsonRpcNotification
-  readonly line: string
-}
-
-const requestLocalEncoded = (
-  config: McpLocalServerConfig,
-  messages: ReadonlyArray<EncodedLocalMessage>,
-  expectedResponses: number,
-  options?: McpClientOptions
-) => {
-  const policy = securityPolicy(options)
-
-  if (!policy.allowLocalServers) {
-    return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
-  }
-
-  const command = config.command[0]
-
-  if (command === undefined) {
-    return fail(config.name, 'Local MCP command must not be empty', 'validation')
-  }
-
-  return Effect.gen(function* () {
-    const stdin = Stream.fromIterable(messages.map(message => `${message.line}\n`)).pipe(
-      Stream.encodeText
-    )
-
-    const child = yield* ChildProcess.make(command, config.command.slice(1), {
-      env: config.environment ?? {},
-      extendEnv: false,
-      stdin: { stream: stdin, endOnDone: true },
-      stderr: 'ignore'
-    })
-
-    const lines = yield* child.stdout.pipe(
-      Stream.decodeText,
-      Stream.splitLines,
-      Stream.filter(line => line.length > 0),
-      Stream.take(expectedResponses),
-      Stream.runCollect
-    )
-
-    const responses = yield* Effect.forEach(lines, line =>
-      decodeJsonRpcResponseFromJson(config.name, line)
-    )
-
-    if (responses.length < expectedResponses) {
-      return yield* fail(config.name, 'Local MCP did not return expected response', 'protocol')
-    }
-
-    return responses
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOrElse({
-      duration: Duration.millis(timeoutMs(options)),
-      orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
-    }),
-    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport'))
-  )
-}
-
-const requestLocal = (
-  config: McpLocalServerConfig,
-  requests: ReadonlyArray<JsonRpcRequest | JsonRpcNotification>,
-  expectedResponses: number,
-  options?: McpClientOptions
-) =>
-  Effect.gen(function* () {
-    const messages = yield* Effect.forEach(requests, request =>
-      encodeJsonRpcMessage(config.name, request).pipe(
-        Effect.map(line => ({ message: request, line }))
-      )
-    )
-
-    return yield* requestLocalEncoded(config, messages, expectedResponses, options)
-  })
-
 const initializeRequest = (options?: McpClientOptions) => {
   const info = clientInfo(options)
 
@@ -413,64 +427,228 @@ const callToolRequest = (input: { readonly toolName: string; readonly params: un
     })
   })
 
-const responseById = (responses: ReadonlyArray<JsonRpcResponse>, id: string | number) =>
-  Option.fromNullishOr(responses.find(response => response.id === id))
+/** One local stdio session that awaits answers between requests (stdin stays open until done). */
+type LocalSession = {
+  readonly send: (message: JsonRpcRequest | JsonRpcNotification) => Effect.Effect<void, McpError>
+  readonly response: (id: JsonRpcResponse['id']) => Effect.Effect<JsonRpcResponse, McpError>
+}
 
-// One local session: initialize, then `requests` in order; answers every response.
-const requestLocalSessionResponses = (
+/**
+ * One line a local server wrote on stdout. MCP `2025-11-25` basic/transports (stdio): every line
+ * is one JSON-RPC request, notification, or response, and a server MUST NOT write anything else
+ * to stdout. So a line that is none of them breaks the session (a protocol error), but a server's
+ * own requests and notifications do not.
+ */
+type LocalServerMessage =
+  | { readonly kind: 'response'; readonly response: JsonRpcResponse }
+  | { readonly kind: 'request'; readonly request: JsonRpcRequest }
+  | { readonly kind: 'notification' }
+
+const decodeLocalJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))
+
+/**
+ * MCP params are an object (basic/index: `params?: { [key: string]: unknown }`), so an inbound
+ * request or notification whose `params` is a scalar or an array is malformed; the shared
+ * `JsonRpcRequest`/`JsonRpcNotification` schemas leave `params` unknown for outbound use.
+ */
+const InboundParams = Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+
+const decodeLocalRequest = Schema.decodeUnknownEffect(
+  Schema.Struct({ ...JsonRpcRequest.fields, params: InboundParams })
+)
+
+const decodeLocalNotification = Schema.decodeUnknownEffect(
+  Schema.Struct({ ...JsonRpcNotification.fields, params: InboundParams })
+)
+
+/**
+ * Classifies a stdout line by its members, as JSON-RPC 2.0 does: a `method` makes it a request
+ * (with an `id`) or a notification (without one), anything else must be a response. A request
+ * whose `id` is not a string or a number (MCP forbids `null`) is malformed, not a notification.
+ */
+const decodeLocalServerMessage = (
+  server: string,
+  line: string
+): Effect.Effect<LocalServerMessage, McpError> => {
+  const invalid = (kind: string) => (error: unknown) =>
+    new McpError({
+      server,
+      message: `Invalid MCP JSON-RPC ${kind}: ${String(error)}`,
+      cause: 'validation'
+    })
+
+  return Effect.gen(function* () {
+    const value = yield* decodeLocalJson(line).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({ server, message: `Malformed MCP JSON: ${String(error)}`, cause: 'parse' })
+      )
+    )
+
+    if (!Predicate.hasProperty(value, 'method')) {
+      const response = yield* decodeJsonRpcResponse(value).pipe(
+        Effect.mapError(invalid('response'))
+      )
+
+      return { kind: 'response', response }
+    }
+
+    if (Predicate.hasProperty(value, 'id')) {
+      const request = yield* decodeLocalRequest(value).pipe(Effect.mapError(invalid('request')))
+
+      return { kind: 'request', request }
+    }
+
+    yield* decodeLocalNotification(value).pipe(Effect.mapError(invalid('notification')))
+
+    return { kind: 'notification' }
+  })
+}
+
+/** JSON-RPC 2.0 "Method not found". */
+const methodNotFoundCode = -32_601
+
+/**
+ * The client's answer to a server request. MCP `2025-11-25` basic/utilities/ping: either side may
+ * send `ping` at any time (basic/lifecycle: even before `notifications/initialized`), and the
+ * receiver MUST respond promptly with an empty result. Every other server-to-client request
+ * (`roots/list`, `sampling/createMessage`, `elicitation/create`) needs a client capability, and
+ * `initialize` declares none (`capabilities: {}`; basic/lifecycle, "Capability Negotiation"), so
+ * it is answered "Method not found" and the session goes on.
+ */
+const localServerRequestAnswer = (request: JsonRpcRequest): JsonRpcResponse =>
+  request.method === 'ping'
+    ? { jsonrpc: '2.0', id: request.id, result: {} }
+    : {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: methodNotFoundCode, message: 'Method not found' }
+      }
+
+const withLocalSession = <A>(
   config: McpLocalServerConfig,
-  requests: ReadonlyArray<JsonRpcRequest>,
-  options?: McpClientOptions
+  options: McpClientOptions | undefined,
+  run: (session: LocalSession) => Effect.Effect<A, McpError>
+): Effect.Effect<A, McpError, ChildProcessSpawner.ChildProcessSpawner> => {
+  const command = config.command[0]
+
+  if (!securityPolicy(options).allowLocalServers) {
+    return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
+  }
+
+  if (command === undefined) {
+    return fail(config.name, 'Local MCP command must not be empty', 'validation')
+  }
+
+  return Effect.gen(function* () {
+    const stdin = yield* Queue.unbounded<string, Cause.Done>()
+
+    const child = yield* ChildProcess.make(command, config.command.slice(1), {
+      env: config.environment ?? {},
+      extendEnv: false,
+      stdin: { stream: Stream.fromQueue(stdin).pipe(Stream.encodeText), endOnDone: true },
+      stderr: 'ignore'
+    })
+
+    const responses = yield* Queue.unbounded<JsonRpcResponse, McpError | Cause.Done>()
+
+    const write = (message: JsonRpcRequest | JsonRpcNotification | JsonRpcResponse) =>
+      encodeJsonRpcMessage(config.name, message).pipe(
+        Effect.flatMap(line => Queue.offer(stdin, `${line}\n`)),
+        Effect.asVoid
+      )
+
+    // Server requests are answered on stdin as they arrive (one after the session ended is
+    // dropped: stdin is closed); notifications get no answer (basic/index: the receiver MUST NOT
+    // respond) and are ignored; responses are handed to `response`.
+    const handle = (message: LocalServerMessage): Effect.Effect<void, McpError> => {
+      switch (message.kind) {
+        case 'response':
+          return Queue.offer(responses, message.response).pipe(Effect.asVoid)
+        case 'request':
+          return write(localServerRequestAnswer(message.request))
+        case 'notification':
+          return Effect.void
+      }
+    }
+
+    yield* child.stdout.pipe(
+      Stream.decodeText,
+      Stream.splitLines,
+      Stream.filter(line => line.length > 0),
+      Stream.mapEffect(line => decodeLocalServerMessage(config.name, line)),
+      Stream.runForEach(handle),
+      Effect.flatMap(() => Queue.end(responses)),
+      Effect.catch(error =>
+        Queue.fail(
+          responses,
+          mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport')(error)
+        )
+      ),
+      Effect.forkScoped
+    )
+
+    // Responses may arrive in any order: keep the ones not asked for yet.
+    const received = new Map<JsonRpcResponse['id'], JsonRpcResponse>()
+
+    const response = (id: JsonRpcResponse['id']): Effect.Effect<JsonRpcResponse, McpError> =>
+      Effect.suspend(() => {
+        const found = received.get(id)
+
+        if (found !== undefined) return Effect.succeed(found)
+
+        return Queue.take(responses).pipe(
+          Effect.catchIf(Cause.isDone, () =>
+            fail(config.name, 'Local MCP did not return expected response', 'protocol')
+          ),
+          Effect.flatMap(next => {
+            received.set(next.id, next)
+
+            return response(id)
+          })
+        )
+      })
+
+    const result = yield* run({ send: write, response })
+
+    yield* Queue.end(stdin)
+
+    return result
+  }).pipe(
+    Effect.scoped,
+    Effect.timeoutOrElse({
+      duration: Duration.millis(timeoutMs(options)),
+      orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
+    }),
+    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport'))
+  )
+}
+
+/**
+ * Opens a local session: sends `initialize`, `notifications/initialized`, and `tools/list` at
+ * once, fails when `initialize` is answered with an error, and returns the listing's response
+ * unread (a call decides what a failed listing means).
+ */
+const openLocalSession = (
+  server: string,
+  session: LocalSession,
+  options: McpClientOptions | undefined
 ) =>
   Effect.gen(function* () {
     const initialize = initializeRequest(options)
+    const list = listToolsRequest()
 
-    const responses = yield* requestLocal(
-      config,
-      [
-        initialize,
-        InitializedNotification.make({
-          jsonrpc: '2.0',
-          method: 'notifications/initialized'
-        }),
-        ...requests
-      ],
-      requests.length + 1,
-      options
+    yield* session.send(initialize)
+    yield* session.send(
+      InitializedNotification.make({ jsonrpc: '2.0', method: 'notifications/initialized' })
     )
+    yield* session.send(list)
+    yield* session
+      .response(initialize.id)
+      .pipe(Effect.flatMap(response => unwrapResponse(server, response)))
 
-    const initializeResponse = responseById(responses, initialize.id)
-
-    if (Option.isNone(initializeResponse)) {
-      return yield* fail(config.name, 'Local MCP did not return initialize response', 'protocol')
-    }
-
-    yield* unwrapResponse(config.name, initializeResponse.value)
-
-    return responses
+    return yield* session.response(list.id)
   })
-
-// The unwrapped result of one request's response.
-const localResult = (
-  config: McpLocalServerConfig,
-  responses: ReadonlyArray<JsonRpcResponse>,
-  request: JsonRpcRequest
-) => {
-  const response = responseById(responses, request.id)
-
-  return Option.isNone(response)
-    ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
-    : unwrapResponse(config.name, response.value)
-}
-
-const requestLocalSession = (
-  config: McpLocalServerConfig,
-  request: JsonRpcRequest,
-  options?: McpClientOptions
-) =>
-  requestLocalSessionResponses(config, [request], options).pipe(
-    Effect.flatMap(responses => localResult(config, responses, request))
-  )
 
 const resolvedMcpTools = (
   config: McpServerConfig,
@@ -535,7 +713,12 @@ export const listLocalMcpServerTools = (
     }
 
     yield* validateLocal(config, securityPolicy(options))
-    const result = yield* requestLocalSession(config, listToolsRequest(), options)
+
+    const result = yield* withLocalSession(config, options, session =>
+      openLocalSession(config.name, session, options).pipe(
+        Effect.flatMap(listResponse => unwrapResponse(config.name, listResponse))
+      )
+    )
 
     const listed = yield* decodeToolsListResult(result).pipe(
       Effect.mapError(
@@ -1173,97 +1356,6 @@ export const resumeRemoteMcpServerToolCall = (
     return yield* resumableOutcome(input, step, argumentsDigest)
   })
 
-/** One local stdio session that awaits answers between requests (stdin stays open until done). */
-type LocalSession = {
-  readonly send: (message: JsonRpcRequest | JsonRpcNotification) => Effect.Effect<void, McpError>
-  readonly response: (id: JsonRpcResponse['id']) => Effect.Effect<JsonRpcResponse, McpError>
-}
-
-const withLocalSession = <A>(
-  config: McpLocalServerConfig,
-  options: McpClientOptions | undefined,
-  run: (session: LocalSession) => Effect.Effect<A, McpError>
-): Effect.Effect<A, McpError, ChildProcessSpawner.ChildProcessSpawner> => {
-  const command = config.command[0]
-
-  if (!securityPolicy(options).allowLocalServers) {
-    return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
-  }
-
-  if (command === undefined) {
-    return fail(config.name, 'Local MCP command must not be empty', 'validation')
-  }
-
-  return Effect.gen(function* () {
-    const stdin = yield* Queue.unbounded<string, Cause.Done>()
-
-    const child = yield* ChildProcess.make(command, config.command.slice(1), {
-      env: config.environment ?? {},
-      extendEnv: false,
-      stdin: { stream: Stream.fromQueue(stdin).pipe(Stream.encodeText), endOnDone: true },
-      stderr: 'ignore'
-    })
-
-    const responses = yield* Queue.unbounded<JsonRpcResponse, McpError | Cause.Done>()
-
-    yield* child.stdout.pipe(
-      Stream.decodeText,
-      Stream.splitLines,
-      Stream.filter(line => line.length > 0),
-      Stream.mapEffect(line => decodeJsonRpcResponseFromJson(config.name, line)),
-      Stream.runForEach(response => Queue.offer(responses, response)),
-      Effect.flatMap(() => Queue.end(responses)),
-      Effect.catch(error =>
-        Queue.fail(
-          responses,
-          mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport')(error)
-        )
-      ),
-      Effect.forkScoped
-    )
-
-    // Responses may arrive in any order: keep the ones not asked for yet.
-    const received = new Map<JsonRpcResponse['id'], JsonRpcResponse>()
-
-    const response = (id: JsonRpcResponse['id']): Effect.Effect<JsonRpcResponse, McpError> =>
-      Effect.suspend(() => {
-        const found = received.get(id)
-
-        if (found !== undefined) return Effect.succeed(found)
-
-        return Queue.take(responses).pipe(
-          Effect.catchIf(Cause.isDone, () =>
-            fail(config.name, 'Local MCP did not return expected response', 'protocol')
-          ),
-          Effect.flatMap(next => {
-            received.set(next.id, next)
-
-            return response(id)
-          })
-        )
-      })
-
-    const send = (message: JsonRpcRequest | JsonRpcNotification) =>
-      encodeJsonRpcMessage(config.name, message).pipe(
-        Effect.flatMap(line => Queue.offer(stdin, `${line}\n`)),
-        Effect.asVoid
-      )
-
-    const result = yield* run({ send, response })
-
-    yield* Queue.end(stdin)
-
-    return result
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOrElse({
-      duration: Duration.millis(timeoutMs(options)),
-      orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
-    }),
-    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport'))
-  )
-}
-
 const invalidListing = (server: string, error: unknown) =>
   error instanceof McpError
     ? error
@@ -1305,7 +1397,9 @@ const localOutputValidator = (
  * and decoded, then the output validator compiled, and only then `tools/call`. So anything that
  * fails before the call (an `initialize` error, an `outputSchema` that is unusable or does not
  * compile) sends no `tools/call`, nor does a broken session (a stdout line that is no JSON-RPC
- * response, an early end before the listing's answer). A listing answered with an error or an
+ * message, an early end before the listing's answer). The server's own requests are answered on
+ * the way (`ping` with an empty result, anything else "Method not found") and its notifications
+ * ignored. A listing answered with an error or an
  * undecodable result, or one that does not hold the tool (the first page only), does not fail
  * the call: it runs without output validation (a value-free warning is logged;
  * `mcpToolOutputDecoder` still checks the `{ value, files }` envelope). A successful result of a
@@ -1320,22 +1414,10 @@ export const callLocalMcpServerTool = (
 
     const toolCallResult = yield* withLocalSession(input.config, input.options, session =>
       Effect.gen(function* () {
-        const initialize = initializeRequest(input.options)
-        const list = listToolsRequest()
-
-        yield* session.send(initialize)
-        yield* session.send(
-          InitializedNotification.make({ jsonrpc: '2.0', method: 'notifications/initialized' })
-        )
-        yield* session.send(list)
-        yield* session
-          .response(initialize.id)
-          .pipe(Effect.flatMap(response => unwrapResponse(server, response)))
-
-        // A broken session (a line that is no JSON-RPC response, an early end) fails the call
+        // A broken session (a line that is no JSON-RPC message, an early end) fails the call
         // before `tools/call`: its answer could not be read either. Only the listing's own
         // failures (an error answer, an undecodable result) let the call run unvalidated.
-        const listResponse = yield* session.response(list.id)
+        const listResponse = yield* openLocalSession(server, session, input.options)
 
         const listed = yield* unwrapResponse(server, listResponse).pipe(
           Effect.flatMap(decodeToolsListResult),

@@ -517,9 +517,20 @@ const pingListing = legacyServerPingListingExchanges().filter(
   exchange => !isClientResponse(exchange.request.body)
 )
 
-/** `fixture` (a legacy calling fixture) against a server that pings during every `initialize`. */
+/**
+ * `fixture` (a legacy calling fixture) against a server that pings during every `initialize`. Each
+ * operation ends its session with a `DELETE` (`pingListing` ends with it, and `rest` carries the
+ * second); replay matches it on its own method, after the operation's POSTs.
+ */
 const pinging = (fixture: WireFixture, callInitialize?: WireResponse): WireFixture => {
-  const call = fixture.exchanges.at(-1)
+  const call = fixture.exchanges
+    .filter(exchange => {
+      const body = exchange.request.body
+
+      return Predicate.hasProperty(body, 'method') && body.method === 'tools/call'
+    })
+    .at(-1)
+
   const [discover, initialize, ...rest] = pingListing
 
   if (call === undefined || discover === undefined || initialize === undefined) {

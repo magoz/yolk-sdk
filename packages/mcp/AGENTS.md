@@ -29,7 +29,7 @@
 - Full-core server HTTP uses `createMcpHandler`; modern stdio uses `serveStdio` from the Node subpath. Both preserve legacy serving unless explicitly rejected.
 - Remote MCP requires `https:` by default; `http://localhost` is dev-policy gated.
 - Local stdio client core uses Effect platform process/stream APIs, not raw `node:child_process`; Node wrappers only provide `NodeServices.layer`.
-- Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id.
+- Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id. Listings and calls share one session runner (`withLocalSession`) that keeps stdin open until the operation has its answers. Each stdout line is classified as JSON-RPC 2.0 does (MCP `2025-11-25` basic/transports, stdio: a line is one request, notification, or response, and nothing else may reach stdout): a server `ping` is answered `{"jsonrpc":"2.0","id":<id>,"result":{}}` on stdin (basic/utilities/ping: MUST respond promptly; basic/lifecycle: even before `notifications/initialized`), any other server request JSON-RPC `-32601` (the client declares no capability, so `roots/list`, `sampling/createMessage` or `elicitation/create` are not for it), and a notification is ignored (basic/index: no response); a line that is none of them (not JSON, no `method` and no `result`/`error`, a request `id` that is `null`, a request or notification whose `params` is not an object) still breaks the session. Server and client ids are separate spaces (a server ping may reuse a client id). Tests: `test/client/client.test.ts` ("local servers may ping, ask, and notify"; a real process that waits for each answer).
 - Decode wire JSON in two steps: JSON string → unknown (`Schema.fromJsonString(Schema.Unknown)`) → protocol schema.
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server body bound: `makeMcpToolServer`'s `maxRequestBodySize` goes to `createMcpHandler` (both eras answer `413` over it; default 4 MiB) and to `isLegacyRequest` in `isListenRequest`, so both read under one bound. An unusable value answers 500 (`-32603`, naming the field) on the SDK path instead of the SDK's `RangeError` on every request. The header-less JSON path is unbounded: hosts cap it. Tests: `test/server/body-size.test.ts`.
@@ -108,7 +108,7 @@
   `test/server/forward.test.ts`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
 - Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
-- Typed results (ADR 0013): `mcpToolToToolDef` declares `mcpToolOutputSchema` as `ToolDef.outputSchema` (never sent to providers): `{ value, files }`, `value` the server's plain-JSON-object `outputSchema` (its `$defs`/`definitions` hoisted to the root; a colliding or `$id` schema, or any other value, leaves it unknown), `files` `Array<FileRef | FileUnavailable>` with the protocol's `toolFileJsonSchemaDefinitions`. `callRemoteMcpServerTool`, `callLocalMcpServerTool` and resumable calls return `mcpToolResult`: `value` is `structuredContent`, else the text of `text` blocks and embedded text resources in order, parsed once when it is one JSON object or array (`mcpTextValue`), else the text, `null` without text (`resource_link` blocks are references and never enter it); blobs, images and audio are captured as file fields through `CallMcpServerToolInput.fileCapture` when given, else the ambient `ToolFileCapture` (calls outside `resolveTools`, such as HITL resumes, need the option); `ToolResult.files` comes from `toolOutputFiles`. Model content: a result without file blocks is byte-identical to `toolCallResultToToolResult`; otherwise each block in order, images and audio as the server sent them (never renamed or MIME-normalized) followed by their `File` part once stored. Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder` (`McpToolOutput`; `resolveTools` requires a decoder whenever `def.outputSchema` is set). The local client (`callLocalMcpServerTool`, `withLocalSession`) keeps one stdio session but awaits each answer before the next request: `initialize` and `tools/list` first, the listing decoded and the validator compiled, and only then `tools/call`, so nothing that fails before dispatch fails after a write ran. An `initialize` error, or a listed `outputSchema` that is not a usable MCP output schema (`isSpecType.Tool` over the tool's name, a fixed object input schema and the listed `outputSchema`; the input schema is never validated) or does not compile, fails before any `tools/call` (`validation`, the remote message). A broken session before the listing's answer (a stdout line that is no JSON-RPC response, an early end) fails the call with no `tools/call` sent. A listing answered with an error or an undecodable result, or one that lacks the tool (first page only), never fails the call: it runs without output validation and logs a value-free warning. The test fake reads stdin on its own detached fiber, so `sent` also holds requests written just before the client failed. Only a real `structuredContent` mismatch against a usable schema fails after the call, with the remote rules (`assertStructuredOutput`). Tests drive a scripted stdio fake that answers what it reads on stdin and assert the requests sent (`test/client/client.test.ts`, "local calls list before they call"). Error results stay `toolCallResultToToolResult`. Tests: `test/client/typed-result.test.ts`, `test/client/client.test.ts` (local validation), `test/client/elicitation.test.ts` (resumed blobs with and without `fileCapture`).
+- Typed results (ADR 0013): `mcpToolToToolDef` declares `mcpToolOutputSchema` as `ToolDef.outputSchema` (never sent to providers): `{ value, files }`, `value` the server's plain-JSON-object `outputSchema` (its `$defs`/`definitions` hoisted to the root; a colliding or `$id` schema, or any other value, leaves it unknown), `files` `Array<FileRef | FileUnavailable>` with the protocol's `toolFileJsonSchemaDefinitions`. `callRemoteMcpServerTool`, `callLocalMcpServerTool` and resumable calls return `mcpToolResult`: `value` is `structuredContent`, else the text of `text` blocks and embedded text resources in order, parsed once when it is one JSON object or array (`mcpTextValue`), else the text, `null` without text (`resource_link` blocks are references and never enter it); blobs, images and audio are captured as file fields through `CallMcpServerToolInput.fileCapture` when given, else the ambient `ToolFileCapture` (calls outside `resolveTools`, such as HITL resumes, need the option); `ToolResult.files` comes from `toolOutputFiles`. Model content: a result without file blocks is byte-identical to `toolCallResultToToolResult`; otherwise each block in order, images and audio as the server sent them (never renamed or MIME-normalized) followed by their `File` part once stored. Registrations of adapted tools set `decodeOutput: mcpToolOutputDecoder` (`McpToolOutput`; `resolveTools` requires a decoder whenever `def.outputSchema` is set). The local client (`callLocalMcpServerTool`, `withLocalSession`) keeps one stdio session but awaits each answer before the next request: `initialize` and `tools/list` first, the listing decoded and the validator compiled, and only then `tools/call`, so nothing that fails before dispatch fails after a write ran. An `initialize` error, or a listed `outputSchema` that is not a usable MCP output schema (`isSpecType.Tool` over the tool's name, a fixed object input schema and the listed `outputSchema`; the input schema is never validated) or does not compile, fails before any `tools/call` (`validation`, the remote message). A broken session before the listing's answer (a stdout line that is no JSON-RPC message, an early end; a server's requests and notifications are handled, not breaks) fails the call with no `tools/call` sent. A listing answered with an error or an undecodable result, or one that lacks the tool (first page only), never fails the call: it runs without output validation and logs a value-free warning. The test fake reads stdin on its own detached fiber, so `sent` also holds requests written just before the client failed. Only a real `structuredContent` mismatch against a usable schema fails after the call, with the remote rules (`assertStructuredOutput`). Tests drive a scripted stdio fake that answers what it reads on stdin and assert the requests sent (`test/client/client.test.ts`, "local calls list before they call"). Error results stay `toolCallResultToToolResult`. Tests: `test/client/typed-result.test.ts`, `test/client/client.test.ts` (local validation), `test/client/elicitation.test.ts` (resumed blobs with and without `fileCapture`).
 - Listing never fails on an `outputSchema` it cannot use. Exposure is host policy: it sets `callableBy`/`discovery`/`loading` only from its `exposure` option (`McpToolExposureResolver`: a `ToolExposure` value or `(tool, serverName) => ToolExposure`), which the listing functions take as `McpClientOptions.exposure`; without it none is set. `resolveTools` keeps the fail-closed rules. Tests: `test/client/tool-exposure.test.ts`.
 - Preserve MCP `structuredContent` (as `value`), `isError`, and supported content blocks when adapting tool results.
 - Form elicitation (MRTR, `src/client/elicitation.ts`) is host-owned and durable: never a blocking
@@ -210,28 +210,39 @@
 - Method coverage of the remote client (`listRemoteMcpServerTools`, `callRemoteMcpServerTool`; spec:
   modelcontextprotocol.io, revisions `2025-11-25` and `2026-07-28`, the two the pinned SDK speaks).
   The remote client sends only `server/discover`, `initialize`,
-  `notifications/initialized`, the standing GET, `tools/list` and `tools/call`, plus the SDK's
-  automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler; legacy
-  only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5 and 7,
-  and the SDK drops inbound requests on modern connections). With Yolk's defaults (no host
-  `sdk.capabilities` or `configureClient`), that answer is the only client-sent response a
-  compliant server can provoke (Yolk then declares no `roots`, `sampling` or legacy `elicitation`
-  capability), and `mcp.legacy.server-ping` covers it (`2025-11-25`
+  `notifications/initialized`, the standing GET, `tools/list`, `tools/call` and, closing a legacy
+  connection that holds a session, `DELETE` (basic/transports, "Session Management" item 5: a
+  client SHOULD end a session it no longer needs; every operation is its own connection), plus the
+  SDK's automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler;
+  legacy only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5
+  and 7, and the SDK drops inbound requests on modern connections). With Yolk's defaults (no host
+  `sdk.capabilities` or `configureClient`), that answer is the only client-sent response a compliant
+  server can provoke (Yolk then declares no `roots`, `sampling` or legacy `elicitation` capability),
+  and `mcp.legacy.server-ping` covers it (`2025-11-25`
   basic/utilities/ping, basic/transports "Sending Messages to the Server" items 3, 4 and 6,
-  basic/lifecycle). No case covers what the client never sends: `DELETE` (basic/transports,
-  "Session Management" item 5 says a client SHOULD terminate a session it no longer needs, but
-  `close()` only aborts and Yolk never calls the SDK's `terminateSession()`; `2026-07-28` has no
-  sessions), its own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
-  (removed in `2026-07-28`; servers' `notifications/message` are ignored and already in every legacy
-  fixture answer), `tasks/*` (task-augmented requests need a declared capability in `2025-11-25`;
-  an extension in `2026-07-28`) and JSON-RPC batches (removed in `2025-06-18`; basic/transports item
-  3 of `2025-11-25` allows one message per POST). Add a case when client code starts sending one.
+  basic/lifecycle). The `DELETE` is the SDK's `terminateSession()`, best effort: at most 2 s
+  (`sessionTerminationTimeoutMs`, capped by `timeoutMs`; a `DELETE` still in flight is aborted by
+  `close()`), a 405 (the server MAY refuse to end sessions) or 404 (the session is already gone:
+  a server MUST answer 404 to a session it ended; servers that do not route `DELETE` may answer
+  it too) accepted silently, any other failure (a defect included) only logged at debug level with
+  no server text, never failing or changing the operation's result (it is awaited: one more round
+  trip per legacy operation with a session); nothing is sent without a session id or on a modern
+  connection (`2026-07-28` has no sessions). An operation interrupted before closing sends no
+  `DELETE`; an interrupt that arrives during the `DELETE` waits at most 2 s. `mcp.legacy.session`
+  covers it (exactly one `DELETE` after the last POST with the session id, answered 2xx, 404 or
+  405; none without a session), and every legacy fixture with a session ends with it (#381). No
+  case covers what the client never sends: its own `ping`, `resources/*`, `prompts/*`,
+  `completion/*`, `logging/setLevel` (removed in `2026-07-28`; servers' `notifications/message` are
+  ignored and already in every legacy fixture answer), `tasks/*` (task-augmented requests need a
+  declared capability in `2025-11-25`; an extension in `2026-07-28`) and JSON-RPC batches (removed
+  in `2025-06-18`; basic/transports item 3 of `2025-11-25` allows one message per POST). Add a case
+  when client code starts sending one.
   `makeEffectFetch` buffers each whole answer, so the remote client answers a ping only after the
   SSE stream carrying it ends (a server waiting for the answer before ending the stream stalls
   until the timeout; unverified live, as is a ping on the standing GET). The local stdio client
-  does not answer pings: it reads stdout lines as responses only, so a server `ping` line fails the
-  call as a broken session (#386). The calling cases run against a pinging server: the call gate
-  understands an accepted answer to a plain ping (#382; see "Call safety" above).
+  answers a server `ping` too (see "Local stdio" above; #386). The calling cases run against a
+  pinging server: the call gate understands an accepted answer to a plain ping (#382; see "Call
+  safety" above).
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
   - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
@@ -287,6 +298,9 @@
   holds the disagreement drills (at least one per case) and passing variants of real SDK behaviour
   (legacy fallbacks, the corrective probe retry, priming and non-message SSE events, an encoded
   `mcp-name`, stripped annotation keys) and header values that collide with wire values.
+  The `mcp.legacy.session` drills also pin the session end: a `DELETE` answered 404 or 405
+  passes, 400, 410 or 500 fails, an unanswered one fails, and a server that issues no session id
+  gets none.
   `gate.test.ts` holds the call-gate refusals (standing-GET delivery, priming then GET replay, a
   `1e400` listing, an incomplete listing, a `readOnlyHint` downgrade or removal, a `ï»¿`-prefixed
   unsafe listing followed by a safe one for both gate kinds, a probe stream carrying a

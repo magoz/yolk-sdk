@@ -489,7 +489,8 @@ describe('Figma MCP cases on replay', () => {
   )
 
   // The client's standing GET is fire-and-forget, so under load it can arrive after a later POST
-  // (#387): POSTs are compared in order, each GET by itself, without fixing its position.
+  // (#387): POSTs and DELETEs are compared in order, each GET by itself, without fixing its
+  // position.
   for (const [label, lateGets] of [
     ['as the client sends them', false],
     ['with each standing GET held until after the next tools/list', true]
@@ -514,21 +515,23 @@ describe('Figma MCP cases on replay', () => {
 
           expect(entries).toHaveLength(fixture.exchanges.length)
 
-          const indexesOf = (method: string) =>
+          const indexesOf = (methods: ReadonlyArray<string>) =>
             fixture.exchanges.flatMap((exchange, index) =>
-              exchange.request.method === method ? [index] : []
+              methods.includes(exchange.request.method) ? [index] : []
             )
 
-          const matched = (method: string) =>
+          const matched = (methods: ReadonlyArray<string>) =>
             entries
-              .filter(entry => entry.method === method)
+              .filter(entry => methods.includes(entry.method))
               .map(entry => (entry.match.outcome === 'matched' ? entry.match.exchangeIndex : -1))
 
-          // Every POST in the fixture's order; every recorded GET once (one per handshake).
-          expect(matched('POST'), testCase.id).toEqual(indexesOf('POST'))
-          expect(matched('GET'), testCase.id).toEqual(indexesOf('GET'))
+          // Every POST and every session-ending DELETE in the fixture's order (each operation's
+          // DELETE right after its last POST, before the next operation's first); every recorded
+          // GET once (one per handshake), wherever it arrives.
+          expect(matched(['POST', 'DELETE']), testCase.id).toEqual(indexesOf(['POST', 'DELETE']))
+          expect(matched(['GET']), testCase.id).toEqual(indexesOf(['GET']))
           expect(
-            entries.every(entry => entry.method === 'POST' || entry.method === 'GET'),
+            entries.every(entry => ['POST', 'GET', 'DELETE'].includes(entry.method)),
             testCase.id
           ).toBe(true)
 
