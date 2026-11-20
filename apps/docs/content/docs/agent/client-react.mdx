@@ -128,7 +128,11 @@ Providers can reuse tool call ids across turns. The chat projection and the `use
 record where the latest model turn starts (`turnStart`), and a turn's tool events only match a
 call after it, so a later turn's call never changes an earlier turn's call with the same id. A
 replayed or late request or tool-batch event updates the earlier part holding the same call (send
-the call as the model emitted it), and a replayed answer the part holding its request. Before any
+the call as the model emitted it), and a replayed answer the part holding its request. A replayed
+request (or `AgentAwaitingInput`) never reopens a call already answered, cancelled, denied or
+finished, and the `useAgentChat` reducer keeps its status when a replayed `AgentAwaitingInput`
+names only such calls (a pause naming some blocks only on its pending requests). An invalid input answer re-pends a request that is still pending, and a
+running call stopped by an abort is asked again when the next run resumes it. Before any
 start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
 holding the call (answers and added results update only that one); `reduceAgentEvents` keeps one
 tool run per call id.

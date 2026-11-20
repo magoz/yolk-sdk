@@ -52,7 +52,10 @@ compaction start, retry) mean the run is working whatever the previous status wa
 durable stream leaves `Blocked` even without `AgentStart`; neutral events never change a terminal
 status. Callers dedupe replayed events by `eventId` first. The reducers also skip status for a
 replayed start of a settled call: the client for a call with an acknowledged `ToolResult`
-(`acceptance`), React for a `Completed` or `Accepted` tool part.
+(`acceptance`), React for a `Completed` or `Accepted` tool part. The React chat reducer also skips
+status for a replayed `AgentAwaitingInput` whose every request names a call already past its
+request (answered, cancelled, denied or finished), whose part the replay leaves unchanged, and
+blocks a pause that names some such calls only on its other requests.
 
 `AgentError` gains an optional `abortReason` (`AgentAbortReason`, also the loop's `AbortError`
 reason) because the reason only existed inside the message text, and status must never parse
