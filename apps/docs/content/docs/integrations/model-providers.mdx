@@ -37,7 +37,9 @@ const ProviderLayer = makeOpenAiProviderLayer({
 ```
 
 Use `chatCompletionsUrl` for generic OpenAI-compatible endpoints. Prefer the dedicated adapter below
-for correct Vercel Gateway error attribution and routing options.
+for correct Vercel Gateway error attribution and routing options. The native endpoint receives
+`reasoningEffort` as `reasoning_effort`; a compatible endpoint needs `reasoningEffortFormat`, or a
+request with an effort fails with a `validation_error`.
 
 ## Vercel AI Gateway
 

@@ -137,7 +137,7 @@ type AnthropicRequestBody = {
   readonly system: ReadonlyArray<AnthropicTextBlock>
   readonly messages: ReadonlyArray<AnthropicMessage>
   readonly max_tokens: number
-  readonly output_config?: { readonly effort: 'low' | 'medium' | 'high' | 'xhigh' }
+  readonly output_config?: { readonly effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' }
   readonly thinking?: {
     readonly type: 'adaptive'
     readonly display: AnthropicClaudeThinkingConfig['display']

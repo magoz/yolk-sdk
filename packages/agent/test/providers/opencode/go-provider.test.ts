@@ -1,4 +1,4 @@
-import { Effect, Layer, Match, Predicate, Redacted, Stream } from 'effect'
+import { Effect, Layer, Match, Predicate, Redacted, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import {
@@ -8,6 +8,7 @@ import {
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
 import {
+  AgentReasoningEffort,
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
@@ -1563,4 +1564,54 @@ describe('OpenCode Go', () => {
       })
     )
   }
+})
+
+describe('OpenCode Go reasoning effort levels', () => {
+  // Decoded as a host decodes a stored or submitted effort.
+  const effort = (value: string) => Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+
+  it.effect('chat-completions and responses pass none and max through', () =>
+    Effect.gen(function* () {
+      for (const value of ['none', 'max']) {
+        const reasoningEffort = yield* effort(value)
+        const chat: Array<HttpClientRequest.HttpClientRequest> = []
+        const responses: Array<HttpClientRequest.HttpClientRequest> = []
+
+        yield* run('chat-completions', success('chat-completions'), chat, {
+          ...input,
+          reasoningEffort
+        })
+        yield* run('responses', success('responses'), responses, { ...input, reasoningEffort })
+
+        expect(bodyOf(chat)).toMatchObject({ reasoning_effort: value })
+        expect(bodyOf(responses)).toMatchObject({ reasoning: { effort: value, summary: 'auto' } })
+      }
+    })
+  )
+
+  it.effect('messages sends max and rejects none before any request', () =>
+    Effect.gen(function* () {
+      const sent: Array<HttpClientRequest.HttpClientRequest> = []
+      const rejected: Array<HttpClientRequest.HttpClientRequest> = []
+
+      yield* run('messages', success('messages'), sent, {
+        ...input,
+        reasoningEffort: yield* effort('max')
+      })
+
+      const error = yield* run('messages', success('messages'), rejected, {
+        ...input,
+        reasoningEffort: yield* effort('none')
+      }).pipe(Effect.flip)
+
+      expect(bodyOf(sent)).toMatchObject({ output_config: { effort: 'max' } })
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'validation_error',
+        retryable: false,
+        message: 'OpenCode Go does not support reasoning effort none'
+      })
+      expect(rejected).toHaveLength(0)
+    })
+  )
 })

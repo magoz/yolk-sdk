@@ -30,6 +30,26 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.149: reasoning effort levels and OpenAI chat effort
+
+`AgentReasoningEffort` adds `none` and `max` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+`max`). Stored efforts keep decoding. Exhaustive matches or `Record`s keyed by the type need the
+two new cases, and code passing an `AgentReasoningEffort` where a narrower host type is expected
+needs a guard. Data written with the new values does not decode on an earlier canary, so roll every
+reader forward first. Anthropic Messages (Claude, OpenCode Go `messages`) sends `max` and rejects
+`none` with a `validation_error` `LLMError`; the other providers pass both through.
+
+`makeOpenAiProviderLayer` and `OpenAiProviderLayer` now send `reasoningEffort` as
+`reasoning_effort` on the native OpenAI endpoint (no `chatCompletionsUrl`, or
+`https://api.openai.com/v1/chat/completions`). Before, it was dropped unless
+`reasoningEffortFormat` was set. Models without reasoning reject the field: stop sending them an
+effort, or set `reasoningEffortFormat: 'omit'` (new), which never sends it and never fails. Move an
+`extraBody.reasoning_effort` workaround to the request's `reasoningEffort` (`reasoning_effort` is
+now a canonical key there and is dropped from `extraBody`). On any other `chatCompletionsUrl`, and
+in `toOpenAiRequestBody` without a format, a request with an effort now fails with a
+`validation_error` instead of being sent without it: set `reasoningEffortFormat` (`'omit'`
+included), or stop sending the effort. Vercel AI Gateway and OpenCode Go set their format already.
+
 ### Canary.145: Cloudflare runtime hook token conflicts
 
 The Cloudflare runtime (`@yolk-sdk/vercel-workflows/cloudflare*`) now refuses a hook whose token

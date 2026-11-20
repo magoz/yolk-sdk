@@ -404,7 +404,8 @@ type SubagentToolResultInput = {
 }
 ```
 
-`AgentReasoningEffort` accepts `minimal`, `low`, `medium`, `high`, or `xhigh`. Model IDs are
+`AgentReasoningEffort` accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`
+(support is model dependent; Anthropic Messages rejects `none`). Model IDs are
 host-owned opaque strings and are not normalized by the subagent tool.
 
 Subagent helper signatures:

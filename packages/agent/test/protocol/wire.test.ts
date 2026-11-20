@@ -525,7 +525,12 @@ describe('protocol wire schemas', () => {
       expect(yield* Schema.decodeUnknownEffect(AgentModelCapabilities)(capabilities)).toEqual(
         capabilities
       )
-      expect(yield* Schema.decodeUnknownEffect(AgentReasoningEffort)('xhigh')).toBe('xhigh')
+
+      // Every level decodes, the earlier five included (stored efforts keep decoding).
+      for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
+        expect(yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(effort)).toBe(effort)
+      }
+
       expect(yield* Schema.decodeUnknownEffect(AgentUsage)(usage)).toEqual(usage)
       expect(textOnlyModelCapabilities.input.image).toBe(false)
       expect(textImageModelCapabilities.input.image).toBe(true)

@@ -229,8 +229,16 @@ export type OpenAiProviderConfig = {
    * without reading values.
    */
   readonly extraBody?: OpenAiRequestExtras
-  /** Opts into a compatible endpoint's reasoning object or reasoning_effort request field. */
-  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  /**
+   * How `LLMRequest.reasoningEffort` is sent: `reasoning-effort` (the Chat Completions
+   * `reasoning_effort` field) or `reasoning-object` (`{ reasoning: { effort } }`). Defaults to
+   * `reasoning-effort` on the native OpenAI endpoint (no `chatCompletionsUrl`, or
+   * `https://api.openai.com/v1/chat/completions`). Other endpoints have no default: a request
+   * with an effort fails with a `validation_error` until the host picks the field it accepts.
+   * `omit` never sends the effort and never fails: for models without reasoning (which reject
+   * the field) behind a host's shared effort setting. No key is then reserved in `extraBody`.
+   */
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort' | 'omit'
   /** Preserve compatible models' reasoning_content output and assistant replay. */
   readonly reasoningContent?: boolean
   /**
@@ -327,7 +335,7 @@ type OpenAiRequestBodyConfig = {
   readonly maxCompletionTokens: number
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraBody?: unknown
-  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort' | 'omit'
   readonly reasoningContent?: boolean
   readonly streaming?: boolean
   readonly supportsPdfAttachments?: boolean
@@ -350,6 +358,23 @@ type OpenAiRequestBodyConfigFields = {
 const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
   id: 'openai',
   name: 'OpenAI'
+}
+
+const openAiChatCompletionsUrl = 'https://api.openai.com/v1/chat/completions'
+
+/**
+ * The host's format, else `reasoning-effort` on the native endpoint, which documents it for
+ * reasoning models. Compatible endpoints differ (or reject the field), so they stay opt-in.
+ */
+const openAiReasoningEffortFormat = (
+  config: OpenAiProviderConfig
+): OpenAiRequestBodyConfig['reasoningEffortFormat'] => {
+  if (config.reasoningEffortFormat !== undefined) return config.reasoningEffortFormat
+
+  return config.chatCompletionsUrl === undefined ||
+    config.chatCompletionsUrl === openAiChatCompletionsUrl
+    ? 'reasoning-effort'
+    : undefined
 }
 
 class OpenAiFunctionResponse extends Schema.Class<OpenAiFunctionResponse>('OpenAiFunctionResponse')(
@@ -995,6 +1020,42 @@ const toOpenAiTool = (tool: ToolDef, providerName: string): Effect.Effect<OpenAi
     }))
   )
 
+/**
+ * The effort passes through in the chosen field (every `AgentReasoningEffort`, `none` and `max`
+ * included: support is model dependent and the endpoint rejects what a model lacks). `omit` drops
+ * it by the host's explicit choice; an effort without a format fails instead of being dropped, so
+ * a host never loses it silently.
+ */
+const openAiReasoningFields = (
+  effort: AgentReasoningEffort | undefined,
+  format: OpenAiRequestBodyConfig['reasoningEffortFormat'],
+  providerName: string
+): Effect.Effect<Pick<OpenAiRequestBody, 'reasoning' | 'reasoning_effort'>, LLMError> => {
+  if (effort === undefined) return Effect.succeed({})
+
+  switch (format) {
+    case 'reasoning-object':
+      return Effect.succeed({ reasoning: { effort } })
+    case 'reasoning-effort':
+      return Effect.succeed({ reasoning_effort: effort })
+    case 'omit':
+      return Effect.succeed({})
+    case undefined:
+      return Effect.fail(
+        new LLMError({
+          cause: 'validation_error',
+          message: `${providerName} needs a reasoningEffortFormat to send a reasoning effort`,
+          retryable: false
+        })
+      )
+  }
+}
+
+/**
+ * Lowers a request to a Chat Completions body. `reasoningEffortFormat` is taken as given (the
+ * provider layers resolve the native default): without one, a request carrying a reasoning effort
+ * fails with a `validation_error`.
+ */
 export const toOpenAiRequestBody = (
   request: LLMRequest,
   config: OpenAiRequestBodyConfig
@@ -1011,6 +1072,13 @@ export const toOpenAiRequestBody = (
         })
       )
     }
+
+    // Before any attachment I/O: a request that cannot be sent must not fetch PDFs.
+    const reasoning = yield* openAiReasoningFields(
+      request.reasoningEffort,
+      config.reasoningEffortFormat,
+      providerName
+    )
 
     yield* validateProviderTranscript(request.messages)
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
@@ -1054,15 +1122,6 @@ export const toOpenAiRequestBody = (
       config.completionTokenField === 'max_tokens'
         ? { max_tokens: config.maxCompletionTokens }
         : { max_completion_tokens: config.maxCompletionTokens }
-
-    const reasoning =
-      request.reasoningEffort === undefined
-        ? {}
-        : config.reasoningEffortFormat === 'reasoning-object'
-          ? { reasoning: { effort: request.reasoningEffort } }
-          : config.reasoningEffortFormat === 'reasoning-effort'
-            ? { reasoning_effort: request.reasoningEffort }
-            : {}
 
     const extraBody =
       config.extraBody === undefined
@@ -1810,8 +1869,10 @@ const openAiRequestBodyFields = (
     fields.extraBody = config.extraBody
   }
 
-  if (config.reasoningEffortFormat !== undefined) {
-    fields.reasoningEffortFormat = config.reasoningEffortFormat
+  const reasoningEffortFormat = openAiReasoningEffortFormat(config)
+
+  if (reasoningEffortFormat !== undefined) {
+    fields.reasoningEffortFormat = reasoningEffortFormat
   }
 
   if (config.reasoningContent !== undefined) {
@@ -1855,7 +1916,7 @@ const postOpenAiRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const httpRequest = HttpClientRequest.post(
-      config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions'
+      config.chatCompletionsUrl ?? openAiChatCompletionsUrl
     ).pipe(
       HttpClientRequest.setHeaders({
         ...config.extraHeaders,

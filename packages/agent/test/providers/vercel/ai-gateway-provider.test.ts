@@ -12,6 +12,7 @@ import {
   run
 } from '@yolk-sdk/agent/loop'
 import {
+  AgentReasoningEffort,
   DocumentPart,
   LLMStreamEnd,
   ToolCall,
@@ -21,8 +22,7 @@ import {
   inlineBase64Source,
   zeroAgentUsage,
   type AgentEvent,
-  type AgentMessage,
-  type AgentReasoningEffort
+  type AgentMessage
 } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
@@ -250,6 +250,29 @@ describe('Vercel AI Gateway provider', () => {
         model: 'provider/opaque-reasoning-model',
         reasoning: { effort: 'xhigh' }
       })
+    })
+  )
+
+  it.effect('passes none and max through in either reasoning format', () =>
+    Effect.gen(function* () {
+      for (const value of ['none', 'max']) {
+        // Decoded as a host decodes a stored or submitted effort.
+        const reasoningEffort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+        const object: Array<CapturedRequest> = []
+        const literal: Array<CapturedRequest> = []
+        const ok = () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }))
+
+        yield* runProvider(ok(), object, defaultGatewayConfig, { reasoningEffort })
+        yield* runProvider(
+          ok(),
+          literal,
+          { ...defaultGatewayConfig, reasoningEffortFormat: 'reasoning-effort' },
+          { reasoningEffort }
+        )
+
+        expect(readCapturedBody(object)).toMatchObject({ reasoning: { effort: value } })
+        expect(readCapturedBody(literal)).toMatchObject({ reasoning_effort: value })
+      }
     })
   )
 

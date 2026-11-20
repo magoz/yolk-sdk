@@ -1,8 +1,9 @@
-import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentReasoningEffort,
   AssistantAgentMessage,
   DocumentPart,
   HostToolCallPart,
@@ -15,7 +16,7 @@ import {
   inlineBase64Source,
   urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
-import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { LLMProvider, type LLMRequest } from '@yolk-sdk/agent/loop'
 import {
   makeOpenAiProviderLayer,
   toOpenAiRequestBody as lowerOpenAiRequestBody
@@ -203,6 +204,214 @@ describe('OpenAI provider', () => {
       expect(body.reasoning).toEqual({ effort: 'high' })
     })
   )
+
+  describe('reasoning effort', () => {
+    const reasoningRequest: LLMRequest = {
+      model: 'gpt-5.5',
+      systemPrompt: '',
+      reasoningEffort: 'high',
+      messages: [UserMessage.make({ content: 'Think carefully' })],
+      tools: []
+    }
+
+    const sendThrough = (config: Parameters<typeof makeOpenAiProviderLayer>[0]) =>
+      Effect.gen(function* () {
+        const requests: Array<CapturedRequest> = []
+
+        const result = yield* Effect.gen(function* () {
+          const provider = yield* LLMProvider
+
+          return yield* provider.stream(reasoningRequest).pipe(Stream.runCollect)
+        }).pipe(
+          Effect.provide(
+            makeOpenAiProviderLayer(config).pipe(
+              Layer.provide(
+                makeHttpClientLayer(
+                  Response.json({
+                    choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+                  }),
+                  requests
+                )
+              )
+            )
+          ),
+          Effect.result
+        )
+
+        return { result, requests }
+      })
+
+    const sentJson = (requests: ReadonlyArray<CapturedRequest>) => {
+      const body = requests[0]?.request.body
+
+      if (body?._tag !== 'Uint8Array') return expect.fail('Expected a JSON request body')
+
+      return JSON.parse(new TextDecoder().decode(body.body))
+    }
+
+    it.effect('sends reasoning_effort to the native endpoint by default', () =>
+      Effect.gen(function* () {
+        const apiKey = Redacted.make('test-key')
+
+        for (const config of [
+          { apiKey, maxCompletionTokens: openAiTestMaxOutputTokens },
+          {
+            apiKey,
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            chatCompletionsUrl: 'https://api.openai.com/v1/chat/completions'
+          }
+        ]) {
+          const { result, requests } = yield* sendThrough(config)
+
+          expect(Result.isSuccess(result)).toBe(true)
+          expect(requests[0]?.request.url).toBe('https://api.openai.com/v1/chat/completions')
+          expect(sentJson(requests)).toMatchObject({ reasoning_effort: 'high' })
+          expect(sentJson(requests)).not.toHaveProperty('reasoning')
+        }
+      })
+    )
+
+    it.effect('an explicit format still wins on the native endpoint', () =>
+      Effect.gen(function* () {
+        const { requests } = yield* sendThrough({
+          apiKey: Redacted.make('test-key'),
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          reasoningEffortFormat: 'reasoning-object'
+        })
+
+        expect(sentJson(requests)).toMatchObject({ reasoning: { effort: 'high' } })
+        expect(sentJson(requests)).not.toHaveProperty('reasoning_effort')
+      })
+    )
+
+    it.effect('a compatible endpoint without a format fails instead of dropping the effort', () =>
+      Effect.gen(function* () {
+        const { result, requests } = yield* sendThrough({
+          apiKey: Redacted.make('test-key'),
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          chatCompletionsUrl: 'https://llm.example.com/v1/chat/completions',
+          providerIdentity: { id: 'compatible', name: 'Compatible' }
+        })
+
+        expect(Result.isFailure(result) && result.failure).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'validation_error',
+          retryable: false,
+          message: 'Compatible needs a reasoningEffortFormat to send a reasoning effort'
+        })
+        expect(requests).toHaveLength(0)
+      })
+    )
+
+    it.effect('a compatible endpoint opts in with a format', () =>
+      Effect.gen(function* () {
+        const { requests } = yield* sendThrough({
+          apiKey: Redacted.make('test-key'),
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          chatCompletionsUrl: 'https://llm.example.com/v1/chat/completions',
+          reasoningEffortFormat: 'reasoning-effort'
+        })
+
+        expect(sentJson(requests)).toMatchObject({ reasoning_effort: 'high' })
+      })
+    )
+
+    it.effect('a compatible endpoint without an effort needs no format', () =>
+      Effect.gen(function* () {
+        const requests: Array<CapturedRequest> = []
+
+        yield* Effect.gen(function* () {
+          const provider = yield* LLMProvider
+          const { reasoningEffort: _effort, ...withoutEffort } = reasoningRequest
+
+          return yield* provider.stream(withoutEffort).pipe(Stream.runCollect)
+        }).pipe(
+          Effect.provide(
+            makeOpenAiProviderLayer({
+              apiKey: Redacted.make('test-key'),
+              maxCompletionTokens: openAiTestMaxOutputTokens,
+              chatCompletionsUrl: 'https://llm.example.com/v1/chat/completions'
+            }).pipe(
+              Layer.provide(
+                makeHttpClientLayer(
+                  Response.json({
+                    choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }]
+                  }),
+                  requests
+                )
+              )
+            )
+          )
+        )
+
+        expect(sentJson(requests)).not.toHaveProperty('reasoning_effort')
+        expect(sentJson(requests)).not.toHaveProperty('reasoning')
+      })
+    )
+
+    it.effect('omit never sends the effort and never fails, on any endpoint', () =>
+      Effect.gen(function* () {
+        for (const chatCompletionsUrl of [
+          'https://api.openai.com/v1/chat/completions',
+          'https://llm.example.com/v1/chat/completions'
+        ]) {
+          const { result, requests } = yield* sendThrough({
+            apiKey: Redacted.make('test-key'),
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            chatCompletionsUrl,
+            reasoningEffortFormat: 'omit'
+          })
+
+          expect(Result.isSuccess(result)).toBe(true)
+          expect(sentJson(requests)).not.toHaveProperty('reasoning_effort')
+          expect(sentJson(requests)).not.toHaveProperty('reasoning')
+        }
+      })
+    )
+
+    it.effect('omit reserves no reasoning key in extraBody', () =>
+      Effect.gen(function* () {
+        const body = yield* lowerOpenAiRequestBody(reasoningRequest, {
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          reasoningEffortFormat: 'omit',
+          extraBody: { reasoning_effort: 'low', reasoning: { effort: 'low' } }
+        })
+
+        expect(body).toMatchObject({ reasoning_effort: 'low', reasoning: { effort: 'low' } })
+      })
+    )
+
+    it.effect('the body helper rejects an effort without a format', () =>
+      Effect.gen(function* () {
+        const error = yield* toOpenAiRequestBody(reasoningRequest).pipe(Effect.flip)
+
+        expect(error).toMatchObject({ _tag: 'LLMError', cause: 'validation_error' })
+      })
+    )
+
+    it.effect('passes none and max through in either format', () =>
+      Effect.gen(function* () {
+        for (const value of ['none', 'max']) {
+          // Decoded as a host decodes a stored or submitted effort.
+          const reasoningEffort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+          const request = { ...reasoningRequest, reasoningEffort }
+
+          const literal = yield* lowerOpenAiRequestBody(request, {
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            reasoningEffortFormat: 'reasoning-effort'
+          })
+
+          const object = yield* lowerOpenAiRequestBody(request, {
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            reasoningEffortFormat: 'reasoning-object'
+          })
+
+          expect(literal.reasoning_effort).toBe(value)
+          expect(object.reasoning).toEqual({ effort: value })
+        }
+      })
+    )
+  })
 
   it.effect('rejects non-portable extraBody at lowering before transport', () =>
     Effect.gen(function* () {

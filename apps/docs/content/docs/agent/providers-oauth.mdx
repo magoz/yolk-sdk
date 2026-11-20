@@ -101,8 +101,11 @@ Public Codex `OpenAiCodexTool.parameters` remains
 non-object SSE JSON is ignored, malformed non-JSON event text fails `invalid_response`, and HTTP
 error bodies stay raw text for classification.
 
-Compatible chat endpoints can opt into `OpenAiProviderConfig.reasoningEffortFormat`:
+`OpenAiProviderConfig.reasoningEffortFormat` picks the request field for `reasoningEffort`:
 `reasoning-object` sends `{ reasoning: { effort } }`, and `reasoning-effort` sends `reasoning_effort`.
+The native OpenAI endpoint (no `chatCompletionsUrl`) defaults to `reasoning-effort`; compatible
+endpoints have no default, and a request with an effort fails with a `validation_error` until one is
+set. `omit` never sends the effort and never fails.
 `reasoningContent: true` validates/emits `reasoning_content` (or the normalized `reasoning` thinking field, preferring `reasoning_content` when both are present) and preserves it in assistant replay;
 by default this vendor extension is ignored. OpenCode Go enables the latter two options.
 
