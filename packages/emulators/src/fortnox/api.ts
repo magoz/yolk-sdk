@@ -1010,15 +1010,26 @@ const rejectionCase = 'fortnox.write.rejection-error-information'
 
 const emailCase = 'fortnox.invoice.send-email'
 
+const companyInformationCase = 'fortnox.company.information-decodes'
+
+const customerListCase = 'fortnox.customer.list-matches-get'
+
 /** The route table: evidence plus handler. `fortnoxEmulatorRoutes` is its evidence part. */
 export const fortnoxApiRoutes: ReadonlyArray<FortnoxApiRoute> = [
-  connectorRoute('GET', '/companyinformation', false, [], companyInformation),
-  connectorRoute('GET', '/customers', false, [], listCustomers, customerListQueryKeys),
+  connectorRoute('GET', '/companyinformation', false, [companyInformationCase], companyInformation),
+  connectorRoute(
+    'GET',
+    '/customers',
+    false,
+    [customerListCase],
+    listCustomers,
+    customerListQueryKeys
+  ),
   connectorRoute(
     'GET',
     '/customers/{CustomerNumber}',
     false,
-    [emptyStringCase, rejectionCase],
+    [emptyStringCase, rejectionCase, customerListCase],
     getCustomer
   ),
   connectorRoute('PUT', '/customers/{CustomerNumber}', true, [emptyStringCase], updateCustomer),

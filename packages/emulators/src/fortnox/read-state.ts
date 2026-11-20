@@ -4,9 +4,11 @@
  * customer and supplier invoice payments, offers, print templates, the inbox, company settings,
  * the locked period, predefined accounts, labels, the five settings registers, and the user.
  *
- * No conformance fixture records these resources: every shape is a minimal one named after the
- * fields the connector reads (`@yolk-sdk/connectors/fortnox`), and every default is synthetic
- * (Example AB, `example.test`). No route writes them.
+ * Every shape is a minimal one named after the fields the connector reads
+ * (`@yolk-sdk/connectors/fortnox`), and every default is synthetic (Example AB, `example.test`).
+ * The read conformance cases' synthetic fixtures record what the routes answer for this default
+ * seed (`test/fortnox-conformance.test.ts` checks they agree), so changing a default here changes
+ * those fixtures in the same change. No route writes them.
  *
  * @experimental
  */

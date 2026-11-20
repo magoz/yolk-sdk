@@ -198,8 +198,8 @@ These additions follow Fortnox's current API reference and archived resource pag
 observed against a live company yet. The
 [Fortnox emulator](../api-reference/emulators#fortnox-emulator) serves their read endpoints
 (including the offer preview and inbox file bytes) with unverified, synthetic shapes named after the
-fields these actions read; their writes, and side-effecting reads such as `email_offer`, are not
-emulated and fail closed with a 404.
+fields these actions read, which the read [conformance cases](#conformance-cases) cover; their
+writes, and side-effecting reads such as `email_offer`, are not emulated and fail closed with a 404.
 
 Create customer inputs require `Name`; Fortnox assigns `CustomerNumber`. Create invoice inputs
 require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry the provider
@@ -381,6 +381,26 @@ canonical list of cases:
 | `fortnox.customer.empty-string-keeps-value`        | `write-reversible`   | `customerNumber`                               | Updating `Comments` to `""` keeps the stored value; how to clear a value is not established. The customer needs a non-empty `Comments`                                              |
 | `fortnox.write.rejection-error-information`        | `write-reversible`   | `missingCustomerNumber`                        | Rejected writes return `ErrorInformation` with a code and message, surfaced as `underlying.providerCode` and the provider message                                                   |
 | `fortnox.invoice.send-email`                       | `write-irreversible` | `emailInvoiceDocumentNumber`, `emailRecipient` | `GET /3/invoices/{DocumentNumber}/email` answers 2xx with the invoice; whether a test company delivers the email is not established                                                 |
+| `fortnox.company.information-decodes`              | `read`               | none                                           | `CompanyInformation` decodes with a non-empty `CompanyName`                                                                                                                         |
+| `fortnox.customer.list-matches-get`                | `read`               | none                                           | Customer lists carry `MetaInformation`; the first row reads back by `CustomerNumber` with the same `Name`                                                                           |
+| `fortnox.article.list-row-numeric-strings`         | `read`               | none                                           | Article list rows (numeric strings) and single reads (numbers) decode to the same `VAT`, `SalesPrice`, `PurchasePrice`, and `QuantityInStock`                                       |
+| `fortnox.price.tier-matches-sublist`               | `read`               | none                                           | The `PreSelected` price list and a price tier read back as listed; an article's `SalesPrice` is its base (`FromQuantity` 0) price in that list                                      |
+| `fortnox.cost-center.list-matches-get`             | `read`               | none                                           | Cost center lists carry `MetaInformation`; the first row reads back by `Code` as listed                                                                                             |
+| `fortnox.payment.invoice-payment-wire-numbers`     | `read`               | none                                           | Invoice payment voucher fields and `ModeOfPaymentAccount` decode to integers (sent as numeric strings in the docs examples); the first row reads back as listed                     |
+| `fortnox.payment.supplier-payment-wire-numbers`    | `read`               | none                                           | Supplier invoice payment voucher fields decode to integers; the first row reads back as listed                                                                                      |
+| `fortnox.offer.rows-on-get-and-preview-pdf`        | `read`               | none                                           | Offer list rows carry no `OfferRows` (unverified); a single read has its rows; the offer preview is a complete PDF                                                                  |
+| `fortnox.print-templates.unpaginated`              | `read`               | none                                           | Invoice and offer print templates decode without `MetaInformation`                                                                                                                  |
+| `fortnox.inbox.file-bytes-match-size`              | `read`               | none                                           | The inbox root lists its subfolders; a file found in the root or a direct subfolder downloads exactly its listed `Size`                                                             |
+| `fortnox.settings.company-and-locked-period`       | `read`               | none                                           | `CompanySettings` has a non-empty `Name`; the locked period `EndDate` is a `YYYY-MM-DD` date, empty, or unset (unverified)                                                          |
+| `fortnox.settings.predefined-accounts-and-labels`  | `read`               | none                                           | Predefined accounts and labels decode without `MetaInformation`; the first account reads back by `Name`; label ids are distinct                                                     |
+| `fortnox.settings.registers-list-matches-get`      | `read`               | none                                           | Each of the five settings registers lists with `MetaInformation`, and its first row reads back by `Code` as listed (a mode of payment `AccountNumber` a string in list rows)        |
+| `fortnox.profile.me`                               | `read`               | none                                           | `Me` decodes with a non-empty `Id`                                                                                                                                                  |
+
+The last fourteen cases cover company information, the customer list, and the read-only resource
+modules: each only reads, needs no seed (it reads back the first row a list answers), and aborts
+with a `precondition:` mismatch when the practice company holds nothing to read. Their fixtures are
+shaped from the [Fortnox API reference](https://api.fortnox.se/apidocs) and the JSON examples of
+its archived resource pages.
 
 The cases need `FortnoxConformanceConfig` seed identities (never hard-coded account data) and the
 connector ports; `@yolk-sdk/connectors/conformance` bridges an Effect `HttpClient` to those ports for

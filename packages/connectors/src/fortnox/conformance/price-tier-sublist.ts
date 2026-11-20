@@ -1,0 +1,108 @@
+import type { WireFixture } from '@yolk-sdk/conformance/fixture'
+
+/**
+ * Price lists, the PreSelected one read back, one article, its price tiers in that list, and its
+ * first tier read back.
+ *
+ * Synthetic placeholder (`evidence: 'unverified'`) shaped from the Fortnox API reference
+ * (https://api.fortnox.se/apidocs, OpenAPI 3.0.3) and the JSON examples of the archived resource
+ * pages (developer.fortnox.se/documentation/resources, Wayback Machine, 2022-08), with the values
+ * of the Fortnox emulator default seed, until a live recording replaces it. Every field name is in
+ * the OpenAPI schema; where its types and the examples disagree (numeric strings in article list
+ * rows, payments, and mode of payment list rows) and for `MetaInformation` (which the OpenAPI list
+ * wrappers omit), the fixture follows the examples and the connector's decoders.
+ * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a
+ * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
+ * step.
+ */
+export const fortnoxPriceTierMatchesSublistFixture: WireFixture = {
+  id: 'fortnox.price.tier-matches-sublist.synthetic',
+  caseId: 'fortnox.price.tier-matches-sublist',
+  evidence: 'unverified',
+  recordedAt: '2026-11-20',
+  account: 'synthetic',
+  endpoint: 'https://api.fortnox.se/3',
+  note: 'Price lists (limit 10), the PreSelected list, articles (limit 1), the article price sublist, and its first tier, in request order. Shaped from the Fortnox API reference (GET /3/pricelists, /3/pricelists/{Code}, /3/prices/sublist/{PriceList}/{ArticleNumber}, /3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}). Synthetic placeholder with the Fortnox emulator default seed values; not recorded from a live service.',
+  exchanges: [
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/pricelists?limit=10',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"PriceLists":[{"@url":"https://api.fortnox.se/3/pricelists/A","Code":"A","Description":"Standard (synthetic)","Comments":"","PreSelected":true},{"@url":"https://api.fortnox.se/3/pricelists/B","Code":"B","Description":"Reseller (synthetic)","Comments":"Synthetic reseller prices.","PreSelected":false}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+      }
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/pricelists/A',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"PriceList":{"@url":"https://api.fortnox.se/3/pricelists/A","Code":"A","Description":"Standard (synthetic)","Comments":"","PreSelected":true}}'
+      }
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/articles?limit=1',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"Articles":[{"@url":"https://api.fortnox.se/3/articles/KIT-1","ArticleNumber":"KIT-1","Description":"Workshop kit (synthetic)","EAN":"2000000000015","PurchasePrice":"120","QuantityInStock":"15","SalesPrice":"250","Unit":"st","VAT":"25"}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":3,"@TotalResources":3}}'
+      }
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/prices/sublist/A/KIT-1',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"Prices":[{"@url":"https://api.fortnox.se/3/prices/A/KIT-1/0","ArticleNumber":"KIT-1","FromQuantity":0,"Price":250,"PriceList":"A"},{"@url":"https://api.fortnox.se/3/prices/A/KIT-1/10","ArticleNumber":"KIT-1","FromQuantity":10,"Price":220,"PriceList":"A"}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+      }
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/prices/A/KIT-1/0',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"Price":{"@url":"https://api.fortnox.se/3/prices/A/KIT-1/0","PriceList":"A","ArticleNumber":"KIT-1","FromQuantity":0,"Price":250,"Percent":0,"Date":"2026-08-01"}}'
+      }
+    }
+  ]
+}

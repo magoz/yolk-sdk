@@ -6,11 +6,14 @@
  * GETs such as `/offers/{DocumentNumber}/email`) are not emulated: they fail closed with the
  * wrapper's 404 `ErrorInformation`.
  *
- * No conformance fixture records these routes: they cite no case ids, are `unverified`, and use
- * minimal shapes named after the connector's read fields, rendered in the wire types the
- * connector's schemas accept (preferring the documented Fortnox wire type, such as numeric strings
- * in article list rows). Lists page with `page`/`limit` and `MetaInformation` where the connector
- * requires it; `lastmodified` is not emulated (the state tracks no modification times).
+ * Each route cites the read conformance cases whose synthetic fixtures record it (the fixtures
+ * are shaped from the Fortnox API reference and its archived examples, with this emulator's default
+ * seed values, and `test/fortnox-conformance.test.ts` checks that the default emulator answers
+ * every fixture request with the fixture's body). Every route is `unverified` and uses minimal
+ * shapes named after the connector's read fields, rendered in the wire types the connector's
+ * schemas accept (preferring the documented Fortnox wire type, such as numeric strings in article
+ * list rows). Lists page with `page`/`limit` and `MetaInformation` where the connector requires
+ * it; `lastmodified` is not emulated (the state tracks no modification times).
  *
  * @experimental
  */
@@ -45,6 +48,31 @@ import {
 import type { FortnoxEmulatorState } from './state.ts'
 
 const pageKeys: ReadonlyArray<string> = ['page', 'limit']
+
+// The read conformance cases each route follows (`@yolk-sdk/connectors/fortnox/conformance`).
+const articleCase = 'fortnox.article.list-row-numeric-strings'
+
+const priceCase = 'fortnox.price.tier-matches-sublist'
+
+const costCenterCase = 'fortnox.cost-center.list-matches-get'
+
+const invoicePaymentCase = 'fortnox.payment.invoice-payment-wire-numbers'
+
+const supplierInvoicePaymentCase = 'fortnox.payment.supplier-payment-wire-numbers'
+
+const offerCase = 'fortnox.offer.rows-on-get-and-preview-pdf'
+
+const printTemplatesCase = 'fortnox.print-templates.unpaginated'
+
+const inboxCase = 'fortnox.inbox.file-bytes-match-size'
+
+const settingsCase = 'fortnox.settings.company-and-locked-period'
+
+const predefinedAccountsCase = 'fortnox.settings.predefined-accounts-and-labels'
+
+const registersCase = 'fortnox.settings.registers-list-matches-get'
+
+const profileCase = 'fortnox.profile.me'
 
 /** One page of `items` under `envelope`, with `MetaInformation`. */
 const pagedList = <A>(
@@ -622,8 +650,8 @@ const registerRoutes = <A extends { readonly Code: string }>(
     )
 
   return [
-    connectorRoute('GET', `/${register.path}`, false, [], list, pageKeys),
-    connectorRoute('GET', `/${register.path}/{Code}`, false, [], get)
+    connectorRoute('GET', `/${register.path}`, false, [registersCase], list, pageKeys),
+    connectorRoute('GET', `/${register.path}/{Code}`, false, [registersCase], get)
   ]
 }
 
@@ -639,50 +667,89 @@ const getMe: RouteHandler = state => jsonResponse(200, { Me: state.me })
  * path: both `matchFortnoxRoute` and the core take the first matching route.
  */
 export const fortnoxReadRoutes: ReadonlyArray<FortnoxApiRoute> = [
-  connectorRoute('GET', '/articles', false, [], listArticles, [
+  connectorRoute('GET', '/articles', false, [articleCase, priceCase], listArticles, [
     ...pageKeys,
     'filter',
     ...Object.keys(articleSearch)
   ]),
-  connectorRoute('GET', '/articles/{ArticleNumber}', false, [], getArticle),
-  connectorRoute('GET', '/pricelists', false, [], listPriceLists, [
+  connectorRoute('GET', '/articles/{ArticleNumber}', false, [articleCase], getArticle),
+  connectorRoute('GET', '/pricelists', false, [priceCase], listPriceLists, [
     ...pageKeys,
     ...Object.keys(priceListSearch)
   ]),
-  connectorRoute('GET', '/pricelists/{Code}', false, [], getPriceList),
+  connectorRoute('GET', '/pricelists/{Code}', false, [priceCase], getPriceList),
   connectorRoute(
     'GET',
     '/prices/sublist/{PriceList}/{ArticleNumber}',
     false,
-    [],
+    [priceCase],
     listPrices,
     pageKeys
   ),
-  connectorRoute('GET', '/prices/{PriceList}/{ArticleNumber}/{FromQuantity}', false, [], getPrice),
-  connectorRoute('GET', '/costcenters', false, [], listCostCenters, pageKeys),
-  connectorRoute('GET', '/costcenters/{Code}', false, [], getCostCenter),
-  connectorRoute('GET', '/invoicepayments', false, [], listInvoicePayments, paymentQueryKeys),
-  connectorRoute('GET', '/invoicepayments/{Number}', false, [], getInvoicePayment),
+  connectorRoute(
+    'GET',
+    '/prices/{PriceList}/{ArticleNumber}/{FromQuantity}',
+    false,
+    [priceCase],
+    getPrice
+  ),
+  connectorRoute('GET', '/costcenters', false, [costCenterCase], listCostCenters, pageKeys),
+  connectorRoute('GET', '/costcenters/{Code}', false, [costCenterCase], getCostCenter),
+  connectorRoute(
+    'GET',
+    '/invoicepayments',
+    false,
+    [invoicePaymentCase],
+    listInvoicePayments,
+    paymentQueryKeys
+  ),
+  connectorRoute(
+    'GET',
+    '/invoicepayments/{Number}',
+    false,
+    [invoicePaymentCase],
+    getInvoicePayment
+  ),
   connectorRoute(
     'GET',
     '/supplierinvoicepayments',
     false,
-    [],
+    [supplierInvoicePaymentCase],
     listSupplierInvoicePayments,
     paymentQueryKeys
   ),
-  connectorRoute('GET', '/supplierinvoicepayments/{Number}', false, [], getSupplierInvoicePayment),
-  connectorRoute('GET', '/offers', false, [], listOffers, offerListQueryKeys),
-  connectorRoute('GET', '/offers/{DocumentNumber}', false, [], getOffer),
-  connectorRoute('GET', '/offers/{DocumentNumber}/preview', false, [], previewOffer),
-  connectorRoute('GET', '/printtemplates', false, [], listPrintTemplates, ['type']),
-  connectorRoute('GET', '/inbox', false, [], getInboxRoot),
-  connectorRoute('GET', '/inbox/{Id}', false, [], getInboxItem),
-  connectorRoute('GET', '/settings/company', false, [], getCompanySettings),
-  connectorRoute('GET', '/settings/lockedperiod', false, [], getLockedPeriod),
-  connectorRoute('GET', '/predefinedaccounts', false, [], listPredefinedAccounts),
-  connectorRoute('GET', '/predefinedaccounts/{Name}', false, [], getPredefinedAccount),
-  connectorRoute('GET', '/labels', false, [], listLabels),
+  connectorRoute(
+    'GET',
+    '/supplierinvoicepayments/{Number}',
+    false,
+    [supplierInvoicePaymentCase],
+    getSupplierInvoicePayment
+  ),
+  connectorRoute('GET', '/offers', false, [offerCase], listOffers, offerListQueryKeys),
+  connectorRoute('GET', '/offers/{DocumentNumber}', false, [offerCase], getOffer),
+  connectorRoute('GET', '/offers/{DocumentNumber}/preview', false, [offerCase], previewOffer),
+  connectorRoute('GET', '/printtemplates', false, [printTemplatesCase], listPrintTemplates, [
+    'type'
+  ]),
+  connectorRoute('GET', '/inbox', false, [inboxCase], getInboxRoot),
+  connectorRoute('GET', '/inbox/{Id}', false, [inboxCase], getInboxItem),
+  connectorRoute('GET', '/settings/company', false, [settingsCase], getCompanySettings),
+  connectorRoute('GET', '/settings/lockedperiod', false, [settingsCase], getLockedPeriod),
+  connectorRoute(
+    'GET',
+    '/predefinedaccounts',
+    false,
+    [predefinedAccountsCase],
+    listPredefinedAccounts
+  ),
+  connectorRoute(
+    'GET',
+    '/predefinedaccounts/{Name}',
+    false,
+    [predefinedAccountsCase],
+    getPredefinedAccount
+  ),
+  connectorRoute('GET', '/labels', false, [predefinedAccountsCase], listLabels),
   ...registerRoutes({
     path: 'modesofpayments',
     kind: 'mode of payment',
@@ -720,5 +787,5 @@ export const fortnoxReadRoutes: ReadonlyArray<FortnoxApiRoute> = [
     singleEnvelope: 'Unit',
     entries: state => state.units
   }),
-  connectorRoute('GET', '/me', false, [], getMe)
+  connectorRoute('GET', '/me', false, [profileCase], getMe)
 ]

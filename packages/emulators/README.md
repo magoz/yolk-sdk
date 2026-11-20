@@ -16,7 +16,7 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim (and answers the
-connector's other reads with unverified synthetic shapes), the Microsoft
+connector's other reads with unverified synthetic shapes its read cases record), the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
 conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
 MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
@@ -705,10 +705,16 @@ downloads):
 | `GET /3/modesofpayments`, `termsofpayments`, `termsofdeliveries`, `wayofdeliveries`, `units` (and `/{Code}`)    | `page`/`limit`, `MetaInformation`; a mode of payment's `AccountNumber` is a string in list rows                                                                                                                                        |
 | `GET /3/me`                                                                                                     | `{ Me }`                                                                                                                                                                                                                               |
 
-`GET /3/companyinformation`, `GET /3/customers`, and every read-only route above have no recorded
-fixture: they cite no conformance case ids, use minimal synthetic shapes named after the
-connector's read fields (in the wire types the connector's schemas accept), and are unverified,
-uncited read routes (the evidence check warns about them). Their writes (`POST`, `PUT`, `DELETE`,
+`GET /3/companyinformation`, `GET /3/customers`, and every read-only route above cite the Fortnox
+read conformance cases (`fortnox.company.information-decodes`, `fortnox.customer.list-matches-get`,
+and one case per resource module; see the
+[Fortnox guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases)),
+whose synthetic fixtures record this emulator's default-seed answers, shaped from the Fortnox API
+reference and its archived examples; a test requires the default emulator to answer every read
+fixture request with the recorded body byte for byte. They use minimal synthetic shapes named after
+the connector's read fields (in the wire types the connector's schemas accept), are unverified, and
+answer requests no fixture records (other pages, filters, searches, ids) from the state. Their
+writes (`POST`, `PUT`, `DELETE`,
 and side-effecting `GET`s such as `/offers/{DocumentNumber}/email` and `/print`) are not emulated
 and fail closed with the 404 below: emulating a connector write needs a conformance case and its
 live run first. Lists of `/3/offers` filter on the stored fields (unverified: `expired` is an

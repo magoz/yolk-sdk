@@ -144,7 +144,21 @@ describe('Fortnox conformance cases', () => {
       ['fortnox.invoice.row-discount-sticky', 'write-reversible'],
       ['fortnox.customer.empty-string-keeps-value', 'write-reversible'],
       ['fortnox.write.rejection-error-information', 'write-reversible'],
-      ['fortnox.invoice.send-email', 'write-irreversible']
+      ['fortnox.invoice.send-email', 'write-irreversible'],
+      ['fortnox.company.information-decodes', 'read'],
+      ['fortnox.customer.list-matches-get', 'read'],
+      ['fortnox.article.list-row-numeric-strings', 'read'],
+      ['fortnox.price.tier-matches-sublist', 'read'],
+      ['fortnox.cost-center.list-matches-get', 'read'],
+      ['fortnox.payment.invoice-payment-wire-numbers', 'read'],
+      ['fortnox.payment.supplier-payment-wire-numbers', 'read'],
+      ['fortnox.offer.rows-on-get-and-preview-pdf', 'read'],
+      ['fortnox.print-templates.unpaginated', 'read'],
+      ['fortnox.inbox.file-bytes-match-size', 'read'],
+      ['fortnox.settings.company-and-locked-period', 'read'],
+      ['fortnox.settings.predefined-accounts-and-labels', 'read'],
+      ['fortnox.settings.registers-list-matches-get', 'read'],
+      ['fortnox.profile.me', 'read']
     ])
     expect(fortnoxConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
       fortnoxConformanceCases.map(testCase => testCase.id)
@@ -186,7 +200,7 @@ describe('Fortnox conformance cases', () => {
         layer: replayCaseLayer
       })
 
-      expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 21, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       for (const result of report.results) {
@@ -198,7 +212,7 @@ describe('Fortnox conformance cases', () => {
       }
 
       expect(formatConformanceReport(report).split('\n').at(-1)).toBe(
-        '7 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
+        '21 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
       )
     })
   )
@@ -215,7 +229,7 @@ describe('Fortnox conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(7)
+      expect(report.summary.passed).toBe(21)
 
       for (const testCase of fortnoxConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -453,7 +467,21 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.invoice.row-discount-sticky', 'skipped', 'writes-not-allowed'],
         ['fortnox.customer.empty-string-keeps-value', 'skipped', 'writes-not-allowed'],
         ['fortnox.write.rejection-error-information', 'skipped', 'writes-not-allowed'],
-        ['fortnox.invoice.send-email', 'skipped', 'manual-only']
+        ['fortnox.invoice.send-email', 'skipped', 'manual-only'],
+        ['fortnox.company.information-decodes', 'passed', null],
+        ['fortnox.customer.list-matches-get', 'passed', null],
+        ['fortnox.article.list-row-numeric-strings', 'passed', null],
+        ['fortnox.price.tier-matches-sublist', 'passed', null],
+        ['fortnox.cost-center.list-matches-get', 'passed', null],
+        ['fortnox.payment.invoice-payment-wire-numbers', 'passed', null],
+        ['fortnox.payment.supplier-payment-wire-numbers', 'passed', null],
+        ['fortnox.offer.rows-on-get-and-preview-pdf', 'passed', null],
+        ['fortnox.print-templates.unpaginated', 'passed', null],
+        ['fortnox.inbox.file-bytes-match-size', 'passed', null],
+        ['fortnox.settings.company-and-locked-period', 'passed', null],
+        ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
+        ['fortnox.settings.registers-list-matches-get', 'passed', null],
+        ['fortnox.profile.me', 'passed', null]
       ])
     })
   )
@@ -469,7 +497,21 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.invoice.row-discount-sticky', 'passed', null],
         ['fortnox.customer.empty-string-keeps-value', 'passed', null],
         ['fortnox.write.rejection-error-information', 'passed', null],
-        ['fortnox.invoice.send-email', 'skipped', 'manual-only']
+        ['fortnox.invoice.send-email', 'skipped', 'manual-only'],
+        ['fortnox.company.information-decodes', 'passed', null],
+        ['fortnox.customer.list-matches-get', 'passed', null],
+        ['fortnox.article.list-row-numeric-strings', 'passed', null],
+        ['fortnox.price.tier-matches-sublist', 'passed', null],
+        ['fortnox.cost-center.list-matches-get', 'passed', null],
+        ['fortnox.payment.invoice-payment-wire-numbers', 'passed', null],
+        ['fortnox.payment.supplier-payment-wire-numbers', 'passed', null],
+        ['fortnox.offer.rows-on-get-and-preview-pdf', 'passed', null],
+        ['fortnox.print-templates.unpaginated', 'passed', null],
+        ['fortnox.inbox.file-bytes-match-size', 'passed', null],
+        ['fortnox.settings.company-and-locked-period', 'passed', null],
+        ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
+        ['fortnox.settings.registers-list-matches-get', 'passed', null],
+        ['fortnox.profile.me', 'passed', null]
       ])
     })
   )

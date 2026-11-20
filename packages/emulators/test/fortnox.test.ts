@@ -134,7 +134,7 @@ describe('route evidence manifest', () => {
       'PUT /3/invoices/{DocumentNumber}',
       'GET /3/invoices/{DocumentNumber}/preview',
       'GET /3/invoices/{DocumentNumber}/email',
-      // Read-only resources (no fixture: no case ids), in `src/fortnox/read-api.ts`.
+      // Read-only resources, in `src/fortnox/read-api.ts`.
       'GET /3/articles',
       'GET /3/articles/{ArticleNumber}',
       'GET /3/pricelists',
@@ -171,10 +171,30 @@ describe('route evidence manifest', () => {
       'GET /3/me'
     ])
 
-    // The read-only routes have no fixture: GET only, no write, no case ids.
+    // The read-only routes: GET only, no write, each citing the read cases that record it.
     for (const route of fortnoxEmulatorRoutes.slice(10)) {
-      expect(route, route.path).toMatchObject({ method: 'GET', write: false, caseIds: [] })
+      expect(route, route.path).toMatchObject({ method: 'GET', write: false })
+      expect(route.caseIds.length, route.path).toBeGreaterThan(0)
     }
+
+    // Every route cites at least one case: no Fortnox route is without a fixture.
+    expect(fortnoxEmulatorRoutes.filter(route => route.caseIds.length === 0)).toEqual([])
+    expect(
+      fortnoxEmulatorRoutes
+        .slice(0, 3)
+        .map(route => [`${route.method} ${route.path}`, route.caseIds])
+    ).toEqual([
+      ['GET /3/companyinformation', ['fortnox.company.information-decodes']],
+      ['GET /3/customers', ['fortnox.customer.list-matches-get']],
+      [
+        'GET /3/customers/{CustomerNumber}',
+        [
+          'fortnox.customer.empty-string-keeps-value',
+          'fortnox.write.rejection-error-information',
+          'fortnox.customer.list-matches-get'
+        ]
+      ]
+    ])
 
     expect(fortnoxEmulatorRoutes.filter(route => route.write).map(route => route.path)).toEqual([
       '/3/customers/{CustomerNumber}',

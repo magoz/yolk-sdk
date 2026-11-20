@@ -12,26 +12,20 @@
  * back, and report (never swallow) a failed restore, also through `ConformanceCleanupReporter` when
  * the case is being interrupted. The rejection case writes nothing when Fortnox
  * behaves as claimed: it first confirms the customer is absent and names any invoice Fortnox
- * unexpectedly creates for manual cancellation.
+ * unexpectedly creates for manual cancellation. The fourteen read cases of company information,
+ * the customer list, and the read-only resource modules live in `read-cases.ts` and run last.
  */
-import { Cause, Chunk, Clock, Context, Data, Effect, Exit, Option, Predicate } from 'effect'
+import { Cause, Chunk, Clock, Effect, Exit, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ConformanceMismatch,
   defineConformanceCase,
   expectConformance,
-  expectEqual,
-  type ConformanceCase
+  expectEqual
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
-import type { ConnectorBinaryHttpClient } from '../../binary-http.ts'
 import { failReporting } from '../../conformance/cleanup-reporter.ts'
-import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
-import type { ConnectorError } from '../../error.ts'
-import type { ConnectorFileTransferError } from '../../file-transfer.ts'
-import { decodeJsonResponse, type ConnectorHttpClient } from '../../http.ts'
-import { makeIntegration } from '../../integration.ts'
-import type { ActionResult } from '../../result.ts'
+import { decodeJsonResponse } from '../../http.ts'
 import { downloadFortnoxInvoicePreview } from '../files.ts'
 import {
   fortnoxCreateInvoiceAction,
@@ -41,14 +35,10 @@ import {
   fortnoxUpdateCustomerAction,
   fortnoxUpdateInvoiceAction
 } from '../index.ts'
-import {
-  FortnoxInvoiceOAuthCredentialSlot,
-  fortnoxConnectorId,
-  fortnoxOAuthSlotId
-} from '../oauth.ts'
+import { FortnoxInvoiceOAuthCredentialSlot } from '../oauth.ts'
 import {
   FortnoxCreateInvoiceInput,
-  FortnoxCustomerNumber,
+  type FortnoxCustomerNumber,
   FortnoxDocumentNumber,
   FortnoxGetCustomerInput,
   FortnoxGetInvoiceInput,
@@ -67,172 +57,75 @@ import { fortnoxInvoicePaymentFiltersFixture } from './invoice-payment-filters.t
 import { fortnoxInvoicePreviewPdfFixture } from './invoice-preview-pdf.ts'
 import { fortnoxInvoiceRowDiscountFixture } from './invoice-row-discount.ts'
 import { fortnoxInvoiceSendEmailFixture } from './invoice-send-email.ts'
+import {
+  fortnoxArticleListRowNumbersCase,
+  fortnoxCompanyInformationCase,
+  fortnoxCostCenterListMatchesGetCase,
+  fortnoxCustomerListMatchesGetCase,
+  fortnoxInboxFolderFileBytesCase,
+  fortnoxInvoicePaymentReadCase,
+  fortnoxOfferRowsAndPreviewCase,
+  fortnoxPredefinedAccountsAndLabelsCase,
+  fortnoxPriceTierMatchesSublistCase,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxProfileMeCase,
+  fortnoxSettingsCompanyAndLockedPeriodCase,
+  fortnoxSettingsRegistersCase,
+  fortnoxSupplierInvoicePaymentReadCase
+} from './read-cases.ts'
+import {
+  downloadBudget,
+  FortnoxConformanceActionFailed,
+  FortnoxConformanceConfig,
+  FortnoxConformanceRestoreFailed,
+  FortnoxConformanceSeeds,
+  fortnoxConformanceCredentialRef,
+  fortnoxConformanceIntegration,
+  hasPdfTrailer,
+  isPdfStart,
+  requireSeed,
+  successValue,
+  type FortnoxConformanceCase,
+  type FortnoxConformanceError,
+  type FortnoxConformanceRequirements,
+  type FortnoxConformanceSeedKey
+} from './shared.ts'
 import { fortnoxWriteRejectionFixture } from './write-rejection.ts'
 
-/**
- * Host-supplied seed identities in the practice company. Cases never hard-code account data. A
- * case whose seed is missing fails with a `precondition:` `ConformanceMismatch` before any
- * request.
- */
-export const FortnoxConformanceSeeds = Schema.Struct({
-  /** Unbooked invoice with at least one row; its rows are changed and then restored. */
-  discountInvoiceDocumentNumber: Schema.optionalKey(FortnoxDocumentNumber),
-  /** Any invoice whose generated PDF preview can be downloaded. */
-  previewInvoiceDocumentNumber: Schema.optionalKey(FortnoxDocumentNumber),
-  /** Customer with a non-empty `Comments` value; it is changed and then restored. */
-  customerNumber: Schema.optionalKey(FortnoxCustomerNumber),
-  /** A customer number that does NOT exist in the practice company. */
-  missingCustomerNumber: Schema.optionalKey(FortnoxCustomerNumber),
-  /** Invoice to send by email (irreversible; manual runs only). */
-  emailInvoiceDocumentNumber: Schema.optionalKey(FortnoxDocumentNumber),
-  /**
-   * The only address the email case may send to. The case aborts before sending unless the email
-   * invoice's `EmailInformation.EmailAddressTo` equals it exactly (and no copy address is set).
-   */
-  emailRecipient: Schema.optionalKey(
-    Schema.Trimmed.check(Schema.isPattern(/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/u))
-  )
-})
-
-export type FortnoxConformanceSeeds = typeof FortnoxConformanceSeeds.Type
-
-export type FortnoxConformanceSeedKey = keyof FortnoxConformanceSeeds
-
-/** Host-supplied seed identities for the Fortnox conformance cases. */
-export class FortnoxConformanceConfig extends Context.Service<
+export {
+  FortnoxConformanceActionFailed,
   FortnoxConformanceConfig,
-  FortnoxConformanceSeeds
->()('@yolk-sdk/connectors/fortnox/conformance/FortnoxConformanceConfig') {}
-
-/**
- * Credential reference the cases bind to the `fortnox.oauth` slot. A host `CredentialResolver`
- * (for example `staticCredentialResolverLayer` from `@yolk-sdk/connectors/conformance`) resolves
- * it to a Fortnox `OAuthCredential`.
- */
-export const fortnoxConformanceCredentialRef = 'fortnox.conformance'
-
-/** The integration every Fortnox conformance case invokes the connector with. */
-export const fortnoxConformanceIntegration = makeIntegration({
-  connectorId: fortnoxConnectorId,
-  credentialBindings: [
-    makeCredentialBinding({
-      slotId: fortnoxOAuthSlotId,
-      credentialRef: fortnoxConformanceCredentialRef
-    })
-  ]
-})
-
-/** A connector action returned an `ActionResult` failure where the case needed success. */
-export class FortnoxConformanceActionFailed extends Data.TaggedError(
-  'FortnoxConformanceActionFailed'
-)<{
-  readonly actionId: string
-  readonly code: string
-  readonly status?: number
-}> {
-  override get message(): string {
-    const status = this.status === undefined ? '' : ` (HTTP ${this.status})`
-
-    return `${this.actionId} failed: ${this.code}${status}`
-  }
+  FortnoxConformanceRestoreFailed,
+  FortnoxConformanceSeeds,
+  fortnoxConformanceCredentialRef,
+  fortnoxConformanceIntegration,
+  type FortnoxConformanceCase,
+  type FortnoxConformanceError,
+  type FortnoxConformanceRequirements,
+  type FortnoxConformanceSeedKey
 }
 
-const restoreByHandAdvice =
-  'restore the account by hand if it still differs from its original state.'
-
-/** `text` ending in a period (a truncated `...` summary already does). */
-const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
-
-/**
- * Restoring the practice account after a write case failed. `caseOutcome` says whether the claim
- * itself held before restoring; `claimFailure` is a sanitized summary of why it failed. The account
- * may or may not still differ from its original state (for example, nothing changed when the first
- * write was rejected): check it, and restore it by hand only if it differs.
- */
-export class FortnoxConformanceRestoreFailed extends Data.TaggedError(
-  'FortnoxConformanceRestoreFailed'
-)<{
-  readonly caseId: string
-  readonly reason: string
-  readonly caseOutcome: 'claim held' | 'claim failed'
-  readonly claimFailure?: string
-}> {
-  override get message(): string {
-    const claim =
-      this.caseOutcome === 'claim held'
-        ? 'Claim held first.'
-        : this.claimFailure === undefined
-          ? 'Claim failed first.'
-          : `Claim failed first: ${this.claimFailure}`
-
-    // Conformance reports cap failure messages at 300 characters: the advice comes first so it
-    // always survives, and each summary is capped at `failureSummaryLength`, so the whole message
-    // fits even for the longest case id.
-    return `${this.caseId}: restore failed; ${restoreByHandAdvice} Restore error: ${sentence(this.reason)} ${claim}`
-  }
+export {
+  fortnoxArticleListRowNumbersCase,
+  fortnoxCompanyInformationCase,
+  fortnoxCostCenterListMatchesGetCase,
+  fortnoxCustomerListMatchesGetCase,
+  fortnoxInboxFolderFileBytesCase,
+  fortnoxInvoicePaymentReadCase,
+  fortnoxOfferRowsAndPreviewCase,
+  fortnoxPredefinedAccountsAndLabelsCase,
+  fortnoxPriceTierMatchesSublistCase,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxProfileMeCase,
+  fortnoxSettingsCompanyAndLockedPeriodCase,
+  fortnoxSettingsRegistersCase,
+  fortnoxSupplierInvoicePaymentReadCase
 }
-
-export type FortnoxConformanceError =
-  | ConformanceMismatch
-  | ConnectorError
-  | ConnectorFileTransferError
-  | FortnoxConformanceActionFailed
-  | FortnoxConformanceRestoreFailed
-
-/** What every Fortnox conformance case requires from the host. */
-export type FortnoxConformanceRequirements =
-  | ConnectorHttpClient
-  | ConnectorBinaryHttpClient
-  | CredentialResolver
-  | FortnoxConformanceConfig
-
-export type FortnoxConformanceCase = ConformanceCase<
-  FortnoxConformanceError,
-  FortnoxConformanceRequirements
->
 
 const integration = fortnoxConformanceIntegration
 
-/** Trusted budget for the preview download (generous for a generated invoice PDF). */
-const previewBudget = {
-  maxBytes: 20 * 1024 * 1024,
-  maxMetadataBytes: 64 * 1024,
-  maxErrorBodyBytes: 64 * 1024
-}
-
 /** Synthetic marker written to the configured customer's `Comments` and then removed. */
 export const fortnoxConformanceCommentsMarker = 'yolk-conformance marker: safe to restore'
-
-const requireSeed = <K extends FortnoxConformanceSeedKey>(key: K) =>
-  Effect.gen(function* () {
-    const seeds = yield* FortnoxConformanceConfig
-    const value = seeds[key]
-
-    if (value === undefined) {
-      return yield* new ConformanceMismatch({
-        message: `precondition: FortnoxConformanceConfig.${key} is not configured`
-      })
-    }
-
-    return value
-  })
-
-const successValue = <A>(
-  actionId: string,
-  result: ActionResult<A>
-): Effect.Effect<A, FortnoxConformanceActionFailed> => {
-  if (Predicate.isTagged(result, 'Success')) {
-    return Effect.succeed(result.value)
-  }
-
-  const { code, status } = result.error
-
-  return Effect.fail(
-    status === undefined
-      ? new FortnoxConformanceActionFailed({ actionId, code })
-      : new FortnoxConformanceActionFailed({ actionId, code, status })
-  )
-}
 
 const getInvoice = (documentNumber: FortnoxDocumentNumber) =>
   fortnoxGetInvoiceAction
@@ -401,12 +294,6 @@ export const fortnoxInvoiceListPopulatedCase: FortnoxConformanceCase = defineCon
   })
 })
 
-const isPdfStart = (bytes: Uint8Array): boolean =>
-  new TextDecoder().decode(bytes.subarray(0, 5)) === '%PDF-'
-
-const hasPdfTrailer = (bytes: Uint8Array): boolean =>
-  new TextDecoder().decode(bytes.subarray(Math.max(0, bytes.byteLength - 1024))).includes('%%EOF')
-
 export const fortnoxInvoicePreviewPdfCase: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.invoice.preview-pdf',
   title: 'Invoice preview returns a complete generated PDF',
@@ -420,7 +307,7 @@ export const fortnoxInvoicePreviewPdfCase: FortnoxConformanceCase = defineConfor
     const preview = yield* downloadFortnoxInvoicePreview(
       integration,
       { documentNumber },
-      previewBudget
+      downloadBudget
     )
 
     yield* expectConformance(isPdfStart(preview.bytes), 'expected the preview to start with %PDF-')
@@ -968,7 +855,7 @@ export const fortnoxInvoiceSendEmailCase: FortnoxConformanceCase = defineConform
   })
 })
 
-/** Every Fortnox conformance case, in fixture order. */
+/** Every Fortnox conformance case, in fixture order (the read-only resource cases last). */
 export const fortnoxConformanceCases: ReadonlyArray<FortnoxConformanceCase> = [
   fortnoxInvoiceListPopulatedCase,
   fortnoxInvoicePreviewPdfCase,
@@ -976,5 +863,19 @@ export const fortnoxConformanceCases: ReadonlyArray<FortnoxConformanceCase> = [
   fortnoxInvoiceRowDiscountCase,
   fortnoxCustomerEmptyStringCase,
   fortnoxWriteRejectionCase,
-  fortnoxInvoiceSendEmailCase
+  fortnoxInvoiceSendEmailCase,
+  fortnoxCompanyInformationCase,
+  fortnoxCustomerListMatchesGetCase,
+  fortnoxArticleListRowNumbersCase,
+  fortnoxPriceTierMatchesSublistCase,
+  fortnoxCostCenterListMatchesGetCase,
+  fortnoxInvoicePaymentReadCase,
+  fortnoxSupplierInvoicePaymentReadCase,
+  fortnoxOfferRowsAndPreviewCase,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxInboxFolderFileBytesCase,
+  fortnoxSettingsCompanyAndLockedPeriodCase,
+  fortnoxPredefinedAccountsAndLabelsCase,
+  fortnoxSettingsRegistersCase,
+  fortnoxProfileMeCase
 ]
