@@ -44,9 +44,10 @@ export type VercelAiGatewayProviderConfig = {
   /**
    * Override the reasoning-effort wire format. Defaults to the Anthropic
    * `reasoning` object; DeepSeek-style hosts expect the literal
-   * `reasoning_effort` field instead.
+   * `reasoning_effort` field instead. `omit` never sends the effort and never
+   * fails, for models without reasoning behind a host's shared effort setting.
    */
-  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort'
+  readonly reasoningEffortFormat?: 'reasoning-object' | 'reasoning-effort' | 'omit'
   /**
    * DeepSeek-style thinking toggle, merged into the request body (e.g.
    * `{ type: 'enabled' }`). Omitted unless a host documents it.
@@ -96,7 +97,7 @@ type VercelAiGatewayOpenAiLayerFields = {
   apiKey: VercelAiGatewayProviderConfig['apiKey']
   maxCompletionTokens: number
   completionTokenField: 'max_tokens'
-  reasoningEffortFormat: 'reasoning-object' | 'reasoning-effort'
+  reasoningEffortFormat: 'reasoning-object' | 'reasoning-effort' | 'omit'
   chatCompletionsUrl: string
   providerIdentity: typeof vercelAiGatewayProviderIdentity
   extraBody: OpenAiRequestExtras

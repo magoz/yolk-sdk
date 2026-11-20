@@ -490,7 +490,6 @@ describe('reasoning effort through the default OpenAI provider', () => {
       )
     )
 
-  /** The reasoning tokens the one Usage event reports. */
   const reasoningTokens = (events: Iterable<LLMEvent>) =>
     Array.from(events).flatMap(event =>
       Predicate.isTagged(event, 'Usage') ? [event.usage.output.reasoning] : []

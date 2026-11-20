@@ -48,7 +48,8 @@ effort, or set `reasoningEffortFormat: 'omit'` (new), which never sends it and n
 now a canonical key there and is dropped from `extraBody`). On any other `chatCompletionsUrl`, and
 in `toOpenAiRequestBody` without a format, a request with an effort now fails with a
 `validation_error` instead of being sent without it: set `reasoningEffortFormat` (`'omit'`
-included), or stop sending the effort. Vercel AI Gateway and OpenCode Go set their format already.
+included), or stop sending the effort. Vercel AI Gateway and OpenCode Go set their format already;
+the Gateway's `reasoningEffortFormat` also accepts `'omit'`.
 
 ### Canary.145: Cloudflare runtime hook token conflicts
 

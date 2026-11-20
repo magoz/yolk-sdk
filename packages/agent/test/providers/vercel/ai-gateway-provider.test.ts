@@ -253,6 +253,22 @@ describe('Vercel AI Gateway provider', () => {
     })
   )
 
+  it.effect('omit never sends the effort and never fails', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      yield* runProvider(
+        new Response(JSON.stringify({ choices: [{ message: { content: 'plain' } }] })),
+        requests,
+        { ...defaultGatewayConfig, reasoningEffortFormat: 'omit' },
+        { model: 'openai/gpt-4o-mini', reasoningEffort: 'high' }
+      )
+
+      expect(readCapturedBody(requests)).not.toHaveProperty('reasoning')
+      expect(readCapturedBody(requests)).not.toHaveProperty('reasoning_effort')
+    })
+  )
+
   it.effect('passes none and max through in either reasoning format', () =>
     Effect.gen(function* () {
       for (const value of ['none', 'max']) {

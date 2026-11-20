@@ -8,6 +8,7 @@ import {
   Predicate,
   Redacted,
   Ref,
+  Result,
   Stream
 } from 'effect'
 import * as Base64 from 'effect/encoding/Base64'
@@ -233,7 +234,8 @@ export type OpenAiProviderConfig = {
    * How `LLMRequest.reasoningEffort` is sent: `reasoning-effort` (the Chat Completions
    * `reasoning_effort` field) or `reasoning-object` (`{ reasoning: { effort } }`). Defaults to
    * `reasoning-effort` on the native OpenAI endpoint (no `chatCompletionsUrl`, or
-   * `https://api.openai.com/v1/chat/completions`). Other endpoints have no default: a request
+   * `https://api.openai.com/v1/chat/completions`, ignoring one trailing slash and any query).
+   * Other endpoints (Azure OpenAI included) have no default: a request
    * with an effort fails with a `validation_error` until the host picks the field it accepts.
    * `omit` never sends the effort and never fails: for models without reasoning (which reject
    * the field) behind a host's shared effort setting. No key is then reserved in `extraBody`.
@@ -360,7 +362,27 @@ const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
   name: 'OpenAI'
 }
 
-const openAiChatCompletionsUrl = 'https://api.openai.com/v1/chat/completions'
+const openAiOrigin = 'https://api.openai.com'
+
+const openAiChatCompletionsPath = '/v1/chat/completions'
+
+const openAiChatCompletionsUrl = `${openAiOrigin}${openAiChatCompletionsPath}`
+
+/**
+ * The native endpoint: no URL, or the OpenAI origin with the Chat Completions path (one trailing
+ * slash, a query and a fragment are ignored). An unparseable URL, another host (Azure OpenAI
+ * included) or another path is a compatible endpoint.
+ */
+const isNativeOpenAiChatCompletionsUrl = (url: string | undefined): boolean =>
+  url === undefined ||
+  Result.try(() => new URL(url)).pipe(
+    Result.match({
+      onFailure: () => false,
+      onSuccess: parsed =>
+        parsed.origin === openAiOrigin &&
+        parsed.pathname.replace(/\/$/, '') === openAiChatCompletionsPath
+    })
+  )
 
 /**
  * The host's format, else `reasoning-effort` on the native endpoint, which documents it for
@@ -371,8 +393,7 @@ const openAiReasoningEffortFormat = (
 ): OpenAiRequestBodyConfig['reasoningEffortFormat'] => {
   if (config.reasoningEffortFormat !== undefined) return config.reasoningEffortFormat
 
-  return config.chatCompletionsUrl === undefined ||
-    config.chatCompletionsUrl === openAiChatCompletionsUrl
+  return isNativeOpenAiChatCompletionsUrl(config.chatCompletionsUrl)
     ? 'reasoning-effort'
     : undefined
 }

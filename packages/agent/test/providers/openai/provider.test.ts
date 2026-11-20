@@ -271,6 +271,48 @@ describe('OpenAI provider', () => {
       })
     )
 
+    it.effect('a trailing slash or a query still names the native endpoint', () =>
+      Effect.gen(function* () {
+        for (const chatCompletionsUrl of [
+          'https://api.openai.com/v1/chat/completions/',
+          'https://api.openai.com/v1/chat/completions?trace=1'
+        ]) {
+          const { result, requests } = yield* sendThrough({
+            apiKey: Redacted.make('test-key'),
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            chatCompletionsUrl
+          })
+
+          expect(Result.isSuccess(result)).toBe(true)
+          expect(sentJson(requests)).toMatchObject({ reasoning_effort: 'high' })
+        }
+      })
+    )
+
+    it.effect('another host, another path or an unparseable URL is not native', () =>
+      Effect.gen(function* () {
+        for (const chatCompletionsUrl of [
+          'https://example.openai.azure.com/openai/v1/chat/completions',
+          'https://api.openai.com.example.com/v1/chat/completions',
+          'https://api.openai.com/v2/chat/completions',
+          'https://api.openai.com/v1/chat/completions//',
+          'api.openai.com/v1/chat/completions'
+        ]) {
+          const { result, requests } = yield* sendThrough({
+            apiKey: Redacted.make('test-key'),
+            maxCompletionTokens: openAiTestMaxOutputTokens,
+            chatCompletionsUrl
+          })
+
+          expect(Result.isFailure(result) && result.failure).toMatchObject({
+            _tag: 'LLMError',
+            cause: 'validation_error'
+          })
+          expect(requests).toHaveLength(0)
+        }
+      })
+    )
+
     it.effect('an explicit format still wins on the native endpoint', () =>
       Effect.gen(function* () {
         const { requests } = yield* sendThrough({
