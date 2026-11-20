@@ -1,5 +1,5 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
-import { describe, expect, it } from '@effect/vitest'
+import { Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { describe, expect, expectTypeOf, it } from '@effect/vitest'
 import {
   AgentAwaitingInput,
   AssistantAgentMessage,
@@ -39,7 +39,9 @@ import {
   markAgentRunStart,
   reduceAgentEvents,
   submitAgentUserMessage,
-  type AgentClientState
+  type AgentClientModelTurnStart,
+  type AgentClientState,
+  type AgentClientTurnStart
 } from '../../src/client'
 import { AgentToolRun } from '../../src/client/state.ts'
 import { ContextTransformer, LoopConfig, run } from '../../src/loop/index.ts'
@@ -52,7 +54,8 @@ import {
   markChatRunStart,
   reduceAgentChatState,
   type AgentChatEventProjectionState,
-  type AgentChatState
+  type AgentChatState,
+  type AgentChatTurnStart
 } from '../../src/react/chat-core.ts'
 import { buildAgentChatMessages, type AgentChatMessage } from '../../src/react/chat-messages.ts'
 import { makeQuestionToolDef } from '../../src/tools/index.ts'
@@ -530,6 +533,28 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
         )
       })
   )
+
+  it('types the marked state with its run start, not a narrower start the input had', () => {
+    const modelStart: AgentChatTurnStart & { readonly run?: undefined } = {
+      streamId: 'run-1',
+      turn: 2,
+      after: Option.none()
+    }
+
+    const marked = markChatRunStart({
+      ...makeAgentChatEventProjectionState(),
+      turnStart: modelStart
+    })
+
+    expectTypeOf(marked.turnStart).toEqualTypeOf<AgentChatTurnStart>()
+    expect(marked.turnStart).toEqual({ streamId: '', turn: 0, after: Option.none(), run: true })
+
+    const clientStart: AgentClientModelTurnStart = { streamId: 'run-1', turn: 2, firstRun: 0 }
+    const client = markAgentRunStart({ ...initialAgentClientState, turnStart: clientStart })
+
+    expectTypeOf(client.turnStart).toEqualTypeOf<AgentClientTurnStart | undefined>()
+    expect(client.turnStart).toEqual({ streamId: '', turn: 0, firstRun: 0, run: true })
+  })
 
   describe('taken mid-turn, while the turn runs its tool batch', () => {
     // The turn's own later host events name calls in the snapshot's last message: they find them

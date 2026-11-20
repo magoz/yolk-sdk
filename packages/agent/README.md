@@ -794,14 +794,19 @@ complete again; dedupe such replays by `eventId`. Until a start is seen, tool ev
 state built before `turnStart` behaves that way too.
 
 Hosts that keep their own snapshot (stored messages, pending requests, accepted interaction
-receipts) rebuild state from it. `buildAgentChatMessages` gives each run in `toolRuns` to one card,
-since `toolRuns` can hold runs of several turns for one call id: the last card holding the same
-call the run holds (its own or its request's; id, name and arguments equal), or, for a run holding
-no call (an input still streaming, an answer or denial without its request), the last card with its
-id that no run took. Later runs choose first, and each card takes at most one run. A run holding a
-call no card holds shows nowhere, and a card no run reaches shows its own result message (the
-`ToolResult` after it, never a later turn's reusing the id). When the snapshot's run may resume (a
-HITL answer, a stopped run going on), mark a run start on the rebuilt state:
+receipts) rebuild state from it. `toolRuns` can hold runs of several turns for one call id, so
+`buildAgentChatMessages` gives each run to one card, later runs first, each card taking at most one:
+a run holding a call (its own or its request's) takes the last card holding the same call (id, name
+and arguments equal); a run holding no call (an input still streaming, an answer or denial without
+its request) that answers an earlier run's request takes that run's card (a later denial wins over
+the pending approval it denies), else the last card with its id that no run took, one without a
+result message first. A card no run reaches shows its own result message: the `ToolResult` after it,
+never another turn's reusing the id (a result with no card before it shows on its own). Give each
+run the call as the transcript holds it (`toolRunsFromHitlRequests` does, from the loop's
+requests): a run whose call equals no card's (arguments the host normalized or re-serialized) falls
+back to the last card with its id and name that no run took and that has no result message, and
+shows nowhere when there is none (a different name is another turn's call). When the snapshot's run
+may resume (a HITL answer, a stopped run going on), mark a run start on the rebuilt state:
 
 ```ts
 import { initialAgentClientState, markAgentRunStart } from '@yolk-sdk/agent/client'

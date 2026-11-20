@@ -439,8 +439,11 @@ export const toolRunCall = (run: AgentToolRun): ToolCall | undefined =>
     Match.exhaustive
   )
 
-/** The request a run carries (pending or answered), if any. */
-const toolRunRequestId = (run: AgentToolRun): string | undefined =>
+/**
+ * The request a run carries (pending or answered), if any. Package-internal: `buildAgentChatMessages`
+ * reads it too.
+ */
+export const toolRunRequestId = (run: AgentToolRun): string | undefined =>
   Match.value(run).pipe(
     Match.tag('ApprovalRequested', 'Denied', current => current.request?.requestId),
     Match.tag(

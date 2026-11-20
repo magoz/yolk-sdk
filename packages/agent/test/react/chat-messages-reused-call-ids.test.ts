@@ -5,6 +5,9 @@ import {
   BackgroundToolAccepted,
   HostToolCallPart,
   InteractionResponse,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionResponse,
   ToolApprovalRequest,
   ToolCall,
   ToolResult,
@@ -203,6 +206,131 @@ describe('buildAgentChatMessages with a call id reused across turns (#356)', () 
         'review_document:Denied',
         'send:InteractionSubmitted'
       ])
+    })
+  })
+
+  describe('review fixes (#357)', () => {
+    const denied = AgentToolRun.Denied({ toolCallId: 'call_0', reason: 'No' })
+
+    it('lets a later answer without its request win on the card of the call it answers', () => {
+      // The denial answers the pending approval: an already denied request is not actionable.
+      expect(cards([turn('Sending', send)], [...pending, denied])).toEqual(['send:Denied'])
+      expect(cards(transcript, [...pending, denied])).toEqual([
+        'review_document:Completed',
+        'send:Denied'
+      ])
+
+      const question = QuestionRequest.make({
+        requestId: 'question:call_0',
+        toolCallId: 'call_0',
+        call: send,
+        questions: [QuestionPrompt.make({ id: 'sure', prompt: 'Send it?' })]
+      })
+
+      const answered = AgentToolRun.QuestionAnswered({
+        response: QuestionResponse.make({
+          requestId: question.requestId,
+          toolCallId: 'call_0',
+          outcome: 'answered',
+          source: 'user'
+        })
+      })
+
+      expect(
+        cards([turn('Sending', send)], [...toolRunsFromHitlRequests([question]), answered])
+      ).toEqual(['send:QuestionAnswered'])
+
+      // An earlier denial is not the later request's answer: the request stays actionable.
+      expect(cards([turn('Sending', send)], [denied, ...pending])).toEqual([
+        'send:ApprovalRequested'
+      ])
+    })
+
+    it("shows a request whose call differs from the transcript's on the card with its id and name", () => {
+      // The host normalized the arguments (a `null` dropped): the call no longer equals the card's.
+      const sendAsEmitted = ToolCall.make({
+        id: 'call_0',
+        name: 'send',
+        params: { to: 'ana', cc: null }
+      })
+
+      const question = QuestionRequest.make({
+        requestId: 'question:call_0',
+        toolCallId: 'call_0',
+        call: send,
+        questions: [QuestionPrompt.make({ id: 'sure', prompt: 'Send it?' })]
+      })
+
+      for (const [request, state] of [
+        [approval, 'ApprovalRequested'],
+        [question, 'QuestionRequested']
+      ] as const) {
+        const toolRuns = toolRunsFromHitlRequests([request])
+
+        expect(cards([turn('Sending', sendAsEmitted)], toolRuns)).toEqual([`send:${state}`])
+
+        // Never on a card with a result: an earlier turn's `send` reusing the id finished.
+        const earlier = ToolCall.make({ id: 'call_0', name: 'send', params: { to: 'bob' } })
+
+        expect(
+          cards(
+            [
+              turn('Sending to Bob', earlier),
+              ToolResultMessage.make({ toolCallId: 'call_0', content: 'Sent' }),
+              turn('Sending to Ana', sendAsEmitted)
+            ],
+            toolRuns
+          )
+        ).toEqual(['send:Completed', `send:${state}`])
+      }
+    })
+
+    it('gives a run without a call the card with its id that has no result first', () => {
+      // Turn 1's interaction was accepted (no result yet); turn 2's `send` completed.
+      const messages = [
+        turn('Reviewing', review),
+        turn('Sending', send),
+        ToolResultMessage.make({ toolCallId: 'call_0', content: 'Sent' })
+      ]
+
+      expect(cards(messages, [acceptedInteraction])).toEqual([
+        'review_document:InteractionSubmitted',
+        'send:Completed'
+      ])
+    })
+
+    it("gives o-o's accepted interaction and pending approval their own cards, in any order", () => {
+      const messages = [turn('Reviewing', review), turn('Sending', send)]
+
+      for (const toolRuns of [
+        [acceptedInteraction, ...pending],
+        [...pending, acceptedInteraction]
+      ]) {
+        expect(cards(messages, toolRuns)).toEqual([
+          'review_document:InteractionSubmitted',
+          'send:ApprovalRequested'
+        ])
+      }
+    })
+
+    it('shows a result with no card before it on its own, never on a later call reusing its id', () => {
+      const accepted = makeBackgroundToolAcceptedResult({
+        toolCallId: 'call_0',
+        acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:review' })
+      })
+
+      const messages = [toolResultMessageFromResult(accepted), turn('Sending', send)]
+
+      expect(cards(messages, pending)).toEqual(['send:ApprovalRequested'])
+      expect(cards(messages, [])).toEqual(['send:Called'])
+
+      expect(
+        build(messages, pending).flatMap(message =>
+          message.parts.flatMap(part =>
+            Predicate.isTagged(part, 'ToolResult') ? [part.toolCallId] : []
+          )
+        )
+      ).toEqual(['call_0'])
     })
   })
 })

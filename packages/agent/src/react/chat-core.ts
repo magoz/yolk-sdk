@@ -188,7 +188,8 @@ const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
  * reusing its id. A snapshot taken mid-turn keeps working: that turn's later host events for calls
  * in the snapshot's messages find them as the same call. Its later model events (before the next
  * `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach an
- * earlier turn's call, as without a start. Pure; works on either chat state.
+ * earlier turn's call, as without a start. Pure; works on either chat state, typed with the new
+ * `turnStart` (a narrower `turnStart` type the input had does not survive).
  */
 export const markChatRunStart = <
   State extends {
@@ -197,7 +198,10 @@ export const markChatRunStart = <
   }
 >(
   state: State
-): State => ({ ...state, turnStart: runTurnStart('', state.chatMessages) })
+): Omit<State, 'turnStart'> & { readonly turnStart: AgentChatTurnStart } => ({
+  ...state,
+  turnStart: runTurnStart('', state.chatMessages)
+})
 
 export const makeAgentChatEventProjectionState = (
   chatMessages: ReadonlyArray<AgentChatMessage> = []
