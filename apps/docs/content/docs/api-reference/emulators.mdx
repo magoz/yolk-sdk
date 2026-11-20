@@ -931,7 +931,7 @@ refused), the issue and comment ids derived from them in the fixtures' form, and
 injectable `now` clock. Issue numbers below the counter that the state does not hold are implied,
 never rendered; the open-issue listing answers only while the seed's `impliedIssues` is `closed`
 (the default seed's, as the open-listing fixture records) or no number is implied; a seed that
-replaces `issues` or sets `nextIssueNumber` gets `unknown` unless it names `impliedIssues: 'closed'`. Label pages are page numbers, not cursors, and the label list never changes within a
+replaces `repository` or `issues` or sets `nextIssueNumber` gets `unknown` unless it names `impliedIssues: 'closed'`. Label pages are page numbers, not cursors, and the label list never changes within a
 seed (no route writes labels). A deleted comment's id and a closed issue stay in the state (GitHub
 keeps both), so a write case ends at the seed except those and the counters.
 

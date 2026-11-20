@@ -38,6 +38,7 @@ import {
   googleLeftoverLookup,
   observed,
   outcomeOf,
+  searchUntilFound,
   requireSeed,
   runText,
   successValue,
@@ -222,9 +223,25 @@ const EventParty = Schema.Struct({
 })
 
 /**
+ * The working-location fields Google's free-text search reads (the events.list `q` reference:
+ * `officeLocation.buildingId`, `.deskId`, `.label`, and `customLocation.label`; `homeOffice` holds
+ * no text).
+ */
+const WorkingLocation = Schema.Struct({
+  customLocation: Schema.optionalKey(Schema.Struct({ label: Schema.optionalKey(Schema.String) })),
+  officeLocation: Schema.optionalKey(
+    Schema.Struct({
+      buildingId: Schema.optionalKey(Schema.String),
+      deskId: Schema.optionalKey(Schema.String),
+      label: Schema.optionalKey(Schema.String)
+    })
+  )
+})
+
+/**
  * The text of each answered event Google's free-text search reads, observed at the port: the
- * connector decodes the summary, description, location, and attendee addresses, but not the names
- * or the organizer and creator, which the search also reads.
+ * connector decodes the summary, description, location, and attendee addresses, but not the names,
+ * the organizer and creator, or the working location, which the search also reads.
  */
 const QueriedEvents = Schema.Struct({
   items: Schema.optionalKey(
@@ -234,9 +251,11 @@ const QueriedEvents = Schema.Struct({
         summary: Schema.optionalKey(Schema.String),
         description: Schema.optionalKey(Schema.String),
         location: Schema.optionalKey(Schema.String),
+        id: Schema.optionalKey(Schema.String),
         attendees: Schema.optionalKey(Schema.Array(EventParty)),
         organizer: Schema.optionalKey(EventParty),
-        creator: Schema.optionalKey(EventParty)
+        creator: Schema.optionalKey(EventParty),
+        workingLocationProperties: Schema.optionalKey(WorkingLocation)
       })
     )
   )
@@ -254,7 +273,11 @@ const mentionsQueryToken = (event: QueriedEvent): boolean =>
     event.location,
     ...(event.attendees ?? []).flatMap(partyTexts),
     ...partyTexts(event.organizer),
-    ...partyTexts(event.creator)
+    ...partyTexts(event.creator),
+    event.workingLocationProperties?.customLocation?.label,
+    event.workingLocationProperties?.officeLocation?.buildingId,
+    event.workingLocationProperties?.officeLocation?.deskId,
+    event.workingLocationProperties?.officeLocation?.label
   ].some(
     text =>
       text !== undefined && leftoverQueryTokens.some(token => text.toLowerCase().includes(token))
@@ -265,7 +288,7 @@ export const calendarQueryCase: GoogleConformanceCase = defineConformanceCase({
   title: 'The free-text event query the leftover lookup sends lists only events that mention it',
   safety: 'read',
   docs: '`calendar.list_events` sends `query` as the `q` parameter (free-text search terms), with `maxResults` and an opaque `pageToken`, and decodes `items` and `nextPageToken`. `findGoogleConformanceLeftovers` queries the seeded calendar for `yolk-conformance` (`maxResults: 250`, at most 4 pages) and reports the events whose summary starts with the run prefix.',
-  wire: "`calendar.list_events` of the seeded calendar with `query: \"yolk-conformance\"` and `maxResults: 250` (the leftover lookup's request), followed through `nextPageToken`, answers no event twice, and every event it answers that is not `cancelled` mentions one of the query's tokens, `yolk` or `conformance` (case-insensitive), in its summary, description, or location, or in an attendee's, the organizer's, or the creator's address or name (observed at the `ConnectorHttpClient` port; unverified: that Google matches only where a token occurs, since the reference names the fields it searches but not how it splits the hyphenated query).",
+  wire: "`calendar.list_events` of the seeded calendar with `query: \"yolk-conformance\"` and `maxResults: 250` (the leftover lookup's request), followed through `nextPageToken`, answers no event twice, and every event it answers that is not `cancelled` mentions one of the query's tokens, `yolk` or `conformance` (case-insensitive), in its summary, description, or location, in an attendee's, the organizer's, or the creator's address or name, or in a working-location label, building, or desk (observed at the `ConnectorHttpClient` port; unverified: that Google matches only where a token occurs, since the reference names the fields it searches but not how it splits the hyphenated query).",
   fixtures: [calendarQueryFixture.id],
   run: Effect.gen(function* () {
     const calendarId = yield* requireSeed('calendarId')
@@ -291,6 +314,12 @@ export const calendarQueryCase: GoogleConformanceCase = defineConformanceCase({
       }
 
       const items = answered.items ?? []
+
+      yield* expectEqual(
+        items.map(event => event.id ?? ''),
+        ids,
+        'expected the observed event listing to answer the events the connector decoded'
+      )
 
       yield* expectConformance(
         ids.every((id, index) => !seen.includes(id) && ids.indexOf(id) === index),
@@ -393,7 +422,7 @@ export const calendarEventLifecycleCase: GoogleConformanceCase = defineConforman
   title: 'An event without attendees is created, read, renamed by PATCH, and deleted',
   safety: 'write-reversible',
   docs: '`calendar.create_event` sends POST .../calendars/{calendarId}/events with `summary`, `description`, `location`, `start`, `end`, and `attendees` (undefined fields omitted) and no `sendUpdates`; `calendar.get_event` sends GET .../events/{eventId}; `calendar.update_event` sends PATCH .../events/{eventId} with only the given fields; all three decode `GoogleCalendarEvent`; `calendar.delete_event` sends DELETE .../events/{eventId} and treats any 2xx as deleted without reading the body. 404 maps to `google_not_found`; 410 keeps the action code with its status.',
-  wire: "`calendar.create_event` in the seeded calendar with a run-scoped summary, a fixed half hour, and no attendees answers an event with an id, that summary, the requested start and end instants, and no attendees; `calendar.get_event` answers the same id and summary; `calendar.update_event` with a new summary and description answers the new summary and the unchanged start (PATCH leaves omitted fields alone), and `calendar.get_event` reads the new summary; live only (`GoogleConformanceLookupRecall`, which the repository's live runner turns on; the fixtures and the emulator answer the lookup's event query only empty), `calendar.list_events` with the leftover lookup's query (`yolk-conformance`, `maxResults: 250`, at most 4 pages) then answers the event (unverified: that Google's search finds a fresh event at once); `calendar.delete_event` answers 2xx, and `calendar.get_event` then reads the event gone (404 or 410, or the event with `status: \"cancelled\"`; unverified: which of them). The event never has attendees, so no invitation or update is ever sent; the case deletes it again, by id, even when a step fails. Nothing remains visible (a deleted event may stay readable as `cancelled`).",
+  wire: "`calendar.create_event` in the seeded calendar with a run-scoped summary, a fixed half hour, and no attendees answers an event with an id, that summary, the requested start and end instants, and no attendees; `calendar.get_event` answers the same id and summary; `calendar.update_event` with a new summary and description answers the new summary and the unchanged start (PATCH leaves omitted fields alone), and `calendar.get_event` reads the new summary; live only (`GoogleConformanceLookupRecall`, which the repository's live runner turns on; the fixtures and the emulator answer the lookup's event query only empty), `calendar.list_events` with the leftover lookup's query (`yolk-conformance`, `maxResults: 250`, at most 4 pages) then answers the event (unverified: that Google's search finds a fresh event within three tries over about 6 seconds); `calendar.delete_event` answers 2xx, and `calendar.get_event` then reads the event gone (404 or 410, or the event with `status: \"cancelled\"`; unverified: which of them). The event never has attendees, so no invitation or update is ever sent; the case deletes it again, by id, even when a step fails. Nothing remains visible (a deleted event may stay readable as `cancelled`).",
   fixtures: [calendarEventLifecycleFixture.id],
   run: Effect.gen(function* () {
     const renamed = yield* runText('event renamed', 'synthetic conformance event, safe to delete')
@@ -452,21 +481,27 @@ export const calendarEventLifecycleCase: GoogleConformanceCase = defineConforman
 
         // Live only (`GoogleConformanceLookupRecall`): the leftover lookup's query finds the event.
         if (yield* GoogleConformanceLookupRecall) {
-          const found: Array<string> = []
-          let pageToken: string | undefined
+          const queried = Effect.gen(function* () {
+            const ids: Array<string> = []
+            let pageToken: string | undefined
 
-          for (let page = 1; page <= leftoverPageCap; page++) {
-            const listing = yield* listEvents(
-              pageToken === undefined
-                ? { calendarId, query: leftoverQuery, maxResults: leftoverPageSize }
-                : { calendarId, query: leftoverQuery, maxResults: leftoverPageSize, pageToken }
-            )
+            for (let page = 1; page <= leftoverPageCap; page++) {
+              const listing = yield* listEvents(
+                pageToken === undefined
+                  ? { calendarId, query: leftoverQuery, maxResults: leftoverPageSize }
+                  : { calendarId, query: leftoverQuery, maxResults: leftoverPageSize, pageToken }
+              )
 
-            found.push(...(listing.items ?? []).map(eventIdOf))
-            pageToken = listing.nextPageToken
+              ids.push(...(listing.items ?? []).map(eventIdOf))
+              pageToken = listing.nextPageToken
 
-            if (pageToken === undefined) break
-          }
+              if (pageToken === undefined) break
+            }
+
+            return ids
+          })
+
+          const found = yield* searchUntilFound(queried, ids => ids.includes(eventId))
 
           yield* expectConformance(
             found.includes(eventId),

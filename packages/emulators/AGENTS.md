@@ -573,7 +573,8 @@ There is no root export or barrel.
   advance (the state-equals-seed proof excludes only the counters, plus Telegram's `sentMessages`: a
   send is irreversible and recorded in state); Todoist cursors are runtime data, valid only as
   issued since the last reset or seed (a project cursor also only while the project listing is
-  unchanged). Recovery never reads the clock (500 `emulator_error` with
+  unchanged), and their counters never restart, so no cursor value carries across a reset or seed.
+  Recovery never reads the clock (500 `emulator_error` with
   `responseError` for a throwing handler, 400 not-emulated, 503 when closed). The drift tests
   (`test/todoist.test.ts`, `test/telegram.test.ts`) replay every fixture exchange against the
   default seed: Telegram byte for byte, Todoist byte for byte for reads and modulo created ids and
@@ -682,8 +683,9 @@ There is no root export or barrel.
   empty answer); issue create; rename and close-as-completed of an issue created here); the
   open-issue listing (`state=open`, `page=1`; the open issues, newest first, on one page, as the
   open-listing fixture records; only while the state's `impliedIssues` is `closed` or no number is
-  implied; a seed defaults to the profile's value only while it replaces neither `issues` nor
-  `nextIssueNumber`, otherwise to `unknown`) and the first comment page (`page=1` instead of `since`), the leftover lookup's reads;
+  implied; a seed defaults to the profile's value only while it replaces none of `repository`,
+  `issues`, and `nextIssueNumber`, otherwise to `unknown`) and the first comment page (`page=1`
+  instead of `since`), the leftover lookup's reads;
   anything else, including the lifecycle restore's close as `not_planned`, a comment listing of more
   than one comment, rendering an issue that holds comments, and issue paging, is not emulated. A write case ends at the seed except the counters, the deleted comment's id
   (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed

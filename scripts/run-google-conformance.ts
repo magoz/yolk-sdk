@@ -143,7 +143,8 @@ export const googleSeedSources: ReadonlyArray<SeedSource<GoogleConformanceSeedKe
     key: 'driveTrashedFileId',
     flag: '--drive-trashed-file',
     env: 'GOOGLE_CONFORMANCE_DRIVE_TRASHED_FILE',
-    description: 'practice Drive file id in Trash, directly inside --drive-folder'
+    description:
+      'practice Drive file id in Trash, directly inside --drive-folder (Drive empties Trash after 30 days: re-trash it within 30 days of a run)'
   }
 ]
 

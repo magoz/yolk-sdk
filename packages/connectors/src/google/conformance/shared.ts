@@ -4,7 +4,7 @@
  * (`../../conformance/owned-write.ts`) bound to the Google errors. See `cases.ts` for the
  * write-safety contract.
  */
-import { Context, Data, Effect, Predicate, Ref, Result } from 'effect'
+import { Context, Data, Effect, Predicate, Ref, Result, Schedule } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConformanceMismatch, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
@@ -174,6 +174,17 @@ export const GoogleConformanceLookupRecall = Context.Reference<boolean>(
   '@yolk-sdk/connectors/google/conformance/GoogleConformanceLookupRecall',
   { defaultValue: () => false }
 )
+
+/**
+ * Run a live recall search until `found` holds for its answer: the first try, then at most two more
+ * 3 seconds apart (about 6 seconds in all), since search indexing can lag behind a fresh write.
+ * Answers the last search's value either way; the caller asserts on it.
+ */
+export const searchUntilFound = <A, E, R>(
+  search: Effect.Effect<A, E, R>,
+  found: (value: A) => boolean
+): Effect.Effect<A, E, R> =>
+  Effect.repeat(search, { until: found, times: 2, schedule: Schedule.spaced('3 seconds') })
 
 /** Synthetic marker every case-written name, subject, and summary starts with. */
 export const googleConformanceMarker = 'yolk-conformance'

@@ -1110,8 +1110,9 @@ const recordedDraftQuery = 'subject:yolk-conformance'
 /**
  * The draft search (`google.gmail.draft-search`, the leftover lookup's request): the recorded `q`
  * and a `maxResults` from 1 to 500, answered with the fixture's empty search while the state holds
- * no draft (no draft created here, and no held message labelled `DRAFT`). A search while a draft exists is not emulated: no fixture records a matching draft, and
- * Gmail's search syntax is not emulated.
+ * no draft (no draft created here, and no held message labelled `DRAFT`). A search while a draft
+ * exists is not emulated: no fixture records a matching draft, and Gmail's search syntax is not
+ * emulated.
  */
 const searchDrafts: GoogleRoute = statefulRoute(
   gmail('GET', '/drafts', false, [draftSearchCase]),

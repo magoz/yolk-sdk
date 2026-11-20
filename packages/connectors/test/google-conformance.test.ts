@@ -514,6 +514,40 @@ const minimalMessage = (labelIds: ReadonlyArray<string>) =>
 
 type ReportedFailure = { readonly kind: string; readonly tag: string; readonly message: string }
 
+/** The seeded trashed Drive file, as the listing with trashed items answers it. */
+const trashedSeed = jsonOf(driveListTrashedFixture, 1).files.at(-1)
+
+/**
+ * The trashed-listing fixture with the listing with trashed items answering the default listing
+ * (the seeded trashed file left out), then the case's `drive.get_file` of the seed answering
+ * `response`.
+ */
+const trashedSeedRead = (response: WireResponse): WireFixture => {
+  const omitted = replaceResponse(
+    driveListTrashedFixture,
+    1,
+    () => exchangeAt(driveListTrashedFixture, 0).response
+  )
+
+  return {
+    ...omitted,
+    exchanges: [
+      ...omitted.exchanges,
+      {
+        request: {
+          method: 'GET',
+          url: exchangeAt(driveGetFileFieldsFixture, 0).request.url.replace(
+            'synthetic-practice-file-0001',
+            String(trashedSeed.id)
+          ),
+          headers: exchangeAt(driveGetFileFieldsFixture, 0).request.headers
+        },
+        response
+      }
+    ]
+  }
+}
+
 /** One tamper per case: the fixture edit and the failure the case reports. */
 const tampers: ReadonlyArray<{
   readonly fixture: WireFixture
@@ -664,12 +698,9 @@ const tampers: ReadonlyArray<{
     message: 'expected get_file to answer the same metadata as the list entry'
   },
   {
-    // The listing with trashed items omits the trashed children (the default listing again).
-    fixture: replaceResponse(
-      driveListTrashedFixture,
-      1,
-      () => exchangeAt(driveListTrashedFixture, 0).response
-    ),
+    // The listing with trashed items omits the trashed children (the default listing again), while
+    // the seeded file still reads in Trash in the folder.
+    fixture: trashedSeedRead(json(200, trashedSeed)),
     message: 'expected the listing with trashed items to answer the seeded trashed file, trashed'
   },
   {
@@ -718,7 +749,22 @@ describe('Google conformance drills (one per case)', () => {
       'an attendee name match',
       { attendees: [{ email: 'a@example.test', displayName: 'Conformance Bot' }] }
     ],
-    ['a single-token summary match', { summary: 'Conformance review' }]
+    ['a single-token summary match', { summary: 'Conformance review' }],
+    [
+      'an office working-location label match',
+      {
+        workingLocationProperties: { type: 'officeLocation', officeLocation: { label: 'Yolk HQ' } }
+      }
+    ],
+    [
+      'a custom working-location label match',
+      {
+        workingLocationProperties: {
+          type: 'customLocation',
+          customLocation: { label: 'Conformance lab' }
+        }
+      }
+    ]
   ] as const) {
     it.effect(`the free-text query case accepts ${label}`, () =>
       Effect.gen(function* () {
@@ -743,6 +789,25 @@ describe('Google conformance drills (one per case)', () => {
         })
       ),
       'expected the listing with trashed items to answer every file of the default listing'
+    ],
+    [
+      'a seeded trashed file Drive purged from Trash (a stale seed)',
+      trashedSeedRead(
+        json(404, {
+          error: {
+            code: 404,
+            message: 'File not found: synthetic-practice-trash-0001.',
+            errors: [{ message: 'File not found.', domain: 'global', reason: 'notFound' }],
+            status: 'NOT_FOUND'
+          }
+        })
+      ),
+      'precondition: driveTrashedFileId must be a file in Trash directly inside driveFolderId (Drive empties Trash after 30 days; re-trash a practice file there); get_file answers not found'
+    ],
+    [
+      'a seeded file restored from Trash (a stale seed)',
+      trashedSeedRead(json(200, { ...trashedSeed, trashed: false, explicitlyTrashed: false })),
+      'precondition: driveTrashedFileId must be a file in Trash directly inside driveFolderId (Drive empties Trash after 30 days; re-trash a practice file there); get_file answers success'
     ],
     [
       'a default listing that answers the trashed file',
@@ -976,7 +1041,10 @@ const labelRecovery =
 
 describe('Google conformance lookup recall (live only)', () => {
   /** `fixture` with `exchange` inserted before its first DELETE (the case's own delete). */
-  const withSearchBeforeDelete = (fixture: WireFixture, exchange: WireExchange): WireFixture => {
+  const withSearchBeforeDelete = (
+    fixture: WireFixture,
+    ...exchanges: ReadonlyArray<WireExchange>
+  ): WireFixture => {
     const index = fixture.exchanges.findIndex(candidate => candidate.request.method === 'DELETE')
     const [first, ...rest] = fixture.exchanges
 
@@ -984,7 +1052,7 @@ describe('Google conformance lookup recall (live only)', () => {
       ? expect.fail(`no delete after the create in ${fixture.id}`)
       : {
           ...fixture,
-          exchanges: [first, ...rest.slice(0, index - 1), exchange, ...rest.slice(index - 1)]
+          exchanges: [first, ...rest.slice(0, index - 1), ...exchanges, ...rest.slice(index - 1)]
         }
   }
 
@@ -1023,17 +1091,24 @@ describe('Google conformance lookup recall (live only)', () => {
     Effect.gen(function* () {
       yield* atTestNow
 
-      const report = yield* runConformance([testCase], {
-        target: everyCase,
-        now,
-        layer: candidate =>
-          recall
-            ? Layer.merge(
-                replayLayerOver([fixture])(candidate),
-                Layer.succeed(GoogleConformanceLookupRecall, true)
-              )
-            : replayLayerOver([fixture])(candidate)
-      })
+      const run = yield* Effect.forkChild(
+        runConformance([testCase], {
+          target: everyCase,
+          now,
+          layer: candidate =>
+            recall
+              ? Layer.merge(
+                  replayLayerOver([fixture])(candidate),
+                  Layer.succeed(GoogleConformanceLookupRecall, true)
+                )
+              : replayLayerOver([fixture])(candidate)
+        })
+      )
+
+      // The recall search retries 3 seconds apart, at most twice.
+      yield* TestClock.adjust('10 seconds')
+
+      const report = yield* Fiber.join(run)
 
       return report.results.map(result => [result.status, result.failure?.message ?? null])
     })
@@ -1050,7 +1125,12 @@ describe('Google conformance lookup recall (live only)', () => {
 
       const [result] = yield* runWithRecall(
         gmailDraftLifecycleCase,
-        withSearchBeforeDelete(gmailDraftLifecycleFixture, draftSearch(false)),
+        withSearchBeforeDelete(
+          gmailDraftLifecycleFixture,
+          draftSearch(false),
+          draftSearch(false),
+          draftSearch(false)
+        ),
         true
       )
 
@@ -1073,7 +1153,12 @@ describe('Google conformance lookup recall (live only)', () => {
 
       const [result] = yield* runWithRecall(
         calendarEventLifecycleCase,
-        withSearchBeforeDelete(calendarEventLifecycleFixture, eventQuery(false)),
+        withSearchBeforeDelete(
+          calendarEventLifecycleFixture,
+          eventQuery(false),
+          eventQuery(false),
+          eventQuery(false)
+        ),
         true
       )
 
@@ -1081,6 +1166,36 @@ describe('Google conformance lookup recall (live only)', () => {
         'failed',
         expect.stringContaining('expected the leftover lookup event query to find the case event')
       ])
+    })
+  )
+
+  // Search indexing can lag behind a fresh write: an item the first search misses is found by a
+  // later try within the bounded wait.
+  it.effect('the recall searches retry until the item appears (indexing lag)', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* runWithRecall(
+          gmailDraftLifecycleCase,
+          withSearchBeforeDelete(
+            gmailDraftLifecycleFixture,
+            draftSearch(false),
+            draftSearch(false),
+            draftSearch(true)
+          ),
+          true
+        )
+      ).toEqual([['passed', null]])
+      expect(
+        yield* runWithRecall(
+          calendarEventLifecycleCase,
+          withSearchBeforeDelete(
+            calendarEventLifecycleFixture,
+            eventQuery(false),
+            eventQuery(true)
+          ),
+          true
+        )
+      ).toEqual([['passed', null]])
     })
   )
 

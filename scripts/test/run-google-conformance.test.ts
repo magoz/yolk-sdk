@@ -66,6 +66,7 @@ import {
   generateRunId,
   googleCaseSpecs,
   googleRunner,
+  googleSeedSources,
   liveCredential,
   recordingsRoot
 } from '../run-google-conformance.ts'
@@ -538,6 +539,14 @@ const liveRecording = (fixture: WireFixture): ReadonlyArray<WireExchange> => {
     ? fixture.exchanges
     : [...fixture.exchanges.slice(0, index), search, ...fixture.exchanges.slice(index)]
 }
+
+describe('run-google-conformance seed sources', () => {
+  it('tells the owner to re-trash the trashed-file seed within 30 days', () => {
+    expect(
+      googleSeedSources.find(source => source.key === 'driveTrashedFileId')?.description
+    ).toContain('re-trash it within 30 days')
+  })
+})
 
 describe('run-google-conformance --record staging (offline)', () => {
   it('stages every case under the gitignored google recordings root', async () => {

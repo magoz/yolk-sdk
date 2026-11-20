@@ -14,9 +14,9 @@
  * Numbers at or above it are not reached yet and answer the not-found fixture's 404. What the
  * open-issue listing may say about implied numbers is `impliedIssues`: `closed` when a fixture
  * records them as not open (the default seed: the open-issue listing fixture answers only the work
- * issue while the repository has reached issue 41; a seed that replaces `issues` or sets
- * `nextIssueNumber` gets `unknown` unless it says `closed` itself), `unknown` otherwise (then a
- * listing that would have to account for them is not emulated). Created issue
+ * issue while the repository has reached issue 41; a seed that replaces `repository` or `issues`
+ * or sets `nextIssueNumber` gets `unknown` unless it says `closed` itself), `unknown` otherwise
+ * (then a listing that would have to account for them is not emulated). Created issue
  * numbers and comment ids come from counters that only advance; the default seed starts them at the
  * fixtures' created values (issue 42, comment 9000000001), and a seed's counters must lie above
  * every seeded number. Created issue `id` and `node_id` values derive from the minted number in the
@@ -419,11 +419,13 @@ const stateFromSeed = (seed: GithubEmulatorSeed): GithubEmulatorState | string =
     labels: seed.labels ?? profile.labels,
     issues,
     files: seed.files ?? profile.files,
-    // The profile's `closed` describes only its own issues and counter (the open-issue listing
-    // fixture records them): a seed that replaces either must say `closed` itself.
+    // The profile's `closed` describes only its own repository, issues, and counter (the open-issue
+    // listing fixture records them): a seed that replaces any of them must say `closed` itself.
     impliedIssues:
       seed.impliedIssues ??
-      (seed.issues === undefined && seed.nextIssueNumber === undefined
+      (seed.repository === undefined &&
+      seed.issues === undefined &&
+      seed.nextIssueNumber === undefined
         ? profile.impliedIssues
         : 'unknown'),
     counters: {

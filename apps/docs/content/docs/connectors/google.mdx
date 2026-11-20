@@ -35,7 +35,7 @@ are as currently understood; none is observed live yet.
 | `google.gmail.trash-untrash`               | `write-reversible`   | `workMessageId`                                  | Trash adds `TRASH`, and untrash removes it; the cleanup restores and verifies every earlier label                                                                                                                                                                                                                                                                    |
 | `google.gmail.send-practice-address`       | `write-irreversible` | `practiceAddress`, `runId`                       | One 7-bit message to the practice address only (decoded again in the case as exactly one plain address), sent as one multipart upload, answers an id whose `To` and `Subject` read back                                                                                                                                                                              |
 | `google.calendar.list-range-paging`        | `read`               | `calendarId`, `eventRangeStart`, `eventRangeEnd` | A time-range listing returns only events overlapping the range, and pages of two chained through `nextPageToken` list exactly the events of one large page                                                                                                                                                                                                           |
-| `google.calendar.free-text-query`          | `read`               | `calendarId`                                     | The leftover lookup's free-text query (`q=yolk-conformance`, `maxResults: 250`) repeats no event and answers only events that mention `yolk` or `conformance` in any text Google searches, organizer and creator included (observed at the port; unverified)                                                                                                         |
+| `google.calendar.free-text-query`          | `read`               | `calendarId`                                     | The leftover lookup's free-text query (`q=yolk-conformance`, `maxResults: 250`) repeats no event and answers only events that mention `yolk` or `conformance` in any text Google searches, organizer, creator, and working location included (observed at the port; unverified)                                                                                      |
 | `google.calendar.event-lifecycle`          | `write-reversible`   | `calendarId`, `runId`                            | An event without attendees is created with the requested times, read, renamed by PATCH (start kept), deleted, and reads gone (404, 410, or `cancelled`; unverified which); live only, the leftover lookup's search finds it before the delete                                                                                                                        |
 | `google.calendar.deleted-event-gone`       | `write-reversible`   | `calendarId`, `runId`                            | A deleted event reads gone, and stays gone after a second delete (2xx, 404, or 410; unverified which)                                                                                                                                                                                                                                                                |
 | `google.drive.list-page-token`             | `read`               | `driveFolderId`                                  | A folder listing returns only untrashed children, and pages of two chained through `nextPageToken` list exactly the files of one large page                                                                                                                                                                                                                          |
@@ -71,15 +71,17 @@ Claims no live run has settled yet, marked "(unverified: ...)" in each case's `w
   case and the cleanup accept any of them, then verify the event still reads gone).
 - Google's free-text event query matches only where one of its tokens occurs: every event it
   answers, unless cancelled, mentions `yolk` or `conformance` in its summary, description, or
-  location, or in an attendee's, the organizer's, or the creator's address or name (observed at the
-  port; the reference names the fields Google searches, not how it splits the hyphenated query).
+  location, in an attendee's, the organizer's, or the creator's address or name, or in a
+  working-location label, building, or desk (observed at the port; the reference names the fields
+  Google searches, not how it splits the hyphenated query).
 - A Drive listing of `'<folder>' in parents` without `trashed = false` lists the folder's trashed
   children too (the files.list reference says so; the case requires the seeded trashed file).
 - Gmail's draft search and Calendar's event query find a draft or event created moments earlier
   (live only: with `GoogleConformanceLookupRecall` on, which the repository's live runner sets, the
   draft and event lifecycle cases run the leftover lookup's search before deleting their item and
   require it there; the committed fixtures and the emulator answer those searches only empty, so
-  replay and emulator runs skip the check).
+  replay and emulator runs skip the check). The search is retried up to three times over about 6
+  seconds, since indexing can lag.
 
 Claims are narrowed to what the connector reads. The error case checks the status the connector
 maps and that its message carries the body `error.message`; it does not pin `error.errors` reasons
@@ -101,7 +103,8 @@ the account owns), `eventRangeStart` and `eventRangeEnd` (RFC 3339 instants arou
 it, away from the case events on 2030-01-07), `driveFolderId` (a practice Drive folder with 3 to 20
 untrashed items the token may write into; trashed items are not counted), `driveFileId` (a practice
 file directly inside it), `driveTrashedFileId` (a practice file directly inside it that is in Trash,
-which the trashed-listing case expects), and `runId` (the branded `GoogleConformanceRunId`). Cases never hard-code
+which the trashed-listing case expects; Drive empties Trash after 30 days, so re-trash it within
+30 days of a run, or the case fails a `precondition:`), and `runId` (the branded `GoogleConformanceRunId`). Cases never hard-code
 account data. `practiceAddress` and `runId` are branded schema types, so a host building the config
 by hand constructs them (`GooglePracticeAddress.make(...)`, `GoogleConformanceRunId.make(...)`) or
 decodes the whole config with `GoogleConformanceSeeds`; a plain string is a type error. Each case

@@ -1566,8 +1566,9 @@ emulator mints (it never mints anything else):
   listing answers only when the state's `impliedIssues` is `closed` (the default seed's, from the
   open-issue listing fixture, which answers only the work issue while the repository has reached
   issue 41) or no number is implied; with `unknown` (the `empty` profile's) it is not emulated. A
-  seed on the default profile keeps `closed` only while it replaces neither `issues` nor
-  `nextIssueNumber`; otherwise it gets `unknown` unless it names `impliedIssues: 'closed'` itself.
+  seed on the default profile keeps `closed` only while it replaces none of `repository`, `issues`,
+  and `nextIssueNumber`; otherwise it gets `unknown` unless it names `impliedIssues: 'closed'`
+  itself.
 - **Open-issue listing.** The open issues the state holds, newest first (GitHub's default
   `sort=created`, `direction=desc`), rendered as issue reads render them, on one page without
   `Link`, as the open-listing fixture records; more open issues than `per_page` (no fixture records

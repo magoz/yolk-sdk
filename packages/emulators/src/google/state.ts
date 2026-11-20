@@ -597,8 +597,8 @@ const practiceChildren: ReadonlyArray<GoogleEmulatorDriveFile> = [
 ]
 
 /**
- * The seeded file in Trash inside the practice folder (`driveTrashedFileId`), as the trashed-listing
- * fixture records it.
+ * The seeded file in Trash inside the practice folder (`driveTrashedFileId`), as the
+ * trashed-listing fixture records it.
  */
 const practiceTrashedFile: GoogleEmulatorDriveFile = {
   ...child('synthetic-practice-trash-0001', 'Synthetic practice old notes.txt', 'text/plain'),

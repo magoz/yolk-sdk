@@ -1094,6 +1094,24 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
     ],
     [
+      'an open-issue listing after a seed replaces the repository',
+      (target: GithubEmulator) =>
+        target.seed({
+          repository: {
+            owner: 'yolk-synthetic',
+            repo: 'other-practice',
+            id: 100000002,
+            defaultBranch: 'main'
+          }
+        }),
+      'GET',
+      '/repos/yolk-synthetic/other-practice/issues?state=open&per_page=100&page=1',
+      {},
+      'implied issue numbers may be open',
+      (target: GithubEmulator) =>
+        call(target, 'GET', '/repos/yolk-synthetic/other-practice/issues/1')
+    ],
+    [
       'an open-issue listing after a seed replaces the issues',
       (target: GithubEmulator) => target.seed({ issues: [] }),
       'GET',
