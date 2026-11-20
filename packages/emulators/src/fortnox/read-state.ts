@@ -564,6 +564,7 @@ const defaultSupplierInvoicePayments: ReadonlyArray<FortnoxEmulatorSupplierInvoi
     InvoiceSupplierName: 'Example Supplier AB',
     InvoiceSupplierNumber: '1',
     InvoiceTotal: 500,
+    Booked: true,
     VoucherNumber: 2,
     VoucherSeries: 'D',
     VoucherYear: 3

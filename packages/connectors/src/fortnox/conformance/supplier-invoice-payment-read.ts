@@ -41,7 +41,7 @@ export const fortnoxSupplierInvoicePaymentReadFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"SupplierInvoicePayments":[{"@url":"https://api.fortnox.se/3/supplierinvoicepayments/1","Number":"1","InvoiceNumber":"1","Amount":500,"AmountCurrency":500,"Currency":"SEK","CurrencyRate":1,"CurrencyUnit":1,"Booked":false,"Information":"","InvoiceDueDate":"2026-09-30","InvoiceOCR":"","InvoiceSupplierName":"Example Supplier AB","InvoiceSupplierNumber":"1","InvoiceTotal":500,"ModeOfPayment":"BG","PaymentDate":"2026-09-25","VoucherNumber":"2","VoucherSeries":"D","VoucherYear":"3"}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":1}}'
+        body: '{"SupplierInvoicePayments":[{"@url":"https://api.fortnox.se/3/supplierinvoicepayments/1","Number":"1","InvoiceNumber":"1","Amount":500,"AmountCurrency":500,"Currency":"SEK","CurrencyRate":1,"CurrencyUnit":1,"Booked":true,"Information":"","InvoiceDueDate":"2026-09-30","InvoiceOCR":"","InvoiceSupplierName":"Example Supplier AB","InvoiceSupplierNumber":"1","InvoiceTotal":500,"ModeOfPayment":"BG","PaymentDate":"2026-09-25","VoucherNumber":"2","VoucherSeries":"D","VoucherYear":"3"}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":1}}'
       }
     },
     {
@@ -57,7 +57,7 @@ export const fortnoxSupplierInvoicePaymentReadFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"SupplierInvoicePayment":{"@url":"https://api.fortnox.se/3/supplierinvoicepayments/1","Number":"1","InvoiceNumber":"1","Amount":500,"AmountCurrency":500,"Currency":"SEK","CurrencyRate":1,"CurrencyUnit":1,"Booked":false,"Information":"","InvoiceDueDate":"2026-09-30","InvoiceOCR":"","InvoiceSupplierName":"Example Supplier AB","InvoiceSupplierNumber":"1","InvoiceTotal":500,"ModeOfPayment":"BG","PaymentDate":"2026-09-25","VoucherNumber":"2","VoucherSeries":"D","VoucherYear":"3"}}'
+        body: '{"SupplierInvoicePayment":{"@url":"https://api.fortnox.se/3/supplierinvoicepayments/1","Number":"1","InvoiceNumber":"1","Amount":500,"AmountCurrency":500,"Currency":"SEK","CurrencyRate":1,"CurrencyUnit":1,"Booked":true,"Information":"","InvoiceDueDate":"2026-09-30","InvoiceOCR":"","InvoiceSupplierName":"Example Supplier AB","InvoiceSupplierNumber":"1","InvoiceTotal":500,"ModeOfPayment":"BG","PaymentDate":"2026-09-25","VoucherNumber":"2","VoucherSeries":"D","VoucherYear":"3"}}'
       }
     }
   ]

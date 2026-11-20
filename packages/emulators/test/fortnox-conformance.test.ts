@@ -557,7 +557,7 @@ const readDrills: ReadonlyArray<{
       status: 404,
       match: { method: 'GET', path: '/3/settings/lockedperiod' }
     },
-    message: 'precondition: the practice company has no locked period (HTTP 404)'
+    message: 'precondition: HTTP 404: no locked period, or the route is missing'
   },
   {
     caseId: 'fortnox.settings.predefined-accounts-and-labels',

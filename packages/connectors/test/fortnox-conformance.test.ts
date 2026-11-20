@@ -53,6 +53,8 @@ import {
   fortnoxInvoiceSendEmailCase,
   fortnoxInvoicePaymentReadFixture,
   fortnoxInvoiceSendEmailFixture,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxPrintTemplatesUnpaginatedFixture,
   fortnoxSupplierInvoicePaymentReadFixture,
   fortnoxWriteRejectionCase,
   fortnoxWriteRejectionFixture,
@@ -781,6 +783,29 @@ describe('Fortnox conformance disagreement drills', () => {
         expect(methodsAndUrls(entries)).toEqual(['GET https://api.fortnox.se/3/invoices/103'])
       }
     })
+  )
+
+  it.effect(
+    'fails the print-template case when a print template list carries MetaInformation',
+    () =>
+      Effect.gen(function* () {
+        const tampered = replaceResponse(
+          fortnoxPrintTemplatesUnpaginatedFixture,
+          0,
+          replaceInBody(
+            ']}',
+            '],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+          )
+        )
+
+        const { failure } = yield* drill(fortnoxPrintTemplatesUnpaginatedCase, tampered)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'ConformanceMismatch',
+          message: 'expected the invoice print templates to carry no MetaInformation'
+        })
+      })
   )
 
   it.effect('fails the payment-filter case when the unbooked invoice is in the unpaid list', () =>

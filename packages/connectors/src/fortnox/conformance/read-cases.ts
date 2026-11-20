@@ -733,7 +733,7 @@ export const fortnoxSettingsCompanyAndLockedPeriodCase: FortnoxConformanceCase =
       })
 
       if (Predicate.isTagged(lockedResult, 'Failure') && lockedResult.error.status === 404) {
-        return yield* precondition('the practice company has no locked period (HTTP 404)')
+        return yield* precondition('HTTP 404: no locked period, or the route is missing')
       }
 
       const locked = yield* successValue(fortnoxGetLockedPeriodAction.id, lockedResult)
