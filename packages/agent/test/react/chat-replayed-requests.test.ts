@@ -501,8 +501,62 @@ describe('a request for a call still pending', () => {
       ])
 
       expect(stateTags(chats)).toEqual(both(['QuestionAnswered', 'QuestionRequested']))
+
+      if (replay === 'pause') {
+        expect(chats.chat.status).toMatchObject({ _tag: 'Blocked', requests: [laterRequest] })
+      }
     }
   )
+
+  it('blocks only on the pending requests of a pause that also names a settled call', () => {
+    // A pause replayed after one of its two calls was answered: the denied approval stays denied,
+    // and the run waits on the question alone.
+    const deploy = approval()
+
+    const unit = ToolCall.make({ id: 'call_1', name: 'question', params: { topic: 'unit' } })
+
+    const unitRequest = QuestionRequest.make({
+      requestId: `question:${unit.id}`,
+      toolCallId: unit.id,
+      call: unit,
+      questions: [QuestionPrompt.make({ id: 'unit', prompt: 'Celsius or Fahrenheit?' })]
+    })
+
+    const twoCalls = AssistantAgentMessage.make({
+      parts: [HostToolCallPart.make({ call: deploy.call }), HostToolCallPart.make({ call: unit })]
+    })
+
+    const pause = (eventId?: string) =>
+      AgentAwaitingInput.make({
+        eventId,
+        requests: [deploy.request, unitRequest],
+        messages: [],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+
+    const answered = applyEvents(initialChats, [
+      LLMStreamStart.make({ eventId: 'run:start-1', turn: 1 }),
+      AssistantMessageEvent.make({ eventId: 'run:message-1', message: twoCalls }),
+      deploy.requested('run:request'),
+      QuestionRequested.make({ eventId: 'run:question', request: unitRequest }),
+      pause('run:pause'),
+      ...(deploy.settles[0]?.events(step => `run:${step}`) ?? [])
+    ])
+
+    expect(stateTags(answered)).toEqual(both(['Denied', 'QuestionRequested']))
+    expect(answered.chat.status).toMatchObject({ _tag: 'Blocked', kind: 'permission' })
+
+    const replayed = applyEvent(answered, pause())
+
+    expect(stateTags(replayed)).toEqual(both(['Denied', 'QuestionRequested']))
+
+    expect(replayed.chat.status).toMatchObject({
+      _tag: 'Blocked',
+      kind: 'question',
+      requests: [unitRequest]
+    })
+  })
 })
 
 describe('an invalid input answer', () => {

@@ -1,5 +1,6 @@
-import { Match, Option, Predicate, Struct } from 'effect'
+import { Array as Arr, Match, Option, Predicate, Struct } from 'effect'
 import {
+  AgentAwaitingInput,
   AgentFailed,
   hitlResponseEvent,
   idleAgentStatus,
@@ -11,6 +12,7 @@ import {
   type AgentStatus,
   type AgentStatusTree,
   type Content,
+  type HitlRequest,
   type HitlResponse,
   type ToolCall,
   type UserMessage
@@ -194,6 +196,11 @@ const projectionFields = (projection: ExecutionProjection): ExecutionProjection 
 type ProjectedExecutionEvent = ExecutionProjection & {
   /** False when the event belonged to a superseded, settled or stale execution. */
   readonly applied: boolean
+  /**
+   * An applied `AgentAwaitingInput`'s requests the chat now shows pending: those it kept as they
+   * were, naming a call already past its request (a replay), are left out.
+   */
+  readonly pendingRequests?: ReadonlyArray<HitlRequest>
 }
 
 /**
@@ -293,7 +300,15 @@ const projectExecutionEvent = (
 
   if (turnStart !== undefined) projected.turnStart = turnStart
 
-  return { ...projected, applied: true }
+  if (!Predicate.isTagged(event, 'AgentAwaitingInput')) return { ...projected, applied: true }
+
+  // Read from the result, through the turn the event acted in: a request the chat kept leaves its
+  // call past its request; one it applied made the call pending.
+  const pendingRequests = event.requests.filter(
+    request => !isPastRequestToolCall(chatMessages, request.call, turn)
+  )
+
+  return { ...projected, applied: true, pendingRequests }
 }
 
 /**
@@ -493,6 +508,41 @@ const restarted = (state: AgentChatState) => ({
 const withoutFailure = (state: AgentChatState): AgentChatState =>
   Predicate.isTagged(state.status, 'Failed') ? { ...state, status: idleAgentStatus } : state
 
+/**
+ * The event the run's status follows, `undefined` when it must not move it: a replayed start of an
+ * already settled call must not reopen the run, and a pause blocks only on the requests the chat
+ * shows pending (`pendingRequests`), none when every one names a call past its request (a replay
+ * the chat kept as it was).
+ */
+const eventForStatus = (
+  state: AgentChatState,
+  event: AgentEvent,
+  pendingRequests: ReadonlyArray<HitlRequest> | undefined
+): AgentEvent | undefined => {
+  if (Predicate.isTagged(event, 'ToolExecutionStarted')) {
+    return isSettledToolCall(state, event.call) ? undefined : event
+  }
+
+  if (!Predicate.isTagged(event, 'AgentAwaitingInput') || pendingRequests === undefined) {
+    return event
+  }
+
+  if (!Arr.isReadonlyArrayNonEmpty(pendingRequests)) return undefined
+
+  return pendingRequests.length === event.requests.length
+    ? event
+    : AgentAwaitingInput.make({
+        eventId: event.eventId,
+        createdAtMs: event.createdAtMs,
+        executionId: event.executionId,
+        streamId: event.streamId,
+        requests: pendingRequests,
+        messages: event.messages,
+        turns: event.turns,
+        usage: event.usage
+      })
+}
+
 export const reduceAgentChatState = (
   state: AgentChatState,
   action: AgentChatAction
@@ -612,20 +662,12 @@ export const reduceAgentChatState = (
 
       if (!routed.applied) return rememberEvent(projected, current.event)
 
-      // A replayed start of an already settled call, or a replayed pause whose every request names
-      // a call past its request (the chat keeps those calls as they are), must not reopen the run.
-      const fenced =
-        (Predicate.isTagged(current.event, 'ToolExecutionStarted') &&
-          isSettledToolCall(state, current.event.call)) ||
-        (Predicate.isTagged(current.event, 'AgentAwaitingInput') &&
-          current.event.requests.every(request =>
-            isPastRequestToolCall(state.chatMessages, request.call, state.turnStart?.after)
-          ))
+      const statusEvent = eventForStatus(state, current.event, routed.pendingRequests)
 
       return rememberEvent(
-        fenced
+        statusEvent === undefined
           ? projected
-          : withStatusTree(projected, nextAgentStatusTree(statusTree(state), current.event)),
+          : withStatusTree(projected, nextAgentStatusTree(statusTree(state), statusEvent)),
         current.event
       )
     }),

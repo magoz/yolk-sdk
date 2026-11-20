@@ -734,14 +734,14 @@ the request it answers (a denial: a pending approval), else on nothing. A reques
 `AgentAwaitingInput`'s requests) never reopens a call past its request: a part answered,
 cancelled, denied or finished keeps its state against a request for the same call, with or without
 event id, and the `useAgentChat` reducer keeps its status when every request of an
-`AgentAwaitingInput` names such a call (a replayed pause does not block the run again). The loop
-asks for a call only until it has a result or used an answer: an invalid input answer re-pends the
-same request while the part is still pending (only a valid payload emits `InputSubmitted`), a
-running call has no result, so an abort leaves it running and the next run that resumes it asks
-again (the card shows), and a later turn reusing the id asks on its own part. Tool-batch and
-request events must therefore carry the call exactly as the model emitted it: a host that
-normalizes arguments between the model's events and its own adds a second card for a replayed or
-late event. Until a start is seen (and after `AgentStart`), and always in
+`AgentAwaitingInput` names such a call (a replayed pause does not block the run again) and blocks
+only on the pending requests of a pause that names some. The loop asks for a call only until it
+has a result or used an answer: an invalid input answer re-pends the same request while the part
+is still pending (only a valid payload emits `InputSubmitted`), a running call has no result, so
+an abort leaves it running and the next run that resumes it asks again (the card shows), and a
+later turn reusing the id asks on its own part. Tool-batch and request events must therefore carry
+the call exactly as the model emitted it: a host that normalizes arguments between the model's
+events and its own adds a second card for a replayed or late event. Until a start is seen (and after `AgentStart`), and always in
 `applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a
 reused id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a
 later call reusing the id whose `AssistantMessage` arrives without `ToolInputStart`/`ToolInputEnd`
