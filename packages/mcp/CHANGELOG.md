@@ -1,5 +1,13 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.152
+
+### Patch Changes
+
+- 3b47dce: `@yolk-sdk/mcp/client/node` imports `NodeServices` from `@effect/platform-node/NodeServices` instead of the package root, so importing it no longer evaluates every Node platform module (about 2.6 MB less on import).
+  - @yolk-sdk/agent@0.1.0-canary.152
+  - @yolk-sdk/conformance@0.1.0-canary.152
+
 ## 0.1.0-canary.151
 
 ### Minor Changes
