@@ -8,6 +8,7 @@ import {
   Predicate,
   Redacted,
   Ref,
+  Result,
   Stream
 } from 'effect'
 import {
@@ -89,8 +90,9 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly allowEofCompletion: boolean
   readonly requireJsonCompletion?: boolean
   /**
-   * Codex compatibility: an SSE `response.completed` whose response has no `output` ends the turn
-   * with what streamed, as Done marked `usageUnavailable` (its usage cannot be read either).
+   * Codex compatibility: an SSE `response.completed` whose `output` is missing or lacks a required
+   * key (`isMissingResponsesFinalOutputError`) ends the turn with what streamed, as Done marked
+   * `usageUnavailable` (its usage cannot be read either).
    */
   readonly recoverMissingFinalOutput?: boolean
   readonly unsupportedContentProviderName?: string
@@ -285,6 +287,16 @@ const schemaErrorToLlmError =
       message: `${message}: ${schemaErrorMessage(error)}`,
       retryable: false
     })
+
+/**
+ * A final response whose `output` (or a key inside it) is missing: the decode failure Codex
+ * compatibility recovers from, in the SSE parser (`recoverMissingFinalOutput`, marked) and in the
+ * Codex wrapper for JSON responses (unmarked).
+ */
+export const isMissingResponsesFinalOutputError = (error: LLMError) =>
+  error.cause === 'invalid_response' &&
+  error.message.includes('Missing key') &&
+  error.message.includes('["output"]')
 
 const encodeJsonString = (value: Schema.Json, message: string) =>
   Schema.encodeEffect(JsonFromJsonString)(value).pipe(
@@ -1361,11 +1373,24 @@ const processSseData = (
       const responseInput = parsed.response
       const hasToolCalls = state.toolCallIds.size > 0
 
-      if (
-        descriptor.recoverMissingFinalOutput === true &&
-        isJsonObject(responseInput) &&
-        !Object.hasOwn(responseInput, 'output')
-      ) {
+      const decodedFinal = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(
+        responseInput
+      ).pipe(
+        Effect.mapError(
+          schemaErrorToLlmError('invalid_response', 'Invalid OpenAI Responses response')
+        ),
+        Effect.result
+      )
+
+      if (Result.isFailure(decodedFinal)) {
+        if (
+          descriptor.recoverMissingFinalOutput !== true ||
+          !isMissingResponsesFinalOutputError(decodedFinal.failure)
+        ) {
+          return yield* Effect.fail(decodedFinal.failure)
+        }
+
+        // The undecodable response's usage cannot be read either.
         return {
           state: { ...state, hasDone: true },
           events: [
@@ -1377,13 +1402,7 @@ const processSseData = (
         }
       }
 
-      const parsedFinal = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(
-        responseInput
-      ).pipe(
-        Effect.mapError(
-          schemaErrorToLlmError('invalid_response', 'Invalid OpenAI Responses response')
-        )
-      )
+      const parsedFinal = decodedFinal.success
 
       const events = yield* finalResponseToEvents(
         parsedFinal,

@@ -877,6 +877,47 @@ const describeFamily = <Req>(family: Family<Req>) => {
           })
       )
 
+      it.effect(
+        'recovers a response.completed whose output item lacks a required key, marked',
+        () =>
+          Effect.gen(function* () {
+            const events = sseEvents(family.functionCall.fixture)
+
+            const withoutCallId = events.map(event =>
+              mapJson(event, json => {
+                if (json.type !== 'response.completed' || !isRecord(json.response)) return
+
+                const output = Array.isArray(json.response.output) ? json.response.output : []
+
+                for (const item of output) {
+                  if (isRecord(item) && item.type === 'function_call') delete item.call_id
+                }
+              })
+            )
+
+            // The terminal event records a function call (with usage) to strip the id from.
+            expect(
+              events.some(event => {
+                const output = completedResponseOf(event)?.output
+
+                return (
+                  Array.isArray(output) &&
+                  output.some(item => isRecord(item) && item.type === 'function_call')
+                )
+              })
+            ).toBe(true)
+
+            const streamed = yield* streamFixture(
+              withEvents(family.functionCall.fixture, withoutCallId, 'no-call-id')
+            )
+
+            // The streamed calls stand; the undecodable response's usage never reached Usage.
+            expect(streamed.map(event => event._tag)).toContain('ToolCall')
+            expect(streamed.map(event => event._tag)).not.toContain('Usage')
+            expect(doneSignals(streamed)).toEqual([['tool_use', true]])
+          })
+      )
+
       it.effect('recovers a JSON response without output unmarked, as before', () =>
         Effect.gen(function* () {
           const completed = sseEvents(family.plainText.fixture).flatMap(event => {
@@ -905,6 +946,27 @@ const describeFamily = <Req>(family: Family<Req>) => {
         })
       )
     } else {
+      it.effect('fails a response.completed without output instead of recovering it', () =>
+        Effect.gen(function* () {
+          const withoutOutput = sseEvents(family.plainText.fixture).map(event =>
+            mapJson(event, json => {
+              if (json.type === 'response.completed' && isRecord(json.response)) {
+                delete json.response.output
+              }
+            })
+          )
+
+          const error = expectLlmError(
+            yield* streamFixture(
+              withEvents(family.plainText.fixture, withoutOutput, 'no-output')
+            ).pipe(Effect.flip)
+          )
+
+          expect(error.cause).toBe('invalid_response')
+          expect(error.retryable).toBe(false)
+        })
+      )
+
       it.effect(
         'requires the terminal event: no response.completed is a non-retryable invalid response',
         () =>
@@ -1067,3 +1129,51 @@ const describeFamily = <Req>(family: Family<Req>) => {
 describeFamily(codex)
 
 describeFamily(grok)
+
+describe('Grok never takes Codex missing-output recovery', () => {
+  it.effect('fails a response.completed without output even when a caller asks for recovery', () =>
+    Effect.gen(function* () {
+      // A runtime config object carrying the private Codex flag: the Grok layer spreads its config.
+      const config = {
+        token: grokSettings.token,
+        clientVersion: grokSettings.clientVersion,
+        maxOutputTokens: grokSettings.maxOutputTokens,
+        recoverMissingFinalOutput: true
+      }
+
+      const withoutOutput = sseEvents(xAiGrokPlainTextFixture).map(event =>
+        mapJson(event, json => {
+          if (json.type === 'response.completed' && isRecord(json.response)) {
+            delete json.response.output
+          }
+        })
+      )
+
+      const error = yield* Effect.gen(function* () {
+        const llm = yield* LLMProvider
+
+        return yield* llm
+          .stream({
+            model: xAiGrokPlainTextFixture.model ?? 'unknown',
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: []
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(
+        Effect.provide(
+          makeXAiGrokProviderLayer(config).pipe(
+            Layer.provide(
+              ReplayHttpClient.layer([
+                withEvents(xAiGrokPlainTextFixture, withoutOutput, 'no-output')
+              ])
+            )
+          )
+        ),
+        Effect.flip
+      )
+
+      expect(expectLlmError(error).cause).toBe('invalid_response')
+    })
+  )
+})

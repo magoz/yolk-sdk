@@ -570,6 +570,24 @@ describe('OpenCode Go Responses usage reports through the provider', () => {
     })
   )
 
+  it.effect('fails a response.completed without output instead of recovering it', () =>
+    Effect.gen(function* () {
+      const withoutOutput = sseEvents(openCodeGoResponsesPlainTextFixture).map(event =>
+        mapJson(event, json => {
+          if (json.type === 'response.completed' && isRecord(json.response)) {
+            delete json.response.output
+          }
+        })
+      )
+
+      const error = yield* streamResponses(
+        withEvents(openCodeGoResponsesPlainTextFixture, withoutOutput, 'no-output')
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ _tag: 'LLMError', cause: 'invalid_response', retryable: false })
+    })
+  )
+
   it.effect('marks Done when response.completed carries no usage', () =>
     Effect.gen(function* () {
       const withoutUsage = sseEvents(openCodeGoResponsesPlainTextFixture).map(event =>

@@ -534,12 +534,12 @@ persist or display.
 A stream can complete without the usage report its request asked for (or its protocol always
 sends):
 
-| Provider                                                      | Completes without the final usage when                                                        |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk |
-| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                       |
-| Codex                                                         | the stream ends without `response.completed`, or `response.completed` has no readable output  |
-| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                     |
+| Provider                                                      | Completes without the final usage when                                                                     |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk              |
+| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                                    |
+| Codex                                                         | the stream ends without `response.completed`, or that event's `output` is missing or misses a required key |
+| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                                  |
 
 These streams completed successfully before the mark existed, and still do: failing them would
 re-run and re-bill the model. A chat stream cut after its finish chunk holds the whole answer;

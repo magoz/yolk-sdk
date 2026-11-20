@@ -12,6 +12,7 @@ import {
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import type { HttpClientResponse } from 'effect/http'
 import {
+  isMissingResponsesFinalOutputError,
   makeOpenAiResponsesProviderLayer,
   streamOpenAiResponsesResponse,
   toOpenAiResponsesRequestBodyWithReasoning,
@@ -119,11 +120,6 @@ const openAiCodexProviderDescriptor = {
   allowEofCompletion: true
 } as const
 
-const isMissingCodexFinalOutputError = (error: LLMError) =>
-  error.cause === 'invalid_response' &&
-  error.message.includes('Missing key') &&
-  error.message.includes('["output"]')
-
 const isCodexContextWindowError = (error: LLMError) => {
   const signal = error.message.toLowerCase()
 
@@ -170,15 +166,16 @@ const noteCodexToolCall =
   }
 
 /**
- * A JSON fallback response without `output` ends the turn as Done, unmarked: JSON responses never
- * carry the missing-usage mark. The SSE `response.completed` without `output` is recovered by the
- * shared parser (`recoverMissingFinalOutput`), which marks its unreadable usage.
+ * A JSON fallback response whose `output` is missing or incomplete ends the turn as Done,
+ * unmarked: JSON responses never carry the missing-usage mark. The parser recovers the same SSE
+ * failure itself (`recoverMissingFinalOutput`) and marks its unreadable usage, so only JSON
+ * responses reach this.
  */
 const recoverMissingCodexFinalOutput = (
   hasToolCallRef: Ref.Ref<boolean>,
   error: LLMError
 ): Stream.Stream<LLMEvent, LLMProviderError> => {
-  if (!isMissingCodexFinalOutputError(error)) return Stream.fail(error)
+  if (!isMissingResponsesFinalOutputError(error)) return Stream.fail(error)
 
   return Stream.fromEffect(
     Ref.get(hasToolCallRef).pipe(
