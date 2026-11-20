@@ -366,6 +366,411 @@ describe('a model error that echoes a model id naming a retryable failure', () =
   }
 })
 
+/** A stream error event fault, sent after a few events of a stream the model starts. */
+type StreamErrorFault = {
+  /** The error's own code (Responses `code`, Anthropic `type`). */
+  readonly code: string
+  readonly message: string
+  /** Responses only: the event that carries it (`error`, the default, or `response.failed`). */
+  readonly event?: 'error' | 'response.failed'
+}
+
+/** One real provider pointed at one emulator that streams for `model`, then sends the fault. */
+type StreamTarget = {
+  readonly name: string
+  readonly providerId: string
+  /** The wire whose error events the emulator sends. */
+  readonly wire: 'responses' | 'messages'
+  readonly failWith: (fault: StreamErrorFault, model: string) => Effect.Effect<LLMError>
+}
+
+const responsesErrorEvent = (fault: StreamErrorFault) => ({
+  kind: 'error-event-after-chunks' as const,
+  chunks: 3,
+  event: fault.event ?? 'error',
+  error: { code: fault.code, message: fault.message }
+})
+
+const messagesErrorEvent = (fault: StreamErrorFault) => ({
+  kind: 'error-event-after-chunks' as const,
+  chunks: 2,
+  error: { type: fault.code, message: fault.message }
+})
+
+const grokOrigin = new URL(xAiGrokConformanceResponsesUrl).origin
+
+const streamTargets: ReadonlyArray<StreamTarget> = [
+  {
+    name: codexTarget.name,
+    providerId: codexTarget.providerId,
+    wire: 'responses',
+    failWith: (fault, model) => {
+      const emulator = makeCodexEmulator({ knownModels: [model] })
+
+      emulator.faults.add(responsesErrorEvent(fault))
+
+      return streamFailure(
+        makeOpenAiCodexProviderLayer({
+          token: new OAuthAccessToken({
+            provider: 'openai-codex',
+            accessToken: 'synthetic-codex-oauth-token',
+            expiresAt
+          })
+        }),
+        new URL(openAiCodexConformanceResponsesUrl).origin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    name: grokTarget.name,
+    providerId: grokTarget.providerId,
+    wire: 'responses',
+    failWith: (fault, model) => {
+      const emulator = makeXAiGrokEmulator({ knownModels: [model] })
+
+      emulator.faults.add(responsesErrorEvent(fault))
+
+      return streamFailure(
+        makeXAiGrokProviderLayer({
+          token: new OAuthAccessToken({
+            provider: 'xai-grok',
+            accessToken: 'synthetic-grok-oauth-token',
+            expiresAt
+          }),
+          clientVersion: '0.0.0-synthetic',
+          maxOutputTokens: 64
+        }),
+        grokOrigin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    // The fixture-only Go emulator sends no error events: Go `responses` runs against the Grok
+    // emulator's Responses route, with the headers that route requires as Go extra headers.
+    name: 'OpenCode Go responses',
+    providerId: 'opencode_go',
+    wire: 'responses',
+    failWith: (fault, model) => {
+      const emulator = makeXAiGrokEmulator({ knownModels: [model] })
+
+      emulator.faults.add(responsesErrorEvent(fault))
+
+      return streamFailure(
+        makeOpenCodeGoProviderLayer({
+          apiKey,
+          protocol: 'responses',
+          maxOutputTokens: 64,
+          baseUrl: `${grokOrigin}/v1`,
+          extraHeaders: {
+            'x-xai-token-auth': 'xai-grok-cli',
+            'x-grok-client-version': '0.0.0-synthetic',
+            'x-grok-model-override': model
+          }
+        }),
+        grokOrigin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    name: claudeTarget.name,
+    providerId: claudeTarget.providerId,
+    wire: 'messages',
+    failWith: (fault, model) => {
+      const emulator = makeAnthropicEmulator({ knownModels: [model] })
+
+      emulator.faults.add(messagesErrorEvent(fault))
+
+      return streamFailure(
+        makeAnthropicClaudeProviderLayer({
+          token: new OAuthAccessToken({
+            provider: 'anthropic-claude',
+            accessToken: 'synthetic-claude-oauth-token',
+            expiresAt
+          }),
+          maxTokens: 64
+        }),
+        anthropicOrigin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    name: nativeMessagesTarget.name,
+    providerId: nativeMessagesTarget.providerId,
+    wire: 'messages',
+    failWith: (fault, model) => {
+      const emulator = makeAnthropicEmulator({ knownModels: [model] })
+
+      emulator.faults.add(messagesErrorEvent(fault))
+
+      return streamFailure(nativeMessagesProvider, anthropicOrigin, emulator.fetch, model)
+    }
+  }
+]
+
+const responsesStreamTargets = streamTargets.filter(target => target.wire === 'responses')
+
+/** A stream error event carries no HTTP status: its kind never came from one. */
+const expectStreamError = (error: LLMError, expected: object) => {
+  expect(error).toMatchObject(expected)
+  expect(error.provider?.status).toBeUndefined()
+}
+
+// Issue #365: a stream error event has no status, so its kind comes from its code or, failing
+// that, its text; the requested model id is removed from that text as on the HTTP paths.
+describe('an in-stream error event that echoes a model id naming a retryable failure', () => {
+  for (const target of streamTargets) {
+    it.effect(`${target.name}: an error event naming the model stays non-retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          { code: 'invalid_request_error', message: `model: ${overloadedModel}` },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'provider_error',
+          retryable: false,
+          provider: {
+            provider: target.providerId,
+            kind: 'unknown',
+            providerCode: 'invalid_request_error'
+          }
+        })
+      })
+    )
+
+    // Guards: the echo is removed, never the failure's own words or code.
+    it.effect(`${target.name}: an overload named beside the echoed model stays retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          { code: 'api_error', message: `${overloadedModel} is overloaded, try again` },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'overloaded',
+          retryable: true,
+          provider: { kind: 'overloaded' }
+        })
+      })
+    )
+
+    it.effect(`${target.name}: a rate-limit code stays retryable whatever the model`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          { code: 'rate_limit_error', message: `model: ${overloadedModel}` },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'rate_limit',
+          retryable: true,
+          provider: { kind: 'rate_limit' }
+        })
+      })
+    )
+  }
+
+  for (const target of responsesStreamTargets) {
+    it.effect(`${target.name}: a response.failed naming the model stays non-retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          {
+            code: 'invalid_prompt',
+            message: `The model ${overloadedModel} could not answer.`,
+            event: 'response.failed'
+          },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'provider_error',
+          retryable: false,
+          provider: { kind: 'unknown', providerCode: 'invalid_prompt' }
+        })
+      })
+    )
+  }
+})
+
+/** A Chat Completions error envelope, as OpenAI-compatible hosts send it inside a stream. */
+type ChatErrorEnvelope = {
+  readonly message: string
+  readonly type: string
+  readonly code?: string
+  readonly param?: Schema.Json
+}
+
+/**
+ * A 200 event stream that starts an answer, then reports the error mid-stream: the status (a
+ * success) cannot classify it. Sent as a `status` fault body (model emulators take 200-599).
+ */
+const chatStreamErrorFault = (error: ChatErrorEnvelope) => ({
+  kind: 'status' as const,
+  status: 200,
+  headers: { 'content-type': 'text/event-stream' },
+  body: [
+    `data: ${JSON.stringify({
+      id: 'chatcmpl-synthetic-stream-error',
+      object: 'chat.completion.chunk',
+      choices: [{ index: 0, delta: { role: 'assistant', content: 'Hi' }, finish_reason: null }]
+    })}`,
+    `data: ${JSON.stringify({ error })}`,
+    ''
+  ].join('\n\n')
+})
+
+type ChatStreamTarget = {
+  readonly name: string
+  readonly providerId: string
+  readonly failWith: (error: ChatErrorEnvelope, model: string) => Effect.Effect<LLMError>
+}
+
+const openAiOrigin = 'https://api.openai.com'
+
+const chatStreamTargets: ReadonlyArray<ChatStreamTarget> = [
+  {
+    name: 'OpenAI chat',
+    providerId: 'openai',
+    failWith: (error, model) => {
+      const emulator = makeOpenAiEmulator()
+
+      emulator.faults.add(chatStreamErrorFault(error))
+
+      return streamFailure(
+        makeOpenAiProviderLayer({ apiKey, maxCompletionTokens: 64, streaming: true }),
+        openAiOrigin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    name: 'Vercel AI Gateway',
+    providerId: 'vercel_ai_gateway',
+    failWith: (error, model) => {
+      const emulator = makeGatewayEmulator()
+
+      emulator.faults.add(chatStreamErrorFault(error))
+
+      return streamFailure(
+        makeVercelAiGatewayProviderLayer({ apiKey, maxCompletionTokens: 64, streaming: true }),
+        new URL(vercelAiGatewayChatCompletionsUrl).origin,
+        emulator.fetch,
+        model
+      )
+    }
+  },
+  {
+    // The fixture-only Go emulator answers only recorded bodies (its faults and scripted errors
+    // are 400-599), so it cannot send a 200 stream that reports an error: Go
+    // `chat-completions` runs against the OpenAI emulator's chat route instead.
+    name: 'OpenCode Go chat-completions',
+    providerId: 'opencode_go',
+    failWith: (error, model) => {
+      const emulator = makeOpenAiEmulator()
+
+      emulator.faults.add(chatStreamErrorFault(error))
+
+      return streamFailure(
+        makeOpenCodeGoProviderLayer({
+          apiKey,
+          protocol: 'chat-completions',
+          maxOutputTokens: 64,
+          baseUrl: `${openAiOrigin}/v1`
+        }),
+        openAiOrigin,
+        emulator.fetch,
+        model
+      )
+    }
+  }
+]
+
+describe('a Chat Completions stream error that echoes a model id naming a retryable failure', () => {
+  for (const target of chatStreamTargets) {
+    it.effect(`${target.name}: an error naming the model stays non-retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          { message: `model: ${overloadedModel}`, type: 'invalid_request_error' },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'provider_error',
+          retryable: false,
+          provider: {
+            provider: target.providerId,
+            kind: 'unknown',
+            providerCode: 'invalid_request_error'
+          }
+        })
+      })
+    )
+
+    // Guards: the echo is removed, never the failure's own words, code, or `param` handling.
+    it.effect(`${target.name}: an overload named beside the echoed model stays retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          { message: `${overloadedModel} is overloaded, try again`, type: 'server_error' },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'overloaded',
+          retryable: true,
+          provider: { kind: 'overloaded' }
+        })
+      })
+    )
+
+    it.effect(`${target.name}: a rate-limit code stays retryable whatever the model`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          {
+            message: `model: ${overloadedModel}`,
+            type: 'invalid_request_error',
+            code: 'rate_limit_exceeded'
+          },
+          overloadedModel
+        )
+
+        expectStreamError(error, {
+          cause: 'rate_limit',
+          retryable: true,
+          provider: { kind: 'rate_limit', providerCode: 'rate_limit_exceeded' }
+        })
+      })
+    )
+
+    it.effect(`${target.name}: a model named in an object param stays non-retryable`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          {
+            message: `Model ${overloadedModel}-fallback is unavailable`,
+            type: 'invalid_request_error',
+            param: { modelId: `${overloadedModel}-fallback` }
+          },
+          'gpt-4.1-nano'
+        )
+
+        expectStreamError(error, {
+          cause: 'provider_error',
+          retryable: false,
+          provider: { kind: 'unknown' }
+        })
+      })
+    )
+  }
+})
+
 describe('a 5xx that echoes a model id naming a context overflow', () => {
   it.effect('the Gateway 503 with param.modelId stays a retryable server error', () =>
     Effect.gen(function* () {
