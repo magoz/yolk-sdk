@@ -153,11 +153,6 @@ const rememberEventId = (seenEventIds: ReadonlyArray<string>, event: AgentEvent)
 const hasSeenEvent = (state: AgentChatState, event: AgentEvent) =>
   hasSeenEventId(state.seenEventIds, event)
 
-const rememberEvent = (state: AgentChatState, event: AgentEvent): AgentChatState =>
-  event.eventId === undefined
-    ? state
-    : { ...state, seenEventIds: rememberEventId(state.seenEventIds, event) }
-
 const statusTree = (state: AgentChatState): AgentStatusTree => ({
   root: state.status,
   subagents: state.subagents
@@ -172,7 +167,7 @@ const withStatusTree = (state: AgentChatState, tree: AgentStatusTree): AgentChat
  * Whether the call a tool-batch event acts on (`hostToolCallMessage`) is that call, finished
  * (`isFinishedToolCall`): a start of it is a replay the chat keeps, as `reduceAgentEvents` does.
  */
-const isSettledToolCall = (state: AgentChatState, call: ToolCall) =>
+const isSettledToolCall = (state: AgentChatEventProjectionState, call: ToolCall) =>
   isFinishedToolCall(state.chatMessages, call, state.turnStart?.after)
 
 const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
@@ -214,20 +209,56 @@ export const makeAgentChatEventProjectionState = (
  * Applies replayable agent events to chat messages while deduping by `eventId`.
  *
  * Use this for durable streams that may reconnect, overlap, or replay events.
- * For ephemeral local streams, `applyAgentEventToChatMessages` is still useful.
+ * For ephemeral local streams, `applyAgentEventToChatMessages` is still useful. A host that also
+ * folds the run's status uses `stepAgentChatProjection`, which returns the same projection.
  */
 export const applyAgentEventToChatProjection = (
   state: AgentChatEventProjectionState,
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions = {}
-): AgentChatEventProjectionState => {
+): AgentChatEventProjectionState => stepAgentChatProjection(state, event, options).projection
+
+/** One event applied to a chat projection (`stepAgentChatProjection`). */
+export type AgentChatProjectionStep = {
+  /** The projection after the event, as `applyAgentEventToChatProjection` returns it. */
+  readonly projection: AgentChatEventProjectionState
+  /**
+   * The event the run's status follows (`nextAgentStatus`, `nextAgentStatusTree`), as the
+   * `useAgentChat` reducer folds it; `undefined` when the status must not move. An
+   * `AgentAwaitingInput` keeps only the requests the projection shows pending after it, read in
+   * the turn the event acted in; it is `undefined` when every request names a call already
+   * answered, cancelled, denied or finished (a replayed pause). Also `undefined` for an event seen
+   * before (`eventId`), an event of a superseded, settled or stale execution, and a replayed start
+   * of a call already finished.
+   */
+  readonly statusEvent: AgentEvent | undefined
+}
+
+/**
+ * Applies one event as `applyAgentEventToChatProjection` does and returns the event a host's own
+ * status fold should apply (`statusEvent`), so its status agrees with the chat: a replayed pause
+ * whose calls are past their requests leaves the status as it was instead of blocking the run
+ * with no card to answer, and a pause naming some such calls blocks only on its other requests.
+ * The `useAgentChat` reducer folds its status from the same `statusEvent`. Pure.
+ */
+export const stepAgentChatProjection = (
+  state: AgentChatEventProjectionState,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions = {}
+): AgentChatProjectionStep => {
   if (hasSeenEventId(state.seenEventIds, event)) {
-    return state
+    return { projection: state, statusEvent: undefined }
   }
 
-  const seenEventIds = rememberEventId(state.seenEventIds, event)
+  const routed = projectExecutionEvent(state, event, options)
 
-  return { ...projectionFields(projectExecutionEvent(state, event, options)), seenEventIds }
+  return {
+    projection: {
+      ...projectionFields(routed),
+      seenEventIds: rememberEventId(state.seenEventIds, event)
+    },
+    statusEvent: routed.applied ? eventForStatus(state, event, routed.pendingRequests) : undefined
+  }
 }
 
 type ExecutionProjection = {
@@ -596,13 +627,14 @@ const withoutFailure = (state: AgentChatState): AgentChatState =>
   Predicate.isTagged(state.status, 'Failed') ? { ...state, status: idleAgentStatus } : state
 
 /**
- * The event the run's status follows, `undefined` when it must not move it: a replayed start of an
- * already settled call must not reopen the run, and a pause blocks only on the requests the chat
- * shows pending (`pendingRequests`), none when every one names a call past its request (a replay
- * the chat kept as it was).
+ * The event the run's status follows after an applied event (`state`: the projection before it),
+ * `undefined` when it must not move it: a replayed start of an already settled call must not
+ * reopen the run, and a pause blocks only on the requests the chat shows pending
+ * (`pendingRequests`), none when every one names a call past its request (a replay the chat kept
+ * as it was).
  */
 const eventForStatus = (
-  state: AgentChatState,
+  state: AgentChatEventProjectionState,
   event: AgentEvent,
   pendingRequests: ReadonlyArray<HitlRequest> | undefined
 ): AgentEvent | undefined => {
@@ -732,23 +764,16 @@ export const reduceAgentChatState = (
         return paused
       }
 
-      const routed = projectExecutionEvent(paused, current.event, current)
+      const step = stepAgentChatProjection(paused, current.event, current)
 
       const projected: AgentChatState = {
         ...Struct.omit(paused, ['executions', 'turnStart']),
-        ...projectionFields(routed)
+        ...step.projection
       }
 
-      if (!routed.applied) return rememberEvent(projected, current.event)
-
-      const statusEvent = eventForStatus(paused, current.event, routed.pendingRequests)
-
-      return rememberEvent(
-        statusEvent === undefined
-          ? projected
-          : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), statusEvent)),
-        current.event
-      )
+      return step.statusEvent === undefined
+        ? projected
+        : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), step.statusEvent))
     }),
     Match.tag('Error', current =>
       withStatusTree(
