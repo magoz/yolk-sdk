@@ -96,8 +96,11 @@ import { telegramConformanceCases } from '../packages/connectors/src/telegram/co
 import { telegramConformanceFixtures } from '../packages/connectors/src/telegram/conformance/index.ts'
 import { todoistConformanceCases } from '../packages/connectors/src/todoist/conformance/cases.ts'
 import { todoistConformanceFixtures } from '../packages/connectors/src/todoist/conformance/index.ts'
-import { mcpConformanceCases } from '../packages/mcp/src/conformance/cases.ts'
-import { mcpConformanceFixtures } from '../packages/mcp/src/conformance/index.ts'
+import { mcpConformanceCases, mcpServerPingCase } from '../packages/mcp/src/conformance/cases.ts'
+import {
+  mcpConformanceFixtures,
+  mcpConformanceServerPingFixtures
+} from '../packages/mcp/src/conformance/index.ts'
 import {
   anthropicEmulatorRoutes,
   anthropicSubscriptionUsageEmulatorRoutes
@@ -354,6 +357,8 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...googleConformanceCases.map(testCase => testCase.id),
   ...linkedInSearchConformanceCases.map(testCase => testCase.id),
   ...mcpConformanceCases.map(testCase => testCase.id),
+  // Opt-in, outside the default suite, but cited by the MCP emulator's synthetic legacy rows.
+  mcpServerPingCase.id,
   ...kieConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id),
   ...r2ConformanceCases.map(testCase => testCase.id)
@@ -423,6 +428,7 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...googleConformanceFixtures,
   ...linkedInSearchConformanceFixtures,
   ...mcpConformanceFixtures,
+  ...mcpConformanceServerPingFixtures,
   ...afloatMcpConformanceFixtures,
   ...figmaMcpConformanceFixtures,
   ...kieConformanceFixtures,

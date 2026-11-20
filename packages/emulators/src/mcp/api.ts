@@ -3,7 +3,8 @@
  * `POST /legacy/mcp`, `GET /legacy/mcp` on the synthetic origin, `POST /mcp` on the Afloat origin,
  * and `POST /mcp` and `GET /mcp` on the Figma origin), each answering only the JSON-RPC methods its
  * profile's fixtures record, as manifest variants (`RPC <origin><path>#<method>`, plus each legacy
- * profile's `GET` row).
+ * profile's `GET` row, and the synthetic legacy profile's `RPC <origin><path>#response:ping` row:
+ * the client's answer to the recorded server ping).
  *
  * A request is admitted only when it equals a recorded request (`src/mcp/recordings.ts`) within
  * the latitude: the MCP headers (`accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
@@ -39,6 +40,7 @@ import { mcpEmulatorAfloatFixtures } from './afloat-recordings.ts'
 import { mcpEmulatorFigmaFixtures } from './figma-recordings.ts'
 import {
   mcpEmulatorFixtures,
+  mcpEmulatorServerPingFixtures,
   type McpRecordedExchange,
   type McpRecordedFixture,
   type McpRecordedRequest,
@@ -78,6 +80,8 @@ export type McpEmulatorDrills = {
   readonly absentCallAnswersResult?: boolean
   /** `mcp.auth.rejected`: the 401 carries no `WWW-Authenticate` challenge. */
   readonly unauthorizedWithoutChallenge?: boolean
+  /** `mcp.legacy.server-ping`: the client's answer to the server ping is refused 400. */
+  readonly pingAnswerRejected?: boolean
 }
 
 export const mcpEmulatorDrillKnobs: ReadonlyArray<keyof McpEmulatorDrills> = [
@@ -89,7 +93,8 @@ export const mcpEmulatorDrillKnobs: ReadonlyArray<keyof McpEmulatorDrills> = [
   'readCallAnswersToolError',
   'invalidCallAnswersRpcError',
   'absentCallAnswersResult',
-  'unauthorizedWithoutChallenge'
+  'unauthorizedWithoutChallenge',
+  'pingAnswerRejected'
 ]
 
 export type McpApiEnv = {
@@ -115,9 +120,13 @@ const fieldOf = (value: Schema.Json | undefined, key: string): Schema.Json | und
 
 // The recorded exchanges the routes answer, by fixture id and exchange index.
 
-/** Every copied fixture: the synthetic profiles', then the Afloat profile's, then Figma's. */
+/**
+ * Every copied fixture: the synthetic profiles' (the default suite's, then the opt-in server
+ * ping's), then the Afloat profile's, then Figma's.
+ */
 const allFixtures: ReadonlyArray<McpRecordedFixture> = [
   ...mcpEmulatorFixtures,
+  ...mcpEmulatorServerPingFixtures,
   ...mcpEmulatorAfloatFixtures,
   ...mcpEmulatorFigmaFixtures
 ]
@@ -158,6 +167,8 @@ const recorded = {
   legacyCallRead: exchangeOf(legacy('mcp.tools.call-read'), -1),
   legacyCallToolError: exchangeOf(legacy('mcp.tools.call-tool-error'), -1),
   legacyCallAbsent: exchangeOf(legacy('mcp.errors.unknown-tool'), -1),
+  legacyPingInitialize: exchangeOf(legacy('mcp.legacy.server-ping'), 1),
+  legacyPingAnswer: exchangeOf(legacy('mcp.legacy.server-ping'), 2),
   afloatDiscover: exchangeOf(afloat('mcp.negotiation.era'), 0),
   afloatRejected: exchangeOf(afloat('mcp.auth.rejected'), 0),
   afloatList: exchangeOf(afloat('mcp.negotiation.era'), 1),
@@ -238,16 +249,37 @@ const modernRows = modernMethods.map(method =>
   rpcRow(mcpEmulatorOrigin, mcpEmulatorModernPath, method)
 )
 
-const legacyRows = legacyMethods.map(method =>
-  rpcRow(mcpEmulatorOrigin, mcpEmulatorLegacyPath, method)
-)
+/** Whether a recorded request is a client-sent JSON-RPC response (no `method`, a `result`). */
+const isRecordedClientResponse = (request: McpRecordedRequest): boolean =>
+  request.method === 'POST' &&
+  rpcMethodOf(request) === undefined &&
+  isJsonObject(request.body) &&
+  ('result' in request.body || 'error' in request.body)
+
+/** The variant name of the client's answer to the recorded server ping. */
+const pingAnswerVariant = 'response:ping'
+
+/** The row of the client's answer to the server ping (the synthetic legacy profile only). */
+const pingAnswerRow: EmulatorRouteEvidence = {
+  method: 'RPC',
+  path: `${mcpEmulatorOrigin}${mcpEmulatorLegacyPath}#${pingAnswerVariant}`,
+  kind: 'connector',
+  write: false,
+  caseIds: casesSending(mcpEmulatorOrigin, mcpEmulatorLegacyPath, isRecordedClientResponse),
+  evidence: 'unverified'
+}
+
+const legacyRows = [
+  ...legacyMethods.map(method => rpcRow(mcpEmulatorOrigin, mcpEmulatorLegacyPath, method)),
+  pingAnswerRow
+]
 
 /** The Afloat profile records the modern methods only (no paging, no session). */
 const afloatRows = modernMethods.map(method =>
   rpcRow(mcpEmulatorAfloatOrigin, mcpEmulatorAfloatPath, method)
 )
 
-/** The Figma profile records the legacy methods (a handshake, a session, no paging). */
+/** The Figma profile records the legacy methods (a handshake, a session, no paging, no ping). */
 const figmaRows = legacyMethods.map(method =>
   rpcRow(mcpEmulatorFigmaOrigin, mcpEmulatorFigmaPath, method)
 )
@@ -669,6 +701,14 @@ type LegacyProfile = {
   readonly reserved: (request: EmulatedRequest, env: McpApiEnv) => boolean
   readonly rows: ReadonlyArray<EmulatorRouteEvidence>
   readonly getRow: EmulatorRouteEvidence
+  /**
+   * The recorded server-ping handshake, when the profile records one: the `initialize` answer that
+   * pings (sent under the seed's `legacyInitialize: 'server-ping'`) and the client's answer to it.
+   */
+  readonly serverPing?: {
+    readonly initialize: RecordedKey
+    readonly answer: RecordedKey
+  }
   readonly keys: {
     readonly discover: RecordedKey
     readonly rejected: RecordedKey
@@ -825,6 +865,9 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
       }))
     }
 
+    case 'legacyPingAnswer':
+      return drills.pingAnswerRejected ? { status: 400, headers: {}, chunks: [] } : answer
+
     case 'modernRejected':
     case 'legacyRejected':
     case 'afloatRejected':
@@ -907,12 +950,23 @@ const planInitialize =
       ? `yolk-emu-session ${number}`
       : `${mcpEmulatorSessionPrefix}${number}`
 
-    const answer = withSession(recordedAnswer(profile.keys.initialize, admitted.id, env), session)
+    // The seed picks the recorded answer that pings, where the profile records one.
+    const key =
+      profile.serverPing !== undefined && state.legacyInitialize === 'server-ping'
+        ? profile.serverPing.initialize
+        : undefined
 
-    const minted =
+    const answer = withSession(
+      recordedAnswer(key ?? profile.keys.initialize, admitted.id, env),
+      session
+    )
+
+    const plain =
       profile.sessionProfile === undefined
         ? { id: session, phase: 'initializing' as const }
         : { id: session, phase: 'initializing' as const, profile: profile.sessionProfile }
+
+    const minted = key === undefined ? plain : { ...plain, awaitingPingAnswer: true as const }
 
     // The session is minted only by the commit, so a faulted or truncated `initialize` holds none
     // and leaves the counter where it was.
@@ -948,6 +1002,77 @@ const planOnSession =
       ? unknownSession('ready')
       : answerOnly(withSession(recordedAnswer(key, admitted.id, env), session.id))
   }
+
+/**
+ * The client's answer to the recorded server ping, on a session of `profile` that awaits it (in
+ * either phase: the client answers before `notifications/initialized`, but a loopback server may
+ * see the two in either order): the recorded 202, and the commit clears the mark, so a second
+ * answer is refused.
+ */
+const planPingAnswer =
+  (profile: LegacyProfile, key: RecordedKey): Plan =>
+  (state, admitted, env) => {
+    const session = state.sessions.find(
+      held =>
+        held.id === admitted.session &&
+        held.profile === profile.sessionProfile &&
+        held.awaitingPingAnswer === true
+    )
+
+    if (session === undefined) {
+      return notEmulated('an answer to no server ping this emulator awaits is not emulated')
+    }
+
+    const answer = recordedAnswer(key, undefined, env)
+
+    // The drill refuses the answer: the session still awaits it.
+    if (env.drills.pingAnswerRejected) return answerOnly(answer)
+
+    return streamedCommit(answer, () => {
+      state.sessions = state.sessions.map(held => {
+        if (held.id !== session.id) return held
+
+        const { awaitingPingAnswer: _answered, ...rest } = held
+
+        return rest
+      })
+    })
+  }
+
+/**
+ * The client's answer to the recorded server ping: exactly the recorded request (the MCP headers,
+ * the session header, the members, `jsonrpc`, the server's ping id byte for byte, and the result),
+ * or not emulated. The id is the server's, so the request-id latitude does not apply.
+ */
+const matchPingAnswer = (request: EmulatedRequest, key: RecordedKey): Matched | NotEmulated => {
+  const recordedRequest = recorded[key].request
+  const recordedBody = recordedRequest.body
+  const body = request.json
+
+  const problem =
+    unrecordedMcpHeader(request) ?? headerProblem(request, recordedRequest, comparedHeaders)
+
+  if (problem !== undefined) return problem
+
+  if (!isJsonObject(body) || !isJsonObject(recordedBody)) {
+    return notEmulated('JSON-RPC batches and non-object bodies are not emulated')
+  }
+
+  const keys = Object.keys(body)
+  const recordedKeys = Object.keys(recordedBody)
+
+  if (keys.length !== recordedKeys.length || keys.some(name => !recordedKeys.includes(name))) {
+    return notEmulated('the JSON-RPC message must have exactly the recorded members')
+  }
+
+  if (!jsonEqual(body, recordedBody)) {
+    return notEmulated(
+      'a client response other than the recorded answer to the server ping is not emulated'
+    )
+  }
+
+  return { key, id: undefined, cursor: undefined }
+}
 
 const planAnswer =
   (key: RecordedKey): Plan =>
@@ -1089,6 +1214,24 @@ const legacyPostRoute = (profile: LegacyProfile): McpRoute => ({
       )
     }
 
+    // A client-sent response: only the recorded answer to the server ping, where one is recorded.
+    if (
+      method === undefined &&
+      profile.serverPing !== undefined &&
+      isJsonObject(request.json) &&
+      !('method' in request.json)
+    ) {
+      const matched = matchPingAnswer(request, profile.serverPing.answer)
+
+      if (isNotEmulated(matched)) return matched
+
+      return admission(
+        variant(pingAnswerVariant),
+        admitted(matched, request),
+        planPingAnswer(profile, matched.key)
+      )
+    }
+
     return notEmulated(`this JSON-RPC method is not emulated on ${profile.label}`)
   }
 })
@@ -1132,6 +1275,7 @@ const syntheticLegacyProfile: LegacyProfile = {
   reserved: isReserved,
   rows: legacyRows,
   getRow: getRowOf(mcpEmulatorOrigin, mcpEmulatorLegacyPath),
+  serverPing: { initialize: 'legacyPingInitialize', answer: 'legacyPingAnswer' },
   keys: {
     discover: 'legacyDiscover',
     rejected: 'legacyRejected',

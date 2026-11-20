@@ -2663,3 +2663,178 @@ export const mcpEmulatorFixtures: ReadonlyArray<McpRecordedFixture> = [
     ]
   }
 ]
+
+/**
+ * The fixture of the opt-in `mcp.legacy.server-ping` case (`mcpConformanceServerPingFixtures` of
+ * `@yolk-sdk/mcp/conformance`), copied as data like the sixteen above: a legacy server whose
+ * `initialize` answer pings before its response, the client's empty-result answer to that ping,
+ * accepted with 202, and the rest of the legacy listing. Answered on the synthetic legacy profile
+ * under the seed `legacyInitialize: 'server-ping'`.
+ */
+export const mcpEmulatorServerPingFixtures: ReadonlyArray<McpRecordedFixture> = [
+  {
+    id: 'mcp.legacy.server-ping.legacy.synthetic',
+    caseId: 'mcp.legacy.server-ping',
+    evidence: 'unverified',
+    recordedAt: '2026-10-01',
+    account: 'synthetic',
+    endpoint: 'https://mcp.example.test/legacy/mcp',
+    note: 'MCP 2025-11-25 basic/utilities/ping, basic/transports (Sending Messages to the Server, items 3, 4 and 6), basic/lifecycle (Initialization): the initialize SSE answer carries a ping request before its response; the client answers it with an empty result on a POST carrying the session, accepted with 202 and no body, then completes the handshake and the listing. Synthetic placeholder shaped like the MCP wire the pinned SDK speaks; not recorded from a live service.',
+    exchanges: [
+      {
+        request: {
+          method: 'POST',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'mcp-method': 'server/discover',
+            'mcp-protocol-version': '2026-07-28'
+          },
+          body: {
+            jsonrpc: '2.0',
+            id: 'server-discover-probe-1',
+            method: 'server/discover',
+            params: {
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientInfo': {
+                  name: 'yolk',
+                  version: '0.1.0'
+                },
+                'io.modelcontextprotocol/clientCapabilities': {}
+              }
+            }
+          }
+        },
+        response: {
+          status: 400,
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Bad Request: Server not initialized"}}'
+        }
+      },
+      {
+        request: {
+          method: 'POST',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json'
+          },
+          body: {
+            jsonrpc: '2.0',
+            id: 0,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2025-11-25',
+              capabilities: {},
+              clientInfo: {
+                name: 'yolk',
+                version: '0.1.0'
+              }
+            }
+          }
+        },
+        response: {
+          status: 200,
+          headers: {
+            'content-type': 'text/event-stream',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          },
+          chunks: [
+            'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","id":"server-ping-1","method":"ping"}\n\n',
+            'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"yolk-synthetic-mcp","version":"0.0.0"}}}\n\n'
+          ]
+        }
+      },
+      {
+        request: {
+          method: 'POST',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          },
+          body: {
+            result: {},
+            jsonrpc: '2.0',
+            id: 'server-ping-1'
+          }
+        },
+        response: {
+          status: 202,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
+          method: 'POST',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          },
+          body: {
+            jsonrpc: '2.0',
+            method: 'notifications/initialized'
+          }
+        },
+        response: {
+          status: 202,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
+          method: 'GET',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'text/event-stream',
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          }
+        },
+        response: {
+          status: 405,
+          headers: {},
+          body: ''
+        }
+      },
+      {
+        request: {
+          method: 'POST',
+          url: 'https://mcp.example.test/legacy/mcp',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          },
+          body: {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/list'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {
+            'content-type': 'text/event-stream',
+            'mcp-session-id': 'yolk-synthetic-session-0001'
+          },
+          chunks: [
+            'event: message\nid: evt-1\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"synthetic notification"}}\n\n',
+            'event: message\nid: evt-2\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_synthetic_note","title":"Get a synthetic note","description":"Read one synthetic note by id.","inputSchema":{"type":"object","properties":{"noteId":{"type":"string"}},"required":["noteId"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noteId":{"type":"string"},"text":{"type":"string"}},"required":["noteId","text"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"create_synthetic_note","description":"Create one synthetic note.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"annotations":{"readOnlyHint":false,"destructiveHint":false}}]}}\n\n'
+          ]
+        }
+      }
+    ]
+  }
+]

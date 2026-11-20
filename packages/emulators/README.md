@@ -2042,6 +2042,16 @@ as `synthetic-figma-token-0001`; a token starting with a hex digit is not emulat
 reserved invalid credential `yolk-conformance-invalid-credential-0000` answers the Figma 401 on its
 era probe. Route `https://mcp.figma.com` to it, or serve `fetchOn(mcpEmulatorFigmaOrigin)`.
 
+The opt-in `mcp.legacy.server-ping` case of `@yolk-sdk/mcp/conformance` runs against
+`synthetic-legacy` seeded with `{ legacyInitialize: 'server-ping' }` (`McpEmulatorLegacyInitialize`;
+the default is `plain`): `initialize` then answers that case's fixture
+(`mcpEmulatorServerPingFixtures`), whose SSE answer sends a `ping` request before its response, and
+the session awaits the client's answer to that ping, which the `response:ping` row accepts once
+with the recorded 202, in either phase (over a socket it may arrive after
+`notifications/initialized`). The Figma profile records no ping and ignores the seed. The calling
+cases refuse a pinging server: their call gate treats any server request in an answer as
+uncertainty (#382).
+
 ```ts
 import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'
 import { EmulatorRoute, InProcessHttpClient } from '@yolk-sdk/emulators/router'
@@ -2056,7 +2066,8 @@ await mcp.close()
 ```
 
 Routes (`mcpEmulatorRoutes`: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
-each profile, plus the legacy `GET` row; every row is a read, and every request needs
+each profile, plus the legacy `GET` row and the synthetic legacy `response:ping` row; every row is a
+read, and every request needs
 `Authorization: Bearer <token>`, a recognisable bearer):
 
 | Row                                     | Answer (the recorded bytes)                                                     |
@@ -2069,6 +2080,7 @@ each profile, plus the legacy `GET` row; every row is a read, and every request 
 | `/legacy/mcp#notifications/initialized` | 202, no body, on an initializing session (which becomes ready)                  |
 | `/legacy/mcp#tools/list`                | The SSE listing, on a ready session                                             |
 | `/legacy/mcp#tools/call`                | The three recorded SSE call answers, on a ready session                         |
+| `/legacy/mcp#response:ping`             | 202, no body: the answer to the server ping, once, on a session awaiting it     |
 | `GET /legacy/mcp`                       | 405, no body, on a ready session                                                |
 | `/{modern,legacy}/mcp#server/discover`  | With the reserved invalid credential: the recorded 401, byte for byte           |
 | `useafloat.com/mcp#server/discover`     | The Afloat discover result; with `afloat_yolkconformanceinvalid0000`, the 401   |
@@ -2147,14 +2159,16 @@ on the Afloat era probe.
   where the recording has an id; any non-empty `name` and `version` (and no other key) in the
   `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
   emulator minted on the same profile since the last reset or seed where the recording sends
-  `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise); and, with the
-  seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
-  second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
-  Everything else (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET`
-  on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on
-  the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one starting
-  with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
-  `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a JSON body
+  `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer to the
+  server ping, ready otherwise); and, with the seed's `two-pages` listing, the cursor this emulator
+  issued in the current generation on the second page. `Authorization` must be exactly
+  `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any query,
+  other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without
+  `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
+  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
+  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches, client-sent
+  responses other than the answer to the recorded server ping (exactly as recorded, the server's
+  ping id included, on a session awaiting it), other members, a JSON body
   repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
   (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
   the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
@@ -2167,8 +2181,9 @@ on the Afloat era probe.
   is not emulated.
 
 Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
-never sends it), `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*`,
-JSON-RPC batches and client-sent responses, a JSON body repeating a key (compared after unescaping;
+never sends it), the client's own `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`,
+`tasks/*` (`@yolk-sdk/mcp/client` sends none of them), JSON-RPC batches, client-sent responses other
+than the answer to the recorded server ping, a JSON body repeating a key (compared after unescaping;
 the wrapper's opt-in `uniqueJsonKeys`), `mcp-*` headers no recording carries (such as
 `mcp-param-*`), cursors this emulator did not issue, any other tool or arguments, any other origin,
 path, or query, and a missing `Authorization` (no fixture records the answer to one). A closed
@@ -2193,9 +2208,12 @@ plane behave as in the Dropbox emulator; `/_emulate/state` also reports `nextSes
 
 **Drill knobs (tests only).** `drills: { discoverCarriesErrorResponse, discoverWithoutResultType,
 sessionIdNotVisibleAscii, discoverAnsweredTwice, writeToolMarkedReadOnly, readCallAnswersToolError,
-invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge }` (booleans) each
-make the emulator disagree with exactly one MCP conformance case, on every profile whose answers
-they change (the Afloat profile included, except the legacy-only session knob), only to prove that
+invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge,
+pingAnswerRejected }` (booleans) each make the emulator disagree with exactly one MCP conformance
+case, on every profile whose answers they change (the Afloat profile included, except the
+legacy-only session knob; `pingAnswerRejected` answers the client's answer to the server ping 400
+with no body, failing the opt-in `mcp.legacy.server-ping`, and changes nothing without the
+`server-ping` seed), only to prove that
 case catches it.
 
 ## Kie emulator

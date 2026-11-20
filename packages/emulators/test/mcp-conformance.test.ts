@@ -6,8 +6,10 @@
  * `afloat.mcp_auth` and `figma.mcp_auth`), per profile,
  * both in-process and over a loopback socket, each case alone and all of them in sequence on one
  * emulator; every case is a read, so each emulator ends at its seed except the legacy sessions the
- * handshakes minted; each drill knob makes exactly its case fail; and an SSE answer truncated
- * before its response fails the operation as an `McpError` at the client's timeout, never a hang.
+ * handshakes minted; each drill knob makes exactly its case fail; an SSE answer truncated before
+ * its response fails the operation as an `McpError` at the client's timeout, never a hang; and the
+ * opt-in `mcp.legacy.server-ping` passes on the synthetic legacy profile under its seed, both
+ * in-process and over loopback, with its own drill.
  * Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer } from 'effect'
@@ -28,6 +30,7 @@ import {
   mcpConformanceInvalidCredential,
   mcpConformanceSyntheticOrigin,
   mcpConformanceSyntheticTarget,
+  mcpServerPingCase,
   mcpToolsListCase,
   selectMcpConformanceCases,
   type McpConformanceCase,
@@ -461,6 +464,160 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
   }
 })
 
+// The opt-in server ping: the synthetic legacy profile under `legacyInitialize: 'server-ping'`.
+
+const pingOptions: McpEmulatorOptions = { seed: { legacyInitialize: 'server-ping' } }
+
+const pingRow = `${mcpEmulatorOrigin}/legacy/mcp#response:ping`
+
+const sendsCall = (testCase: McpConformanceCase) =>
+  expectedRequests('legacy', testCase.id).some(line => line.includes('#tools/call'))
+
+/** The legacy cases that call a tool refuse a pinging server (see below); the others pass. */
+const legacyCallingCases = applicable('legacy').filter(sendsCall)
+
+const legacyOtherCases = applicable('legacy').filter(testCase => !sendsCall(testCase))
+
+describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
+  for (const [target, transport] of transports) {
+    it.effect(
+      `passes on a fresh emulator: the ping answered once with the recorded 202 (${target.kind})`,
+      () =>
+        Effect.gen(function* () {
+          const report = yield* runEach(
+            'legacy',
+            [mcpServerPingCase],
+            pingOptions,
+            target,
+            transport,
+            (id, emulator) => {
+              const entries = emulator.ledger.entries()
+
+              expect(sorted(requests(entries)), id).toEqual(
+                sorted([...expectedRequests('legacy', id), `POST ${pingRow} 202`])
+              )
+              expect(entries.every(entry => entry.notEmulated === undefined)).toBe(true)
+              expect(emulator.snapshot().sessions).toEqual([
+                { id: 'yolk-emu-session-1', phase: 'ready' }
+              ])
+            }
+          )
+
+          expectAllPassed(report, 1)
+        }),
+      60_000
+    )
+
+    it.effect(
+      `the non-calling cases pass beside it, twice on ONE emulator; no credential kept (${target.kind})`,
+      () =>
+        withEmulator(pingOptions, emulator =>
+          Effect.gen(function* () {
+            const cases = [mcpServerPingCase, ...legacyOtherCases]
+
+            const runOnce = runConformance(cases, {
+              target,
+              now,
+              layer: () => Layer.mergeAll(transport(emulator), services(targetFor('legacy')))
+            })
+
+            expectAllPassed(yield* runOnce, cases.length)
+            expectAllPassed(yield* runOnce, cases.length)
+
+            const answers = emulator.ledger.entries().filter(entry => entry.route === pingRow)
+
+            // One ping per handshake (every case but the auth case shakes hands), answered once.
+            expect(answers.map(entry => entry.status)).toEqual(
+              Array<number>((cases.length - 1) * 2).fill(202)
+            )
+            expect(
+              emulator
+                .snapshot()
+                .sessions.every(
+                  session => session.phase === 'ready' && session.awaitingPingAnswer === undefined
+                )
+            ).toBe(true)
+
+            yield* Effect.promise(() => expectNoCredential(emulator))
+          })
+        ),
+      60_000
+    )
+  }
+
+  it.effect(
+    // Pinned until #382 decides whether the gate may understand a server ping.
+    'the call gate treats the ping as uncertainty (#382): calling cases refuse with no forwarded call',
+    () =>
+      Effect.gen(function* () {
+        const calling = legacyCallingCases
+
+        expect(calling.map(testCase => testCase.id)).toEqual([
+          'mcp.tools.call-read',
+          'mcp.tools.call-tool-error',
+          'mcp.errors.unknown-tool'
+        ])
+
+        const report = yield* runEach(
+          'legacy',
+          calling,
+          pingOptions,
+          { kind: 'in-process' },
+          inProcessLayer,
+          (id, emulator) => {
+            expect(
+              emulator.ledger.entries().some(entry => entry.route?.endsWith('#tools/call')),
+              id
+            ).toBe(false)
+          }
+        )
+
+        expect(report.summary.failed, formatConformanceReport(report)).toBe(calling.length)
+
+        for (const result of report.results) {
+          expect(result.failure?.message).toContain('uncertain-exchange')
+        }
+      }),
+    60_000
+  )
+
+  it.effect(
+    'pingAnswerRejected fails only the server ping case',
+    () =>
+      Effect.gen(function* () {
+        const knobs: McpEmulatorDrills = { pingAnswerRejected: true }
+
+        const report = yield* runEach(
+          'legacy',
+          [mcpServerPingCase, ...legacyOtherCases],
+          { ...pingOptions, drills: knobs },
+          { kind: 'in-process' },
+          inProcessLayer
+        )
+
+        const failed = report.results.filter(result => result.status === 'failed')
+
+        expect(failed.map(result => result.id)).toEqual([mcpServerPingCase.id])
+        expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
+        expect(failed[0]?.failure?.message).toContain(
+          'expected the server to accept the answer to ping 1 with 202 and an empty body'
+        )
+
+        // Without the seed nothing pings, so the knob changes no default legacy case.
+        const plain = yield* runEach(
+          'legacy',
+          applicable('legacy'),
+          { drills: knobs },
+          { kind: 'in-process' },
+          inProcessLayer
+        )
+
+        expectAllPassed(plain, applicable('legacy').length)
+      }),
+    60_000
+  )
+})
+
 describe('an SSE answer truncated before its response', () => {
   for (const [target, transport] of transports) {
     it.effect(
@@ -622,7 +779,11 @@ for (const [target, transport] of afloatTransports) {
               ),
               id
             ).toBe(true)
-            expect(emulator.snapshot()).toEqual({ modernListing: 'one-page', sessions: [] })
+            expect(emulator.snapshot()).toEqual({
+              modernListing: 'one-page',
+              legacyInitialize: 'plain',
+              sessions: []
+            })
           })
 
           expectAllPassed(report, afloatCases.length)

@@ -16,6 +16,7 @@ import {
   mcpConformanceCases,
   mcpConformanceFixtures,
   mcpConformanceInvalidCredential,
+  mcpConformanceServerPingFixtures,
   mcpConformanceSyntheticLegacyUrl,
   mcpConformanceSyntheticModernUrl,
   mcpConformanceSyntheticOrigin,
@@ -49,6 +50,7 @@ import {
   mcpEmulatorOrigin,
   mcpEmulatorReservedInvalidCredential,
   mcpEmulatorRoutes,
+  mcpEmulatorServerPingFixtures,
   mcpEmulatorSessionCap,
   type McpEmulator,
   type McpEmulatorOptions,
@@ -82,6 +84,7 @@ const row = (url: string, method: string) => `${url}#${method}`
 const fixtureById = (id: string): McpRecordedFixture => {
   const fixture = [
     ...mcpEmulatorFixtures,
+    ...mcpEmulatorServerPingFixtures,
     ...mcpEmulatorAfloatFixtures,
     ...mcpEmulatorFigmaFixtures
   ].find(candidate => candidate.id === id)
@@ -103,6 +106,11 @@ const modernEra = 'mcp.negotiation.era.modern.synthetic'
 
 const legacyEra = 'mcp.negotiation.era.legacy.synthetic'
 
+const serverPing = 'mcp.legacy.server-ping.legacy.synthetic'
+
+/** The seed under which the synthetic legacy `initialize` pings (the opt-in server ping). */
+const pingSeed: McpEmulatorOptions = { seed: { legacyInitialize: 'server-ping' } }
+
 /** The recorded requests the tests vary. */
 const recorded = {
   modernDiscover: exchangeOf(modernEra, 0),
@@ -115,6 +123,8 @@ const recorded = {
   legacyGet: exchangeOf(legacyEra, 3),
   legacyList: exchangeOf(legacyEra, 4),
   legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -1),
+  legacyPingInitialize: exchangeOf(serverPing, 1),
+  legacyPingAnswer: exchangeOf(serverPing, 2),
   afloatDiscover: exchangeOf('mcp.negotiation.era.afloat.synthetic', 0),
   afloatList: exchangeOf('mcp.negotiation.era.afloat.synthetic', 1),
   afloatCallRead: exchangeOf('mcp.tools.call-read.afloat.synthetic', -1),
@@ -270,6 +280,7 @@ describe('manifest', () => {
       `RPC ${row(legacyUrl, 'notifications/initialized')}`,
       `RPC ${row(legacyUrl, 'tools/list')}`,
       `RPC ${row(legacyUrl, 'tools/call')}`,
+      `RPC ${row(legacyUrl, 'response:ping')}`,
       `GET ${legacyUrl}`,
       `RPC ${row(afloatUrl, 'server/discover')}`,
       `RPC ${row(afloatUrl, 'tools/list')}`,
@@ -305,10 +316,13 @@ describe('manifest', () => {
       'mcp.tools.call-tool-error',
       'mcp.errors.unknown-tool'
     ])
-    expect(caseIdsOf(row(legacyUrl, 'server/discover'))).toEqual(
-      ids.filter(id => id !== 'mcp.modern.stateless')
-    )
-    expect(caseIdsOf(`${legacyUrl}`)).toEqual(listingCases)
+    // The opt-in server ping's fixture runs the legacy listing too (under its seed).
+    expect(caseIdsOf(row(legacyUrl, 'server/discover'))).toEqual([
+      ...ids.filter(id => id !== 'mcp.modern.stateless'),
+      'mcp.legacy.server-ping'
+    ])
+    expect(caseIdsOf(`${legacyUrl}`)).toEqual([...listingCases, 'mcp.legacy.server-ping'])
+    expect(caseIdsOf(row(legacyUrl, 'response:ping'))).toEqual(['mcp.legacy.server-ping'])
     expect(caseIdsOf(row(legacyUrl, 'tools/call'))).toEqual([
       'mcp.tools.call-read',
       'mcp.tools.call-tool-error',
@@ -346,7 +360,7 @@ describe('manifest', () => {
 
       const counts = emulator.coverage().routes.map(route => route.requests)
 
-      expect(counts).toEqual([1, 1, ...Array<number>(16).fill(0)])
+      expect(counts).toEqual([1, 1, ...Array<number>(17).fill(0)])
 
       const served = await emulator
         .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/coverage`))
@@ -360,6 +374,8 @@ describe('manifest', () => {
 describe('the data copy', () => {
   it('equals the @yolk-sdk/mcp/conformance fixtures, and the constants agree', () => {
     expect(mcpEmulatorFixtures).toEqual(mcpConformanceFixtures)
+    expect(mcpEmulatorServerPingFixtures).toEqual(mcpConformanceServerPingFixtures)
+    expect(mcpRecordingProblems(mcpEmulatorServerPingFixtures)).toEqual([])
     expect(mcpEmulatorOrigin).toBe(mcpConformanceSyntheticOrigin)
     expect(modernUrl).toBe(mcpConformanceSyntheticModernUrl)
     expect(legacyUrl).toBe(mcpConformanceSyntheticLegacyUrl)
@@ -458,9 +474,17 @@ const bearerOf = (fixture: McpRecordedFixture) => {
 const recordedSessionOf = (fixture: McpRecordedFixture) =>
   fixture.endpoint === figmaUrl ? figmaMcpConformanceSessionId : mcpConformanceSyntheticSessionId
 
-/** Seed a fixture's replay needs (the paged listing only for `mcp.tools.list` modern). */
-const seedOf = (fixture: McpRecordedFixture): McpEmulatorOptions =>
-  fixture.id === 'mcp.tools.list.modern.synthetic' ? { seed: { modernListing: 'two-pages' } } : {}
+/**
+ * Seed a fixture's replay needs (the paged listing only for `mcp.tools.list` modern, the pinging
+ * `initialize` only for the opt-in server ping).
+ */
+const seedOf = (fixture: McpRecordedFixture): McpEmulatorOptions => {
+  if (fixture.id === 'mcp.tools.list.modern.synthetic') {
+    return { seed: { modernListing: 'two-pages' } }
+  }
+
+  return fixture.id === serverPing ? pingSeed : {}
+}
 
 /** What a replay sends for one recorded exchange. */
 type ReplaySend = {
@@ -487,8 +511,13 @@ const replay = async (
     const recordedBody = bodyWith(exchange, {})
     const recordedId = recordedBody['id']
 
+    // Only a request's id is the client's to choose: a client-sent response (the answer to the
+    // server ping) carries the server's id, sent as recorded.
     const id =
-      Predicate.isString(recordedId) || Predicate.isNumber(recordedId) ? recordedId : undefined
+      Predicate.isString(recordedBody['method']) &&
+      (Predicate.isString(recordedId) || Predicate.isNumber(recordedId))
+        ? recordedId
+        : undefined
 
     const headers: Record<string, string> = {}
 
@@ -554,6 +583,7 @@ describe('drift: every fixture replayed byte for byte', () => {
   // `figmaMcpConformanceFixtures`.
   for (const fixture of [
     ...mcpEmulatorFixtures,
+    ...mcpEmulatorServerPingFixtures,
     ...mcpEmulatorAfloatFixtures,
     ...mcpEmulatorFigmaFixtures
   ]) {
@@ -1071,6 +1101,90 @@ const refusals: ReadonlyArray<Refusal> = [
     request: async emulator =>
       onSession(recorded.legacyGet, await handshake(emulator), { url: `${legacyUrl}?resume=1` }),
     reason: 'query parameters are not emulated'
+  },
+  {
+    name: 'a client-sent response on a legacy session awaiting no server ping',
+    request: async emulator => onSession(recorded.legacyPingAnswer, await handshake(emulator)),
+    reason: 'an answer to no server ping this emulator awaits is not emulated'
+  },
+  {
+    name: 'a second answer to the server ping',
+    options: pingSeed,
+    request: async emulator => {
+      const session = await handshake(emulator, 'initializing')
+      const first = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(first.status).toBe(202)
+
+      return onSession(recorded.legacyPingAnswer, session)
+    },
+    reason: 'an answer to no server ping this emulator awaits is not emulated'
+  },
+  {
+    name: 'an answer to the server ping on a session this emulator never minted',
+    options: pingSeed,
+    request: () => onSession(recorded.legacyPingAnswer, mcpConformanceSyntheticSessionId),
+    reason: 'an answer to no server ping this emulator awaits is not emulated'
+  },
+  ...(
+    [
+      ['another ping id', { result: {}, jsonrpc: '2.0', id: 'server-ping-2' }],
+      ['the ping id as a number', { result: {}, jsonrpc: '2.0', id: 1 }],
+      ['a non-empty result', { result: { extra: true }, jsonrpc: '2.0', id: 'server-ping-1' }]
+    ] satisfies ReadonlyArray<readonly [string, Schema.JsonObject]>
+  ).map(([name, body]): Refusal => ({
+    name: `an answer to the server ping with ${name}`,
+    options: pingSeed,
+    request: async emulator =>
+      onSession(recorded.legacyPingAnswer, await handshake(emulator, 'initializing'), { body }),
+    reason: 'a client response other than the recorded answer to the server ping is not emulated'
+  })),
+  {
+    name: 'an error answer to the server ping',
+    options: pingSeed,
+    request: async emulator =>
+      onSession(recorded.legacyPingAnswer, await handshake(emulator, 'initializing'), {
+        body: { jsonrpc: '2.0', id: 'server-ping-1', error: { code: -32_601, message: 'x' } }
+      }),
+    reason: 'the JSON-RPC message must have exactly the recorded members'
+  },
+  {
+    name: 'an answer to the server ping with mcp-protocol-version',
+    options: pingSeed,
+    request: async emulator =>
+      onSession(recorded.legacyPingAnswer, await handshake(emulator, 'initializing'), {
+        headers: { 'mcp-protocol-version': '2025-11-25' }
+      }),
+    reason: 'the mcp-protocol-version header must be the recorded value, or absent where none is'
+  },
+  {
+    name: 'an answer to the server ping without a session header',
+    options: pingSeed,
+    request: async emulator => {
+      await handshake(emulator, 'initializing')
+
+      return requestFor(recorded.legacyPingAnswer, { headers: { 'mcp-session-id': undefined } })
+    },
+    reason: 'mcp-session-id must be sent exactly where the recording sends one'
+  },
+  {
+    name: 'a batch holding the answer to the server ping',
+    options: pingSeed,
+    request: async emulator =>
+      onSession(recorded.legacyPingAnswer, await handshake(emulator, 'initializing'), {
+        body: [bodyWith(recorded.legacyPingAnswer, {})]
+      }),
+    reason: 'this JSON-RPC method is not emulated on the legacy profile'
+  },
+  {
+    name: 'an answer to a server ping on the Figma profile (it records none)',
+    options: pingSeed,
+    request: () =>
+      requestFor(recorded.legacyPingAnswer, {
+        url: figmaUrl,
+        headers: { 'mcp-session-id': 'yolk-emu-session-1' }
+      }),
+    reason: 'this JSON-RPC method is not emulated on the Figma profile'
   },
   {
     name: 'a tools/call on a session reset cleared',
@@ -1785,12 +1899,143 @@ describe('faults', () => {
   })
 })
 
+describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
+  const pingRow = row(legacyUrl, 'response:ping')
+
+  it('initialize answers the recorded ping; its answer is accepted once with the recorded 202', async () => {
+    await withEmulator(pingSeed, async emulator => {
+      const initialized = await emulator.fetch(requestFor(recorded.legacyInitialize))
+      const session = initialized.headers.get('mcp-session-id')
+
+      expect(initialized.status).toBe(200)
+      expect(await initialized.text()).toBe(recordedText(recorded.legacyPingInitialize))
+
+      if (session === null) throw new Error('no session minted')
+
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: session, phase: 'initializing', awaitingPingAnswer: true }
+      ])
+
+      const answered = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(answered.status).toBe(202)
+      expect(await answered.text()).toBe('')
+      expect(emulator.snapshot().sessions).toEqual([{ id: session, phase: 'initializing' }])
+      expect(emulator.ledger.entries().at(-1)).toMatchObject({ route: pingRow, status: 202 })
+
+      // The handshake goes on as recorded.
+      const ready = await emulator.fetch(onSession(recorded.legacyInitialized, session))
+
+      expect(ready.status).toBe(202)
+      expect(emulator.snapshot().sessions).toEqual([{ id: session, phase: 'ready' }])
+    })
+  })
+
+  it('accepts the answer after notifications/initialized too (either arrival order)', async () => {
+    await withEmulator(pingSeed, async emulator => {
+      const session = await handshake(emulator)
+
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: session, phase: 'ready', awaitingPingAnswer: true }
+      ])
+
+      const answered = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(answered.status).toBe(202)
+      expect(emulator.snapshot().sessions).toEqual([{ id: session, phase: 'ready' }])
+    })
+  })
+
+  it('the plain seed answers the plain initialize; the Figma profile ignores the seed', async () => {
+    await withEmulator({}, async emulator => {
+      const plain = await emulator.fetch(requestFor(recorded.legacyInitialize))
+
+      expect(await plain.text()).toBe(recordedText(recorded.legacyInitialize))
+      expect(
+        emulator.snapshot().sessions.every(held => held.awaitingPingAnswer === undefined)
+      ).toBe(true)
+    })
+
+    await withEmulator(pingSeed, async emulator => {
+      const figma = await emulator.fetch(requestFor(recorded.figmaInitialize))
+
+      expect(await figma.text()).toBe(recordedText(recorded.figmaInitialize))
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: 'yolk-emu-session-1', phase: 'initializing', profile: 'figma' }
+      ])
+    })
+  })
+
+  it('a reset or a plain seed clears the awaiting session; seeding selects the answer', async () => {
+    await withEmulator({}, async emulator => {
+      const seeded = await emulator.fetch(
+        new Request(`${mcpEmulatorOrigin}/_emulate/seed`, {
+          method: 'POST',
+          body: JSON.stringify({ legacyInitialize: 'server-ping' })
+        })
+      )
+
+      expect(await seeded.json()).toEqual({
+        seeded: true,
+        modernListing: 'one-page',
+        legacyInitialize: 'server-ping'
+      })
+
+      const session = await handshake(emulator, 'initializing')
+
+      await emulator.reset()
+
+      expect(emulator.snapshot()).toEqual({
+        modernListing: 'one-page',
+        legacyInitialize: 'server-ping',
+        sessions: []
+      })
+
+      const stale = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(stale.status).toBe(400)
+    })
+  })
+
+  it('a status fault on the answer row answers only it and clears nothing', async () => {
+    await withEmulator(pingSeed, async emulator => {
+      const session = await handshake(emulator, 'initializing')
+
+      emulator.faults.add({ kind: 'status', status: 503, match: { route: pingRow } })
+
+      const faulted = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(faulted.status).toBe(503)
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: session, phase: 'initializing', awaitingPingAnswer: true }
+      ])
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1])
+    })
+  })
+
+  it('the pingAnswerRejected drill answers 400 with no body and the session still awaits', async () => {
+    await withEmulator({ ...pingSeed, drills: { pingAnswerRejected: true } }, async emulator => {
+      const session = await handshake(emulator, 'initializing')
+      const rejected = await emulator.fetch(onSession(recorded.legacyPingAnswer, session))
+
+      expect(rejected.status).toBe(400)
+      expect(await rejected.text()).toBe('')
+      expect(emulator.ledger.entries().at(-1)).toMatchObject({ route: pingRow, status: 400 })
+      expect(emulator.ledger.entries().at(-1)?.notEmulated).toBeUndefined()
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: session, phase: 'initializing', awaitingPingAnswer: true }
+      ])
+    })
+  })
+})
+
 describe('seeds, options, and the control plane', () => {
   it('rejects an invalid seed (sessions are never seeded) or drill knob', async () => {
     // Parsed from JSON, as a host passing untyped input would.
     const invalid: ReadonlyArray<readonly [McpEmulatorOptions, string]> = JSON.parse(
       JSON.stringify([
         [{ seed: { modernListing: 'three-pages' } }, 'Invalid MCP emulator seed'],
+        [{ seed: { legacyInitialize: 'pings' } }, 'Invalid MCP emulator seed'],
         [{ seed: { sessions: [] } }, 'Invalid MCP emulator seed'],
         [{ drills: { unknownKnob: true } }, 'unknown drill knob unknownKnob'],
         [{ drills: { writeToolMarkedReadOnly: 'yes' } }, 'must be a boolean']
@@ -1817,7 +2062,11 @@ describe('seeds, options, and the control plane', () => {
         })
       )
 
-      expect(await seeded.json()).toEqual({ seeded: true, modernListing: 'two-pages' })
+      expect(await seeded.json()).toEqual({
+        seeded: true,
+        modernListing: 'two-pages',
+        legacyInitialize: 'plain'
+      })
 
       const invalid = await emulator.fetch(
         new Request(`${mcpEmulatorOrigin}/_emulate/seed`, {
@@ -1833,7 +2082,7 @@ describe('seeds, options, and the control plane', () => {
         .then(response => response.json())
 
       expect(state).toMatchObject({
-        state: { modernListing: 'two-pages', sessions: [] },
+        state: { modernListing: 'two-pages', legacyInitialize: 'plain', sessions: [] },
         nextSession: 1,
         cursorGeneration: 2,
         issuedCursor: null
