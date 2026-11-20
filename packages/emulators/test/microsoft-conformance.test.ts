@@ -226,7 +226,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             ...sendSeed,
             chatMessagesSent: [
               {
-                chatId: '19:synthetic-chat-0001@thread.v2',
+                chatId: '19:synthetic-send-chat-0001@thread.v2',
                 id: '1790000000101',
                 runId: 'run-synthetic'
               }

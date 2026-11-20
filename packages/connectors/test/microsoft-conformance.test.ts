@@ -1892,13 +1892,102 @@ describe('Microsoft Teams and SharePoint conformance drills', () => {
       const { failure, entries } = yield* drill(
         microsoftTeamsSendChatMessageCase,
         microsoftTeamsSendChatMessageFixture,
-        { ...microsoftConformanceFixtureSeeds, chatId: '19:synthetic/other@thread.v2' }
+        { ...microsoftConformanceFixtureSeeds, sendChatId: '19:synthetic/other@thread.v2' }
       )
 
       expect(failure).toEqual(
-        mismatch('precondition: MicrosoftConformanceConfig.chatId is not a valid Teams id')
+        mismatch('precondition: MicrosoftConformanceConfig.sendChatId is not a valid Teams id')
       )
       expect(entries).toEqual([])
+    })
+  )
+
+  it.effect('sends to the dedicated send chat, never the paging chat', () =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const { chatId: _paging, ...withoutPagingChat } = microsoftConformanceFixtureSeeds
+      const ledgers = yield* Ref.make(new Map<string, ReplayLedgerApi>())
+
+      const report = yield* runConformance([microsoftTeamsSendChatMessageCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: ledgerCaseLayer(ledgers, microsoftConformanceFixtures, withoutPagingChat)
+      })
+
+      expect(report.summary).toEqual({ passed: 1, failed: 0, skipped: 0 })
+      expect(microsoftConformanceFixtureSeeds.sendChatId).not.toBe(
+        microsoftConformanceFixtureSeeds.chatId
+      )
+
+      const { entries } = yield* ledgerOf(ledgers, microsoftTeamsSendChatMessageCase.id)
+
+      expect(entries.map(entry => decodeURIComponent(new URL(entry.url).pathname))).toEqual([
+        `/v1.0/chats/${microsoftConformanceFixtureSeeds.sendChatId}/messages`,
+        `/v1.0/chats/${microsoftConformanceFixtureSeeds.sendChatId}/messages/1790000000101`
+      ])
+
+      const { sendChatId: _send, ...withoutSendChat } = microsoftConformanceFixtureSeeds
+
+      const { failure } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        microsoftTeamsSendChatMessageFixture,
+        withoutSendChat
+      )
+
+      expect(failure).toEqual(
+        mismatch('precondition: MicrosoftConformanceConfig.sendChatId is not configured')
+      )
+    })
+  )
+
+  it.effect('reports a redirected send as a definitive rejection, never following it', () =>
+    Effect.gen(function* () {
+      const { failure, entries } = yield* drill(
+        microsoftTeamsSendChatMessageCase,
+        pickExchanges(
+          replaceResponse(microsoftTeamsSendChatMessageFixture, 0, response => ({
+            status: 307,
+            headers: {
+              ...response.headers,
+              location: 'https://graph.microsoft.com/v1.0/elsewhere'
+            },
+            body: ''
+          })),
+          [0]
+        )
+      )
+
+      expect(failure?.tag).toBe('MicrosoftConformanceActionFailed')
+      expect(failure?.message).toMatch(/^teams\.send_chat_message failed: \w+ \(HTTP 307\)$/)
+      expect(exchangeIndices(entries)).toEqual(['POST 0'])
+    })
+  )
+
+  it.effect('passes the chat paging case when Graph answers fewer than $top with a nextLink', () =>
+    Effect.gen(function* () {
+      const shortPage = replaceResponse(
+        microsoftTeamsChatMessagesPagingFixture,
+        0,
+        editBody(body => ({
+          ...body,
+          value: Array.isArray(body.value) ? body.value.slice(0, 1) : (body.value ?? null)
+        }))
+      )
+
+      yield* atTestNow
+
+      const report = yield* runConformance([microsoftTeamsChatMessagesPagingCase], {
+        target: { kind: 'replay' },
+        now,
+        layer: () => portsOver(ReplayHttpClient.layer([shortPage]))
+      })
+
+      expect(report.summary, formatConformanceReport(report)).toEqual({
+        passed: 1,
+        failed: 0,
+        skipped: 0
+      })
     })
   )
 })

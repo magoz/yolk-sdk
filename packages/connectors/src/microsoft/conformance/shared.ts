@@ -64,11 +64,13 @@ export const MicrosoftConformanceSeeds = Schema.Struct({
   siteSearchQuery: Schema.optionalKey(SeedString),
   /** A SharePoint team site (`{hostname},{site-collection-id},{web-id}`) with a document library. */
   siteId: Schema.optionalKey(SeedString),
-  /**
-   * A practice Teams chat of the signed-in user holding more than two messages. The
-   * write-irreversible send case posts a real message there.
-   */
+  /** A Teams chat of the signed-in user holding more than two messages (never written to). */
   chatId: Schema.optionalKey(SeedString),
+  /**
+   * A dedicated practice Teams chat of the signed-in user, kept apart from `chatId`: the
+   * write-irreversible send case posts a real message there, so the paging chat stays unchanged.
+   */
+  sendChatId: Schema.optionalKey(SeedString),
   /** A team the signed-in user joined (listed by `teams.list_joined_teams`). */
   teamId: Schema.optionalKey(SeedString),
   /** A channel of that team listed on the first page of `teams.list_channels`. */

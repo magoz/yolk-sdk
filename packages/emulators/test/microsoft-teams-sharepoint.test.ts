@@ -19,6 +19,7 @@ import {
   microsoftTeamsSitesFixtures,
   type MicrosoftRecordedExchange
 } from '../src/microsoft/teams-sites-recordings.ts'
+import { sendTemplateOf } from '../src/microsoft/teams-sites.ts'
 
 const now = Date.parse('2026-09-29T10:00:00.000Z')
 
@@ -75,7 +76,12 @@ const sendExchanges = () => {
   return { post, readback }
 }
 
+/** The dedicated send chat's messages (the recorded send posts there). */
 const chatMessages =
+  'https://graph.microsoft.com/v1.0/chats/19%3Asynthetic-send-chat-0001%40thread.v2/messages'
+
+/** The paging chat's messages: never written to. */
+const pagingChatMessages =
   'https://graph.microsoft.com/v1.0/chats/19%3Asynthetic-chat-0001%40thread.v2/messages'
 
 const sentContent =
@@ -96,6 +102,25 @@ const errorCode = async (response: Response): Promise<string | undefined> =>
       body => body.error.code
     )
   )
+
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
+
+/** `text` as a promoted live recording would name its run id. */
+const promoted = (text: string): string => text.replaceAll('run-synthetic', 'run-0f3a9c12')
+
+/** A recorded exchange with every run id promoted, in its body and its answer. */
+const promotedExchange = (exchange: MicrosoftRecordedExchange): MicrosoftRecordedExchange => {
+  const response = { ...exchange.response, body: promoted(exchange.response.body) }
+  const body = exchange.request.body
+
+  if (body === undefined) return { request: exchange.request, response }
+
+  const promotedBody = Option.getOrUndefined(decodeJson(promoted(JSON.stringify(body))))
+
+  return promotedBody === undefined
+    ? expect.fail('expected a JSON request body')
+    : { request: { ...exchange.request, body: promotedBody }, response }
+}
 
 describe('Microsoft Teams and SharePoint site routes', () => {
   it('copy the eight connector fixtures as data, in suite order', () => {
@@ -141,7 +166,7 @@ describe('Microsoft Teams and SharePoint site routes', () => {
           ...seed,
           chatMessagesSent: [
             {
-              chatId: '19:synthetic-chat-0001@thread.v2',
+              chatId: '19:synthetic-send-chat-0001@thread.v2',
               id: '1790000000101',
               runId: 'run-synthetic'
             }
@@ -185,17 +210,54 @@ describe('Microsoft Teams and SharePoint site routes', () => {
     })
   )
 
-  it.effect('answer the recorded reads under the empty profile too (they hold no entities)', () =>
-    Effect.promise(async () => {
-      const target = await emulator({ seed: { profile: 'empty' } })
-      const [fixture] = microsoftTeamsSitesFixtures
-      const [exchange] = fixture?.exchanges ?? []
+  it.effect(
+    'keep a run id holding the recorded message id intact on a later send and its readback',
+    () =>
+      Effect.promise(async () => {
+        const target = await emulator()
+        const { post, readback } = sendExchanges()
 
-      if (exchange === undefined) return expect.fail('expected a recorded exchange')
+        await expectRecorded(await send(target, post.request), post)
 
-      await expectRecorded(await send(target, exchange.request), exchange)
-    })
+        const runId = 'run-1790000000101'
+        const content = sentContent.replace('run-synthetic', runId)
+        const second = await send(target, { ...post.request, body: sendBody(content) })
+        const answered: unknown = await second.json()
+
+        // The minted id replaces only the recorded message id, never text inside the run id.
+        expect(answered).toMatchObject({
+          id: '1790000000102',
+          body: { contentType: 'html', content }
+        })
+
+        const read = await send(target, {
+          ...readback.request,
+          url: readback.request.url.replace('1790000000101', '1790000000102')
+        })
+
+        expect(await read.json()).toMatchObject({ id: '1790000000102', body: { content } })
+        expect(target.snapshot().chatMessagesSent.at(-1)).toEqual({
+          chatId: '19:synthetic-send-chat-0001@thread.v2',
+          id: '1790000000102',
+          runId
+        })
+      })
   )
+
+  it('take the recorded run id from the copied send body, so a promoted recording still works', () => {
+    const recorded = microsoftTeamsSitesFixtures.map(fixture => ({
+      ...fixture,
+      exchanges: fixture.exchanges.map(promotedExchange)
+    }))
+
+    const template = sendTemplateOf(recorded)
+
+    expect(template?.runId).toBe('run-0f3a9c12')
+    expect(template?.content.exec(sentContent.replace('run-synthetic', 'run-other'))?.[1]).toBe(
+      'run-other'
+    )
+    expect(sendTemplateOf(microsoftTeamsSitesFixtures)?.runId).toBe('run-synthetic')
+  })
 })
 
 type Refusal = {
@@ -234,9 +296,9 @@ const refusals: ReadonlyArray<Refusal> = [
     code: notEmulated
   },
   {
-    name: 'a send to another chat',
+    name: 'a send to the paging chat',
     method: 'POST',
-    url: 'https://graph.microsoft.com/v1.0/chats/19%3Asynthetic-chat-0002%40thread.v2/messages',
+    url: pagingChatMessages,
     body: sendBody(sentContent),
     code: notEmulated
   },
@@ -301,7 +363,7 @@ describe('Microsoft Teams and SharePoint site refusals', () => {
     )
   }
 
-  it.effect('refuse a listing of the chat once it holds a sent message', () =>
+  it.effect('keep answering the paging chat after a send to the dedicated send chat', () =>
     Effect.promise(async () => {
       const target = await emulator()
       const { post } = sendExchanges()
@@ -314,12 +376,34 @@ describe('Microsoft Teams and SharePoint site refusals', () => {
 
       if (firstPage === undefined) return expect.fail('expected the paging fixture')
 
+      expect(firstPage.request.url.startsWith(pagingChatMessages)).toBe(true)
+      expect(post.request.url).toBe(chatMessages)
+
       await expectRecorded(await send(target, post.request), post)
+      // The send never touches the paging chat, so the suite does not depend on case order.
+      await expectRecorded(await send(target, firstPage.request), firstPage)
+    })
+  )
 
-      const listing = await send(target, firstPage.request)
+  it.effect('refuse every Teams and SharePoint request under the empty profile', () =>
+    Effect.promise(async () => {
+      const target = await emulator({ seed: { profile: 'empty' } })
+      const seed = target.snapshot()
 
-      expect(listing.status).toBe(400)
-      expect(await errorCode(listing)).toBe(notEmulated)
+      expect(seed.recordedTeamsSites).toBe(false)
+      target.faults.add({ kind: 'status', status: 503 })
+
+      for (const fixture of microsoftTeamsSitesFixtures) {
+        for (const exchange of fixture.exchanges) {
+          const response = await send(target, exchange.request)
+
+          expect(response.status, exchange.request.url).toBe(400)
+          expect(await errorCode(response)).toBe(notEmulated)
+        }
+      }
+
+      expect(target.snapshot()).toEqual(seed)
+      expect(target.faults.list()).toEqual([expect.objectContaining({ applied: 0 })])
     })
   )
 

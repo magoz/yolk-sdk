@@ -1,7 +1,8 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * A two-message first page of the seeded chat with `@odata.nextLink`, the page the link returns, and the first message by id.
+ * A two-message first page of the seeded chat with `@odata.nextLink`, the page the link returns,
+ * and the first message by id.
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it.
  * `pnpm conformance:microsoft --live --owner-approved --account <label> --record` stages a

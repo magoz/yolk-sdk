@@ -8,7 +8,8 @@
  * examples (each fixture's note names its pages).
  *
  * The read cases change nothing. `microsoft.teams.send-chat-message` posts a real message to the
- * seeded practice chat that the connector cannot remove (Graph's soft delete needs another
+ * seeded send chat (`sendChatId`, a dedicated practice chat apart from the paging `chatId`) that
+ * the connector cannot remove (Graph's soft delete needs another
  * permission and no connector action exists), so it is write-irreversible: it runs live only when
  * named by its exact id. Its text names the per-invocation `runId`; the send and its
  * classification run uninterruptibly, and an ambiguous send (the shared `classifyWriteExit`: a
@@ -246,7 +247,7 @@ export const microsoftTeamsChatMessagesPagingCase: MicrosoftConformanceCase = de
     title: 'A chat larger than the page size returns a usable nextLink',
     safety: 'read',
     docs: 'GET /chats/{chat-id}/messages pages with `$top` (at most 50) and returns `@odata.nextLink` when more messages exist; the docs example names the chat id unencoded in that link.',
-    wire: '`teams.list_chat_messages` with `top: 2` on a chat seeded with more than two messages answers two messages and a `nextLink` the connector accepts (the global Graph origin and the same chat collection, compared decoded, since Graph may name the chat id unencoded); following it answers at least one further message, none repeated from the first page; `teams.get_chat_message` with the first listed id answers that message with the same body.',
+    wire: '`teams.list_chat_messages` with `top: 2` on a chat seeded with more than two messages answers at least one and at most two messages (Graph may answer fewer than `$top`) and a `nextLink` the connector accepts (the global Graph origin and the same chat collection, compared decoded, since Graph may name the chat id unencoded); following it answers at least one further message, none repeated from the first page; `teams.get_chat_message` with the first listed id answers that message with the same body.',
     fixtures: [microsoftTeamsChatMessagesPagingFixture.id],
     run: Effect.gen(function* () {
       const chatId = yield* requireSeed('chatId')
@@ -264,10 +265,11 @@ export const microsoftTeamsChatMessagesPagingCase: MicrosoftConformanceCase = de
         })
       )
 
-      yield* expectEqual(
-        first.messages.length,
-        chatPageSize,
-        'precondition: the seeded chat needs more than two messages'
+      // Graph may answer fewer than `$top` on a page that still has a next one.
+      yield* expectConformance(
+        first.messages.length > 0 && first.messages.length <= chatPageSize,
+        `expected the first page to hold 1 to ${chatPageSize} messages`,
+        { actual: first.messages.length }
       )
 
       if (first.nextLink === undefined) {
@@ -618,17 +620,17 @@ export const microsoftTeamsSendChatMessageCase: MicrosoftConformanceCase = defin
   title: 'A plain-text chat message is posted as escaped HTML and reads back by its id',
   safety: 'write-irreversible',
   docs: 'POST /chats/{chat-id}/messages with a `chatMessage` body sends a message to an existing chat and answers 201 Created with the created message. The connector sends plain text as an HTML body (markup escaped, line breaks as `<br>`) and has no delete action: a sent message cannot be undone through it.',
-  wire: '`teams.send_chat_message` of a short text naming the run id (with markup, an ampersand, and a line break) to the seeded practice chat answers a message with a non-empty id that names the seeded chat, whose body is `html` and equals the escaped HTML the connector sent (unverified: Graph may normalize the HTML it stores); `teams.get_chat_message` with the returned id answers the same message and body. The message stays in the chat: this case is write-irreversible and runs only when requested by its exact id.',
+  wire: '`teams.send_chat_message` of a short text naming the run id (with markup, an ampersand, and a line break) to the seeded send chat (a dedicated practice chat, never the paging chat) answers a message with a non-empty id that names the seeded chat, whose body is `html` and equals the escaped HTML the connector sent (unverified: Graph may normalize the HTML it stores); `teams.get_chat_message` with the returned id answers the same message and body. The message stays in the chat: this case is write-irreversible and runs only when requested by its exact id.',
   fixtures: [microsoftTeamsSendChatMessageFixture.id],
   run: Effect.gen(function* () {
-    const chatId = yield* requireSeed('chatId')
+    const chatId = yield* requireSeed('sendChatId')
     const runId = yield* requireSeed('runId')
     const text = sendText(runId)
 
     const input = yield* decodedInput(
       TeamsSendChatMessageInput,
       { chatId, content: text },
-      'precondition: MicrosoftConformanceConfig.chatId is not a valid Teams id'
+      'precondition: MicrosoftConformanceConfig.sendChatId is not a valid Teams id'
     )
 
     const sent = yield* sendOnce(input, runId)

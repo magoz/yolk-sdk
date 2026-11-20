@@ -103,7 +103,6 @@ import { microsoftOutlookAttachmentsListingFixture } from './outlook-attachments
 import { microsoftOutlookConcurrentWritesFixture } from './outlook-concurrent-writes.ts'
 import { microsoftOutlookImmutableIdFixture } from './outlook-immutable-id.ts'
 import { microsoftOutlookPagingNextLinkFixture } from './outlook-paging-next-link.ts'
-
 import {
   MicrosoftConformanceActionFailed,
   MicrosoftConformanceConfig,

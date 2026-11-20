@@ -883,8 +883,10 @@ answer only the recorded exchanges of the eight `microsoft.sharepoint.*` and `mi
 fixtures (synthetic, shaped from the Microsoft Graph v1.0 docs examples; copied as data in
 `src/microsoft/teams-sites-recordings.ts`, never imported), with the recorded status, content type,
 and body byte for byte. A read is answered when its raw path and its query parameters (decoded, in
-any order) equal a recorded request's; they read no entity of the state, so they answer under every
-profile and seed. Anything else answers 400 `SyntheticValueNotEmulated` (or
+any order) equal a recorded request's. They read no entity of the state and answer only under the
+`default` profile (the state flag `recordedTeamsSites`); under `empty` every one of them answers the
+400 not emulated, since no fixture records an empty listing. Anything else answers 400
+`SyntheticValueNotEmulated` (or
 `SyntheticQueryNotEmulated` for a query key the route does not take) before anything is written or
 a fault is used:
 
@@ -898,11 +900,12 @@ a fault is used:
 | `GET /teams/{teamId}/channels/{channelId}/messages[/{id}[/replies]]`         | Top-level posts, one post, and its replies                                              |
 | `GET /me/onlineMeetings?$filter=`, `GET /me/onlineMeetings/{id}/transcripts` | The meeting found by its join link, and its transcripts                                 |
 
-The chat send answers only the recorded chat and a body of exactly
-`{ body: { contentType: 'html', content } }` whose content is the recorded text with any run id
-(`run-` then lower-case letters, digits, and inner hyphens, at most 40 characters) in place of
-`run-synthetic`: the recorded 201 with that run id and a minted message id (`1790000000000` plus the
-`nextChatMessageNumber` counter, starting at the recorded `1790000000101`, which only advances). A
+The chat send answers only the recorded send chat (a dedicated chat, never the paging chat) and a
+body of exactly `{ body: { contentType: 'html', content } }` whose content is the recorded text with
+any run id (`run-` then lower-case letters, digits, and inner hyphens, at most 40 characters) in
+place of the run id the copied body names (`run-synthetic`): the recorded 201 with that run id and a
+minted message id (`1790000000000` plus the `nextChatMessageNumber` counter, starting at the
+recorded `1790000000101`, which only advances), substituted in one pass. A
 send cannot be undone on Graph, so the emulator keeps it in the state (`chatMessagesSent`); a read
 of a sent message by its id answers the recorded readback with the same substitutions, and a
 listing of a chat holding a sent message is not emulated (no fixture lists one).
@@ -988,8 +991,9 @@ fault body) are documented Graph codes no fixture records; the `Synthetic*` ones
 codes.
 
 State and seeds: the mailbox user, mail folders, messages, file attachments (inline and regular),
-calendars and events, the drive and its items, the Teams chat messages the send recorded
-(`chatMessagesSent`, never seeded), and id counters. The default seed is the synthetic
+calendars and events, the drive and its items, whether the Teams and SharePoint site recordings
+apply (`recordedTeamsSites`, `true` only under the `default` profile), the Teams chat messages the
+send recorded (`chatMessagesSent`, never seeded), and id counters. The default seed is the synthetic
 fixture entities with the same ids as `microsoftConformanceFixtureSeeds` (mailbox
 `ada@example.test`, calendar, events, attachment message, paging folder with three messages, drive,
 parent folder, and copy source). Pass `seed: { profile?, user?, mailFolders?, messages?,

@@ -599,9 +599,10 @@ top-level posts, one post, and its replies; the meeting found by its join link
 (`POST /chats/{chatId}/messages`). They answer only the recorded exchanges of the eight
 `microsoft.sharepoint.*` and `microsoft.teams.*` fixtures (synthetic, shaped from the Microsoft
 Graph v1.0 docs examples), byte for byte, for a request whose raw path and query parameters
-(decoded, in any order) equal a recorded one, under every profile and seed; anything else answers
-400 before anything is written or a fault is used. The send answers only the recorded chat and the
-recorded text with any run id: the recorded 201 under a minted message id from a counter that only
+(decoded, in any order) equal a recorded one, and only under the `default` profile: under `empty`
+every one of them answers the 400 not emulated, since no fixture records an empty listing. Anything
+else answers 400 before anything is written or a fault is used. The send answers only the recorded
+send chat (a dedicated chat, never the paging chat) and the recorded text with any run id: the recorded 201 under a minted message id from a counter that only
 advances. A send cannot be undone on Graph, so the emulator keeps it in the state
 (`chatMessagesSent`, never seeded): a read of the sent message answers the recorded readback, and a
 listing of a chat holding a sent message is not emulated.

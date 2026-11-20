@@ -891,11 +891,15 @@ const graphRequest = <Wire, Output>(input: {
     const response = yield* http.request(
       input.body === undefined
         ? ConnectorHttpRequest.make({ method: 'GET', url, headers: read })
-        : ConnectorHttpRequest.make({
+        : // A send never follows a redirect (a 307 or 308 would POST the message again) and sends
+          // no ambient credentials; a 3xx is a non-success answer, so the send failed.
+          ConnectorHttpRequest.make({
             method: 'POST',
             url,
             headers: { ...read, 'content-type': 'application/json' },
-            body: JSON.stringify(input.body)
+            body: JSON.stringify(input.body),
+            redirect: 'manual',
+            credentials: 'omit'
           })
     )
 

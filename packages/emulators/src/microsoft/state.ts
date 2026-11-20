@@ -8,8 +8,9 @@
  * value, the default is synthesized and says so below: the user id, the well-known mail folders
  * other than Drafts and Deleted Items, the attachment message itself, and the drive root and
  * `Sources` folder have no fixture. The Teams and SharePoint site routes answer only their
- * recorded fixtures (`teams-sites.ts`), not entities of this state; the state holds only the Teams
- * chat messages the send route recorded.
+ * recorded fixtures (`teams-sites.ts`), not entities of this state, and only under the `default`
+ * profile (`recordedTeamsSites`); the state holds only that flag and the Teams chat messages the
+ * send route recorded.
  *
  * @experimental
  */
@@ -202,6 +203,8 @@ export const MicrosoftEmulatorStateSchema = Schema.Struct({
   events: Schema.Array(MicrosoftEmulatorEvent),
   drive: MicrosoftEmulatorDrive,
   driveItems: Schema.Array(MicrosoftEmulatorDriveItem),
+  /** Whether the recorded Teams and SharePoint answers apply (the `default` profile only). */
+  recordedTeamsSites: Schema.Boolean,
   chatMessagesSent: Schema.Array(MicrosoftEmulatorChatMessageSent),
   counters: Counters
 })
@@ -219,6 +222,11 @@ export type MicrosoftEmulatorState = {
   events: ReadonlyArray<MicrosoftEmulatorEvent>
   drive: MicrosoftEmulatorDrive
   driveItems: ReadonlyArray<MicrosoftEmulatorDriveItem>
+  /**
+   * Whether the Teams and SharePoint site routes answer their recorded fixtures: `true` under the
+   * `default` profile, `false` under `empty` (no fixture records an empty answer).
+   */
+  recordedTeamsSites: boolean
   /** Teams chat messages sent since the seed (never seeded; a send cannot be undone). */
   chatMessagesSent: ReadonlyArray<MicrosoftEmulatorChatMessageSent>
   counters: typeof Counters.Type
@@ -815,6 +823,7 @@ const stateFromSeed = (seed: MicrosoftEmulatorSeed): MicrosoftEmulatorState | st
     events,
     drive: entities.drive,
     driveItems: entities.driveItems.map(driveItemFromSeed),
+    recordedTeamsSites: (seed.profile ?? 'default') === 'default',
     chatMessagesSent: [],
     counters: {
       nextEventNumber: 101,

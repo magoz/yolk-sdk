@@ -21,6 +21,7 @@ export const microsoftConformanceFixtureSeeds: MicrosoftConformanceSeeds = {
   siteId:
     'synthetic.sharepoint.com,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222',
   chatId: '19:synthetic-chat-0001@thread.v2',
+  sendChatId: '19:synthetic-send-chat-0001@thread.v2',
   teamId: '00000000-0000-4000-8000-000000007ea1',
   channelId: '19:synthetic-channel-0001@thread.tacv2',
   channelMessageId: '1789900000101',

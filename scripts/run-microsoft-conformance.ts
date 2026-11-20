@@ -16,11 +16,11 @@
  * reports and recorded in fixtures. Read cases always run; `--allow-writes reversible` adds the
  * write-reversible cases, which create their own event, draft, or folder and always remove it
  * again. Nothing sends mail or invitations. The write-irreversible
- * `microsoft.teams.send-chat-message` posts one real message to the `--chat` practice chat that
- * the connector cannot remove; it runs only with `--allow-irreversible
- * microsoft.teams.send-chat-message` (`--allow-writes` never starts it), and its text names a fresh
- * random `runId` the runner generates per invocation (never a flag), printed before any case when
- * the send will run.
+ * `microsoft.teams.send-chat-message` posts one real message that the connector cannot remove to
+ * the `--send-chat-id` practice chat (a dedicated chat, apart from the `--chat` paging chat); it
+ * runs only with `--allow-irreversible microsoft.teams.send-chat-message` (`--allow-writes` never
+ * starts it), and its text names a fresh random `runId` the runner generates per invocation (never
+ * a flag), printed before any case when the send will run.
  *
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
@@ -221,7 +221,13 @@ export const microsoftSeedSources: ReadonlyArray<SeedSource> = [
     key: 'chatId',
     flag: '--chat',
     env: 'MICROSOFT_CONFORMANCE_CHAT',
-    description: 'practice Teams chat with more than two messages (the send posts there)'
+    description: 'Teams chat with more than two messages (read only)'
+  },
+  {
+    key: 'sendChatId',
+    flag: '--send-chat-id',
+    env: 'MICROSOFT_CONFORMANCE_SEND_CHAT',
+    description: 'dedicated practice Teams chat the irreversible send posts to'
   },
   {
     key: 'teamId',
@@ -420,11 +426,11 @@ export const microsoftCaseSpecs: ReadonlyArray<MicrosoftCaseSpec> = [
   },
   {
     caseId: 'microsoft.teams.send-chat-message',
-    seeds: ['chatId', 'runId'],
+    seeds: ['sendChatId', 'runId'],
     optionalSeeds: [],
     fileName: 'teams-send-chat-message.ts',
     exportName: 'microsoftTeamsSendChatMessageFixture',
-    doc: 'A plain-text message posted to the seeded chat (escaped HTML, `<br>` line break), then read back by the returned id.'
+    doc: 'A plain-text message posted to the seeded send chat (escaped HTML, `<br>` line break), then read back by the returned id.'
   }
 ]
 
@@ -484,7 +490,7 @@ Options:
                                   creates its own event, draft, or folder and removes it again)
   --allow-irreversible <case-id>  run this exact write-irreversible case, which cannot be undone
                                   (repeatable; only microsoft.teams.send-chat-message, which posts
-                                  a real message naming a fresh run id to the --chat chat)
+                                  a real message naming a fresh run id to the --send-chat-id chat)
   --record                        with --live: record the cases that passed, verify on replay,
                                   and stage them in a new run directory under
                                   .conformance-recordings/microsoft/ (gitignored) for manual
@@ -690,7 +696,7 @@ export const dryRunReport = (options: RunOptions): string => {
     `Plan for a live target: allowWrites=${options.allowWrites}${options.allowIrreversible.length === 0 ? '' : `, allowIrreversible=[${options.allowIrreversible.join(', ')}]`}${options.record ? ', record' : ''}`,
     ...lines,
     "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write-reversible cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.",
-    'The write-irreversible microsoft.teams.send-chat-message case posts a real message naming a fresh run id to --chat that the connector cannot remove; it runs only with --allow-irreversible microsoft.teams.send-chat-message.'
+    'The write-irreversible microsoft.teams.send-chat-message case posts a real message naming a fresh run id to --send-chat-id that the connector cannot remove; it runs only with --allow-irreversible microsoft.teams.send-chat-message.'
   ].join('\n')
 }
 
@@ -1020,6 +1026,8 @@ const allowedEmailDomains = ['example.test', 'example.com']
 
 const emailPattern = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
 
+const wholeEmailPattern = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/
+
 const isAllowedEmail = (email: string): boolean => {
   const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase()
 
@@ -1041,11 +1049,28 @@ const guidSource = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 /**
  * Tenant GUIDs in text: a `tenantId=` URL parameter (Teams `webUrl` values) or a `"Tid":"…"` member
- * of a join link's percent-encoded `context` (Teams `joinWebUrl` values), found raw or once decoded.
+ * of a join link's percent-encoded `context` (Teams `joinWebUrl` values).
  */
 const tenantGuidPattern = new RegExp(`(?:tenantId=|"Tid"\\s*:\\s*")(${guidSource})`, 'gi')
 
+/** A user (object) GUID in a join link's `context`: its `"Oid":"…"` member. */
+const objectGuidPattern = new RegExp(`"Oid"\\s*:\\s*"(${guidSource})`, 'gi')
+
+/** A one-on-one chat id names both users: `19:<oid>_<oid>@unq.gbl.spaces`. */
+const oneOnOneChatPattern = new RegExp(
+  `19:(${guidSource})_(${guidSource})@unq\\.gbl\\.spaces`,
+  'gi'
+)
+
+/** A user segment of a Graph path or `@odata.context`: `users('…')`. */
+const usersKeyPattern = /users\('([^']+)'\)/gi
+
+/** A token that may be a base64 or base64url id (Teams member, transcript, and meeting ids). */
+const base64TokenPattern = /[A-Za-z0-9+/_-]{16,}={0,2}/g
+
 const guidPattern = new RegExp(`^${guidSource}$`, 'i')
+
+const guidsPattern = new RegExp(guidSource, 'gi')
 
 /** The synthetic GUIDs the committed fixtures use (`00000000-0000-4000-8000-…`). */
 const syntheticGuid = /^00000000-0000-4000-8000-[0-9a-f]{12}$/i
@@ -1059,15 +1084,36 @@ const percentDecoded = (text: string): string => {
   }
 }
 
-/** Tenant GUIDs a string carries: as a `tenantId` value, or in a URL or join-link context. */
-const tenantGuids = (value: string, key: string | undefined): ReadonlyArray<string> => [
-  ...(key === 'tenantId' && guidPattern.test(value) ? [value] : []),
-  ...[value, percentDecoded(value)].flatMap(text =>
-    [...text.matchAll(tenantGuidPattern)].flatMap(match =>
-      match[1] === undefined ? [] : [match[1]]
-    )
+/** Percent-decoding rounds the scan applies, stopping early at a fixed point. */
+const maxDecodeRounds = 3
+
+/** `text` and its percent-decodings, up to `maxDecodeRounds` rounds or a fixed point. */
+const decodedVariants = (text: string): ReadonlyArray<string> => {
+  const variants = [text]
+
+  for (let round = 0; round < maxDecodeRounds; round++) {
+    const previous = variants.at(-1) ?? text
+    const next = percentDecoded(previous)
+
+    if (next === previous) break
+
+    variants.push(next)
+  }
+
+  return variants
+}
+
+/** Every capture of every group of `pattern` in `text`. */
+const captures = (pattern: RegExp, text: string): ReadonlyArray<string> =>
+  [...text.matchAll(pattern)].flatMap(match =>
+    match.slice(1).flatMap(group => (group === undefined ? [] : [group]))
   )
-]
+
+/** The GUIDs in the text a base64 or base64url token decodes to (none when it decodes to none). */
+const base64Guids = (token: string): ReadonlyArray<string> =>
+  [...new Set([Buffer.from(token, 'base64'), Buffer.from(token, 'base64url')])].flatMap(bytes =>
+    [...bytes.toString('latin1').matchAll(guidsPattern)].map(match => match[0])
+  )
 
 type ReviewFindings = {
   readonly emails: Set<string>
@@ -1075,46 +1121,114 @@ type ReviewFindings = {
   readonly texts: Set<string>
   readonly tenantHosts: Set<string>
   readonly tenantIds: Set<string>
+  readonly userIds: Set<string>
 }
 
-const collectStrings = (value: unknown, key: string | undefined, found: ReviewFindings): void => {
+const addGuid = (target: Set<string>, guid: string): void => {
+  if (!syntheticGuid.test(guid)) target.add(guid.toLowerCase())
+}
+
+/**
+ * Teams thread ids look like addresses (`19:…@thread.v2`, `19:…@unq.gbl.spaces`) but are not:
+ * their GUIDs are scanned as chat ids instead.
+ */
+const teamsThreadDomain = /@(?:thread\.(?:v2|tacv2|skype)|unq\.gbl\.spaces)$/i
+
+const addEmail = (found: ReviewFindings, email: string): void => {
+  if (!isAllowedEmail(email) && !teamsThreadDomain.test(email)) found.emails.add(email)
+}
+
+/** A `users('…')` key: an allowed address, a synthetic GUID, or a user identifier to review. */
+const addUserKey = (found: ReviewFindings, raw: string): void => {
+  const key = decodedVariants(raw).at(-1) ?? raw
+
+  if (wholeEmailPattern.test(key)) addEmail(found, key)
+  else if (guidPattern.test(key)) addGuid(found.userIds, key)
+  else found.userIds.add(key)
+}
+
+/**
+ * Collect review candidates from a string under its JSON `key` (and the key of the object holding
+ * it, `parent`): every percent-decoding of it (up to `maxDecodeRounds`, so a twice-encoded join
+ * link is seen through) is scanned for emails, tenant hosts, tenant GUIDs, `Oid` members,
+ * `users('…')` keys, and one-on-one chat ids; base64 tokens are decoded and scanned for GUIDs; and
+ * `tenantId`, `userId`, and `user.id` values are taken as they are.
+ */
+const collectString = (
+  value: string,
+  key: string | undefined,
+  parent: string | undefined,
+  found: ReviewFindings
+): void => {
+  for (const text of decodedVariants(value)) {
+    for (const email of text.match(emailPattern) ?? []) addEmail(found, email)
+
+    for (const host of text.match(tenantHostPattern) ?? []) {
+      if (!syntheticTenantHost.test(host)) found.tenantHosts.add(host.toLowerCase())
+    }
+
+    for (const guid of captures(tenantGuidPattern, text)) addGuid(found.tenantIds, guid)
+
+    for (const guid of [
+      ...captures(objectGuidPattern, text),
+      ...captures(oneOnOneChatPattern, text)
+    ]) {
+      addGuid(found.userIds, guid)
+    }
+
+    for (const userKey of captures(usersKeyPattern, text)) addUserKey(found, userKey)
+  }
+
+  for (const token of value.match(base64TokenPattern) ?? []) {
+    for (const guid of base64Guids(token)) addGuid(found.userIds, guid)
+  }
+
+  if (key === 'tenantId' && guidPattern.test(value)) addGuid(found.tenantIds, value)
+
+  if ((key === 'userId' || (key === 'id' && parent === 'user')) && value.trim().length > 0) {
+    if (guidPattern.test(value)) addGuid(found.userIds, value)
+    else found.userIds.add(value)
+  }
+
+  if (key !== undefined && value.trim().length > 0) {
+    if (isTextKey(key)) found.texts.add(value)
+    else if (isNameKey(key)) found.names.add(value)
+  }
+}
+
+const collectStrings = (
+  value: unknown,
+  key: string | undefined,
+  found: ReviewFindings,
+  parent?: string
+): void => {
   if (Predicate.isString(value)) {
-    for (const email of value.match(emailPattern) ?? []) {
-      if (!isAllowedEmail(email)) {
-        found.emails.add(email)
-      }
-    }
-
-    for (const host of value.match(tenantHostPattern) ?? []) {
-      if (!syntheticTenantHost.test(host)) {
-        found.tenantHosts.add(host.toLowerCase())
-      }
-    }
-
-    for (const guid of tenantGuids(value, key)) {
-      if (!syntheticGuid.test(guid)) {
-        found.tenantIds.add(guid.toLowerCase())
-      }
-    }
-
-    if (key !== undefined && value.trim().length > 0) {
-      if (isTextKey(key)) found.texts.add(value)
-      else if (isNameKey(key)) found.names.add(value)
-    }
+    collectString(value, key, parent, found)
 
     return
   }
 
   if (Array.isArray(value)) {
-    for (const item of value) collectStrings(item, key, found)
+    for (const item of value) collectStrings(item, key, found, parent)
 
     return
   }
 
   if (Predicate.isObject(value)) {
-    for (const [childKey, child] of Object.entries(value)) collectStrings(child, childKey, found)
+    for (const [childKey, child] of Object.entries(value)) {
+      collectStrings(child, childKey, found, key)
+    }
   }
 }
+
+const emptyFindings = (): ReviewFindings => ({
+  emails: new Set(),
+  names: new Set(),
+  texts: new Set(),
+  tenantHosts: new Set(),
+  tenantIds: new Set(),
+  userIds: new Set()
+})
 
 /** A text body as JSON when it parses, otherwise the raw text (still scanned for emails). */
 const parsedText = (text: string): unknown => {
@@ -1128,15 +1242,40 @@ const parsedText = (text: string): unknown => {
 const quotedList = (values: ReadonlySet<string>): string =>
   [...values].map(value => JSON.stringify(value)).join(', ')
 
+/** The review items of one file's findings (and its binary body count). */
+const reviewItems = (found: ReviewFindings, binaryBodies: number): ReadonlyArray<string> =>
+  [
+    found.emails.size > 0
+      ? `emails outside ${allowedEmailDomains.join('/')}: ${quotedList(found.emails)}`
+      : undefined,
+    found.tenantHosts.size > 0 ? `tenant host names: ${quotedList(found.tenantHosts)}` : undefined,
+    found.tenantIds.size > 0 ? `tenant GUIDs: ${quotedList(found.tenantIds)}` : undefined,
+    found.userIds.size > 0 ? `user and object ids: ${quotedList(found.userIds)}` : undefined,
+    found.names.size > 0 ? `names and subjects: ${quotedList(found.names)}` : undefined,
+    found.texts.size > 0 ? `body text: ${quotedList(found.texts)}` : undefined,
+    binaryBodies > 0 ? `${binaryBodies} binary body: open it and check its content` : undefined
+  ].filter((item): item is string => item !== undefined)
+
+/** One file's checklist entry: its name, then its review items. */
+const reviewEntry = (fileName: string, items: ReadonlyArray<string>): ReadonlyArray<string> => [
+  `  ${fileName}: ${items.length === 0 ? 'no candidates found; still read it' : ''}`.trimEnd(),
+  ...items.map(item => `    - ${item}`)
+]
+
 /**
- * What a person must check in each staged fixture before promoting it: email-like strings outside
+ * What a person must check in each staged fixture, and in the staged seeds module (`seedsModule`,
+ * its rendered text, when given), before promoting it: email-like strings outside
  * `example.test`/`example.com`, names, subjects, and chat topics, body text, tenant host names,
- * tenant GUIDs (`tenantId` values, `tenantId=` URL parameters, and join-link `Tid` members, except
- * the fixtures' synthetic `00000000-0000-4000-8000-…` ones), and binary bodies. The script only
- * lists candidates; it does not decide what is personal data.
+ * tenant GUIDs (`tenantId` values, `tenantId=` URL parameters, and join-link `Tid` members), user
+ * and object ids (join-link `Oid` members, `users('…')` keys, `userId` and `user.id` values, the
+ * GUIDs of one-on-one chat ids, and GUIDs inside base64 ids), and binary bodies. Every string is
+ * also scanned percent-decoded, up to three rounds. The fixtures' synthetic
+ * `00000000-0000-4000-8000-…` GUIDs are never listed. The script only lists candidates; it does not
+ * decide what is personal data.
  */
 export const recordingReviewChecklist = (
-  recorded: ReadonlyArray<{ readonly spec: MicrosoftCaseSpec; readonly fixture: WireFixture }>
+  recorded: ReadonlyArray<{ readonly spec: MicrosoftCaseSpec; readonly fixture: WireFixture }>,
+  seedsModule?: string
 ): ReadonlyArray<string> => {
   const lines = [
     'REVIEW before promoting (staged files hold practice-tenant data):',
@@ -1144,13 +1283,7 @@ export const recordingReviewChecklist = (
   ]
 
   for (const { spec, fixture } of recorded) {
-    const found: ReviewFindings = {
-      emails: new Set(),
-      names: new Set(),
-      texts: new Set(),
-      tenantHosts: new Set(),
-      tenantIds: new Set()
-    }
+    const found = emptyFindings()
 
     let binaryBodies = 0
 
@@ -1173,23 +1306,14 @@ export const recordingReviewChecklist = (
       }
     }
 
-    const items = [
-      found.emails.size > 0
-        ? `emails outside ${allowedEmailDomains.join('/')}: ${quotedList(found.emails)}`
-        : undefined,
-      found.tenantHosts.size > 0
-        ? `tenant host names: ${quotedList(found.tenantHosts)}`
-        : undefined,
-      found.tenantIds.size > 0 ? `tenant GUIDs: ${quotedList(found.tenantIds)}` : undefined,
-      found.names.size > 0 ? `names and subjects: ${quotedList(found.names)}` : undefined,
-      found.texts.size > 0 ? `body text: ${quotedList(found.texts)}` : undefined,
-      binaryBodies > 0 ? `${binaryBodies} binary body: open it and check its content` : undefined
-    ].filter((item): item is string => item !== undefined)
+    lines.push(...reviewEntry(spec.fileName, reviewItems(found, binaryBodies)))
+  }
 
-    lines.push(
-      `  ${spec.fileName}: ${items.length === 0 ? 'no candidates found; still read it' : ''}`.trimEnd(),
-      ...items.map(item => `    - ${item}`)
-    )
+  if (seedsModule !== undefined) {
+    const found = emptyFindings()
+
+    collectStrings(seedsModule, undefined, found)
+    lines.push(...reviewEntry('seeds.ts', reviewItems(found, 0)))
   }
 
   lines.push(
@@ -1297,19 +1421,21 @@ export const stageRecordings = (
 
     const seeds = mergedFixtureSeeds(microsoftConformanceFixtureSeeds, inputs.seeds, recordedIds)
 
+    const seedsModule = renderSeedsModule(seeds)
+
     // Everything verified: render every file before writing any of them.
     const files = [
       ...recorded.map(({ spec, fixture }) => ({
         name: spec.fileName,
         contents: renderFixtureModule(spec, fixture)
       })),
-      { name: 'seeds.ts', contents: renderSeedsModule(seeds) }
+      { name: 'seeds.ts', contents: seedsModule }
     ]
 
     const stale = staleSharedSeeds(microsoftConformanceFixtureSeeds, seeds, recordedIds)
 
     const checklist = [
-      ...recordingReviewChecklist(recorded),
+      ...recordingReviewChecklist(recorded, seedsModule),
       ...stale.map(
         ({ key, cases }) =>
           `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
@@ -1378,7 +1504,7 @@ export const runIdLines = (options: RunOptions, inputs: LiveInputs): ReadonlyArr
     entry => entry.skipReason === undefined && entry.safety === 'write-irreversible'
   ) && inputs.seeds.runId !== undefined
     ? [
-        `runId for this run: ${inputs.seeds.runId} (the Teams send names it in the message it posts to --chat)`
+        `runId for this run: ${inputs.seeds.runId} (the Teams send names it in the message it posts to --send-chat-id)`
       ]
     : []
 
@@ -1475,7 +1601,7 @@ const parseCliArgs = (): RunOptions | undefined => {
  * write-irreversible Teams send leaves its message in the chat.
  */
 export const microsoftRecoveryAdvice =
-  "Case-created items may remain; their subjects and names start with yolk-conformance. Look for messages in the --mailbox mailbox (without it, the token user's mailbox), in Drafts and Deleted Items too; events in the --calendar calendar (without it, the default calendar); and folders under the --drive-parent folder. Remove them by hand (removed folders also sit in the OneDrive recycle bin). A Teams send (only with --allow-irreversible) may have posted a yolk-conformance run- message to the --chat chat; the connector cannot remove it."
+  "Case-created items may remain; their subjects and names start with yolk-conformance. Look for messages in the --mailbox mailbox (without it, the token user's mailbox), in Drafts and Deleted Items too; events in the --calendar calendar (without it, the default calendar); and folders under the --drive-parent folder. Remove them by hand (removed folders also sit in the OneDrive recycle bin). A Teams send (only with --allow-irreversible) may have posted a yolk-conformance run- message to the --send-chat-id chat; the connector cannot remove it."
 
 /** `runInterruptibly` options of the Microsoft runner: its recovery advice; its cases clean up. */
 export const microsoftInterruptOptions: Pick<

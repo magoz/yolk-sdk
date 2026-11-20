@@ -471,11 +471,15 @@ There is no root export or barrel.
   exceptions, inside this legacy wrapper: they read no entity of the state and answer only the
   recorded exchanges of their eight fixtures (copied as data in
   `src/microsoft/teams-sites-recordings.ts`; status, content type, and body byte for byte) for a
-  request whose raw path and decoded query parameters (in any order) equal a recorded one, so they
-  answer under every profile and seed; anything else is the 400 `SyntheticValueNotEmulated` (or
-  `SyntheticQueryNotEmulated`) before anything is written or a fault is used. The chat send answers
-  only the recorded chat and text (any run id of the `run-` form, at most 40 characters), mints the
-  message id from `nextChatMessageNumber` (starting at the recorded id, only advancing), and keeps
+  request whose raw path and decoded query parameters (in any order) equal a recorded one, and only
+  under the `default` profile (the state flag `recordedTeamsSites`): under `empty` every one of them
+  answers the 400 not emulated, since no fixture records an empty listing. Anything else is the 400
+  `SyntheticValueNotEmulated` (or `SyntheticQueryNotEmulated`) before anything is written or a fault
+  is used. The chat send answers only the recorded send chat (a dedicated chat, apart from the
+  paging chat) and text (any run id of the `run-` form, at most 40 characters, in place of the run
+  id the copied body names), mints the message id from `nextChatMessageNumber` (starting at the
+  recorded id, only advancing; both substituted in one pass, so a run id holding the recorded id
+  survives), and keeps
   the send in `chatMessagesSent` (Graph cannot undo it; the state-equals-seed proof excludes the
   counters and that one send); a read of a sent message answers the recorded readback, and a
   listing of a chat holding one is not emulated. `test/microsoft-teams-sharepoint.test.ts` holds
