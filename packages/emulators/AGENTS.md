@@ -145,18 +145,21 @@ There is no root export or barrel.
   of `src/fortnox/read-api.ts` (articles, price lists and prices, cost centers, customer and
   supplier invoice payments, offers and the offer preview, print templates, the inbox, company
   settings, the locked period, predefined accounts, labels, the five settings registers, `/me`).
-  Their synthetic fixtures record this emulator's default-seed answers, shaped from the Fortnox API
-  reference and its archived examples, and `test/fortnox-conformance.test.ts` sends every read
-  fixture request to the default emulator and requires the recorded status, content type, and body
-  byte for byte, so changing a read route's default answer changes its fixture in the same change.
-  The shapes stay minimal ones named after the connector's read fields, rendered in the wire types
+  As for every emulator, the wire shapes come from those conformance fixtures: synthetic bodies
+  shaped from the Fortnox OpenAPI spec and the archived resource pages' JSON examples (first
+  rendered by this emulator's default seed, which fixed their key order, `@url` links, and extra
+  fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends every read
+  fixture request to the default emulator and requires the fixture's status, content type, and body
+  byte for byte, so the emulator cannot drift from them; a fixture edit needs a cited spec or
+  live-run reason, never only an emulator change. The shapes stay minimal ones named after the connector's read fields, rendered in the wire types
   the connector's schemas accept; like every `/fortnox` route, they also answer requests no fixture
   records (other pages, filters, searches, ids) from the state. Their writes (and side-effecting
   GETs such as `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a
   connector write route needs verified evidence or a pending entry naming a conformance case's live
   run, and none of them has a case yet. The owner-approved exception for fixtureless Fortnox reads
-  (PR #202) is retired: no Fortnox route is without a fixture, and no other emulator ever had the
-  exception. The fixture-only `/todoist`,
+  (PR #202) is retired: no Fortnox route is without a fixture, and no other emulator ever had a
+  fixtureless-route exception (the Microsoft emulator's legacy extrapolations, below, are
+  behaviours on fixture-backed routes, not routes without a fixture). The fixture-only `/todoist`,
   `/telegram`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators never add a route
   without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
   the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
@@ -1019,9 +1022,10 @@ file bytes, faults, seed integrity, profiles, and every read action of the new c
 plus the offer preview and inbox file downloads run in-process through the real connector, and the
 read cases each route cites), `test/fortnox-conformance.test.ts` (all twenty-one Fortnox cases
 in-process and over a loopback socket, the ledger showing the restores, the state-equals-seed proof
-for the reversible and read cases, one drill per knob, one disagreement drill per read case (a 200
-fault answering one route with a body that breaks the claim, failing exactly that case), and every
-read case fixture request answered by the default emulator byte for byte),
+for the reversible and read cases, one drill per knob, disagreement drills covering every read
+case (a fault answering one route with a body, or a 404, that breaks one claim, failing exactly
+that case; the customer drill also proves the report never echoes the name), and every read case
+fixture request answered by the default emulator byte for byte),
 `test/microsoft.test.ts` (manifest, fail closed including nested body keys, query allowlist, auth,
 credential redaction, calendar overlap, immutable ids, the concurrent-write rule, attachments,
 `$batch`, folders, the copy monitor through the real connector, handler failures,

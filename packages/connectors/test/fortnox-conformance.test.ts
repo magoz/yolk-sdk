@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Predicate, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -51,7 +51,9 @@ import {
   fortnoxInvoiceRowDiscountCase,
   fortnoxInvoiceRowDiscountFixture,
   fortnoxInvoiceSendEmailCase,
+  fortnoxInvoicePaymentReadFixture,
   fortnoxInvoiceSendEmailFixture,
+  fortnoxSupplierInvoicePaymentReadFixture,
   fortnoxWriteRejectionCase,
   fortnoxWriteRejectionFixture,
   type FortnoxConformanceCase,
@@ -188,6 +190,34 @@ describe('Fortnox conformance cases', () => {
       expect(isWireBase64BodyResponse(preview)).toBe(true)
     })
   )
+
+  it('record the numeric-string voucher fields the payment cases claim', () => {
+    const payments = (response: WireResponse): ReadonlyArray<unknown> => {
+      const body: unknown = JSON.parse(textBody(response))
+
+      return Predicate.isObject(body)
+        ? Object.entries(body).flatMap(([key, value]) =>
+            key === 'MetaInformation' ? [] : Array.isArray(value) ? value : [value]
+          )
+        : []
+    }
+
+    for (const fixture of [
+      fortnoxInvoicePaymentReadFixture,
+      fortnoxSupplierInvoicePaymentReadFixture
+    ]) {
+      const recorded = fixture.exchanges.flatMap(exchange => payments(exchange.response))
+
+      expect(recorded.length, fixture.id).toBeGreaterThan(0)
+
+      for (const payment of recorded) {
+        expect(payment, fixture.id).toMatchObject({
+          VoucherNumber: expect.stringMatching(/^\d+$/),
+          VoucherYear: expect.stringMatching(/^\d+$/)
+        })
+      }
+    }
+  })
 
   it.effect('all pass on replay with unverified warnings', () =>
     Effect.gen(function* () {

@@ -6,9 +6,10 @@
  *
  * Every shape is a minimal one named after the fields the connector reads
  * (`@yolk-sdk/connectors/fortnox`), and every default is synthetic (Example AB, `example.test`).
- * The read conformance cases' synthetic fixtures record what the routes answer for this default
- * seed (`test/fortnox-conformance.test.ts` checks they agree), so changing a default here changes
- * those fixtures in the same change. No route writes them.
+ * The read conformance cases' synthetic fixtures are the source of what the routes answer for
+ * this default seed (`test/fortnox-conformance.test.ts` requires the answers byte for byte), so a
+ * default here changes only together with its fixture, for a cited spec or live-run reason. No
+ * route writes them.
  *
  * @experimental
  */
@@ -562,7 +563,10 @@ const defaultSupplierInvoicePayments: ReadonlyArray<FortnoxEmulatorSupplierInvoi
     InvoiceDueDate: '2026-09-30',
     InvoiceSupplierName: 'Example Supplier AB',
     InvoiceSupplierNumber: '1',
-    InvoiceTotal: 500
+    InvoiceTotal: 500,
+    VoucherNumber: 2,
+    VoucherSeries: 'D',
+    VoucherYear: 3
   }
 ]
 

@@ -61,6 +61,7 @@ export {
   fortnoxPriceTierMatchesSublistCase,
   fortnoxPrintTemplatesUnpaginatedCase,
   fortnoxProfileMeCase,
+  fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
   fortnoxSupplierInvoicePaymentReadCase,

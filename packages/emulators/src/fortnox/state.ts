@@ -6,8 +6,8 @@
  * as data (the same customer and document numbers as `fortnoxConformanceFixtureSeeds`), never
  * imported from SDK code. Where no fixture records a value, the default is synthesized and says
  * so below: most invoice rows have no fixture, and customer 1002 and the company information
- * appear only in read case fixtures shaped from these synthetic defaults (those fixtures record
- * this emulator's default answers). The read-only resources (articles, prices, offers, payments,
+ * appear only in the read case fixtures (whose bodies were first rendered by these defaults and are
+ * now their source). The read-only resources (articles, prices, offers, payments,
  * the inbox, settings, registers, ...) live in `src/fortnox/read-state.ts`.
  *
  * @experimental
@@ -398,7 +398,7 @@ export const invoiceTotals = (rows: ReadonlyArray<FortnoxEmulatorInvoiceRow>): I
 // the more specific one wins: invoice 103 (and its two rows) follows the row-discount fixture, not
 // the list fixture (its Balance, DueDate, InvoiceDate, and OCR differ there). Synthesized: customer
 // 1002, the rows of invoices 101, 102, 104, and 105 (chosen so their computed totals equal the
-// fixture totals), the company information (its read fixture records this default), and every
+// fixture totals), the company information (its read fixture now holds this default), and every
 // default `customerFromSeed` and `invoiceFromSeed` fill in for a field the seed omits.
 
 const exampleCustomer: FortnoxEmulatorCustomerSeed = {

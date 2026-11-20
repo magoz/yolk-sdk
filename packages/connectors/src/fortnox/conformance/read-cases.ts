@@ -11,10 +11,13 @@
  * Each claims only what the connector relies on when it decodes the answer: the envelope, the
  * pagination metadata where the connector requires it, and the wire types the Fortnox API
  * reference (https://api.fortnox.se/apidocs) and its examples document (for example numeric
- * strings in list rows where single reads send JSON numbers). None is observed live yet.
+ * strings in list rows where single reads send JSON numbers). None is observed live yet; a
+ * sub-claim neither the OpenAPI schema nor the archived examples settle is marked
+ * "(unverified: ...)" in its `wire`. Value types the connector's decoders already enforce (finite
+ * numbers, integers) are stated in `wire` as decoding facts, not checked again.
  */
-import { Chunk, Effect, Predicate } from 'effect'
-import type * as Schema from 'effect/Schema'
+import { Chunk, Effect, Option, Predicate, Ref } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ConformanceMismatch,
   defineConformanceCase,
@@ -22,6 +25,7 @@ import {
   expectEqual
 } from '@yolk-sdk/conformance/case'
 import type { TypedConnectorAction } from '../../action.ts'
+import { ConnectorHttpClient } from '../../http.ts'
 import {
   fortnoxGetArticleAction,
   fortnoxListArticlesAction,
@@ -147,7 +151,6 @@ const listLimit = 10
 
 type InputSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 
-/** Run a typed read action and take its success value (a failure fails the case). */
 const read = <S extends InputSchema, A, R, E>(
   action: TypedConnectorAction<S, A, R, E>,
   input: S['Type']
@@ -160,9 +163,7 @@ const read = <S extends InputSchema, A, R, E>(
 const firstOf = <A>(items: Chunk.Chunk<A>, lacking: string) => {
   const first = Chunk.toReadonlyArray(items)[0]
 
-  return first === undefined
-    ? Effect.fail(new ConformanceMismatch({ message: `precondition: ${lacking}` }))
-    : Effect.succeed(first)
+  return first === undefined ? precondition(lacking) : Effect.succeed(first)
 }
 
 type Scalar = string | number | boolean | null | undefined
@@ -171,11 +172,47 @@ type Scalar = string | number | boolean | null | undefined
 const scalars = (fields: Readonly<Record<string, Scalar>>): Schema.Json =>
   Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value ?? null]))
 
-const isFiniteOrUnset = (value: number | null | undefined): boolean =>
-  value === null || value === undefined || Number.isFinite(value)
+const precondition = (lacking: string) =>
+  Effect.fail(new ConformanceMismatch({ message: `precondition: ${lacking}` }))
 
-const isIntOrUnset = (value: number | null | undefined): boolean =>
-  value === null || value === undefined || Number.isInteger(value)
+/**
+ * Run `effect` with the host's `ConnectorHttpClient` wrapped so every response body is kept; the
+ * requests and responses are the host's own, unchanged (no extra request is sent).
+ */
+const withResponseBodies = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorHttpClient
+    const bodies = yield* Ref.make<ReadonlyArray<string>>([])
+
+    const observing = ConnectorHttpClient.of({
+      request: request =>
+        http
+          .request(request)
+          .pipe(Effect.tap(response => Ref.update(bodies, list => [...list, response.body])))
+    })
+
+    const value = yield* effect.pipe(Effect.provideService(ConnectorHttpClient, observing))
+
+    return { value, bodies: yield* Ref.get(bodies) }
+  })
+
+const decodeMetaEnvelope = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ MetaInformation: Schema.optionalKey(Schema.Json) }))
+)
+
+/** Whether a raw JSON envelope carries a top-level `MetaInformation` key. */
+const carriesMetaInformation = (body: string): boolean => {
+  const envelope = decodeMetaEnvelope(body)
+
+  return Option.isSome(envelope) && envelope.value.MetaInformation !== undefined
+}
+
+/** Every observed answer of an unpaginated list leaves out `MetaInformation`. */
+const expectUnpaginated = (bodies: ReadonlyArray<string>, list: string) =>
+  expectConformance(
+    bodies.length > 0 && !bodies.some(carriesMetaInformation),
+    `expected the ${list} to carry no MetaInformation`
+  )
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u
 
@@ -231,7 +268,7 @@ export const fortnoxCustomerListMatchesGetCase: FortnoxConformanceCase = defineC
   title: 'Customer lists page with MetaInformation and their rows read back by CustomerNumber',
   safety: 'read',
   docs: 'GET /3/customers returns `Customers` plus `MetaInformation`; GET /3/customers/{CustomerNumber} returns one `Customer`.',
-  wire: '`fortnox.list_customers` (limit 10) decodes every row and pagination metadata covering them; the first row read back with `fortnox.get_customer` has the same `CustomerNumber` and `Name`. Aborts with a precondition when the company has no customer.',
+  wire: '`fortnox.list_customers` (limit 10) decodes every row and pagination metadata covering them; the first row read back with `fortnox.get_customer` has the same `CustomerNumber` and `Name` (a mismatch never echoes either value: they may be personal data). Aborts with a precondition when the company has no customer.',
   fixtures: [fortnoxCustomerListMatchesGetFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* read(
@@ -248,10 +285,14 @@ export const fortnoxCustomerListMatchesGetCase: FortnoxConformanceCase = defineC
       FortnoxGetCustomerInput.make({ customerNumber: row.CustomerNumber })
     )
 
-    yield* expectEqual(
-      scalars({ CustomerNumber: customer.CustomerNumber, Name: customer.Name }),
-      scalars({ CustomerNumber: row.CustomerNumber, Name: row.Name }),
-      'expected the listed customer to read back with the same CustomerNumber and Name'
+    // Customer numbers and names are never echoed: they may be personal data.
+    yield* expectConformance(
+      customer.CustomerNumber === row.CustomerNumber,
+      'expected the listed customer to read back with the same CustomerNumber'
+    )
+    yield* expectConformance(
+      (customer.Name ?? null) === (row.Name ?? null),
+      'expected the listed customer to read back with the same Name'
     )
   })
 })
@@ -271,7 +312,7 @@ export const fortnoxArticleListRowNumbersCase: FortnoxConformanceCase = defineCo
   title: 'Article list rows and single reads decode to the same amounts',
   safety: 'read',
   docs: 'GET /3/articles returns `Articles` plus `MetaInformation`, and the docs examples send `VAT`, `SalesPrice`, `PurchasePrice`, and `QuantityInStock` in list rows as numeric strings; GET /3/articles/{ArticleNumber} sends them as JSON numbers.',
-  wire: '`fortnox.list_articles` (limit 10) decodes every row and pagination metadata; the first row read back with `fortnox.get_article` has the same `ArticleNumber`, and its `VAT`, `SalesPrice`, `PurchasePrice`, and `QuantityInStock` decode to the same finite numbers (or unset) whichever wire type each answer uses. Aborts with a precondition when the company has no article.',
+  wire: '`fortnox.list_articles` (limit 10) decodes every row and pagination metadata; the first row read back with `fortnox.get_article` has the same `ArticleNumber`, and its `VAT`, `SalesPrice`, `PurchasePrice`, and `QuantityInStock` decode to the same values whichever wire type each answer uses (decoding enforces a finite number or unset). Aborts with a precondition when the company has no article.',
   fixtures: [fortnoxArticleListRowNumbersFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* read(
@@ -288,12 +329,6 @@ export const fortnoxArticleListRowNumbersCase: FortnoxConformanceCase = defineCo
       FortnoxGetArticleInput.make({ articleNumber: row.ArticleNumber })
     )
 
-    const amounts = Object.values(articleAmounts(row))
-
-    yield* expectConformance(
-      amounts.every(isFiniteOrUnset),
-      'expected every listed article amount to decode to a finite number or unset'
-    )
     yield* expectEqual(
       scalars({ ArticleNumber: article.ArticleNumber, ...articleAmounts(article) }),
       scalars({ ArticleNumber: row.ArticleNumber, ...articleAmounts(row) }),
@@ -463,7 +498,7 @@ export const fortnoxInvoicePaymentReadCase: FortnoxConformanceCase = defineConfo
   title: 'Invoice payments decode numeric-string voucher fields and read back by Number',
   safety: 'read',
   docs: 'GET /3/invoicepayments returns `InvoicePayments` plus `MetaInformation`; GET /3/invoicepayments/{Number} returns one `InvoicePayment`. The docs examples send `VoucherNumber`, `VoucherYear`, and `ModeOfPaymentAccount` as numeric strings.',
-  wire: '`fortnox.list_invoice_payments` (limit 10) decodes every row and pagination metadata; `VoucherNumber`, `VoucherYear`, and `ModeOfPaymentAccount` decode to integers or unset; the first row read back with `fortnox.get_invoice_payment` has the same `Number`, `InvoiceNumber`, `Amount`, `PaymentDate`, voucher fields, and `ModeOfPaymentAccount`. Aborts with a precondition when the company has no invoice payment.',
+  wire: '`fortnox.list_invoice_payments` (limit 10) decodes every row and pagination metadata; `VoucherNumber`, `VoucherYear`, and `ModeOfPaymentAccount` decode from numeric strings or numbers (decoding enforces an integer or unset); the first row read back with `fortnox.get_invoice_payment` has the same `Number`, `InvoiceNumber`, `Amount`, `PaymentDate`, voucher fields, and `ModeOfPaymentAccount`. Aborts with a precondition when the company has no invoice payment.',
   fixtures: [fortnoxInvoicePaymentReadFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* read(
@@ -474,15 +509,6 @@ export const fortnoxInvoicePaymentReadCase: FortnoxConformanceCase = defineConfo
     const rows = Chunk.toReadonlyArray(listed.invoicePayments)
 
     yield* expectPagination(listed.pagination, rows.length, 'invoice payment')
-    yield* expectConformance(
-      rows.every(
-        payment =>
-          isIntOrUnset(payment.VoucherNumber) &&
-          isIntOrUnset(payment.VoucherYear) &&
-          isIntOrUnset(payment.ModeOfPaymentAccount)
-      ),
-      'expected VoucherNumber, VoucherYear, and ModeOfPaymentAccount to decode to integers or unset'
-    )
 
     const row = yield* firstOf(
       listed.invoicePayments,
@@ -507,7 +533,7 @@ export const fortnoxSupplierInvoicePaymentReadCase: FortnoxConformanceCase = def
   title: 'Supplier invoice payments decode numeric-string voucher fields and read back by Number',
   safety: 'read',
   docs: 'GET /3/supplierinvoicepayments returns `SupplierInvoicePayments` plus `MetaInformation`; GET /3/supplierinvoicepayments/{Number} returns one `SupplierInvoicePayment`. The docs examples send `VoucherNumber` and `VoucherYear` as numeric strings.',
-  wire: '`fortnox.list_supplier_invoice_payments` (limit 10) decodes every row and pagination metadata; `VoucherNumber` and `VoucherYear` decode to integers or unset; the first row read back with `fortnox.get_supplier_invoice_payment` has the same `Number`, `InvoiceNumber`, `Amount`, `PaymentDate`, and voucher fields. Aborts with a precondition when the company has no supplier invoice payment.',
+  wire: '`fortnox.list_supplier_invoice_payments` (limit 10) decodes every row and pagination metadata; `VoucherNumber` and `VoucherYear` decode from numeric strings or numbers (decoding enforces an integer or unset); the first row read back with `fortnox.get_supplier_invoice_payment` has the same `Number`, `InvoiceNumber`, `Amount`, `PaymentDate`, and voucher fields. Aborts with a precondition when the company has no supplier invoice payment.',
   fixtures: [fortnoxSupplierInvoicePaymentReadFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* read(
@@ -518,12 +544,6 @@ export const fortnoxSupplierInvoicePaymentReadCase: FortnoxConformanceCase = def
     const rows = Chunk.toReadonlyArray(listed.supplierInvoicePayments)
 
     yield* expectPagination(listed.pagination, rows.length, 'supplier invoice payment')
-    yield* expectConformance(
-      rows.every(
-        payment => isIntOrUnset(payment.VoucherNumber) && isIntOrUnset(payment.VoucherYear)
-      ),
-      'expected VoucherNumber and VoucherYear to decode to integers or unset'
-    )
 
     const row = yield* firstOf(
       listed.supplierInvoicePayments,
@@ -550,7 +570,7 @@ export const fortnoxOfferRowsAndPreviewCase: FortnoxConformanceCase = defineConf
   title: 'Offer rows come from a single read, and the offer preview is a complete PDF',
   safety: 'read',
   docs: 'GET /3/offers returns `Offers` plus `MetaInformation` (list rows without `OfferRows`); GET /3/offers/{DocumentNumber} returns one `Offer` with its `OfferRows` (the docs examples send row `Quantity` as a numeric string); GET /3/offers/{DocumentNumber}/preview returns the offer as a generated PDF without marking it sent.',
-  wire: '`fortnox.list_offers` (limit 10) decodes every row and pagination metadata, and no list row carries `OfferRows` (unverified: the connector reads rows only from a single read); the first row read back with `fortnox.get_offer` has the same `DocumentNumber` and `CustomerNumber` and at least one row, each row `Quantity` a finite number or unset; `downloadFortnoxOfferPreview` returns bytes starting with `%PDF-` and ending with an `%%EOF` trailer. Aborts with a precondition when the company has no offer, or the first offer has no row.',
+  wire: '`fortnox.list_offers` (limit 10) decodes every row and pagination metadata, and no list row carries `OfferRows` (unverified: the OpenAPI offer list item has no `OfferRows`, but no live run confirms Fortnox never sends them in a list); the first row read back with `fortnox.get_offer` has the same `DocumentNumber` and `CustomerNumber` and at least one row (decoding enforces each row `Quantity` a finite number or unset, sent as a numeric string or a number); `downloadFortnoxOfferPreview` returns bytes starting with `%PDF-` and ending with an `%%EOF` trailer. Aborts with a precondition when the company has no offer, or the first offer has no row.',
   fixtures: [fortnoxOfferRowsAndPreviewFixture.id],
   run: Effect.gen(function* () {
     const listed = yield* read(
@@ -588,10 +608,6 @@ export const fortnoxOfferRowsAndPreviewCase: FortnoxConformanceCase = defineConf
       offerRows.length > 0,
       'precondition: the first listed offer needs at least one row'
     )
-    yield* expectConformance(
-      offerRows.every(offerRow => isFiniteOrUnset(offerRow.Quantity)),
-      'expected every offer row Quantity to decode to a finite number or unset'
-    )
 
     const preview = yield* downloadFortnoxOfferPreview(
       integration,
@@ -614,25 +630,23 @@ export const fortnoxPrintTemplatesUnpaginatedCase: FortnoxConformanceCase = defi
   title: 'Print template lists are unpaginated and filtered by document type',
   safety: 'read',
   docs: 'GET /3/printtemplates returns `PrintTemplates` (`Template`, `Name`) for the document `type` (invoice when omitted); the docs list no pagination for it.',
-  wire: '`fortnox.list_print_templates` decodes the invoice templates (no `type`) and the offer templates (`type=offer`) without `MetaInformation`; each list holds at least one template with a non-empty `Template` code. Aborts with a precondition when either list is empty.',
+  wire: '`fortnox.list_print_templates` decodes the invoice templates (no `type`) and the offer templates (`type=offer`), each raw answer (observed at the `ConnectorHttpClient` port) carries no `MetaInformation`, and each list holds at least one template (decoding enforces a non-empty `Template` code). Aborts with a precondition when either list is empty.',
   fixtures: [fortnoxPrintTemplatesUnpaginatedFixture.id],
   run: Effect.gen(function* () {
     for (const type of [undefined, 'offer'] as const) {
-      const listed = yield* read(
-        fortnoxListPrintTemplatesAction,
-        FortnoxListPrintTemplatesInput.make(type === undefined ? {} : { type })
+      const { value: listed, bodies } = yield* withResponseBodies(
+        read(
+          fortnoxListPrintTemplatesAction,
+          FortnoxListPrintTemplatesInput.make(type === undefined ? {} : { type })
+        )
       )
 
-      const templates = Chunk.toReadonlyArray(listed.printTemplates)
       const kind = type ?? 'invoice'
 
+      yield* expectUnpaginated(bodies, `${kind} print templates`)
       yield* expectConformance(
-        templates.length > 0,
+        Chunk.size(listed.printTemplates) > 0,
         `precondition: the practice company needs a print template for ${kind}`
-      )
-      yield* expectConformance(
-        templates.every(template => template.Template.trim().length > 0),
-        `expected every ${kind} print template to carry a Template code`
       )
     }
   })
@@ -700,7 +714,7 @@ export const fortnoxSettingsCompanyAndLockedPeriodCase: FortnoxConformanceCase =
     title: 'Company settings and the locked period decode from their envelopes',
     safety: 'read',
     docs: 'GET /3/settings/company returns `CompanySettings`; GET /3/settings/lockedperiod returns `LockedPeriod` with the `EndDate` of the locked bookkeeping period.',
-    wire: '`fortnox.get_company_settings` decodes `CompanySettings` with a non-empty `Name`; `fortnox.get_locked_period` decodes `LockedPeriod`, whose `EndDate` is a `YYYY-MM-DD` date, empty, or unset (unverified: how a company without a locked period answers).',
+    wire: '`fortnox.get_company_settings` decodes `CompanySettings` with a non-empty `Name`; `fortnox.get_locked_period` decodes `LockedPeriod`, whose `EndDate` is a `YYYY-MM-DD` date, empty, or unset (unverified: how a company without a locked period answers; a 404 aborts with a precondition rather than failing the claim).',
     fixtures: [fortnoxSettingsCompanyAndLockedPeriodFixture.id],
     run: Effect.gen(function* () {
       const settings = yield* read(
@@ -713,7 +727,16 @@ export const fortnoxSettingsCompanyAndLockedPeriodCase: FortnoxConformanceCase =
         'expected CompanySettings to carry a non-empty Name'
       )
 
-      const locked = yield* read(fortnoxGetLockedPeriodAction, FortnoxGetLockedPeriodInput.make({}))
+      const lockedResult = yield* fortnoxGetLockedPeriodAction.executeTyped({
+        integration,
+        input: FortnoxGetLockedPeriodInput.make({})
+      })
+
+      if (Predicate.isTagged(lockedResult, 'Failure') && lockedResult.error.status === 404) {
+        return yield* precondition('the practice company has no locked period (HTTP 404)')
+      }
+
+      const locked = yield* successValue(fortnoxGetLockedPeriodAction.id, lockedResult)
       const endDate = locked.EndDate ?? ''
 
       yield* expectConformance(
@@ -730,13 +753,14 @@ export const fortnoxPredefinedAccountsAndLabelsCase: FortnoxConformanceCase = de
     title: 'Predefined accounts and labels decode without pagination',
     safety: 'read',
     docs: 'GET /3/predefinedaccounts returns `PreDefinedAccounts` (`Name`, `Account`), GET /3/predefinedaccounts/{Name} one `PreDefinedAccount`, and GET /3/labels returns `Labels` (`Id`, `Description`); the docs list no pagination for either list.',
-    wire: '`fortnox.list_predefined_accounts` decodes the accounts without `MetaInformation`; the first one read back with `fortnox.get_predefined_account` has the same `Name` and `Account`; `fortnox.list_labels` decodes the labels (possibly none) without `MetaInformation`, with distinct `Id`s. Aborts with a precondition when the company has no predefined account.',
+    wire: '`fortnox.list_predefined_accounts` decodes the accounts, and its raw answer (observed at the `ConnectorHttpClient` port) carries no `MetaInformation`; the first one read back with `fortnox.get_predefined_account` has the same `Name` and `Account`; `fortnox.list_labels` decodes the labels (possibly none) with distinct `Id`s, and its raw answer carries no `MetaInformation` either. Aborts with a precondition when the company has no predefined account.',
     fixtures: [fortnoxPredefinedAccountsAndLabelsFixture.id],
     run: Effect.gen(function* () {
-      const accounts = yield* read(
-        fortnoxListPredefinedAccountsAction,
-        FortnoxListPredefinedAccountsInput.make({})
+      const { value: accounts, bodies: accountBodies } = yield* withResponseBodies(
+        read(fortnoxListPredefinedAccountsAction, FortnoxListPredefinedAccountsInput.make({}))
       )
+
+      yield* expectUnpaginated(accountBodies, 'predefined accounts')
 
       const row = yield* firstOf(
         accounts.predefinedAccounts,
@@ -754,9 +778,13 @@ export const fortnoxPredefinedAccountsAndLabelsCase: FortnoxConformanceCase = de
         'expected the listed predefined account to read back as listed'
       )
 
-      const labels = Chunk.toReadonlyArray(
-        (yield* read(fortnoxListLabelsAction, FortnoxListLabelsInput.make({}))).labels
+      const { value: listedLabels, bodies: labelBodies } = yield* withResponseBodies(
+        read(fortnoxListLabelsAction, FortnoxListLabelsInput.make({}))
       )
+
+      yield* expectUnpaginated(labelBodies, 'labels')
+
+      const labels = Chunk.toReadonlyArray(listedLabels.labels)
 
       yield* expectConformance(
         new Set(labels.map(label => label.Id)).size === labels.length,
@@ -802,7 +830,7 @@ export const fortnoxSettingsRegistersCase: FortnoxConformanceCase = defineConfor
   title: 'Settings register lists page with MetaInformation and their rows read back by Code',
   safety: 'read',
   docs: 'GET /3/modesofpayments, /3/termsofpayments, /3/termsofdeliveries, /3/wayofdeliveries, and /3/units list a register (plus `MetaInformation`), and GET /3/<register>/{Code} reads one entry. The docs examples send a mode of payment `AccountNumber` as a string in list rows and as a number in single reads.',
-  wire: 'For each of the five registers, the list action (limit 10) decodes every row and pagination metadata, and the first row read back with the get action by `Code` has the same fields (`Description`, plus `AccountNumber` for modes of payment, `DescriptionEnglish` for terms and ways of delivery, `CodeEnglish` for units); a mode of payment `AccountNumber` decodes to the same integer whichever wire type each answer uses. Aborts with a precondition when a register is empty.',
+  wire: 'For each of the five registers, the list action (limit 10) decodes every row and pagination metadata, and the first row read back with the get action by `Code` has the same fields (`Description`, plus `AccountNumber` for modes of payment, `DescriptionEnglish` for terms and ways of delivery, `CodeEnglish` for units); a mode of payment `AccountNumber` decodes to the same integer whichever wire type each answer uses (the docs examples send a string in list rows; the case does not require it). Aborts with a precondition when a register is empty.',
   fixtures: [fortnoxSettingsRegistersFixture.id],
   run: Effect.gen(function* () {
     yield* registerReadBack(
@@ -908,3 +936,21 @@ export const fortnoxProfileMeCase: FortnoxConformanceCase = defineConformanceCas
     )
   })
 })
+
+/** The read cases, in fixture order (`fortnoxConformanceCases` lists them after the other seven). */
+export const fortnoxReadConformanceCases: ReadonlyArray<FortnoxConformanceCase> = [
+  fortnoxCompanyInformationCase,
+  fortnoxCustomerListMatchesGetCase,
+  fortnoxArticleListRowNumbersCase,
+  fortnoxPriceTierMatchesSublistCase,
+  fortnoxCostCenterListMatchesGetCase,
+  fortnoxInvoicePaymentReadCase,
+  fortnoxSupplierInvoicePaymentReadCase,
+  fortnoxOfferRowsAndPreviewCase,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxInboxFolderFileBytesCase,
+  fortnoxSettingsCompanyAndLockedPeriodCase,
+  fortnoxPredefinedAccountsAndLabelsCase,
+  fortnoxSettingsRegistersCase,
+  fortnoxProfileMeCase
+]

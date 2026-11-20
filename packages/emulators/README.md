@@ -16,7 +16,7 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim (and answers the
-connector's other reads with unverified synthetic shapes its read cases record), the Microsoft
+connector's other reads with the unverified synthetic shapes of its read case fixtures), the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
 conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
 MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
@@ -709,9 +709,11 @@ downloads):
 read conformance cases (`fortnox.company.information-decodes`, `fortnox.customer.list-matches-get`,
 and one case per resource module; see the
 [Fortnox guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases)),
-whose synthetic fixtures record this emulator's default-seed answers, shaped from the Fortnox API
-reference and its archived examples; a test requires the default emulator to answer every read
-fixture request with the recorded body byte for byte. They use minimal synthetic shapes named after
+whose synthetic fixtures are the source of these answers: bodies shaped from the Fortnox OpenAPI
+spec and archived resource pages (first rendered by the default seed, then checked against the
+spec). A test requires the default emulator to answer every read fixture request with the fixture's
+body byte for byte, so the emulator cannot drift; a fixture changes only for a cited spec or
+live-run reason. They use minimal synthetic shapes named after
 the connector's read fields (in the wire types the connector's schemas accept), are unverified, and
 answer requests no fixture records (other pages, filters, searches, ids) from the state. Their
 writes (`POST`, `PUT`, `DELETE`,

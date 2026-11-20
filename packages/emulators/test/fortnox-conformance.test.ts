@@ -39,6 +39,7 @@ import {
   fortnoxPriceTierMatchesSublistFixture,
   fortnoxPrintTemplatesUnpaginatedFixture,
   fortnoxProfileMeFixture,
+  fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodFixture,
   fortnoxSettingsRegistersFixture,
   fortnoxSupplierInvoicePaymentReadFixture
@@ -426,6 +427,8 @@ const readDrills: ReadonlyArray<{
   readonly caseId: string
   readonly fault: FortnoxFault
   readonly message: string
+  /** Text from the drill body the report must never echo (it may be personal data). */
+  readonly unechoed?: string
 }> = [
   {
     caseId: 'fortnox.company.information-decodes',
@@ -438,7 +441,8 @@ const readDrills: ReadonlyArray<{
       Customers: [{ CustomerNumber: '1001', Name: 'Drill name' }],
       MetaInformation: meta
     }),
-    message: 'expected the listed customer to read back with the same CustomerNumber and Name'
+    message: 'expected the listed customer to read back with the same Name',
+    unechoed: 'Drill name'
   },
   {
     caseId: 'fortnox.article.list-row-numeric-strings',
@@ -460,6 +464,18 @@ const readDrills: ReadonlyArray<{
       Price: { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 0, Price: 1 }
     }),
     message: 'expected the price tier to read back as listed'
+  },
+  {
+    // The first tier (10) reads back as listed; the base tier disagrees with SalesPrice (250).
+    caseId: 'fortnox.price.tier-matches-sublist',
+    fault: answer('/3/prices/sublist/A/KIT-1', {
+      Prices: [
+        { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 10, Price: 220 },
+        { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 0, Price: 1 }
+      ],
+      MetaInformation: { '@CurrentPage': 1, '@TotalPages': 1, '@TotalResources': 2 }
+    }),
+    message: 'expected the article SalesPrice to equal its base price in the PreSelected price list'
   },
   {
     caseId: 'fortnox.cost-center.list-matches-get',
@@ -489,10 +505,10 @@ const readDrills: ReadonlyArray<{
       SupplierInvoicePayment: {
         Number: '1',
         InvoiceNumber: '1',
-        Amount: 499,
+        Amount: 500,
         PaymentDate: '2026-09-25',
-        VoucherNumber: null,
-        VoucherYear: null
+        VoucherNumber: '3',
+        VoucherYear: '3'
       }
     }),
     message: 'expected the listed supplier invoice payment to read back as listed'
@@ -506,9 +522,17 @@ const readDrills: ReadonlyArray<{
     message: 'expected offer list rows to carry no OfferRows'
   },
   {
+    caseId: 'fortnox.offer.rows-on-get-and-preview-pdf',
+    fault: answer('/3/offers/1/preview', '%PDF-1.4 cut short'),
+    message: 'expected a complete PDF ending with an %%EOF trailer'
+  },
+  {
     caseId: 'fortnox.print-templates.unpaginated',
-    fault: answer('/3/printtemplates', { PrintTemplates: [] }),
-    message: 'precondition: the practice company needs a print template for invoice'
+    fault: answer('/3/printtemplates', {
+      PrintTemplates: [{ Template: 'invoice-standard', Name: 'Standard invoice (synthetic)' }],
+      MetaInformation: meta
+    }),
+    message: 'expected the invoice print templates to carry no MetaInformation'
   },
   {
     caseId: 'fortnox.inbox.file-bytes-match-size',
@@ -517,13 +541,54 @@ const readDrills: ReadonlyArray<{
   },
   {
     caseId: 'fortnox.settings.company-and-locked-period',
+    fault: answer('/3/settings/company', { CompanySettings: { Name: ' ' } }),
+    message: 'expected CompanySettings to carry a non-empty Name'
+  },
+  {
+    caseId: 'fortnox.settings.company-and-locked-period',
     fault: answer('/3/settings/lockedperiod', { LockedPeriod: { EndDate: '30/06/2026' } }),
     message: 'expected the locked period EndDate to be a YYYY-MM-DD date, empty, or unset'
+  },
+  {
+    // A company without a locked period: Fortnox may answer 404 (unverified).
+    caseId: 'fortnox.settings.company-and-locked-period',
+    fault: {
+      kind: 'status',
+      status: 404,
+      match: { method: 'GET', path: '/3/settings/lockedperiod' }
+    },
+    message: 'precondition: the practice company has no locked period (HTTP 404)'
   },
   {
     caseId: 'fortnox.settings.predefined-accounts-and-labels',
     fault: answer('/3/predefinedaccounts/BG', { PreDefinedAccount: { Name: 'BG', Account: 1931 } }),
     message: 'expected the listed predefined account to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/predefinedaccounts', {
+      PreDefinedAccounts: [{ Name: 'BG', Account: 1930 }],
+      MetaInformation: meta
+    }),
+    message: 'expected the predefined accounts to carry no MetaInformation'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/labels', {
+      Labels: [{ Id: 1, Description: 'Priority (synthetic)' }],
+      MetaInformation: meta
+    }),
+    message: 'expected the labels to carry no MetaInformation'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/labels', {
+      Labels: [
+        { Id: 1, Description: 'Priority (synthetic)' },
+        { Id: 1, Description: 'Follow up (synthetic)' }
+      ]
+    }),
+    message: 'expected every label to carry a distinct Id'
   },
   {
     caseId: 'fortnox.settings.registers-list-matches-get',
@@ -533,29 +598,62 @@ const readDrills: ReadonlyArray<{
     message: 'expected the listed mode of payment to read back as listed'
   },
   {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/termsofpayments/10', {
+      TermsOfPayment: { Code: '10', Description: 'Drill' }
+    }),
+    message: 'expected the listed terms of payment to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/termsofdeliveries/EXW', {
+      TermsOfDelivery: { Code: 'EXW', Description: 'Ex works (synthetic)', DescriptionEnglish: '' }
+    }),
+    message: 'expected the listed terms of delivery to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/wayofdeliveries/P', {
+      WayOfDelivery: { Code: 'P', Description: 'Drill', DescriptionEnglish: 'Mail' }
+    }),
+    message: 'expected the listed way of delivery to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/units/h', { Unit: { Code: 'h', Description: 'Hour (synthetic)' } }),
+    message: 'expected the listed unit to read back as listed'
+  },
+  {
     caseId: 'fortnox.profile.me',
     fault: answer('/3/me', { Me: { Id: ' ' } }),
     message: 'expected the profile to carry a non-empty Id'
   }
 ]
 
+const readCaseIds = fortnoxReadConformanceCases.map(testCase => testCase.id)
+
 describe('disagreement drill (read cases)', () => {
-  it('covers every read case without a quirk knob exactly once', () => {
-    expect(readDrills.map(entry => entry.caseId)).toEqual(
-      fortnoxConformanceCases.slice(7).map(testCase => testCase.id)
-    )
+  it('covers every read case without a quirk knob, in case order', () => {
+    expect([...new Set(readDrills.map(entry => entry.caseId))]).toEqual(readCaseIds)
   })
 
   for (const entry of readDrills) {
-    it.effect(`a disagreeing ${entry.fault.match?.path} fails only ${entry.caseId}`, () =>
+    it.effect(`${entry.fault.match?.path} fails only ${entry.caseId}: ${entry.message}`, () =>
       Effect.gen(function* () {
-        expectOnlyFailure(yield* drill({}, [entry.fault]), entry.caseId, entry.message)
+        const report = yield* drill({}, [entry.fault])
+
+        expectOnlyFailure(report, entry.caseId, entry.message)
+
+        if (entry.unechoed !== undefined) {
+          expect(formatConformanceReport(report)).not.toContain(entry.unechoed)
+          expect(JSON.stringify(report.results)).not.toContain(entry.unechoed)
+        }
       })
     )
   }
 })
 
-/** The read case fixtures, each recorded from the default emulator. */
+/** The read case fixtures, the source of the default emulator's read answers. */
 const readFixtures = [
   fortnoxCompanyInformationFixture,
   fortnoxCustomerListMatchesGetFixture,
@@ -577,9 +675,7 @@ const base64Of = (bytes: ArrayBuffer): string => btoa(String.fromCharCode(...new
 
 describe('read case fixtures and the default emulator', () => {
   it('cover every read case without a quirk knob, in case order', () => {
-    expect(readFixtures.map(fixture => fixture.caseId)).toEqual(
-      fortnoxConformanceCases.slice(7).map(testCase => testCase.id)
-    )
+    expect(readFixtures.map(fixture => fixture.caseId)).toEqual(readCaseIds)
   })
 
   it.effect('answer every recorded request with the recorded status, content type, and body', () =>

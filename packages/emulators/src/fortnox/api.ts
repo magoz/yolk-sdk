@@ -148,7 +148,7 @@ const renderCustomer = (env: FortnoxApiEnv, customer: FortnoxEmulatorCustomer) =
   ...customer
 })
 
-// No fixture records the customer list: rows carry the list-only `Phone` and a subset of fields.
+// Customer list rows carry the list-only `Phone` and a subset of fields.
 const renderCustomerRow = (env: FortnoxApiEnv, customer: FortnoxEmulatorCustomer) => ({
   '@url': customerUrl(env, customer.CustomerNumber),
   Address1: customer.Address1,

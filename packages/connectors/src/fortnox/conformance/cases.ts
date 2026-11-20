@@ -69,6 +69,7 @@ import {
   fortnoxPriceTierMatchesSublistCase,
   fortnoxPrintTemplatesUnpaginatedCase,
   fortnoxProfileMeCase,
+  fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
   fortnoxSupplierInvoicePaymentReadCase
@@ -117,6 +118,7 @@ export {
   fortnoxPriceTierMatchesSublistCase,
   fortnoxPrintTemplatesUnpaginatedCase,
   fortnoxProfileMeCase,
+  fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
   fortnoxSupplierInvoicePaymentReadCase
@@ -864,18 +866,5 @@ export const fortnoxConformanceCases: ReadonlyArray<FortnoxConformanceCase> = [
   fortnoxCustomerEmptyStringCase,
   fortnoxWriteRejectionCase,
   fortnoxInvoiceSendEmailCase,
-  fortnoxCompanyInformationCase,
-  fortnoxCustomerListMatchesGetCase,
-  fortnoxArticleListRowNumbersCase,
-  fortnoxPriceTierMatchesSublistCase,
-  fortnoxCostCenterListMatchesGetCase,
-  fortnoxInvoicePaymentReadCase,
-  fortnoxSupplierInvoicePaymentReadCase,
-  fortnoxOfferRowsAndPreviewCase,
-  fortnoxPrintTemplatesUnpaginatedCase,
-  fortnoxInboxFolderFileBytesCase,
-  fortnoxSettingsCompanyAndLockedPeriodCase,
-  fortnoxPredefinedAccountsAndLabelsCase,
-  fortnoxSettingsRegistersCase,
-  fortnoxProfileMeCase
+  ...fortnoxReadConformanceCases
 ]

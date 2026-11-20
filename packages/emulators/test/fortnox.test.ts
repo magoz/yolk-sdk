@@ -171,7 +171,7 @@ describe('route evidence manifest', () => {
       'GET /3/me'
     ])
 
-    // The read-only routes: GET only, no write, each citing the read cases that record it.
+    // The read-only routes: GET only, no write, each citing the read cases whose fixtures shape it.
     for (const route of fortnoxEmulatorRoutes.slice(10)) {
       expect(route, route.path).toMatchObject({ method: 'GET', write: false })
       expect(route.caseIds.length, route.path).toBeGreaterThan(0)

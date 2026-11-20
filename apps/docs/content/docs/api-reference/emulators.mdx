@@ -436,9 +436,9 @@ payments, offers and their preview PDF, print templates, the inbox (folder JSON;
 the file bytes), company settings, the locked period, predefined accounts, labels, the modes and
 terms of payment, terms and ways of delivery, and units registers, and `/3/me`. These 34 routes,
 `GET /3/companyinformation`, and `GET /3/customers` cite the Fortnox read conformance cases, whose
-synthetic fixtures record the default emulator's answers (shaped from the Fortnox API reference and
-its archived examples; a test requires every read fixture request to get the recorded body byte for
-byte). They are `unverified`, use minimal synthetic shapes named after the fields the connector
+synthetic fixtures are the source of these answers (bodies shaped from the Fortnox OpenAPI spec and
+its archived examples; a test requires every read fixture request to get the fixture's body byte
+for byte, so the emulator cannot drift from them). They are `unverified`, use minimal synthetic shapes named after the fields the connector
 reads, and answer requests no fixture records (other pages, filters, searches, ids) from the state.
 Their writes (and side-effecting reads such as
 `/3/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404; a key the state

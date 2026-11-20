@@ -6,10 +6,11 @@
  * GETs such as `/offers/{DocumentNumber}/email`) are not emulated: they fail closed with the
  * wrapper's 404 `ErrorInformation`.
  *
- * Each route cites the read conformance cases whose synthetic fixtures record it (the fixtures
- * are shaped from the Fortnox API reference and its archived examples, with this emulator's default
- * seed values, and `test/fortnox-conformance.test.ts` checks that the default emulator answers
- * every fixture request with the fixture's body). Every route is `unverified` and uses minimal
+ * Each route cites the read conformance cases whose synthetic fixtures are the source of its wire
+ * shape (bodies shaped from the Fortnox OpenAPI spec and its archived examples; they were first
+ * rendered by the default seed, then checked against the spec), and
+ * `test/fortnox-conformance.test.ts` requires the default emulator to answer every fixture request
+ * with the fixture's body byte for byte, so these routes cannot drift from them. Every route is `unverified` and uses minimal
  * shapes named after the connector's read fields, rendered in the wire types the connector's
  * schemas accept (preferring the documented Fortnox wire type, such as numeric strings in article
  * list rows). Lists page with `page`/`limit` and `MetaInformation` where the connector requires
