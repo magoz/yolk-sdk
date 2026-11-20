@@ -2050,7 +2050,7 @@ the session awaits the client's answer to that ping, which the `response:ping` r
 with the recorded 202, in either phase (over a socket it may arrive after
 `notifications/initialized`). The Figma profile records no ping and ignores the seed. The calling
 cases refuse a pinging server: their call gate treats any server request in an answer as
-uncertainty.
+uncertainty (#382).
 
 ```ts
 import { makeMcpEmulator, mcpEmulatorOrigin } from '@yolk-sdk/emulators/mcp'

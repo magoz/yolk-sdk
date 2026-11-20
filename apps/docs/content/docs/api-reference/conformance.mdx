@@ -407,10 +407,16 @@ least one `ping` request in an answer (else its precondition fails). For each pi
 exactly one POST to the target URL holding `{"jsonrpc":"2.0","id":<ping id>,"result":{}}`, with an
 `accept` listing both media types and the issued session id, and the server accepts it with 202 and
 no body (basic/transports, "Sending Messages to the Server"). The client never surfaces a rejected
-answer (its send error only reaches `onerror`), so only the wire shows it. The synthetic fixture
+answer (its send error only reaches `onerror`), so only the wire shows it, and an answer with no
+observed status (a transport failure, or the client closing first) fails the case. The Effect fetch
+bridge buffers each whole answer, so the client reads, and answers, a ping only after the SSE stream
+carrying it ends: a server that waits for the answer before ending that stream stalls the operation
+until the client's timeout (unverified: whether live servers do), and a ping on the standing GET is
+unverified. The synthetic fixture
 pings inside the `initialize` answer, before its response; the pinned SDK answers before
 `notifications/initialized`, without `mcp-protocol-version`. The call gate treats any server request
-in an answer as uncertainty, so the calling cases refuse a pinging server (no `tools/call` is sent).
+in an answer as uncertainty, so the calling cases refuse a pinging server (no `tools/call` is sent;
+#382).
 
 Not covered, because `@yolk-sdk/mcp/client` never sends them (it lists and calls tools only):
 `DELETE` session termination (`close()` only aborts; the SDK's `terminateSession()` is never

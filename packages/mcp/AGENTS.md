@@ -197,14 +197,16 @@
   test. The sixteen fixtures are copied as data into `packages/emulators/src/mcp/recordings.ts`
   (the `@yolk-sdk/emulators/mcp` emulator); `packages/emulators/test/mcp.test.ts` fails when the
   copy drifts, so a fixture change updates that copy in the same change.
-- Method coverage (spec: modelcontextprotocol.io, revisions `2025-11-25` and `2026-07-28`, the two
-  the pinned SDK speaks). The client sends only `server/discover`, `initialize`,
+- Method coverage of the remote client (`listRemoteMcpServerTools`, `callRemoteMcpServerTool`; spec:
+  modelcontextprotocol.io, revisions `2025-11-25` and `2026-07-28`, the two the pinned SDK speaks).
+  The remote client sends only `server/discover`, `initialize`,
   `notifications/initialized`, the standing GET, `tools/list` and `tools/call`, plus the SDK's
   automatic answer to a server `ping` (its `Protocol` constructor registers a `ping` handler; legacy
   only: `2026-07-28` removed `ping` and server-to-client requests, changelog major changes 5 and 7,
-  and the SDK drops inbound requests on modern connections). That answer is the only client-sent
-  response a compliant server can provoke (Yolk declares no `roots`, `sampling` or legacy
-  `elicitation` capability), and `mcp.legacy.server-ping` covers it (`2025-11-25`
+  and the SDK drops inbound requests on modern connections). With Yolk's defaults (no host
+  `sdk.capabilities` or `configureClient`), that answer is the only client-sent response a
+  compliant server can provoke (Yolk then declares no `roots`, `sampling` or legacy `elicitation`
+  capability), and `mcp.legacy.server-ping` covers it (`2025-11-25`
   basic/utilities/ping, basic/transports "Sending Messages to the Server" items 3, 4 and 6,
   basic/lifecycle). No case covers what the client never sends: `DELETE` (basic/transports,
   "Session Management" item 5 says a client SHOULD terminate a session it no longer needs, but
@@ -214,6 +216,12 @@
   fixture answer), `tasks/*` (task-augmented requests need a declared capability in `2025-11-25`;
   an extension in `2026-07-28`) and JSON-RPC batches (removed in `2025-06-18`; basic/transports item
   3 of `2025-11-25` allows one message per POST). Add a case when client code starts sending one.
+  `makeEffectFetch` buffers each whole answer, so the remote client answers a ping only after the
+  SSE stream carrying it ends (a server waiting for the answer before ending the stream stalls
+  until the timeout; unverified live, as is a ping on the standing GET). The local stdio client
+  does not answer pings: it reads stdout lines as responses only, so a server `ping` line fails the
+  call as a broken session (tracked in an issue). A pinging server also makes the calling cases
+  refuse: the call gate treats any server request as uncertainty (#382).
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
   - `listTools(undefined)` follows `nextCursor`, also a repeated one (it stops silently only on a
@@ -282,7 +290,9 @@
   `elicitation-declaration.test.ts` replays the opt-in elicitation case on both eras (exact
   requests), drills a rejected listing, and runs it in-process.
   `server-ping.test.ts` replays the opt-in server ping case (exact requests and MCP headers), drills
-  a rejected or bodied 202, a server that never pings and a modern target, passes other ping ids,
+  a rejected or bodied 202, a ping answer with no observed status (a transport failure; the client
+  closing first), a server that never pings and a modern target, pins the timeout when a server
+  holds the ping's stream open for the answer (the bridge buffers), passes other ping ids,
   and runs the default listing cases against the pinging server (`mcp.transport.response-encoding`
   skips client-sent responses). It does not run in-process: `makeMcpToolServer` is modern and never
   pings; the emulator's cross-checks cover it.

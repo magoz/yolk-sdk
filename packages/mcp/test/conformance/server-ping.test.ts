@@ -6,7 +6,8 @@
  * never pings. The emulator's cross-checks (`@yolk-sdk/emulators`, `test/mcp-conformance.test.ts`)
  * run it in-process and over loopback against the synthetic legacy profile.
  */
-import { Effect, Predicate, Ref, type Layer } from 'effect'
+import { Effect, Layer, Predicate, Ref } from 'effect'
+import { HttpClient, HttpClientError, type HttpClientRequest } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   decodeWireFixture,
@@ -15,7 +16,8 @@ import {
   type WireExchange,
   type WireFixture
 } from '@yolk-sdk/conformance/fixture'
-import type { ReplayLedgerApi } from '@yolk-sdk/conformance/replay'
+import { WireFault, makeReplayHttpClient, type ReplayLedgerApi } from '@yolk-sdk/conformance/replay'
+import { McpError } from '../../src/client/index.ts'
 import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
 import {
   legacyListingExchanges,
@@ -23,6 +25,7 @@ import {
   mcpConformanceCases,
   mcpConformanceFixtures,
   mcpConformanceServerPingFixtures,
+  mcpConformanceSyntheticTarget,
   mcpConformanceServerPingRequestId,
   mcpLegacySessionCase,
   mcpNegotiationEraCase,
@@ -33,7 +36,7 @@ import {
   type McpConformanceCase,
   type McpConformanceRequirements
 } from '../../src/conformance/index.ts'
-import { drillFixture, replayLayer, withResponse } from './helpers.ts'
+import { caseServices, drillFixture, replayLayer, withResponse } from './helpers.ts'
 
 const now = new Date('2026-10-01T12:00:00.000Z')
 
@@ -60,6 +63,54 @@ const run = (
 
 const runCase = (fixture: WireFixture, era: 'modern' | 'legacy' = 'legacy') =>
   run([mcpServerPingCase], [fixture], replayLayer([fixture], era))
+
+/** Whether a request is the client's answer to a server request (a body without `method`). */
+const isPingAnswer = (request: HttpClientRequest.HttpClientRequest): boolean => {
+  if (!Predicate.isTagged(request.body, 'Uint8Array')) return false
+
+  const text = new TextDecoder().decode(request.body.body)
+
+  return text.includes('"result"') && !text.includes('"method"')
+}
+
+/**
+ * The fixture's replay, except that the client's answer to the ping, once the replay has consumed
+ * its recorded exchange (replay matches per method and URL in order), is answered by `pingAnswer`
+ * (with `faults` on the replay and the synthetic legacy target with `timeoutMs`).
+ */
+const pingAnswerLayer = (
+  pingAnswer: (
+    request: HttpClientRequest.HttpClientRequest
+  ) => Effect.Effect<never, HttpClientError.HttpClientError>,
+  options: { readonly faults?: ReadonlyArray<WireFault>; readonly timeoutMs?: number } = {}
+) =>
+  Layer.mergeAll(
+    Layer.effect(
+      HttpClient.HttpClient,
+      Effect.gen(function* () {
+        const replay = yield* makeReplayHttpClient([mcpServerPingLegacyFixture], {
+          faults: options.faults ?? []
+        })
+
+        return HttpClient.make(request =>
+          isPingAnswer(request)
+            ? replay.client.execute(request).pipe(Effect.andThen(pingAnswer(request)))
+            : replay.client.execute(request)
+        )
+      })
+    ),
+    caseServices({
+      ...mcpConformanceSyntheticTarget('legacy'),
+      timeoutMs: options.timeoutMs ?? 5_000
+    })
+  )
+
+const transportFailure = (request: HttpClientRequest.HttpClientRequest) =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({ request, description: 'synthetic drop' })
+    })
+  )
 
 /** The ping fixture with the server's ping (and so the client's answer) under another id. */
 const withPingId = (id: string | number): WireFixture => {
@@ -191,6 +242,75 @@ describe('mcp.legacy.server-ping (opt-in)', () => {
 
       expect(report.summary.failed, formatConformanceReport(report)).toBe(1)
     })
+  )
+
+  // The observer records a request before the transport answers it, and the client only logs a
+  // failed answer, so the listing succeeds either way: missing acceptance evidence must fail.
+  it.effect('fails when the answer to the ping never reaches the server (transport failure)', () =>
+    Effect.gen(function* () {
+      const report = yield* run(
+        [mcpServerPingCase],
+        [mcpServerPingLegacyFixture],
+        pingAnswerLayer(transportFailure)
+      )
+
+      expect(report.summary.failed, formatConformanceReport(report)).toBe(1)
+      expect(formatConformanceReport(report)).toContain('no answer was observed')
+    })
+  )
+
+  it.effect('fails when the client closes before the server answers the ping answer', () =>
+    Effect.gen(function* () {
+      // The answer is never answered: the listing ends and the client's close aborts it.
+      const report = yield* run(
+        [mcpServerPingCase],
+        [mcpServerPingLegacyFixture],
+        pingAnswerLayer(() => Effect.never)
+      )
+
+      expect(report.summary.failed, formatConformanceReport(report)).toBe(1)
+      expect(formatConformanceReport(report)).toContain('no answer was observed')
+    })
+  )
+
+  it.effect(
+    'a server that waits for the ping answer before ending the stream stalls until the timeout',
+    () =>
+      Effect.gen(function* () {
+        // `makeEffectFetch` buffers the whole answer, so the client reads the ping only after the
+        // stream ends; a server holding the `initialize` stream open after the ping (POST attempt
+        // 2) until the answer arrives never gets it, and the operation fails at the timeout.
+        let answered = false
+
+        const error = yield* mcpServerPingCase.run.pipe(
+          Effect.provide(
+            pingAnswerLayer(
+              request => {
+                answered = true
+
+                return transportFailure(request)
+              },
+              {
+                faults: [
+                  WireFault.HoldAfterChunks({
+                    match: { method: 'POST' },
+                    attempt: 2,
+                    chunks: 1,
+                    release: Effect.never
+                  })
+                ],
+                timeoutMs: 300
+              }
+            )
+          ),
+          Effect.flip
+        )
+
+        expect(error).toBeInstanceOf(McpError)
+        expect(error).toMatchObject({ cause: 'timeout' })
+        expect(answered).toBe(false)
+      }),
+    10_000
   )
 
   it.effect('fails its precondition on a server that never pings', () =>

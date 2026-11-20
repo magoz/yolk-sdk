@@ -546,7 +546,8 @@ describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
   }
 
   it.effect(
-    'the call gate treats the ping as uncertainty: calling cases refuse with zero forwarded calls',
+    // Pinned until #382 decides whether the gate may understand a server ping.
+    'the call gate treats the ping as uncertainty (#382): calling cases refuse with no forwarded call',
     () =>
       Effect.gen(function* () {
         const calling = legacyCallingCases

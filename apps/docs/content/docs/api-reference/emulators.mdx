@@ -1316,7 +1316,7 @@ then answers that case's fixture, whose SSE answer sends a `ping` request before
 the session awaits the client's answer to that ping, which the `response:ping` row
 (`https://mcp.example.test/legacy/mcp#response:ping`) accepts once with the recorded 202, in either
 phase. The Figma profile records no ping and ignores the seed. The calling cases refuse a pinging
-server: their call gate treats any server request in an answer as uncertainty.
+server: their call gate treats any server request in an answer as uncertainty (#382).
 
 Every answer is a fixture's, byte for byte, with only the request id substituted at the recorded
 place (the top-level `id` of a JSON answer, or of the SSE response event's payload; notification
