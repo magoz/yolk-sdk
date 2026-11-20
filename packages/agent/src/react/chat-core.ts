@@ -94,10 +94,11 @@ export type AgentChatTurnStart = {
   /** The turn's output follows this chat message (none: the chat was empty). */
   readonly after: Option.Option<string>
   /**
-   * A run start, before the run's first model turn: it bounds host events only (the model's events
-   * act as with no start known: a run's own model output follows an `LLMStreamStart`, so model
-   * events before it replay an earlier run's), and the run's first `LLMStreamStart` starts a new
-   * turn, never retries this one.
+   * A run start, before the run's first model turn: it bounds host events. The model's tool events
+   * before the run's first `LLMStreamStart` replay an earlier run's (a run's own model output
+   * follows a start), so they act on a call before the run's messages when one holds their id, else
+   * as usual (`ChatEventScope.runOutput`). The run's first `LLMStreamStart` starts a new turn, never
+   * retries this one.
    */
   readonly run?: true
 }

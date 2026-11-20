@@ -1201,8 +1201,7 @@ const acknowledgedReplay = (
 
   const call = hostEventToolCall(event)
 
-  // No model turn start known for this event (none seen, or a model event before a run's first
-  // model turn): any event about the id replays it.
+  // No model turn start seen: any event about the id replays it.
   if (state.turnStart === undefined) {
     return Option.some(run => toolRunId(run) === callId && isActiveToolRun(run))
   }
