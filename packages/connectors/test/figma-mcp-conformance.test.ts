@@ -6,7 +6,7 @@
  * `@yolk-sdk/mcp/client` behind its observing client and fail-closed call gate; one drill per case
  * makes exactly that case disagree.
  */
-import { Effect, Layer, Option, Predicate, Ref } from 'effect'
+import { Deferred, Effect, Layer, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -98,26 +98,6 @@ const fixtureOf = (testCase: Pick<McpConformanceCase, 'id'>): WireFixture => {
   return fixture
 }
 
-const replayLayer = (
-  fixtures: ReadonlyArray<WireFixture>,
-  options: {
-    readonly seeds?: McpConformanceSeeds
-    readonly ledger?: Ref.Ref<ReplayLedgerApi | undefined>
-  } = {}
-) =>
-  Layer.mergeAll(
-    Layer.unwrap(
-      makeReplayHttpClient(fixtures).pipe(
-        Effect.tap(({ ledger }) =>
-          options.ledger === undefined ? Effect.void : Ref.set(options.ledger, ledger)
-        ),
-        Effect.map(({ client }) => Layer.succeed(HttpClient.HttpClient, client))
-      )
-    ),
-    Layer.effect(McpConformanceTarget, target),
-    Layer.succeed(McpConformanceConfig, options.seeds ?? figmaMcpConformanceFixtureSeeds)
-  )
-
 const isRecord = (value: Schema.Json | undefined): value is Schema.JsonObject =>
   Predicate.isObject(value) && !Array.isArray(value)
 
@@ -131,6 +111,89 @@ const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json)
 
 const decodeJsonText = (text: string): Schema.Json =>
   Option.getOrElse(decodeJson(text), (): Schema.Json => null)
+
+/**
+ * `client` holding the n-th standing GET until the n-th tools/list POST has reached it, and that
+ * POST's answer until the GET has been answered: every GET arrives after a later POST,
+ * deterministically, as a slow fire-and-forget GET can (#387). `handshakes` is the GET count.
+ */
+const holdingGets = (client: HttpClient.HttpClient, handshakes: number) =>
+  Effect.gen(function* () {
+    const pairs = yield* Effect.forEach(Array.from({ length: handshakes }), () =>
+      Effect.all({ listSent: Deferred.make<void>(), getAnswered: Deferred.make<void>() })
+    )
+
+    const gets = yield* Ref.make(0)
+    const lists = yield* Ref.make(0)
+
+    return HttpClient.make(request =>
+      Effect.gen(function* () {
+        if (request.method === 'GET') {
+          const pair = pairs[yield* Ref.getAndUpdate(gets, count => count + 1)]
+
+          if (pair === undefined) {
+            return yield* client.execute(request)
+          }
+
+          yield* Deferred.await(pair.listSent)
+
+          return yield* client
+            .execute(request)
+            .pipe(Effect.ensuring(Deferred.succeed(pair.getAnswered, undefined)))
+        }
+
+        const body = Predicate.isTagged(request.body, 'Uint8Array')
+          ? decodeJsonText(new TextDecoder().decode(request.body.body))
+          : null
+
+        if (!isRecord(body) || body['method'] !== 'tools/list') {
+          return yield* client.execute(request)
+        }
+
+        const pair = pairs[yield* Ref.getAndUpdate(lists, count => count + 1)]
+        const response = yield* client.execute(request)
+
+        if (pair !== undefined) {
+          yield* Deferred.succeed(pair.listSent, undefined)
+          yield* Deferred.await(pair.getAnswered)
+        }
+
+        return response
+      })
+    )
+  })
+
+const replayLayer = (
+  fixtures: ReadonlyArray<WireFixture>,
+  options: {
+    readonly seeds?: McpConformanceSeeds
+    readonly ledger?: Ref.Ref<ReplayLedgerApi | undefined>
+    /** Hold each standing GET until after the next tools/list (`holdingGets`). */
+    readonly lateGets?: boolean
+  } = {}
+) =>
+  Layer.mergeAll(
+    Layer.unwrap(
+      makeReplayHttpClient(fixtures).pipe(
+        Effect.tap(({ ledger }) =>
+          options.ledger === undefined ? Effect.void : Ref.set(options.ledger, ledger)
+        ),
+        Effect.flatMap(({ client }) =>
+          options.lateGets === true
+            ? holdingGets(
+                client,
+                fixtures
+                  .flatMap(fixture => fixture.exchanges)
+                  .filter(exchange => exchange.request.method === 'GET').length
+              )
+            : Effect.succeed(client)
+        ),
+        Effect.map(client => Layer.succeed(HttpClient.HttpClient, client))
+      )
+    ),
+    Layer.effect(McpConformanceTarget, target),
+    Layer.succeed(McpConformanceConfig, options.seeds ?? figmaMcpConformanceFixtureSeeds)
+  )
 
 const dataPrefix = 'data: '
 
@@ -425,48 +488,72 @@ describe('Figma MCP cases on replay', () => {
     })
   )
 
-  it.effect("send exactly the fixture requests, in the SDK's order", () =>
-    Effect.gen(function* () {
-      for (const testCase of applicable) {
-        const fixture = fixtureOf(testCase)
-        const ledger = yield* Ref.make<ReplayLedgerApi | undefined>(undefined)
+  // The client's standing GET is fire-and-forget, so under load it can arrive after a later POST
+  // (#387): POSTs are compared in order, each GET by itself, without fixing its position.
+  for (const [label, lateGets] of [
+    ['as the client sends them', false],
+    ['with each standing GET held until after the next tools/list', true]
+  ] as const) {
+    it.effect(`send exactly the fixture requests, POSTs in the SDK's order (${label})`, () =>
+      Effect.gen(function* () {
+        for (const testCase of applicable) {
+          const fixture = fixtureOf(testCase)
+          const ledger = yield* Ref.make<ReplayLedgerApi | undefined>(undefined)
 
-        yield* testCase.run.pipe(Effect.provide(replayLayer([fixture], { ledger })))
+          yield* testCase.run.pipe(Effect.provide(replayLayer([fixture], { ledger, lateGets })))
 
-        const api = yield* Ref.get(ledger)
+          const api = yield* Ref.get(ledger)
 
-        if (api === undefined) {
-          return expect.fail('no ledger')
-        }
-
-        expect(yield* api.remaining, testCase.id).toEqual([])
-
-        const entries = yield* api.entries
-
-        expect(entries).toHaveLength(fixture.exchanges.length)
-
-        for (const [index, entry] of entries.entries()) {
-          if (entry.match.outcome !== 'matched') {
-            return expect.fail(`${testCase.id}: unmatched ${entry.method} ${entry.url}`)
+          if (api === undefined) {
+            return expect.fail('no ledger')
           }
 
-          expect(entry.match.exchangeIndex, testCase.id).toBe(index)
+          expect(yield* api.remaining, testCase.id).toEqual([])
 
-          const recorded = fixture.exchanges[index]?.request
+          const entries = yield* api.entries
 
-          expect(entry.bodyJson, `${testCase.id} #${index}`).toEqual(recorded?.body)
+          expect(entries).toHaveLength(fixture.exchanges.length)
 
-          for (const name of mcpObservedRequestHeaders) {
-            expect(entry.headers[name], `${testCase.id} #${index} ${name}`).toBe(
-              recorded?.headers?.[name]
+          const indexesOf = (method: string) =>
+            fixture.exchanges.flatMap((exchange, index) =>
+              exchange.request.method === method ? [index] : []
             )
-          }
 
-          expect(entry.headers['authorization'] ?? '<redacted>').toBe('<redacted>')
+          const matched = (method: string) =>
+            entries
+              .filter(entry => entry.method === method)
+              .map(entry => (entry.match.outcome === 'matched' ? entry.match.exchangeIndex : -1))
+
+          // Every POST in the fixture's order; every recorded GET once (one per handshake).
+          expect(matched('POST'), testCase.id).toEqual(indexesOf('POST'))
+          expect(matched('GET'), testCase.id).toEqual(indexesOf('GET'))
+          expect(
+            entries.every(entry => entry.method === 'POST' || entry.method === 'GET'),
+            testCase.id
+          ).toBe(true)
+
+          for (const entry of entries) {
+            if (entry.match.outcome !== 'matched') {
+              return expect.fail(`${testCase.id}: unmatched ${entry.method} ${entry.url}`)
+            }
+
+            const index = entry.match.exchangeIndex
+            const recorded = fixture.exchanges[index]?.request
+
+            expect(entry.bodyJson, `${testCase.id} #${index}`).toEqual(recorded?.body)
+
+            for (const name of mcpObservedRequestHeaders) {
+              expect(entry.headers[name], `${testCase.id} #${index} ${name}`).toBe(
+                recorded?.headers?.[name]
+              )
+            }
+
+            expect(entry.headers['authorization'] ?? '<redacted>').toBe('<redacted>')
+          }
         }
-      }
-    })
-  )
+      })
+    )
+  }
 
   it.effect('without readTool, the call cases fail their precondition and send nothing', () =>
     Effect.gen(function* () {
