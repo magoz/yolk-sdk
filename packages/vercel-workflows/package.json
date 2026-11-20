@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/vercel-workflows",
-  "version": "0.1.0-canary.150",
+  "version": "0.1.0-canary.151",
   "description": "Vercel Workflow orchestration primitives for Yolk agent loops, plus a Workflow-compatible durable runtime on Cloudflare Durable Objects.",
   "license": "MIT",
   "type": "module",
