@@ -80,13 +80,14 @@ Provider layers implement `LLMProvider`. The loop calls that service with messag
 
 A stream that completes without the usage report its request asked for still ends with `LLMDone`, marked `usageUnavailable: true`:
 
-| Provider                                                               | Marked when                                                                                          |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Streamed chat (OpenAI-compatible, Vercel AI Gateway, OpenCode Go chat) | the stream ends after the finish chunk, without the `stream_options.include_usage` usage chunk       |
-| OpenAI Codex                                                           | the stream ends without `response.completed`, or `response.completed` has no readable output         |
-| Anthropic Claude, native Messages (OpenCode Go `messages`)             | `message_stop` arrives without a `message_delta` carrying usage (only `message_start` usage, if any) |
+| Provider                                                               | Marked when                                                                                                    |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, OpenCode Go chat) | the stream ends after the finish chunk, without the `stream_options.include_usage` usage chunk                 |
+| Streamed Responses (OpenAI Codex, xAI Grok, OpenCode Go `responses`)   | `response.completed` carries no `usage`                                                                        |
+| OpenAI Codex                                                           | the stream ends without `response.completed`, or `response.completed` has no readable output                   |
+| Anthropic Claude, native Messages (OpenCode Go `messages`)             | `message_stop` arrives without a `message_delta` carrying an output count (only `message_start` usage, if any) |
 
-Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes that way. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
+Non-streamed (JSON) responses are never marked. Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes without its terminal event. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
 
 ## OpenAI JSON admission
 

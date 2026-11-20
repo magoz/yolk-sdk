@@ -161,47 +161,28 @@ const normalizeCodexContextWindowError = (error: LLMError) =>
         })()
       )
 
-/** What the stream emitted before a failure the provider may recover from. */
-type CodexStreamSeen = {
-  readonly toolCall: boolean
-  readonly usage: boolean
-}
-
-const nothingSeen: CodexStreamSeen = { toolCall: false, usage: false }
-
-const noteCodexEvent =
-  (seenRef: Ref.Ref<CodexStreamSeen>) =>
+const noteCodexToolCall =
+  (hasToolCallRef: Ref.Ref<boolean>) =>
   (event: LLMEvent): Effect.Effect<LLMEvent> => {
-    if (Predicate.isTagged(event, 'ToolCall')) {
-      return Ref.update(seenRef, seen => ({ ...seen, toolCall: true })).pipe(Effect.as(event))
-    }
+    if (!Predicate.isTagged(event, 'ToolCall')) return Effect.succeed(event)
 
-    if (Predicate.isTagged(event, 'Usage')) {
-      return Ref.update(seenRef, seen => ({ ...seen, usage: true })).pipe(Effect.as(event))
-    }
-
-    return Effect.succeed(event)
+    return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
   }
 
 /**
- * `response.completed` arrived without a readable final output: the turn ends with what streamed.
- * Its usage could not be read either, so Done says so unless the stream already reported usage.
+ * A JSON fallback response without `output` ends the turn as Done, unmarked: JSON responses never
+ * carry the missing-usage mark. The SSE `response.completed` without `output` is recovered by the
+ * shared parser (`recoverMissingFinalOutput`), which marks its unreadable usage.
  */
 const recoverMissingCodexFinalOutput = (
-  seenRef: Ref.Ref<CodexStreamSeen>,
+  hasToolCallRef: Ref.Ref<boolean>,
   error: LLMError
 ): Stream.Stream<LLMEvent, LLMProviderError> => {
   if (!isMissingCodexFinalOutputError(error)) return Stream.fail(error)
 
   return Stream.fromEffect(
-    Ref.get(seenRef).pipe(
-      Effect.map(seen => {
-        const stopReason = seen.toolCall ? 'tool_use' : 'stop'
-
-        return seen.usage
-          ? LLMDone.make({ stopReason })
-          : LLMDone.make({ stopReason, usageUnavailable: true })
-      })
+    Ref.get(hasToolCallRef).pipe(
+      Effect.map(hasToolCall => LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
     )
   )
 }
@@ -239,15 +220,15 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
   return decorateLLMProvider(provider =>
     LLMProvider.of({
       stream: request =>
-        Stream.fromEffect(Ref.make(nothingSeen)).pipe(
-          Stream.flatMap(seenRef =>
+        Stream.fromEffect(Ref.make(false)).pipe(
+          Stream.flatMap(hasToolCallRef =>
             provider.stream(request).pipe(
-              Stream.mapEffect(noteCodexEvent(seenRef)),
+              Stream.mapEffect(noteCodexToolCall(hasToolCallRef)),
               Stream.catchTags({
                 LLMError: error =>
                   isCodexContextWindowError(error)
                     ? Stream.fail(normalizeCodexContextWindowError(error))
-                    : recoverMissingCodexFinalOutput(seenRef, error)
+                    : recoverMissingCodexFinalOutput(hasToolCallRef, error)
               })
             )
           )
@@ -264,6 +245,7 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
         authorizationHeaders: (token: OAuthAccessToken) => openAiCodexAuthorizationHeaders(token),
         alwaysIncludeReasoning: true,
         allowEofCompletion: true,
+        recoverMissingFinalOutput: true,
         unsupportedContentProviderName: 'OpenAI Codex OAuth'
       })
     )

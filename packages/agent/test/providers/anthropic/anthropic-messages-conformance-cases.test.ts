@@ -930,6 +930,32 @@ describe('Anthropic Messages usage reports through the providers', () => {
       })
     )
 
+    // Every usage field is optional on the wire: only an output count is a final report.
+    for (const [label, usage, marked] of [
+      ['an empty usage object', {}, true],
+      ['a null output count', { output_tokens: null }, true],
+      ['a zero output count', { output_tokens: 0 }, false]
+    ] as const) {
+      it.effect(
+        `${name}: ${marked ? 'marks' : 'does not mark'} a message_delta with ${label}`,
+        () =>
+          Effect.gen(function* () {
+            const edited = recorded.map(event =>
+              mapJson(event, json => {
+                if (json.type === 'message_delta') json.usage = { ...usage }
+              })
+            )
+
+            const events = yield* stream(
+              provider,
+              withEvents(anthropicMessagesPlainTextFixture, edited)
+            )
+
+            expect(doneSignals(events)).toEqual([['stop', marked ? true : undefined]])
+          })
+      )
+    }
+
     it.effect(`${name}: marks usage unavailable when message_delta carries no usage`, () =>
       Effect.gen(function* () {
         const withoutUsage = recorded.map(event =>

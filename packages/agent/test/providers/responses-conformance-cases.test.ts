@@ -782,6 +782,45 @@ const describeFamily = <Req>(family: Family<Req>) => {
         'no-terminal'
       )
 
+    // Responses always reports usage on `response.completed`; a completed stream without it still
+    // completes, and its Done says the usage never arrived.
+    it.effect('marks Done when the streamed response.completed carries no usage', () =>
+      Effect.gen(function* () {
+        const withoutUsage = sseEvents(family.plainText.fixture).map(event =>
+          mapJson(event, json => {
+            if (isRecord(json.response)) delete json.response.usage
+          })
+        )
+
+        const events = yield* streamFixture(
+          withEvents(family.plainText.fixture, withoutUsage, 'no-usage')
+        )
+
+        expect(events.map(event => event._tag)).not.toContain('Usage')
+        expect(doneSignals(events)).toEqual([['stop', true]])
+      })
+    )
+
+    it.effect('never marks a JSON response, even one without usage', () =>
+      Effect.gen(function* () {
+        const completed = sseEvents(family.plainText.fixture).flatMap(event => {
+          const response = completedResponseOf(event)
+
+          return response === undefined ? [] : [response]
+        })
+
+        const response = completed[0] ?? expect.fail('no response.completed')
+        const { usage: _usage, ...withoutUsage } = response
+
+        const events = yield* streamFixture(
+          withResponse(family.plainText.fixture, 'json-no-usage', 200, JSON.stringify(withoutUsage))
+        )
+
+        expect(events.map(event => event._tag)).not.toContain('Usage')
+        expect(doneSignals(events)).toEqual([['stop', undefined]])
+      })
+    )
+
     it.effect('leaves Done unmarked when response.completed carries the usage', () =>
       Effect.gen(function* () {
         const events = yield* streamFixture(family.terminal.fixture)
@@ -836,6 +875,34 @@ const describeFamily = <Req>(family: Family<Req>) => {
             expect(streamed.map(event => event._tag)).not.toContain('Usage')
             expect(doneSignals(streamed)).toEqual([['stop', true]])
           })
+      )
+
+      it.effect('recovers a JSON response without output unmarked, as before', () =>
+        Effect.gen(function* () {
+          const completed = sseEvents(family.plainText.fixture).flatMap(event => {
+            const response = completedResponseOf(event)
+
+            return response === undefined ? [] : [response]
+          })
+
+          const response = completed[0] ?? expect.fail('no response.completed')
+          const { output: _output, ...withoutOutput } = response
+
+          // The JSON body still reports usage; recovery cannot read it, and JSON is never marked.
+          expect(isRecord(withoutOutput.usage)).toBe(true)
+
+          const events = yield* streamFixture(
+            withResponse(
+              family.plainText.fixture,
+              'json-no-output',
+              200,
+              JSON.stringify(withoutOutput)
+            )
+          )
+
+          expect(events.map(event => event._tag)).toEqual(['Done'])
+          expect(doneSignals(events)).toEqual([['stop', undefined]])
+        })
       )
     } else {
       it.effect(

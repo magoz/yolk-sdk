@@ -88,6 +88,11 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly alwaysIncludeReasoning: boolean
   readonly allowEofCompletion: boolean
   readonly requireJsonCompletion?: boolean
+  /**
+   * Codex compatibility: an SSE `response.completed` whose response has no `output` ends the turn
+   * with what streamed, as Done marked `usageUnavailable` (its usage cannot be read either).
+   */
+  readonly recoverMissingFinalOutput?: boolean
   readonly unsupportedContentProviderName?: string
   readonly maxOutputTokens?: number
   readonly extraHeaders?: Readonly<Record<string, string>>
@@ -783,6 +788,7 @@ type OpenAiResponsesProviderDescriptor = {
   readonly allowEofCompletion: boolean
   readonly requireJsonCompletion?: boolean
   readonly preserveOutputOrder?: boolean
+  readonly recoverMissingFinalOutput?: boolean
 }
 
 type OpenAiResponsesLlmErrorFields = {
@@ -1224,13 +1230,23 @@ const finalResponseToEvents = (
     const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || hasToolCalls
     const dedupedEvents = shouldDedupe ? dedupeSseEvents(state, finalEvents) : finalEvents
 
-    if (!hasToolCalls) {
+    // Responses always reports usage on `response.completed`; one without it completes the turn,
+    // but Done says the usage never arrived.
+    const usageUnavailable = parsedFinal.usage === undefined
+
+    if (!hasToolCalls && !usageUnavailable) {
       return dedupedEvents
     }
 
-    return dedupedEvents.map(event =>
-      Predicate.isTagged(event, 'Done') ? LLMDone.make({ stopReason: 'tool_use' }) : event
-    )
+    return dedupedEvents.map(event => {
+      if (!Predicate.isTagged(event, 'Done')) return event
+
+      const stopReason = hasToolCalls ? 'tool_use' : event.stopReason
+
+      return usageUnavailable
+        ? LLMDone.make({ stopReason, usageUnavailable: true })
+        : LLMDone.make({ stopReason })
+    })
   })
 
 const reasoningSummaryPartKey = (event: Schema.JsonObject) => {
@@ -1344,6 +1360,22 @@ const processSseData = (
 
       const responseInput = parsed.response
       const hasToolCalls = state.toolCallIds.size > 0
+
+      if (
+        descriptor.recoverMissingFinalOutput === true &&
+        isJsonObject(responseInput) &&
+        !Object.hasOwn(responseInput, 'output')
+      ) {
+        return {
+          state: { ...state, hasDone: true },
+          events: [
+            LLMDone.make({
+              stopReason: hasToolCalls ? 'tool_use' : 'stop',
+              usageUnavailable: true
+            })
+          ]
+        }
+      }
 
       const parsedFinal = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(
         responseInput
@@ -1740,7 +1772,8 @@ export const makeOpenAiResponsesProviderLayer = (config: OpenAiResponsesProvider
         providerName: config.providerName,
         allowEofCompletion: config.allowEofCompletion,
         requireJsonCompletion: config.requireJsonCompletion ?? false,
-        preserveOutputOrder: config.commentaryPhaseBeforeToolCalls === true
+        preserveOutputOrder: config.commentaryPhaseBeforeToolCalls === true,
+        recoverMissingFinalOutput: config.recoverMissingFinalOutput === true
       }
 
       return LLMProvider.of({

@@ -369,8 +369,8 @@ export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamE
    * The model stream completed without the final usage report its request asked for (the
    * provider's `LLMDone.usageUnavailable`): the turn's token usage is missing from `UsageUpdate`
    * and terminal usage, or partial when this stream sent earlier `UsageUpdate`s. Absent when the
-   * report arrived or the request asked for none, and on events recorded before it existed. Hosts
-   * decide how to account for it (estimate, flag, or ignore).
+   * report arrived, for non-streamed (JSON) responses, and on events recorded before it existed.
+   * Hosts decide how to account for it (estimate, flag, or ignore).
    */
   usageUnavailable: Schema.optional(Schema.Literal(true))
 }) {}

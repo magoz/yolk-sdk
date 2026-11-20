@@ -1609,7 +1609,6 @@ type TurnCompletion = {
   readonly usageUnavailable: boolean
 }
 
-/** Ends a validated model stream, forwarding the provider's missing-usage signal. */
 const llmStreamEnd = (turn: number, completion: TurnCompletion) =>
   completion.usageUnavailable
     ? LLMStreamEnd.make({ turn, usageUnavailable: true })

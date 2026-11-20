@@ -2199,7 +2199,7 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
-  /** A `message_delta` carried usage: its cumulative counts are the message's final usage. */
+  /** A `message_delta` carried an output count: its cumulative usage is the message's final one. */
   readonly hasFinalUsage: boolean
   /** A thinking block closed without the signature its replay needs. */
   readonly hasUnsignedThinking: boolean
@@ -2453,7 +2453,11 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         state: (() => {
           const nextState: AnthropicSseStateFields = {
             ...state,
-            hasFinalUsage: state.hasFinalUsage || Predicate.isTagged(parsedUsage, 'Some'),
+            // Every usage field is optional: only an output count (0 included) is a final report.
+            hasFinalUsage:
+              state.hasFinalUsage ||
+              (Predicate.isTagged(parsedUsage, 'Some') &&
+                Predicate.isNumber(parsedUsage.value.output_tokens)),
             usage: step.snapshot
           }
 

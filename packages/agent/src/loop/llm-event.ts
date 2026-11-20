@@ -30,12 +30,12 @@ export class LLMDone extends Schema.TaggedClass<LLMDone>()('Done', {
   stopReason: Schema.Literals(['stop', 'tool_use']),
   /**
    * The stream completed without the final usage report its request asked for (a streamed chat
-   * completion with `stream_options.include_usage` that ended without a usage chunk, a Codex
-   * stream without a readable `response.completed`, a Messages `message_stop` without a
-   * `message_delta` carrying usage).
-   * The turn is complete, but its token usage is missing, or partial when earlier `Usage` events
-   * arrived. Absent when the report arrived or the request asked for none. The loop forwards it on
-   * `LLMStreamEnd`; hosts decide how to account for it.
+   * completion with `stream_options.include_usage` that ended without a usage chunk, a streamed
+   * Responses `response.completed` without `usage`, a Codex stream without a readable
+   * `response.completed`, a Messages `message_stop` without a `message_delta` output count).
+   * The turn completed, but its token usage is missing, or partial when earlier `Usage` events
+   * arrived. Absent when the report arrived; non-streamed (JSON) responses are never marked. The
+   * loop forwards it on `LLMStreamEnd`; hosts decide how to account for it.
    */
   usageUnavailable: Schema.optional(Schema.Literal(true))
 }) {}

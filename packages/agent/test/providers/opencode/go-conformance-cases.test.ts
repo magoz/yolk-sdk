@@ -3,7 +3,7 @@
  * the replay ledger, and structural disagreement drills over the parsed fixtures (never text
  * matches, so the drills keep working when live recordings replace the synthetic placeholders).
  */
-import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Stream } from 'effect'
 import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -42,6 +42,9 @@ import {
   openCodeGoUsageSnapshotFixture,
   type OpenCodeGoConformanceCase
 } from '../../../src/providers/opencode/conformance/index.ts'
+import { makeOpenCodeGoProviderLayer } from '../../../src/providers/opencode/go-provider.ts'
+import { LLMDone, LLMProvider } from '@yolk-sdk/agent/loop'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
 
 const now = new Date('2026-09-30T12:00:00.000Z')
 
@@ -523,6 +526,64 @@ describe('OpenCode Go conformance disagreement drills', () => {
       )
 
       expect(unauthorized?.tag).toBe('ProviderSubscriptionUsageAuthError')
+    })
+  )
+})
+
+// Responses always reports usage on `response.completed`; Go Responses completes a stream whose
+// terminal event lacks it, and Done says the usage never arrived.
+describe('OpenCode Go Responses usage reports through the provider', () => {
+  const streamResponses = (fixture: WireFixture) =>
+    Effect.gen(function* () {
+      const llm = yield* LLMProvider
+
+      return Array.from(
+        yield* llm
+          .stream({
+            model: openCodeGoConformanceDefaultModels.responses,
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: []
+          })
+          .pipe(Stream.runCollect)
+      )
+    }).pipe(
+      Effect.provide(
+        makeOpenCodeGoProviderLayer({
+          apiKey: Redacted.make('synthetic-go-key'),
+          protocol: 'responses',
+          maxOutputTokens: 64
+        }).pipe(Layer.provide(ReplayHttpClient.layer([fixture])))
+      )
+    )
+
+  const doneSignals = (events: ReadonlyArray<unknown>) =>
+    events.flatMap(event =>
+      event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+    )
+
+  it.effect('leaves Done unmarked when response.completed carries the usage', () =>
+    Effect.gen(function* () {
+      expect(doneSignals(yield* streamResponses(openCodeGoResponsesPlainTextFixture))).toEqual([
+        ['stop', undefined]
+      ])
+    })
+  )
+
+  it.effect('marks Done when response.completed carries no usage', () =>
+    Effect.gen(function* () {
+      const withoutUsage = sseEvents(openCodeGoResponsesPlainTextFixture).map(event =>
+        mapJson(event, json => {
+          if (isRecord(json.response)) delete json.response.usage
+        })
+      )
+
+      const events = yield* streamResponses(
+        withEvents(openCodeGoResponsesPlainTextFixture, withoutUsage, 'no-usage')
+      )
+
+      expect(events.map(event => event._tag)).not.toContain('Usage')
+      expect(doneSignals(events)).toEqual([['stop', true]])
     })
   )
 })

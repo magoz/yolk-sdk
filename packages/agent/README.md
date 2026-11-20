@@ -537,17 +537,20 @@ sends):
 | Provider                                                      | Completes without the final usage when                                                        |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk |
+| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                       |
 | Codex                                                         | the stream ends without `response.completed`, or `response.completed` has no readable output  |
-| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying usage                               |
+| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                     |
 
-The answer is whole, so the turn completes normally (failing it would re-run and re-bill the
-model), but the provider's `LLMDone` carries `usageUnavailable: true` and the loop forwards it on
+These streams completed successfully before the mark existed, and still do: failing them would
+re-run and re-bill the model. A chat stream cut after its finish chunk holds the whole answer;
+Codex's EOF compatibility accepts any stream end without `response.completed`, including a
+premature cut. The provider's `LLMDone` carries `usageUnavailable: true` and the loop forwards it on
 that model stream's protocol `LLMStreamEnd`. The turn's usage is then missing from `UsageUpdate`
 and terminal usage, or partial when the stream sent some (Messages' `message_start`). Hosts decide
 how to account for it: estimate it, flag the total as a lower bound, or ignore it. The field is
-absent when the report arrived, when the request asked for none (JSON responses), and on events
-recorded before it existed. Grok and Go Responses streams fail without `response.completed`, and
-Messages streams fail without `message_stop`, so they never complete that way.
+absent when the report arrived and on events recorded before it existed; non-streamed (JSON)
+responses are never marked. Grok and Go Responses streams fail without `response.completed`, and
+Messages streams fail without `message_stop`, so they never complete without a terminal event.
 
 ## Context compaction
 
