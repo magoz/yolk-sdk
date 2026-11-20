@@ -472,7 +472,8 @@ Open cases:
   another committed message of the run (same text, same call ids) counts as committed. Providers
   can reuse call ids across turns: the chat projections match a turn's tool events only after the
   latest turn start they saw (a replayed or late request or tool-batch event for a call that turn
-  lacks acts on the earlier part holding the same call, an answer on the part holding its request),
+  lacks, or holds as another call reusing the id, acts on the earlier part holding the same call,
+  an answer on the part holding its request),
   and `reduceAgentEvents` scopes its tool runs the same way (one run per turn for a reused id), so
   only until a client sees a start (it joined mid-turn) can a reused id still update an earlier
   turn's call or run (`AgentStart` and a local submit record a run start, so a resumed run's tool

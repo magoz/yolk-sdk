@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Match, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -594,6 +594,298 @@ describe('a request for a call still pending', () => {
       requests: [unitRequest]
     })
   })
+})
+
+/** A later turn's call of the same tool reusing the id, with other arguments, and its request. */
+type Reused = {
+  readonly call: ToolCall
+  readonly request: HitlRequest
+  readonly pending: ChatToolState['_tag']
+  readonly requested: (eventId?: string) => AgentEvent
+}
+
+const reused = (kind: Kind, params: Record<string, string> = { reused: 'yes' }): Reused => {
+  const call = ToolCall.make({ id: toolCallId, name: kind.call.name, params })
+
+  return Match.value(kind.request).pipe(
+    Match.withReturnType<Reused>(),
+    Match.tag('ToolApprovalRequest', current => {
+      const request = ToolApprovalRequest.make({ ...current, call })
+
+      return {
+        call,
+        request,
+        pending: 'ApprovalRequested',
+        requested: eventId => ToolApprovalRequested.make({ eventId, call, request })
+      }
+    }),
+    Match.tag('QuestionRequest', current => {
+      const request = QuestionRequest.make({ ...current, call })
+
+      return {
+        call,
+        request,
+        pending: 'QuestionRequested',
+        requested: eventId => QuestionRequested.make({ eventId, request })
+      }
+    }),
+    Match.tag('InputRequest', current => {
+      const request = InputRequest.make({ ...current, call })
+
+      return {
+        call,
+        request,
+        pending: 'InputRequested',
+        requested: eventId => InputRequested.make({ eventId, request })
+      }
+    }),
+    Match.tag('InteractionRequest', current => {
+      const request = InteractionRequest.make({ ...current, call })
+
+      return {
+        call,
+        request,
+        pending: 'InteractionRequested',
+        requested: eventId => InteractionRequested.make({ eventId, request })
+      }
+    }),
+    Match.exhaustive
+  )
+}
+
+/** Turn 1 settled (`settledChats`, a turn after it); turn 3 asks `later`, still pending. */
+const askedLater = (kind: Kind, settle: Settle, later: Reused) =>
+  applyEvents(settledChats(kind, settle, 'after the next turn started'), [
+    LLMStreamStart.make({ eventId: 'run:start-3', turn: 3 }),
+    AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(later.call) }),
+    later.requested('run:request-3'),
+    awaiting(later.request, 'run:pause-3')
+  ])
+
+/** A tool-batch event as a replay without event id sends it. */
+const batchReplay = (event: AgentEvent): ReadonlyArray<AgentEvent> =>
+  Match.value(event).pipe(
+    Match.withReturnType<ReadonlyArray<AgentEvent>>(),
+    Match.tag('ToolExecutionStarted', current => [
+      ToolExecutionStarted.make({ call: current.call })
+    ]),
+    Match.tag('ToolExecutionCompleted', current => [
+      ToolExecutionCompleted.make({ call: current.call, result: current.result })
+    ]),
+    Match.tag('ToolExecutionError', current => [
+      ToolExecutionError.make({ call: current.call, message: current.message, code: current.code })
+    ]),
+    Match.orElse(() => [])
+  )
+
+/** An answer as a replay without event id sends it. */
+const answerReplay = (event: AgentEvent): ReadonlyArray<AgentEvent> =>
+  Match.value(event).pipe(
+    Match.withReturnType<ReadonlyArray<AgentEvent>>(),
+    Match.tag('QuestionAnswered', current => [
+      QuestionAnswered.make({ response: current.response })
+    ]),
+    Match.tag('QuestionCancelled', current => [
+      QuestionCancelled.make({ response: current.response })
+    ]),
+    Match.tag('InputSubmitted', current => [InputSubmitted.make({ response: current.response })]),
+    Match.tag('InputCancelled', current => [InputCancelled.make({ response: current.response })]),
+    Match.tag('InteractionSubmitted', current => [
+      InteractionSubmitted.make({ response: current.response })
+    ]),
+    Match.tag('InteractionCancelled', current => [
+      InteractionCancelled.make({ response: current.response })
+    ]),
+    Match.orElse(() => [])
+  )
+
+describe("an earlier turn's event replayed after a later turn reused the call id", () => {
+  // Turn 1 settles `call_0`; turn 3 asks another `call_0` (same tool, other arguments), still
+  // pending. A replay of turn 1's request, pause or tool batch acts on turn 1's part, which keeps
+  // its state: turn 3's card, and the status blocked on it, stay. As `reduceAgentEvents`.
+  const requestCases = kinds.flatMap(kind =>
+    kind.settles.flatMap(settle =>
+      replays.map(replay => ({
+        title: `${kind.name} ${settle.name}: ${replay}`,
+        kind,
+        settle,
+        replay
+      }))
+    )
+  )
+
+  it.each(requestCases)(
+    "keeps the later turn's card pending ($title)",
+    ({ kind, settle, replay }) => {
+      const later = reused(kind)
+      const asked = askedLater(kind, settle, later)
+
+      expect(stateTags(asked)).toEqual(both([settle.state, later.pending]))
+      expect(asked.chat.status).toMatchObject({ _tag: 'Blocked', requests: [later.request] })
+
+      const replayed = applyEvent(asked, replayEvent(kind, replay))
+
+      expect(replayed.projection.chatMessages).toEqual(asked.projection.chatMessages)
+      expect(replayed.chat.chatMessages).toEqual(asked.chat.chatMessages)
+      expect(replayed.chat.status).toEqual(asked.chat.status)
+    }
+  )
+
+  const batchCases = kinds.flatMap(kind =>
+    kind.settles.flatMap(settle =>
+      settle
+        .events(step => `run:${step}`)
+        .flatMap(batchReplay)
+        .map(event => ({
+          title: `${kind.name} ${settle.name}: ${event._tag}`,
+          kind,
+          settle,
+          event
+        }))
+    )
+  )
+
+  it.each(batchCases)(
+    "keeps the later turn's card pending on a tool-batch replay ($title)",
+    ({ kind, settle, event }) => {
+      const later = reused(kind)
+      const asked = askedLater(kind, settle, later)
+
+      const replayed = applyEvent(asked, event)
+
+      expect(replayed.projection.chatMessages).toEqual(asked.projection.chatMessages)
+      expect(replayed.chat.chatMessages).toEqual(asked.chat.chatMessages)
+      expect(replayed.chat.status).toEqual(asked.chat.status)
+    }
+  )
+
+  // An answer goes to the part holding its request: turn 3's approval holds another request
+  // (`approval:call_0`), so a replayed answer of turn 1's question, input or interaction leaves it.
+  const answerCases = [question(), input(), interaction()].flatMap(kind =>
+    kind.settles.flatMap(settle =>
+      settle
+        .events(step => `run:${step}`)
+        .flatMap(answerReplay)
+        .filter(() => settle.state !== 'Completed')
+        .map(event => ({
+          title: `${kind.name} ${settle.name}: ${event._tag}`,
+          kind,
+          settle,
+          event
+        }))
+    )
+  )
+
+  it.each(answerCases)(
+    "keeps another tool's later card pending on an answer replay ($title)",
+    ({ kind, settle, event }) => {
+      const later = reused(approval(), { env: 'staging' })
+      const asked = askedLater(kind, settle, later)
+
+      expect(stateTags(asked)).toEqual(both([settle.state, 'ApprovalRequested']))
+
+      const replayed = applyEvent(asked, event)
+
+      expect(replayed.projection.chatMessages).toEqual(asked.projection.chatMessages)
+      expect(replayed.chat.chatMessages).toEqual(asked.chat.chatMessages)
+    }
+  )
+
+  // A stale answer: the part with its call id holds another request, and no part holds its own
+  // (its request's part was never seen, for example after hydration). It answers nothing, as in
+  // `reduceAgentEvents`, instead of answering the pending approval.
+  const staleCases = [question(), input(), interaction()].flatMap(kind =>
+    kind.settles
+      .filter(settle => settle.state !== 'Completed')
+      .flatMap(settle =>
+        settle
+          .events(step => `run:${step}`)
+          .flatMap(answerReplay)
+          .map(event => ({ title: `${kind.name} ${settle.name}: ${event._tag}`, event }))
+      )
+  )
+
+  it.each(staleCases)(
+    'drops an answer whose request no part holds when the part holds another ($title)',
+    ({ event }) => {
+      const later = reused(approval(), { env: 'staging' })
+
+      const asked = applyEvents(initialChats, [
+        LLMStreamStart.make({ eventId: 'run:start-1', turn: 1 }),
+        AssistantMessageEvent.make({ eventId: 'run:message-1', message: ask(later.call) }),
+        later.requested('run:request'),
+        awaiting(later.request, 'run:pause')
+      ])
+
+      expect(stateTags(asked)).toEqual(both(['ApprovalRequested']))
+
+      const answered = applyEvent(asked, event)
+
+      expect(answered.projection.chatMessages).toEqual(asked.projection.chatMessages)
+      expect(answered.chat.chatMessages).toEqual(asked.chat.chatMessages)
+      expect(answered.chat.status).toEqual(asked.chat.status)
+    }
+  )
+
+  it("replaces the later turn's pending request with a newer one of its own call", () => {
+    const kind = approval()
+    const settle = kind.settles[1]
+    const later = reused(kind)
+
+    if (settle === undefined || !Predicate.isTagged(later.request, 'ToolApprovalRequest')) {
+      throw new Error('expected an approval')
+    }
+
+    const previewed = ToolApprovalRequest.make({
+      ...later.request,
+      previewError: { cause: 'timeout', message: 'The preview timed out.' }
+    })
+
+    const chats = applyEvents(askedLater(kind, settle, later), [
+      ToolApprovalRequested.make({ call: later.call, request: previewed }),
+      awaiting(previewed)
+    ])
+
+    expect(toolStates(chats.projection.chatMessages)).toMatchObject([
+      { _tag: 'Completed' },
+      { _tag: 'ApprovalRequested', request: previewed }
+    ])
+
+    expect(chats.chat.chatMessages).toEqual(chats.projection.chatMessages)
+    expect(chats.chat.status).toMatchObject({ _tag: 'Blocked', requests: [previewed] })
+  })
+
+  it.each(['request event', 'pause'] as const)(
+    'lets a request for a call no part holds act on the later turn (%s)',
+    replay => {
+      // No earlier part holds the request's exact call: it is the latest turn's call, as before.
+      const kind = approval()
+      const settle = kind.settles[1]
+
+      if (settle === undefined) throw new Error('expected a settle')
+
+      const unseen = reused(kind, { env: 'dev' })
+      const asked = askedLater(kind, settle, reused(kind))
+
+      const replayed = applyEvent(
+        asked,
+        replay === 'request event' ? unseen.requested() : awaiting(unseen.request)
+      )
+
+      const expected = [
+        { _tag: 'ToolCall', state: { _tag: 'Completed' } },
+        { _tag: 'ToolCall', call: unseen.call, state: { _tag: 'ApprovalRequested' } }
+      ]
+
+      const parts = (messages: ReadonlyArray<AgentChatMessage>) =>
+        messages.flatMap(message =>
+          message.parts.filter(part => Predicate.isTagged(part, 'ToolCall'))
+        )
+
+      expect(parts(replayed.projection.chatMessages)).toMatchObject(expected)
+      expect(parts(replayed.chat.chatMessages)).toMatchObject(expected)
+    }
+  )
 })
 
 describe('an invalid input answer', () => {

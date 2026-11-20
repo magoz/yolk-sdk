@@ -737,7 +737,20 @@ a resumed tool batch), a host event acts on an earlier part instead of adding a 
 (approval, question, input, interaction) or a tool-batch event on the last earlier part holding the
 same call (id, name and arguments equal); an answer (question, input or interaction response,
 approval denial) on the last earlier part holding the request it answers (a denial: a pending
-approval), else on nothing. A request (including `AgentAwaitingInput`'s requests) never reopens a
+approval), else on nothing. The turn's part also gives way to that earlier part when it is known to
+be another call (or, for an answer, to hold another request), as in `reduceAgentEvents`: a replay
+without event id of an earlier turn's request, pause, tool-batch event or answer after a later turn
+reused the id acts on the earlier turn's part (which the request rule below keeps), so the later
+turn's card, and the status blocked on it, stay. With no earlier part holding the call, a request
+or tool-batch event acts on the turn's part; an answer reaching a part that holds another request,
+with no part holding its own (a stale answer, for example after hydration), changes nothing, in
+both reducers (a denial still denies the pending approval it reaches). Limits, shared with
+`reduceAgentEvents`: request ids are built from the tool name and call id, so a replayed answer of
+an earlier turn's call of the same tool reusing the id answers the later turn's request, and a
+replayed denial denies its pending approval (dedupe answers by `eventId`); a part still streaming
+its input does not say which call it is and keeps the event; and with no start known (see below)
+there is no earlier turn to give way to. A request (including `AgentAwaitingInput`'s requests)
+never reopens a
 call past its request: a part answered, cancelled, denied or finished keeps its state against a
 request for the same call, with or without event id, and the `useAgentChat` reducer keeps its status
 when every request of an `AgentAwaitingInput` names such a call (a replayed pause does not block the
