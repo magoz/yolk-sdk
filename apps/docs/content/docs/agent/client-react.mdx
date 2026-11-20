@@ -143,3 +143,55 @@ run, also when the id was an accepted background call's, so `toolRuns` can hold 
 for an id (the last is the latest). It follows the same request rule and status fence: a replayed
 request leaves a run already answered, cancelled, denied or finished alone (a running call is asked
 again), and a replayed pause blocks only on its pending requests.
+
+## Rebuild from a snapshot
+
+A host that keeps its own snapshot (stored messages, pending requests, accepted interaction
+receipts) rebuilds chat state with `buildAgentChatMessages`. Its `toolRuns` can hold runs of
+several turns for one call id (one per turn from `reduceAgentEvents`, or pending requests from
+`toolRunsFromHitlRequests` beside an earlier turn's receipt), so each run goes to one card: the last
+card holding the same call the run holds (its own or its request's; id, name and arguments equal),
+or, for a run holding no call (an input still streaming, an answer or denial without its request),
+the last card with its id that no run took. Later runs choose first, and each card takes at most
+one run. A run holding a call no card holds shows nowhere, and a card no run reaches shows its own
+result message (the result after it, never a later turn's reusing the id).
+
+When the snapshot's run may resume (a HITL answer, a stopped run going on), mark a run start on the
+rebuilt state:
+
+```ts
+import { initialAgentClientState, markAgentRunStart } from '@yolk-sdk/agent/client'
+import {
+  buildAgentChatMessages,
+  makeAgentChatEventProjectionState,
+  markChatRunStart
+} from '@yolk-sdk/agent/react'
+
+const projection = markChatRunStart(
+  makeAgentChatEventProjectionState(
+    buildAgentChatMessages({
+      messages,
+      toolRuns,
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      error: null
+    })
+  )
+)
+
+const client = markAgentRunStart({ ...initialAgentClientState, messages, toolRuns })
+```
+
+The resumed run's `AgentStart` can lie before your stream cursor, and its tool batch runs before
+its first model turn. Without a start, the batch acts on the last card or run holding its call id,
+which can be an earlier turn's (client runs kept from earlier turns, or stored messages that lag the
+run). With the run start, it reaches the snapshot's cards and runs only as the same call or, for
+answers, the one holding their request, and adds its own otherwise. A snapshot taken mid-turn keeps
+working: that turn's later host events name calls in the snapshot's last message and find them as
+the same call. That turn's later model events (input, provider results) before the next
+`LLMStreamStart` count as replays of an earlier run's, so a reused id among them can still reach an
+earlier turn's call, as without a start. A client that missed a run's `LLMStreamStart` otherwise (it
+connected mid-turn after a local submit, or an `AgentStart` replayed without `eventId` after the
+turn's start, whose replay its event id then dedupes) has the same limit. The next `AgentStart` or
+`LLMStreamStart` replaces the run start.

@@ -178,6 +178,27 @@ const isSettledToolCall = (state: AgentChatState, call: ToolCall) =>
 const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
   withStatusTree(next, startAgentStatusTree(statusTree(state)))
 
+/**
+ * Marks a run start after the chat's last message (`turnStart`: turn `0`, `run: true`), as
+ * `AgentStart` does, for a host that rebuilt the chat from a snapshot (`buildAgentChatMessages`,
+ * `makeAgentChatEventProjectionState`) whose run may resume: the resumed run's tool batch, which
+ * runs before its first model turn and may come after the snapshot's `AgentStart`, then reaches the
+ * snapshot's parts only as the same call (id, name and arguments) or, for answers, the part holding
+ * their request, and adds a part of its own otherwise, never landing on an earlier turn's call
+ * reusing its id. A snapshot taken mid-turn keeps working: that turn's later host events for calls
+ * in the snapshot's messages find them as the same call. Its later model events (before the next
+ * `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach an
+ * earlier turn's call, as without a start. Pure; works on either chat state.
+ */
+export const markChatRunStart = <
+  State extends {
+    readonly chatMessages: ReadonlyArray<AgentChatMessage>
+    readonly turnStart?: AgentChatTurnStart
+  }
+>(
+  state: State
+): State => ({ ...state, turnStart: runTurnStart('', state.chatMessages) })
+
 export const makeAgentChatEventProjectionState = (
   chatMessages: ReadonlyArray<AgentChatMessage> = []
 ): AgentChatEventProjectionState => ({

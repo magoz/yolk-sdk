@@ -269,7 +269,8 @@ const rememberEvent = (state: AgentClientState, event: AgentEvent): AgentClientS
     ? state
     : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
 
-const toolRunId = (run: AgentToolRun) =>
+/** The call id a run is about (package-internal: `buildAgentChatMessages` reads it too). */
+export const toolRunId = (run: AgentToolRun) =>
   Match.value(run).pipe(
     Match.tag('InputStreaming', current => current.id),
     Match.tag('Denied', current => current.toolCallId),
@@ -401,8 +402,12 @@ const findLastRunIndex = (
 const toolRunAt = (state: AgentClientState, index: number): AgentToolRun | undefined =>
   index < 0 ? undefined : state.toolRuns[index]
 
-/** The call a run holds, when it holds one (`InputStreaming` holds only its id). */
-const toolRunCall = (run: AgentToolRun): ToolCall | undefined =>
+/**
+ * The call a run holds, its own or its request's, when it holds one (`InputStreaming` holds only its
+ * id, an answer without its request only its response). Package-internal: `buildAgentChatMessages`
+ * reads it too.
+ */
+export const toolRunCall = (run: AgentToolRun): ToolCall | undefined =>
   Match.value(run).pipe(
     Match.tag('InputStreaming', () => undefined),
     Match.tag('Denied', current => current.request?.call),
@@ -1546,6 +1551,21 @@ export const submitAgentUserMessage = (
     },
     startAgentStatusTree(statusTree(state))
   )
+
+/**
+ * Marks a run start after the state's runs (`AgentClientRunStart`: `firstRun` = `toolRuns.length`),
+ * as `AgentStart` does, for a host that rebuilt client state from a snapshot (its `messages` and
+ * `toolRuns`, for example `toolRunsFromHitlRequests` plus earlier turns' runs) whose run may
+ * resume: the resumed run's tool batch, which runs before its first model turn and may come after
+ * the snapshot's `AgentStart`, then reaches the snapshot's runs only as the same call (id, name and
+ * arguments) or, for answers, the run holding their request, and adds a run of its own otherwise,
+ * never landing on an earlier turn's run reusing its id. A snapshot taken mid-turn keeps working:
+ * that turn's later host events for runs holding their call find them as the same call. Its later
+ * model events (before the next `LLMStreamStart`) still act as replays of an earlier run's: a
+ * reused id among them can reach an earlier turn's run. Pure; changes nothing else.
+ */
+export const markAgentRunStart = (state: AgentClientState): AgentClientState =>
+  runTurnStart(state, '')
 
 /** Marks the run `Failed`, e.g. after a transport failure that produced no `AgentError` event. */
 export const markAgentError = (

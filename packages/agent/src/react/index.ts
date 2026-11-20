@@ -9,6 +9,7 @@ export {
   isActiveChatToolPart,
   isCompletedChatToolPart,
   makeAgentChatEventProjectionState,
+  markChatRunStart,
   reduceAgentChatState
 } from './chat-core.ts'
 

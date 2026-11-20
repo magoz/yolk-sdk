@@ -1,5 +1,6 @@
 import { Array as Arr, Data, Equal, Match, Option, Predicate } from 'effect'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
+import { toolRunCall, toolRunId } from '../client/state.ts'
 import {
   isInstructionMessage,
   AssistantAgentMessage,
@@ -329,65 +330,105 @@ const toolResultFromMessage = (message: ToolResultMessage): ToolResult =>
     })()
   )
 
-const toolResultEntry = (
-  message: AgentMessage
-): ReadonlyArray<readonly [string, ToolResultMessage]> =>
-  Predicate.isTagged(message, 'ToolResult') ? [[message.toolCallId, message]] : []
+/**
+ * A tool call part of an assistant message in `buildAgentChatMessages`' input: `key` names the part
+ * (`assistantToolPartKey`), `messageIndex` its message.
+ */
+type ToolCallSlot = {
+  readonly key: string
+  readonly messageIndex: number
+  readonly call: ToolCall
+}
 
-const collectToolResultsById = (messages: ReadonlyArray<AgentMessage>) =>
-  new Map(messages.flatMap(toolResultEntry))
+const assistantToolPartKey = (messageIndex: number, partIndex: number) =>
+  `${messageIndex}:${partIndex}`
 
-const collectToolCallIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
-  new Set(
-    messages.flatMap(message =>
-      Predicate.isTagged(message, 'Assistant')
-        ? message.parts.flatMap(part =>
-            Predicate.isTagged(part, 'HostToolCall') || Predicate.isTagged(part, 'ProviderToolCall')
-              ? [part.call.id]
-              : []
-          )
-        : []
-    )
+const collectToolCallSlots = (messages: ReadonlyArray<AgentMessage>): ReadonlyArray<ToolCallSlot> =>
+  messages.flatMap((message, messageIndex) =>
+    Predicate.isTagged(message, 'Assistant')
+      ? message.parts.flatMap((part, partIndex) =>
+          Predicate.isTagged(part, 'HostToolCall') || Predicate.isTagged(part, 'ProviderToolCall')
+            ? [
+                {
+                  key: assistantToolPartKey(messageIndex, partIndex),
+                  messageIndex,
+                  call: part.call
+                }
+              ]
+            : []
+        )
+      : []
   )
 
-const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] =>
-  Match.value(run).pipe(
-    Match.tag('InputStreaming', current => [current.id, current] as const),
-    Match.tag('Denied', current => [current.toolCallId, current] as const),
-    Match.tag('QuestionRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'QuestionAnswered',
-      'QuestionCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag('InputRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'InputSubmitted',
-      'InputCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag('InteractionRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'InteractionSubmitted',
-      'InteractionCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag(
-      'InputReady',
-      'ApprovalRequested',
-      'Executing',
-      'Accepted',
-      'Completed',
-      'Errored',
-      'ProviderCompleted',
-      current => [current.call.id, current] as const
-    ),
-    Match.exhaustive
+const findLastSlot = (
+  slots: ReadonlyArray<ToolCallSlot>,
+  predicate: (slot: ToolCallSlot) => boolean
+): ToolCallSlot | undefined => Option.getOrUndefined(Arr.findLast(slots, predicate))
+
+/**
+ * The result message of each tool call part: a `ToolResult` message belongs to the last part with
+ * its id before it (providers reuse call ids across turns, so a result never reaches another turn's
+ * call); one with no part before it to the last part with its id. A part no result follows has
+ * none.
+ */
+const collectToolResultsByPart = (
+  messages: ReadonlyArray<AgentMessage>,
+  slots: ReadonlyArray<ToolCallSlot>
+): ReadonlyMap<string, ToolResultMessage> =>
+  new Map(
+    messages.flatMap((message, messageIndex) => {
+      if (!Predicate.isTagged(message, 'ToolResult')) return []
+
+      const slot =
+        findLastSlot(
+          slots,
+          current => current.messageIndex < messageIndex && current.call.id === message.toolCallId
+        ) ?? findLastSlot(slots, current => current.call.id === message.toolCallId)
+
+      return slot === undefined ? [] : [[slot.key, message] as const]
+    })
   )
 
-const collectToolRunsById = (
+/**
+ * The run each tool call part shows. `toolRuns` can hold one run per turn for a reused call id
+ * (`reduceAgentEvents`), and snapshot hosts pass runs of several turns (pending requests, accepted
+ * interactions), so a run goes to one part: the last part holding the same call it holds
+ * (`toolRunCall`: its own, or its request's; id, name and arguments equal), else, when it holds no
+ * call (an input still streaming, an answer or denial without its request), the last part with its
+ * id that no run took. A run holding a call no part holds shows nowhere (another turn's call reusing
+ * the id, not in `messages` yet). Each part takes at most one run, later runs first (the last run of
+ * a call is its latest), and a part no run reaches keeps the state its messages give it.
+ */
+const collectToolRunsByPart = (
+  slots: ReadonlyArray<ToolCallSlot>,
   runs: ReadonlyArray<AgentToolRun>
-): ReadonlyMap<string, AgentToolRun> => new Map(runs.map(toolRunEntry))
+): ReadonlyMap<string, AgentToolRun> => {
+  const latestFirst = Arr.reverse(runs)
+
+  const assign = (
+    taken: ReadonlyMap<string, AgentToolRun>,
+    run: AgentToolRun,
+    matches: (slot: ToolCallSlot) => boolean
+  ): ReadonlyMap<string, AgentToolRun> => {
+    const slot = findLastSlot(slots, current => !taken.has(current.key) && matches(current))
+
+    return slot === undefined ? taken : new Map([...taken, [slot.key, run]])
+  }
+
+  const byCall = latestFirst.reduce<ReadonlyMap<string, AgentToolRun>>((taken, run) => {
+    const call = toolRunCall(run)
+
+    return call === undefined ? taken : assign(taken, run, slot => Equal.equals(slot.call, call))
+  }, new Map())
+
+  return latestFirst.reduce<ReadonlyMap<string, AgentToolRun>>((taken, run) => {
+    if (toolRunCall(run) !== undefined) return taken
+
+    const id = toolRunId(run)
+
+    return assign(taken, run, slot => slot.call.id === id)
+  }, byCall)
+}
 
 const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | undefined =>
   Match.value(state).pipe(
@@ -611,16 +652,25 @@ const toolStateFor = (
   return ChatToolState.Called()
 }
 
+/** Each tool call part's run and result message, by `assistantToolPartKey`. */
+type ToolPartSources = {
+  readonly toolResultsByPart: ReadonlyMap<string, ToolResultMessage>
+  readonly toolRunsByPart: ReadonlyMap<string, AgentToolRun>
+}
+
+const noToolPartSources: ToolPartSources = {
+  toolResultsByPart: new Map(),
+  toolRunsByPart: new Map()
+}
+
 const assistantPartsFromMessage = ({
   message,
   messageIndex,
-  toolResultsById,
-  toolRunsById
+  sources
 }: {
   readonly message: Extract<AgentMessage, { readonly _tag: 'Assistant' }>
   readonly messageIndex: number
-  readonly toolResultsById: ReadonlyMap<string, ToolResultMessage>
-  readonly toolRunsById: ReadonlyMap<string, AgentToolRun>
+  readonly sources: ToolPartSources
 }): ReadonlyArray<AgentChatPart> => {
   return message.parts.flatMap((part, partIndex): ReadonlyArray<AgentChatPart> =>
     Match.value(part).pipe(
@@ -648,8 +698,8 @@ const assistantPartsFromMessage = ({
           id: `message-${messageIndex}-tool-call-${current.call.id}`,
           call: current.call,
           state: toolStateFor(
-            toolRunsById.get(current.call.id),
-            toolResultsById.get(current.call.id)
+            sources.toolRunsByPart.get(assistantToolPartKey(messageIndex, partIndex)),
+            sources.toolResultsByPart.get(assistantToolPartKey(messageIndex, partIndex))
           )
         })
       ]),
@@ -673,8 +723,7 @@ const assistantChatMessage = (
   parts: ReadonlyArray<AgentChatPart> = assistantPartsFromMessage({
     message,
     messageIndex: sequence,
-    toolResultsById: new Map(),
-    toolRunsById: new Map()
+    sources: noToolPartSources
   })
 ): AgentChatMessage => ({
   id: messageId(sequence, 'assistant'),
@@ -1457,8 +1506,7 @@ const partsFromAssistantMessage = (
   const parts = assistantPartsFromMessage({
     message,
     messageIndex,
-    toolResultsById: new Map(),
-    toolRunsById: new Map()
+    sources: noToolPartSources
   }).flatMap((part): ReadonlyArray<AgentChatPart> => {
     if (!Predicate.isTagged(part, 'ToolCall')) return [part]
 
@@ -2372,17 +2420,15 @@ const chatMessagesFromProtocolMessage = ({
   sequence,
   currentTurnId,
   toolNames,
-  toolResultsById,
   toolCallIds,
-  toolRunsById
+  sources
 }: {
   readonly message: AgentMessage
   readonly sequence: number
   readonly currentTurnId: string
   readonly toolNames: ReadonlyMap<string, string>
-  readonly toolResultsById: ReadonlyMap<string, ToolResultMessage>
   readonly toolCallIds: ReadonlySet<string>
-  readonly toolRunsById: ReadonlyMap<string, AgentToolRun>
+  readonly sources: ToolPartSources
 }): ReadonlyArray<AgentChatMessage> =>
   Match.value(message).pipe(
     Match.withReturnType<ReadonlyArray<AgentChatMessage>>(),
@@ -2398,8 +2444,7 @@ const chatMessagesFromProtocolMessage = ({
         parts: assistantPartsFromMessage({
           message: current,
           messageIndex: sequence,
-          toolResultsById,
-          toolRunsById
+          sources
         })
       }
     ]),
@@ -2521,9 +2566,13 @@ export const buildAgentChatMessages = ({
   error
 }: BuildAgentChatMessagesInput): ReadonlyArray<AgentChatMessage> => {
   const toolNames = collectToolNames(messages, toolRuns)
-  const toolResultsById = collectToolResultsById(messages)
-  const toolCallIds = collectToolCallIds(messages)
-  const toolRunsById = collectToolRunsById(toolRuns)
+  const slots = collectToolCallSlots(messages)
+  const toolCallIds = new Set(slots.map(slot => slot.call.id))
+
+  const sources: ToolPartSources = {
+    toolResultsByPart: collectToolResultsByPart(messages, slots),
+    toolRunsByPart: collectToolRunsByPart(slots, toolRuns)
+  }
 
   const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>(
     (current, message, index) => {
@@ -2540,9 +2589,8 @@ export const buildAgentChatMessages = ({
           sequence: index,
           currentTurnId,
           toolNames,
-          toolResultsById,
           toolCallIds,
-          toolRunsById
+          sources
         })
       ]
     },

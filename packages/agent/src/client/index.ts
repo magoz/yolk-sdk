@@ -11,6 +11,7 @@ export {
   isActiveToolRun,
   markAgentAborted,
   markAgentError,
+  markAgentRunStart,
   reduceAgentEvents,
   submitAgentUserMessage,
   toolRunsFromHitlRequests
