@@ -8,8 +8,9 @@
  * empty strings that keep values, payment filters that skip unbooked invoices, `ErrorInformation`
  * rejections, read-only `Country`) are implemented and listed in `fortnoxEmulatorQuirks`.
  *
- * It also serves the connector's read-only resources (`GET` only, no fixture: unverified, minimal
- * synthetic shapes named after the connector's read fields): articles, price lists and prices,
+ * It also serves the connector's read-only resources (`GET` only, unverified, minimal synthetic
+ * shapes named after the connector's read fields, each route citing the read conformance cases
+ * whose synthetic fixtures are the source of its shape): articles, price lists and prices,
  * cost centers, customer and supplier invoice payments, offers (with a preview PDF), print
  * templates, the inbox (folder JSON, file bytes), company settings, the locked period, predefined
  * accounts, labels, the modes/terms of payment, terms/ways of delivery, and units registers, and

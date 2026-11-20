@@ -1231,6 +1231,8 @@ type ChatStreamContext = {
   readonly providerIdentity: OpenAiProviderIdentity
   readonly reasoningContent: boolean
   readonly responseFormat: ProviderStreamResponseFormat
+  /** The requested model id: an in-stream error envelope may echo it in its text. */
+  readonly requestModel: string
 }
 
 const initialOpenAiChatStreamState: OpenAiChatStreamState = {
@@ -1351,18 +1353,21 @@ const invalidChatStreamEvent = (
     stream: chatStreamDiagnostics(context.responseFormat, state, invalidField)
   })
 
-const chatStreamError = (
-  providerIdentity: OpenAiProviderIdentity,
-  raw: string
-): Effect.Effect<never, LLMError> =>
+/**
+ * An error envelope inside a stream: no status, so its code or, failing that, its text decides the
+ * kind. The requested model and the envelope's `param` object values are removed from that text,
+ * as on the HTTP path, so an echoed model id never decides it.
+ */
+const chatStreamError = (context: ChatStreamContext, raw: string): Effect.Effect<never, LLMError> =>
   Effect.gen(function* () {
+    const { providerIdentity } = context
     const error = yield* decodeOpenAiHttpError(raw)
 
     const provider = classifyProviderFailure({
       provider: providerIdentity.id,
       body: raw,
       providerCode: error.code,
-      echoedValues: error.echoedValues,
+      echoedValues: [context.requestModel, ...error.echoedValues],
       kindCodes: error.kindCodes
     })
 
@@ -1426,7 +1431,7 @@ const processChatStreamPayload = (
     const envelope = isJsonRecord(parsed) ? jsonRecordField(parsed, 'error') : undefined
 
     if (envelope !== undefined && isJsonRecord(envelope)) {
-      return yield* chatStreamError(context.providerIdentity, payload)
+      return yield* chatStreamError(context, payload)
     }
 
     const chunk = yield* Schema.decodeUnknownEffect(OpenAiChatStreamChunk)(parsed).pipe(
@@ -1706,15 +1711,13 @@ const expectChatSseResponse = (
 }
 
 const streamOpenAiChatResponse = (
-  providerIdentity: OpenAiProviderIdentity,
-  reasoningContent: boolean,
-  responseFormat: ProviderStreamResponseFormat,
+  context: ChatStreamContext,
   response: HttpClientResponse.HttpClientResponse
 ): Stream.Stream<LLMEvent, LLMError> =>
   Stream.unwrap(
     Ref.make(initialOpenAiChatStreamState).pipe(
       Effect.map(stateRef => {
-        const context: ChatStreamContext = { providerIdentity, reasoningContent, responseFormat }
+        const { providerIdentity } = context
 
         const chunks = response.stream.pipe(
           Stream.mapError(toHttpClientLlmError(providerIdentity, true)),
@@ -2042,9 +2045,12 @@ const streamOpenAiRequest = (
       const responseFormat = yield* expectChatSseResponse(providerIdentity, response)
 
       return streamOpenAiChatResponse(
-        providerIdentity,
-        config.reasoningContent ?? false,
-        responseFormat,
+        {
+          providerIdentity,
+          reasoningContent: config.reasoningContent ?? false,
+          responseFormat,
+          requestModel: request.model
+        },
         response
       )
     })

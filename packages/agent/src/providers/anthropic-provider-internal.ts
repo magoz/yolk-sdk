@@ -1888,6 +1888,7 @@ type AnthropicProviderSignalClassifyFields = {
   provider: string
   message: string
   kindCodes: ReadonlyArray<string>
+  echoedValues: ReadonlyArray<string>
   providerCode?: string
   fallbackKind?: ProviderFailureKind
 }
@@ -1895,6 +1896,7 @@ type AnthropicProviderSignalClassifyFields = {
 type AnthropicProviderSignalInputFields = {
   message: string
   kindCodes: ReadonlyArray<string>
+  echoedValues: ReadonlyArray<string>
   providerCode?: string
 }
 
@@ -1914,6 +1916,8 @@ const providerSignalError = (input: {
   readonly message: string
   readonly providerCode?: string
   readonly kindCodes?: ReadonlyArray<string>
+  /** Request values (the model id) the message may echo, removed before its text is read. */
+  readonly echoedValues: ReadonlyArray<string>
   readonly fallbackKind?: ProviderFailureKind
 }) => {
   const provider = classifyProviderFailure(
@@ -1921,7 +1925,8 @@ const providerSignalError = (input: {
       const fields: AnthropicProviderSignalClassifyFields = {
         provider: anthropicClaudeProvider,
         message: input.message,
-        kindCodes: input.kindCodes ?? []
+        kindCodes: input.kindCodes ?? [],
+        echoedValues: input.echoedValues
       }
 
       if (input.providerCode !== undefined) {
@@ -2085,18 +2090,23 @@ const emptyUsageStep = (previous: AnthropicUsageComponents): AnthropicStreamUsag
 /**
  * How a response is read. Claude decodes its prefixed tool names, accepts a JSON body without a
  * `stop_reason` (compatibility) and keeps thinking signatures under `reasoningReplayProvider`;
- * without one, thinking stays text only. Every stream requires `message_stop`.
+ * without one, thinking stays text only. Every stream requires `message_stop`. `echoedValues` are
+ * the request values (the model id) an in-stream `error` event may echo, kept out of its
+ * classification; providers pass `[request.model]`, and the request-less public stream helper
+ * none.
  */
 type AnthropicResponseOptions = {
   readonly decodeToolName: (name: string) => string
   readonly requireJsonStopReason: boolean
   readonly reasoningReplayProvider: string | undefined
+  readonly echoedValues: ReadonlyArray<string>
 }
 
 const anthropicClaudeResponseOptions: AnthropicResponseOptions = {
   decodeToolName: unprefixClaudeToolName,
   requireJsonStopReason: false,
-  reasoningReplayProvider: anthropicClaudeProvider
+  reasoningReplayProvider: anthropicClaudeProvider,
+  echoedValues: []
 }
 
 /** Thinking text; omitted thinking (`display: 'omitted'`) has none and emits nothing. */
@@ -2521,7 +2531,8 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
           (() => {
             const fields: AnthropicProviderSignalInputFields = {
               message: stringField(error, 'message') ?? 'Anthropic Claude stream error',
-              kindCodes: anthropicErrorKindCodes(error)
+              kindCodes: anthropicErrorKindCodes(error),
+              echoedValues: options.echoedValues
             }
 
             if (providerCode !== undefined) {
@@ -2810,7 +2821,12 @@ export const makeAnthropicClaudeProviderLayer = (config: AnthropicClaudeProvider
       return LLMProvider.of({
         stream: request =>
           Stream.fromEffect(sendAnthropicClaudeRequest(config, request, client, sessionId)).pipe(
-            Stream.flatMap(response => streamAnthropicResponse(response))
+            Stream.flatMap(response =>
+              streamAnthropicResponse(response, {
+                ...anthropicClaudeResponseOptions,
+                echoedValues: [request.model]
+              })
+            )
           )
       })
     })
