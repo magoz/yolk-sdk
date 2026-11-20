@@ -1,5 +1,11 @@
 # @yolk-sdk/extractors
 
+## 0.1.0-canary.148
+
+### Patch Changes
+
+- @yolk-sdk/knowledge@0.1.0-canary.148
+
 ## 0.1.0-canary.147
 
 ### Patch Changes

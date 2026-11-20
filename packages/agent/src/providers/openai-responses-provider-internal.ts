@@ -8,7 +8,6 @@ import {
   Predicate,
   Redacted,
   Ref,
-  Result,
   Stream
 } from 'effect'
 import {
@@ -18,6 +17,7 @@ import {
   type HttpClientResponse
 } from 'effect/http'
 import * as Schema from 'effect/Schema'
+import type * as SchemaIssue from 'effect/SchemaIssue'
 import {
   AgentInputUsage,
   AgentOutputUsage,
@@ -91,9 +91,10 @@ export type OpenAiResponsesProviderConfig = OpenAiResponsesAuthentication & {
   readonly allowEofCompletion: boolean
   readonly requireJsonCompletion?: boolean
   /**
-   * Codex compatibility: an SSE `response.completed` whose `output` is missing or lacks a required
-   * key (`isMissingResponsesFinalOutputError`) ends the turn with what streamed, as Done marked
-   * `usageUnavailable` (its usage cannot be read either).
+   * Codex compatibility: a final response (SSE `response.completed` or JSON body) whose `output`
+   * is missing or lacks a required key (`isMissingFinalOutputIssue`) completes with its decodable
+   * output items and usage (`recoveredFinalResponse`); a streamed Done is marked only when that
+   * usage is missing or does not decode.
    */
   readonly recoverMissingFinalOutput?: boolean
   readonly unsupportedContentProviderName?: string
@@ -227,6 +228,8 @@ class OpenAiResponsesFunctionCallOutput extends Schema.Class<OpenAiResponsesFunc
   'OpenAiResponsesFunctionCallOutput'
 )({
   type: Schema.Literals(['function_call']),
+  /** The output item id: a final `output` replays a streamed call under the same one. */
+  id: Schema.optional(Schema.String),
   call_id: Schema.String,
   name: Schema.String,
   arguments: Schema.String
@@ -289,15 +292,36 @@ const schemaErrorToLlmError =
       retryable: false
     })
 
+type IssuePath = ReadonlyArray<PropertyKey>
+
+const noMissingKeys = (): ReadonlyArray<IssuePath> => []
+
+/** The path of every `MissingKey` in a decode failure, each union member's included. */
+const missingKeyPaths = (issue: SchemaIssue.Issue, path: IssuePath): ReadonlyArray<IssuePath> =>
+  Match.value(issue).pipe(
+    Match.tagsExhaustive({
+      Pointer: pointer => missingKeyPaths(pointer.issue, [...path, ...pointer.path]),
+      Composite: composite => composite.issues.flatMap(child => missingKeyPaths(child, path)),
+      AnyOf: anyOf => anyOf.issues.flatMap(child => missingKeyPaths(child, path)),
+      Filter: filter => missingKeyPaths(filter.issue, path),
+      Encoding: encoding => missingKeyPaths(encoding.issue, path),
+      MissingKey: () => [path],
+      InvalidType: noMissingKeys,
+      InvalidValue: noMissingKeys,
+      UnexpectedKey: noMissingKeys,
+      Forbidden: noMissingKeys,
+      OneOf: noMissingKeys
+    })
+  )
+
 /**
- * A final response whose `output` (or a key inside it) is missing: the decode failure Codex
- * compatibility recovers from, in the SSE parser (`recoverMissingFinalOutput`, marked) and in the
- * Codex wrapper for JSON responses (unmarked).
+ * A final response decode failure whose `output`, or a key inside one of its items, is missing:
+ * the failure Codex compatibility recovers from (`recoverMissingFinalOutput`). Read from the
+ * issue, never the formatted message, so no other failure whose text happens to read "Missing
+ * key" and `["output"]` looks recoverable.
  */
-export const isMissingResponsesFinalOutputError = (error: LLMError) =>
-  error.cause === 'invalid_response' &&
-  error.message.includes('Missing key') &&
-  error.message.includes('["output"]')
+export const isMissingFinalOutputIssue = (issue: SchemaIssue.Issue) =>
+  missingKeyPaths(issue, []).some(path => path[0] === 'output')
 
 const encodeJsonString = (value: Schema.Json, message: string) =>
   Schema.encodeEffect(JsonFromJsonString)(value).pipe(
@@ -818,6 +842,11 @@ type OpenAiResponsesProviderDescriptor = {
   readonly requireJsonCompletion?: boolean
   readonly preserveOutputOrder?: boolean
   readonly recoverMissingFinalOutput?: boolean
+  /**
+   * Request values (the model id) an in-stream error event may echo in its message, removed
+   * before its text is classified. Set per request; absent where the request is unknown.
+   */
+  readonly echoedValues?: ReadonlyArray<string>
 }
 
 type OpenAiResponsesLlmErrorFields = {
@@ -825,6 +854,7 @@ type OpenAiResponsesLlmErrorFields = {
   message: string
   retryable: boolean
   provider?: LLMError['provider']
+  responseIssue?: LLMError['responseIssue']
 }
 
 export const withOpenAiResponsesProviderName = (providerName: string, error: LLMError) =>
@@ -840,6 +870,10 @@ export const withOpenAiResponsesProviderName = (providerName: string, error: LLM
         fields.provider = error.provider
       }
 
+      if (error.responseIssue !== undefined) {
+        fields.responseIssue = error.responseIssue
+      }
+
       return fields
     })()
   )
@@ -848,6 +882,7 @@ type OpenAiResponsesClassifyFields = {
   provider: string
   message: string
   kindCodes: ReadonlyArray<string>
+  echoedValues: ReadonlyArray<string>
   providerCode?: string
   fallbackKind?: ProviderFailureKind
 }
@@ -855,6 +890,7 @@ type OpenAiResponsesClassifyFields = {
 type OpenAiResponsesSignalInputFields = {
   message: string
   kindCodes: ReadonlyArray<string>
+  echoedValues: ReadonlyArray<string>
   providerCode?: string
 }
 
@@ -864,6 +900,8 @@ const providerSignalError = (
     readonly message: string
     readonly providerCode?: string
     readonly kindCodes?: ReadonlyArray<string>
+    /** Values the event itself echoes (its `error.param` object), besides the request's. */
+    readonly echoedValues?: ReadonlyArray<string>
     readonly fallbackKind?: ProviderFailureKind
   }
 ) => {
@@ -872,7 +910,8 @@ const providerSignalError = (
       const fields: OpenAiResponsesClassifyFields = {
         provider: descriptor.providerId,
         message: input.message,
-        kindCodes: input.kindCodes ?? []
+        kindCodes: input.kindCodes ?? [],
+        echoedValues: [...(descriptor.echoedValues ?? []), ...(input.echoedValues ?? [])]
       }
 
       if (input.providerCode !== undefined) {
@@ -892,6 +931,29 @@ const providerSignalError = (
     message: `${descriptor.providerName} stream error: ${input.message}`,
     retryable: providerFailureRetryable(provider.kind),
     provider
+  })
+}
+
+/**
+ * A stream that ended before its terminal event (`response.completed`, or the failing
+ * `response.incomplete` / `response.failed`) emitted no `Done`: the loop's incomplete stream,
+ * raised here with `responseIssue: 'missing_done'` so direct consumers of the provider see it
+ * too. It keeps its `incomplete_stream` code (OpenCode Go re-routes on it). Only providers
+ * without EOF completion raise it: Codex completes such a stream instead, so it emits a `Done`.
+ */
+const missingTerminalEventError = (descriptor: OpenAiResponsesProviderDescriptor) => {
+  const error = providerSignalError(descriptor, {
+    message: 'The provider stream ended before a terminal response event',
+    providerCode: 'incomplete_stream',
+    fallbackKind: 'invalid_response'
+  })
+
+  return new LLMError({
+    cause: error.cause,
+    message: error.message,
+    retryable: error.retryable,
+    provider: error.provider,
+    responseIssue: 'missing_done'
   })
 }
 
@@ -1063,6 +1125,134 @@ const toLlmEvents = (
     return events
   })
 
+/**
+ * What a stream already emitted before its final response: function calls by call id and by
+ * output item id, and whether any text streamed (final text is then dropped as a replay).
+ */
+type StreamedOutput = {
+  readonly toolCallIds: ReadonlySet<string>
+  readonly functionCallItemIds: ReadonlySet<string>
+  readonly hasTextDelta: boolean
+}
+
+const nothingStreamed: StreamedOutput = {
+  toolCallIds: new Set(),
+  functionCallItemIds: new Set(),
+  hasTextDelta: false
+}
+
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value)
+
+const jsonArrayField = (value: Schema.Json | undefined, key: string) => {
+  const raw = jsonField(value, key)
+
+  return raw !== undefined && isJsonArray(raw) ? raw : []
+}
+
+/** Whether a raw `function_call` item replays a call the stream emitted (`call_id` or `id`). */
+const isEmittedFunctionCall = (item: Schema.Json, emitted: StreamedOutput) => {
+  const callId = stringField(item, 'call_id')
+  const itemId = stringField(item, 'id')
+
+  return (
+    (callId !== undefined && emitted.toolCallIds.has(callId)) ||
+    (itemId !== undefined && emitted.functionCallItemIds.has(itemId))
+  )
+}
+
+/** Whether a raw `message` item carries text: a content part with a non-empty `text`. */
+const carriesText = (item: Schema.Json) =>
+  jsonArrayField(item, 'content').some(part => {
+    const text = stringField(part, 'text')
+
+    return text !== undefined && text.length > 0
+  })
+
+/**
+ * Whether dropping a raw output item that does not decode loses what the model said: a
+ * `function_call` the stream never emitted (`isEmittedFunctionCall`), or a `message` carrying text
+ * when no text streamed (once text streamed, every final message is a replay the parser drops
+ * anyway; one without text, such as an empty preamble, says nothing). Reasoning and unknown items
+ * are dropped.
+ */
+const losesUnstreamedOutput = (item: Schema.Json, streamed: StreamedOutput) => {
+  switch (stringField(item, 'type')) {
+    case 'function_call':
+      return !isEmittedFunctionCall(item, streamed)
+    case 'message':
+      return !streamed.hasTextDelta && carriesText(item)
+    default:
+      return false
+  }
+}
+
+/**
+ * Codex compatibility (`recoverMissingFinalOutput`) for a final response whose decode failed with
+ * `isMissingFinalOutputIssue`: its output items are decoded one by one, so the valid ones count
+ * (function calls the stream never emitted included) and the others are dropped, and its `usage`
+ * is kept when it decodes on its own (else left out, and a streamed Done says so). An item whose
+ * loss would drop what the model said (`losesUnstreamedOutput`) fails the response with its decode
+ * error (`failure`) instead, so the turn never ends as if finished without it.
+ */
+const recoveredFinalResponse = (
+  raw: Schema.Json | undefined,
+  streamed: StreamedOutput,
+  failure: LLMError
+): Effect.Effect<OpenAiResponsesResponse, LLMError> => {
+  const items = jsonArrayField(raw, 'output').map(item => ({
+    item,
+    decoded: Schema.decodeUnknownOption(OpenAiResponsesOutputItem)(item)
+  }))
+
+  const losesOutput = items.some(
+    ({ item, decoded }) => Option.isNone(decoded) && losesUnstreamedOutput(item, streamed)
+  )
+
+  if (losesOutput) return Effect.fail(failure)
+
+  return Effect.succeed(
+    OpenAiResponsesResponse.make({
+      output_text: stringField(raw, 'output_text'),
+      output: Arr.getSomes(items.map(({ decoded }) => decoded)),
+      usage: Option.getOrUndefined(
+        Schema.decodeUnknownOption(OpenAiResponsesUsageResponse)(jsonField(raw, 'usage'))
+      )
+    })
+  )
+}
+
+/** A final response as decoded, or as `recoveredFinalResponse` read it. */
+type FinalResponse = {
+  readonly response: OpenAiResponsesResponse
+  readonly recovered: boolean
+}
+
+const decodeFinalResponse = (
+  descriptor: OpenAiResponsesProviderDescriptor,
+  raw: Schema.Json | undefined,
+  streamed: StreamedOutput
+): Effect.Effect<FinalResponse, LLMError> =>
+  Schema.decodeUnknownEffect(OpenAiResponsesResponse)(raw).pipe(
+    Effect.map(response => ({ response, recovered: false })),
+    Effect.catch(error => {
+      const failure = schemaErrorToLlmError(
+        'invalid_response',
+        'Invalid OpenAI Responses response'
+      )(error)
+
+      if (
+        descriptor.recoverMissingFinalOutput !== true ||
+        !isMissingFinalOutputIssue(error.issue)
+      ) {
+        return Effect.fail(failure)
+      }
+
+      return recoveredFinalResponse(raw, streamed, failure).pipe(
+        Effect.map(response => ({ response, recovered: true }))
+      )
+    })
+  )
+
 const parseOpenAiResponsesJsonResponse = (
   descriptor: OpenAiResponsesProviderDescriptor,
   raw: string
@@ -1080,25 +1270,22 @@ const parseOpenAiResponsesJsonResponse = (
       )
     }
 
-    const parsed = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(json).pipe(
-      Effect.mapError(
-        schemaErrorToLlmError('invalid_response', 'Invalid OpenAI Responses response')
-      )
-    )
+    // Nothing streamed before a JSON body, so every call and message it holds is unseen.
+    const final = yield* decodeFinalResponse(descriptor, json, nothingStreamed)
 
-    return yield* toLlmEvents(parsed, {
-      allowEmptyStop: false,
+    // A recovered JSON response may hold nothing: it still completes, unmarked (JSON responses
+    // never carry `usageUnavailable`).
+    return yield* toLlmEvents(final.response, {
+      allowEmptyStop: final.recovered,
       preserveOutputOrder: descriptor.preserveOutputOrder === true
     })
   })
 
 type OpenAiResponsesBodyFormat = 'undecided' | 'sse' | 'json'
 
-type OpenAiResponsesSseState = {
-  readonly hasTextDelta: boolean
+type OpenAiResponsesSseState = StreamedOutput & {
   readonly hasReasoningDelta: boolean
   readonly reasoningSummaryPartKey: string | undefined
-  readonly toolCallIds: ReadonlySet<string>
   readonly hasDone: boolean
 }
 
@@ -1118,6 +1305,7 @@ const initialSseState: OpenAiResponsesSseState = {
   hasReasoningDelta: false,
   reasoningSummaryPartKey: undefined,
   toolCallIds: new Set(),
+  functionCallItemIds: new Set(),
   hasDone: false
 }
 
@@ -1237,34 +1425,43 @@ const eventsFromOutputItem = (
   }
 }
 
+/** The final response without the calls the stream already emitted (`call_id` or item `id`). */
 const responseWithoutReplayedToolCalls = (
   response: OpenAiResponsesResponse,
-  emittedCallIds: ReadonlySet<string>
+  streamed: StreamedOutput
 ): OpenAiResponsesResponse =>
   OpenAiResponsesResponse.make({
     ...response,
     output: response.output.filter(
-      item => item.type !== 'function_call' || !emittedCallIds.has(item.call_id)
+      item =>
+        item.type !== 'function_call' ||
+        !(
+          streamed.toolCallIds.has(item.call_id) ||
+          (item.id !== undefined && streamed.functionCallItemIds.has(item.id))
+        )
     )
   })
 
 const finalResponseToEvents = (
-  parsedFinal: OpenAiResponsesResponse,
+  final: FinalResponse,
   state: OpenAiResponsesSseState,
   hasToolCalls: boolean,
   preserveOutputOrder: boolean
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const finalEvents = yield* toLlmEvents(
-      responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
-      { allowEmptyStop: state.hasTextDelta || hasToolCalls, preserveOutputOrder }
-    )
+    const parsedFinal = final.response
+
+    // A recovered response completes even with nothing in it or streamed before it.
+    const finalEvents = yield* toLlmEvents(responseWithoutReplayedToolCalls(parsedFinal, state), {
+      allowEmptyStop: final.recovered || state.hasTextDelta || hasToolCalls,
+      preserveOutputOrder
+    })
 
     const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || hasToolCalls
     const dedupedEvents = shouldDedupe ? dedupeSseEvents(state, finalEvents) : finalEvents
 
-    // Responses always reports usage on `response.completed`; one without it completes the turn,
-    // but Done says the usage never arrived.
+    // Responses always reports usage on `response.completed`; one without it (or a recovered one
+    // whose usage does not decode) completes the turn, but Done says the usage never arrived.
     const usageUnavailable = parsedFinal.usage === undefined
 
     if (!hasToolCalls && !usageUnavailable) {
@@ -1371,6 +1568,13 @@ const processSseData = (
       const events = dedupeSseEvents(state, outputItemDoneEvents)
       const emittedToolCallIds = toolCallIdsFromEvents(events)
 
+      // The item id of a streamed call, so a final `output` replaying it without its `call_id`
+      // still reads as a replay (`isEmittedFunctionCall`).
+      const callItemId =
+        toolCallIdsFromEvents(outputItemDoneEvents).length > 0
+          ? stringField(parsed.item, 'id')
+          : undefined
+
       return {
         state: {
           hasTextDelta:
@@ -1380,6 +1584,10 @@ const processSseData = (
             events.some(event => Predicate.isTagged(event, 'ReasoningDelta')),
           reasoningSummaryPartKey: state.reasoningSummaryPartKey,
           toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
+          functionCallItemIds:
+            callItemId === undefined
+              ? state.functionCallItemIds
+              : new Set([...state.functionCallItemIds, callItemId]),
           hasDone: state.hasDone
         },
         events
@@ -1391,42 +1599,10 @@ const processSseData = (
         return { state, events: [] }
       }
 
-      const responseInput = parsed.response
       const hasToolCalls = state.toolCallIds.size > 0
 
-      const decodedFinal = yield* Schema.decodeUnknownEffect(OpenAiResponsesResponse)(
-        responseInput
-      ).pipe(
-        Effect.mapError(
-          schemaErrorToLlmError('invalid_response', 'Invalid OpenAI Responses response')
-        ),
-        Effect.result
-      )
-
-      if (Result.isFailure(decodedFinal)) {
-        if (
-          descriptor.recoverMissingFinalOutput !== true ||
-          !isMissingResponsesFinalOutputError(decodedFinal.failure)
-        ) {
-          return yield* Effect.fail(decodedFinal.failure)
-        }
-
-        // The undecodable response's usage cannot be read either.
-        return {
-          state: { ...state, hasDone: true },
-          events: [
-            LLMDone.make({
-              stopReason: hasToolCalls ? 'tool_use' : 'stop',
-              usageUnavailable: true
-            })
-          ]
-        }
-      }
-
-      const parsedFinal = decodedFinal.success
-
       const events = yield* finalResponseToEvents(
-        parsedFinal,
+        yield* decodeFinalResponse(descriptor, parsed.response, state),
         state,
         hasToolCalls,
         descriptor.preserveOutputOrder === true
@@ -1442,6 +1618,7 @@ const processSseData = (
           hasReasoningDelta: state.hasReasoningDelta || emittedReasoning,
           reasoningSummaryPartKey: state.reasoningSummaryPartKey,
           toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
+          functionCallItemIds: state.functionCallItemIds,
           hasDone: true
         },
         events
@@ -1459,7 +1636,8 @@ const processSseData = (
           (() => {
             const fields: OpenAiResponsesSignalInputFields = {
               message,
-              kindCodes: typeKindCodes(error)
+              kindCodes: typeKindCodes(error),
+              echoedValues: echoedParamValues(jsonField(error, 'param'))
             }
 
             if (providerCode !== undefined) {
@@ -1499,7 +1677,8 @@ const processSseData = (
             // An `error` event's `type` is the event type, not an error type: no kind codes.
             const fields: OpenAiResponsesSignalInputFields = {
               message: parsed.message,
-              kindCodes: []
+              kindCodes: [],
+              echoedValues: echoedParamValues(jsonField(parsed, 'param'))
             }
 
             if (providerCode !== undefined) {
@@ -1605,18 +1784,13 @@ const finalizeBodyState = (
       }
     }
 
+    // `hasDone` is set with the only SSE `Done`, so here no `Done` was emitted.
     if (!sseState.hasDone) {
       if (!descriptor.allowEofCompletion) {
-        return yield* Effect.fail(
-          providerSignalError(descriptor, {
-            message: 'The provider stream ended before a terminal response event',
-            providerCode: 'incomplete_stream',
-            fallbackKind: 'invalid_response'
-          })
-        )
+        return yield* Effect.fail(missingTerminalEventError(descriptor))
       }
 
-      // Usage arrives only on `response.completed`, which never came.
+      // Codex EOF completion. Usage arrives only on `response.completed`, which never came.
       events.push(
         LLMDone.make({
           stopReason: sseState.toolCallIds.size > 0 ? 'tool_use' : 'stop',
@@ -1829,7 +2003,12 @@ export const makeOpenAiResponsesProviderLayer = (config: OpenAiResponsesProvider
       return LLMProvider.of({
         stream: request =>
           Stream.fromEffect(sendOpenAiResponsesRequest(config, request, client)).pipe(
-            Stream.flatMap(response => streamOpenAiResponsesResponse(descriptor, response))
+            Stream.flatMap(response =>
+              streamOpenAiResponsesResponse(
+                { ...descriptor, echoedValues: [request.model] },
+                response
+              )
+            )
           )
       })
     })

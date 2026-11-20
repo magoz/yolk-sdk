@@ -193,7 +193,8 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
               streamAnthropicResponse(response, {
                 decodeToolName: name => name,
                 requireJsonStopReason: true,
-                reasoningReplayProvider: undefined
+                reasoningReplayProvider: undefined,
+                echoedValues: [request.model]
               })
             ),
             Stream.mapError(mapError)

@@ -104,7 +104,10 @@ the server that just failed. When a response is malformed (a Chat Completions pa
 terminal event) before any event was emitted, the adapter sends the request once more under `<session>.reroute`, giving up that
 request's cached prefix; model decisions such as `length` are never retried. The session is the
 request `cacheKey`, else the `x-opencode-session` extra header; without either the request is resent
-unchanged.
+unchanged. A Messages or Responses stream cut before its terminal event that is not re-routed
+(output had begun, or the re-routed request was cut too) fails as non-retryable `invalid_response`
+with `responseIssue: 'missing_done'`, the loop's incomplete stream (Responses keep
+`providerCode: 'incomplete_stream'`).
 
 Go reports safe failures under provider ID `opencode_go`. Credentials, model capabilities, supported
 reasoning efforts, allowance polling/persistence, and UI remain host-owned. Read allowance with
@@ -127,10 +130,18 @@ const ProviderLayer = makeOpenAiCodexProviderLayer({
 The ChatGPT subscription endpoint rejects vendor `max_output_tokens`, so the adapter does not expose
 an output-token limit. The optional deprecated `maxOutputTokens` field is ignored for compatibility.
 
-Codex synthesizes `Done` only for the specific missing-final-`output` invalid response (the error
-message includes `Missing key` and `["output"]`). The stop reason is `tool_use` if a tool call was
-already emitted, otherwise `stop`. Unrelated invalid responses still fail. This is not generic
-kernel `missing_done` recovery and does not replay tools.
+Codex completes a final response (streamed `response.completed` or a JSON body) whose `output` is
+missing or misses a required key, decided from the decode issue (a missing key under `output`),
+never from the error message. It reads `output` item by item: valid items still count, so a function
+call the stream never emitted still runs, and the stop reason is `tool_use` when any call was
+emitted, otherwise `stop`; items that do not decode are dropped. A function call that does not decode
+must replay one the stream already emitted (same `call_id` or item `id`), and a message that does not
+decode and carries text must be one whose text already streamed: otherwise the response fails as a non-retryable
+`invalid_response`, since ending the turn would lose that call or answer. The response's `usage` is
+reported when it decodes; a streamed `Done` is marked `usageUnavailable` only when it is missing or
+does not decode. Unrelated invalid responses still fail. A stream cut before `response.completed` also completes (EOF
+compatibility), so Codex never reports `missing_done`; this is not generic kernel `missing_done`
+recovery and does not replay tools.
 
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and the exact `@yolk-sdk/agent/providers/openai/codex` subpath:
 
@@ -160,6 +171,11 @@ const ProviderLayer = makeXAiGrokProviderLayer({
 `clientVersion` is required and sent as `x-grok-client-version`: the CLI proxy version-gates
 requests and rejects missing or outdated client versions with HTTP 426. The host owns the value and
 should keep it current with the minimum Grok CLI version the proxy accepts.
+
+Grok requires `response.completed`: a stream that ends without it emits no `Done` and fails as
+non-retryable `invalid_response` with `providerCode: 'incomplete_stream'` and
+`responseIssue: 'missing_done'`, the loop's incomplete stream (earlier releases left
+`responseIssue` unset), so harness hosts continue or recover the turn instead of failing the run.
 
 This adapter sends consumer OAuth credentials only to the xAI CLI proxy by default. It does not use
 `XAI_API_KEY` or `https://api.x.ai/v1`. OAuth helpers live in

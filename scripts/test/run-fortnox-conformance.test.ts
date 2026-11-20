@@ -198,9 +198,23 @@ describe('run-fortnox-conformance plan', () => {
       ['fortnox.invoice.row-discount-sticky', 'writes-not-allowed'],
       ['fortnox.customer.empty-string-keeps-value', 'writes-not-allowed'],
       ['fortnox.write.rejection-error-information', 'writes-not-allowed'],
-      ['fortnox.invoice.send-email', 'manual-only']
+      ['fortnox.invoice.send-email', 'manual-only'],
+      ['fortnox.company.information-decodes', 'runs'],
+      ['fortnox.customer.list-matches-get', 'runs'],
+      ['fortnox.article.list-row-numeric-strings', 'runs'],
+      ['fortnox.price.tier-matches-sublist', 'runs'],
+      ['fortnox.cost-center.list-matches-get', 'runs'],
+      ['fortnox.payment.invoice-payment-wire-numbers', 'runs'],
+      ['fortnox.payment.supplier-payment-wire-numbers', 'runs'],
+      ['fortnox.offer.rows-on-get-and-preview-pdf', 'runs'],
+      ['fortnox.print-templates.unpaginated', 'runs'],
+      ['fortnox.inbox.file-bytes-match-size', 'runs'],
+      ['fortnox.settings.company-and-locked-period', 'runs'],
+      ['fortnox.settings.predefined-accounts-and-labels', 'runs'],
+      ['fortnox.settings.registers-list-matches-get', 'runs'],
+      ['fortnox.profile.me', 'runs']
     ])
-    expect(skips(['--allow-writes', 'reversible']).at(-1)).toEqual([
+    expect(skips(['--allow-writes', 'reversible'])[6]).toEqual([
       'fortnox.invoice.send-email',
       'manual-only'
     ])
@@ -209,7 +223,7 @@ describe('run-fortnox-conformance plan', () => {
       ['fortnox.customer.empty-string-keeps-value', 'runs'],
       ['fortnox.write.rejection-error-information', 'runs']
     ])
-    expect(skips(['--allow-irreversible=fortnox.invoice.send-email']).at(-1)).toEqual([
+    expect(skips(['--allow-irreversible=fortnox.invoice.send-email'])[6]).toEqual([
       'fortnox.invoice.send-email',
       'runs'
     ])
@@ -228,6 +242,20 @@ describe('run-fortnox-conformance plan', () => {
       'RUN   fortnox.customer.empty-string-keeps-value  [write-reversible]  needs --customer',
       'RUN   fortnox.write.rejection-error-information  [write-reversible]  needs --missing-customer',
       'SKIP  fortnox.invoice.send-email  [write-irreversible]  manual-only',
+      'RUN   fortnox.company.information-decodes  [read]',
+      'RUN   fortnox.customer.list-matches-get  [read]',
+      'RUN   fortnox.article.list-row-numeric-strings  [read]',
+      'RUN   fortnox.price.tier-matches-sublist  [read]',
+      'RUN   fortnox.cost-center.list-matches-get  [read]',
+      'RUN   fortnox.payment.invoice-payment-wire-numbers  [read]',
+      'RUN   fortnox.payment.supplier-payment-wire-numbers  [read]',
+      'RUN   fortnox.offer.rows-on-get-and-preview-pdf  [read]',
+      'RUN   fortnox.print-templates.unpaginated  [read]',
+      'RUN   fortnox.inbox.file-bytes-match-size  [read]',
+      'RUN   fortnox.settings.company-and-locked-period  [read]',
+      'RUN   fortnox.settings.predefined-accounts-and-labels  [read]',
+      'RUN   fortnox.settings.registers-list-matches-get  [read]',
+      'RUN   fortnox.profile.me  [read]',
       "Use a Fortnox developer test company only, with the repository owner's approval; never in CI. Row and customer write cases restore what they change; the rejection case writes only if Fortnox wrongly accepts it."
     ])
   })

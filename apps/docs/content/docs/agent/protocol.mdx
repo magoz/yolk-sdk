@@ -132,7 +132,8 @@ for (const event of events) {
 `AgentAwaitingInput` carry the run's total. When a model stream completes without the usage report
 its request asked for (a streamed chat completion cut after its finish chunk, before the
 `stream_options.include_usage` chunk; a streamed Responses `response.completed` without `usage`; a
-Codex stream without a readable `response.completed`; a Claude or native Messages stream whose
+Codex stream without `response.completed`, or whose recovered `response.completed` has no `usage`
+that decodes; a Claude or native Messages stream whose
 `message_stop` came without a `message_delta` carrying an output count), the turn still completes,
 and that stream's `LLMStreamEnd` carries
 `usageUnavailable: true`. Its usage is then missing from the totals, or partial when the stream
