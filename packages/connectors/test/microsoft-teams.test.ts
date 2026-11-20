@@ -514,6 +514,44 @@ describe('Microsoft Teams actions', () => {
     })
   )
 
+  it.effect('sends without following redirects or ambient credentials; a 3xx is a failure', () =>
+    Effect.gen(function* () {
+      const host = makeHost([response(307, {}), response(308, {}), response(307, {})])
+
+      const sends: ReadonlyArray<{
+        readonly action: string
+        readonly input: Readonly<Record<string, string>>
+        readonly status: number
+      }> = [
+        { action: 'teams.send_chat_message', input: { chatId, content: 'Hej' }, status: 307 },
+        {
+          action: 'teams.send_channel_message',
+          input: { teamId, channelId, content: 'Hej' },
+          status: 308
+        },
+        {
+          action: 'teams.reply_to_channel_message',
+          input: { teamId, channelId, messageId: '1700000000003', content: 'Hej' },
+          status: 307
+        }
+      ]
+
+      for (const { action, input, status } of sends) {
+        const result = yield* invoke(action, input, host.layer)
+
+        expect(result, action).toMatchObject({ _tag: 'Failure', error: { status } })
+      }
+
+      expect(
+        host.requests.map(request => [request.method, request.redirect, request.credentials])
+      ).toEqual([
+        ['POST', 'manual', 'omit'],
+        ['POST', 'manual', 'omit'],
+        ['POST', 'manual', 'omit']
+      ])
+    })
+  )
+
   it.effect('reads and posts in channels under the channel message scopes', () =>
     Effect.gen(function* () {
       const post = {

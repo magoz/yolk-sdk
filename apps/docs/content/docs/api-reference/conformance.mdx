@@ -505,18 +505,23 @@ any invoice Fortnox unexpectedly creates for manual cancellation. See
 [Fortnox conformance cases](../connectors/fortnox#conformance-cases) for the case table, seeds, and
 claims.
 
-`@yolk-sdk/connectors/microsoft/conformance` exports eleven Microsoft Graph cases
+`@yolk-sdk/connectors/microsoft/conformance` exports nineteen Microsoft Graph cases
 (`microsoftConformanceCases`), their synthetic fixtures (`microsoftConformanceFixtures`), and the
 seeds they replay with (`microsoftConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
 `CredentialResolver`, and `MicrosoftConformanceConfig` (seed identities in a Microsoft 365 practice
-tenant). Outlook and OneDrive cases run the real connector actions. The connector has no calendar
-actions yet, so the four calendar cases send raw Graph requests through the same ports and pin
-expected Graph behaviour (unverified until a live run) for hosts and the Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Write
-cases create their own event, draft, or folder and remove it again automatically when its id is
-recoverable, failing with `MicrosoftConformanceRestoreFailed` when the removal fails or a create
-returns no id. An ambiguous create (transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails
-with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry
-manual-recovery advice. The create is not interruptible and the runner has no request timeout. See [Microsoft conformance cases](../connectors/microsoft#conformance-cases).
+tenant). Outlook, OneDrive, SharePoint site, and Teams cases run the real connector actions. The
+connector has no calendar actions yet, so the four calendar cases send raw Graph requests through
+the same ports and pin expected Graph behaviour (unverified until a live run) for hosts and the
+Microsoft Graph emulator (`@yolk-sdk/emulators/microsoft`). Write cases create their own event,
+draft, or folder and remove it again automatically when its id is recoverable, failing with
+`MicrosoftConformanceRestoreFailed` when the removal fails or a create returns no id. An ambiguous
+create (transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
+`MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`); both messages carry manual-recovery
+advice. The create is not interruptible and the runner has no request timeout. The one
+write-irreversible case, `microsoft.teams.send-chat-message`, posts a real Teams chat message naming
+the seeded `runId` and runs live only by its exact id; an ambiguous send fails with
+`MicrosoftConformanceActionFailed` (`sendOutcome: 'unknown'`). See [Microsoft conformance
+cases](../connectors/microsoft#conformance-cases).
 
 `@yolk-sdk/connectors/email/conformance` exports ten port-level email cases
 (`emailConformanceCases`), their synthetic `PortFixture`s (`emailConformanceFixtures`), and the seeds
@@ -562,7 +567,7 @@ searches, read-only, bounded (at most 10 search pages), and best effort, for unt
 listing pages. The Notion emulator (`@yolk-sdk/emulators/notion`) passes every case offline. See
 [Notion conformance cases](../connectors/notion#conformance-cases).
 
-`@yolk-sdk/connectors/todoist/conformance` exports seven Todoist cases (`todoistConformanceCases`),
+`@yolk-sdk/connectors/todoist/conformance` exports eight Todoist cases (`todoistConformanceCases`),
 their synthetic fixtures (`todoistConformanceFixtures`), and the seeds they replay with
 (`todoistConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
 `TodoistConformanceConfig` (seed ids in a practice Todoist account). Every case runs the real
@@ -576,7 +581,8 @@ seeded project's id, or a task outside the case project, is never deleted
 timeout. The cleanup verifies that the project is gone; that its tasks go with it is checked only
 by the delete case. `findTodoistConformanceLeftovers` lists,
 read-only and bounded (at most 20 listing pages), the active projects whose names start with
-`todoistConformanceRunProjectPrefix` (`yolk-conformance-run-`). See
+`todoistConformanceRunProjectPrefix` (`yolk-conformance-run-`); the project paging case
+(`todoist.projects.list-cursor-paging`) sends its listing request, so a fixture records it. See
 [Todoist conformance cases](../connectors/todoist#conformance-cases).
 
 `@yolk-sdk/connectors/telegram/conformance` exports four Telegram cases
@@ -593,7 +599,7 @@ message cannot be deleted through the connector, so it runs only when a person n
 chat. There is no leftover lookup.
 See [Telegram conformance cases](../connectors/telegram#conformance-cases).
 
-`@yolk-sdk/connectors/github/conformance` exports seven GitHub cases (`githubConformanceCases`),
+`@yolk-sdk/connectors/github/conformance` exports eight GitHub cases (`githubConformanceCases`),
 their synthetic fixtures (`githubConformanceFixtures`), and the seeds they replay with
 (`githubConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
 `GithubConformanceConfig` (the practice repository's `owner` and `repo`, a work issue, a label, a
@@ -609,10 +615,11 @@ the run namespace is never adopted (`GithubConformanceCleanupRefused`). The issu
 **write-irreversible**: GitHub issues cannot be deleted through the REST API, so the issue it opens
 stays in the repository, closed, and it runs only when a person names its exact id.
 `findGithubConformanceLeftovers` lists, read-only and bounded, open `yolk-conformance run-*` issues,
-run comments on the work issue, and the seeded label on it. See [GitHub conformance
+run comments on the work issue, and the seeded label on it; the open-listing case
+(`github.issues.open-listing`) sends its listing requests, so a fixture records them. See [GitHub conformance
 cases](../connectors/github#conformance-cases).
 
-`@yolk-sdk/connectors/google/conformance` exports fifteen Gmail, Calendar, and Drive cases
+`@yolk-sdk/connectors/google/conformance` exports nineteen Gmail, Calendar, and Drive cases
 (`googleConformanceCases`), their synthetic fixtures (`googleConformanceFixtures`), and the seeds
 they replay with (`googleConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`,
 `CredentialResolver`, and `GoogleConformanceConfig` (a practice mailbox address, practice messages
@@ -628,8 +635,9 @@ definitive rejection undoes nothing; an ambiguous write fails with `GoogleConfor
 adopted (`GoogleConformanceCleanupRefused`). The send case is **write-irreversible**: Gmail cannot
 unsend, so it runs only when a person names its exact id, and it sends one message whose only
 recipient is the seeded practice address. `findGoogleConformanceLeftovers` lists, read-only and
-bounded, run labels and drafts, the work message in Trash, run events, and run Drive items. See
-[Google conformance cases](../connectors/google#conformance-cases).
+bounded, run labels and drafts, the work message in Trash, run events, and run Drive items; the
+label-listing, draft-search, free-text-query, and trashed-listing cases send its requests, so
+fixtures record them. See [Google conformance cases](../connectors/google#conformance-cases).
 
 `@yolk-sdk/connectors/linkedin-search/conformance` exports seven LinkedIn search cases
 (`linkedInSearchConformanceCases`), their synthetic fixtures (`linkedInSearchConformanceFixtures`,

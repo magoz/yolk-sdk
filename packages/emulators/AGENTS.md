@@ -50,6 +50,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                                                                                                                                                                                               |
 | (internal)                            | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                                                                                                                                                                |
 | (internal)                            | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                                                                                                                                                                                                       |
+| (internal)                            | `src/microsoft/teams-sites*.ts`          | Fixture-only SharePoint site and Teams handlers (`teams-sites.ts`) and the eight fixtures copied as data (`teams-sites-recordings.ts`)                                                                                                                                                                             |
 | (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`, `/kie`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, bearer prefixes, variants, truncation; no core import)             |
 | (internal)                            | `src/stateful-core.ts`                   | The `@emulators/core` adapter every subpath on the stateful wrapper passes as `createCore` (`statefulCoreRuntime`; Node-only, loads the core lazily)                                                                                                                                                               |
 | (internal)                            | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                                                                                                                                                               |
@@ -166,10 +167,18 @@ There is no root export or barrel.
   exception (the Microsoft emulator's legacy extrapolations, below, are behaviours on fixture-backed
   routes, not routes without a fixture). The fixture-only `/todoist`, `/telegram`, `/github`,
   `/google`, `/linkedin-search`, `/mcp`, and `/kie` emulators never add a route without a fixture:
-  every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`, the GitHub one's
-  `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing, draft search,
-  free-text event query, and trashed-included Drive listing have no fixture, so they are not
-  emulated and the lookups fail closed until a fixture records them).
+  every route cites a case (the leftover lookups' reads were added only with read cases recording
+  them, tracking #115: Todoist's project listing, `todoist.projects.list-cursor-paging`; GitHub's
+  open-issue listing and first comment page, `github.issues.open-listing`; Google's label listing,
+  draft search, free-text event query, and trashed-included Drive listing,
+  `google.gmail.label-listing`, `google.gmail.draft-search`, `google.calendar.free-text-query`,
+  `google.drive.list-includes-trashed`). The Google draft search and event query are recorded only
+  empty: they answer only while the state can match nothing (the draft search: no draft created
+  here and no held message labelled `DRAFT`; the event query: no event of the calendar, cancelled
+  included, holding `yolk` or `conformance` in any case in its summary or description, and, while
+  the calendar holds any event, neither word in the calendar's id or summary (the organizer) or the
+  practice address (the creator)) and fail closed otherwise, since Gmail's search syntax and
+  Calendar's free-text matching cannot be emulated.
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -223,7 +232,7 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115), and so are the four Fortnox write routes, the eleven
+  write routes are pending (tracking #115), and so are the four Fortnox write routes, the twelve
   Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
   Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, the fifteen
   Google write routes, and the Kie `createTask` route (the three `/linkedin-search` routes and the
@@ -466,6 +475,23 @@ There is no root export or barrel.
   monitors and their counter; a refusal (404, 400 not emulated, 409 conflict) uses up no fault; a
   message write returns a `HeldAnswer`, and the message is held only once the write is committed, so
   a faulted write writes nothing, creates no monitor, and holds no message.
+  The SharePoint site and Teams routes (`src/microsoft/teams-sites.ts`) are fixture-only, without
+  exceptions, inside this legacy wrapper: they read no entity of the state and answer only the
+  recorded exchanges of their eight fixtures (copied as data in
+  `src/microsoft/teams-sites-recordings.ts`; status, content type, and body byte for byte) for a
+  request whose raw path and decoded query parameters (in any order) equal a recorded one, and only
+  under the `default` profile (the state flag `recordedTeamsSites`): under `empty` every one of them
+  answers the 400 not emulated, since no fixture records an empty listing. Anything else is the 400
+  `SyntheticValueNotEmulated` (or `SyntheticQueryNotEmulated`) before anything is written or a fault
+  is used. The chat send answers only the recorded send chat (a dedicated chat, apart from the
+  paging chat) and text (any run id of the `run-` form, at most 40 characters, in place of the run
+  id the copied body names after the `yolk-conformance` marker), mints the message id from `nextChatMessageNumber` (starting at the
+  recorded id, only advancing; both substituted in one pass, so a run id holding the recorded id
+  survives), and keeps
+  the send in `chatMessagesSent` (Graph cannot undo it; the state-equals-seed proof excludes the
+  counters and that one send); a read of a sent message answers the recorded readback, and a
+  listing of a chat holding one is not emulated. `test/microsoft-teams-sharepoint.test.ts` holds
+  the drift and byte-for-byte replay tests; a changed fixture fails them until this copy follows.
   Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
   `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
   names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
@@ -480,7 +506,8 @@ There is no root export or barrel.
   not emulated, and Notion search considers only pages whose content the state holds. An empty
   listing or search page is no fixture's answer either, so the read-only leftover lookups fail
   against the default seeds (not-emulated, nothing written) and the runners print their
-  lookup-failed `WARN`; never answer an empty page to make them pass. Entity state lives on
+  lookup-failed `WARN`; never answer an empty page to make them pass, unless a committed fixture
+  records that empty page (as the Google draft search and event query fixtures do). Entity state lives on
   `@emulators/core`; the shared wrapper
   `src/stateful-emulator.ts` holds the ledger, faults, and control plane. Each route is
   `statefulRoute(evidence, body, admit, plan)`: `admit` checks the request shape without reading
@@ -554,15 +581,18 @@ There is no root export or barrel.
   header names, and no header but `content-type`. A `match.route` naming no manifest row is
   rejected when the fault is added. So a refused request answers the ledgered 400 not-emulated,
   writes nothing, and never uses a fault; faults are `status` only, 400-599. Only
-  items created through the recorded create flow are written or (for projects) read: seeded projects
-  answer not-emulated on reads (no fixture records their objects), seeded projects and tasks are
+  items created through the recorded create flow are written or (for projects) read alone: seeded
+  projects answer not-emulated on single reads (only the project listing fixture records their
+  objects, and the listing renders them), seeded projects and tasks are
   never updated, closed, or deleted, a case project takes one task and a seeded parent one
   sub-project (`child_order: 1`, as recorded). Created ids use the reserved prefix `6XEmu`
   (`6XEmuProject0001`, `6XEmuTask0000001`), which seeds may not use, so seeded and minted ids never
   collide. Created ids, 404 `event_id`s, and Telegram `message_id`s come from counters that only
   advance (the state-equals-seed proof excludes only the counters, plus Telegram's `sentMessages`: a
   send is irreversible and recorded in state); Todoist cursors are runtime data, valid only as
-  issued since the last reset or seed. Recovery never reads the clock (500 `emulator_error` with
+  issued since the last reset or seed (a project cursor also only while the project listing is
+  unchanged), and their counters never restart, so no cursor value carries across a reset or seed.
+  Recovery never reads the clock (500 `emulator_error` with
   `responseError` for a throwing handler, 400 not-emulated, 503 when closed). The drift tests
   (`test/todoist.test.ts`, `test/telegram.test.ts`) replay every fixture exchange against the
   default seed: Telegram byte for byte, Todoist byte for byte for reads and modulo created ids and
@@ -603,7 +633,9 @@ There is no root export or barrel.
   writes: only items created through the recorded create flow; a new project's `parent_id`: a seeded
   project); any `run-` run id (at most 40 characters) in a case project name; any non-empty task
   `content`; a task update sending `content`, `due_datetime`, or both; a label listing `limit` of 1
-  to 200 that covers every label; Telegram: a well-formed `<digits>:<secret>` bot token with a
+  to 200 that covers every label; a project listing `limit` of 1 to 200, its pages chained through
+  cursors this emulator issued for the same `limit` and unchanged listing; Telegram: a well-formed
+  `<digits>:<secret>` bot token with a
   secret of at least 8 characters (the bot id `0` names no bot); any well-formed `chat_id` string
   (an integer or a public `@username`; one the bot is not in answers the recorded 400 on `getChat`);
   any non-empty message `text`. The bullet has four copies that change together with the unit tests:
@@ -666,11 +698,14 @@ There is no root export or barrel.
   changes within a seed (no route writes labels), so there is no cursor registry. Writes follow only
   the recorded flows (comment create/delete on an open held issue; one repository label added that
   sorts after the issue's labels, or removed unless it is the issue's last (no fixture records an
-  empty answer); issue create; rename and close-as-completed of an issue created here); anything
-  else, including the lifecycle restore's close as `not_planned`, a comment listing of more than one
-  comment, rendering an issue that holds comments, and the leftover lookup's open-issue listing (so
-  `findGithubConformanceLeftovers` fails and runners print their lookup-failed WARN), is not
-  emulated. A write case ends at the seed except the counters, the deleted comment's id
+  empty answer); issue create; rename and close-as-completed of an issue created here); the
+  open-issue listing (`state=open`, `page=1`; the open issues, newest first, on one page, as the
+  open-listing fixture records; only while the state's `impliedIssues` is `closed` or no number is
+  implied; a seed defaults to the profile's value only while it replaces none of `repository`,
+  `issues`, and `nextIssueNumber`, otherwise to `unknown`) and the first comment page (`page=1`
+  instead of `since`), the leftover lookup's reads;
+  anything else, including the lifecycle restore's close as `not_planned`, a comment listing of more
+  than one comment, rendering an issue that holds comments, and issue paging, is not emulated. A write case ends at the seed except the counters, the deleted comment's id
   (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed
   issue (GitHub cannot delete issues); the cross-checks prove exactly that. Drill knobs (`drills`,
   booleans) each fail exactly one case.
@@ -680,16 +715,18 @@ There is no root export or barrel.
   least one outside `[0-9.eE+-]`, that occurs nowhere else in the request (never compared against
   anything, stored, or ledgered); extra request headers; JSON key order; `content-type` media-type
   parameters; the order of query parameters; any non-empty issue title and comment body, and any
-  issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing
-  `per_page` from 1 to 100, with no `page` or a `page` from 2 to one past the last page; any issue
-  search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is
+  issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ` (or, instead of
+  `since`, `page=1`); any label listing `per_page` from 1 to 100, with no `page` or a `page` from 2
+  to one past the last page; any open-issue listing (`state=open`, `page=1`) `per_page` from 1 to
+  100; any issue search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose
+  query after it is
   longer than 256 characters (answered the recorded 422); any issue number the repository has not
   reached (answered the recorded 404); and any issue, comment, repository label, or file the state
   holds where a fixture has one, under the per-route state rules. `Authorization` must be exactly
   `Bearer <token>` (that spelling, one space), `Accept` `application/vnd.github+json`, and
   `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query parameters,
   empty query components such as a bare `?` or a stray `&`, another origin or repository, a repeated
-  query key, an explicit `page=1`, and a comment listing `per_page` other than 100) is not emulated.
+  query key, an explicit `page=1` on the label listing, and a comment listing `per_page` other than 100) is not emulated.
   Copies change together with `test/github.test.ts`: this bullet, the `src/github.ts` header,
   `README.md` (GitHub emulator), and `apps/docs/content/docs/api-reference/emulators.mdx` (GitHub
   emulator).
@@ -707,7 +744,7 @@ There is no root export or barrel.
   own constant reasons, the 13-character run-id reason among them), which the wrapper ledgers in the
   constant entry, or a repeat when the raw decodes cleanly to text holding the bearer, and no
   refused `message.raw` is ever ledgered), and the wrapper's constant-reason `exactQuery` and
-  `exactBodyKeys`. It emulates only the Gmail, Calendar, and Drive routes the fifteen Google cases
+  `exactBodyKeys`. It emulates only the Gmail, Calendar, and Drive routes the nineteen Google cases
   (with their cleanup) send, each on its recorded origin (`https://gmail.googleapis.com` for Gmail
   and the multipart send upload, `https://www.googleapis.com` for Calendar and Drive). Draft
   attachments are not emulated: `gmail.draft_compose`, `gmail.draft_update`, and `gmail.draft_reply`
@@ -757,9 +794,11 @@ There is no root export or barrel.
   recorded `sizeEstimate` of the draft and sent messages (answered by their message reads and the
   draft thread) covers the subject; on the practice send, a `content-type` of exactly
   `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to 70 `[A-Za-z0-9_]`
-  characters and no other parameter; a `gmail.list` or `gmail.list_threads` `maxResults` from 1 to
-  500, a `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize`
-  from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour
+  characters and no other parameter; a `gmail.list`, `gmail.list_threads`, or `gmail.list_drafts`
+  (the recorded `q` only) `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1
+  to 2500 (a range, or the recorded `q`), and a `drive.list_files` `pageSize` from 1 to 1000 (with
+  or without `and trashed = false`); any `timeMin` before `timeMax` (RFC 3339 instants with a real
+  calendar date, hour
   0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the
   state holds where a fixture has an id (writes: only items created here, plus label changes, trash,
   and untrash of a stored non-draft message); and, for an id the state does not hold, only the
@@ -1130,8 +1169,13 @@ credential redaction, calendar overlap, immutable ids, the concurrent-write rule
 `$batch`, folders, the copy monitor through the real connector, handler failures,
 every fixture's complete envelopes, faults including 429 `retry-after`, seeds, control plane), and
 `test/microsoft-conformance.test.ts` (all
-eleven Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
-proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every fixture's
+nineteen Microsoft cases in-process and over a loopback socket, the state-equals-seed proof except
+the counters and the one recorded Teams send, and the drills, one per SharePoint site and Teams
+case), `test/microsoft-teams-sharepoint.test.ts` (the Teams and SharePoint site data copy equal to
+the connector fixtures, every exchange byte for byte alone and in suite order on one emulator,
+minted send ids and run-id substitution, every refusal leaving the state unchanged and a match-all
+fault unused, a faulted send writing nothing, the bearer never ledgered), `test/dropbox.test.ts` and
+`test/notion.test.ts` (manifest, every fixture's
 complete responses byte for byte, the data copies, every fail-closed refusal (by shape and by state)
 writing nothing and using no fault, origins, cursor issuance and provenance, the latitude, the
 clock-safe recovery, credential and `Dropbox-API-Arg` redaction, minted values above seeded ones,
@@ -1157,10 +1201,10 @@ unencodable refusal reason answering the 500; 429 faults through the real connec
 clock-safe recovery; seeds; control plane), and `test/todoist-conformance.test.ts` /
 `test/telegram-conformance.test.ts` (cross-checks A and B: every case in-process and over a loopback
 socket, each comparing every emulator's snapshot with its seed afterwards: equal except the id
-counters (and the one recorded Telegram send); all seven Todoist cases run sequentially against one
+counters (and the one recorded Telegram send); all eight Todoist cases run sequentially against one
 shared emulator, ending at the seed except counters; a `run-<hex>` run id; the leftover lookup
-failing closed (its project listing has no fixture); and one drill per case failing exactly that
-case), `test/github.test.ts` (manifest, the data copies, the drift test replaying every fixture byte
+answering from the recorded project listing (nothing on the seed, a planted case project) and
+failing closed on a listing no fixture records; and one drill per case failing exactly that case), `test/github.test.ts` (manifest, the data copies, the drift test replaying every fixture byte
 for byte (status, every header, body) with minted values substituted only at exact field paths on a
 second run, the latitude, every fail-closed refusal (by shape and by state) asserting a ledgered
 400, an unchanged state, and an unused match-all fault that still answers the next valid request,
@@ -1170,8 +1214,8 @@ numeric body forms, checked against responses and every `/_emulate/*` read), ori
 through the real connector, clock-safe recovery, seeds, control plane),
 `test/github-conformance.test.ts` (all seven cases in-process and over a loopback socket, each
 ending at its seed except the counters, the deleted comment's id, and the closed lifecycle issue;
-all cases twice in sequence on one emulator; the leftover lookup failing closed; one drill per case
-failing exactly that case), `test/google.test.ts` (manifest, the data copies, the drift tests above,
+all cases twice in sequence on one emulator; the leftover lookup finding nothing before and after
+and listing a planted open run issue; one drill per case failing exactly that case), `test/google.test.ts` (manifest, the data copies, the drift tests above,
 the latitude, the 13-character draft and send run ids and the practice-address pin, every
 fail-closed refusal by shape and by state asserting a ledgered 400, an unchanged state, and an
 unused match-all fault that still answers the next valid request, constant-text unrecognised shapes
@@ -1193,8 +1237,9 @@ throwing, non-finite, or out-of-range clock), seeds and minted ids, control plan
 `test/google-conformance.test.ts` (cross-checks A and B: every case in-process and over loopback
 sockets, one per origin, each emulator ending at its seed except the counters, the event cases'
 cancelled events, and the one sent message; all fifteen cases sequentially on one shared emulator;
-another 13-character run id; the leftover lookup failing closed before and after; and one drill per
-case failing exactly that case), `test/linkedin-search.test.ts` (manifest, the data copies and error
+another 13-character run id; the leftover lookup finding nothing before and failing closed after the
+event cases (their cancelled run events), and listing a planted run label and trashed run folder;
+and one drill per case failing exactly that case), `test/linkedin-search.test.ts` (manifest, the data copies and error
 bodies, the drift test replaying every fixture byte for byte with no substitution, alone and all in
 suite order twice on one emulator, the latitude, rejected keys per origin, every fail-closed refusal
 by shape and by state asserting a ledgered 400, an unchanged state, and an unused match-all fault

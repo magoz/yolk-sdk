@@ -31,7 +31,10 @@ import {
   microsoftConformanceFixtureSeeds,
   microsoftConformanceFixtures,
   microsoftOneDriveCreateFolderFixture,
-  microsoftOutlookPagingNextLinkFixture
+  microsoftOutlookPagingNextLinkFixture,
+  microsoftSharePointSearchSitesFixture,
+  microsoftTeamsChatsListMembersFixture,
+  microsoftTeamsMeetingTranscriptsFixture
 } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import {
   liveInCiMessage,
@@ -65,6 +68,7 @@ import {
   renderFixtureModule,
   renderSeedsModule,
   renderedTokenRefusal,
+  sameChatRefusal,
   runMicrosoftInterruptibly,
   runMicrosoftLive,
   runMicrosoftLiveCli,
@@ -85,7 +89,15 @@ const readSeedFlags = [
   '--event=AAMkAGI2-synthetic-event-0001=',
   '--event-start=2026-09-23T12:00:00Z',
   '--attachment-message=AAMkAGI2-synthetic-message-0001=',
-  '--paging-folder=AAMkAGI2-synthetic-folder-0001='
+  '--paging-folder=AAMkAGI2-synthetic-folder-0001=',
+  `--site-query=${microsoftConformanceFixtureSeeds.siteSearchQuery}`,
+  `--site=${microsoftConformanceFixtureSeeds.siteId}`,
+  `--chat=${microsoftConformanceFixtureSeeds.chatId}`,
+  `--send-chat-id=${microsoftConformanceFixtureSeeds.sendChatId}`,
+  `--team=${microsoftConformanceFixtureSeeds.teamId}`,
+  `--channel=${microsoftConformanceFixtureSeeds.channelId}`,
+  `--channel-message=${microsoftConformanceFixtureSeeds.channelMessageId}`,
+  `--meeting-join-url=${microsoftConformanceFixtureSeeds.meetingJoinWebUrl}`
 ]
 
 describe('run-microsoft-conformance arguments', () => {
@@ -155,18 +167,46 @@ describe('run-microsoft-conformance arguments', () => {
       ownerApproved: true,
       account: 'practice',
       allowWrites: 'reversible',
+      allowIrreversible: [],
       seeds: { mailbox: 'ada@example.test', driveId: 'b!synthetic-drive-0001' }
     })
+  })
+
+  it('takes --allow-irreversible only with the exact id of the write-irreversible Teams send', () => {
+    const sendCase = 'microsoft.teams.send-chat-message'
+
+    expect(
+      parseRunArgs(['--allow-irreversible', sendCase, `--allow-irreversible=${sendCase}`])
+        .allowIrreversible
+    ).toEqual([sendCase])
+    expect(liveTarget(parseRunArgs(['--allow-irreversible', sendCase]))).toEqual({
+      kind: 'live',
+      account: 'dry-run',
+      allowWrites: 'none',
+      allowIrreversible: [sendCase]
+    })
+    // The run id is generated per invocation, never taken from a flag or the environment.
+    expect(() => parseRunArgs(['--run-id', 'run-synthetic'])).toThrow('Unknown argument')
+    expect(parseRunArgs([], { MICROSOFT_CONFORMANCE_RUN_ID: 'run-synthetic' }).seeds).toEqual({})
   })
 
   it('rejects unknown flags, bad values, irreversible flags, and --record without --live', () => {
     expect(() => parseRunArgs(['--nope'])).toThrow('Unknown argument')
     expect(() => parseRunArgs(['--mailbox'])).toThrow('requires a value')
     expect(() => parseRunArgs(['--allow-writes=all'])).toThrow('none or reversible')
-    // There are no write-irreversible Microsoft cases, so there is no flag to allow one.
-    expect(() =>
-      parseRunArgs(['--allow-irreversible', 'microsoft.calendar.cancel-semantics'])
-    ).toThrow('Unknown argument')
+
+    // Only the exact id of a write-irreversible case: never a reversible case, a prefix, or `all`.
+    for (const caseId of [
+      'microsoft.calendar.cancel-semantics',
+      'microsoft.teams.send',
+      'all',
+      'MICROSOFT.TEAMS.SEND-CHAT-MESSAGE'
+    ]) {
+      expect(() => parseRunArgs(['--allow-irreversible', caseId]), caseId).toThrow(
+        '--allow-irreversible takes an exact write-irreversible case id: microsoft.teams.send-chat-message'
+      )
+    }
+
     expect(() => parseRunArgs(['--record'])).toThrow('--record requires --live')
   })
 })
@@ -177,8 +217,10 @@ describe('run-microsoft-conformance plan', () => {
       microsoftConformanceCases.map(testCase => testCase.id)
     )
     expect(
-      microsoftConformanceCases.some(testCase => testCase.safety === 'write-irreversible')
-    ).toBe(false)
+      microsoftConformanceCases
+        .filter(testCase => testCase.safety === 'write-irreversible')
+        .map(testCase => testCase.id)
+    ).toEqual(['microsoft.teams.send-chat-message'])
   })
 
   it('runs only read cases by default and every case with reversible writes', () => {
@@ -196,9 +238,25 @@ describe('run-microsoft-conformance plan', () => {
       ['microsoft.outlook.immutable-id-survives-move', 'writes-not-allowed'],
       ['microsoft.outlook.concurrent-writes-same-message', 'writes-not-allowed'],
       ['microsoft.onedrive.create-folder-roundtrip', 'writes-not-allowed'],
-      ['microsoft.onedrive.copy-accepted-monitor', 'writes-not-allowed']
+      ['microsoft.onedrive.copy-accepted-monitor', 'writes-not-allowed'],
+      ['microsoft.sharepoint.search-finds-site', 'runs'],
+      ['microsoft.sharepoint.site-drives-libraries', 'runs'],
+      ['microsoft.teams.chats-list-members', 'runs'],
+      ['microsoft.teams.chat-messages-paging', 'runs'],
+      ['microsoft.teams.team-channels', 'runs'],
+      ['microsoft.teams.channel-message-replies', 'runs'],
+      ['microsoft.teams.meeting-transcripts', 'runs'],
+      ['microsoft.teams.send-chat-message', 'manual-only']
     ])
-    expect(skips(['--allow-writes', 'reversible']).every(([, skip]) => skip === 'runs')).toBe(true)
+    // Reversible writes never start the irreversible send; only its exact id does.
+    expect(skips(['--allow-writes', 'reversible']).filter(([, skip]) => skip !== 'runs')).toEqual([
+      ['microsoft.teams.send-chat-message', 'manual-only']
+    ])
+    expect(
+      skips(['--allow-irreversible', 'microsoft.teams.send-chat-message']).filter(
+        ([, skip]) => skip !== 'runs' && skip !== 'writes-not-allowed'
+      )
+    ).toEqual([])
   })
 
   it('prints a dry-run plan with safety, skip reasons, and missing seeds', () => {
@@ -218,8 +276,30 @@ describe('run-microsoft-conformance plan', () => {
       'RUN   microsoft.outlook.concurrent-writes-same-message  [write-reversible]',
       'RUN   microsoft.onedrive.create-folder-roundtrip  [write-reversible]  needs --drive-parent',
       'RUN   microsoft.onedrive.copy-accepted-monitor  [write-reversible]  needs --drive, --drive-parent, --copy-source',
-      "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations."
+      'RUN   microsoft.sharepoint.search-finds-site  [read]  needs --site-query, --site',
+      'RUN   microsoft.sharepoint.site-drives-libraries  [read]  needs --site',
+      'RUN   microsoft.teams.chats-list-members  [read]',
+      'RUN   microsoft.teams.chat-messages-paging  [read]  needs --chat',
+      'RUN   microsoft.teams.team-channels  [read]  needs --team, --channel',
+      'RUN   microsoft.teams.channel-message-replies  [read]  needs --team, --channel, --channel-message',
+      'RUN   microsoft.teams.meeting-transcripts  [read]  needs --meeting-join-url',
+      'SKIP  microsoft.teams.send-chat-message  [write-irreversible]  manual-only',
+      "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write-reversible cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.",
+      'The write-irreversible microsoft.teams.send-chat-message case posts a real message naming a fresh run id to --send-chat-id that the connector cannot remove; it runs only with --allow-irreversible microsoft.teams.send-chat-message.'
     ])
+  })
+
+  it('plans the Teams send with its exact id, never asking for the generated run id', () => {
+    const report = dryRunReport(
+      parseRunArgs(['--allow-irreversible', 'microsoft.teams.send-chat-message'])
+    )
+
+    expect(report.split('\n')).toContain(
+      'Plan for a live target: allowWrites=none, allowIrreversible=[microsoft.teams.send-chat-message]'
+    )
+    expect(report.split('\n')).toContain(
+      'RUN   microsoft.teams.send-chat-message  [write-irreversible]  needs --send-chat-id'
+    )
   })
 })
 
@@ -294,7 +374,7 @@ describe('run-microsoft-conformance live refusal (no network)', () => {
 
     expect(liveInputs(live([]), env)).toEqual({
       refusal:
-        'Missing seed identities for the cases that would run: --range-start, --range-end, --event, --event-start, --attachment-message, --paging-folder'
+        'Missing seed identities for the cases that would run: --range-start, --range-end, --event, --event-start, --attachment-message, --paging-folder, --site-query, --site, --chat, --team, --channel, --channel-message, --meeting-join-url'
     })
     expect(liveInputs(live([...readSeedFlags, '--event-start=2026-09-23 12:00']), env)).toEqual({
       refusal:
@@ -307,6 +387,39 @@ describe('run-microsoft-conformance live refusal (no network)', () => {
         accessToken: 'synthetic-token',
         seeds: { mailbox: 'ada@example.test', calendarEventStart: '2026-09-23T12:00:00Z' }
       }
+    })
+  })
+
+  it('refuses a send chat that is the paging chat, compared decoded', () => {
+    const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
+    const chatId = microsoftConformanceFixtureSeeds.chatId ?? expect.fail('no chat seed')
+
+    for (const sendChat of [chatId, encodeURIComponent(chatId), chatId.toUpperCase()]) {
+      expect(
+        liveInputs(live([...readSeedFlags, `--send-chat-id=${sendChat}`]), env),
+        sendChat
+      ).toEqual({
+        refusal: sameChatRefusal
+      })
+    }
+
+    expect(liveInputs(live(readSeedFlags), env)).toHaveProperty('inputs')
+  })
+
+  it('generates a fresh run id per invocation and merges it over the seeds', () => {
+    const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
+    const options = live(readSeedFlags)
+    const first = liveInputs(options, env)
+    const second = liveInputs(options, env)
+
+    if (!('inputs' in first) || !('inputs' in second)) {
+      return expect.fail('expected both invocations to be accepted')
+    }
+
+    expect(first.inputs.seeds.runId).toMatch(/^run-[0-9a-f]{8}$/)
+    expect(second.inputs.seeds.runId).not.toBe(first.inputs.seeds.runId)
+    expect(liveInputs(options, env, 'run-fixed')).toMatchObject({
+      inputs: { seeds: { runId: 'run-fixed' } }
     })
   })
 
@@ -573,6 +686,70 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
       'names and subjects: "Synthetic planning session"'
     )
     expect(result.success.checklist.join('\n')).not.toContain('SHARED SEED')
+    // The staged seeds module is scanned like the fixtures.
+    expect(result.success.checklist).toContain('  seeds.ts: no candidates found; still read it')
+  })
+
+  it('scans the staged seeds one by one, so a stray % never hides a tenant GUID', async () => {
+    const tenant = '7d5c4b3a-2f1e-4d0c-9b8a-6f5e4d3c2b1a'
+    const syntheticTenant = '00000000-0000-4000-8000-00000000c0de'
+    const withTenant = (text: string) => text.replaceAll(syntheticTenant, tenant)
+
+    const rewritten = (
+      fixture: WireFixture,
+      rewrite: (text: string) => string
+    ): ReadonlyArray<WireExchange> =>
+      fixture.exchanges.map(({ request, response }) =>
+        isWireStreamResponse(response) || isWireBase64BodyResponse(response)
+          ? expect.fail('expected text answers')
+          : {
+              request: { ...request, url: rewrite(request.url) },
+              response: { ...response, body: rewrite(response.body) }
+            }
+      )
+
+    const searchId = microsoftSharePointSearchSitesFixture.caseId
+    const meetingId = microsoftTeamsMeetingTranscriptsFixture.caseId
+
+    const recorders = new Map([
+      [
+        searchId,
+        recorderOf(
+          rewritten(microsoftSharePointSearchSitesFixture, text =>
+            text.replace('search=synthetic', 'search=50%25+off')
+          )
+        )
+      ],
+      [meetingId, recorderOf(rewritten(microsoftTeamsMeetingTranscriptsFixture, withTenant))]
+    ])
+
+    const { writer } = memoryWriter()
+
+    const result = await Effect.runPromise(
+      stageRecordings(
+        passedReport([searchId, meetingId]),
+        recorders,
+        {
+          ...recordInputs,
+          seeds: {
+            ...microsoftConformanceFixtureSeeds,
+            siteSearchQuery: '50% off',
+            meetingJoinWebUrl: withTenant(microsoftConformanceFixtureSeeds.meetingJoinWebUrl ?? '')
+          }
+        },
+        { writer, stagingDir, recordedAt: '2026-09-30' }
+      ).pipe(Effect.result)
+    )
+
+    if (Result.isFailure(result) || result.success === undefined) {
+      return expect.fail('expected staged recordings')
+    }
+
+    const { checklist } = result.success
+    const seedsAt = checklist.indexOf('  seeds.ts:')
+
+    expect(seedsAt).toBeGreaterThan(0)
+    expect(checklist.slice(seedsAt + 1)).toContain(`    - tenant GUIDs: "${tenant}"`)
   })
 
   it('leaves no run directory and removes the temp directory when a write fails mid-batch', async () => {
@@ -794,6 +971,181 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
     expect(checklist).toContain('tenant host names: "practice-tenant-my.sharepoint.com"')
     expect(checklist).toContain('"Quarterly numbers"')
     expect(checklist).toContain('body text: "Hi team"')
+  })
+
+  it('lists Teams chat topics and tenant GUIDs for review, but not the synthetic ones', () => {
+    const tenant = '7d5c4b3a-2f1e-4d0c-9b8a-6f5e4d3c2b1a'
+    const [list, get] = microsoftTeamsChatsListMembersFixture.exchanges
+    const joinLink = `https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%22Tid%22%3a%22${tenant.toUpperCase()}%22%7d`
+
+    const leaky: WireFixture = {
+      ...microsoftTeamsChatsListMembersFixture,
+      exchanges: [
+        {
+          ...list,
+          response: {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({
+              value: [
+                {
+                  id: '19:x@thread.v2',
+                  topic: 'Practice launch plans',
+                  webUrl: `https://teams.microsoft.com/l/chat/19%3Ax%40thread.v2/0?tenantId=${tenant}`,
+                  onlineMeetingInfo: { joinWebUrl: joinLink },
+                  members: [{ tenantId: tenant }]
+                }
+              ]
+            })
+          }
+        },
+        get
+      ]
+    }
+
+    const spec =
+      microsoftCaseSpecs.find(entry => entry.caseId === leaky.caseId) ??
+      expect.fail('missing chats spec')
+
+    const checklist = recordingReviewChecklist([{ spec, fixture: leaky }]).join('\n')
+
+    expect(checklist).toContain('"Practice launch plans"')
+    expect(checklist).toContain(`tenant GUIDs: "${tenant}"`)
+
+    // The committed synthetic fixture carries only the fixtures' synthetic tenant GUID.
+    const committed = recordingReviewChecklist([
+      { spec, fixture: microsoftTeamsChatsListMembersFixture }
+    ]).join('\n')
+
+    expect(committed).not.toContain('tenant GUIDs')
+    expect(committed).toContain('"Synthetic project chat"')
+  })
+
+  describe('user and tenant identifiers a live Teams recording carries', () => {
+    const tenant = '7d5c4b3a-2f1e-4d0c-9b8a-6f5e4d3c2b1a'
+    const person = '3c2b1a0f-9e8d-4c7b-8a69-5f4e3d2c1b0a'
+    const other = '6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d'
+
+    const spec =
+      microsoftCaseSpecs.find(
+        entry => entry.caseId === microsoftTeamsChatsListMembersFixture.caseId
+      ) ?? expect.fail('missing chats spec')
+
+    /** The review checklist of the chats fixture with its first answer replaced by `body`. */
+    const checklistOf = (body: unknown): string => {
+      const [list, get] = microsoftTeamsChatsListMembersFixture.exchanges
+
+      return recordingReviewChecklist([
+        {
+          spec,
+          fixture: {
+            ...microsoftTeamsChatsListMembersFixture,
+            exchanges: [
+              { ...list, response: { status: 200, headers: {}, body: JSON.stringify(body) } },
+              get
+            ]
+          }
+        }
+      ]).join('\n')
+    }
+
+    const context = `{"Tid":"${tenant}","Oid":"${person}"}`
+
+    it('sees a twice percent-encoded join link context through (Tid and Oid)', () => {
+      const twice = encodeURIComponent(encodeURIComponent(context))
+
+      const checklist = checklistOf({
+        joinWebUrl: `https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=${twice}`
+      })
+
+      expect(checklist).toContain(`tenant GUIDs: "${tenant}"`)
+      expect(checklist).toContain(`user and object ids: "${person}"`)
+    })
+
+    it('lists users(…) keys, foreign mailbox keys, user.id, and userId values', () => {
+      const checklist = checklistOf({
+        '@odata.context': `https://graph.microsoft.com/v1.0/$metadata#users('${person}')/onlineMeetings`,
+        mailbox: `https://graph.microsoft.com/v1.0/$metadata#users('person%40practice.invalid')/messages`,
+        synthetic: `https://graph.microsoft.com/v1.0/$metadata#users('ada%40example.test')/messages`,
+        from: { user: { id: other, displayName: null } },
+        members: [{ userId: 'opaque-user-7' }]
+      })
+
+      expect(checklist).toContain(`user and object ids: "${person}", "${other}", "opaque-user-7"`)
+      expect(checklist).toContain(
+        'emails outside example.test/example.com: "person@practice.invalid"'
+      )
+      expect(checklist).not.toContain('ada@example.test')
+    })
+
+    it('lists the user GUIDs of a one-on-one chat id', () => {
+      expect(checklistOf({ id: `19:${person}_${other}@unq.gbl.spaces` })).toContain(
+        `user and object ids: "${person}", "${other}"`
+      )
+    })
+
+    it('lists GUIDs inside base64 and base64url ids, but not the synthetic ones', () => {
+      const member = Buffer.from(`1#${tenant}##19:x@thread.v2##${person}`).toString('base64')
+      const url = Buffer.from(`??${other}??`).toString('base64url')
+
+      const checklist = checklistOf({ members: [{ id: member }, { id: url }] })
+
+      expect(checklist).toContain(person)
+      expect(checklist).toContain(other)
+      expect(checklistOf({ value: microsoftTeamsChatsListMembersFixture.exchanges })).not.toContain(
+        'user and object ids'
+      )
+    })
+
+    it('scans each staged seed value on its own', () => {
+      const checklist = recordingReviewChecklist([], {
+        ...microsoftConformanceFixtureSeeds,
+        chatId: `19:${person}_${other}@unq.gbl.spaces`
+      }).join('\n')
+
+      expect(checklist).toContain('  seeds.ts:')
+      expect(checklist).toContain(`user and object ids: "${person}", "${other}"`)
+      expect(recordingReviewChecklist([], microsoftConformanceFixtureSeeds)).toContain(
+        '  seeds.ts: no candidates found; still read it'
+      )
+    })
+
+    it('decodes the other seeds when one holds a stray percent sign', () => {
+      const joinLink = `https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=${encodeURIComponent(context)}`
+
+      const checklist = recordingReviewChecklist([], {
+        ...microsoftConformanceFixtureSeeds,
+        siteSearchQuery: '50% off',
+        meetingJoinWebUrl: joinLink
+      }).join('\n')
+
+      expect(checklist).toContain(`tenant GUIDs: "${tenant}"`)
+      expect(checklist).toContain(`user and object ids: "${person}"`)
+    })
+
+    it('decodes the valid escapes of a string that also holds a stray percent sign', () => {
+      const joinLink = `https://teams.microsoft.com/l/meetup-join/0?context=${encodeURIComponent(context)}`
+
+      expect(checklistOf({ note: `50% off, see ${joinLink}` })).toContain(
+        `tenant GUIDs: "${tenant}"`
+      )
+    })
+
+    it('finds base64 ids inside URL paths and in percent-encoded paths', () => {
+      // `MT8/…`: the id holds `/`, and only its decoded path keeps the token whole and aligned.
+      const slashed = Buffer.from(`1??#${person}`).toString('base64')
+      const plain = Buffer.from(`1?#${other}`).toString('base64')
+
+      expect(slashed).toContain('/')
+
+      const checklist = checklistOf({
+        encoded: `https://graph.microsoft.com/v1.0/x/${encodeURIComponent(slashed)}/messages`,
+        path: `https://graph.microsoft.com/v1.0/sites/a/${plain}/drives`
+      })
+
+      expect(checklist).toContain(person)
+      expect(checklist).toContain(other)
+    })
   })
 })
 
@@ -1143,6 +1495,57 @@ describe('run-microsoft-conformance live runs are interruptible', () => {
     expect(errors).toEqual(['synthetic live failure'])
     expect(exitCodes).toEqual([1])
     expect(signals.registered()).toBe(0)
+  })
+})
+
+describe('run-microsoft-conformance Teams send (write-irreversible)', () => {
+  const sendCase = 'microsoft.teams.send-chat-message'
+
+  const runOver = async (allowIrreversible: ReadonlyArray<string>) => {
+    const { client } = await Effect.runPromise(makeReplayHttpClient(microsoftConformanceFixtures))
+    const out: Array<string> = []
+    const exitCode = process.exitCode
+
+    try {
+      await Effect.runPromise(
+        runMicrosoftLive(
+          {
+            ...defaultRunOptions,
+            live: true,
+            ownerApproved: true,
+            account: 'practice',
+            allowIrreversible
+          },
+          recordInputs,
+          {
+            http: Layer.succeed(HttpClient.HttpClient, client),
+            out: line => out.push(line),
+            err: () => {}
+          }
+        )
+      )
+    } finally {
+      process.exitCode = exitCode
+    }
+
+    return out
+  }
+
+  it('prints the run id before any case and runs the send when named by its exact id', async () => {
+    const out = await runOver([sendCase])
+
+    expect(out[0]).toBe(
+      'runId for this run: run-synthetic (the Teams send names it in the message it posts to --send-chat-id)'
+    )
+    expect(out[1]).toContain(`PASS  ${sendCase}`)
+  })
+
+  it('prints no run id and skips the send without --allow-irreversible', async () => {
+    const out = await runOver([])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]).not.toContain('runId for this run')
+    expect(out[0]).toContain(`SKIP  ${sendCase}`)
   })
 })
 

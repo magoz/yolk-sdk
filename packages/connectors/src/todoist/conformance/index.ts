@@ -16,6 +16,7 @@ import { todoistDueDatesFixture } from './due-dates.ts'
 import { todoistNotFoundEnvelopeFixture } from './not-found-envelope.ts'
 import { todoistProjectDeleteFixture } from './project-delete.ts'
 import { todoistProjectParentIdFixture } from './project-parent-id.ts'
+import { todoistProjectsPagingFixture } from './projects-paging.ts'
 import { todoistTaskLabelsFixture } from './task-labels.ts'
 import { todoistTaskLifecycleFixture } from './task-lifecycle.ts'
 import { todoistTasksPagingFixture } from './tasks-paging.ts'
@@ -36,6 +37,7 @@ export {
   todoistNotFoundEnvelopeCase,
   todoistProjectDeleteCase,
   todoistProjectParentIdCase,
+  todoistProjectsPagingCase,
   todoistTaskLabelsCase,
   todoistTaskLifecycleCase,
   todoistTasksPagingCase,
@@ -53,6 +55,7 @@ export {
   todoistNotFoundEnvelopeFixture,
   todoistProjectDeleteFixture,
   todoistProjectParentIdFixture,
+  todoistProjectsPagingFixture,
   todoistTaskLabelsFixture,
   todoistTaskLifecycleFixture,
   todoistTasksPagingFixture
@@ -63,6 +66,7 @@ export const todoistConformanceFixtures: ReadonlyArray<WireFixture> = [
   todoistTasksPagingFixture,
   todoistNotFoundEnvelopeFixture,
   todoistTaskLabelsFixture,
+  todoistProjectsPagingFixture,
   todoistTaskLifecycleFixture,
   todoistDueDatesFixture,
   todoistProjectParentIdFixture,

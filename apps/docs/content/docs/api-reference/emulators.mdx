@@ -508,13 +508,14 @@ const httpLayer = InProcessHttpClient.layer([
 `@yolk-sdk/emulators/microsoft`
 
 > **Experimental, Node only.** A stateful stand-in for the Microsoft Graph v1.0 routes the Microsoft
-> conformance cases use (calendar, Outlook mail, OneDrive) plus the OneDrive copy monitor URL,
-> built on the same `@emulators/core` runtime (loaded lazily when you create an emulator).
+> conformance cases use (calendar, Outlook mail, OneDrive, SharePoint sites, Teams) plus the
+> OneDrive copy monitor URL, built on the same `@emulators/core` runtime (loaded lazily when you
+> create an emulator).
 
 | Export                                                                       | Purpose                                                                                                                       |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `makeMicrosoftEmulator(options?)`                                            | `Promise` of `{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`         |
-| `microsoftEmulatorRoutes`                                                    | Route evidence manifest (19 routes, all `unverified`; eleven are connector write routes)                                      |
+| `microsoftEmulatorRoutes`                                                    | Route evidence manifest (35 routes, all `unverified`; twelve are connector write routes)                                      |
 | `MicrosoftEmulatorSeed`, `MicrosoftEmulatorProfile`                          | Typed seed schema (`profile`, `user`, `mailFolders`, `messages`, `attachments`, `calendars`, `events`, `drive`, `driveItems`) |
 | `MicrosoftFault`                                                             | `{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`                                             |
 | `microsoftEmulatorErrorCodes`                                                | Graph error codes, in three groups (below)                                                                                    |
@@ -551,18 +552,19 @@ ledgered, and credential-named keys in ledgered bodies and queries are redacted.
 the fixtures' `@odata.context` envelopes.
 
 Behaviour comes only from the conformance fixtures. Everything they do not show fails closed with
-the Graph error envelope `{ error: { code, message, innerError } }`: `/me` paths and other unknown
-routes get 404; query keys, `$select` fields, body properties (including unknown nested keys), and
-values the emulator does not emulate get a 400 before anything is written. That includes Outlook
-requests without `Prefer: IdType="ImmutableId"` and calendar requests without
-`Prefer: outlook.timezone="UTC"` (every fixture of theirs sends it), writes to messages that are
-not drafts, moves to any destination but `deleteditems`, folder listings by well-known name,
-`If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed copies, and
-failed copies. A route handler that throws answers a 500 envelope recorded in the ledger. The few
-behaviours the cases need without a fixture (the concurrency window, advancing id counters, removal
-on delete, synthesized seed values), the request-shape latitude it accepts (for example optional `$select`,
-smaller `$top`, user aliases, subsets of the fixture body keys), and the opt-in in-progress copy
-polls are listed in the package README under "Emulator extrapolations (no fixture)".
+the Graph error envelope `{ error: { code, message, innerError } }`: `/me` paths other than the
+Teams ones below and other unknown routes get 404; query keys, `$select` fields, body properties
+(including unknown nested keys), and values the emulator does not emulate get a 400 before anything
+is written. That includes Outlook requests without `Prefer: IdType="ImmutableId"` and calendar
+requests without `Prefer: outlook.timezone="UTC"` (every fixture of theirs sends it), writes to
+messages that are not drafts, moves to any destination but `deleteditems`, folder listings by
+well-known name, `If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed
+copies, and failed copies. A route handler that throws answers a 500 envelope recorded in the
+ledger. The few behaviours the cases need without a fixture (the concurrency window, advancing id
+counters, removal on delete, synthesized seed values), the request-shape latitude it accepts (for
+example optional `$select`, smaller `$top`, user aliases, subsets of the fixture body keys), and the
+opt-in in-progress copy polls are listed in the package README under "Emulator extrapolations (no
+fixture)".
 
 `microsoftEmulatorErrorCodes` groups:
 
@@ -583,8 +585,27 @@ fixture entities with the same ids as `microsoftConformanceFixtureSeeds`; profil
 plane behave as in the Fortnox emulator: a refusal (a 404 for an unknown id, a 400 not emulated, or
 a 409 conflict) uses up no fault, and a faulted request writes nothing, creates no copy monitor, and
 holds no message. `reset` and `seed` also clear copy monitors. The `drills` option
-(`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) is a test-only
-drill knob that makes the matching conformance case fail.
+(`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`, and one per
+SharePoint site and Teams case: `siteSearchEmpty`, `siteDrivesNoLibrary`, `chatsOmitMembers`,
+`chatMessagesOmitNextLink`, `joinedTeamsEmpty`, `repliesOmitReplyToId`, `transcriptsOtherMeeting`,
+`chatSendUnescaped`) is a test-only drill knob that makes the matching conformance case fail.
+
+The SharePoint site and Teams routes are fixture-only, without exceptions: site search
+(`GET /sites?search=`) and site drives; chats (`GET /me/chats`, `GET /chats/{chatId}`), chat
+messages (two recorded pages, the second through an `@odata.nextLink` naming the chat id
+unencoded) and one message; joined teams, a team, its channels, and one channel; a channel's
+top-level posts, one post, and its replies; the meeting found by its join link
+(`GET /me/onlineMeetings?$filter=`) and its transcripts; and the chat send
+(`POST /chats/{chatId}/messages`). They answer only the recorded exchanges of the eight
+`microsoft.sharepoint.*` and `microsoft.teams.*` fixtures (synthetic, shaped from the Microsoft
+Graph v1.0 docs examples), byte for byte, for a request whose raw path and query parameters
+(decoded, in any order) equal a recorded one, and only under the `default` profile: under `empty`
+every one of them answers the 400 not emulated, since no fixture records an empty listing. Anything
+else answers 400 before anything is written or a fault is used. The send answers only the recorded
+send chat (a dedicated chat, never the paging chat) and the recorded text with any run id: the recorded 201 under a minted message id from a counter that only
+advances. A send cannot be undone on Graph, so the emulator keeps it in the state
+(`chatMessagesSent`, never seeded): a read of the sent message answers the recorded readback, and a
+listing of a chat holding a sent message is not emulated.
 
 ## Dropbox emulator
 
@@ -758,7 +779,7 @@ is a test-only drill knob that makes exactly the matching conformance case fail.
 | Export                                          | Purpose                                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `makeTodoistEmulator(options?)`                 | `Promise` of `{ fetch, ledger, faults, cursors, reset, seed, snapshot, coverage, close }`              |
-| `todoistEmulatorRoutes`                         | Route evidence manifest (nine routes, all `unverified`; five are connector write routes)               |
+| `todoistEmulatorRoutes`                         | Route evidence manifest (ten routes, all `unverified`; five are connector write routes)                |
 | `TodoistEmulatorSeed`, `TodoistEmulatorProfile` | Typed seed schema (`profile`, `userId`, `projects`, `tasks`, `labels`); profiles `default` and `empty` |
 | `TodoistFault`                                  | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`    |
 | `TodoistEmulatorInputInvalid`                   | Invalid seed or fault passed to the JS API                                                             |
@@ -778,24 +799,28 @@ const httpLayer = InProcessHttpClient.layer([
 It serves, under `/api/v1` with `Authorization: Bearer <token>` (at least 8 characters; never stored
 or ledgered, and refused when the path, query, or body repeats it): `GET /tasks` (active tasks of a
 project, REST v1 cursor paging with `next_cursor`), task create, read, update, and close, `GET
-/labels`, and project create, read, and delete (which removes the project's task). Case projects are
+/labels`, `GET /projects` (every project, REST v1 cursor paging), and project create, read, and
+delete (which removes the project's task). Case projects are
 named `yolk-conformance-<runId>-<case>` with any `run-` run id, so a live runner's `run-<hex>` ids
 work. Bodies, 404 envelopes (`{ error, error_code, error_extra, error_tag, http_code }`), cursors,
 and due objects follow the synthetic fixtures; created ids (reserved prefix `6XEmu`, which seeds may
 not use) and `event_id`s come from counters that only advance, timestamps from the injectable `now`
-clock, and cursors are valid only as issued since the last reset or seed.
+clock, and cursors are valid only as issued since the last reset or seed (a project cursor also only
+while the project listing is unchanged); the cursor counters never reset, so no cursor value crosses
+a reset or seed.
 
 It is **fixture-only**, with no synthesised answers: anything the fixtures do not record answers one
 ledgered 400 `{ error: { type: 'not_emulated', message } }` before anything is written and before
 any fault is chosen, for example other routes, body fields such as `labels` or `due_string`, other
 due values, task listings other than the paging project with `limit=2` or a case project created
-here without `limit`, unpaged label listings larger than `limit`, a closed task, reading a seeded
-project (no fixture records its object), writes to seeded items (only items created through the
-recorded create flow are updated, closed, or deleted), and a second task in a case project or a
-second sub-project (the fixtures record `child_order: 1` only). That includes the project listing
-(`GET /projects`) of the read-only leftover lookup `findTodoistConformanceLeftovers`, which no
-fixture records: the lookup fails (`todoist_list_projects_failed`, HTTP 400), and the repository
-runners print their lookup-failed WARN instead of leftover warnings.
+here without `limit`, unpaged label listings larger than `limit`, a project listing without `limit`
+or without projects, a closed task, reading a seeded project alone (only the project listing
+fixture records its object), writes to seeded items (only items created through the recorded
+create flow are updated, closed, or deleted), and a second task in a case project or a second
+sub-project (the fixtures record `child_order: 1` only). The project listing (`GET /projects`) of
+the read-only leftover lookup `findTodoistConformanceLeftovers` is the one the project paging case
+(`todoist.projects.list-cursor-paging`) records, so the lookup runs against the emulator: it finds
+nothing on the default seed and lists every `yolk-conformance-run-*` project the state holds.
 
 Unrecognised requests (no emulated route under that HTTP method, or raw id segments that are not
 Todoist ids) are ledgered and answered with constant text only: the path `/<unrecognised>`, a
@@ -816,10 +841,11 @@ tasks and created projects; task listings: the paging project with `limit=2` and
 created here without `limit`; writes: only items created through the recorded create flow; a new
 project's `parent_id`: a seeded project); any `run-` run id (at most 40 characters) in a case
 project name; any non-empty task `content`; a task update sending `content`, `due_datetime`, or
-both; a label listing `limit` of 1 to 200 that covers every label. The `drills` option
-(`cursorRestarts`, `notFoundWithoutError`, `taskLabelsAsIds`, `listIncludesClosed`, `ignoreDue`,
-`createOmitsParent`, `deleteKeepsTasks`) is a test-only knob that makes exactly one Todoist case
-fail.
+both; a label listing `limit` of 1 to 200 that covers every label; a project listing `limit` of 1
+to 200, its pages chained through cursors this emulator issued for the same `limit` and unchanged
+listing. The `drills` option (`cursorRestarts`, `notFoundWithoutError`, `taskLabelsAsIds`,
+`projectCursorRestarts`, `listIncludesClosed`, `ignoreDue`, `createOmitsParent`, `deleteKeepsTasks`)
+is a test-only knob that makes exactly one Todoist case fail.
 
 ## Telegram emulator
 
@@ -880,16 +906,16 @@ and the `/_emulate/*` control plane (`ledger`, `faults`, `reset`, `state`, `seed
 > the GitHub conformance cases use, built on the same `@emulators/core` runtime (loaded lazily when
 > you create an emulator).
 
-| Export                                             | Purpose                                                                                                                   |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `makeGithubEmulator(options?)`                     | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                 |
-| `githubEmulatorRoutes`                             | Route evidence manifest (11 routes, all `unverified`; six are connector write routes)                                     |
-| `GithubEmulatorSeed`, `GithubEmulatorProfile`      | Typed seed schema (`profile`, `viewer`, `repository`, `labels`, `issues`, `files`, counters); profiles `default`, `empty` |
-| `GithubFault`                                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`                       |
-| `GithubEmulatorInputInvalid`                       | Invalid seed, fault, or option passed to the JS API                                                                       |
-| `githubEmulatorOrigin`                             | `https://api.github.com`                                                                                                  |
-| `githubEmulatorErrorBodies`                        | The fixtures' not-found, label, and validation error bodies, byte for byte                                                |
-| `githubEmulatorAccept`, `githubEmulatorApiVersion` | `application/vnd.github+json` and `2026-03-10`, the header values every request needs                                     |
+| Export                                             | Purpose                                                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `makeGithubEmulator(options?)`                     | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`                                                  |
+| `githubEmulatorRoutes`                             | Route evidence manifest (12 routes, all `unverified`; six are connector write routes)                                                      |
+| `GithubEmulatorSeed`, `GithubEmulatorProfile`      | Typed seed schema (`profile`, `viewer`, `repository`, `labels`, `issues`, `files`, `impliedIssues`, counters); profiles `default`, `empty` |
+| `GithubFault`                                      | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }`                                        |
+| `GithubEmulatorInputInvalid`                       | Invalid seed, fault, or option passed to the JS API                                                                                        |
+| `githubEmulatorOrigin`                             | `https://api.github.com`                                                                                                                   |
+| `githubEmulatorErrorBodies`                        | The fixtures' not-found, label, and validation error bodies, byte for byte                                                                 |
+| `githubEmulatorAccept`, `githubEmulatorApiVersion` | `application/vnd.github+json` and `2026-03-10`, the header values every request needs                                                      |
 
 ```ts
 import { makeGithubEmulator } from '@yolk-sdk/emulators/github'
@@ -904,10 +930,12 @@ const httpLayer = InProcessHttpClient.layer([
 
 It serves, on the seeded repository: `GET /repos/{owner}/{repo}/labels` (`per_page`, `page`, with
 the paging fixture's `Link` header minted in its exact form; a listing that fits one page carries
-none), `GET .../issues/{number}` (the recorded 404 for a number the repository has not reached),
+none), `GET /repos/{owner}/{repo}/issues` (`state=open`, `per_page`, `page=1`: the open issues,
+newest first, on one page), `GET .../issues/{number}` (the recorded 404 for a number the repository
+has not reached),
 `GET /search/issues` (the recorded 422 for a repository-scoped query longer than 256 characters),
-`GET .../contents/{path}` (base64 folded every 60 characters), comment create, listing `since`
-(`per_page=100`), and delete (204, then the recorded 404), issue label add and remove (the recorded
+`GET .../contents/{path}` (base64 folded every 60 characters), comment create, listing
+(`per_page=100` with `since`, or `page=1`), and delete (204, then the recorded 404), issue label add and remove (the recorded
 404 for a repository label not on the issue; removing an issue's last label is not emulated), and
 issue create, rename, and close as completed. Every route needs exactly
 `Authorization: Bearer <token>` (a recognisable bearer, as below; never compared against anything,
@@ -922,7 +950,9 @@ comment `9000000001`, a seed's counters lie above its seeded numbers, no seeded 
 minted form at or above its counter, and a create past the last addressable number or id is
 refused), the issue and comment ids derived from them in the fixtures' form, and timestamps from the
 injectable `now` clock. Issue numbers below the counter that the state does not hold are implied,
-never rendered. Label pages are page numbers, not cursors, and the label list never changes within a
+never rendered; the open-issue listing answers only while the seed's `impliedIssues` is `closed`
+(the default seed's, as the open-listing fixture records) or no number is implied; a seed that
+replaces `repository` or `issues` or sets `nextIssueNumber` gets `unknown` unless it names `impliedIssues: 'closed'`. Label pages are page numbers, not cursors, and the label list never changes within a
 seed (no route writes labels). A deleted comment's id and a closed issue stay in the state (GitHub
 keeps both), so a write case ends at the seed except those and the counters.
 
@@ -965,10 +995,11 @@ before anything is written and before any fault is chosen, for example other rou
 with labels or assignees, updates other than the two recorded ones (so the lifecycle case's
 failure-path restore, which closes as `not_planned`, is not emulated), adding a label the repository
 lacks (it would create it), a comment listing of more than one comment, rendering an issue that
-holds comments (every fixture answers `comments: 0`), and writes to closed or implied issues. That
-includes the open-issue listing of the read-only leftover lookup `findGithubConformanceLeftovers`,
-which no fixture records: the lookup fails (`github_validation`, HTTP 400), and the repository
-runner prints its lookup-failed WARN instead of leftover warnings.
+holds comments (every fixture answers `comments: 0`), issue paging, and writes to closed or implied
+issues. The reads of the read-only leftover lookup `findGithubConformanceLeftovers` (the open-issue
+listing, the work issue's first comment page, and the work issue) are the ones the open-listing
+case (`github.issues.open-listing`) records, so the lookup runs against the emulator: it finds
+nothing on the default seed and lists an open `yolk-conformance run-*` issue the state holds.
 
 - Request-shape latitude (`/github`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
@@ -976,20 +1007,21 @@ runner prints its lookup-failed WARN instead of leftover warnings.
   least one outside `[0-9.eE+-]`, that occurs nowhere else in the request (never compared against
   anything, stored, or ledgered); extra request headers; JSON key order; `content-type` media-type
   parameters; the order of query parameters; any non-empty issue title and comment body, and any
-  issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ`; any label listing
-  `per_page` from 1 to 100, with no `page` or a `page` from 2 to one past the last page; any issue
-  search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose query after it is
-  longer than 256 characters (answered the recorded 422); any issue number the repository has not
+  issue body text; any comment listing `since` of the form `YYYY-MM-DDTHH:MM:SSZ` (or, instead of
+  `since`, `page=1`); any label listing `per_page` from 1 to 100, with no `page` or a `page` from 2
+  to one past the last page; any open-issue listing (`state=open`, `page=1`) `per_page` from 1 to
+  100; any issue search `q` that starts with the seeded `repo:<owner>/<repo>` qualifier and whose
+  query after it is longer than 256 characters (answered the recorded 422); any issue number the repository has not
   reached (answered the recorded 404); and any issue, comment, repository label, or file the state
   holds where a fixture has one, under the per-route state rules. `Authorization` must be exactly
   `Bearer <token>` (that spelling, one space), `Accept` `application/vnd.github+json`, and
   `X-GitHub-Api-Version` `2026-03-10`. Everything else (other keys and values, query parameters,
   empty query components such as a bare `?` or a stray `&`, another origin or repository, a repeated
-  query key, an explicit `page=1`, and a comment listing `per_page` other than 100) is not emulated.
+  query key, an explicit `page=1` on the label listing, and a comment listing `per_page` other than 100) is not emulated.
 
 Faults, the ledger (which records the `Accept` and `X-GitHub-Api-Version` headers), clock-free
 recovery, and the control plane behave as in the Dropbox emulator; a 429 fault reaches the
-connector as `github_rate_limited`. The `drills` option (seven booleans, one per GitHub case) is a
+connector as `github_rate_limited`. The `drills` option (eight booleans, one per GitHub case) is a
 test-only knob that makes exactly the matching conformance case fail.
 
 ## Google emulator
@@ -1003,7 +1035,7 @@ test-only knob that makes exactly the matching conformance case fail.
 | Export                                                  | Purpose                                                                                             |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `makeGoogleEmulator(options?)`                          | `Promise` of `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`           |
-| `googleEmulatorRoutes`                                  | Route evidence manifest (25 routes, all `unverified`; 15 are connector write routes)                |
+| `googleEmulatorRoutes`                                  | Route evidence manifest (27 routes, all `unverified`; 15 are connector write routes)                |
 | `GoogleEmulatorSeed`, `GoogleEmulatorProfile`           | Typed seed schema (messages, implied entities, attachments, calendars, events, Drive files)         |
 | `GoogleFault`                                           | `{ kind: 'status', status (400-599), headers?, body?, match?: { method?, path?, route? }, count? }` |
 | `GoogleEmulatorInputInvalid`                            | Invalid seed, fault, or option passed to the JS API                                                 |
@@ -1027,15 +1059,30 @@ const httpLayer = InProcessHttpClient.layer([
 
 It serves the Gmail routes the cases use (label listings of messages and of threads with page
 tokens, message reads in the `format` renderings a fixture records, with an optional
-`metadataHeaders` selection, attachments, the label lifecycle, adding a created label, trash and
-untrash, the draft lifecycle and its thread, and the multipart practice send), the Calendar event
-routes (time-range listings with page tokens, and a run event created, read, renamed by `PATCH`,
-deleted to `cancelled`, and answered the recorded 410 when deleted again), and the Drive file routes
-(folder listings with page tokens, reads with the connector `fields` selection, and a run folder
-created, trashed, and deleted, then the recorded 404). Every route needs
+`metadataHeaders` selection, attachments, the label listing and lifecycle, adding a created label,
+trash and untrash, the draft search, the draft lifecycle and its thread, and the multipart practice
+send), the Calendar event routes (time-range listings with page tokens, the free-text query, and a
+run event created, read, renamed by `PATCH`, deleted to `cancelled`, and answered the recorded 410
+when deleted again), and the Drive file routes (folder listings with page tokens, with or without
+trashed items, reads with the connector `fields` selection, and a run folder created, trashed, and
+deleted, then the recorded 404). Every route needs
 `Authorization: Bearer <token>` (a recognisable bearer) and answers only on its recorded origin:
 `fetch` reads the origin from the request URL; behind a loopback rewrite, serve `fetchOn(origin)`
 for each origin on its own server.
+
+**The leftover lookup's reads.** `findGoogleConformanceLeftovers` reads what four read cases
+record: the label listing (`google.gmail.label-listing`: the seeded system and paging labels as
+recorded, then the labels created here), the draft search (`google.gmail.draft-search`), the
+free-text event query (`google.calendar.free-text-query`), and the folder listing with trashed
+items (`google.drive.list-includes-trashed`). So the lookup runs against the default seed and lists
+a run label or a run folder (in Trash too) the state holds. The draft search and the event query
+are recorded only empty, and stay fixture-only: the draft search answers only while the state holds
+no draft and no message labelled `DRAFT` (Gmail's search syntax is not emulated), and the event
+query only while no event of the calendar, cancelled or not, holds `yolk` or `conformance` in any
+case in its summary or description, nor, while the calendar holds events, its id or summary (the
+organizer) or the practice address (the creator): Google's free-text matching cannot be emulated honestly. Otherwise
+they answer the ledgered 400 not-emulated, so after the event cases, whose cancelled run events stay
+in the state, the lookup fails closed and a runner prints its lookup-failed `WARN`.
 
 **Draft attachments are not emulated.** `gmail.draft_compose`, `gmail.draft_update`, and
 `gmail.draft_reply` with `attachments` write through the draft media upload
@@ -1098,9 +1145,11 @@ reports as its lookup-failed `WARN`.
   recorded `sizeEstimate` of the draft and sent messages (answered by their message reads and the
   draft thread) covers the subject; on the practice send, a `content-type` of exactly
   `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to 70 `[A-Za-z0-9_]`
-  characters and no other parameter; a `gmail.list` or `gmail.list_threads` `maxResults` from 1 to
-  500, a `calendar.list_events` `maxResults` from 1 to 2500, and a `drive.list_files` `pageSize`
-  from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants with a real calendar date, hour
+  characters and no other parameter; a `gmail.list`, `gmail.list_threads`, or `gmail.list_drafts`
+  (the recorded `q` only) `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1
+  to 2500 (a range, or the recorded `q`), and a `drive.list_files` `pageSize` from 1 to 1000 (with
+  or without `and trashed = false`); any `timeMin` before `timeMax` (RFC 3339 instants with a real
+  calendar date, hour
   0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric offset); any id of an item the
   state holds where a fixture has an id (writes: only items created here, plus label changes, trash,
   and untrash of a stored non-draft message); and, for an id the state does not hold, only the
@@ -1136,7 +1185,7 @@ profiles `default` and `empty`. A reversible case ends at the seed except the co
 event cases, its own event, which stays readable as `cancelled`; the send leaves its sent message.
 Faults, the ledger, clock-free recovery, and the control plane behave as in the Dropbox emulator; a
 429 fault with `retry-after` reaches the connector as `google_rate_limited`. The `drills` option
-(fifteen booleans, one per Google case) is a test-only knob that makes exactly the matching
+(nineteen booleans, one per Google case) is a test-only knob that makes exactly the matching
 conformance case fail.
 
 ## LinkedIn search emulator
@@ -1488,7 +1537,7 @@ time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evide
 them as PENDING warnings until each entry's expiry date and fails again after it. The R2
 `R2ObjectClient.put` route is held in the same list until a live run against a practice bucket,
 through a host `R2ObjectClient` implementation, verifies it. The four Fortnox write routes, the
-eleven Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
+twelve Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
 Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, and the fifteen
 Google write routes are held in the same pending list until a live run against a Fortnox test
 company, a Microsoft practice tenant, a Dropbox practice account, a Notion practice workspace, a

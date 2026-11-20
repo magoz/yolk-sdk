@@ -3,11 +3,12 @@
  * stateful handlers), the fixture error bodies, object rendering, and `Link` paging (internal;
  * re-exported by `src/github.ts`).
  *
- * Only the REST routes the seven GitHub conformance cases send are emulated, on
+ * Only the REST routes the eight GitHub conformance cases send are emulated, on
  * `https://api.github.com`, with the wire shapes of their synthetic fixtures: the label listing
- * (with the paging fixture's `Link` header), issue read, create, rename, and close, the issue
- * search the validation fixture refuses, file contents (folded base64), comment create, listing
- * `since`, and delete, and issue label add and remove. Every route plans first (reading the state,
+ * (with the paging fixture's `Link` header), the open-issue listing (the leftover lookup's
+ * request), issue read, create, rename, and close, the issue search the validation fixture
+ * refuses, file contents (folded base64), comment create, listing (`since`, or the lookup's first
+ * page), and delete, and issue label add and remove. Every route plans first (reading the state,
  * writing nothing) and commits only an eligible request: anything no fixture shows is not emulated
  * (400, nothing written, no fault used up).
  *
@@ -76,6 +77,8 @@ export type GithubEmulatorDrills = {
   readonly addAnswerOmitsLabel?: boolean
   /** Closing an issue answers `closed_at: null`. */
   readonly closeWithoutClosedAt?: boolean
+  /** The open-issue listing advertises `rel="next"` although it fits one page. */
+  readonly issueListingLinksNext?: boolean
 }
 
 export const githubEmulatorDrillKnobs: ReadonlyArray<keyof GithubEmulatorDrills> = [
@@ -85,7 +88,8 @@ export const githubEmulatorDrillKnobs: ReadonlyArray<keyof GithubEmulatorDrills>
   'contentUnfolded',
   'sinceExcludesEqual',
   'addAnswerOmitsLabel',
-  'closeWithoutClosedAt'
+  'closeWithoutClosedAt',
+  'issueListingLinksNext'
 ]
 
 export type GithubApiEnv = {
@@ -144,6 +148,8 @@ const commentCase = 'github.comments.create-delete'
 const labelCase = 'github.labels.add-remove'
 
 const lifecycleCase = 'github.issues.lifecycle-close'
+
+const openIssuesCase = 'github.issues.open-listing'
 
 // Raw (still percent-encoded) path parameter patterns: a request whose raw path is not exactly one
 // of these shapes is unrecognised (ledgered with constant text only).
@@ -423,6 +429,93 @@ const listLabels: Route = statefulRoute(
   }
 )
 
+type IssuesInput = RepoInput & { readonly perPage: number }
+
+/**
+ * The open-issue listing (`github.issues.open-listing`, the leftover lookup's request):
+ * `state=open`, `per_page` from 1 to 100, and `page=1`, as recorded. It answers every open issue
+ * the state holds, newest first (GitHub's default `sort=created`, `direction=desc`), rendered as
+ * the issue reads render them, on one page without `Link` (as the fixture records). Not emulated: a
+ * listing that would have to say whether an implied issue number is open (unless the seed records
+ * them closed), more open issues than `per_page` (no fixture records issue paging), an open issue
+ * holding comments, and an empty listing (no fixture records one).
+ */
+const listIssues: Route = statefulRoute(
+  repoEvidence('GET', '/issues', false, [openIssuesCase]),
+  'none',
+  (request): IssuesInput | NotEmulated => {
+    const query = exactQuery(request, ['state', 'per_page', 'page'])
+
+    if (isNotEmulated(query)) return query
+
+    if (query.state !== 'open')
+      return notEmulated('a listing other than state=open is not emulated')
+
+    // The fixture asks for the first page explicitly, as the leftover lookup does.
+    if (query.page !== '1') return notEmulated('an issue listing page other than 1 is not emulated')
+
+    const perPage = query.per_page ?? ''
+
+    return /^[1-9][0-9]{0,2}$/.test(perPage) && Number(perPage) <= 100
+      ? { ...repoOf(request), perPage: Number(perPage) }
+      : notEmulated('per_page must be an integer from 1 to 100')
+  },
+  (state, input, { env }) => {
+    const other = otherRepository(state, input)
+
+    if (other !== undefined) return other
+
+    const held = new Set(state.issues.map(issue => issue.number))
+    let implied = false
+
+    for (let number = 1; number < state.counters.nextIssueNumber && !implied; number++) {
+      implied = !held.has(number)
+    }
+
+    if (implied && state.impliedIssues !== 'closed') {
+      return notEmulated(
+        'an open-issue listing while implied issue numbers may be open is not emulated'
+      )
+    }
+
+    const open = state.issues
+      .filter(issue => issue.state === 'open')
+      .sort(
+        (left, right) => right.createdAt.localeCompare(left.createdAt) || right.number - left.number
+      )
+
+    if (open.length === 0) {
+      return notEmulated(
+        'an open-issue listing without issues is not emulated (no fixture records one)'
+      )
+    }
+
+    if (open.length > input.perPage) {
+      return notEmulated('an open-issue listing of more than one page is not emulated')
+    }
+
+    for (const issue of open) {
+      const refusal = commentsRefusal(state, issue)
+
+      if (refusal !== undefined) return refusal
+    }
+
+    return answer(() =>
+      json(
+        200,
+        open.map(issue => renderIssue(state, issue)),
+        env.drills.issueListingLinksNext
+          ? {
+              link:
+                `<${githubEmulatorOrigin}/repositories/${state.repository.id}/issues` +
+                `?state=open&per_page=${input.perPage}&page=2>; rel="next"`
+            }
+          : {}
+      )
+    )
+  }
+)
+
 type IssueInput = RepoInput & { readonly number: number }
 
 const issueInput = (request: EmulatedRequest): IssueInput | NotEmulated =>
@@ -605,24 +698,36 @@ const createComment: Route = statefulRoute(
   }
 )
 
-type CommentsInput = IssueInput & { readonly since: number }
+/** A `since` listing (`since` in epoch milliseconds), or the lookup's first page (`undefined`). */
+type CommentsInput = IssueInput & { readonly since: number | undefined }
 
 const listComments: Route = statefulRoute(
-  repoEvidence('GET', '/issues/{issueNumber}/comments', false, [commentCase], {
+  repoEvidence('GET', '/issues/{issueNumber}/comments', false, [commentCase, openIssuesCase], {
     issueNumber: issueNumberPattern
   }),
   'none',
   (request): CommentsInput | NotEmulated => {
-    const query = exactQuery(request, ['per_page', 'since'])
+    const query = exactQuery(request, ['per_page'], ['since', 'page'])
 
     if (isNotEmulated(query)) return query
 
-    // The fixture records one page of 100, without `page`.
+    // The fixtures record pages of 100: `since` without `page` (the comment case), or `page=1`
+    // without `since` (the open-listing case, the leftover lookup's request).
     if (query.per_page !== '100') {
       return notEmulated('a comment listing per_page other than 100 is not emulated')
     }
 
-    const since = query.since ?? ''
+    if (query.since === undefined) {
+      return query.page === '1'
+        ? { ...repoOf(request), number: issueNumberOf(request), since: undefined }
+        : notEmulated('a comment listing needs since, or page=1 without since')
+    }
+
+    if (query.page !== undefined) {
+      return notEmulated('a comment listing with both since and page is not emulated')
+    }
+
+    const since = query.since
     const instant = githubTimestampPattern.test(since) ? Date.parse(since) : Number.NaN
 
     if (!Number.isFinite(instant)) {
@@ -640,6 +745,8 @@ const listComments: Route = statefulRoute(
 
     const listed = state.comments.filter(comment => {
       if (comment.issueNumber !== input.number) return false
+
+      if (input.since === undefined) return true
 
       const updated = Date.parse(comment.updatedAt)
 
@@ -973,6 +1080,7 @@ const updateIssue: Route = statefulRoute(
 /** The route table: evidence plus handlers. `githubEmulatorRoutes` is its evidence part. */
 export const githubApiRoutes: ReadonlyArray<Route> = [
   listLabels,
+  listIssues,
   getIssue,
   searchIssues,
   getContents,

@@ -105,6 +105,14 @@ export const todoistCaseSpecs: ReadonlyArray<CaseSpec<TodoistConformanceSeedKey>
     doc: 'The seeded labeled task, then the personal label list.'
   },
   {
+    caseId: 'todoist.projects.list-cursor-paging',
+    seeds: ['pagingProjectId'],
+    optionalSeeds: [],
+    fileName: 'projects-paging.ts',
+    exportName: 'todoistProjectsPagingFixture',
+    doc: 'The active project listing as the leftover lookup sends it (`limit=200`), then one project per page through `next_cursor`.'
+  },
+  {
     caseId: 'todoist.tasks.lifecycle-close',
     seeds: ['workProjectId', 'runId'],
     optionalSeeds: [],

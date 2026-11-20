@@ -84,8 +84,30 @@ not apply.
 - When an execution ends, tool calls still pending are rejected at once and their signal aborts,
   and later calls are rejected without running, so an unawaited call never keeps a Dynamic Worker
   in flight (Cloudflare allows 4 per request, 10 per Durable Object).
-- Loader and isolate failures reach the caller as fixed messages, never the runtime's error text.
+- Loader and isolate failures reach the caller as fixed messages, never the runtime's error text
+  (see [Log executor failures](#log-executor-failures)).
 - Every execution loads one Dynamic Worker, and each is billed.
+
+### Log executor failures
+
+Both executors answer their own failures (not the script's) with fixed messages, so runtime error
+text, which may carry host details or secrets, never reaches the script or the model. Pass
+`onInternalError` to log the original error:
+
+```ts
+const executor = makeDynamicWorkerCodeModeExecutor({
+  loader: () => env.LOADER,
+  // Host logs only: `cause` may carry secrets.
+  onInternalError: ({ stage, cause }) => logger.error('code mode executor failed', { stage, cause })
+})
+```
+
+`stage` is `load` (the sandbox could not be created or loaded), `isolate` (it failed while
+running), `cpu-limit` (a Dynamic Worker past its CPU limit), or `host-call` (a Dynamic Worker
+call's RPC to your Worker failed). `makePiCodeModeExecutor` takes the same option and reports `load`
+and `isolate`. It is called once per such failure, never for script errors, tool rejections,
+timeouts, or aborts, and whatever it throws is ignored. A script can fake a `host-call` report (its
+isolate sends it), so at most 10 are accepted per execution.
 
 ### Next.js
 

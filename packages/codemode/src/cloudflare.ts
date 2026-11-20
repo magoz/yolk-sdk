@@ -3,15 +3,18 @@ import { Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import { transform } from 'sucrase'
-import type {
-  CodeModeError,
-  CodeModeExecuteOptions,
-  CodeModeExecutionResult,
-  CodeModeExecutor,
-  CodeModeExecutorGlobal,
-  CodeModeExecutorTool,
-  CodeModeOutputItem,
-  CodeModeStoreWrites
+import {
+  reportInternalError,
+  type CodeModeError,
+  type CodeModeExecuteOptions,
+  type CodeModeExecutionResult,
+  type CodeModeExecutor,
+  type CodeModeExecutorGlobal,
+  type CodeModeExecutorTool,
+  type CodeModeInternalError,
+  type CodeModeInternalErrorObserver,
+  type CodeModeOutputItem,
+  type CodeModeStoreWrites
 } from './executor.ts'
 import { encodedRejection, guardPrefix, guardSuffix } from './guard.ts'
 import { PRELUDE_SOURCE } from './pi-prelude.ts'
@@ -53,6 +56,16 @@ export type DynamicWorkerCodeModeExecutorOptions = {
    * of <cpuMs> ms`).
    */
   readonly cpuMs?: number
+  /**
+   * Observes the executor's own failures, which the result and the script only see as fixed
+   * messages: `load` (the binding, `load()` or `getEntrypoint()` threw), `isolate` (the isolate's
+   * `run` failed), `cpu-limit` (it failed for its CPU limit), and `host-call` (a call's RPC to the
+   * host failed; at most `maxDynamicWorkerHostCallFailureReports` per execution, and since the
+   * script's isolate reports it, a script can fake one). Called once per failure with the original
+   * error, never for script errors, timeouts or aborts; what it throws is ignored. For host logs:
+   * the cause may carry host details and must not reach the model.
+   */
+  readonly onInternalError?: CodeModeInternalErrorObserver
 }
 
 /** Default compatibility date of a script's isolate. */
@@ -60,6 +73,12 @@ export const defaultDynamicWorkerCompatibilityDate = '2026-05-12'
 
 /** Default CPU limit of a script's isolate, in milliseconds. */
 export const defaultDynamicWorkerCpuMs = 500
+
+/**
+ * `host-call` failures reported to `onInternalError` per execution; later ones are dropped. The
+ * script's isolate reports them, so this bounds what a script can make the host log.
+ */
+export const maxDynamicWorkerHostCallFailureReports = 10
 
 type CallReply =
   | { readonly ok: true; readonly payload: string | null }
@@ -92,16 +111,20 @@ class ToolHost extends RpcTarget {
   readonly #globals: ReadonlyMap<string, CodeModeExecutorGlobal>
   readonly #signal: AbortSignal
   readonly #ended: Promise<void>
+  readonly #onInternalError: CodeModeInternalErrorObserver | undefined
+  #callFailureReports = 0
 
   constructor(
     tools: ReadonlyArray<CodeModeExecutorTool>,
     globals: ReadonlyArray<CodeModeExecutorGlobal>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    onInternalError: CodeModeInternalErrorObserver | undefined
   ) {
     super()
     this.#tools = new Map(tools.map(tool => [tool.name, tool]))
     this.#globals = new Map(globals.map(global => [global.name, global]))
     this.#signal = signal
+    this.#onInternalError = onInternalError
     this.#ended = new Promise(resolve => {
       signal.addEventListener('abort', () => resolve(), { once: true })
     })
@@ -114,6 +137,18 @@ class ToolHost extends RpcTarget {
     const reply = this.#execute(kind, name, argsJson)
 
     return await Promise.race([reply, this.#ended.then(() => ended(kind))])
+  }
+
+  /**
+   * The isolate reports a call whose RPC to the host failed (the script got the fixed
+   * `hostCallFailedMessage`), with the error it saw, also after the execution ended. Bounded by
+   * `maxDynamicWorkerHostCallFailureReports`, since the script shares the isolate.
+   */
+  async reportCallFailure(cause: unknown): Promise<void> {
+    if (this.#callFailureReports >= maxDynamicWorkerHostCallFailureReports) return
+
+    this.#callFailureReports++
+    reportInternalError(this.#onInternalError, { stage: 'host-call', cause })
   }
 
   async #execute(kind: string, name: string, argsJson: string | null): Promise<CallReply> {
@@ -201,7 +236,10 @@ export default class CodeModeScript extends WorkerEntrypoint {
         if (kind === "call" || kind === "global") {
           host.call(kind, b, c === undefined ? null : c).then(
             (reply) => reply.ok ? api.settle(a, true, reply.payload === null ? undefined : reply.payload) : api.settle(a, false, reply.message),
-            () => api.settle(a, false, ${JSON.stringify(hostCallFailedMessage)})
+            (error) => {
+              Promise.resolve().then(() => host.reportCallFailure(error)).catch(() => {});
+              api.settle(a, false, ${JSON.stringify(hostCallFailedMessage)});
+            }
           );
           return;
         }
@@ -369,14 +407,26 @@ const sandboxFailed = failure({ kind: 'sandbox', message: 'The script sandbox fa
 // workerd's errors for a Worker past its CPU time ("exceeded CPU time limit", "CPU limit").
 const isCpuLimitError = (error: unknown) => /\bcpu\b.*\blimit/i.test(describeError(error))
 
+/** How an execution settled, with the executor's own failure behind it, if any. */
+type Settled = {
+  readonly result: CodeModeExecutionResult
+  readonly internalError?: CodeModeInternalError
+}
+
 /**
  * A failed `run` (the isolate itself failed, not the script): never the runtime's text, which is
- * not the script's and may carry host details.
+ * not the script's and may carry host details. The original error goes to `onInternalError`.
  */
-const fromRunFailure = (error: unknown, cpuMs: number): CodeModeExecutionResult =>
+const fromRunFailure = (error: unknown, cpuMs: number): Settled =>
   isCpuLimitError(error)
-    ? failure({ kind: 'timeout', message: `Execution exceeded its CPU limit of ${cpuMs} ms` })
-    : sandboxFailed
+    ? {
+        result: failure({
+          kind: 'timeout',
+          message: `Execution exceeded its CPU limit of ${cpuMs} ms`
+        }),
+        internalError: { stage: 'cpu-limit', cause: error }
+      }
+    : { result: sandboxFailed, internalError: { stage: 'isolate', cause: error } }
 
 /**
  * Disposes a loaded Worker or entrypoint stub when it has `Symbol.dispose`, so its native handle is
@@ -416,7 +466,7 @@ const disposeQuietly = (resource: unknown) => {
  * Errors: what the script controls reaches the caller as on Node (its thrown error's name, message
  * and stack, parse errors, tool and global rejections). Failures of the loader or the isolate
  * itself become fixed messages (`sandbox`, or `timeout` past the CPU limit), never the runtime's
- * text.
+ * text; `onInternalError` receives the original error for host logs.
  *
  * Needs the `cloudflare:workers` module, so only a Worker can load this subpath.
  */
@@ -458,7 +508,13 @@ export const makeDynamicWorkerCodeModeExecutor = (
       )
     )
 
-    const host = new ToolHost(execution.tools, execution.globals, controller.signal)
+    const host = new ToolHost(
+      execution.tools,
+      execution.globals,
+      controller.signal,
+      options.onInternalError
+    )
+
     let timer: ReturnType<typeof setTimeout> | undefined
     let worker: unknown
     let entrypoint: unknown
@@ -475,7 +531,9 @@ export const makeDynamicWorkerCodeModeExecutor = (
 
         worker = loaded
         entrypoint = loaded.getEntrypoint()
-      } catch {
+      } catch (error) {
+        reportInternalError(options.onInternalError, { stage: 'load', cause: error })
+
         return loadFailed
       }
 
@@ -483,33 +541,44 @@ export const makeDynamicWorkerCodeModeExecutor = (
         return failure({ kind: 'sandbox', message: 'The loaded Worker has no run entrypoint.' })
       }
 
-      const run = entrypoint
-        .run(host, toolsJson, globalsJson, storeJson)
-        .then(fromIsolate, (error: unknown) => fromRunFailure(error, cpuMs))
+      const run = entrypoint.run(host, toolsJson, globalsJson, storeJson).then(
+        (reply): Settled => ({ result: fromIsolate(reply) }),
+        (error: unknown) => fromRunFailure(error, cpuMs)
+      )
 
-      const deadline = new Promise<CodeModeExecutionResult>(resolve => {
+      const deadline = new Promise<Settled>(resolve => {
         timer = setTimeout(
           () =>
-            resolve(
-              failure({
+            resolve({
+              result: failure({
                 kind: 'timeout',
                 message: `Execution timed out after ${execution.timeoutMs} ms`
               })
-            ),
+            }),
           Math.max(0, execution.timeoutMs)
         )
       })
 
-      const aborted = new Promise<CodeModeExecutionResult>(resolve => {
+      const aborted = new Promise<Settled>(resolve => {
         controller.signal.addEventListener(
           'abort',
-          () => resolve(failure({ kind: 'aborted', message: 'Execution aborted' })),
+          () => resolve({ result: failure({ kind: 'aborted', message: 'Execution aborted' }) }),
           { once: true }
         )
       })
 
-      return await Promise.race([run, deadline, aborted])
-    } catch {
+      // Only the failure that settled the execution is reported: an isolate failing after a
+      // timeout or abort already answered is not.
+      const settled = await Promise.race([run, deadline, aborted])
+
+      if (settled.internalError !== undefined) {
+        reportInternalError(options.onInternalError, settled.internalError)
+      }
+
+      return settled.result
+    } catch (error) {
+      reportInternalError(options.onInternalError, { stage: 'isolate', cause: error })
+
       return sandboxFailed
     } finally {
       if (timer !== undefined) clearTimeout(timer)

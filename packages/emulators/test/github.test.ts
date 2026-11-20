@@ -202,6 +202,7 @@ describe('route evidence manifest', () => {
 
     expect(githubEmulatorRoutes.map(route => `${route.method} ${route.path}`)).toEqual([
       'GET /repos/{owner}/{repo}/labels',
+      'GET /repos/{owner}/{repo}/issues',
       'GET /repos/{owner}/{repo}/issues/{issueNumber}',
       'GET /search/issues',
       'GET /repos/{owner}/{repo}/contents/{path+}',
@@ -567,6 +568,45 @@ describe('request-shape latitude', () => {
     expect(await search.text()).toBe(JSON.stringify(githubEmulatorErrorBodies.searchTooLong))
   })
 
+  it('lists open issues of a seed that names impliedIssues closed itself', async () => {
+    const target = await emulator({ seed: { nextIssueNumber: 100, impliedIssues: 'closed' } })
+
+    const response = await call(target, 'GET', repo('/issues?state=open&per_page=100&page=1'))
+
+    expect(response.status).toBe(200)
+    expect(await jsonOf(response)).toEqual([expect.objectContaining({ number: 1 })])
+  })
+
+  it('lists open issues newest first for any per_page, without the closed ones', async () => {
+    const target = await emulator()
+
+    await createIssue(target)
+
+    const listed = async (perPage: number) => {
+      const response = await call(
+        target,
+        'GET',
+        repo(`/issues?page=1&per_page=${perPage}&state=open`)
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('link')).toBeNull()
+
+      return jsonOf(response)
+    }
+
+    expect(await listed(2)).toEqual([
+      expect.objectContaining({ number: 42, state: 'open' }),
+      expect.objectContaining({ number: 1, state: 'open' })
+    ])
+
+    await call(target, 'PATCH', repo('/issues/42'), {
+      body: { state: 'closed', state_reason: 'completed' }
+    })
+
+    expect(await listed(50)).toEqual([expect.objectContaining({ number: 1, state: 'open' })])
+  })
+
   it('a created issue reads back, renames keep updated_at, closing stamps the clock', async () => {
     const target = await emulator({ now: scriptedClock([at('12:00:00'), at('12:00:30')]) })
 
@@ -696,11 +736,11 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'a query parameter this route does not take'
     ],
     [
-      'comments without since',
+      'comments without since or page',
       'GET',
       repo('/issues/1/comments?per_page=100'),
       {},
-      'query parameter since'
+      'needs since, or page=1'
     ],
     [
       'comments per_page other than 100',
@@ -710,9 +750,66 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'per_page other than 100'
     ],
     [
-      'comments with page',
+      'comments page 2',
       'GET',
-      repo('/issues/1/comments?per_page=100&page=1'),
+      repo('/issues/1/comments?per_page=100&page=2'),
+      {},
+      'needs since, or page=1'
+    ],
+    [
+      'comments with both since and page',
+      'GET',
+      repo('/issues/1/comments?per_page=100&page=1&since=2026-09-30T12:00:00Z'),
+      {},
+      'both since and page'
+    ],
+    [
+      'comments page 1 per_page 50',
+      'GET',
+      repo('/issues/1/comments?per_page=50&page=1'),
+      {},
+      'per_page other than 100'
+    ],
+    ['open issues without page', 'GET', repo('/issues?state=open&per_page=100'), {}, 'page'],
+    [
+      'open issues page 2',
+      'GET',
+      repo('/issues?state=open&per_page=100&page=2'),
+      {},
+      'page other than 1'
+    ],
+    [
+      'closed issues',
+      'GET',
+      repo('/issues?state=closed&per_page=100&page=1'),
+      {},
+      'other than state=open'
+    ],
+    [
+      'all issues',
+      'GET',
+      repo('/issues?state=all&per_page=100&page=1'),
+      {},
+      'other than state=open'
+    ],
+    [
+      'open issues per_page 0',
+      'GET',
+      repo('/issues?state=open&per_page=0&page=1'),
+      {},
+      'per_page must be'
+    ],
+    [
+      'open issues per_page 101',
+      'GET',
+      repo('/issues?state=open&per_page=101&page=1'),
+      {},
+      'per_page must be'
+    ],
+    [
+      'open issues with a label filter',
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1&labels=bug'),
       {},
       'a query parameter this route does not take'
     ],
@@ -881,6 +978,35 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       'holds comments'
     ],
     [
+      'an open-issue listing while an open issue holds a comment',
+      (target: GithubEmulator) => createComment(target),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'holds comments'
+    ],
+    [
+      'an open-issue listing of more than per_page issues (no fixture records issue paging)',
+      async (target: GithubEmulator) => {
+        await createIssue(target)
+      },
+      'GET',
+      repo('/issues?state=open&per_page=1&page=1'),
+      {},
+      'more than one page'
+    ],
+    [
+      'the first comment page of two comments (order unrecorded)',
+      async (target: GithubEmulator) => {
+        await createComment(target)
+        await createComment(target)
+      },
+      'GET',
+      repo('/issues/1/comments?per_page=100&page=1'),
+      {},
+      'more than one comment'
+    ],
+    [
       'a listing of two comments (order unrecorded)',
       async (target: GithubEmulator) => {
         await createComment(target)
@@ -950,6 +1076,61 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
     ],
     [
+      'an open-issue listing while implied issue numbers may be open',
+      (target: GithubEmulator) => target.seed({ impliedIssues: 'unknown' }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'implied issue numbers may be open',
+      (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
+      'an open-issue listing after a seed raises nextIssueNumber (implied numbers no fixture records)',
+      (target: GithubEmulator) => target.seed({ nextIssueNumber: 100 }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'implied issue numbers may be open',
+      (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
+      'an open-issue listing after a seed replaces the repository',
+      (target: GithubEmulator) =>
+        target.seed({
+          repository: {
+            owner: 'yolk-synthetic',
+            repo: 'other-practice',
+            id: 100000002,
+            defaultBranch: 'main'
+          }
+        }),
+      'GET',
+      '/repos/yolk-synthetic/other-practice/issues?state=open&per_page=100&page=1',
+      {},
+      'implied issue numbers may be open',
+      (target: GithubEmulator) =>
+        call(target, 'GET', '/repos/yolk-synthetic/other-practice/issues/1')
+    ],
+    [
+      'an open-issue listing after a seed replaces the issues',
+      (target: GithubEmulator) => target.seed({ issues: [] }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'implied issue numbers may be open',
+      validRequest
+    ],
+    [
+      'an open-issue listing without open issues (no fixture records an empty listing)',
+      (target: GithubEmulator) =>
+        target.seed({ profile: 'empty', labels: [], issues: [], impliedIssues: 'closed' }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'without issues',
+      (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
       'an issue create past the last addressable number',
       async (target: GithubEmulator) => {
         await target.seed({ nextIssueNumber: 9_999_999_999 })
@@ -1004,7 +1185,7 @@ describe('unrecognised requests are ledgered without request text', () => {
   })
 
   it.each([
-    ['GET', repo(`/issues?state=open&q=${token}`)],
+    ['GET', repo(`/milestones?state=open&q=${token}`)],
     ['GET', repo(`/pulls?${token}=1`)],
     ['GET', repo('/issues/01')],
     ['GET', repo('/issues/abc')],

@@ -10,27 +10,28 @@
  * (unverified until a live run) for hosts and the Microsoft Graph emulator
  * (`@yolk-sdk/emulators/microsoft`). The same cases run on replay
  * fixtures, an emulator, or by hand against a practice tenant. None is observed live yet
- * (`observed` absent = unverified).
+ * (`observed` absent = unverified). The SharePoint site and Teams cases live in
+ * `teams-sharepoint-cases.ts` and run last; the shared seeds, errors, and helpers live in
+ * `shared.ts`.
  *
- * Every write case creates its own calendar event, draft, or folder and registers its id for the
- * restore before any claim runs (the create and the registration run uninterruptibly, so a hanging
- * create cannot be interrupted; nothing here adds a request timeout). The restore then removes it
- * again (also after a failed claim or an interruption), verifies the removal where Graph allows it,
- * and reports (never swallows) a failed restore. A create that succeeds without a recoverable id
- * fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure (the shared
- * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx) fails with
- * `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`): both messages say to remove the
- * item by hand if it exists. Raised while the case is being interrupted, these and a failed restore
- * also go to `ConformanceCleanupReporter`. No case sends mail or invitations.
+ * Every write-reversible case creates its own calendar event, draft, or folder and registers its id
+ * for the restore before any claim runs (the create and the registration run uninterruptibly, so a
+ * hanging create cannot be interrupted; nothing here adds a request timeout). The restore then
+ * removes it again (also after a failed claim or an interruption), verifies the removal where Graph
+ * allows it, and reports (never swallows) a failed restore. A create that succeeds without a
+ * recoverable id fails with `MicrosoftConformanceRestoreFailed`, and an ambiguous create failure
+ * (the shared `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP
+ * 5xx) fails with `MicrosoftConformanceActionFailed` (`createOutcome: 'unknown'`): both messages
+ * say to remove the item by hand if it exists. Raised while the case is being interrupted, these
+ * and a failed restore also go to `ConformanceCleanupReporter`. No case sends mail or invitations;
+ * the only write-irreversible case posts one Teams chat message (see `teams-sharepoint-cases.ts`).
  */
-import { Cause, Chunk, Context, Data, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
-import * as Schema from 'effect/Schema'
+import { Cause, Chunk, Duration, Effect, Exit, Option, Predicate, Ref } from 'effect'
 import {
   ConformanceMismatch,
   defineConformanceCase,
   expectConformance,
-  expectEqual,
-  type ConformanceCase
+  expectEqual
 } from '@yolk-sdk/conformance/case'
 import { sanitizeConformanceMessage } from '@yolk-sdk/conformance/runner'
 import {
@@ -39,10 +40,7 @@ import {
   interruptPending,
   reportCleanupProblem
 } from '../../conformance/cleanup-reporter.ts'
-import { makeCredentialBinding, type CredentialResolver } from '../../credential.ts'
 import type { ConnectorError } from '../../error.ts'
-import type { ConnectorHttpClient } from '../../http.ts'
-import { makeIntegration } from '../../integration.ts'
 import type { ActionResult } from '../../result.ts'
 import {
   OneDriveCopyItemInput,
@@ -77,7 +75,6 @@ import {
   type OutlookAttachmentMetadata,
   type OutlookMessage
 } from '../mail.ts'
-import { microsoftConnectorId, microsoftOAuthSlotId } from '../oauth.ts'
 import {
   calendarActionIds,
   cancelCalendarEvent,
@@ -89,7 +86,6 @@ import {
   isBefore,
   isNonEmptyString,
   isoInstant,
-  isoUtcInstantPattern,
   listCalendarRange,
   sameInstant,
   updateCalendarEventSubject,
@@ -107,193 +103,59 @@ import { microsoftOutlookAttachmentsListingFixture } from './outlook-attachments
 import { microsoftOutlookConcurrentWritesFixture } from './outlook-concurrent-writes.ts'
 import { microsoftOutlookImmutableIdFixture } from './outlook-immutable-id.ts'
 import { microsoftOutlookPagingNextLinkFixture } from './outlook-paging-next-link.ts'
-
-const SeedString = Schema.Trimmed.check(Schema.isNonEmpty())
-
-const IsoUtcInstant = Schema.String.check(Schema.isPattern(isoUtcInstantPattern))
-
-/**
- * Host-supplied seed identities in the practice tenant. Cases never hard-code account data. A case
- * whose required seed is missing fails with a `precondition:` `ConformanceMismatch` before any
- * request.
- */
-export const MicrosoftConformanceSeeds = Schema.Struct({
-  /**
-   * Mailbox (user principal name or id) for the Outlook and calendar cases, sent as
-   * `/users/{mailbox}`; absent means the signed-in user (`/me`). When it equals the credential's
-   * `accountId`, the connector keeps ordinary (non-Shared) Outlook scopes.
-   */
-  mailbox: Schema.optionalKey(SeedString),
-  /** Calendar for the calendar cases; absent means the default calendar. */
-  calendarId: Schema.optionalKey(SeedString),
-  /** Start of a range with known events (ISO-8601 UTC, for example `2026-09-21T00:00:00Z`). */
-  calendarRangeStart: Schema.optionalKey(IsoUtcInstant),
-  /** End (exclusive) of that range. */
-  calendarRangeEnd: Schema.optionalKey(IsoUtcInstant),
-  /** A known event inside the range, among the first 50 events of the range. */
-  calendarEventId: Schema.optionalKey(SeedString),
-  /** That event's known start instant (ISO-8601 UTC, at most millisecond precision). */
-  calendarEventStart: Schema.optionalKey(IsoUtcInstant),
-  /** A message with at least one inline and one regular (non-inline) file attachment. */
-  attachmentMessageId: Schema.optionalKey(SeedString),
-  /** A mail folder holding more than two messages. */
-  pagingFolderId: Schema.optionalKey(SeedString),
-  /** Drive for the OneDrive cases (`/drives/{driveId}`); absent means `/me/drive`. Copy needs it. */
-  driveId: Schema.optionalKey(SeedString),
-  /** A concrete folder id (not `root`) the OneDrive cases create their own folders under. */
-  driveParentItemId: Schema.optionalKey(SeedString),
-  /** A small file the copy case copies into its own folder. */
-  copySourceItemId: Schema.optionalKey(SeedString)
-})
-
-export type MicrosoftConformanceSeeds = typeof MicrosoftConformanceSeeds.Type
-
-export type MicrosoftConformanceSeedKey = keyof MicrosoftConformanceSeeds
-
-/** Host-supplied seed identities for the Microsoft conformance cases. */
-export class MicrosoftConformanceConfig extends Context.Service<
+import {
+  MicrosoftConformanceActionFailed,
   MicrosoftConformanceConfig,
-  MicrosoftConformanceSeeds
->()('@yolk-sdk/connectors/microsoft/conformance/MicrosoftConformanceConfig') {}
+  MicrosoftConformanceRestoreFailed,
+  MicrosoftConformanceSeeds,
+  microsoftConformanceCredentialRef,
+  microsoftConformanceIntegration,
+  microsoftConformanceMarker,
+  optionalSeed,
+  requireSeed,
+  successValue,
+  type MicrosoftConformanceCase,
+  type MicrosoftConformanceError,
+  type MicrosoftConformanceRequirements,
+  type MicrosoftConformanceSeedKey
+} from './shared.ts'
+import {
+  microsoftSharePointSearchSitesCase,
+  microsoftSharePointSiteDrivesCase,
+  microsoftTeamsChannelMessageRepliesCase,
+  microsoftTeamsChatMessagesPagingCase,
+  microsoftTeamsChatsListMembersCase,
+  microsoftTeamsMeetingTranscriptsCase,
+  microsoftTeamsSendChatMessageCase,
+  microsoftTeamsTeamChannelsCase
+} from './teams-sharepoint-cases.ts'
 
-/**
- * Credential reference the cases bind to the `microsoft.oauth` slot. A host `CredentialResolver`
- * (for example `staticCredentialResolverLayer` from `@yolk-sdk/connectors/conformance`) resolves
- * it to a Microsoft `OAuthCredential`.
- */
-export const microsoftConformanceCredentialRef = 'microsoft.conformance'
-
-/** The integration every Microsoft conformance case invokes the connector with. */
-export const microsoftConformanceIntegration = makeIntegration({
-  connectorId: microsoftConnectorId,
-  credentialBindings: [
-    makeCredentialBinding({
-      slotId: microsoftOAuthSlotId,
-      credentialRef: microsoftConformanceCredentialRef
-    })
-  ]
-})
-
-const restoreByHandAdvice =
-  'remove the case-created item by hand if it still exists (subjects and names start with yolk-conformance).'
-
-/**
- * A connector action (or raw calendar request) returned a failure where the case needed success.
- *
- * `createOutcome: 'unknown'` marks an ambiguous create of a write case's own item (see
- * `classifyWriteExit`: a transport or decoding failure, no status, HTTP 408, or HTTP 5xx): Graph
- * may have created the item without the case learning its id, so the message adds the
- * manual-recovery advice. `code` and `status` keep the underlying classification (the
- * `ConnectorError` cause, such as `transport_failed` or `validation_failed`, for a failed action).
- */
-export class MicrosoftConformanceActionFailed extends Data.TaggedError(
-  'MicrosoftConformanceActionFailed'
-)<{
-  readonly actionId: string
-  readonly code: string
-  readonly status?: number
-  readonly createOutcome?: 'unknown'
-}> {
-  override get message(): string {
-    const status = this.status === undefined ? '' : ` (HTTP ${this.status})`
-
-    const advice =
-      this.createOutcome === 'unknown' ? `; the item may exist anyway: ${restoreByHandAdvice}` : ''
-
-    return `${this.actionId} failed: ${this.code}${status}${advice}`
-  }
+export {
+  MicrosoftConformanceActionFailed,
+  MicrosoftConformanceConfig,
+  MicrosoftConformanceRestoreFailed,
+  MicrosoftConformanceSeeds,
+  microsoftConformanceCredentialRef,
+  microsoftConformanceIntegration,
+  microsoftConformanceMarker,
+  microsoftSharePointSearchSitesCase,
+  microsoftSharePointSiteDrivesCase,
+  microsoftTeamsChannelMessageRepliesCase,
+  microsoftTeamsChatMessagesPagingCase,
+  microsoftTeamsChatsListMembersCase,
+  microsoftTeamsMeetingTranscriptsCase,
+  microsoftTeamsSendChatMessageCase,
+  microsoftTeamsTeamChannelsCase
 }
 
-/** `text` ending in a period (a truncated `...` summary already does). */
-const sentence = (text: string): string => (text.endsWith('.') ? text : `${text}.`)
-
-/**
- * Removing what a write case created failed, or a create succeeded without an id so nothing could
- * be removed automatically. `caseOutcome` says whether the claim itself held before the restore;
- * `claimFailure` is a sanitized summary of why it failed. The item may or may not still exist:
- * check it, and remove it by hand only if it does.
- */
-export class MicrosoftConformanceRestoreFailed extends Data.TaggedError(
-  'MicrosoftConformanceRestoreFailed'
-)<{
-  readonly caseId: string
-  readonly reason: string
-  readonly caseOutcome: 'claim held' | 'claim failed'
-  readonly claimFailure?: string
-}> {
-  override get message(): string {
-    const claim =
-      this.caseOutcome === 'claim held'
-        ? 'Claim held first.'
-        : this.claimFailure === undefined
-          ? 'Claim failed first.'
-          : `Claim failed first: ${this.claimFailure}`
-
-    // Conformance reports cap failure messages at 300 characters: the advice comes first so it
-    // always survives, and each summary is capped at `failureSummaryLength`.
-    return `${this.caseId}: restore failed; ${restoreByHandAdvice} Restore error: ${sentence(this.reason)} ${claim}`
-  }
-}
-
-export type MicrosoftConformanceError =
-  | ConformanceMismatch
-  | ConnectorError
-  | MicrosoftConformanceActionFailed
-  | MicrosoftConformanceRestoreFailed
-
-/** What every Microsoft conformance case requires from the host. */
-export type MicrosoftConformanceRequirements =
-  | ConnectorHttpClient
-  | CredentialResolver
-  | MicrosoftConformanceConfig
-
-export type MicrosoftConformanceCase = ConformanceCase<
+export type {
+  MicrosoftConformanceCase,
   MicrosoftConformanceError,
-  MicrosoftConformanceRequirements
->
+  MicrosoftConformanceRequirements,
+  MicrosoftConformanceSeedKey
+}
 
 const integration = microsoftConformanceIntegration
-
-/** Synthetic marker every case-created item carries in its subject or name. */
-export const microsoftConformanceMarker = 'yolk-conformance'
-
-const requireSeed = <K extends MicrosoftConformanceSeedKey>(key: K) =>
-  Effect.gen(function* () {
-    const seeds = yield* MicrosoftConformanceConfig
-    const value = seeds[key]
-
-    if (value === undefined) {
-      return yield* new ConformanceMismatch({
-        message: `precondition: MicrosoftConformanceConfig.${key} is not configured`
-      })
-    }
-
-    return value
-  })
-
-const optionalSeed = <K extends MicrosoftConformanceSeedKey>(key: K) =>
-  Effect.gen(function* () {
-    const seeds = yield* MicrosoftConformanceConfig
-
-    return seeds[key]
-  })
-
-const successValue = <A>(
-  actionId: string,
-  result: ActionResult<A>
-): Effect.Effect<A, MicrosoftConformanceActionFailed> => {
-  if (Predicate.isTagged(result, 'Success')) {
-    return Effect.succeed(result.value)
-  }
-
-  const { code, status } = result.error
-
-  return Effect.fail(
-    status === undefined
-      ? new MicrosoftConformanceActionFailed({ actionId, code })
-      : new MicrosoftConformanceActionFailed({ actionId, code, status })
-  )
-}
 
 /** `'success'`, or the HTTP status of a failed result (`'no-status'` when it has none). */
 const outcomeStatus = <A>(result: ActionResult<A>): number | 'success' | 'no-status' =>
@@ -1386,5 +1248,13 @@ export const microsoftConformanceCases: ReadonlyArray<MicrosoftConformanceCase> 
   microsoftOutlookImmutableIdCase,
   microsoftOutlookConcurrentWritesCase,
   microsoftOneDriveCreateFolderCase,
-  microsoftOneDriveCopyMonitorCase
+  microsoftOneDriveCopyMonitorCase,
+  microsoftSharePointSearchSitesCase,
+  microsoftSharePointSiteDrivesCase,
+  microsoftTeamsChatsListMembersCase,
+  microsoftTeamsChatMessagesPagingCase,
+  microsoftTeamsTeamChannelsCase,
+  microsoftTeamsChannelMessageRepliesCase,
+  microsoftTeamsMeetingTranscriptsCase,
+  microsoftTeamsSendChatMessageCase
 ]
