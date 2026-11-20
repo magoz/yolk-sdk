@@ -263,6 +263,57 @@ describe('stepAgentChatProjection', () => {
     expect(asked.chat.status).toMatchObject({ _tag: 'Blocked', requests: [laterRequest] })
   })
 
+  it.each([
+    { replay: 'pause', event: pause([deployRequest]), folded: false },
+    {
+      replay: 'request event',
+      event: ToolApprovalRequested.make({ call: deploy, request: deployRequest }),
+      // Status-neutral: folded, it leaves the status as it is.
+      folded: true
+    },
+    {
+      replay: 'tool batch start',
+      event: ToolExecutionStarted.make({ call: deploy }),
+      folded: false
+    },
+    {
+      replay: 'tool batch completion',
+      event: ToolExecutionCompleted.make({
+        call: deploy,
+        result: ToolResult.make({ toolCallId: deploy.id, content: 'ok' })
+      }),
+      // A settled call: folded, it leaves the blocked status as it is.
+      folded: true
+    }
+  ])(
+    "keeps blocking on a later turn's call when the earlier call's $replay replays",
+    ({ event, folded }) => {
+      const later = ToolCall.make({ id: deploy.id, name: 'deploy', params: { env: 'staging' } })
+
+      const laterRequest = ToolApprovalRequest.make({
+        requestId: deployRequest.requestId,
+        toolCallId: later.id,
+        call: later
+      })
+
+      const asked = applyEvents(run([...deployed, ...nextTurn]), [
+        LLMStreamStart.make({ eventId: 'start-3', turn: 3 }),
+        AssistantMessageEvent.make({ eventId: 'message-3', message: ask(later) }),
+        ToolApprovalRequested.make({ eventId: 'request-3', call: later, request: laterRequest }),
+        pause([laterRequest], 'pause-3')
+      ])
+
+      expect(asked.chat.status).toMatchObject({ _tag: 'Blocked', requests: [laterRequest] })
+
+      const replayed = applyEvents(asked, [event])
+
+      expect(replayed.last).toBe(folded ? event : undefined)
+      expect(replayed.step.chatMessages).toEqual(asked.step.chatMessages)
+      expect(replayed.chat.status).toEqual(asked.chat.status)
+      expect(agentStatusFromEvents(replayed.statusEvents)).toEqual(asked.chat.status)
+    }
+  )
+
   it("skips a pause of a superseded execution's turn", () => {
     const tagged = (executionId: string) => ({ executionId, streamId: 'run-1' })
 

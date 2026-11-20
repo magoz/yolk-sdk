@@ -490,18 +490,58 @@ const sameCall =
     return held === undefined ? undefined : Equal.equals(held, call)
   }
 
-/** An answer replays the run holding the request it answers. */
+/** A call with its result: completed, accepted, errored, or the provider's result. */
+const hasToolResultRun = (run: AgentToolRun) =>
+  Predicate.isTagged(run, 'Completed') ||
+  Predicate.isTagged(run, 'Accepted') ||
+  Predicate.isTagged(run, 'Errored') ||
+  Predicate.isTagged(run, 'ProviderCompleted')
+
+/**
+ * An answer replays the run holding the request it answers. A run with its result is never the
+ * one (the loop asks only before a result, so an answer reaching it is a replay; for an accepted
+ * call it would drop the background fence); a running call does not say (an answer can precede
+ * its request there). The chat's `answeredRequest` keeps the same rule.
+ */
 const answeredRequest =
   (requestId: string): ReplayedRun =>
   run => {
+    if (hasToolResultRun(run)) return false
+
     const held = toolRunRequestId(run)
 
     return held === undefined ? undefined : held === requestId
   }
 
-/** A denial replays a pending approval. */
+/**
+ * A denial replays a pending approval. It never answers a run with its result (the loop asks only
+ * before a result) or one holding a question, input or interaction request or answer (a denial
+ * answers only an approval); a run that holds no request does not say. The chat's
+ * `pendingApproval` keeps the same rule.
+ */
 const pendingApproval: ReplayedRun = run =>
-  Predicate.isTagged(run, 'ApprovalRequested') ? true : undefined
+  Match.value(run).pipe(
+    Match.withReturnType<boolean | undefined>(),
+    Match.tag('ApprovalRequested', () => true),
+    Match.tag(
+      'Completed',
+      'Accepted',
+      'Errored',
+      'ProviderCompleted',
+      'QuestionRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InputRequested',
+      'InputSubmitted',
+      'InputCancelled',
+      'InteractionRequested',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      () => false
+    ),
+    Match.tag('InputStreaming', 'InputReady', 'Executing', 'Denied', () => undefined),
+    Match.exhaustive
+  )
 
 /**
  * The run an event about a call acts on (`-1`: none): the last run of the latest turn holding the

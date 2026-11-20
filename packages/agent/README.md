@@ -768,32 +768,54 @@ a resumed tool batch), a host event acts on an earlier part instead of adding a 
 (approval, question, input, interaction) or a tool-batch event on the last earlier part holding the
 same call (id, name and arguments equal); an answer (question, input or interaction response,
 approval denial) on the last earlier part holding the request it answers (a denial: a pending
-approval), else on nothing. A request (including `AgentAwaitingInput`'s requests) never reopens a
-call past its request: a part answered, cancelled, denied or finished keeps its state against a
-request for the same call, with or without event id, and the `useAgentChat` reducer keeps its status
-when every request of an `AgentAwaitingInput` names such a call (a replayed pause does not block the
-run again) and blocks only on the pending requests of a pause that names some. A host that folds
-status itself beside the projection uses `stepAgentChatProjection`: it applies the event as
-`applyAgentEventToChatProjection` does and returns `statusEvent`, the event the reducer's status
-follows (the pause with only its pending requests), or `undefined` when the status must not move (a
-seen or dropped event, a replayed start of a finished call, a pause naming only such calls); fold it
-with `nextAgentStatus` or collect it for `agentStatusFromEvents`. The loop asks for a call only
-until it has a result or used an answer: an invalid input answer re-pends the same request while the
-part is still pending (only a valid payload emits `InputSubmitted`), a running call has no result,
-so an abort leaves it running and the next run that resumes it asks again (the card shows), and a
-later turn reusing the id asks on its own part. Tool-batch and request events must therefore carry
-the call exactly as the model emitted it: a host that normalizes arguments between the model's
-events and its own adds a second card for a replayed or late event. A replayed start of the same
-call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone; a
-start whose arguments differ is another call's and reopens a completed or errored part (an accepted
-one keeps its fence), as in `reduceAgentEvents`. Until a start is seen (a state built before
-`turnStart` too), and always in `applyAgentEventToChatMessages`, a tool event matches the last
-message holding the call, so a reused id can still update an earlier turn's call there (in
-`applyAgentEventToChatMessages`, a later call reusing the id whose `AssistantMessage` arrives
-without `ToolInputStart`/`ToolInputEnd` while the earlier call's message is the last assistant
-message replaces that message, keeps the earlier call's settled state and ignores its own request;
-the loop always emits `ToolInputEnd`, which resets the part); answers, approval denials and added
-acceptance or interaction results update that one call, not every call with the id.
+approval), else on nothing. The turn's part also gives way to that earlier part when it is known
+not to be the one: another call (requests, tool-batch events), or, for an answer, a part holding
+another request (pending, answered or cancelled, read by its response's request id, or denied, read
+by the approval request it denies) or a part with its result (completed, accepted, errored or
+provider-completed: the loop asks only before a result, so an answer reaching one is a replay). A
+replay without event id of an earlier turn's request, pause, tool-batch event or answer after a
+later turn reused the id then acts on the earlier turn's part (which the request rule below keeps),
+so the later turn's card, and the status blocked on it, stay. With no earlier part holding the call,
+a request or tool-batch event acts on the turn's part; an answer reaching a part known not to be its
+own, with no part holding its request (a stale answer, for example after hydration), changes
+nothing. A denial answers only a pending approval: a part with its result, or one holding a
+question, input or interaction request or answer, is never the one it denies (it gives way to an
+earlier pending approval, else the denial changes nothing). A part holding no request (called or
+running) does not say, so a denial denies it and an answer can reach a running part before its
+request. `reduceAgentEvents` reads its runs by the same rules. Limits, shared with
+`reduceAgentEvents`: request ids are built from the tool name and call id, so a replayed answer of
+an earlier turn's call of the same tool reusing the id answers the later turn's request, and a
+replayed denial denies a later turn's pending approval or running call reusing the id (dedupe
+answers by `eventId`); a part still streaming its input does not say which call it is and keeps the
+event; with no start known (see below) there is no earlier turn to give way to; and a replay that
+gives way to an earlier part still acknowledges the latest turn's provisional call with the same id
+(execution routing matches ids), so a superseded execution of that turn no longer discards that
+call. A request (including `AgentAwaitingInput`'s requests) never reopens a call past its request: a
+part answered, cancelled, denied or finished keeps its state against a request for the same call,
+with or without event id, and the `useAgentChat` reducer keeps its status when every request of an
+`AgentAwaitingInput` names such a call (a replayed pause does not block the run again) and blocks
+only on the pending requests of a pause that names some. A host that folds status itself beside the
+projection uses `stepAgentChatProjection`: it applies the event as `applyAgentEventToChatProjection`
+does and returns `statusEvent`, the event the reducer's status follows (the pause with only its
+pending requests), or `undefined` when the status must not move (a seen or dropped event, a replayed
+start of a finished call, a pause naming only such calls); fold it with `nextAgentStatus` or collect
+it for `agentStatusFromEvents`. The loop asks for a call only until it has a result or used an
+answer: an invalid input answer re-pends the same request while the part is still pending (only a
+valid payload emits `InputSubmitted`), a running call has no result, so an abort leaves it running
+and the next run that resumes it asks again (the card shows), and a later turn reusing the id asks
+on its own part. Tool-batch and request events must therefore carry the call exactly as the model
+emitted it: a host that normalizes arguments between the model's events and its own adds a second
+card for a replayed or late event. A replayed start of the same call leaves a completed, accepted or
+errored part, and the `useAgentChat` reducer's status, alone; a start whose arguments differ is
+another call's and reopens a completed or errored part (an accepted one keeps its fence), as in
+`reduceAgentEvents`. Until a start is seen (a state built before `turnStart` too), and always in
+`applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a reused
+id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a later call
+reusing the id whose `AssistantMessage` arrives without `ToolInputStart`/`ToolInputEnd` while the
+earlier call's message is the last assistant message replaces that message, keeps the earlier call's
+settled state and ignores its own request; the loop always emits `ToolInputEnd`, which resets the
+part); answers, approval denials and added acceptance or interaction results update that one call,
+not every call with the id.
 
 `reduceAgentEvents` scopes tool runs the same way: its state records where the latest turn's runs
 start in `toolRuns` (`turnStart`, an `AgentClientTurnStart`), so a later turn's call reusing an id
@@ -802,10 +824,11 @@ by id, the last is the latest). The model's events (input, provider results) act
 turn's run; host events act on it first, else a request or tool-batch event on the last earlier run
 holding the same call and an answer on the last earlier run holding its request, else they add a
 run to the latest turn; the latest turn's run also gives way to that earlier run when it holds
-another call or request (an answer reaching a latest-turn run that holds another request, with no
-run holding its own, changes nothing). A replay without event id of an accepted (background)
-call's start or request still leaves its `Accepted` run alone, and with a turn start known, the transcript's acknowledgement fences only
-events naming the acknowledged call, not a later call reusing its id. The request rule and status
+another call or request, or, for an answer, its result (an answer reaching a latest-turn run that
+holds another request or its result, with no run holding its own, changes nothing). A replay without
+event id of an accepted (background) call's start or request still leaves its `Accepted` run alone,
+and with a turn start known, the transcript's acknowledgement fences only events naming the
+acknowledged call, not a later call reusing its id. The request rule and status
 fence are the chat's: a request never reopens a run past its request (answered or submitted,
 cancelled, denied or finished) when it names the same call, with or without event id (a `Denied`
 run keeps the approval request it denies, `request`, for that check); a running call is not past

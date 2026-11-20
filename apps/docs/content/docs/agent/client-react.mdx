@@ -129,9 +129,13 @@ Providers can reuse tool call ids across turns. The chat projection and the `use
 record where the latest model turn starts (`turnStart`), and a turn's tool events only match a
 call after it, so a later turn's call never changes an earlier turn's call with the same id. A
 replayed or late request or tool-batch event updates the earlier part holding the same call (send
-the call as the model emitted it), and a replayed answer the part holding its request. A replayed
-request (or `AgentAwaitingInput`) never reopens a call already answered, cancelled, denied or
-finished, and the `useAgentChat` reducer keeps its status when a replayed `AgentAwaitingInput`
+the call as the model emitted it), and a replayed answer the part holding its request, also when
+the latest turn holds another call reusing the id: a replay of an earlier turn's pause leaves a
+later turn's pending card, and the status blocked on it, alone. An answer whose request no part
+holds changes nothing when the call it reaches holds another request or already has its result (a
+stale answer), and a denial answers only a pending approval (or a call holding no request);
+`reduceAgentEvents` reads its runs the same way. A replayed request (or `AgentAwaitingInput`)
+never reopens a call already answered, cancelled, denied or finished, and the `useAgentChat` reducer keeps its status when a replayed `AgentAwaitingInput`
 names only such calls (a pause naming some blocks only on its pending requests); a host folding
 status beside the projection gets the same answer from `stepAgentChatProjection`
 ([status](./status#from-live-events)). An invalid input answer re-pends a request that is still pending, and a

@@ -18,6 +18,7 @@ import {
   QuestionRequest,
   QuestionRequested,
   QuestionResponse,
+  ToolApprovalDenied,
   ToolApprovalGranted,
   ToolApprovalRequest,
   ToolApprovalRequested,
@@ -25,6 +26,7 @@ import {
   ToolCall,
   ToolExecutionAccepted,
   ToolExecutionCompleted,
+  ToolExecutionError,
   ToolExecutionStarted,
   ToolInputDelta,
   ToolInputEnd,
@@ -467,6 +469,151 @@ describe('tool runs of calls that reuse an id across turns', () => {
         'call_0 {"city":"Oslo"}:QuestionAnswered',
         'call_0 {"city":"Bergen"}:QuestionRequested'
       ])
+    })
+
+    // The latest turn's `call_0` has its result: an answer reaching it is a replay (the loop asks
+    // only before a result). A replayed answer to turn 1's question acts on turn 1's run, a stale
+    // one changes nothing, and an accepted call keeps its background fence.
+    const search = ToolCall.make({ id: 'call_0', name: 'web_search', params: { q: 'Bergen' } })
+
+    const finished = [
+      {
+        state: 'Completed',
+        events: [
+          ...modelTurn('tagged', 'model-2:1', 2, turnTwo, bergen),
+          ...batch(bergen, result('9C'))
+        ]
+      },
+      {
+        state: 'Accepted',
+        events: [...modelTurn('tagged', 'model-2:1', 2, startedExport, exporting), ...background()]
+      },
+      {
+        state: 'Errored',
+        events: [
+          ...modelTurn('tagged', 'model-2:1', 2, turnTwo, bergen),
+          ToolExecutionStarted.make({ ...host(), call: bergen }),
+          ToolExecutionError.make({
+            ...host(),
+            call: bergen,
+            message: 'Weather is down',
+            code: 'tool_error'
+          })
+        ]
+      },
+      {
+        state: 'ProviderCompleted',
+        events: [
+          LLMStreamStart.make({ ...identity('tagged', 'model-2:1'), turn: 2 }),
+          ProviderToolResult.make({
+            ...identity('tagged', 'model-2:1'),
+            call: search,
+            result: result('Bergen')
+          })
+        ]
+      }
+    ]
+
+    it.each(finished)(
+      "leaves the latest turn's $state run alone for a replayed or stale answer",
+      ({ state, events }) => {
+        const answeredFirst = reduce([
+          ...modelTurn('tagged', 'model-1:1', 1, answer('Which unit?', [unit]), unit),
+          QuestionRequested.make({ ...host(), request: question }),
+          QuestionAnswered.make({ ...host(), response: answered }),
+          ...events
+        ])
+
+        expect(answeredFirst.toolRuns.map(run => run._tag)).toEqual(['QuestionAnswered', state])
+
+        const replay = QuestionAnswered.make({ response: answered })
+
+        expect(applyAgentEvent(answeredFirst, replay).toolRuns).toEqual(answeredFirst.toolRuns)
+
+        const latestOnly = reduce(events)
+
+        expect(applyAgentEvent(latestOnly, replay).toolRuns).toEqual(latestOnly.toolRuns)
+      }
+    )
+
+    it('still answers a running call (an answer can precede its request there)', () => {
+      const running = reduce([
+        ...modelTurn('tagged', 'model-1:1', 1, answer('Which unit?', [unit]), unit),
+        ToolExecutionStarted.make({ ...host(), call: unit })
+      ])
+
+      const state = applyAgentEvent(running, QuestionAnswered.make({ response: answered }))
+
+      expect(state.toolRuns.map(run => run._tag)).toEqual(['QuestionAnswered'])
+    })
+
+    // A denial answers only a pending approval, and the loop asks only before a result: turn 1's
+    // denial replayed without event id leaves a later turn's question or finished call alone.
+    const deploy = ToolCall.make({ id: 'call_0', name: 'deploy', params: { env: 'prod' } })
+
+    const deployRequest = ToolApprovalRequest.make({
+      requestId: 'approval:call_0',
+      toolCallId: 'call_0',
+      call: deploy
+    })
+
+    /** The denial, as a replay without event id sends it unless given its identity. */
+    const denial = (identity: { readonly eventId?: string; readonly streamId?: string } = {}) =>
+      ToolApprovalDenied.make({
+        ...identity,
+        toolCallId: 'call_0',
+        reason: 'Not now',
+        response: ToolApprovalResponse.make({
+          requestId: deployRequest.requestId,
+          toolCallId: 'call_0',
+          decision: 'denied',
+          source: 'user'
+        })
+      })
+
+    const askedDeploy = [
+      ...modelTurn('tagged', 'model-1:1', 1, answer('Deploy?', [deploy]), deploy),
+      ToolApprovalRequested.make({ ...host(), call: deploy, request: deployRequest })
+    ]
+
+    const deniedFirst = [...askedDeploy, denial(host())]
+
+    const laterRuns = [
+      {
+        state: 'QuestionRequested',
+        events: [
+          ...modelTurn('tagged', 'model-2:1', 2, answer('Which unit?', [unit]), unit),
+          QuestionRequested.make({ ...host(), request: question })
+        ]
+      },
+      ...finished.filter(({ state }) => state === 'Completed' || state === 'Accepted')
+    ]
+
+    it.each(laterRuns)(
+      "leaves the latest turn's $state run alone for a replayed denial",
+      ({ state, events }) => {
+        const denied = reduce([...deniedFirst, ...events])
+
+        expect(denied.toolRuns.map(run => run._tag)).toEqual(['Denied', state])
+        expect(applyAgentEvent(denied, denial()).toolRuns).toEqual(denied.toolRuns)
+
+        const latestOnly = reduce(events)
+
+        expect(applyAgentEvent(latestOnly, denial()).toolRuns).toEqual(latestOnly.toolRuns)
+      }
+    )
+
+    it('still denies a pending approval and a running call', () => {
+      expect(applyAgentEvent(reduce(askedDeploy), denial()).toolRuns.map(run => run._tag)).toEqual([
+        'Denied'
+      ])
+
+      const running = reduce([
+        ...modelTurn('tagged', 'model-1:1', 1, answer('Deploy', [deploy]), deploy),
+        ToolExecutionStarted.make({ ...host(), call: deploy })
+      ])
+
+      expect(applyAgentEvent(running, denial()).toolRuns.map(run => run._tag)).toEqual(['Denied'])
     })
 
     it('keeps the transcript fence when a later turn holds another call with the id', () => {
