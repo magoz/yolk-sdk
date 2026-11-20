@@ -246,6 +246,104 @@ export const fortnoxCaseSpecs: ReadonlyArray<FortnoxCaseSpec> = [
     fileName: 'invoice-send-email.ts',
     exportName: 'fortnoxInvoiceSendEmailFixture',
     doc: 'The invoice read that confirms the email recipient, then the email send answered with the invoice envelope.'
+  },
+  {
+    caseId: 'fortnox.company.information-decodes',
+    seeds: [],
+    fileName: 'company-information.ts',
+    exportName: 'fortnoxCompanyInformationFixture',
+    doc: 'Company information (`CompanyInformation`).'
+  },
+  {
+    caseId: 'fortnox.customer.list-matches-get',
+    seeds: [],
+    fileName: 'customer-list-get.ts',
+    exportName: 'fortnoxCustomerListMatchesGetFixture',
+    doc: 'One page of customers with `MetaInformation`, then the first customer read back.'
+  },
+  {
+    caseId: 'fortnox.article.list-row-numeric-strings',
+    seeds: [],
+    fileName: 'article-list-row-numbers.ts',
+    exportName: 'fortnoxArticleListRowNumbersFixture',
+    doc: 'One page of articles, then the first article read back.'
+  },
+  {
+    caseId: 'fortnox.price.tier-matches-sublist',
+    seeds: [],
+    fileName: 'price-tier-sublist.ts',
+    exportName: 'fortnoxPriceTierMatchesSublistFixture',
+    doc: 'Price lists, the PreSelected one, one article, its price tiers, and its first tier read back.'
+  },
+  {
+    caseId: 'fortnox.cost-center.list-matches-get',
+    seeds: [],
+    fileName: 'cost-center-list-get.ts',
+    exportName: 'fortnoxCostCenterListMatchesGetFixture',
+    doc: 'One page of cost centers, then the first cost center read back.'
+  },
+  {
+    caseId: 'fortnox.payment.invoice-payment-wire-numbers',
+    seeds: [],
+    fileName: 'invoice-payment-read.ts',
+    exportName: 'fortnoxInvoicePaymentReadFixture',
+    doc: 'One page of invoice payments, then the first payment read back.'
+  },
+  {
+    caseId: 'fortnox.payment.supplier-payment-wire-numbers',
+    seeds: [],
+    fileName: 'supplier-invoice-payment-read.ts',
+    exportName: 'fortnoxSupplierInvoicePaymentReadFixture',
+    doc: 'One page of supplier invoice payments, then the first payment read back.'
+  },
+  {
+    caseId: 'fortnox.offer.rows-on-get-and-preview-pdf',
+    seeds: [],
+    fileName: 'offer-rows-preview.ts',
+    exportName: 'fortnoxOfferRowsAndPreviewFixture',
+    doc: 'One page of offers, the first offer with its rows, and its preview PDF (`bodyBase64`).'
+  },
+  {
+    caseId: 'fortnox.print-templates.unpaginated',
+    seeds: [],
+    fileName: 'print-templates.ts',
+    exportName: 'fortnoxPrintTemplatesUnpaginatedFixture',
+    doc: 'The invoice and offer print templates.'
+  },
+  {
+    caseId: 'fortnox.inbox.file-bytes-match-size',
+    seeds: [],
+    fileName: 'inbox-folder-file.ts',
+    exportName: 'fortnoxInboxFolderFileBytesFixture',
+    doc: 'The inbox root, its subfolders up to the first holding a file, and that file’s bytes.'
+  },
+  {
+    caseId: 'fortnox.settings.company-and-locked-period',
+    seeds: [],
+    fileName: 'settings-company-locked-period.ts',
+    exportName: 'fortnoxSettingsCompanyAndLockedPeriodFixture',
+    doc: 'Company settings and the locked period.'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    seeds: [],
+    fileName: 'predefined-accounts-labels.ts',
+    exportName: 'fortnoxPredefinedAccountsAndLabelsFixture',
+    doc: 'Predefined accounts, the first one read back, and the labels.'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    seeds: [],
+    fileName: 'settings-registers.ts',
+    exportName: 'fortnoxSettingsRegistersFixture',
+    doc: 'Each settings register, then its first entry read back.'
+  },
+  {
+    caseId: 'fortnox.profile.me',
+    seeds: [],
+    fileName: 'profile-me.ts',
+    exportName: 'fortnoxProfileMeFixture',
+    doc: 'The token user profile (`Me`).'
   }
 ]
 

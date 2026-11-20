@@ -84,7 +84,7 @@ export const unsupportedQuery = (key: string): Response =>
   )
 
 // The synthetic invoice preview PDF from the preview fixture (`bodyBase64`), copied as data. The
-// offer preview (no fixture) answers the same bytes.
+// offer preview answers the same bytes (as its read case fixture has them).
 const previewPdfBase64 =
   'JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFtdIC9Db3VudCAwID4+CmVuZG9iagp0cmFpbGVyCjw8IC9Sb290IDEgMCBSID4+CiUlRU9GCg=='
 
@@ -125,7 +125,7 @@ export type FortnoxApiRoute = EmulatorRouteEvidence & {
 
 /**
  * An unverified connector route under `/3`. `caseIds` lists the conformance cases whose claims it
- * follows; routes without a fixture cite none.
+ * follows (every route cites at least one).
  */
 export const connectorRoute = (
   method: string,

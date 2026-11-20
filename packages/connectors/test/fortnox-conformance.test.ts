@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Predicate, Ref } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient } from 'effect/http'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -51,7 +51,11 @@ import {
   fortnoxInvoiceRowDiscountCase,
   fortnoxInvoiceRowDiscountFixture,
   fortnoxInvoiceSendEmailCase,
+  fortnoxInvoicePaymentReadFixture,
   fortnoxInvoiceSendEmailFixture,
+  fortnoxPrintTemplatesUnpaginatedCase,
+  fortnoxPrintTemplatesUnpaginatedFixture,
+  fortnoxSupplierInvoicePaymentReadFixture,
   fortnoxWriteRejectionCase,
   fortnoxWriteRejectionFixture,
   type FortnoxConformanceCase,
@@ -144,7 +148,21 @@ describe('Fortnox conformance cases', () => {
       ['fortnox.invoice.row-discount-sticky', 'write-reversible'],
       ['fortnox.customer.empty-string-keeps-value', 'write-reversible'],
       ['fortnox.write.rejection-error-information', 'write-reversible'],
-      ['fortnox.invoice.send-email', 'write-irreversible']
+      ['fortnox.invoice.send-email', 'write-irreversible'],
+      ['fortnox.company.information-decodes', 'read'],
+      ['fortnox.customer.list-matches-get', 'read'],
+      ['fortnox.article.list-row-numeric-strings', 'read'],
+      ['fortnox.price.tier-matches-sublist', 'read'],
+      ['fortnox.cost-center.list-matches-get', 'read'],
+      ['fortnox.payment.invoice-payment-wire-numbers', 'read'],
+      ['fortnox.payment.supplier-payment-wire-numbers', 'read'],
+      ['fortnox.offer.rows-on-get-and-preview-pdf', 'read'],
+      ['fortnox.print-templates.unpaginated', 'read'],
+      ['fortnox.inbox.file-bytes-match-size', 'read'],
+      ['fortnox.settings.company-and-locked-period', 'read'],
+      ['fortnox.settings.predefined-accounts-and-labels', 'read'],
+      ['fortnox.settings.registers-list-matches-get', 'read'],
+      ['fortnox.profile.me', 'read']
     ])
     expect(fortnoxConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
       fortnoxConformanceCases.map(testCase => testCase.id)
@@ -175,6 +193,34 @@ describe('Fortnox conformance cases', () => {
     })
   )
 
+  it('record the numeric-string voucher fields the payment cases claim', () => {
+    const payments = (response: WireResponse): ReadonlyArray<unknown> => {
+      const body: unknown = JSON.parse(textBody(response))
+
+      return Predicate.isObject(body)
+        ? Object.entries(body).flatMap(([key, value]) =>
+            key === 'MetaInformation' ? [] : Array.isArray(value) ? value : [value]
+          )
+        : []
+    }
+
+    for (const fixture of [
+      fortnoxInvoicePaymentReadFixture,
+      fortnoxSupplierInvoicePaymentReadFixture
+    ]) {
+      const recorded = fixture.exchanges.flatMap(exchange => payments(exchange.response))
+
+      expect(recorded.length, fixture.id).toBeGreaterThan(0)
+
+      for (const payment of recorded) {
+        expect(payment, fixture.id).toMatchObject({
+          VoucherNumber: expect.stringMatching(/^\d+$/),
+          VoucherYear: expect.stringMatching(/^\d+$/)
+        })
+      }
+    }
+  })
+
   it.effect('all pass on replay with unverified warnings', () =>
     Effect.gen(function* () {
       yield* atTestNow
@@ -186,7 +232,7 @@ describe('Fortnox conformance cases', () => {
         layer: replayCaseLayer
       })
 
-      expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 21, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       for (const result of report.results) {
@@ -198,7 +244,7 @@ describe('Fortnox conformance cases', () => {
       }
 
       expect(formatConformanceReport(report).split('\n').at(-1)).toBe(
-        '7 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
+        '21 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
       )
     })
   )
@@ -215,7 +261,7 @@ describe('Fortnox conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(7)
+      expect(report.summary.passed).toBe(21)
 
       for (const testCase of fortnoxConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -453,7 +499,21 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.invoice.row-discount-sticky', 'skipped', 'writes-not-allowed'],
         ['fortnox.customer.empty-string-keeps-value', 'skipped', 'writes-not-allowed'],
         ['fortnox.write.rejection-error-information', 'skipped', 'writes-not-allowed'],
-        ['fortnox.invoice.send-email', 'skipped', 'manual-only']
+        ['fortnox.invoice.send-email', 'skipped', 'manual-only'],
+        ['fortnox.company.information-decodes', 'passed', null],
+        ['fortnox.customer.list-matches-get', 'passed', null],
+        ['fortnox.article.list-row-numeric-strings', 'passed', null],
+        ['fortnox.price.tier-matches-sublist', 'passed', null],
+        ['fortnox.cost-center.list-matches-get', 'passed', null],
+        ['fortnox.payment.invoice-payment-wire-numbers', 'passed', null],
+        ['fortnox.payment.supplier-payment-wire-numbers', 'passed', null],
+        ['fortnox.offer.rows-on-get-and-preview-pdf', 'passed', null],
+        ['fortnox.print-templates.unpaginated', 'passed', null],
+        ['fortnox.inbox.file-bytes-match-size', 'passed', null],
+        ['fortnox.settings.company-and-locked-period', 'passed', null],
+        ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
+        ['fortnox.settings.registers-list-matches-get', 'passed', null],
+        ['fortnox.profile.me', 'passed', null]
       ])
     })
   )
@@ -469,7 +529,21 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.invoice.row-discount-sticky', 'passed', null],
         ['fortnox.customer.empty-string-keeps-value', 'passed', null],
         ['fortnox.write.rejection-error-information', 'passed', null],
-        ['fortnox.invoice.send-email', 'skipped', 'manual-only']
+        ['fortnox.invoice.send-email', 'skipped', 'manual-only'],
+        ['fortnox.company.information-decodes', 'passed', null],
+        ['fortnox.customer.list-matches-get', 'passed', null],
+        ['fortnox.article.list-row-numeric-strings', 'passed', null],
+        ['fortnox.price.tier-matches-sublist', 'passed', null],
+        ['fortnox.cost-center.list-matches-get', 'passed', null],
+        ['fortnox.payment.invoice-payment-wire-numbers', 'passed', null],
+        ['fortnox.payment.supplier-payment-wire-numbers', 'passed', null],
+        ['fortnox.offer.rows-on-get-and-preview-pdf', 'passed', null],
+        ['fortnox.print-templates.unpaginated', 'passed', null],
+        ['fortnox.inbox.file-bytes-match-size', 'passed', null],
+        ['fortnox.settings.company-and-locked-period', 'passed', null],
+        ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
+        ['fortnox.settings.registers-list-matches-get', 'passed', null],
+        ['fortnox.profile.me', 'passed', null]
       ])
     })
   )
@@ -709,6 +783,29 @@ describe('Fortnox conformance disagreement drills', () => {
         expect(methodsAndUrls(entries)).toEqual(['GET https://api.fortnox.se/3/invoices/103'])
       }
     })
+  )
+
+  it.effect(
+    'fails the print-template case when a print template list carries MetaInformation',
+    () =>
+      Effect.gen(function* () {
+        const tampered = replaceResponse(
+          fortnoxPrintTemplatesUnpaginatedFixture,
+          0,
+          replaceInBody(
+            ']}',
+            '],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+          )
+        )
+
+        const { failure } = yield* drill(fortnoxPrintTemplatesUnpaginatedCase, tampered)
+
+        expect(failure).toEqual({
+          kind: 'failure',
+          tag: 'ConformanceMismatch',
+          message: 'expected the invoice print templates to carry no MetaInformation'
+        })
+      })
   )
 
   it.effect('fails the payment-filter case when the unbooked invoice is in the unpaid list', () =>

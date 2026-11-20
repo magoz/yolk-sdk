@@ -434,9 +434,11 @@ and `credentials: 'omit'` are forwarded as `FetchHttpClient.RequestInit` options
 failures become code-only errors without URLs, headers, or bodies. The static resolver ignores
 scopes and never refreshes; hosts own real credential storage.
 
-`@yolk-sdk/connectors/fortnox/conformance` exports seven Fortnox cases (`fortnoxConformanceCases`),
-their synthetic fixtures (`fortnoxConformanceFixtures`, `evidence: 'unverified'`), and the seeds they
-replay with (`fortnoxConformanceFixtureSeeds`). Cases need the connector ports plus
+`@yolk-sdk/connectors/fortnox/conformance` exports twenty-one Fortnox cases
+(`fortnoxConformanceCases`: seven invoice and customer cases, and fourteen seedless `read` cases of
+company information, the customer list, and the read-only resources), their synthetic fixtures
+(`fortnoxConformanceFixtures`, `evidence: 'unverified'`), and the seeds they replay with
+(`fortnoxConformanceFixtureSeeds`). Cases need the connector ports plus
 `FortnoxConformanceConfig`, which holds seed identities in a Fortnox developer test company. A
 missing seed fails the case with a `precondition:` mismatch before any request. None of the cases is
 observed live yet, so reports warn `unverified-case`.
