@@ -3,11 +3,11 @@
  * (internal; re-exported by `src/todoist.ts`, which runs the table on the shared stateful wrapper,
  * `src/stateful-emulator.ts`, in its resolved mode).
  *
- * Only the routes the seven Todoist conformance cases (and their cleanup) need are emulated, with
+ * Only the routes the eight Todoist conformance cases (and their cleanup) need are emulated, with
  * wire shapes copied from the synthetic fixtures; everything else answers the wrapper's ledgered
  * 400 not-emulated. Each route lists the cases whose claims it follows. The project listing that
- * the read-only leftover lookup (`findTodoistConformanceLeftovers`) sends has no fixture, so it is
- * not emulated: the lookup fails, and runners print their lookup-failed WARN.
+ * the read-only leftover lookup (`findTodoistConformanceLeftovers`) sends is the one the project
+ * paging case records (`todoist.projects.list-cursor-paging`), so the lookup runs against it.
  *
  * @experimental
  */
@@ -55,6 +55,8 @@ export type TodoistEmulatorDrills = {
   readonly createOmitsParent?: boolean
   /** `true`: deleting a project keeps its tasks. */
   readonly deleteKeepsTasks?: boolean
+  /** `true`: a project-listing cursor leads back to the first page (projects repeat). */
+  readonly projectCursorRestarts?: boolean
 }
 
 /** Where a task-listing cursor leads (runtime data, like the ledger; not in the state). */
@@ -65,13 +67,27 @@ export type TodoistCursor = {
   readonly offset: number
 }
 
+/** Where a project-listing cursor leads (runtime data, like the ledger; not in the state). */
+export type TodoistProjectCursor = {
+  readonly id: string
+  readonly limit: string
+  readonly offset: number
+  /** The project ids of the listing when the cursor was issued; a changed listing is refused. */
+  readonly listing: string
+}
+
 export type TodoistApiEnv = {
   /** Clock in epoch milliseconds (timestamps of created and closed items). */
   readonly now: () => number
   readonly drills: Required<TodoistEmulatorDrills>
   /** Task-listing cursors by id (runtime-only; cleared by reset and seed). */
   readonly cursors: Map<string, TodoistCursor>
+  /** Next task-cursor number; never reset, so no cursor value crosses a reset or seed. */
   readonly cursorCounter: { next: number }
+  /** Project-listing cursors by id (runtime-only; cleared by reset and seed). */
+  readonly projectCursors: Map<string, TodoistProjectCursor>
+  /** Next project-cursor number; never reset, like `cursorCounter`. */
+  readonly projectCursorCounter: { next: number }
 }
 
 type RouteRequest = {
@@ -114,6 +130,8 @@ const dueCase = 'todoist.tasks.due-dates'
 const parentCase = 'todoist.projects.parent-id'
 
 const deleteCase = 'todoist.projects.delete-then-not-found'
+
+const projectsPagingCase = 'todoist.projects.list-cursor-paging'
 
 /** Every write case creates, reads, and deletes its own project. */
 const projectCases = [lifecycleCase, dueCase, parentCase, deleteCase]
@@ -507,6 +525,61 @@ const listLabels: RouteHandler = (state, request) => {
     : () => json(200, { results: state.labels, next_cursor: null })
 }
 
+/**
+ * The active project listing (`todoist.projects.list-cursor-paging`, which the leftover lookup's
+ * request follows): every project the state holds, in state order (the seeded projects as the
+ * listing fixture records them, then the projects created here, in the create fixtures' shape),
+ * `limit` from 1 to 200 required, pages chained through cursors this emulator issued for the same
+ * `limit` and the same, unchanged listing. An empty listing is no fixture's answer.
+ */
+const listProjects: RouteHandler = (state, request, env) => {
+  const limit = limitOf(request, value => value <= maxListLimit, `from 1 to ${maxListLimit}`)
+
+  if (isNotEmulated(limit)) return limit
+
+  if (limit === undefined) return notEmulated('project listings without limit are not emulated')
+
+  if (state.projects.length === 0) {
+    return notEmulated(
+      'a project listing without projects is not emulated (no fixture records one)'
+    )
+  }
+
+  const listing = state.projects.map(project => project.id).join(',')
+  const rawCursor = request.query.get('cursor')
+  const cursor = rawCursor === null ? undefined : env.projectCursors.get(rawCursor)
+
+  // Cursors are valid only as issued by this emulator since its last reset or seed.
+  if (rawCursor !== null && cursor === undefined) {
+    return notEmulated('a cursor this emulator did not issue is not emulated')
+  }
+
+  if (cursor !== undefined && cursor.limit !== String(limit)) {
+    return notEmulated('a cursor sent with another limit is not emulated')
+  }
+
+  if (cursor !== undefined && cursor.listing !== listing) {
+    return notEmulated('continuing a project listing that changed since its cursor is not emulated')
+  }
+
+  const offset = cursor === undefined || env.drills.projectCursorRestarts ? 0 : cursor.offset
+  const end = offset + limit
+
+  return () => {
+    let next: string | null = null
+
+    if (end < state.projects.length) {
+      next = `SyntheticProjectCursor${padded(env.projectCursorCounter.next++, 4)}`
+      env.projectCursors.set(next, { id: next, limit: String(limit), offset: end, listing })
+    }
+
+    return json(200, {
+      results: state.projects.slice(offset, end).map(projectWire),
+      next_cursor: next
+    })
+  }
+}
+
 const createProject: RouteHandler = (state, request, env) => {
   const body = bodyObject(request, ['name', 'parent_id'], ['name', 'parent_id'])
 
@@ -568,7 +641,8 @@ const getProject: RouteHandler = (state, request, env) => {
     return () => notFound(state, env, 'Project not found')
   }
 
-  // Only projects created here answer: no fixture records a seeded project's object.
+  // Only projects created here answer: no fixture records a seeded project's single read (only
+  // the project listing renders them).
   const project = createdProject(state, id)
 
   return project === undefined
@@ -651,6 +725,7 @@ export const todoistApiRoutes: ReadonlyArray<TodoistApiRoute> = [
   route('POST', '/tasks/{taskId}', true, [lifecycleCase, dueCase], updateTask),
   route('POST', '/tasks/{taskId}/close', true, [lifecycleCase], closeTask),
   route('GET', '/labels', false, [labelsCase], listLabels, ['limit']),
+  route('GET', '/projects', false, [projectsPagingCase], listProjects, ['cursor', 'limit']),
   route('POST', '/projects', true, projectCases, createProject),
   route('GET', '/projects/{projectId}', false, projectCases, getProject),
   route('DELETE', '/projects/{projectId}', true, projectCases, deleteProject)

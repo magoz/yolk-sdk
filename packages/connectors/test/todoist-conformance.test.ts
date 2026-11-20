@@ -44,6 +44,7 @@ import {
   todoistProjectDeleteFixture,
   todoistProjectParentIdCase,
   todoistProjectParentIdFixture,
+  todoistProjectsPagingFixture,
   todoistTaskLabelsFixture,
   todoistTaskLifecycleCase,
   todoistTaskLifecycleFixture,
@@ -128,6 +129,7 @@ const caseIds = [
   ['todoist.tasks.list-cursor-paging', 'read'],
   ['todoist.errors.not-found-envelope', 'read'],
   ['todoist.labels.task-labels-are-names', 'read'],
+  ['todoist.projects.list-cursor-paging', 'read'],
   ['todoist.tasks.lifecycle-close', 'write-reversible'],
   ['todoist.tasks.due-dates', 'write-reversible'],
   ['todoist.projects.parent-id', 'write-reversible'],
@@ -178,6 +180,7 @@ describe('Todoist conformance cases', () => {
     ).toEqual([
       'todoist.errors.not-found-envelope',
       'todoist.errors.not-found-envelope',
+      'todoist.projects.list-cursor-paging',
       'todoist.tasks.due-dates',
       'todoist.projects.delete-then-not-found',
       'todoist.projects.delete-then-not-found'
@@ -218,7 +221,7 @@ describe('Todoist conformance cases', () => {
         layer: replayLayerOver()
       })
 
-      expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 8, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       for (const result of report.results) {
@@ -229,7 +232,7 @@ describe('Todoist conformance cases', () => {
       }
 
       expect(formatConformanceReport(report).split('\n').at(-1)).toBe(
-        '7 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
+        '8 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
       )
     })
   )
@@ -246,7 +249,7 @@ describe('Todoist conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(7)
+      expect(report.summary.passed).toBe(8)
 
       for (const testCase of todoistConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -306,7 +309,7 @@ describe('Todoist conformance safety on a live target', () => {
         allowWrites: 'reversible'
       })
 
-      expect(results.map(([, status]) => status)).toEqual(Array(7).fill('passed'))
+      expect(results.map(([, status]) => status)).toEqual(Array(8).fill('passed'))
     })
   )
 
@@ -424,6 +427,15 @@ const tampers: ReadonlyArray<{
       replaceInBody('"name":"synthetic-waiting"', '"name":"synthetic-later"')
     ),
     message: 'expected every task label to be the name of a listed personal label'
+  },
+  {
+    // The one-per-page listing's cursor leads back to the work project.
+    fixture: replaceResponse(
+      todoistProjectsPagingFixture,
+      2,
+      replaceInBody('"id":"6XSyntheticPage0"', '"id":"6XSyntheticWork0"')
+    ),
+    message: 'expected a later page to repeat no project from an earlier page'
   },
   {
     fixture: replaceResponse(
@@ -574,7 +586,7 @@ const lifecycleProject = 'project yolk-conformance-run-synthetic-lifecycle (id 6
 const deleteCalls = (entries: ReadonlyArray<ReplayLedgerEntry>) =>
   entries.flatMap(entry => (entry.method === 'DELETE' ? [entry.url.slice(apiBase.length)] : []))
 
-const lifecycleTamper = tampers[3]?.fixture ?? expect.fail('missing lifecycle tamper')
+const lifecycleTamper = tampers[4]?.fixture ?? expect.fail('missing lifecycle tamper')
 
 const deleteFailing = (fixture: WireFixture) =>
   replaceResponse(fixture, 6, withStatus(500, serverError))

@@ -1,8 +1,9 @@
 /**
  * Gmail routes of the Google emulator (internal): message and thread listing by label with page
  * tokens, message and thread reads in the recorded formats (a `metadataHeaders` selection keeps
- * only the selected recorded headers), attachments, the label lifecycle, label changes, trash and
- * untrash, the draft lifecycle with its thread, and the multipart practice send.
+ * only the selected recorded headers), attachments, the label listing and lifecycle, label
+ * changes, trash and untrash, the draft search (empty only) and lifecycle with its thread, and the
+ * multipart practice send.
  *
  * Every answer comes from the Gmail fixtures, through the seed or the request, or is minted. The
  * practice send is irreversible on the real service: here it only records the sent message in the
@@ -79,6 +80,10 @@ const draftCase = 'google.gmail.draft-compose-update-delete'
 const trashCase = 'google.gmail.trash-untrash'
 
 const sendCase = 'google.gmail.send-practice-address'
+
+const labelListingCase = 'google.gmail.label-listing'
+
+const draftSearchCase = 'google.gmail.draft-search'
 
 const gmail = (
   method: string,
@@ -548,6 +553,77 @@ const getAttachment: GoogleRoute = statefulRoute(
 )
 
 // Labels.
+
+/** The fields of a listed label, in the listing fixture's key order. */
+type ListedLabelWire = {
+  readonly id: string
+  readonly name: string
+  messageListVisibility?: string
+  labelListVisibility?: string
+  type?: string
+}
+
+/**
+ * The label listing (`google.gmail.label-listing`, the leftover lookup's request): the seeded
+ * labels as the listing fixture records them (`listedLabels`), then the labels created here in the
+ * label fixture's shape. Not emulated: a state whose seeded labels the listing cannot render (an
+ * implied label, or a system label a message carries, without a listed entry, or a listed user
+ * label the state does not imply), and an empty listing (Gmail always lists its system labels).
+ */
+const listLabels: GoogleRoute = statefulRoute(
+  gmail('GET', '/labels', false, [labelListingCase]),
+  'none',
+  request => withoutQuery(request) ?? 'labels',
+  (state, _input, { env }) => {
+    if (state.listedLabels.length === 0) {
+      return notEmulated('a label listing without listed labels is not emulated')
+    }
+
+    const listed = new Set(state.listedLabels.map(label => label.id))
+
+    const listedUsers = state.listedLabels
+      .filter(label => label.type === 'user')
+      .map(label => label.id)
+
+    const carried = [...state.messages, ...state.impliedMessages].flatMap(
+      message => message.labelIds
+    )
+
+    if (
+      state.impliedLabelIds.some(id => !listed.has(id)) ||
+      listedUsers.some(id => !state.impliedLabelIds.includes(id)) ||
+      carried.some(id => !listed.has(id) && !state.labels.some(label => label.id === id))
+    ) {
+      return notEmulated('a label listing of labels no listing fixture records is not emulated')
+    }
+
+    return answer(() => {
+      const seeded = state.listedLabels
+        .filter(label => !(env.drills.labelListingOmitsUserLabels && label.type === 'user'))
+        .map(label => {
+          const wire: ListedLabelWire = { id: label.id, name: label.name }
+
+          if (label.messageListVisibility !== undefined) {
+            wire.messageListVisibility = label.messageListVisibility
+          }
+
+          if (label.labelListVisibility !== undefined) {
+            wire.labelListVisibility = label.labelListVisibility
+          }
+
+          wire.type = label.type
+
+          return wire
+        })
+
+      const created = env.drills.labelListingOmitsUserLabels
+        ? []
+        : state.labels.map(label => ({ ...label }))
+
+      return googleJson(200, { labels: [...seeded, ...created] })
+    })
+  }
+)
 
 const createLabel: GoogleRoute = statefulRoute(
   gmail('POST', '/labels', true, [labelCase]),
@@ -1028,6 +1104,45 @@ const updateDraft: GoogleRoute = statefulRoute(
   }
 )
 
+/** The leftover lookup's draft search, the only `q` a fixture records. */
+const recordedDraftQuery = 'subject:yolk-conformance'
+
+/**
+ * The draft search (`google.gmail.draft-search`, the leftover lookup's request): the recorded `q`
+ * and a `maxResults` from 1 to 500, answered with the fixture's empty search while the state holds
+ * no draft (no draft created here, and no held message labelled `DRAFT`). A search while a draft
+ * exists is not emulated: no fixture records a matching draft, and Gmail's search syntax is not
+ * emulated.
+ */
+const searchDrafts: GoogleRoute = statefulRoute(
+  gmail('GET', '/drafts', false, [draftSearchCase]),
+  'none',
+  (request): number | NotEmulated => {
+    const query = exactQuery(request, ['q', 'maxResults'])
+
+    if (isNotEmulated(query)) return query
+
+    const recorded = recordedValue(query, 'q', recordedDraftQuery)
+
+    return recorded ?? pageSize(query['maxResults'], 'maxResults', 1, 500)
+  },
+  (state, _maxResults, { env }) =>
+    // A held message labelled DRAFT (a seeded one included) is a draft Gmail would list.
+    state.drafts.length > 0 ||
+    [...state.messages, ...state.impliedMessages].some(message =>
+      message.labelIds.includes('DRAFT')
+    )
+      ? notEmulated('a draft search while the state holds a draft is not emulated')
+      : answer(() =>
+          googleJson(
+            200,
+            env.drills.draftSearchDraftsNull
+              ? { drafts: null, resultSizeEstimate: 0 }
+              : { resultSizeEstimate: 0 }
+          )
+        )
+)
+
 const deleteDraft: GoogleRoute = statefulRoute(
   gmail('DELETE', '/drafts/{draftId}', true, [draftCase], ['draftId']),
   'none',
@@ -1295,9 +1410,11 @@ export const gmailRoutes: ReadonlyArray<GoogleRoute> = [
   modifyMessage,
   trashRoute('trash'),
   trashRoute('untrash'),
+  listLabels,
   createLabel,
   getLabel,
   deleteLabel,
+  searchDrafts,
   composeDraft,
   updateDraft,
   deleteDraft,

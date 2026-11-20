@@ -1,9 +1,10 @@
 /**
  * Cross-checks: the Todoist emulator must satisfy the same conformance cases the replayed fixtures
  * satisfy, through the REAL Todoist connector actions, both in-process (A) and over a loopback
- * socket (B); the read-only leftover lookup must fail closed (its listing has no fixture); and each
- * drill knob must make
- * exactly its case fail. Tests may import SDK packages; the emulator source never does.
+ * socket (B); the read-only leftover lookup must run against it (its project listing is the one
+ * the project paging case records) and fail closed on a listing no fixture records; and each drill
+ * knob must make exactly its case fail. Tests may import SDK packages; the emulator source never
+ * does.
  */
 import { Effect, Layer } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
@@ -160,7 +161,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
 
           expectAllPassed(report)
           expect(report.target).toEqual({ kind: 'in-process' })
-          expect(readCaseIds).toHaveLength(3)
+          expect(readCaseIds).toHaveLength(4)
           expect(writeCaseIds).toHaveLength(4)
 
           const seedOf = (id: string): TodoistEmulatorState => {
@@ -191,7 +192,8 @@ describe('cross-check A: in-process emulator through the real connector', () => 
 
           for (const id of [
             'todoist.tasks.list-cursor-paging',
-            'todoist.labels.task-labels-are-names'
+            'todoist.labels.task-labels-are-names',
+            'todoist.projects.list-cursor-paging'
           ]) {
             expect(stateOf(id), id).toEqual(seedOf(id))
           }
@@ -215,6 +217,18 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           expect(requests(ledgerOf('todoist.labels.task-labels-are-names'))).toEqual([
             'GET /api/v1/tasks/{taskId} 200',
             'GET /api/v1/labels 200'
+          ])
+
+          // The leftover lookup's listing, then one project per page through the cursor.
+          expect(
+            ledgerOf('todoist.projects.list-cursor-paging').map(entry => [
+              entry.query,
+              entry.status
+            ])
+          ).toEqual([
+            [{ limit: '200' }, 200],
+            [{ limit: '1' }, 200],
+            [{ cursor: 'SyntheticProjectCursor0001', limit: '1' }, 200]
           ])
 
           // The lifecycle fixture's exchanges, then the restore.
@@ -291,13 +305,69 @@ describe('cross-check A: in-process emulator through the real connector', () => 
     )
   )
 
-  // No fixture records the project listing the leftover lookup sends, so the emulator answers it
-  // 400 not-emulated (fixture-only): the lookup fails, and the repository runners print their
-  // lookup-failed WARN (`could not look for leftovers (lookup failed:
-  // todoist_list_projects_failed HTTP 400)`) instead of leftover warnings. Nothing is written.
-  it.effect('the leftover lookup fails closed: its project listing is not emulated', () =>
+  // The project paging case records the listing the leftover lookup sends, so the lookup runs
+  // against the emulator: nothing on the default seed, a case project an earlier run left behind
+  // when the state holds one, and nothing is written either way.
+  it.effect('the leftover lookup answers from the recorded project listing', () =>
     Effect.acquireUseRelease(
       Effect.promise(() => makeTodoistEmulator({ now: () => now.getTime() })),
+      emulator =>
+        Effect.gen(function* () {
+          const lookup = findTodoistConformanceLeftovers.pipe(
+            Effect.provide(portsOver(inProcessLayer(emulator)))
+          )
+
+          const seed = emulator.snapshot()
+
+          expect(yield* lookup).toEqual([])
+          expect(emulator.snapshot()).toEqual(seed)
+
+          // An earlier run's case project, left behind (created through the recorded flow).
+          const left = yield* Effect.promise(() =>
+            emulator.fetch(
+              new Request(`${origin}/api/v1/projects`, {
+                method: 'POST',
+                headers: {
+                  authorization: `Bearer ${apiToken}`,
+                  'content-type': 'application/json'
+                },
+                body: JSON.stringify({
+                  name: 'yolk-conformance-run-0a1b2c3d-lifecycle',
+                  parent_id: '6XSyntheticWork0'
+                })
+              })
+            )
+          )
+
+          expect(left.status).toBe(200)
+
+          const planted = emulator.snapshot()
+
+          expect(yield* lookup).toEqual([
+            'yolk-conformance-run-0a1b2c3d-lifecycle (6XEmuProject0001)'
+          ])
+          expect(emulator.snapshot()).toEqual(planted)
+          expect(
+            emulator.ledger
+              .entries()
+              .filter(entry => entry.method === 'GET')
+              .map(entry => [entry.route, entry.query, entry.status, entry.notEmulated])
+          ).toEqual([
+            ['/api/v1/projects', { limit: '200' }, 200, undefined],
+            ['/api/v1/projects', { limit: '200' }, 200, undefined]
+          ])
+        }),
+      emulator => Effect.promise(() => emulator.close())
+    )
+  )
+
+  // An account without projects is no fixture's listing: the lookup fails closed (HTTP 400), and
+  // the runners print their lookup-failed WARN instead of leftover warnings.
+  it.effect('the leftover lookup fails closed on a listing no fixture records', () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() =>
+        makeTodoistEmulator({ now: () => now.getTime(), seed: { projects: [], tasks: [] } })
+      ),
       emulator =>
         Effect.gen(function* () {
           const seed = emulator.snapshot()
@@ -317,11 +387,9 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           expect(emulator.ledger.entries()).toEqual([
             expect.objectContaining({
               method: 'GET',
-              path: '/<unrecognised>',
-              query: {},
+              path: '/api/v1/projects',
               status: 400,
-              evidence: 'unknown-route',
-              notEmulated: 'no emulated Todoist route for this method and path'
+              notEmulated: expect.stringContaining('without projects')
             })
           ])
         }),
@@ -334,7 +402,7 @@ describe('one shared emulator', () => {
   // A shared emulator works when the write cases run one after another: each case deletes its
   // project before the next creates one (a seeded parent takes one sub-project, `child_order: 1`).
   it.effect(
-    'passes all seven Todoist cases run sequentially against ONE emulator, ending at the seed except counters',
+    'passes all eight Todoist cases run sequentially against ONE emulator, ending at the seed except counters',
     () =>
       Effect.acquireUseRelease(
         Effect.promise(() => makeTodoistEmulator({ now: () => now.getTime() })),
@@ -465,6 +533,11 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       { deleteKeepsTasks: true },
       'todoist.projects.delete-then-not-found',
       'which was in the deleted project, to answer todoist_not_found'
+    ],
+    [
+      { projectCursorRestarts: true },
+      'todoist.projects.list-cursor-paging',
+      'expected a later page to repeat no project from an earlier page'
     ]
   ] as const)(
     '%o fails only %s',

@@ -88,6 +88,7 @@ import { githubIssueLabelsFixture } from './issue-labels.ts'
 import { githubIssueLifecycleFixture } from './issue-lifecycle.ts'
 import { githubLabelsPagingFixture } from './labels-paging.ts'
 import { githubNotFoundEnvelopeFixture } from './not-found-envelope.ts'
+import { githubOpenIssuesFixture } from './open-issues.ts'
 import { githubConformanceLongSearchQuery } from './synthetic.ts'
 import { githubValidationEnvelopeFixture } from './validation-envelope.ts'
 
@@ -670,6 +671,69 @@ export const githubFileContentsCase: GithubConformanceCase = defineConformanceCa
   })
 })
 
+/** Listing page size of the leftover lookup (the GitHub maximum), and the pages it reads. */
+const leftoverPageSize = 100
+
+const leftoverPageCap = 10
+
+export const githubOpenIssuesCase: GithubConformanceCase = defineConformanceCase({
+  id: 'github.issues.open-listing',
+  title: 'The open-issue and comment listings the leftover lookup reads fit their first page',
+  safety: 'read',
+  docs: '`github.list_issues` sends GET /repos/{owner}/{repo}/issues with `per_page`, `page`, and `state` query parameters, decodes the issues (pull requests included, marked `isPullRequest`), and reports `hasNextPage` from the `Link` header; `github.list_issue_comments` sends GET /repos/{owner}/{repo}/issues/{issue_number}/comments with `per_page` and `page`. `findGithubConformanceLeftovers` reads both with `perPage: 100` from `page: 1` and stops at the first page without `hasNextPage`.',
+  wire: "`github.list_issues` with `state: \"open\"`, `perPage: 100`, `page: 1` (the leftover lookup's request) answers only open items, among them the seeded work issue as an issue (not a pull request), and a page of fewer than 100 items reports `hasNextPage: false`; `github.list_issue_comments` of the work issue with `perPage: 100`, `page: 1` answers as many comments as that listing's `comments` count for the work issue when it is under 100 (unverified: that the listing's `comments` count matches the comment listing), with `hasNextPage: false`.",
+  fixtures: [githubOpenIssuesFixture.id],
+  run: Effect.gen(function* () {
+    const issueNumber = yield* requireIssueNumber
+    const integration = yield* repoIntegration
+
+    const listing = yield* githubListIssuesAction
+      .executeTyped({ integration, input: { state: 'open', perPage: leftoverPageSize, page: 1 } })
+      .pipe(Effect.flatMap(successValue(githubListIssuesAction.id)))
+
+    yield* expectConformance(
+      !(listing.hasNextPage && listing.issues.length < leftoverPageSize),
+      'expected a listing of fewer than per_page issues to report no next page',
+      { actual: listing.issues.length }
+    )
+
+    if (listing.hasNextPage) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: the practice repository has more than ${leftoverPageSize} open issues and pull requests`
+      })
+    }
+
+    yield* expectConformance(
+      listing.issues.every(issue => issue.state === 'open'),
+      'expected the open-issue listing to answer only open items'
+    )
+
+    const work = listing.issues.find(issue => issue.number === issueNumber && !issue.isPullRequest)
+
+    if (work === undefined) {
+      return yield* new ConformanceMismatch({
+        message: 'expected the open-issue listing to include the seeded work issue'
+      })
+    }
+
+    const comments = yield* githubListIssueCommentsAction
+      .executeTyped({ integration, input: { issueNumber, perPage: leftoverPageSize, page: 1 } })
+      .pipe(Effect.flatMap(successValue(githubListIssueCommentsAction.id)))
+
+    if (work.comments >= leftoverPageSize) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: the work issue has ${leftoverPageSize} or more comments`
+      })
+    }
+
+    yield* expectEqual(
+      [comments.comments.length, comments.hasNextPage],
+      [work.comments, false],
+      'expected the comment listing to answer the listed comments count on one page'
+    )
+  })
+})
+
 // Write cases.
 
 const commentCaseId = 'github.comments.create-delete'
@@ -1004,11 +1068,6 @@ export const githubIssueLifecycleCase: GithubConformanceCase = defineConformance
   })
 })
 
-/** Listing page size (the GitHub maximum), and the pages read before giving up. */
-const leftoverPageSize = 100
-
-const leftoverPageCap = 10
-
 /**
  * READ-ONLY and bounded: what earlier runs left behind in the practice repository (a killed
  * process, a failed or ambiguous cleanup): OPEN issues titled `yolk-conformance run-*` (at most 10
@@ -1084,6 +1143,7 @@ export const githubConformanceCases: ReadonlyArray<GithubConformanceCase> = [
   githubNotFoundEnvelopeCase,
   githubValidationEnvelopeCase,
   githubFileContentsCase,
+  githubOpenIssuesCase,
   githubCommentLifecycleCase,
   githubIssueLabelsCase,
   githubIssueLifecycleCase

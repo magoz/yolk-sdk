@@ -11,7 +11,12 @@
  *
  * Issue numbers below `nextIssueNumber` that the state does not hold are implied (the repository
  * reached them, but no fixture shows them): an answer that would render one is not emulated.
- * Numbers at or above it are not reached yet and answer the not-found fixture's 404. Created issue
+ * Numbers at or above it are not reached yet and answer the not-found fixture's 404. What the
+ * open-issue listing may say about implied numbers is `impliedIssues`: `closed` when a fixture
+ * records them as not open (the default seed: the open-issue listing fixture answers only the work
+ * issue while the repository has reached issue 41; a seed that replaces `repository` or `issues`
+ * or sets `nextIssueNumber` gets `unknown` unless it says `closed` itself), `unknown` otherwise
+ * (then a listing that would have to account for them is not emulated). Created issue
  * numbers and comment ids come from counters that only advance; the default seed starts them at the
  * fixtures' created values (issue 42, comment 9000000001), and a seed's counters must lie above
  * every seeded number. Created issue `id` and `node_id` values derive from the minted number in the
@@ -156,6 +161,14 @@ export const GithubEmulatorFile = Schema.Struct({
 
 export type GithubEmulatorFile = typeof GithubEmulatorFile.Type
 
+/**
+ * What the open-issue listing may say about the implied issue numbers: `closed` (none of them is an
+ * open issue or pull request, as a fixture records) or `unknown`.
+ */
+export const GithubEmulatorImpliedIssues = Schema.Literals(['closed', 'unknown'])
+
+export type GithubEmulatorImpliedIssues = typeof GithubEmulatorImpliedIssues.Type
+
 const Counters = Schema.Struct({
   /** The number the next created issue takes (one past the maximum when exhausted). */
   nextIssueNumber: PositiveInt.check(Schema.isLessThanOrEqualTo(githubMaxIssueNumber + 1)),
@@ -174,6 +187,8 @@ export const GithubEmulatorStateSchema = Schema.Struct({
   /** Ids of comments deleted here (a second delete answers the recorded 404). */
   deletedComments: Schema.Array(CommentId),
   files: Schema.Array(GithubEmulatorFile),
+  /** What the open-issue listing may say about the implied issue numbers. */
+  impliedIssues: GithubEmulatorImpliedIssues,
   counters: Counters
 })
 
@@ -189,6 +204,7 @@ export type GithubEmulatorState = {
   comments: ReadonlyArray<GithubEmulatorComment>
   deletedComments: ReadonlyArray<number>
   files: ReadonlyArray<GithubEmulatorFile>
+  impliedIssues: GithubEmulatorImpliedIssues
   counters: typeof Counters.Type
 }
 
@@ -209,6 +225,7 @@ export const GithubEmulatorSeed = Schema.Struct({
   labels: Schema.optionalKey(Schema.Array(GithubEmulatorLabel)),
   issues: Schema.optionalKey(Schema.Array(GithubEmulatorSeedIssue)),
   files: Schema.optionalKey(Schema.Array(GithubEmulatorFile)),
+  impliedIssues: Schema.optionalKey(GithubEmulatorImpliedIssues),
   nextIssueNumber: Schema.optionalKey(IssueNumber),
   nextCommentId: Schema.optionalKey(CommentId)
 })
@@ -298,6 +315,7 @@ type ProfileParts = {
   readonly labels: ReadonlyArray<GithubEmulatorLabel>
   readonly issues: ReadonlyArray<GithubEmulatorSeedIssue>
   readonly files: ReadonlyArray<GithubEmulatorFile>
+  readonly impliedIssues: GithubEmulatorImpliedIssues
   readonly counters: typeof Counters.Type
 }
 
@@ -309,6 +327,8 @@ const profileParts = (profile: GithubEmulatorProfile): ProfileParts =>
         labels: defaultLabels,
         issues: [workIssue],
         files: [notesFile],
+        // The open-issue listing fixture answers only the work issue: issues 2 to 41 are closed.
+        impliedIssues: 'closed',
         // The lifecycle fixture's created issue and the comment fixture's created comment.
         counters: { nextIssueNumber: 42, nextCommentId: 9000000001 }
       }
@@ -318,6 +338,7 @@ const profileParts = (profile: GithubEmulatorProfile): ProfileParts =>
         labels: [],
         issues: [],
         files: [],
+        impliedIssues: 'unknown',
         counters: { nextIssueNumber: 1, nextCommentId: 1 }
       }
 
@@ -398,6 +419,15 @@ const stateFromSeed = (seed: GithubEmulatorSeed): GithubEmulatorState | string =
     labels: seed.labels ?? profile.labels,
     issues,
     files: seed.files ?? profile.files,
+    // The profile's `closed` describes only its own repository, issues, and counter (the open-issue
+    // listing fixture records them): a seed that replaces any of them must say `closed` itself.
+    impliedIssues:
+      seed.impliedIssues ??
+      (seed.repository === undefined &&
+      seed.issues === undefined &&
+      seed.nextIssueNumber === undefined
+        ? profile.impliedIssues
+        : 'unknown'),
     counters: {
       // Raised above the seeded numbers unless the seed names the counter itself (then checked).
       nextIssueNumber:
@@ -417,6 +447,7 @@ const stateFromSeed = (seed: GithubEmulatorSeed): GithubEmulatorState | string =
       comments: [],
       deletedComments: [],
       files: parts.files,
+      impliedIssues: parts.impliedIssues,
       counters: parts.counters
     }
   )

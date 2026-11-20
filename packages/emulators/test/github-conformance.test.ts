@@ -2,7 +2,8 @@
  * Cross-checks: the GitHub emulator must satisfy the same conformance cases the replayed fixtures
  * satisfy, through the REAL GitHub connector actions, both in-process and over a loopback socket,
  * each case alone and all of them in sequence on one emulator; the read-only leftover lookup must
- * fail closed against it (its open-issue listing has no fixture); and each drill knob must make
+ * run against it (its reads are the ones the open-listing case records) and list what an earlier
+ * run left open; and each drill knob must make
  * exactly its case fail. Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer } from 'effect'
@@ -228,7 +229,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           const report = yield* runAll(emulators, { kind: 'in-process' }, inProcessLayer)
 
           expectAllPassed(report)
-          expect(readCaseIds).toHaveLength(4)
+          expect(readCaseIds).toHaveLength(5)
           expectEndsAtSeed(emulators, seeds)
 
           const ledgerOf = (id: string) => emulatorFor(emulators, id).ledger.entries()
@@ -260,6 +261,19 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           ])
           expect(requests(ledgerOf('github.errors.validation-envelope'))).toEqual([
             'GET /search/issues 422'
+          ])
+          // The leftover lookup's reads: the open-issue listing, then the work issue's comments.
+          expect(
+            ledgerOf('github.issues.open-listing').map(entry => [
+              `${entry.method} ${entry.route} ${entry.status}`,
+              entry.query
+            ])
+          ).toEqual([
+            ['GET /repos/{owner}/{repo}/issues 200', { per_page: '100', page: '1', state: 'open' }],
+            [
+              'GET /repos/{owner}/{repo}/issues/{issueNumber}/comments 200',
+              { per_page: '100', page: '1' }
+            ]
           ])
           expect(requests(ledgerOf(commentCaseId))).toEqual([
             'POST /repos/{owner}/{repo}/issues/{issueNumber}/comments 201',
@@ -297,7 +311,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
   )
 
   it.effect(
-    'passes every case twice in sequence on ONE emulator; the leftover lookup is not emulated',
+    'passes every case twice in sequence on ONE emulator; the leftover lookup finds nothing',
     () =>
       withEmulator({}, emulator =>
         Effect.gen(function* () {
@@ -305,27 +319,15 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             Effect.provide(portsOver(inProcessLayer(emulator)))
           )
 
-          // No fixture records the open-issue listing, so the read-only lookup fails with its
-          // action-failed error (the live runner prints its lookup-failed WARN) and writes nothing.
+          // The open-listing case records the lookup's reads: on the seed it finds nothing and
+          // writes nothing.
           const seed = emulator.snapshot()
 
-          expect(yield* Effect.flip(lookup)).toMatchObject({
-            _tag: 'GithubConformanceActionFailed',
-            actionId: 'github.list_issues',
-            code: 'github_validation',
-            status: 400
-          })
-          expect(emulator.ledger.entries()).toEqual([
-            {
-              seq: 1,
-              method: 'GET',
-              path: '/<unrecognised>',
-              query: {},
-              headers: {},
-              status: 400,
-              evidence: 'unknown-route',
-              notEmulated: 'no emulated GitHub route for this method and path'
-            }
+          expect(yield* lookup).toEqual([])
+          expect(requests(emulator.ledger.entries())).toEqual([
+            'GET /repos/{owner}/{repo}/issues 200',
+            'GET /repos/{owner}/{repo}/issues/{issueNumber}/comments 200',
+            'GET /repos/{owner}/{repo}/issues/{issueNumber} 200'
           ])
           expect(emulator.snapshot()).toEqual(seed)
           emulator.ledger.clear()
@@ -357,14 +359,47 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             [43, 'closed']
           ])
 
-          expect(yield* Effect.flip(lookup)).toMatchObject({
-            _tag: 'GithubConformanceActionFailed',
-            status: 400
-          })
+          // The lifecycle case's issues are closed (its documented residue), so they are no
+          // leftovers.
+          expect(yield* lookup).toEqual([])
           expect(emulator.snapshot()).toEqual(after)
         })
       ),
     60_000
+  )
+
+  it.effect('the leftover lookup lists an open run issue an earlier run left behind', () =>
+    withEmulator({}, emulator =>
+      Effect.gen(function* () {
+        const title = 'yolk-conformance run-0a1b2c3d lifecycle: synthetic conformance issue'
+
+        const left = yield* Effect.promise(() =>
+          emulator.fetch(
+            new Request(`${origin}/repos/yolk-synthetic/conformance-practice/issues`, {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${token}`,
+                accept: 'application/vnd.github+json',
+                'x-github-api-version': '2026-03-10',
+                'content-type': 'application/json'
+              },
+              body: JSON.stringify({ title, body: 'Synthetic leftover.' })
+            })
+          )
+        )
+
+        expect(left.status).toBe(201)
+
+        const planted = emulator.snapshot()
+
+        const found = yield* findGithubConformanceLeftovers.pipe(
+          Effect.provide(portsOver(inProcessLayer(emulator)))
+        )
+
+        expect(found).toEqual([`open issue #42 "${title}"`])
+        expect(emulator.snapshot()).toEqual(planted)
+      })
+    )
   )
 })
 
@@ -457,6 +492,14 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
         id: 'github.contents.base64-file',
         tag: 'ConformanceMismatch',
         message: 'expected the base64 content to be broken into lines'
+      }
+    ],
+    [
+      { issueListingLinksNext: true },
+      {
+        id: 'github.issues.open-listing',
+        tag: 'ConformanceMismatch',
+        message: 'expected a listing of fewer than per_page issues to report no next page'
       }
     ],
     [

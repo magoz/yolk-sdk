@@ -1349,6 +1349,7 @@ it a request is not emulated):
 | `POST /tasks/{taskId}`               | `content` and/or `due_datetime` of an active task created here: the updated task                                                                                |
 | `POST /tasks/{taskId}/close`         | Closes an active task created here (204, no body); it leaves the active listing                                                                                 |
 | `GET /labels?limit`                  | Personal labels, one page (`next_cursor: null`)                                                                                                                 |
+| `GET /projects?limit&cursor`         | Every project, seeded ones as the project listing fixture records them, then those created here; REST v1 cursor paging (`SyntheticProjectCursor0001`, ...)      |
 | `POST /projects`                     | `{ name, parent_id }` for a case project `yolk-conformance-<runId>-<lifecycle\|due\|parent\|delete>`                                                            |
 | `GET /projects/{projectId}`          | A project created here, or the fixtures' 404 `Project not found` body                                                                                           |
 | `DELETE /projects/{projectId}`       | A project created here: 204; it and its task are removed, so later reads answer 404                                                                             |
@@ -1361,8 +1362,8 @@ page of the same project and `limit`, and the last page answers `next_cursor: nu
 `due_date: '2030-01-15'` and `due_datetime: '2030-01-15T12:00:00Z'` answer the recorded due
 objects; an update keeps `updated_at`, as recorded.
 
-Nothing else is synthesised. Seeded projects (the work and paging projects, whose objects no
-fixture records; the fixtures name only their ids) are reference targets only: reading one answers
+Nothing else is synthesised. Seeded projects (the work and paging projects, whose objects only the
+project listing fixture records) are listed and referenced only: reading one alone answers
 not-emulated, and only projects and tasks created through the recorded create flow are updated,
 closed, or deleted. A case project takes one task and a seeded parent one sub-project, because the
 fixtures record `child_order: 1` only (a second one is not emulated). The labeled task is in the
@@ -1383,7 +1384,7 @@ and scrubbed, so nothing from the request is recorded.
 A seeded parent takes one case project at a time (the fixtures record `child_order: 1` only), so
 concurrent write cases, or a case that failed before its cleanup, make later project creates answer
 not-emulated (a definitive rejection: nothing is created). `test/todoist-conformance.test.ts` runs
-all seven cases one after another on one emulator, which ends at the seed except the counters.
+all eight cases one after another on one emulator, which ends at the seed except the counters.
 
 Every answer value comes from a fixture, through the seed or the request, except the values the
 emulator mints (it never mints anything else):
@@ -1392,8 +1393,10 @@ emulator mints (it never mints anything else):
   404 `event_id`s (`00000000000000000000000000000001`) come from counters that only advance;
   created timestamps come from the injectable `now` clock (default `Date.now`). Minted ids use the
   reserved prefix `6XEmu`, which a seed may not use (it is rejected), so seeded and created ids
-  never collide. Cursors are runtime data (`cursors()`, `/_emulate/state`), valid only as issued
-  since the last `reset` or `seed`.
+  never collide. Cursors are runtime data (`cursors()` for task listings, `/_emulate/state` for
+  both), valid only as issued since the last `reset` or `seed`; a project cursor also only while
+  the project listing is unchanged. The cursor counters never reset, so no cursor value issued
+  before a `reset` or `seed` is ever issued again.
 - **Removal.** A deleted project and its task are removed from the state, so a write case ends at
   the seed except the counters.
 - **Request-shape latitude** (the only accepted deviations from the fixture requests): any
@@ -1405,10 +1408,13 @@ emulator mints (it never mints anything else):
   `limit`; writes: only items created through the recorded create flow; a new project's `parent_id`:
   a seeded project); any `run-` run id (at most 40 characters) in a case project name; any non-empty
   task `content`; a task update sending `content`, `due_datetime`, or both; a label listing `limit`
-  of 1 to 200 that covers every label.
+  of 1 to 200 that covers every label; a project listing `limit` of 1 to 200, its pages chained
+  through cursors this emulator issued for the same `limit` and unchanged listing.
 
-Not emulated (400), among others: other routes (`/tasks/filter`, sections, comments, REST v2, and
-the project listing `GET /projects`); task listings without `project_id`, of any project but the
+Not emulated (400), among others: other routes (`/tasks/filter`, sections, comments, REST v2);
+project listings without `limit`, with another query parameter, without projects, or with a cursor
+the emulator did not issue, sent with another `limit`, or issued for a listing that changed since;
+task listings without `project_id`, of any project but the
 paging project with `limit=2` or a case project created here without `limit`, or with a cursor the
 emulator did not issue since its last reset or that is sent with another `project_id` or `limit`;
 label listings without `limit` or with more labels than `limit` (paging them is not emulated); body
@@ -1419,12 +1425,13 @@ one in it; reading a closed task; updating or closing a seeded, unknown, or clos
 seeded or unknown project; a path, query, or body that repeats the bearer value; write bodies that
 are not `application/json` objects. Reading an absent task or project answers the fixtures' 404.
 
-**Leftover lookup.** No fixture records the project listing that `findTodoistConformanceLeftovers`
-sends (`GET /projects?limit=200`), so it answers the ledgered 400 not-emulated like any other
-unrecorded route: the lookup fails with `todoist_list_projects_failed` (HTTP 400), and the
-repository runners print their lookup-failed WARN (`WARN could not look for leftovers (lookup
-failed: todoist_list_projects_failed HTTP 400); check for yolk-conformance items by hand`) instead
-of leftover warnings. It never writes. Emulating the listing needs a committed fixture for it first.
+**Leftover lookup.** The project paging case (`todoist.projects.list-cursor-paging`) records the
+project listing that `findTodoistConformanceLeftovers` sends (`GET /projects?limit=200`), so the
+lookup runs against the emulator: it finds nothing on the default seed and lists every
+`yolk-conformance-run-*` project the state holds (one an interrupted run left, for example). It
+never writes. A listing no fixture records (an account without projects) still fails closed: the
+lookup fails with `todoist_list_projects_failed` (HTTP 400), and the repository runners print their
+lookup-failed WARN instead of leftover warnings.
 
 Seeds: `seed: { profile?, userId?, projects?, tasks?, labels? }` (entity lists replace the
 profile's) with profiles `'default'` (the fixture entities, with the ids of
@@ -1432,9 +1439,9 @@ profile's) with profiles `'default'` (the fixture entities, with the ids of
 are rejected.
 
 **Drill knobs (tests only).** `drills: { cursorRestarts, notFoundWithoutError, taskLabelsAsIds,
-listIncludesClosed, ignoreDue, createOmitsParent, deleteKeepsTasks }` each make the emulator
-disagree with exactly one Todoist case (paging, not-found envelope, labels, lifecycle, due dates,
-parent id, delete), only to prove that case catches it.
+projectCursorRestarts, listIncludesClosed, ignoreDue, createOmitsParent, deleteKeepsTasks }` each
+make the emulator disagree with exactly one Todoist case (paging, not-found envelope, labels,
+project paging, lifecycle, due dates, parent id, delete), only to prove that case catches it.
 
 ### Telegram emulator
 
@@ -1525,7 +1532,7 @@ nothing; not-emulated answers (400) and a closed emulator (503) need no clock. T
 `await makeGithubEmulator(options?)` returns
 `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
 state; `await close()` when done. It is a stateful, fixture-only stand-in for exactly the GitHub
-REST routes the seven GitHub conformance cases send, so the GitHub connector and the cases run
+REST routes the eight GitHub conformance cases send, so the GitHub connector and the cases run
 unchanged against it. Every route answers only on the origin its fixtures record,
 `https://api.github.com` (`githubEmulatorOrigin`): `fetch` reads the origin from the request URL;
 behind a loopback rewrite, serve `fetchOn(githubEmulatorOrigin)`. Route `https://api.github.com` to
@@ -1552,11 +1559,12 @@ sends; bodies are JSON; `{owner}/{repo}` is the seeded repository):
 | Route                                                             | Behavior                                                                              |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `GET /repos/{owner}/{repo}/labels`                                | `per_page`, `page`: repository labels with the paging fixture's `Link` header         |
+| `GET /repos/{owner}/{repo}/issues`                                | `state=open`, `per_page`, `page=1`: the open issues, newest first, on one page        |
 | `GET /repos/{owner}/{repo}/issues/{issueNumber}`                  | The issue; the recorded 404 for a number the repository has not reached               |
 | `GET /search/issues`                                              | `q`: the recorded 422 for a scoped query longer than 256 characters                   |
 | `GET /repos/{owner}/{repo}/contents/{path+}`                      | A seeded file: `type: "file"`, base64 `content` folded every 60 characters            |
 | `POST /repos/{owner}/{repo}/issues/{issueNumber}/comments`        | `{ body }`: 201 and the comment, on an open issue                                     |
-| `GET /repos/{owner}/{repo}/issues/{issueNumber}/comments`         | `per_page=100`, `since`: the issue's comments updated at or after `since` (0 or 1)    |
+| `GET /repos/{owner}/{repo}/issues/{issueNumber}/comments`         | `per_page=100` and `since` (comments updated since then) or `page=1`: 0 or 1 comment  |
 | `DELETE /repos/{owner}/{repo}/issues/comments/{commentId}`        | 204; the recorded 404 when this emulator deleted it already                           |
 | `POST /repos/{owner}/{repo}/issues/{issueNumber}/labels`          | `{ labels: [name] }`: one repository label added; answers the issue labels            |
 | `DELETE /repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}` | The remaining labels (never none); the recorded 404 for a label not on the issue      |
@@ -1595,7 +1603,17 @@ emulator mints (it never mints anything else):
   `now` clock, in whole seconds.
 - **Implied issues.** Issue numbers below `nextIssueNumber` that the state does not hold are
   implied (the repository reached them, but no fixture shows them): any answer that would render
-  one is not emulated. Numbers at or above it answer the not-found fixture's 404.
+  one is not emulated. Numbers at or above it answer the not-found fixture's 404. The open-issue
+  listing answers only when the state's `impliedIssues` is `closed` (the default seed's, from the
+  open-issue listing fixture, which answers only the work issue while the repository has reached
+  issue 41) or no number is implied; with `unknown` (the `empty` profile's) it is not emulated. A
+  seed on the default profile keeps `closed` only while it replaces none of `repository`, `issues`,
+  and `nextIssueNumber`; otherwise it gets `unknown` unless it names `impliedIssues: 'closed'`
+  itself.
+- **Open-issue listing.** The open issues the state holds, newest first (GitHub's default
+  `sort=created`, `direction=desc`), rendered as issue reads render them, on one page without
+  `Link`, as the open-listing fixture records; more open issues than `per_page` (no fixture records
+  issue paging), an open issue holding comments, and an empty listing are not emulated.
 - **State rules.** Comments and label changes apply to issues the state holds and that are open;
   only issues created here are renamed or closed; a label add takes one repository label not yet on
   the issue that sorts after the issue's labels (the fixture's answer is both appended and in name
@@ -1655,29 +1673,32 @@ emulator mints (it never mints anything else):
   compared against anything, stored, or ledgered); extra request headers; JSON key order;
   `content-type` media-type parameters; the order of query parameters; any non-empty issue title and
   comment body, and any issue body text; any comment listing `since` of the form
-  `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100, with no `page` or a `page`
-  from 2 to one past the last page; any issue search `q` that starts with the seeded
+  `YYYY-MM-DDTHH:MM:SSZ` (or, instead of `since`, `page=1`); any label listing `per_page` from 1 to
+  100, with no `page` or a `page` from 2 to one past the last page; any open-issue listing
+  (`state=open`, `page=1`) `per_page` from 1 to 100; any issue search `q` that starts with the seeded
   `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters (answered
   the recorded 422); any issue number the repository has not reached (answered the recorded 404);
   and any issue, comment, repository label, or file the state holds where a fixture has one, under
   the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that spelling, one
   space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version` `2026-03-10`.
   Everything else (other keys and values, query parameters, empty query components such as a bare
-  `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1`, and
-  a comment listing `per_page` other than 100) is not emulated.
+  `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1` on
+  the label listing, and a comment listing `per_page` other than 100) is not emulated.
 
 Anything else answers one ledgered 400 not-emulated (`{ error: { type: 'not_emulated', message } }`,
-`notEmulated` in the ledger), writes nothing, and uses up no fault: other routes (issue and pull
-request listings, locks, assignees, reactions, timelines), a search of at most 256 characters
+`notEmulated` in the ledger), writes nothing, and uses up no fault: other routes (pull request
+listings, locks, assignees, reactions, timelines), issue listings other than the first page of open
+issues, a search of at most 256 characters
 (no fixture records results), `sort`, `order`, or paging on search, a contents `ref` or a missing
 file, issue creates with `labels`, `assignees`, `milestone`, or `type`, updates other than the two
 recorded ones (so the lifecycle case's failure-path restore, which closes as `not_planned`, is not
 emulated), adding a label the repository lacks (that would create it) or two labels at once, and
-writes to closed or implied issues. That includes the open-issue listing
-(`GET /repos/{owner}/{repo}/issues`) of the read-only leftover lookup
-`findGithubConformanceLeftovers`, which no fixture records: the lookup fails
-(`GithubConformanceActionFailed`, `github.list_issues`, `github_validation`, HTTP 400), and the
-repository runner prints its lookup-failed `WARN` instead of leftover warnings. A route that throws
+writes to closed or implied issues. The reads of the read-only leftover lookup
+`findGithubConformanceLeftovers` (the open-issue listing, the work issue's first comment page, and
+the work issue) are the ones the open-listing case (`github.issues.open-listing`) records, so the
+lookup runs against the emulator: it finds nothing on the default seed (the lifecycle case's issues
+are closed, its documented residue) and lists an open `yolk-conformance run-*` issue the state
+holds. A route that throws
 answers an evidence-tagged 500 emulator error with `responseError` in the ledger, and a closed
 emulator answers 503; neither reads the clock.
 
@@ -1687,7 +1708,8 @@ name; `createdHere` marks issues created here), comments, `deletedComments`, fil
 UTF-8 text), and the counters. The default seed is the synthetic fixture entities with the values of
 `githubConformanceFixtureSeeds`: the five paging-fixture labels, open work issue 1 labelled `bug`,
 and `docs/synthetic-notes.txt`. Pass a `seed` with any of `profile`, `viewer`, `repository`,
-`labels`, `issues`, `files`, `nextIssueNumber`, and `nextCommentId` (lists replace the profile's)
+`labels`, `issues`, `files`, `impliedIssues`, `nextIssueNumber`, and `nextCommentId` (lists
+replace the profile's)
 with profiles `'default'` or `'empty'`. `reset()`, `seed(next)`, and `snapshot()` behave as in the
 Dropbox emulator.
 
@@ -1696,9 +1718,9 @@ plane behave as in the Dropbox emulator; a 429 fault with `retry-after` reaches 
 `github_rate_limited`.
 
 **Drill knobs (tests only).** The `drills` booleans `linkOmitsNext`,
-`notFoundOmitsDocumentationUrl`, `validationWithoutErrors`, `contentUnfolded`, `sinceExcludesEqual`,
-`addAnswerOmitsLabel`, and `closeWithoutClosedAt` each make the emulator disagree with exactly one
-GitHub case, only to prove that case catches it.
+`notFoundOmitsDocumentationUrl`, `validationWithoutErrors`, `contentUnfolded`,
+`issueListingLinksNext`, `sinceExcludesEqual`, `addAnswerOmitsLabel`, and `closeWithoutClosedAt`
+each make the emulator disagree with exactly one GitHub case, only to prove that case catches it.
 
 ## Google emulator
 
@@ -1707,7 +1729,7 @@ GitHub case, only to prove that case catches it.
 
 `await makeGoogleEmulator(options?)` returns
 `{ fetch, fetchOn, ledger, faults, reset, seed, snapshot, coverage, close }`. Each call has its own
-state; `await close()` when done. It emulates only the Gmail, Calendar, and Drive routes the fifteen
+state; `await close()` when done. It emulates only the Gmail, Calendar, and Drive routes the nineteen
 Google conformance cases (with their cleanup) send, so the Google connector actions and the cases
 run unchanged against it, the irreversible practice send included. Each route answers only on the
 origin its fixtures record: Gmail (the API and the multipart send upload) on
@@ -1739,11 +1761,19 @@ const httpLayer = InProcessHttpClient.layer([
 await google.close()
 ```
 
-The read-only leftover lookup (`findGoogleConformanceLeftovers`) fails against it: its first read,
-the Gmail label listing, has no fixture (nor do its draft search, free-text event query, and
-trashed-included Drive listing), so it answers the ledgered 400 not-emulated (nothing is written)
-and the lookup fails with `GoogleConformanceActionFailed` (`gmail_list_labels_failed`, HTTP 400);
-the live runner turns that into its lookup-failed `WARN`.
+The read-only leftover lookup (`findGoogleConformanceLeftovers`) runs against it: its reads are the
+ones four read cases record, the Gmail label listing (`google.gmail.label-listing`), the draft
+search (`google.gmail.draft-search`), the free-text event query (`google.calendar.free-text-query`),
+and the Drive listing with trashed items (`google.drive.list-includes-trashed`). On the default
+seed it finds nothing; it lists a run label or a run folder (in Trash too) the state holds. Two of
+those answers are recorded only empty, so they fail closed otherwise (ledgered 400 not-emulated,
+nothing written; the live runner prints its lookup-failed `WARN`): the draft search while the state
+holds any draft (no fixture records a matching draft, and Gmail's search syntax is not emulated),
+and the event query while any event of the calendar, cancelled or not, holds `yolk` or
+`conformance` in any case in its summary or description (or the organizer or creator does): Google's
+free-text matching (which fields, which tokens, whether a cancelled event counts) cannot be emulated
+honestly, so after the event cases, whose cancelled run events stay in the state, the lookup fails
+closed there.
 
 Routes (every request needs `Authorization: Bearer <token>`, a recognisable bearer; bodies are
 JSON unless noted; Drive requests also send `accept: application/json`, as recorded):
@@ -1756,15 +1786,17 @@ JSON unless noted; Drive requests also send `accept: application/json`, as recor
 | `GET /gmail/v1/users/me/messages/{messageId}/attachments/{id}`   | `{ size, data }` (base64url) of a seeded attachment                                                   |
 | `POST /gmail/v1/users/me/messages/{messageId}/modify`            | `{ addLabelIds: [<created label>] }`: `{ id, threadId, labelIds }`                                    |
 | `POST /gmail/v1/users/me/messages/{messageId}/trash`, `/untrash` | No body: adds or removes `TRASH`, answering `{ id, threadId, labelIds }`                              |
+| `GET /gmail/v1/users/me/labels`                                  | `{ labels }`: the seeded labels as the listing fixture records them, then the labels created here     |
 | `POST /gmail/v1/users/me/labels`                                 | `{ name: "yolk-conformance <runId> label" }`: the created user label (`Label_9101` first)             |
 | `GET`, `DELETE /gmail/v1/users/me/labels/{labelId}`              | Delete a created label (204; it leaves every message); a read of an absent label answers 404          |
+| `GET /gmail/v1/users/me/drafts`                                  | `q=subject:yolk-conformance`, `maxResults`: `{ resultSizeEstimate: 0 }` while no draft exists         |
 | `POST /gmail/v1/users/me/drafts`, `PUT .../drafts/{draftId}`     | The recorded run draft without recipients: `{ id, message: { id, threadId, labelIds } }`              |
 | `DELETE /gmail/v1/users/me/drafts/{draftId}`                     | 204 (the draft and its message go); an absent draft answers the recorded 404                          |
 | `GET /gmail/v1/users/me/threads/{threadId}`                      | `format=full`: a draft thread created here; `format=metadata` with `metadataHeaders`: a stored thread |
 | `POST /upload/gmail/v1/users/me/messages/send`                   | `uploadType=multipart`, `multipart/related`: the practice message only (see below)                    |
-| `GET`, `POST /calendar/v3/calendars/{calendarId}/events`         | Range listing (`singleEvents=true`, `orderBy=startTime`) with page tokens; the run event              |
+| `GET`, `POST /calendar/v3/calendars/{calendarId}/events`         | Range listing with page tokens, or the recorded `q` (an empty page, see above); the run event         |
 | `GET`, `PATCH`, `DELETE .../events/{eventId}`                    | Read (cancelled too), the recorded rename, delete to `cancelled` (204), then the recorded 410         |
-| `GET`, `POST /drive/v3/files`                                    | Folder listing (`'<folder>' in parents and trashed = false`) with page tokens; the run folder         |
+| `GET`, `POST /drive/v3/files`                                    | Folder listing (`'<folder>' in parents`, with or without `and trashed = false`), page tokens; folder  |
 | `GET`, `PATCH`, `DELETE /drive/v3/files/{fileId}`                | Read with the connector `fields` (absent: the recorded 404), `{ trashed: true }`, delete 204          |
 
 **The practice send is recorded, never delivered.** `google.gmail.send-practice-address` is
@@ -1825,7 +1857,10 @@ emulator mints (it never mints anything else):
   (`impliedThreads`, rendered only as `{ id, snippet, historyId }` thread listing entries), and the
   practice Drive folder (`impliedFolderIds`) are only named by the fixtures: references resolve
   through them (a label listing, a folder parent), but an answer that would render one is not
-  emulated.
+  emulated. The one exception is the label listing, which renders the seeded labels (the system
+  labels and the paging label) as its fixture records them (`listedLabels`); it answers only while
+  every implied label and every system label a message carries has a listed entry, and every
+  listed user label is implied.
 - **Recorded renderings.** A Gmail message answers only the formats a fixture records for it (the
   work message `minimal`, the attachment message `metadata` and `full`, a composed draft `metadata`
   and `full`, an updated draft `full`, a sent message `metadata`); another format is not emulated. A
@@ -1849,9 +1884,10 @@ emulator mints (it never mints anything else):
   fixtures' `run-synthetic`, because the recorded `sizeEstimate` of the draft and sent messages
   (answered by their message reads and the draft thread) covers the subject; on the practice send, a
   `content-type` of exactly `multipart/related; boundary=<b>` with any one unquoted boundary of 1 to
-  70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` or `gmail.list_threads`
-  `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1 to 2500, and a
-  `drive.list_files` `pageSize` from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants
+  70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list`, `gmail.list_threads`, or
+  `gmail.list_drafts` (the recorded `q` only) `maxResults` from 1 to 500, a `calendar.list_events`
+  `maxResults` from 1 to 2500 (a range, or the recorded `q`), and a `drive.list_files` `pageSize`
+  from 1 to 1000 (with or without `and trashed = false`); any `timeMin` before `timeMax` (RFC 3339 instants
   with a real calendar date, hour 0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric
   offset); any id of an item the state holds where a fixture has an id (writes: only items created
   here, plus label changes, trash, and untrash of a stored non-draft message); and, for an id the
@@ -1896,11 +1932,13 @@ answers an evidence-tagged 500 `{ error: { type: 'emulator_error', message } }` 
 reads the clock.
 
 State and seeds: `practiceAddress`, Gmail `messages` (with their recorded renderings),
-`impliedMessages`, `impliedThreads`, `impliedLabelIds`, created `labels`, `attachments`, `drafts`,
+`impliedMessages`, `impliedThreads`, `impliedLabelIds`, `listedLabels`, created `labels`,
+`attachments`, `drafts`,
 Calendar `calendars` and `events`, Drive `files` and `impliedFolderIds`, and the counters. The
 default seed is the synthetic fixture entities with the ids of `googleConformanceFixtureSeeds`.
 Pass `seed: { profile?, practiceAddress?, messages?, impliedMessages?, impliedThreads?,
-impliedLabelIds?, attachments?, calendars?, events?, files?, impliedFolderIds? }` (lists replace
+impliedLabelIds?, listedLabels?, attachments?, calendars?, events?, files?, impliedFolderIds? }`
+(lists replace
 the profile's; labels and drafts are never seeded) with profiles `'default'` or `'empty'`.
 `reset()`, `seed(next)`, and `snapshot()` behave as in the Dropbox emulator; reset and seed also
 clear issued page tokens.
@@ -1910,7 +1948,7 @@ Faults and the control plane behave as in the Dropbox emulator (the ledger recor
 `google_rate_limited` with `retryAfterMs`.
 
 **Drill knobs (tests only).**
-`drills: { gmailPageRepeats, attachmentStandardBase64, notFoundWithoutMessage, gmailThreadPageRepeats, metadataHeadersIgnored, labelDeleteKeepsOnMessages, draftUpdateKeepsContent, trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventPatchKeepsSummary, repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, listIncludesTrashed }`
+`drills: { gmailPageRepeats, attachmentStandardBase64, notFoundWithoutMessage, gmailThreadPageRepeats, metadataHeadersIgnored, labelListingOmitsUserLabels, draftSearchDraftsNull, labelDeleteKeepsOnMessages, draftUpdateKeepsContent, trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventQueryIgnored, eventPatchKeepsSummary, repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, trashedListingOmitsTrashed, listIncludesTrashed }`
 (booleans) each make the emulator disagree with exactly one Google case, only to prove that case
 catches it.
 

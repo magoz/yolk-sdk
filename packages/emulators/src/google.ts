@@ -5,7 +5,7 @@
  *
  * It never imports SDK code: its wire shapes, error envelopes, and default seed are copied as data
  * from the synthetic Google conformance fixtures, and every route names the conformance cases it
- * follows in `googleEmulatorRoutes`. Only the routes those fifteen cases (with their cleanup) send
+ * follows in `googleEmulatorRoutes`. Only the routes those nineteen cases (with their cleanup) send
  * are emulated: Gmail on `https://gmail.googleapis.com` (`/gmail/v1/users/me/...` and the multipart
  * send upload), Calendar and Drive on `https://www.googleapis.com` (`/calendar/v3` and
  * `/drive/v3`). Each route answers only on its recorded origin (`fetchOn(origin)` serves one origin
@@ -13,10 +13,16 @@
  * through the draft media upload (`POST`/`PUT` `/upload/gmail/v1/users/me/drafts[/{id}]`), which no
  * fixture records, so it answers the constant unrecognised 400 until a draft-attachment case is
  * recorded live. Response behaviour comes only from the fixtures: anything they do not
- * show answers one ledgered 400 not-emulated, writes nothing, and uses up no fault. That includes
- * an empty listing and every read of the leftover lookup (`findGoogleConformanceLeftovers`, whose
- * label listing, draft search, and free-text event query no fixture records): the lookup fails, and
- * runners print their lookup-failed WARN.
+ * show answers one ledgered 400 not-emulated, writes nothing, and uses up no fault. The reads of
+ * the leftover lookup (`findGoogleConformanceLeftovers`) are the ones four read cases record: the
+ * label listing (`google.gmail.label-listing`: the seeded labels as recorded, then labels created
+ * here), the draft search (`google.gmail.draft-search`: its recorded empty answer, only while the
+ * state holds no draft), the free-text event query (`google.calendar.free-text-query`: its recorded
+ * empty page, only while no event of the calendar, cancelled or not, holds `yolk` or `conformance`
+ * in any case, since Google's free-text matching cannot be emulated honestly), and the folder
+ * listing with trashed items (`google.drive.list-includes-trashed`). So the lookup runs against
+ * the default seed, and fails closed (runners print their lookup-failed WARN) once the calendar
+ * holds a run event, the event cases' cancelled ones included, or the account a draft.
  *
  * The practice send (`google.gmail.send-practice-address`) is irreversible on Gmail. Here it is
  * only recorded in the state (the sent message reads back; nothing is delivered anywhere), and only
@@ -61,9 +67,11 @@
  * the fixtures' `run-synthetic`, because the recorded `sizeEstimate` of the draft and sent messages
  * (answered by their message reads and the draft thread) covers the subject; on the practice send,
  * a `content-type` of exactly `multipart/related; boundary=<b>` with any one unquoted boundary of 1
- * to 70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list` or `gmail.list_threads`
- * `maxResults` from 1 to 500, a `calendar.list_events` `maxResults` from 1 to 2500, and a
- * `drive.list_files` `pageSize` from 1 to 1000; any `timeMin` before `timeMax` (RFC 3339 instants
+ * to 70 `[A-Za-z0-9_]` characters and no other parameter; a `gmail.list`, `gmail.list_threads`, or
+ * `gmail.list_drafts` (the recorded `q` only) `maxResults` from 1 to 500, a `calendar.list_events`
+ * `maxResults` from 1 to 2500 (a range, or the recorded `q`), and a `drive.list_files` `pageSize`
+ * from 1 to 1000 (with or without `and trashed = false`); any `timeMin` before `timeMax` (RFC 3339
+ * instants
  * with a real calendar date, hour 0 to 23, minute and second 0 to 59, and a `Z` or in-range numeric
  * offset); any id of an item the state holds where a fixture has an id (writes: only items created
  * here, plus label changes, trash, and untrash of a stored non-draft message); and, for an id the
@@ -151,6 +159,7 @@ export {
   GoogleEmulatorGmailLabel,
   GoogleEmulatorGmailMessage,
   GoogleEmulatorImpliedMessage,
+  GoogleEmulatorListedLabel,
   GoogleEmulatorPracticeAddress,
   GoogleEmulatorProfile,
   GoogleEmulatorSeed,
@@ -267,7 +276,11 @@ export const makeGoogleEmulator = async (
       repeatedEventDeleteConflict: drills.repeatedEventDeleteConflict === true,
       drivePageRepeats: drills.drivePageRepeats === true,
       getFileWithoutParents: drills.getFileWithoutParents === true,
-      listIncludesTrashed: drills.listIncludesTrashed === true
+      listIncludesTrashed: drills.listIncludesTrashed === true,
+      labelListingOmitsUserLabels: drills.labelListingOmitsUserLabels === true,
+      draftSearchDraftsNull: drills.draftSearchDraftsNull === true,
+      eventQueryIgnored: drills.eventQueryIgnored === true,
+      trashedListingOmitsTrashed: drills.trashedListingOmitsTrashed === true
     },
     pageTokens: new Map(),
     generation: { current: 0 },

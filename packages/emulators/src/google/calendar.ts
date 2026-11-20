@@ -1,6 +1,7 @@
 /**
  * Calendar routes of the Google emulator (internal): the time-range event listing with page
- * tokens, and the lifecycle of a run-scoped event without attendees (create, read, PATCH rename,
+ * tokens, the leftover lookup's free-text query (its empty answer only), and the lifecycle of a
+ * run-scoped event without attendees (create, read, PATCH rename,
  * delete to `cancelled`, and the recorded 410 of a repeated delete).
  *
  * Every answer comes from the Calendar fixtures, through the seed or the request, or is minted
@@ -53,6 +54,8 @@ const listCase = 'google.calendar.list-range-paging'
 const lifecycleCase = 'google.calendar.event-lifecycle'
 
 const deletedCase = 'google.calendar.deleted-event-gone'
+
+const queryCase = 'google.calendar.free-text-query'
 
 /** A raw calendar id segment: an address-like id, its `@` percent-encoded once (`%40`). */
 const calendarIdSegment = /^[A-Za-z0-9._+-]{1,200}(?:%40[A-Za-z0-9.-]{1,200})?$/
@@ -213,18 +216,96 @@ const isRecordedBoundary = (
 
 // Listing.
 
-type ListInput = {
-  readonly calendarId: string
-  readonly timeMin: string
-  readonly timeMax: string
-  readonly maxResults: number
-  readonly pageToken: string | undefined
+type ListInput =
+  | {
+      readonly kind: 'range'
+      readonly calendarId: string
+      readonly timeMin: string
+      readonly timeMax: string
+      readonly maxResults: number
+      readonly pageToken: string | undefined
+    }
+  | { readonly kind: 'query'; readonly calendarId: string }
+
+/** The leftover lookup's free-text query, the only `q` a fixture records. */
+const recordedQuery = 'yolk-conformance'
+
+/**
+ * True when `text` holds a word of the recorded query (`yolk` or `conformance`, in any case): an
+ * event holding one might match Google's free-text search, whose tokenization no fixture records.
+ */
+const mayMatchQuery = (text: string | undefined): boolean =>
+  text !== undefined && /yolk|conformance/i.test(text)
+
+/**
+ * The free-text query listing (`google.calendar.free-text-query`, the leftover lookup's request):
+ * `q=yolk-conformance` with a `maxResults` from 1 to 2500 and no page token, answered with the
+ * fixture's empty page only when no event of the calendar, cancelled or not, can match it (no
+ * event's summary or description, and neither the calendar's id and summary (the organizer) nor the
+ * practice address (the creator) while it holds events, holds `yolk` or `conformance` in any case).
+ * Anything else is not emulated: no fixture records a match, and Google's free-text matching (which
+ * fields, which tokens, whether a cancelled event counts) cannot be emulated honestly.
+ */
+const queryAdmit = (request: EmulatedRequest): ListInput | NotEmulated => {
+  const query = exactQuery(request, ['q', 'maxResults'])
+
+  if (isNotEmulated(query)) return query
+
+  const recorded = recordedValue(query, 'q', recordedQuery)
+
+  if (recorded !== undefined) return recorded
+
+  const maxResults = pageSize(query['maxResults'], 'maxResults', 1, 2500)
+
+  return isNotEmulated(maxResults)
+    ? maxResults
+    : { kind: 'query', calendarId: param(request, 'calendarId') }
+}
+
+const queryPlan = (state: GoogleEmulatorState, owner: GoogleEmulatorCalendar, ignored: boolean) => {
+  const events = state.events.filter(event => event.calendarId === owner.id)
+
+  const owned =
+    events.length > 0 &&
+    [owner.id, owner.summary, state.practiceAddress].some(text => mayMatchQuery(text))
+
+  if (
+    !ignored &&
+    (owned ||
+      events.some(event => mayMatchQuery(event.summary) || mayMatchQuery(event.description)))
+  ) {
+    return notEmulated(
+      'a free-text query of a calendar holding an event it might match is not emulated'
+    )
+  }
+
+  // The drill lists every live event, as if `q` were ignored.
+  const items = ignored
+    ? events
+        .filter(event => event.status !== 'cancelled')
+        .sort((left, right) => instant(left.start) - instant(right.start))
+        .map(event => renderEvent(state, owner, event))
+    : []
+
+  return answer(() => {
+    const body: EventsPage = {
+      kind: 'calendar#events',
+      summary: owner.summary,
+      timeZone: owner.timeZone,
+      accessRole: owner.accessRole,
+      items
+    }
+
+    return googleJson(200, body)
+  })
 }
 
 const listEvents: GoogleRoute = statefulRoute(
-  calendar('GET', '', false, [listCase], false),
+  calendar('GET', '', false, [listCase, queryCase], false),
   'none',
   (request): ListInput | NotEmulated => {
+    if (request.query.has('q')) return queryAdmit(request)
+
     const query = exactQuery(
       request,
       ['timeMin', 'timeMax', 'maxResults', 'singleEvents', 'orderBy'],
@@ -257,12 +338,21 @@ const listEvents: GoogleRoute = statefulRoute(
 
     return pageToken === ''
       ? notEmulated('an empty pageToken is not emulated')
-      : { calendarId: param(request, 'calendarId'), timeMin, timeMax, maxResults, pageToken }
+      : {
+          kind: 'range',
+          calendarId: param(request, 'calendarId'),
+          timeMin,
+          timeMax,
+          maxResults,
+          pageToken
+        }
   },
   (state, input, { env }) => {
     const owner = findCalendar(state, input.calendarId)
 
     if (owner === undefined) return notEmulated('a calendar the state does not hold')
+
+    if (input.kind === 'query') return queryPlan(state, owner, env.drills.eventQueryIgnored)
 
     const from = Date.parse(input.timeMin)
     const to = Date.parse(input.timeMax)

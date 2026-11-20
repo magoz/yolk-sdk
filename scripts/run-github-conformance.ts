@@ -149,6 +149,14 @@ export const githubCaseSpecs: ReadonlyArray<CaseSpec<GithubConformanceSeedKey>> 
     doc: '`github.get_file_contents` of the seeded text file.'
   },
   {
+    caseId: 'github.issues.open-listing',
+    seeds: [...repoSeeds, 'workIssueNumber'],
+    optionalSeeds: [],
+    fileName: 'open-issues.ts',
+    exportName: 'githubOpenIssuesFixture',
+    doc: "The open-issue listing and the work issue's first comment page, as the leftover lookup sends them."
+  },
+  {
     caseId: 'github.comments.create-delete',
     seeds: [...repoSeeds, 'workIssueNumber', 'runId'],
     optionalSeeds: [],

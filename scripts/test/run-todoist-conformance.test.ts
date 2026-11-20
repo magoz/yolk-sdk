@@ -132,6 +132,7 @@ describe('run-todoist-conformance plan', () => {
       'RUN   todoist.tasks.list-cursor-paging  [read]  needs --paging-project',
       'RUN   todoist.errors.not-found-envelope  [read]',
       'RUN   todoist.labels.task-labels-are-names  [read]  needs --labeled-task',
+      'RUN   todoist.projects.list-cursor-paging  [read]  needs --paging-project',
       'SKIP  todoist.tasks.lifecycle-close  [write-reversible]  writes-not-allowed',
       'SKIP  todoist.tasks.due-dates  [write-reversible]  writes-not-allowed',
       'SKIP  todoist.projects.parent-id  [write-reversible]  writes-not-allowed',
