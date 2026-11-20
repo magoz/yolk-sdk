@@ -38,11 +38,6 @@ import {
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
 import {
-  emptyWorkflowHitlPauses,
-  rememberWorkflowHitlPause,
-  workflowHitlResponseEndpoint
-} from './workflow-hitl-pause'
-import {
   activityItemFromAgentEvent,
   maxActivityItems,
   type AgentActivityItem
@@ -223,6 +218,8 @@ async function* missingWorkflowRunIdAgentEvents(): AsyncGenerator<AgentEvent, vo
   })
 }
 
+const workflowRunEndpoint = (runId: string) => `/api/agent/workflow/${encodeURIComponent(runId)}`
+
 const sourceImageCanBeReady = (file: File) =>
   file.type.startsWith('image/') && file.size <= maxSourceImageBytes
 
@@ -369,12 +366,6 @@ export function AgentPlayground({
   const nextActivityIdRef = useRef(0)
   const workflowResumeAbortRef = useRef<AbortController | null>(null)
   const refreshedCommandToolRunIdsRef = useRef(new Set<string>())
-  // The pause each pending request was last asked in: Workflow answers name it.
-  const workflowHitlPausesRef = useRef(emptyWorkflowHitlPauses)
-
-  const rememberWorkflowEvent = useCallback((event: AgentEvent) => {
-    workflowHitlPausesRef.current = rememberWorkflowHitlPause(workflowHitlPausesRef.current, event)
-  }, [])
 
   const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
     const id = nextActivityIdRef.current
@@ -535,12 +526,11 @@ export function AgentPlayground({
 
         return Stream.toAsyncIterable(
           streamAgentRunHitlResponseEventStreamUntilTerminal({
-            endpoint: workflowHitlResponseEndpoint(
-              workflowRunId,
-              workflowHitlPausesRef.current,
-              hitlResponse
-            ),
+            endpoint: workflowRunEndpoint(workflowRunId),
             hitlResponses: [hitlResponse],
+            // The pause it answers (`?pause=` on the POST): useAgentChat remembers it per request
+            // from every event it applies (start, HITL resume, and the replay below).
+            pause: request.pause,
             signal: request.signal,
             onResponse: response => {
               const runId = response.headers['x-workflow-run-id']
@@ -551,7 +541,7 @@ export function AgentPlayground({
                 tone: 'neutral'
               })
             }
-          }).pipe(Stream.tap(event => Effect.sync(() => rememberWorkflowEvent(event))))
+          })
         )
       }
 
@@ -560,14 +550,13 @@ export function AgentPlayground({
           ...request,
           endpoint: '/api/agent/workflow',
           onRunId: runId => {
-            workflowHitlPausesRef.current = emptyWorkflowHitlPauses
             setWorkflowRunId(runId)
             recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
           }
-        }).pipe(Stream.tap(event => Effect.sync(() => rememberWorkflowEvent(event))))
+        })
       )
     }
-  }, [recordActivity, rememberWorkflowEvent, runtime, workflowRunId])
+  }, [recordActivity, runtime, workflowRunId])
 
   const agentTransport = cloudflareTransport ?? workflowTransport
 
@@ -967,7 +956,7 @@ export function AgentPlayground({
       tone: 'neutral'
     })
 
-    const endpoint = `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`
+    const endpoint = workflowRunEndpoint(workflowRunId)
 
     Effect.runPromise(
       Effect.promise(async () => {
@@ -979,7 +968,6 @@ export function AgentPlayground({
         )
 
         for await (const event of events) {
-          rememberWorkflowEvent(event)
           applyEvent(event)
         }
       })
@@ -1004,7 +992,6 @@ export function AgentPlayground({
     isRunning,
     isWorkflowResuming,
     recordActivity,
-    rememberWorkflowEvent,
     runtime,
     state.status,
     workflowRunId
@@ -1023,7 +1010,7 @@ export function AgentPlayground({
       return
     }
 
-    const endpoint = `/api/agent/workflow/${encodeURIComponent(runId)}`
+    const endpoint = workflowRunEndpoint(runId)
     recordActivity({ title: 'Workflow cancel requested', detail: runId, tone: 'neutral' })
 
     Effect.runPromise(cancelAgentRun({ endpoint }))

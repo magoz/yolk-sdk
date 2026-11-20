@@ -5,6 +5,8 @@ import { Effect, Fiber, Option, Predicate, Stream } from 'effect'
 import {
   AgentTransportError,
   appendAgentMessage,
+  emptyHitlPauses,
+  hitlPauseFor,
   streamAgentEventStream,
   type AgentTranscript,
   type StreamAgentEventsRequest
@@ -47,6 +49,14 @@ import {
 
 export type AgentChatTransportRequest = Omit<StreamAgentEventsRequest, 'signal'> & {
   readonly signal: AbortSignal
+  /**
+   * With `hitlResponses`: the pause the answer is for, the `eventId` of the latest
+   * `AgentAwaitingInput` this chat applied that holds its request (`state.hitlPauses`). Absent when
+   * no such pause carried an `eventId`. Durable transports send it with the answer, for example as
+   * `pause` on `streamAgentRunHitlResponseEventStreamUntilTerminal`; the default transport ignores
+   * it.
+   */
+  readonly pause?: string
 }
 
 export type AgentChatTransport = (request: AgentChatTransportRequest) => AsyncIterable<AgentEvent>
@@ -182,18 +192,21 @@ export function useAgentChat({
     (
       messages: AgentTranscript,
       signal: AbortSignal,
-      hitlResponses?: ReadonlyArray<HitlResponse>
+      hitlResponses?: ReadonlyArray<HitlResponse>,
+      pause?: string
     ): AgentChatTransportRequest => {
       const base =
         endpoint === undefined ? { sessionId, messages } : { endpoint, sessionId, messages }
 
-      return { ...base, hitlResponses, model, reasoningEffort, signal }
+      const request = { ...base, hitlResponses, model, reasoningEffort, signal }
+
+      return pause === undefined ? request : { ...request, pause }
     },
     [endpoint, model, reasoningEffort, sessionId]
   )
 
   const runAgent = useCallback(
-    (messages: AgentTranscript, hitlResponses?: ReadonlyArray<HitlResponse>) => {
+    (messages: AgentTranscript, hitlResponses?: ReadonlyArray<HitlResponse>, pause?: string) => {
       const controller = new AbortController()
       abortControllerRef.current = controller
 
@@ -204,13 +217,12 @@ export function useAgentChat({
         }
       })
 
+      const request = makeTransportRequest(messages, controller.signal, hitlResponses, pause)
+
       const eventStream =
         transport === undefined
-          ? streamAgentEventStream(makeTransportRequest(messages, controller.signal, hitlResponses))
-          : Stream.fromAsyncIterable(
-              transport(makeTransportRequest(messages, controller.signal, hitlResponses)),
-              admitAgentChatTransportCause
-            )
+          ? streamAgentEventStream(request)
+          : Stream.fromAsyncIterable(transport(request), admitAgentChatTransportCause)
 
       const fiber = Effect.runFork(
         eventStream.pipe(
@@ -384,14 +396,16 @@ export function useAgentChat({
       return Option.match(transcript, {
         onNone: () => AgentChatHitlResponseResultValue.Ignored(),
         onSome: messages => {
+          // Read before the dispatch: the answer starts a new stream, which has its own pauses.
+          const pause = hitlPauseFor(state.hitlPauses ?? emptyHitlPauses, response)
           dispatch(AgentChatAction.SubmitHitlResponse({ response }))
-          runAgent(messages, [response])
+          runAgent(messages, [response], pause)
 
           return AgentChatHitlResponseResultValue.Submitted({ response, messages })
         }
       })
     },
-    [canSubmitHitlResponse, runAgent, state.chatMessages]
+    [canSubmitHitlResponse, runAgent, state.chatMessages, state.hitlPauses]
   )
 
   const submitToolApprovalResponse = useCallback(

@@ -26,6 +26,7 @@ import {
   type AgentExecutionRoute,
   type AgentExecutions
 } from '../client/executions.ts'
+import { emptyHitlPauses, rememberHitlPause, type HitlPauses } from '../client/hitl-pauses.ts'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
@@ -67,6 +68,12 @@ export type AgentChatState = {
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
   /** The latest model turn's start; see `AgentChatEventProjectionState`. */
   readonly turnStart?: AgentChatTurnStart
+  /**
+   * The pause each request was last asked in (`rememberHitlPause` over every `AgentAwaitingInput`,
+   * seen or not): `useAgentChat` puts it on the transport request of an answer (`pause`). Reset
+   * with `seenEventIds`; absent in states built before it.
+   */
+  readonly hitlPauses?: HitlPauses
 }
 
 /**
@@ -498,12 +505,24 @@ export type AgentChatAction =
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
-/** A new stream starts: its event ids, executions and turns are its own. */
+/** A new stream starts: its event ids, executions, turns and pauses are its own. */
 const restarted = (state: AgentChatState) => ({
-  ...Struct.omit(state, ['turnStart']),
+  ...Struct.omit(state, ['turnStart', 'hitlPauses']),
   seenEventIds: [],
   executions: []
 })
+
+/**
+ * Records the pause every `AgentAwaitingInput` names (`rememberHitlPause`), seen or not: a replay
+ * from an earlier index re-reads the later pauses after the earlier ones, so it ends at the latest
+ * even when an answer cleared `seenEventIds` and only the earlier pauses read as new.
+ */
+const rememberPause = (state: AgentChatState, event: AgentEvent): AgentChatState => {
+  const pauses = state.hitlPauses ?? emptyHitlPauses
+  const next = rememberHitlPause(pauses, event)
+
+  return next === pauses ? state : { ...state, hitlPauses: next }
+}
 
 const withoutFailure = (state: AgentChatState): AgentChatState =>
   Predicate.isTagged(state.status, 'Failed') ? { ...state, status: idleAgentStatus } : state
@@ -649,25 +668,27 @@ export const reduceAgentChatState = (
       )
     ),
     Match.tag('Event', current => {
-      if (hasSeenEvent(state, current.event)) {
-        return state
+      const paused = rememberPause(state, current.event)
+
+      if (hasSeenEvent(paused, current.event)) {
+        return paused
       }
 
-      const routed = projectExecutionEvent(state, current.event, current)
+      const routed = projectExecutionEvent(paused, current.event, current)
 
       const projected: AgentChatState = {
-        ...Struct.omit(state, ['executions', 'turnStart']),
+        ...Struct.omit(paused, ['executions', 'turnStart']),
         ...projectionFields(routed)
       }
 
       if (!routed.applied) return rememberEvent(projected, current.event)
 
-      const statusEvent = eventForStatus(state, current.event, routed.pendingRequests)
+      const statusEvent = eventForStatus(paused, current.event, routed.pendingRequests)
 
       return rememberEvent(
         statusEvent === undefined
           ? projected
-          : withStatusTree(projected, nextAgentStatusTree(statusTree(state), statusEvent)),
+          : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), statusEvent)),
         current.event
       )
     }),
