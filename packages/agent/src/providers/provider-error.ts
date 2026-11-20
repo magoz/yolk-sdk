@@ -1,3 +1,5 @@
+import { Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ProviderErrorInfo,
   type AgentErrorCode,
@@ -14,6 +16,19 @@ type ProviderFailureInput = {
   readonly body?: string
   readonly message?: string
   readonly providerCode?: string
+  /**
+   * Further structured codes, in order, consulted when `providerCode` names no kind: Anthropic
+   * reports the specific `details.error_code` as `providerCode` and classifies from `error.type`.
+   * They are never reported.
+   */
+  readonly kindCodes?: ReadonlyArray<string>
+  /**
+   * Request values the provider may echo back in its error text (the requested model id, the
+   * Gateway's `param.modelId`). They are removed from `message` and the decoded `body` before the
+   * text fallback, so a model id containing words such as "overload" or "rate_limit" never decides
+   * the failure kind. Values shorter than three characters are ignored.
+   */
+  readonly echoedValues?: ReadonlyArray<string>
   readonly fallbackKind?: ProviderFailureKind
   /** Quota reset already parsed by the vendor adapter; see `ProviderErrorInfo.quotaResetsAtMs`. */
   readonly quotaResetsAtMs?: number
@@ -114,6 +129,11 @@ const kindFromStatus = (status: number | undefined): ProviderFailureKind | undef
     return 'auth'
   }
 
+  // A request timeout: the request never got an answer, so it is a transport failure.
+  if (status === 408) {
+    return 'network'
+  }
+
   if (status >= 500) {
     return 'server_error'
   }
@@ -121,15 +141,117 @@ const kindFromStatus = (status: number | undefined): ProviderFailureKind | undef
   return undefined
 }
 
-const normalizedSignal = (input: ProviderFailureInput) =>
-  [input.providerCode, input.message, input.body]
-    .filter(value => value !== undefined)
-    .join(' ')
-    .toLowerCase()
+/**
+ * The request values an error envelope's `param` echoes: the string fields of an object (the
+ * Gateway's `{ modelId }`). A string `param` (OpenAI `'input'`, `'messages'`) names the rejected
+ * parameter, not a value the request sent, so it echoes nothing; so does anything else.
+ */
+export const echoedParamValues = (param: unknown): ReadonlyArray<string> =>
+  Predicate.isObject(param) ? Object.values(param).filter(Predicate.isString) : []
 
-const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | undefined => {
-  const signal = normalizedSignal(input)
+/** Shorter echoed values could match inside ordinary words, so they are never removed. */
+const minEchoedValueLength = 3
 
+const JsonFromString = Schema.fromJsonString(Schema.Json)
+
+/** Only the head of an error body is scanned: a body is classified, never fully read as text. */
+const maxScannedBodyLength = 64 * 1024
+
+/** Deeper JSON bodies are scanned as raw text, so decoding and `jsonStrings` stay shallow. */
+const maxJsonDepth = 32
+
+/**
+ * Whether the JSON text nests arrays and objects at most `maxDepth` deep, checked in one pass
+ * without recursion (brackets inside strings do not count), before anything recursive reads it.
+ */
+const jsonNestsWithin = (text: string, maxDepth: number): boolean => {
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+    } else if (char === '"') {
+      inString = true
+    } else if (char === '{' || char === '[') {
+      depth += 1
+
+      if (depth > maxDepth) {
+        return false
+      }
+    } else if (char === '}' || char === ']') {
+      depth -= 1
+    }
+  }
+
+  return true
+}
+
+const isJsonArray = (value: Schema.JsonArray | Schema.JsonObject): value is Schema.JsonArray =>
+  Array.isArray(value)
+
+/**
+ * The string values of a decoded JSON body (its keys and the `param` subtree, which holds request
+ * values, left out), so echoed values compare against decoded text, never JSON escapes. Its
+ * recursion is bounded by `maxJsonDepth`: `bodyText` decodes only bodies that nest within it.
+ */
+const jsonStrings = (value: Schema.Json): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) {
+    return [value]
+  }
+
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
+    return []
+  }
+
+  if (isJsonArray(value)) {
+    return value.flatMap(item => jsonStrings(item))
+  }
+
+  return Object.entries(value).flatMap(([key, field]) =>
+    key === 'param' ? [] : jsonStrings(field)
+  )
+}
+
+/**
+ * A JSON body as its decoded strings; any other body, one longer than `maxScannedBodyLength`, or
+ * one nested deeper than `maxJsonDepth`, as the raw text of its head.
+ */
+const bodyText = (body: string): string => {
+  const head = body.slice(0, maxScannedBodyLength)
+
+  if (head.length < body.length || !jsonNestsWithin(head, maxJsonDepth)) {
+    return head
+  }
+
+  return Option.match(Schema.decodeUnknownOption(JsonFromString)(head), {
+    onNone: () => head,
+    onSome: json => jsonStrings(json).join(' ')
+  })
+}
+
+/** The free text of a failure, lower-cased, with every echoed request value removed. */
+const scannedText = (input: ProviderFailureInput) =>
+  (input.echoedValues ?? []).reduce(
+    (text, value) => {
+      const echoed = value.trim().toLowerCase()
+
+      return echoed.length < minEchoedValueLength ? text : text.replaceAll(echoed, ' ')
+    },
+    [input.message, input.body === undefined ? undefined : bodyText(input.body)]
+      .filter(value => value !== undefined)
+      .join(' ')
+      .toLowerCase()
+  )
+
+const kindFromSignal = (signal: string): ProviderFailureKind | undefined => {
   if (
     signal.includes('rate_limit') ||
     signal.includes('rate limit') ||
@@ -167,9 +289,6 @@ const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | unde
   return undefined
 }
 
-export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind =>
-  kindFromSignal(input) ?? kindFromStatus(input.status) ?? input.fallbackKind ?? 'unknown'
-
 export const providerFailureRetryable = (kind: ProviderFailureKind) => {
   switch (kind) {
     case 'rate_limit':
@@ -184,6 +303,39 @@ export const providerFailureRetryable = (kind: ProviderFailureKind) => {
     case 'unknown':
       return false
   }
+}
+
+/**
+ * Classify from structured fields first: the vendor's `providerCode` (`error.type`/`code`), then
+ * its `kindCodes`, when one names a kind, then the HTTP status. Free text (`message`, `body`,
+ * echoed request values removed) is the fallback when no status exists (stream error events), and
+ * otherwise only refines the status: it may name a non-retryable kind (an Anthropic 400 "prompt
+ * is too long" is `context_overflow`) or a more specific retryable one for a retryable status (a
+ * 503 "service unavailable" is `overloaded`), but never makes a failure retryable that its status
+ * (a 404 model error, a 401) leaves non-retryable.
+ */
+export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind => {
+  for (const code of [input.providerCode, ...(input.kindCodes ?? [])]) {
+    const fromCode = code === undefined ? undefined : kindFromSignal(code.toLowerCase())
+
+    if (fromCode !== undefined) {
+      return fromCode
+    }
+  }
+
+  const fromStatus = kindFromStatus(input.status)
+  const fromText = kindFromSignal(scannedText(input))
+
+  if (
+    fromText !== undefined &&
+    (input.status === undefined ||
+      !providerFailureRetryable(fromText) ||
+      (fromStatus !== undefined && providerFailureRetryable(fromStatus)))
+  ) {
+    return fromText
+  }
+
+  return fromStatus ?? input.fallbackKind ?? 'unknown'
 }
 
 export const providerFailureCause = (kind: ProviderFailureKind): ProviderLlmErrorCause => {

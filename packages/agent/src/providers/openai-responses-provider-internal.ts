@@ -53,6 +53,7 @@ import {
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   classifyProviderFailure,
+  echoedParamValues,
   providerErrorInfo,
   providerFailureCause,
   providerFailureRetryable
@@ -308,16 +309,32 @@ const decodeJsonString = (raw: string, message: string) =>
     Effect.mapError(schemaErrorToLlmError('invalid_response', message))
   )
 
+type OpenAiResponsesHttpError = {
+  readonly code: string | undefined
+  /** Request values the envelope echoes in `error.param`, kept out of the text fallback. */
+  readonly echoedValues: ReadonlyArray<string>
+  /** `error.type`, classified when the reported `code` names no kind. */
+  readonly kindCodes: ReadonlyArray<string>
+}
+
+/** An error object's `type`, classified when its reported `code` names no kind. */
+const typeKindCodes = (error: Schema.Json | undefined): ReadonlyArray<string> =>
+  [stringField(error, 'type')].filter(Predicate.isString)
+
 // Machine error codes are safe to surface in provider metadata. Free-text
 // upstream messages stay out of LLMError per provider sanitization policy.
-const decodeOpenAiHttpErrorCode = (raw: string): Effect.Effect<string | undefined> =>
+const decodeOpenAiHttpError = (raw: string): Effect.Effect<OpenAiResponsesHttpError> =>
   Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
     Effect.map(parsed => {
       const error = jsonObjectFromField(parsed, 'error')
 
-      return stringField(error, 'code') ?? stringField(error, 'type')
+      return {
+        code: stringField(error, 'code') ?? stringField(error, 'type'),
+        echoedValues: echoedParamValues(jsonField(error, 'param')),
+        kindCodes: typeKindCodes(error)
+      }
     }),
-    Effect.catch(() => Effect.succeed(undefined))
+    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [], kindCodes: [] }))
   )
 
 const unsupportedContentError = (contentType: string, providerName: string) =>
@@ -830,12 +847,14 @@ export const withOpenAiResponsesProviderName = (providerName: string, error: LLM
 type OpenAiResponsesClassifyFields = {
   provider: string
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
   fallbackKind?: ProviderFailureKind
 }
 
 type OpenAiResponsesSignalInputFields = {
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
 }
 
@@ -844,6 +863,7 @@ const providerSignalError = (
   input: {
     readonly message: string
     readonly providerCode?: string
+    readonly kindCodes?: ReadonlyArray<string>
     readonly fallbackKind?: ProviderFailureKind
   }
 ) => {
@@ -851,7 +871,8 @@ const providerSignalError = (
     (() => {
       const fields: OpenAiResponsesClassifyFields = {
         provider: descriptor.providerId,
-        message: input.message
+        message: input.message,
+        kindCodes: input.kindCodes ?? []
       }
 
       if (input.providerCode !== undefined) {
@@ -1436,7 +1457,10 @@ const processSseData = (
         providerSignalError(
           descriptor,
           (() => {
-            const fields: OpenAiResponsesSignalInputFields = { message }
+            const fields: OpenAiResponsesSignalInputFields = {
+              message,
+              kindCodes: typeKindCodes(error)
+            }
 
             if (providerCode !== undefined) {
               fields.providerCode = providerCode
@@ -1472,8 +1496,10 @@ const processSseData = (
         providerSignalError(
           descriptor,
           (() => {
+            // An `error` event's `type` is the event type, not an error type: no kind codes.
             const fields: OpenAiResponsesSignalInputFields = {
-              message: parsed.message
+              message: parsed.message,
+              kindCodes: []
             }
 
             if (providerCode !== undefined) {
@@ -1741,7 +1767,8 @@ const sendOpenAiResponsesRequest = (
         )
       )
 
-      const errorCode = yield* decodeOpenAiHttpErrorCode(errorText)
+      const error = yield* decodeOpenAiHttpError(errorText)
+      const echoedValues = [request.model, ...error.echoedValues]
 
       const quotaResetsAtMs = openAiCodexQuotaResetsAtMs({
         status: response.status,
@@ -1756,14 +1783,18 @@ const sendOpenAiResponsesRequest = (
               status: response.status,
               headers: response.headers,
               body: errorText,
-              providerCode: errorCode
+              providerCode: error.code,
+              echoedValues,
+              kindCodes: error.kindCodes
             }
           : {
               provider: config.providerId,
               status: response.status,
               headers: response.headers,
               body: errorText,
-              providerCode: errorCode,
+              providerCode: error.code,
+              echoedValues,
+              kindCodes: error.kindCodes,
               quotaResetsAtMs
             }
       )

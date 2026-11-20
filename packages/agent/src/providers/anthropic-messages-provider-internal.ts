@@ -1,9 +1,13 @@
 import { Effect, Layer, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
-import { HttpClient, HttpClientRequest } from 'effect/http'
+import { HttpClient, HttpClientRequest, type HttpClientResponse } from 'effect/http'
 import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
 import { ProviderErrorInfo, replaceLoneSurrogatesDeep } from '@yolk-sdk/agent/protocol'
-import { streamAnthropicResponse, toAnthropicRequestBody } from './anthropic-provider-internal.ts'
+import {
+  decodeAnthropicHttpErrorInfo,
+  streamAnthropicResponse,
+  toAnthropicRequestBody
+} from './anthropic-provider-internal.ts'
 import { requestCacheKeyHeaders, type CacheKeyHeaders } from './cache-key-headers.ts'
 import {
   classifyProviderFailure,
@@ -27,6 +31,17 @@ type AnthropicMessagesProviderConfig = {
   readonly extraBody?: Readonly<Record<string, Schema.Json>> | undefined
   /** Session-affinity headers for `LLMRequest.cacheKey`; required headers win on a clash. */
   readonly cacheKeyHeaders?: CacheKeyHeaders
+}
+
+type AnthropicMessagesClassifyFields = {
+  provider: string
+  status: number
+  headers: HttpClientResponse.HttpClientResponse['headers']
+  body: string
+  echoedValues: ReadonlyArray<string>
+  kindCodes: ReadonlyArray<string>
+  message?: string
+  providerCode?: string
 }
 
 type AnthropicMessagesErrorFields = {
@@ -134,12 +149,32 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
                   )
                 )
 
-                const provider = classifyProviderFailure({
-                  provider: config.providerId,
-                  status: response.status,
-                  headers: response.headers,
-                  body
-                })
+                // The envelope's `error.type` (for example `not_found_error`) becomes
+                // `providerCode`; its message only feeds classification, never the LLMError.
+                const errorInfo = yield* decodeAnthropicHttpErrorInfo(body)
+
+                const provider = classifyProviderFailure(
+                  (() => {
+                    const fields: AnthropicMessagesClassifyFields = {
+                      provider: config.providerId,
+                      status: response.status,
+                      headers: response.headers,
+                      body,
+                      echoedValues: [request.model],
+                      kindCodes: errorInfo.kindCodes
+                    }
+
+                    if (errorInfo.message !== undefined) {
+                      fields.message = errorInfo.message
+                    }
+
+                    if (errorInfo.providerCode !== undefined) {
+                      fields.providerCode = errorInfo.providerCode
+                    }
+
+                    return fields
+                  })()
+                )
 
                 return yield* Effect.fail(
                   new LLMError({

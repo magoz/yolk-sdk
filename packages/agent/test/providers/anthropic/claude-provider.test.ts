@@ -2099,6 +2099,34 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('classifies a stream error from its type when details.error_code names no kind', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"error","error":{"type":"overloaded_error","message":"Try again soon.","details":{"error_code":"capacity_exhausted"}}}\n\n'
+        ])
+      )
+
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        cause: 'overloaded',
+        retryable: true,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'overloaded',
+          providerCode: 'capacity_exhausted'
+        }
+      })
+    })
+  )
+
   it.effect('marks Anthropic stream read failures retryable', () =>
     Effect.gen(function* () {
       const response = streamErrorHttpResponse()

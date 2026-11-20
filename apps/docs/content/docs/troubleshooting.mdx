@@ -81,7 +81,14 @@ raw upstream bodies stay out of typed failures: diagnose from `providerCode`, st
 rather than logging raw response bodies.
 
 Claude subscription (`anthropic_claude`) HTTP and stream errors report the more specific
-`error.details.error_code` when present, then `error.type`, then `error.code`.
+`error.details.error_code` when present, then `error.type`, then `error.code`. Native Messages HTTP
+errors (OpenCode Go `protocol: 'messages'`) follow the same rule, so an unknown model reports
+`providerCode: 'not_found_error'`.
+
+Retryability follows the structured fields: a provider code that names a failure (for example
+`rate_limit_error` or `overloaded_error`), then the HTTP status (429, 408, 5xx, and 529
+retry; other 4xx do not). Upstream message text only refines that, and request values the upstream echoes back,
+such as the model id, are ignored, so a model id containing "overload" never makes a 404 retryable.
 
 ### Claude rejects a model with claude_code_version_too_old
 

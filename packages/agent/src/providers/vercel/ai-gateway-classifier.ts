@@ -292,17 +292,20 @@ type StatusFailureInput = {
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
   readonly nowMs: number
+  readonly echoedValues: ReadonlyArray<string>
   providerCode?: string
   message?: string
 }
 
 /** Classify a non-2xx answer: status, Gateway error type, and retry delay (an HTTP-date
- * `Retry-After` is read against the Effect `Clock`); never the body text.
+ * `Retry-After` is read against the Effect `Clock`); never the body text. The requested `model`
+ * is an echoed value: the envelope message may repeat it, and it never decides the kind.
  */
 const statusError = (
   status: number,
   headers: Readonly<Record<string, string>>,
-  text: string
+  text: string,
+  model: string
 ): Effect.Effect<ClassificationProviderError> =>
   Effect.all([
     Schema.decodeUnknownEffect(Schema.fromJsonString(EvaluateErrorWire))(text).pipe(Effect.option),
@@ -317,7 +320,8 @@ const statusError = (
         provider: vercelAiGatewayProviderId,
         status,
         headers,
-        nowMs
+        nowMs,
+        echoedValues: [model]
       }
 
       if (providerCode !== undefined) failure.providerCode = providerCode
@@ -442,7 +446,9 @@ const classifyWith = (config: VercelAiGatewayClassifierConfig, client: HttpClien
         )
 
         if (response.status < 200 || response.status >= 300) {
-          return yield* Effect.fail(yield* statusError(response.status, response.headers, text))
+          return yield* Effect.fail(
+            yield* statusError(response.status, response.headers, text, model)
+          )
         }
 
         return yield* decodeEvaluateResponse(text, response.headers, request, model)

@@ -924,6 +924,27 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('classifies a response.failed error from its type when its code names no kind', () =>
+    Effect.gen(function* () {
+      const response = responseFromSseEvents([
+        {
+          type: 'response.failed',
+          response: {
+            error: { code: '1302', type: 'rate_limit_exceeded', message: 'Slow down.' }
+          }
+        }
+      ])
+
+      const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toMatchObject({
+        cause: 'rate_limit',
+        retryable: true,
+        provider: { provider: 'openai_codex', kind: 'rate_limit', providerCode: '1302' }
+      })
+    })
+  )
+
   it.effect('maps Codex response context-window failures to overflow metadata', () =>
     Effect.gen(function* () {
       const response = responseFromSseEvents([
