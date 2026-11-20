@@ -3,11 +3,11 @@
  * fixtures satisfy, through the real OpenAI-compatible chat provider, both in-process and over a
  * loopback socket. Tests may import SDK packages; the emulator source never does.
  */
-import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Schema, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
-import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
+import { AgentReasoningEffort, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   OpenAiConformanceConfig,
   openAiChatJsonPlainTextCase,
@@ -27,6 +27,7 @@ import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/r
 import { serveFetchHandler } from '../src/node.ts'
 import {
   makeOpenAiEmulator,
+  openAiEmulatorDefaultReasoningModels,
   type OpenAiEmulator,
   type OpenAiFault,
   type OpenAiScriptedTurn
@@ -458,6 +459,70 @@ describe('faults through the OpenAI provider', () => {
       if (error instanceof LLMError) {
         expect(error.provider?.providerCode).toBe('incomplete_stream')
       }
+    })
+  )
+})
+
+describe('reasoning effort through the default OpenAI provider', () => {
+  // The emulator's reasoning model; the provider config names no endpoint and no format.
+  const reasoningModel = openAiEmulatorDefaultReasoningModels[0] ?? 'gpt-6-luna'
+
+  const streamWithEffort = (emulator: OpenAiEmulator, reasoningEffort: AgentReasoningEffort) =>
+    Effect.gen(function* () {
+      const provider = yield* LLMProvider
+
+      return yield* provider
+        .stream({
+          model: reasoningModel,
+          systemPrompt: 'Reply in one short sentence.',
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          tools: [],
+          reasoningEffort
+        })
+        .pipe(Stream.runCollect)
+    }).pipe(
+      Effect.provide(
+        makeOpenAiProviderLayer({
+          apiKey: settings.apiKey,
+          maxCompletionTokens: 64,
+          streaming: true
+        }).pipe(Layer.provide(inProcessLayer(emulator)))
+      )
+    )
+
+  const reasoningTokens = (events: Iterable<LLMEvent>) =>
+    Array.from(events).flatMap(event =>
+      Predicate.isTagged(event, 'Usage') ? [event.usage.output.reasoning] : []
+    )
+
+  it.effect('the native endpoint receives the effort, so the reasoning model reasons', () =>
+    Effect.gen(function* () {
+      const emulator = makeOpenAiEmulator()
+
+      const events = yield* streamWithEffort(emulator, 'high')
+
+      expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(['high'])
+      expect(reasoningTokens(events)).toEqual([expect.any(Number)])
+      expect(reasoningTokens(events)[0]).toBeGreaterThan(0)
+    })
+  )
+
+  it.effect('none and max reach the native endpoint unchanged; none turns reasoning off', () =>
+    Effect.gen(function* () {
+      const emulator = makeOpenAiEmulator()
+      const efforts = ['none', 'max']
+      const reported: Array<ReadonlyArray<number | undefined>> = []
+
+      for (const value of efforts) {
+        // Decoded as a host decodes a stored or submitted effort.
+        const effort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+
+        reported.push(reasoningTokens(yield* streamWithEffort(emulator, effort)))
+      }
+
+      expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(efforts)
+      expect(reported[0]).toEqual([0])
+      expect(reported[1]?.[0]).toBeGreaterThan(0)
     })
   )
 })
