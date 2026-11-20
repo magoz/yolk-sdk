@@ -50,6 +50,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/microsoft/api.ts`                   | Microsoft route table (evidence, query allowlist, auth flag), matching, registration                                                                                                                                                                                                                               |
 | (internal)                            | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                                                                                                                                                                |
 | (internal)                            | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                                                                                                                                                                                                       |
+| (internal)                            | `src/microsoft/teams-sites*.ts`          | Fixture-only SharePoint site and Teams handlers (`teams-sites.ts`) and the eight fixtures copied as data (`teams-sites-recordings.ts`)                                                                                                                                                                             |
 | (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`, `/kie`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, bearer prefixes, variants, truncation; no core import)             |
 | (internal)                            | `src/stateful-core.ts`                   | The `@emulators/core` adapter every subpath on the stateful wrapper passes as `createCore` (`statefulCoreRuntime`; Node-only, loads the core lazily)                                                                                                                                                               |
 | (internal)                            | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                                                                                                                                                               |
@@ -223,7 +224,7 @@ There is no root export or barrel.
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
   without a reason; verify the route with an owner-approved live run and delete the entry (the
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
-  write routes are pending (tracking #115), and so are the four Fortnox write routes, the eleven
+  write routes are pending (tracking #115), and so are the four Fortnox write routes, the twelve
   Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
   Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, the fifteen
   Google write routes, and the Kie `createTask` route (the three `/linkedin-search` routes and the
@@ -466,6 +467,23 @@ There is no root export or barrel.
   monitors and their counter; a refusal (404, 400 not emulated, 409 conflict) uses up no fault; a
   message write returns a `HeldAnswer`, and the message is held only once the write is committed, so
   a faulted write writes nothing, creates no monitor, and holds no message.
+  The SharePoint site and Teams routes (`src/microsoft/teams-sites.ts`) are fixture-only, without
+  exceptions, inside this legacy wrapper: they read no entity of the state and answer only the
+  recorded exchanges of their eight fixtures (copied as data in
+  `src/microsoft/teams-sites-recordings.ts`; status, content type, and body byte for byte) for a
+  request whose raw path and decoded query parameters (in any order) equal a recorded one, and only
+  under the `default` profile (the state flag `recordedTeamsSites`): under `empty` every one of them
+  answers the 400 not emulated, since no fixture records an empty listing. Anything else is the 400
+  `SyntheticValueNotEmulated` (or `SyntheticQueryNotEmulated`) before anything is written or a fault
+  is used. The chat send answers only the recorded send chat (a dedicated chat, apart from the
+  paging chat) and text (any run id of the `run-` form, at most 40 characters, in place of the run
+  id the copied body names after the `yolk-conformance` marker), mints the message id from `nextChatMessageNumber` (starting at the
+  recorded id, only advancing; both substituted in one pass, so a run id holding the recorded id
+  survives), and keeps
+  the send in `chatMessagesSent` (Graph cannot undo it; the state-equals-seed proof excludes the
+  counters and that one send); a read of a sent message answers the recorded readback, and a
+  listing of a chat holding one is not emulated. `test/microsoft-teams-sharepoint.test.ts` holds
+  the drift and byte-for-byte replay tests; a changed fixture fails them until this copy follows.
   Ledgered bodies and queries redact credential-named keys (`redactCredentialFields`,
   `redactCredentialQuery`, which also covers the conformance scan's `credential_query_param`
   names such as `x-amz-signature`); `test/emulator-http.test.ts` keeps both name rules in step
@@ -1130,8 +1148,13 @@ credential redaction, calendar overlap, immutable ids, the concurrent-write rule
 `$batch`, folders, the copy monitor through the real connector, handler failures,
 every fixture's complete envelopes, faults including 429 `retry-after`, seeds, control plane), and
 `test/microsoft-conformance.test.ts` (all
-eleven Microsoft cases in-process and over a loopback socket, the state-equals-seed-except-counters
-proof, and the drills), `test/dropbox.test.ts` and `test/notion.test.ts` (manifest, every fixture's
+nineteen Microsoft cases in-process and over a loopback socket, the state-equals-seed proof except
+the counters and the one recorded Teams send, and the drills, one per SharePoint site and Teams
+case), `test/microsoft-teams-sharepoint.test.ts` (the Teams and SharePoint site data copy equal to
+the connector fixtures, every exchange byte for byte alone and in suite order on one emulator,
+minted send ids and run-id substitution, every refusal leaving the state unchanged and a match-all
+fault unused, a faulted send writing nothing, the bearer never ledgered), `test/dropbox.test.ts` and
+`test/notion.test.ts` (manifest, every fixture's
 complete responses byte for byte, the data copies, every fail-closed refusal (by shape and by state)
 writing nothing and using no fault, origins, cursor issuance and provenance, the latitude, the
 clock-safe recovery, credential and `Dropbox-API-Arg` redaction, minted values above seeded ones,

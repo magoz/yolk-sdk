@@ -508,13 +508,14 @@ const httpLayer = InProcessHttpClient.layer([
 `@yolk-sdk/emulators/microsoft`
 
 > **Experimental, Node only.** A stateful stand-in for the Microsoft Graph v1.0 routes the Microsoft
-> conformance cases use (calendar, Outlook mail, OneDrive) plus the OneDrive copy monitor URL,
-> built on the same `@emulators/core` runtime (loaded lazily when you create an emulator).
+> conformance cases use (calendar, Outlook mail, OneDrive, SharePoint sites, Teams) plus the
+> OneDrive copy monitor URL, built on the same `@emulators/core` runtime (loaded lazily when you
+> create an emulator).
 
 | Export                                                                       | Purpose                                                                                                                       |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `makeMicrosoftEmulator(options?)`                                            | `Promise` of `{ fetch, baseUrl, sharePointOrigin, ledger, faults, monitors, reset, seed, snapshot, coverage, close }`         |
-| `microsoftEmulatorRoutes`                                                    | Route evidence manifest (19 routes, all `unverified`; eleven are connector write routes)                                      |
+| `microsoftEmulatorRoutes`                                                    | Route evidence manifest (35 routes, all `unverified`; twelve are connector write routes)                                      |
 | `MicrosoftEmulatorSeed`, `MicrosoftEmulatorProfile`                          | Typed seed schema (`profile`, `user`, `mailFolders`, `messages`, `attachments`, `calendars`, `events`, `drive`, `driveItems`) |
 | `MicrosoftFault`                                                             | `{ kind: 'status', status, headers?, body?, match?: { method?, path? }, count? }`                                             |
 | `microsoftEmulatorErrorCodes`                                                | Graph error codes, in three groups (below)                                                                                    |
@@ -551,18 +552,19 @@ ledgered, and credential-named keys in ledgered bodies and queries are redacted.
 the fixtures' `@odata.context` envelopes.
 
 Behaviour comes only from the conformance fixtures. Everything they do not show fails closed with
-the Graph error envelope `{ error: { code, message, innerError } }`: `/me` paths and other unknown
-routes get 404; query keys, `$select` fields, body properties (including unknown nested keys), and
-values the emulator does not emulate get a 400 before anything is written. That includes Outlook
-requests without `Prefer: IdType="ImmutableId"` and calendar requests without
-`Prefer: outlook.timezone="UTC"` (every fixture of theirs sends it), writes to messages that are
-not drafts, moves to any destination but `deleteditems`, folder listings by well-known name,
-`If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed copies, and
-failed copies. A route handler that throws answers a 500 envelope recorded in the ledger. The few
-behaviours the cases need without a fixture (the concurrency window, advancing id counters, removal
-on delete, synthesized seed values), the request-shape latitude it accepts (for example optional `$select`,
-smaller `$top`, user aliases, subsets of the fixture body keys), and the opt-in in-progress copy
-polls are listed in the package README under "Emulator extrapolations (no fixture)".
+the Graph error envelope `{ error: { code, message, innerError } }`: `/me` paths other than the
+Teams ones below and other unknown routes get 404; query keys, `$select` fields, body properties
+(including unknown nested keys), and values the emulator does not emulate get a 400 before anything
+is written. That includes Outlook requests without `Prefer: IdType="ImmutableId"` and calendar
+requests without `Prefer: outlook.timezone="UTC"` (every fixture of theirs sends it), writes to
+messages that are not drafts, moves to any destination but `deleteditems`, folder listings by
+well-known name, `If-Match`, conflict behaviors other than `fail`, name conflicts, folder or renamed
+copies, and failed copies. A route handler that throws answers a 500 envelope recorded in the
+ledger. The few behaviours the cases need without a fixture (the concurrency window, advancing id
+counters, removal on delete, synthesized seed values), the request-shape latitude it accepts (for
+example optional `$select`, smaller `$top`, user aliases, subsets of the fixture body keys), and the
+opt-in in-progress copy polls are listed in the package README under "Emulator extrapolations (no
+fixture)".
 
 `microsoftEmulatorErrorCodes` groups:
 
@@ -583,8 +585,27 @@ fixture entities with the same ids as `microsoftConformanceFixtureSeeds`; profil
 plane behave as in the Fortnox emulator: a refusal (a 404 for an unknown id, a 400 not emulated, or
 a 409 conflict) uses up no fault, and a faulted request writes nothing, creates no copy monitor, and
 holds no message. `reset` and `seed` also clear copy monitors. The `drills` option
-(`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`) is a test-only
-drill knob that makes the matching conformance case fail.
+(`calendarRangeEmpty`, `createOmitsId`, `timestampPrecisionDigits`, `omitNextLink`, and one per
+SharePoint site and Teams case: `siteSearchEmpty`, `siteDrivesNoLibrary`, `chatsOmitMembers`,
+`chatMessagesOmitNextLink`, `joinedTeamsEmpty`, `repliesOmitReplyToId`, `transcriptsOtherMeeting`,
+`chatSendUnescaped`) is a test-only drill knob that makes the matching conformance case fail.
+
+The SharePoint site and Teams routes are fixture-only, without exceptions: site search
+(`GET /sites?search=`) and site drives; chats (`GET /me/chats`, `GET /chats/{chatId}`), chat
+messages (two recorded pages, the second through an `@odata.nextLink` naming the chat id
+unencoded) and one message; joined teams, a team, its channels, and one channel; a channel's
+top-level posts, one post, and its replies; the meeting found by its join link
+(`GET /me/onlineMeetings?$filter=`) and its transcripts; and the chat send
+(`POST /chats/{chatId}/messages`). They answer only the recorded exchanges of the eight
+`microsoft.sharepoint.*` and `microsoft.teams.*` fixtures (synthetic, shaped from the Microsoft
+Graph v1.0 docs examples), byte for byte, for a request whose raw path and query parameters
+(decoded, in any order) equal a recorded one, and only under the `default` profile: under `empty`
+every one of them answers the 400 not emulated, since no fixture records an empty listing. Anything
+else answers 400 before anything is written or a fault is used. The send answers only the recorded
+send chat (a dedicated chat, never the paging chat) and the recorded text with any run id: the recorded 201 under a minted message id from a counter that only
+advances. A send cannot be undone on Graph, so the emulator keeps it in the state
+(`chatMessagesSent`, never seeded): a read of the sent message answers the recorded readback, and a
+listing of a chat holding a sent message is not emulated.
 
 ## Dropbox emulator
 
@@ -1486,7 +1507,7 @@ time-bounded allowlist (`scripts/emulator-evidence-pending.json`), and the evide
 them as PENDING warnings until each entry's expiry date and fails again after it. The R2
 `R2ObjectClient.put` route is held in the same list until a live run against a practice bucket,
 through a host `R2ObjectClient` implementation, verifies it. The four Fortnox write routes, the
-eleven Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
+twelve Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
 Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, and the fifteen
 Google write routes are held in the same pending list until a live run against a Fortnox test
 company, a Microsoft practice tenant, a Dropbox practice account, a Notion practice workspace, a
