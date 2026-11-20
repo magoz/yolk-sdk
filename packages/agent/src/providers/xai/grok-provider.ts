@@ -144,5 +144,7 @@ export const makeXAiGrokProviderLayer = (config: XAiGrokProviderConfig) =>
     }),
     alwaysIncludeReasoning: false,
     allowEofCompletion: false,
+    // The config spread above must never turn on Codex's missing-output recovery for Grok.
+    recoverMissingFinalOutput: false,
     expectedTokenProvider: xAiGrokProviderId
   })

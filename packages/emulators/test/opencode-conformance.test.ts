@@ -7,15 +7,17 @@
  * through the provider (429 `retry-after`, a stream cut before its terminal event).
  * Tests may import SDK packages; the emulator source never does.
  */
-import { Effect, Layer, Redacted, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/runner'
-import { LLMDone, LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
+import { LLMDone, LLMError, LLMProvider, LLMUsage, type LLMEvent } from '@yolk-sdk/agent/loop'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { isWireStreamResponse } from '@yolk-sdk/conformance/fixture'
 import {
   OpenCodeGoConformanceConfig,
   openCodeGoChatPlainTextCase,
+  openCodeGoChatPlainTextFixture,
   openCodeGoConformanceCases,
   openCodeGoConformanceDefaultModels,
   openCodeGoMessagesPlainTextCase,
@@ -79,6 +81,12 @@ const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMisma
 
 const doneReasons = (events: Iterable<LLMEvent>) =>
   Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
+
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
 
 const modelFor: Readonly<Record<OpenCodeGoProtocol, string>> = {
   'chat-completions': openCodeGoConformanceDefaultModels.chat,
@@ -314,6 +322,68 @@ describe('OpenCode Go faults through the real provider', () => {
       })
     )
   }
+
+  // The recorded chat stream sends its usage in a chunk after the finish chunk. A cut between
+  // them still completes (the answer is whole), and Done says the requested usage never arrived.
+  it.effect('chat-completions: a stream cut after the finish marks its usage unavailable', () =>
+    Effect.gen(function* () {
+      const response = openCodeGoChatPlainTextFixture.exchanges[0].response
+      const chunks = isWireStreamResponse(response) ? response.chunks : expect.fail('no stream')
+
+      // The whole JSON events in the first `count` chunks.
+      const events = (count: number): ReadonlyArray<unknown> =>
+        chunks
+          .slice(0, count)
+          .map(chunk => (Predicate.isString(chunk) ? chunk : expect.fail('text chunks only')))
+          .join('')
+          .split('\n\n')
+          .slice(0, -1)
+          .map(event => event.replace(/^data: ?/, ''))
+          .filter(payload => payload !== '[DONE]')
+          .map(payload => JSON.parse(payload))
+
+      const isFinish = (event: unknown) =>
+        Predicate.hasProperty(event, 'choices') &&
+        Array.isArray(event.choices) &&
+        event.choices.some(
+          (choice: unknown) =>
+            Predicate.hasProperty(choice, 'finish_reason') &&
+            Predicate.isString(choice.finish_reason)
+        )
+
+      const hasUsage = (event: unknown) =>
+        Predicate.hasProperty(event, 'usage') && Predicate.isObject(event.usage)
+
+      // The fewest chunks carrying the whole finish event: the usage chunk is not among them.
+      const kept = chunks.findIndex((_, index) => events(index + 1).some(isFinish)) + 1
+
+      expect(kept).toBeGreaterThan(0)
+      expect(events(kept).some(hasUsage)).toBe(false)
+      expect(events(chunks.length).some(hasUsage)).toBe(true)
+
+      const emulator = makeOpenCodeGoEmulator()
+
+      emulator.chat.faults.add({ kind: 'truncate-after-chunks', chunks: kept })
+
+      const streamed = yield* streamThroughProvider('chat-completions', inProcessLayer(emulator))
+
+      expect(doneSignals(streamed)).toEqual([['stop', true]])
+      expect(streamed.some(event => event instanceof LLMUsage)).toBe(false)
+      expect(emulator.chat.ledger.entries()[0]?.fault).toBe('truncate-after-chunks')
+    })
+  )
+
+  it.effect('chat-completions: Done stays unmarked when the usage chunk arrives', () =>
+    Effect.gen(function* () {
+      const events = yield* streamThroughProvider(
+        'chat-completions',
+        inProcessLayer(makeOpenCodeGoEmulator())
+      )
+
+      expect(doneSignals(events)).toEqual([['stop', undefined]])
+      expect(events.some(event => event instanceof LLMUsage)).toBe(true)
+    })
+  )
 
   it.effect(
     'answers 400 not-emulated through the provider for a request shape no fixture records',

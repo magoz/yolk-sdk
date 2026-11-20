@@ -1636,8 +1636,15 @@ const finalizeChatStreamState = (
     })
 
     const events: Array<LLMEvent> = [...toolCallEvents]
+    const stopReason = toolCallEvents.length > 0 ? 'tool_use' : 'stop'
 
-    events.push(LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' }))
+    // Every streamed request sets `stream_options.include_usage`. A processed finish reason is
+    // terminal, so a stream cut before the usage chunk still completes: say its usage is missing.
+    events.push(
+      state.usage === undefined
+        ? LLMDone.make({ stopReason, usageUnavailable: true })
+        : LLMDone.make({ stopReason })
+    )
 
     if (state.usage !== undefined) {
       const usage = yield* Schema.decodeUnknownEffect(OpenAiUsageResponse)(state.usage).pipe(

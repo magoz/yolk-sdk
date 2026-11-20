@@ -342,6 +342,24 @@ describe('protocol wire schemas', () => {
     })
   )
 
+  it.effect('round-trips the stream end usage mark, and decodes events recorded without it', () =>
+    Effect.gen(function* () {
+      const marked = LLMStreamEnd.make({ turn: 2, usageUnavailable: true })
+
+      expect(yield* encodeJson(marked)).toBe(
+        '{"_tag":"LLMStreamEnd","turn":2,"usageUnavailable":true}'
+      )
+      expect(yield* roundTripEvent(marked)).toEqual(marked)
+
+      const recordedBefore = yield* decodeAgentEvent(
+        yield* decodeJson('{"_tag":"LLMStreamEnd","turn":2}')
+      )
+
+      expect(recordedBefore).toEqual(LLMStreamEnd.make({ turn: 2 }))
+      expect(yield* encodeJson(recordedBefore)).toBe('{"_tag":"LLMStreamEnd","turn":2}')
+    })
+  )
+
   it('creates plain HITL payloads and response events', () => {
     const answered = QuestionResponse.make({
       requestId: 'question:call_1',

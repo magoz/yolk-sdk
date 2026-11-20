@@ -269,6 +269,34 @@ describe('durable workflow agent events', () => {
     )
   })
 
+  // `@yolk-sdk/agent` clients decode this exact line (its transport test reads it back): the
+  // writer keeps an event's optional fields, such as the stream end usage mark.
+  it('writes the stream end usage mark into the NDJSON line', async () => {
+    const chunks: Array<Uint8Array> = []
+
+    const writer = new WritableStream<Uint8Array>({
+      write: chunk => {
+        chunks.push(chunk)
+      }
+    }).getWriter()
+
+    await Effect.runPromise(
+      writeDurableAgentEvent({
+        writer,
+        state: makeDurableAgentEventSequencerState(4),
+        streamId: 'workflow:run-1',
+        turn: 1,
+        event: { _tag: 'LLMStreamEnd', turn: 1, usageUnavailable: true }
+      })
+    )
+
+    writer.releaseLock()
+
+    expect(chunks.map(chunk => new TextDecoder().decode(chunk))).toEqual([
+      '{"_tag":"LLMStreamEnd","turn":1,"usageUnavailable":true,"eventId":"workflow:run-1:1:4","streamId":"workflow:run-1"}\n'
+    ])
+  })
+
   it('commits before writing terminal events', async () => {
     const operations: Array<string> = []
     const terminal = { text: 'last' }

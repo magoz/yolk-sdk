@@ -1605,7 +1605,14 @@ const toolErrorCode = (error: ToolError): AgentErrorCode => {
 type TurnCompletion = {
   readonly toolCalls: ReadonlyArray<ToolCall>
   readonly stopReason: 'stop' | 'tool_use'
+  /** The provider's `Done` said the requested usage report never arrived. */
+  readonly usageUnavailable: boolean
 }
+
+const llmStreamEnd = (turn: number, completion: TurnCompletion) =>
+  completion.usageUnavailable
+    ? LLMStreamEnd.make({ turn, usageUnavailable: true })
+    : LLMStreamEnd.make({ turn })
 
 const validateTurnCompletion = (
   events: ReadonlyArray<LLMEvent>
@@ -1647,7 +1654,11 @@ const validateTurnCompletion = (
     )
   }
 
-  return Effect.succeed({ toolCalls, stopReason })
+  return Effect.succeed({
+    toolCalls,
+    stopReason,
+    usageUnavailable: doneEvent.usageUnavailable === true
+  })
 }
 
 const makeAfterLlmStream = (
@@ -1661,7 +1672,7 @@ const makeAfterLlmStream = (
       const assistantMessage = accumulateAssistantMessage(llmEvents)
 
       const turnEndEvents: ReadonlyArray<AgentEvent> = [
-        LLMStreamEnd.make({ turn: input.turn }),
+        llmStreamEnd(input.turn, completion),
         AssistantMessageEvent.make({ message: assistantMessage })
       ]
 
@@ -1796,7 +1807,7 @@ const makeModelOnlyAfterLlmStream = (
       yield* Ref.update(input.createdMessages, messages => [...messages, assistantMessage])
 
       return Stream.fromIterable([
-        LLMStreamEnd.make({ turn: input.turn }),
+        llmStreamEnd(input.turn, completion),
         AssistantMessageEvent.make({ message: assistantMessage }),
         TurnEnd.make({ turn: input.turn, reason: completion.stopReason })
       ])

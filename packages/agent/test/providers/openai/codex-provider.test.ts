@@ -1052,9 +1052,9 @@ describe('OpenAI Codex provider', () => {
       ).toEqual(['call-1'])
       expect(
         Array.from(events).flatMap(event =>
-          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+          Predicate.isTagged(event, 'Done') ? [[event.stopReason, event.usageUnavailable]] : []
         )
-      ).toEqual(['tool_use'])
+      ).toEqual([['tool_use', true]])
     })
   )
 
@@ -1067,9 +1067,9 @@ describe('OpenAI Codex provider', () => {
       expect(Array.from(events).map(event => event._tag)).toEqual(['Done'])
       expect(
         Array.from(events).flatMap(event =>
-          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+          Predicate.isTagged(event, 'Done') ? [[event.stopReason, event.usageUnavailable]] : []
         )
-      ).toEqual(['stop'])
+      ).toEqual([['stop', true]])
     })
   )
 
