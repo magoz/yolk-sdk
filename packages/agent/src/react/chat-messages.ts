@@ -2049,19 +2049,38 @@ export const applyAgentEventToChatMessages = (
   applyExecutionEventToChatMessages(messages, event, options, {
     foreign: noForeignMessages,
     turn: undefined,
-    modelTurn: undefined
+    modelTurn: undefined,
+    runOutput: undefined
   })
 
 /**
- * What an event may change: never a message in `foreign`, another model-step execution's output
- * (an earlier turn's answer kept for reconciling), and a tool call only in the event's turn, the
- * messages after `turn` (providers reuse call ids across turns); the model's events after
- * `modelTurn` (unknown before a run's first model turn, `AgentChatTurnStart.run`).
+ * What an event may change: the model's stream never a message in `foreign` (another model-step
+ * execution's output, an earlier turn's answer kept for reconciling), and a tool call only in the
+ * event's turn: host events after `turn`, the model's after `modelTurn` (providers reuse call ids
+ * across turns). Before a run's first model turn (`AgentChatTurnStart.run`), `runOutput` holds the
+ * run's messages: a model tool event then replays an earlier run's and acts on a call before them
+ * when one holds its id, else as usual (a host that streams without `LLMStreamStart`).
  */
 type ChatEventScope = {
   readonly foreign: ForeignMessages
   readonly turn: ChatTurnAnchor
   readonly modelTurn: ChatTurnAnchor
+  readonly runOutput: ForeignMessages | undefined
+}
+
+/**
+ * The chat messages after a run's start (`anchor`; none: every message); none when the anchor
+ * message is gone.
+ */
+export const messagesAfterAnchor = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  anchor: Option.Option<string>
+): ForeignMessages => {
+  const index = indexOfMessage(messages, anchor)
+
+  return Option.isSome(anchor) && index === -1
+    ? noForeignMessages
+    : new Set(messages.slice(index + 1).map(message => message.id))
 }
 
 /**
@@ -2092,6 +2111,21 @@ export const applyExecutionEventToChatMessages = (
     replays: true
   }
 
+  // Before a run's first model turn, a model tool event replays an earlier run's: a call before the
+  // run's messages comes first, never the resumed batch's call reusing its id.
+  const replayed: ToolPartScope | undefined =
+    scope.runOutput === undefined
+      ? undefined
+      : { from: 0, foreign: new Set([...foreign, ...scope.runOutput]), replays: false }
+
+  const modelScope = (callId: string): ToolPartScope =>
+    replayed !== undefined && toolCallMessageIndex(messages, callId, replayed) !== -1
+      ? replayed
+      : model
+
+  const upsertModelToolCallPart = (call: ToolCall, state: ChatToolState) =>
+    upsertToolCallPart(messages, call, state, modelScope(call.id))
+
   return Match.value(event)
     .pipe(
       Match.tag('AgentStart', () => clearTransientParts(messages)),
@@ -2113,22 +2147,20 @@ export const applyExecutionEventToChatMessages = (
       // `AssistantMessage` brings the replay state and one part per block.
       Match.tag('LLMReasoningReplay', () => messages),
       Match.tag('ToolInputEnd', current =>
-        upsertToolCallPart(messages, current.call, ChatToolState.Called(), model)
+        upsertModelToolCallPart(current.call, ChatToolState.Called())
       ),
       Match.tag('UserMessage', current => appendProtocolMessage(messages, current.message)),
       Match.tag('AssistantMessage', current =>
         appendOrReplaceAssistantMessage(messages, current.message, model)
       ),
       Match.tag('ToolInputStart', current =>
-        upsertToolCallPart(
-          messages,
+        upsertModelToolCallPart(
           inputStreamingToolCall(current.id, current.name),
-          ChatToolState.InputStreaming({ input: '' }),
-          model
+          ChatToolState.InputStreaming({ input: '' })
         )
       ),
       Match.tag('ToolInputDelta', current =>
-        appendToolInputDelta(messages, current.id, current.delta, model)
+        appendToolInputDelta(messages, current.id, current.delta, modelScope(current.id))
       ),
       Match.tag('ToolApprovalRequested', current =>
         upsertToolCallPart(
@@ -2279,11 +2311,9 @@ export const applyExecutionEventToChatMessages = (
         )
       ),
       Match.tag('ProviderToolResult', current =>
-        upsertToolCallPart(
-          messages,
+        upsertModelToolCallPart(
           current.call,
-          ChatToolState.ProviderCompleted({ result: current.result }),
-          model
+          ChatToolState.ProviderCompleted({ result: current.result })
         )
       ),
       Match.tag('AgentError', current => markChatError(messages, current.message)),

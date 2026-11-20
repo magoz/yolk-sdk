@@ -729,8 +729,10 @@ changes an earlier turn's call with the same id. `AgentStart` and the `useAgentC
 submit, HITL answer, regenerate and edit record a run start (`turnStart.run`, after the last
 message): a resumed run's tool batch, which the loop runs before its first model turn, then acts
 only on the paused call (or adds its own card), never on an earlier turn's call reusing its id
-(#352); the model's events before the run's first model turn replay an earlier run's and match as
-with no start known. When the turn does not hold the call (a replay without event id, a batch event
+(#352). The model's events before the run's first model turn replay an earlier run's: they act on
+a call before the run's messages when one holds their id (never on the resumed batch's call
+reusing it), else as with no start known (a host that streams without `LLMStreamStart`). When the
+turn does not hold the call (a replay without event id, a batch event
 arriving after the next turn started, or a resumed tool batch), a host event acts on an earlier part
 instead of adding a card: a request (approval, question, input, interaction) or a
 tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
@@ -747,7 +749,9 @@ an abort leaves it running and the next run that resumes it asks again (the card
 later turn reusing the id asks on its own part. Tool-batch and request events must therefore carry
 the call exactly as the model emitted it: a host that normalizes arguments between the model's
 events and its own adds a second card for a replayed or late event. A replayed start of the same
-call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone.
+call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone;
+a start whose arguments differ is another call's and reopens a completed or errored part (an
+accepted one keeps its fence), as in `reduceAgentEvents`.
 Until a start is seen (a state built before `turnStart` too), and always in
 `applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a
 reused id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a
@@ -765,8 +769,8 @@ turn's run; host events act on it first, else a request or tool-batch event on t
 holding the same call and an answer on the last earlier run holding its request, else they add a
 run to the latest turn; the latest turn's run also gives way to that earlier run when it holds
 another call or request (an answer reaching a latest-turn run that holds another request, with no
-run holding its own, changes nothing). A replay without event id of an accepted (background) call's start or request still leaves
-its `Accepted` run alone, and with a turn start known, the transcript's acknowledgement fences only
+run holding its own, changes nothing). A replay without event id of an accepted (background)
+call's start or request still leaves its `Accepted` run alone, and with a turn start known, the transcript's acknowledgement fences only
 events naming the acknowledged call, not a later call reusing its id. The request rule and status
 fence are the chat's: a request never reopens a run past its request (answered or submitted,
 cancelled, denied or finished) when it names the same call, with or without event id (a `Denied`
@@ -776,11 +780,17 @@ pause blocks only on its requests still pending (none: the status stays). A repl
 same call also leaves a completed, errored or accepted run, and the status, alone. A turn reconciled
 after later turns started (`AgentAwaitingInput`, `AgentEnd`) changes only its own runs, between its
 start and the next (`turnStart.earlier`). `AgentStart` and `submitAgentUserMessage` record a run
-start (`turnStart.run`; the runs kept so far are earlier turns'), so a loop resume's tool batch,
-which runs before the run's first model turn, acts only on the paused call's run or adds its own
-(an answer whose pending run `AgentStart` dropped adds one), never on an earlier turn's run reusing
-its id (#352); the model's events before that first turn act as with no start known. Until a start
-is seen, tool events act on the last run holding the call id, as before except those fences; a
+start (`AgentClientRunStart`, `turnStart.run`; the runs kept so far are earlier turns'; the run's
+first `LLMStreamStart` starts a new turn, kept in `earlier` as turn `0`), so a loop resume's tool
+batch, which runs before the run's first model turn, acts only on the paused call's run or adds its
+own (an answer whose pending run `AgentStart` dropped adds one), never on an earlier turn's run
+reusing its id (#352). The model's events before that first turn act on an earlier run holding
+their id (a replay; the transcript fence drops only earlier runs), else on the run's own. An answer
+that adds a run carries only its response: it names its request id and call id, not the request or
+call, which the client no longer holds, so a later request or start of that call cannot tell it
+from another call reusing the id. A replay without event ids of a whole finished resumed run
+(`AgentStart` included) therefore adds a second answered run, which its replayed start and result
+complete again; dedupe such replays by `eventId`. Until a start is seen, tool events act on the last run holding the call id, as before except those fences; a
 state built before `turnStart` behaves that way too.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry

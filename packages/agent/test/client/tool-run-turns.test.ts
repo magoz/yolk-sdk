@@ -672,6 +672,117 @@ describe('tool runs of calls that reuse an id across turns', () => {
     })
   })
 
+  describe('a run start (#354)', () => {
+    it("starts a new turn at the run's first start, also when it numbers it 0", () => {
+      // A run start (`AgentStart`, a local submit) never counts as a retried turn: a host that
+      // numbers its first model turn 0 still starts it, so the model's call reusing `call_0` gets a
+      // run of its own.
+      const state: AgentClientState = {
+        ...initialAgentClientState,
+        toolRuns: [
+          AgentToolRun.Completed({
+            call: oslo,
+            result: result('12C'),
+            startedAtMs: 0,
+            endedAtMs: 0
+          })
+        ],
+        turnStart: { streamId: '', turn: 0, firstRun: 1, run: true }
+      }
+
+      const streamed = reduce(
+        [LLMStreamStart.make({ turn: 0 }), ToolInputEnd.make({ call: bergen })],
+        state
+      )
+
+      expect(runs(streamed)).toEqual([
+        'call_0 {"city":"Oslo"}:Completed',
+        'call_0 {"city":"Bergen"}:InputReady'
+      ])
+
+      expect(streamed.turnStart).toEqual({
+        streamId: '',
+        turn: 0,
+        firstRun: 1,
+        earlier: [{ streamId: '', turn: 0, firstRun: 1 }]
+      })
+    })
+
+    it("reconciles a resumed run's turn within its own runs, after the resumed batch's", () => {
+      // Run 1 completes `call_0` (Oslo). Run 2 resumes a batch reusing the id (Bergen), then its
+      // turn 1 runs twice: the older execution committed, the newer one (shown) reused `call_0`
+      // for Lyon. Turn 2 starts, then the pause commits turn 1's older answer.
+      const committed = answer('Bergen is 9C')
+      const shown = answer('Now Lyon', [lyon])
+      const later = answer('Turn two')
+
+      const turnOneRan = reduce([
+        ...modelTurn('tagged', 'run-1:model-1:1', 1, turnOne, oslo, 'run-1'),
+        ...batch(oslo, result('12C'), 'run-1'),
+        AgentStart.make(host('run-2')),
+        ...batch(bergen, result('9C'), 'run-2'),
+        LLMStreamStart.make({ ...identity('tagged', 'run-2:model-1:1', 'run-2'), turn: 1 }),
+        AssistantMessageEvent.make({
+          ...identity('tagged', 'run-2:model-1:1', 'run-2'),
+          message: committed
+        }),
+        LLMStreamStart.make({ ...identity('tagged', 'run-2:model-1:2', 'run-2'), turn: 1 }),
+        ToolInputEnd.make({ ...identity('tagged', 'run-2:model-1:2', 'run-2'), call: lyon }),
+        AssistantMessageEvent.make({
+          ...identity('tagged', 'run-2:model-1:2', 'run-2'),
+          message: shown
+        }),
+        LLMStreamStart.make({ ...identity('tagged', 'run-2:model-2:1', 'run-2'), turn: 2 }),
+        AssistantMessageEvent.make({
+          ...identity('tagged', 'run-2:model-2:1', 'run-2'),
+          message: later
+        })
+      ])
+
+      expect(runs(turnOneRan)).toEqual([
+        'call_0 {"city":"Oslo"}:Completed',
+        'call_0 {"city":"Bergen"}:Completed',
+        'call_0 {"city":"Lyon"}:InputReady'
+      ])
+
+      // The run start is turn 0 among the earlier starts: turn 1's runs start after the batch's.
+      expect(turnOneRan.turnStart).toMatchObject({
+        streamId: 'run-2',
+        turn: 2,
+        firstRun: 3,
+        earlier: [
+          { streamId: 'run-2', turn: 0, firstRun: 1 },
+          { streamId: 'run-2', turn: 1, firstRun: 2 }
+        ]
+      })
+
+      const paused = reduce(
+        [
+          AgentAwaitingInput.make({
+            ...host('run-2'),
+            requests: [
+              QuestionRequest.make({
+                requestId: 'question:call_7',
+                toolCallId: 'call_7',
+                call: ToolCall.make({ id: 'call_7', name: 'question', params: {} }),
+                questions: [QuestionPrompt.make({ id: 'go', prompt: 'Go on?' })]
+              })
+            ],
+            messages: [committed, later],
+            turns: 2,
+            usage: zeroAgentUsage
+          })
+        ],
+        turnOneRan
+      )
+
+      expect(runs(paused)).toEqual([
+        'call_0 {"city":"Oslo"}:Completed',
+        'call_0 {"city":"Bergen"}:Completed'
+      ])
+    })
+  })
+
   it('keeps one run per call id until a turn start is seen (states built before turn tracking)', () => {
     const state = reduce([
       ...batch(oslo, result('12C')),

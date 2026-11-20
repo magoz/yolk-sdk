@@ -37,6 +37,7 @@ import {
   isFinishedToolCall,
   isLatestTurnAnchor,
   isPastRequestToolCall,
+  messagesAfterAnchor,
   replaceWithCommittedAnswer,
   deleteChatTurn,
   editChatUserMessage,
@@ -301,11 +302,15 @@ const projectExecutionEvent = (
 
   const turn = ownTurn ?? latest?.after
 
+  // Model events before a run's first model turn replay an earlier run's (any turn, an earlier
+  // run's call first), never the resumed batch's call reusing its id.
+  const runStart = ownTurn === undefined && latest?.run === true ? latest : undefined
+
   const chatMessages = applyExecutionEventToChatMessages(committed, event, options, {
     foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
     turn,
-    // Model events before a run's first model turn replay an earlier run's: any turn.
-    modelTurn: ownTurn ?? (latest?.run === true ? undefined : latest?.after)
+    modelTurn: runStart === undefined ? turn : undefined,
+    runOutput: runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
   })
 
   const after = recordAgentExecutionEvent(

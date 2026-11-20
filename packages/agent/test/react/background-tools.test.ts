@@ -40,6 +40,9 @@ import {
 import {
   AgentChatAction,
   applyAgentEventToChatMessages,
+  applyAgentEventToChatProjection,
+  makeAgentChatEventProjectionState,
+  type AgentChatMessage,
   reduceAgentChatState,
   initialAgentChatState,
   buildAgentChatMessages,
@@ -278,6 +281,68 @@ it('keeps the accepted call after AgentStart, giving another call with its id a 
     ['work', 'Accepted'],
     ['replayed-name', 'Executing']
   ])
+})
+
+describe('a replay of the accepted call after a resumed call reused its id (#354)', () => {
+  // The run ended with `work` handed to a background owner (the transcript acknowledges it). The
+  // next run resumes a call reusing the id; before its first model turn, replays without event ids
+  // of the accepted call's model events arrive. They fence the accepted call, not the resumed one.
+  const resumedCall = ToolCall.make({ ...call, name: 'resumed', params: { other: true } })
+
+  const acknowledgedMessages = [
+    AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] }),
+    toolResultMessageFromResult(result)
+  ]
+
+  const events: ReadonlyArray<AgentEvent> = [
+    accepted,
+    AgentEnd.make({ messages: acknowledgedMessages, turns: 1, usage: zeroAgentUsage }),
+    AgentStart.make({ eventId: 'start-2' }),
+    ToolExecutionStarted.make({ eventId: 'resumed-start', call: resumedCall }),
+    ToolInputStart.make({ id: call.id, name: call.name }),
+    ToolInputDelta.make({ id: call.id, delta: '{}' }),
+    ToolInputEnd.make({ call })
+  ]
+
+  const expected = [
+    ['work', 'Accepted'],
+    ['resumed', 'Running']
+  ]
+
+  it('in the client state, with and without the transcript acknowledgement', () => {
+    for (const fold of [events, events.filter(event => !Predicate.isTagged(event, 'AgentEnd'))]) {
+      const state = fold.reduce(applyAgentEvent, initialAgentClientState)
+
+      expect(
+        state.toolRuns.map(run => [
+          'call' in run ? run.call.name : run._tag,
+          Predicate.isTagged(run, 'Executing') ? 'Running' : run._tag
+        ])
+      ).toEqual(expected)
+    }
+  })
+
+  it('in the chat projection and the useAgentChat reducer', () => {
+    const chatParts = (messages: ReadonlyArray<AgentChatMessage>) =>
+      messages.flatMap(message =>
+        message.parts.flatMap(part =>
+          Predicate.isTagged(part, 'ToolCall') ? [[part.call.name, part.state._tag]] : []
+        )
+      )
+
+    const projection = events.reduce(
+      (state, event) => applyAgentEventToChatProjection(state, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    const chat = events.reduce(
+      (state, event) => reduceAgentChatState(state, AgentChatAction.Event({ event })),
+      initialAgentChatState
+    )
+
+    expect(chatParts(projection.chatMessages)).toEqual(expected)
+    expect(chatParts(chat.chatMessages)).toEqual(expected)
+  })
 })
 
 it('gives a persisted acceptance precedence over stale active client runs on hydration', () => {
