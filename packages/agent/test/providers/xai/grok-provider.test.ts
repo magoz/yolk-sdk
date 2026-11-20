@@ -1,7 +1,8 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
+import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentReasoningEffort,
   AssistantAgentMessage,
   AssistantTextPart,
   HostToolCallPart,
@@ -220,6 +221,35 @@ describe('xAI Grok subscription provider', () => {
       )
 
       expect(body.reasoning).toEqual({ effort: 'high', summary: 'detailed' })
+    })
+  )
+
+  it.effect('passes none and max through; the model decides which it accepts', () =>
+    Effect.gen(function* () {
+      for (const value of ['none', 'max']) {
+        // Decoded as a host decodes a stored or submitted effort.
+        const effort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+
+        const request = {
+          model: 'grok-4.6',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'Think carefully' })],
+          tools: []
+        }
+
+        const requested = yield* toXAiGrokRequestBody(
+          { ...request, reasoningEffort: effort },
+          { maxOutputTokens: 1_000 }
+        )
+
+        const defaulted = yield* toXAiGrokRequestBody(request, {
+          maxOutputTokens: 1_000,
+          defaultReasoningEffort: effort
+        })
+
+        expect(requested.reasoning).toEqual({ effort: value, summary: 'auto' })
+        expect(defaulted.reasoning).toEqual({ effort: value, summary: 'auto' })
+      }
     })
   )
 

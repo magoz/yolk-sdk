@@ -1,8 +1,9 @@
 /**
  * Cross-checks: the MCP emulator must satisfy the same `@yolk-sdk/mcp/conformance` cases the
- * replayed synthetic fixtures (and the derived Afloat fixtures) satisfy, through the REAL
- * `@yolk-sdk/mcp/client` (the cases run its operations behind their observing client and
- * fail-closed call gate; the Afloat target comes from the real `afloat.mcp_auth`), per profile,
+ * replayed synthetic fixtures (and the derived Afloat and synthetic Figma fixtures) satisfy,
+ * through the REAL `@yolk-sdk/mcp/client` (the cases run its operations behind their observing
+ * client and fail-closed call gate; the Afloat and Figma targets come from the real
+ * `afloat.mcp_auth` and `figma.mcp_auth`), per profile,
  * both in-process and over a loopback socket, each case alone and all of them in sequence on one
  * emulator; every case is a read, so each emulator ends at its seed except the legacy sessions the
  * handshakes minted; each drill knob makes exactly its case fail; and an SSE answer truncated
@@ -33,7 +34,7 @@ import {
   type McpConformanceEra,
   type McpConformanceTargetSettings
 } from '@yolk-sdk/mcp/conformance'
-import { ApiKeyCredential } from '@yolk-sdk/connectors'
+import { ApiKeyCredential, OAuthCredential } from '@yolk-sdk/connectors'
 import {
   afloatMcpConformanceFixtureSeeds,
   afloatMcpConformanceFixtures,
@@ -42,8 +43,14 @@ import {
 } from '@yolk-sdk/connectors/afloat/conformance'
 import { staticCredentialResolverLayer } from '@yolk-sdk/connectors/conformance'
 import {
+  figmaMcpConformanceFixtureSeeds,
+  figmaMcpConformanceFixtures,
+  makeFigmaMcpConformanceTarget
+} from '@yolk-sdk/connectors/figma/conformance'
+import {
   makeMcpEmulator,
   mcpEmulatorAfloatOrigin,
+  mcpEmulatorFigmaOrigin,
   mcpEmulatorOrigin,
   type McpEmulator,
   type McpEmulatorDrills,
@@ -688,6 +695,244 @@ describe('Afloat profile disagreement drills: each fails exactly its case', () =
 
           expect(report.summary, formatConformanceReport(report)).toEqual({
             passed: afloatCases.length - 1,
+            failed: 1,
+            skipped: 0
+          })
+
+          const failed = report.results.filter(result => result.status === 'failed')
+
+          expect(failed.map(result => result.id)).toEqual([drill.id])
+          expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
+          expect(failed[0]?.failure?.message).toContain(drill.message)
+        }),
+      60_000
+    )
+  }
+})
+
+// The Figma profile: the synthetic Figma fixtures on `https://mcp.figma.com/mcp` (the legacy era),
+// the target built by running the real `figma.mcp_auth` action, and the Figma seeds.
+
+/** A synthetic Figma access token the emulator accepts (the plain recognisable-bearer rule). */
+const figmaToken = 'synthetic-figma-emulator-token-0001'
+
+const figmaServices = Layer.mergeAll(
+  Layer.effect(
+    McpConformanceTarget,
+    makeFigmaMcpConformanceTarget().pipe(
+      Effect.provide(
+        staticCredentialResolverLayer(
+          OAuthCredential.make({
+            provider: 'figma',
+            accessToken: figmaToken,
+            expiresAt: 1_900_000_000_000
+          })
+        )
+      )
+    )
+  ),
+  Layer.succeed(McpConformanceConfig, figmaMcpConformanceFixtureSeeds)
+)
+
+const figmaInProcessLayer = (emulator: McpEmulator) =>
+  InProcessHttpClient.layer([EmulatorRoute.handler(mcpEmulatorFigmaOrigin, emulator.fetch)])
+
+const figmaEmulatedLayer = (emulator: McpEmulator) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const server = yield* serveFetchHandler(emulator.fetchOn(mcpEmulatorFigmaOrigin))
+
+      return EmulatedHttpClient.layer([EmulatorRoute.url(mcpEmulatorFigmaOrigin, server.url)]).pipe(
+        Layer.provide(FetchHttpClient.layer)
+      )
+    })
+  )
+
+const figmaTransports: ReadonlyArray<readonly [ConformanceTarget, Transport]> = [
+  [{ kind: 'in-process' }, figmaInProcessLayer],
+  [{ kind: 'emulated' }, figmaEmulatedLayer]
+]
+
+/** The requests each case sends to the Figma profile on a fresh emulator (the GET may race). */
+const figmaExpectedRequests = (id: string): ReadonlyArray<string> => {
+  const row = (method: string) => `${mcpEmulatorFigmaOrigin}/mcp#${method}`
+
+  const listing = [
+    `POST ${row('server/discover')} 400`,
+    `POST ${row('initialize')} 200`,
+    `POST ${row('notifications/initialized')} 202`,
+    `GET ${mcpEmulatorFigmaOrigin}/mcp 405`,
+    `POST ${row('tools/list')} 200`
+  ]
+
+  const call = [...listing, `POST ${row('tools/call')} 200`]
+
+  switch (id) {
+    case 'mcp.errors.unknown-tool':
+    case 'mcp.tools.call-read':
+    case 'mcp.tools.call-tool-error':
+      return [...listing, ...call]
+    case 'mcp.auth.rejected':
+      return [`POST ${row('server/discover')} 401`]
+    default:
+      return listing
+  }
+}
+
+const figmaCases = applicable('legacy')
+
+const runFigma = (
+  cases: ReadonlyArray<McpConformanceCase>,
+  options: McpEmulatorOptions,
+  target: ConformanceTarget,
+  transport: Transport,
+  check: (id: string, emulator: McpEmulator) => void = () => undefined
+) =>
+  Effect.gen(function* () {
+    const emulators = new Map<string, McpEmulator>()
+
+    const report = yield* runConformance(cases, {
+      target,
+      now,
+      layer: testCase =>
+        Layer.unwrap(
+          Effect.promise(async () => {
+            const emulator = await makeMcpEmulator(options)
+
+            emulators.set(testCase.id, emulator)
+
+            return Layer.mergeAll(transport(emulator), figmaServices)
+          })
+        )
+    })
+
+    for (const [id, emulator] of emulators) {
+      check(id, emulator)
+      yield* Effect.promise(() => emulator.close())
+    }
+
+    return report
+  })
+
+/** No bearer, accepted or reserved, ever reaches a Figma emulator's records. */
+const expectNoFigmaCredential = async (emulator: McpEmulator) => {
+  const reads = await Promise.all(
+    ['ledger', 'state', 'coverage', 'faults'].map(route =>
+      emulator
+        .fetch(new Request(`${mcpEmulatorFigmaOrigin}/_emulate/${route}`))
+        .then(response => response.text())
+    )
+  )
+
+  const recorded = [
+    JSON.stringify(emulator.ledger.entries()),
+    JSON.stringify(emulator.snapshot()),
+    ...reads
+  ].join('\n')
+
+  expect(recorded).not.toContain(figmaToken)
+  expect(recorded).not.toContain(mcpConformanceInvalidCredential)
+  expect(recorded.toLowerCase()).not.toContain('bearer')
+}
+
+describe('the Figma profile is the provider endpoint', () => {
+  it('the synthetic fixtures cover every case of the legacy era', () => {
+    expect(figmaMcpConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
+      figmaCases.map(testCase => testCase.id)
+    )
+    expect(new Set(figmaMcpConformanceFixtures.map(fixture => fixture.endpoint))).toEqual(
+      new Set([`${mcpEmulatorFigmaOrigin}/mcp`])
+    )
+  })
+})
+
+for (const [target, transport] of figmaTransports) {
+  describe(`Figma profile, ${target.kind}`, () => {
+    it.effect(
+      'passes every applicable case, each on a fresh emulator; only Figma sessions are minted',
+      () =>
+        Effect.gen(function* () {
+          const report = yield* runFigma(figmaCases, {}, target, transport, (id, emulator) => {
+            const entries = emulator.ledger.entries()
+
+            expect(sorted(requests(entries)), id).toEqual(sorted(figmaExpectedRequests(id)))
+            expect(
+              entries.every(
+                entry => entry.notEmulated === undefined && entry.evidence === 'unverified'
+              ),
+              id
+            ).toBe(true)
+
+            const state = emulator.snapshot()
+
+            expect(state.modernListing).toBe('one-page')
+            expect(
+              state.sessions.every(
+                session => session.phase === 'ready' && session.profile === 'figma'
+              ),
+              id
+            ).toBe(true)
+          })
+
+          expectAllPassed(report, figmaCases.length)
+        }),
+      60_000
+    )
+
+    it.effect(
+      'passes every applicable case twice in sequence on ONE emulator; no token is kept',
+      () =>
+        withEmulator({}, emulator =>
+          Effect.gen(function* () {
+            const runOnce = runConformance(figmaCases, {
+              target,
+              now,
+              layer: () => Layer.mergeAll(transport(emulator), figmaServices)
+            })
+
+            expectAllPassed(yield* runOnce, figmaCases.length)
+            expectAllPassed(yield* runOnce, figmaCases.length)
+
+            const once = figmaCases.flatMap(testCase => figmaExpectedRequests(testCase.id))
+
+            expect(sorted(requests(emulator.ledger.entries()))).toEqual(sorted([...once, ...once]))
+
+            yield* Effect.promise(() => expectNoFigmaCredential(emulator))
+          })
+        ),
+      60_000
+    )
+  })
+}
+
+const figmaDrills = drills.filter(drill => drill.eras.includes('legacy'))
+
+describe('Figma profile disagreement drills: each fails exactly its case', () => {
+  it('has a drill for every legacy case the emulator can drill alone', () => {
+    // Every case starts with the era probe and a listing, so no knob can break only
+    // mcp.negotiation.era or mcp.transport.response-encoding on a legacy profile (as on the
+    // synthetic legacy profile); the replayed fixtures drill those two in the connectors tests.
+    expect(figmaDrills.map(drill => drill.id)).toEqual(
+      figmaCases
+        .map(testCase => testCase.id)
+        .filter(id => id !== 'mcp.negotiation.era' && id !== 'mcp.transport.response-encoding')
+    )
+  })
+
+  for (const drill of figmaDrills) {
+    it.effect(
+      `${Object.keys(drill.knobs).join(', ')} fails only ${drill.id} (figma)`,
+      () =>
+        Effect.gen(function* () {
+          const report = yield* runFigma(
+            figmaCases,
+            { drills: drill.knobs },
+            { kind: 'in-process' },
+            figmaInProcessLayer
+          )
+
+          expect(report.summary, formatConformanceReport(report)).toEqual({
+            passed: figmaCases.length - 1,
             failed: 1,
             skipped: 0
           })

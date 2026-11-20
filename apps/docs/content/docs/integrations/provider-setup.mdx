@@ -30,7 +30,12 @@ const OpenAiLayer = makeOpenAiProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-Use `chatCompletionsUrl` for generic OpenAI-compatible endpoints.
+Use `chatCompletionsUrl` for generic OpenAI-compatible endpoints. Run-level `reasoningEffort` goes
+to the native endpoint as `reasoning_effort`. A compatible endpoint needs `reasoningEffortFormat`
+(`'reasoning-effort'` or `'reasoning-object'`); without it, a request with an effort fails with a
+`validation_error` rather than being sent without it. `reasoningEffortFormat: 'omit'` never sends
+the effort and never fails: use it for a model without reasoning (which rejects the field) when the
+host shares one effort setting across models.
 
 ## Vercel AI Gateway
 
@@ -55,7 +60,7 @@ options default to false; replayed reasoning spends input tokens. These are expl
 not env-backed switches.
 
 The factory sends `maxCompletionTokens` as Gateway `max_tokens`. Run-level `reasoningEffort` is
-forwarded as `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking: { type: 'enabled' | 'disabled' }` toggle merged into the request body). The host must restrict its
+forwarded as `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking: { type: 'enabled' | 'disabled' }` toggle merged into the request body), and `'omit'` never sends the effort and never fails, for a model without reasoning behind a shared effort setting. The host must restrict its
 choices to efforts supported by the selected model. The env-backed `VercelAiGatewayProviderLayer`
 reads `AI_GATEWAY_API_KEY`, falls back to
 `VERCEL_OIDC_TOKEN`, and requires `AI_GATEWAY_MAX_COMPLETION_TOKENS`. The factory also accepts
@@ -87,7 +92,7 @@ configuration should load the key with `Config.Redacted` inside `Effect.gen`.
 
 `maxOutputTokens` becomes `max_tokens` for Chat Completions/Messages or `max_output_tokens` for
 Responses. Request `reasoningEffort` becomes `reasoning_effort` for chat, `output_config.effort` for
-Messages (omitting `minimal`), or Responses `reasoning.effort`. Responses also sends
+Messages (omitting `minimal`, rejecting `none`), or Responses `reasoning.effort`. Responses also sends
 `summary: 'auto'` when effort is present; configure `reasoningSummary` to select another summary mode.
 Only offer efforts supported by your model. Chat emits and replays provider `reasoning_content` (and host-normalized `reasoning`).
 

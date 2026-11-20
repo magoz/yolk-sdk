@@ -3,16 +3,19 @@
  * fixtures satisfy, through the real OpenAI-compatible chat provider, both in-process and over a
  * loopback socket. Tests may import SDK packages; the emulator source never does.
  */
-import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Schema, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMError, LLMProvider } from '@yolk-sdk/agent/loop'
-import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
+import { AgentReasoningEffort, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   OpenAiConformanceConfig,
   openAiChatJsonPlainTextCase,
+  openAiChatJsonReasoningUsageCase,
   openAiChatPlainTextCase,
+  openAiChatReasoningEffortCase,
   openAiChatToolCallDeltasCase,
+  openAiChatUnsupportedParameterCase,
   openAiConformanceCases,
   openAiConformanceChatCompletionsUrl,
   openAiConformanceDefaultModels,
@@ -24,6 +27,7 @@ import { formatConformanceReport, runConformance } from '@yolk-sdk/conformance/r
 import { serveFetchHandler } from '../src/node.ts'
 import {
   makeOpenAiEmulator,
+  openAiEmulatorDefaultReasoningModels,
   type OpenAiEmulator,
   type OpenAiFault,
   type OpenAiScriptedTurn
@@ -37,10 +41,22 @@ const now = new Date('2026-09-30T12:00:00.000Z')
 const settings: OpenAiConformanceSettings = {
   apiKey: Redacted.make('synthetic-openai-key'),
   maxCompletionTokens: 64,
+  reasoningMaxCompletionTokens: 1024,
+  reasoningEffort: 'medium',
   models: openAiConformanceDefaultModels
 }
 
 const configLayer = Layer.succeed(OpenAiConformanceConfig, settings)
+
+const jsonCaseIds: ReadonlyArray<string> = [
+  openAiChatJsonPlainTextCase.id,
+  openAiChatJsonReasoningUsageCase.id
+]
+
+const reasoningCaseIds: ReadonlyArray<string> = [
+  openAiChatReasoningEffortCase.id,
+  openAiChatJsonReasoningUsageCase.id
+]
 
 const inProcessLayer = (emulator: OpenAiEmulator) =>
   InProcessHttpClient.layer([EmulatorRoute.handler(openAiOrigin, emulator.fetch)])
@@ -67,7 +83,7 @@ describe('cross-check A: in-process OpenAI emulator', () => {
       })
 
       expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 4,
+        passed: 7,
         failed: 0,
         skipped: 0
       })
@@ -98,7 +114,7 @@ describe('cross-check B: OpenAI emulator over a loopback socket', () => {
       })
 
       expect(report.summary, formatConformanceReport(report)).toEqual({
-        passed: 4,
+        passed: 7,
         failed: 0,
         skipped: 0
       })
@@ -116,38 +132,79 @@ describe('cross-check B: OpenAI emulator over a loopback socket', () => {
       for (const testCase of openAiConformanceCases) {
         expect(entryOf(testCase.id), testCase.id).toMatchObject({
           path: '/v1/chat/completions',
-          stream: testCase.id !== openAiChatJsonPlainTextCase.id,
-          maxCompletionTokens: settings.maxCompletionTokens,
+          stream: !jsonCaseIds.includes(testCase.id),
           evidence: 'unverified'
         })
+      }
+
+      // The plain cases send the plain limit as `max_completion_tokens`; the reasoning cases send
+      // the reasoning limit and the effort to the reasoning model.
+      for (const testCase of openAiConformanceCases) {
+        if (testCase.id === openAiChatUnsupportedParameterCase.id) continue
+
+        const reasoning = reasoningCaseIds.includes(testCase.id)
+
+        expect(entryOf(testCase.id)?.maxCompletionTokens, testCase.id).toBe(
+          reasoning ? settings.reasoningMaxCompletionTokens : settings.maxCompletionTokens
+        )
+        expect(entryOf(testCase.id)?.reasoningEffort, testCase.id).toBe(
+          reasoning ? settings.reasoningEffort : undefined
+        )
         expect(entryOf(testCase.id)?.body, testCase.id).not.toHaveProperty('max_tokens')
       }
 
+      for (const id of reasoningCaseIds) {
+        expect(entryOf(id), id).toMatchObject({
+          model: settings.models.reasoning,
+          status: 200
+        })
+      }
+
+      // The rejected parameter: `max_tokens` on the reasoning model, answered 400 before any body.
+      expect(entryOf(openAiChatUnsupportedParameterCase.id)).toMatchObject({
+        model: settings.models.reasoning,
+        status: 400,
+        unsupportedParameter: 'max_tokens',
+        body: { max_tokens: settings.maxCompletionTokens }
+      })
+      expect(entryOf(openAiChatUnsupportedParameterCase.id)?.maxCompletionTokens).toBeUndefined()
+
       // Streamed cases: several body chunks, one per pull (`node.test.ts` covers progressive
       // delivery over the socket). The JSON case is one chunk.
-      for (const id of ['openai.chat.stream.plain-text', 'openai.chat.stream.tool-call-deltas']) {
+      for (const id of [
+        'openai.chat.stream.plain-text',
+        'openai.chat.stream.tool-call-deltas',
+        'openai.chat.stream.reasoning-effort'
+      ]) {
         expect(entryOf(id)?.status, id).toBe(200)
         expect(entryOf(id)?.bodyChunks, id).toBeGreaterThan(1)
       }
 
       expect(entryOf('openai.chat.json.plain-text')).toMatchObject({ status: 200, bodyChunks: 1 })
+      expect(entryOf('openai.chat.json.reasoning-usage')).toMatchObject({
+        status: 200,
+        bodyChunks: 1
+      })
       expect(entryOf('openai.chat.stream.error-envelope')?.status).toBe(404)
     })
   )
 })
 
-const drill = (testCase: OpenAiConformanceCase, turn: OpenAiScriptedTurn) =>
+const runOn = (testCase: OpenAiConformanceCase, makeEmulator: () => OpenAiEmulator) =>
   runConformance([testCase], {
     target: { kind: 'in-process' },
     now,
-    layer: () => {
-      const emulator = makeOpenAiEmulator()
-
-      emulator.script.enqueue(turn)
-
-      return Layer.mergeAll(inProcessLayer(emulator), configLayer)
-    }
+    layer: () => Layer.mergeAll(inProcessLayer(makeEmulator()), configLayer)
   }).pipe(Effect.map(report => report.results[0]))
+
+const drill = (testCase: OpenAiConformanceCase, turn: OpenAiScriptedTurn) =>
+  runOn(testCase, () => {
+    const emulator = makeOpenAiEmulator()
+
+    emulator.script.enqueue(turn)
+
+    return emulator
+  })
 
 describe('disagreement drill', () => {
   it.effect('fails the plain-text case when the usage chunk is dropped', () =>
@@ -182,6 +239,75 @@ describe('disagreement drill', () => {
     })
   )
 
+  it.effect('fails both reasoning cases when usage counts no reasoning tokens', () =>
+    Effect.gen(function* () {
+      for (const testCase of [openAiChatReasoningEffortCase, openAiChatJsonReasoningUsageCase]) {
+        const result = yield* drill(testCase, {
+          text: ['391'],
+          usage: { promptTokens: 20, completionTokens: 2 }
+        })
+
+        expect(result?.status, testCase.id).toBe('failed')
+        expect(result?.failure?.message, testCase.id).toBe(
+          'expected the usage report to count reasoning tokens'
+        )
+      }
+    })
+  )
+
+  it.effect('fails both reasoning cases when the model is not a reasoning model', () =>
+    Effect.gen(function* () {
+      // Without reasoning models the effort is recorded and ignored: usage counts no reasoning.
+      for (const testCase of [openAiChatReasoningEffortCase, openAiChatJsonReasoningUsageCase]) {
+        const result = yield* runOn(testCase, () => makeOpenAiEmulator({ reasoningModels: [] }))
+
+        expect(result?.status, testCase.id).toBe('failed')
+        expect(result?.failure?.message, testCase.id).toBe(
+          'expected the usage report to count reasoning tokens'
+        )
+      }
+    })
+  )
+
+  it.effect('fails the unsupported-parameter case when max_tokens is accepted', () =>
+    Effect.gen(function* () {
+      // A scripted turn answers before parameter validation, as a model that accepted it would.
+      const scripted = yield* drill(openAiChatUnsupportedParameterCase, { text: ['Hello.'] })
+
+      expect(scripted?.status).toBe('failed')
+      expect(scripted?.failure?.message).toBe('expected a rejection, the request succeeded')
+
+      // A model that takes `max_tokens` (not listed as reasoning) accepts the request too.
+      const plain = yield* runOn(openAiChatUnsupportedParameterCase, () =>
+        makeOpenAiEmulator({ reasoningModels: [] })
+      )
+
+      expect(plain?.status).toBe('failed')
+      expect(plain?.failure?.message).toBe('expected a rejection, the request succeeded')
+    })
+  )
+
+  it.effect('fails the unsupported-parameter case for a scripted error in another code', () =>
+    Effect.gen(function* () {
+      const result = yield* drill(openAiChatUnsupportedParameterCase, {
+        error: {
+          status: 400,
+          body: {
+            error: {
+              message: 'Synthetic: invalid value.',
+              type: 'invalid_request_error',
+              param: 'max_tokens',
+              code: 'invalid_value'
+            }
+          }
+        }
+      })
+
+      expect(result?.status).toBe('failed')
+      expect(result?.failure?.message).toBe('expected the provider code `unsupported_parameter`')
+    })
+  )
+
   it.effect('the same scripted shapes pass when they agree with the cases', () =>
     Effect.gen(function* () {
       const plain = yield* drill(openAiChatPlainTextCase, { text: ['Hello', ' there.'] })
@@ -192,7 +318,40 @@ describe('disagreement drill', () => {
 
       const json = yield* drill(openAiChatJsonPlainTextCase, { text: ['Hello', ' there.'] })
 
-      expect([plain?.status, tool?.status, json?.status]).toEqual(['passed', 'passed', 'passed'])
+      const reasoningUsage = { promptTokens: 20, completionTokens: 66, reasoningTokens: 64 }
+
+      const reasoning = yield* drill(openAiChatReasoningEffortCase, {
+        text: ['391'],
+        usage: reasoningUsage
+      })
+
+      const jsonReasoning = yield* drill(openAiChatJsonReasoningUsageCase, {
+        text: ['391'],
+        usage: reasoningUsage
+      })
+
+      const rejected = yield* drill(openAiChatUnsupportedParameterCase, {
+        error: {
+          status: 400,
+          body: {
+            error: {
+              message: 'Synthetic: unsupported parameter.',
+              type: 'invalid_request_error',
+              param: 'max_tokens',
+              code: 'unsupported_parameter'
+            }
+          }
+        }
+      })
+
+      expect([
+        plain?.status,
+        tool?.status,
+        json?.status,
+        reasoning?.status,
+        jsonReasoning?.status,
+        rejected?.status
+      ]).toEqual(['passed', 'passed', 'passed', 'passed', 'passed', 'passed'])
     })
   )
 })
@@ -300,6 +459,70 @@ describe('faults through the OpenAI provider', () => {
       if (error instanceof LLMError) {
         expect(error.provider?.providerCode).toBe('incomplete_stream')
       }
+    })
+  )
+})
+
+describe('reasoning effort through the default OpenAI provider', () => {
+  // The emulator's reasoning model; the provider config names no endpoint and no format.
+  const reasoningModel = openAiEmulatorDefaultReasoningModels[0] ?? 'gpt-6-luna'
+
+  const streamWithEffort = (emulator: OpenAiEmulator, reasoningEffort: AgentReasoningEffort) =>
+    Effect.gen(function* () {
+      const provider = yield* LLMProvider
+
+      return yield* provider
+        .stream({
+          model: reasoningModel,
+          systemPrompt: 'Reply in one short sentence.',
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          tools: [],
+          reasoningEffort
+        })
+        .pipe(Stream.runCollect)
+    }).pipe(
+      Effect.provide(
+        makeOpenAiProviderLayer({
+          apiKey: settings.apiKey,
+          maxCompletionTokens: 64,
+          streaming: true
+        }).pipe(Layer.provide(inProcessLayer(emulator)))
+      )
+    )
+
+  const reasoningTokens = (events: Iterable<LLMEvent>) =>
+    Array.from(events).flatMap(event =>
+      Predicate.isTagged(event, 'Usage') ? [event.usage.output.reasoning] : []
+    )
+
+  it.effect('the native endpoint receives the effort, so the reasoning model reasons', () =>
+    Effect.gen(function* () {
+      const emulator = makeOpenAiEmulator()
+
+      const events = yield* streamWithEffort(emulator, 'high')
+
+      expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(['high'])
+      expect(reasoningTokens(events)).toEqual([expect.any(Number)])
+      expect(reasoningTokens(events)[0]).toBeGreaterThan(0)
+    })
+  )
+
+  it.effect('none and max reach the native endpoint unchanged; none turns reasoning off', () =>
+    Effect.gen(function* () {
+      const emulator = makeOpenAiEmulator()
+      const efforts = ['none', 'max']
+      const reported: Array<ReadonlyArray<number | undefined>> = []
+
+      for (const value of efforts) {
+        // Decoded as a host decodes a stored or submitted effort.
+        const effort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+
+        reported.push(reasoningTokens(yield* streamWithEffort(emulator, effort)))
+      }
+
+      expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(efforts)
+      expect(reported[0]).toEqual([0])
+      expect(reported[1]?.[0]).toBeGreaterThan(0)
     })
   )
 })
