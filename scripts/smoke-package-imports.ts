@@ -204,6 +204,129 @@ const extractTarballName = (output: string) => {
   return tarballLine
 }
 
+/**
+ * Heavy dependencies that public subpaths load only on first use. Each subpath must import without
+ * evaluating its dependency (`lazyImports`), and a production bundle must keep the dependency out
+ * of the importer's chunk (`checkBundleSplits`).
+ */
+const lazyDependencies = [
+  {
+    subpaths: ['@yolk-sdk/knowledge/chunking', '@yolk-sdk/knowledge/ingestion'],
+    entry:
+      'export { KnowledgeChunker, DefaultKnowledgeChunkerLive } from "@yolk-sdk/knowledge/chunking"',
+    dependency: 'gpt-tokenizer'
+  },
+  {
+    subpaths: ['@yolk-sdk/codemode/cloudflare'],
+    entry: 'export { makeDynamicWorkerCodeModeExecutor } from "@yolk-sdk/codemode/cloudflare"',
+    dependency: 'sucrase'
+  }
+] as const
+
+/**
+ * Imports the lazy subpaths in a fresh process (the smoke above already loaded everything), with a
+ * module hook recording what loads, then uses them and checks their dependencies loaded then.
+ */
+const checkLazyImports = (fixtureDir: string, cloudflareStub: string) => {
+  const lazyFile = join(fixtureDir, 'lazy.mjs')
+
+  writeFileSync(
+    lazyFile,
+    [
+      'import { registerHooks } from "node:module"',
+      `const stub = ${JSON.stringify(pathToFileURL(cloudflareStub).href)}`,
+      'const loaded = []',
+      'registerHooks({',
+      '  resolve: (specifier, context, next) => specifier === "cloudflare:workers" ? { url: stub, shortCircuit: true } : next(specifier, context),',
+      '  load: (url, context, next) => { loaded.push(url); return next(url, context) }',
+      '})',
+      'const evaluated = name => loaded.some(url => url.includes(`/node_modules/${name}/`))',
+      ...lazyDependencies.flatMap(({ subpaths, dependency }) => [
+        ...subpaths.map(subpath => `await import(${JSON.stringify(subpath)})`),
+        `if (evaluated(${JSON.stringify(dependency)})) throw new Error(${JSON.stringify(`${subpaths.join(', ')} evaluated ${dependency} on import`)})`
+      ]),
+      'const { Effect } = await import("effect")',
+      'const chunking = await import("@yolk-sdk/knowledge/chunking")',
+      'const count = await Effect.runPromise(chunking.countKnowledgeChunkTokens("hello world"))',
+      'if (count !== 2 || !evaluated("gpt-tokenizer")) throw new Error(`Lazy tokenizer smoke failed: ${count}`)',
+      'const codemodeCloudflare = await import("@yolk-sdk/codemode/cloudflare")',
+      'const failedLoad = await codemodeCloudflare.makeDynamicWorkerCodeModeExecutor({ loader: () => { throw new Error("no loader") } }).execute("return 1", { tools: [], globals: [], timeoutMs: 1000, memoryLimitBytes: 1048576, store: {}, signal: new AbortController().signal })',
+      'if (failedLoad.ok || !evaluated("sucrase")) throw new Error("Lazy Sucrase smoke failed")'
+    ].join('\n')
+  )
+  execFileSync(process.execPath, [lazyFile], { cwd: fixtureDir, stdio: 'inherit' })
+}
+
+/**
+ * Bundles each lazy subpath's typical import with Vite (Rolldown, as Workers and browser builds
+ * do) and checks the dependency lands in a chunk of its own that the entry imports dynamically.
+ */
+const checkBundleSplits = async (fixtureDir: string) => {
+  const { build } = await import('vite')
+
+  for (const { entry, dependency } of lazyDependencies) {
+    const entryFile = join(fixtureDir, `bundle-${dependency}.mjs`)
+
+    writeFileSync(entryFile, `${entry}\n`)
+
+    const result = await build({
+      configFile: false,
+      root: fixtureDir,
+      logLevel: 'silent',
+      build: {
+        write: false,
+        minify: false,
+        lib: { entry: entryFile, formats: ['es'] },
+        rollupOptions: { external: ['cloudflare:workers'] }
+      }
+    })
+
+    const outputs = (Array.isArray(result) ? result : [result]).flatMap(output =>
+      'output' in output ? output.output : []
+    )
+
+    const chunks = outputs.flatMap(output => (output.type === 'chunk' ? [output] : []))
+
+    const bundles = (chunk: (typeof chunks)[number]) =>
+      chunk.moduleIds.some(id => id.includes(`/node_modules/${dependency}/`))
+
+    // The chunks evaluated when the entry is imported: the entry and its static imports, transitively.
+    const staticClosure = new Set<string>()
+
+    const visit = (fileName: string) => {
+      const chunk = chunks.find(candidate => candidate.fileName === fileName)
+
+      if (chunk === undefined || staticClosure.has(fileName)) return
+
+      staticClosure.add(fileName)
+      chunk.imports.forEach(visit)
+    }
+
+    chunks.filter(chunk => chunk.isEntry).forEach(chunk => visit(chunk.fileName))
+
+    const dependencyChunks = chunks.filter(bundles)
+
+    if (
+      staticClosure.size === 0 ||
+      dependencyChunks.length === 0 ||
+      dependencyChunks.some(chunk => staticClosure.has(chunk.fileName))
+    ) {
+      throw new Error(`${entry}: the bundle does not keep ${dependency} in a lazy chunk`)
+    }
+
+    const kilobytes = (inStaticClosure: boolean) =>
+      Math.round(
+        chunks
+          .filter(chunk => staticClosure.has(chunk.fileName) === inStaticClosure)
+          .reduce((sum, chunk) => sum + chunk.code.length, 0) / 1024
+      )
+
+    console.log(
+      `bundle: ${dependency} lazy (${kilobytes(true)} KB on import, ${kilobytes(false)} KB on first use)`
+    )
+  }
+}
+
 const main = async () => {
   const workspaceRoot = process.cwd()
   const fixtureDir = mkdtempSync(join(tmpdir(), 'yolk-package-smoke-'))
@@ -659,6 +782,9 @@ const main = async () => {
     )
 
     await import(pathToFileURL(smokeFile).href)
+
+    checkLazyImports(fixtureDir, cloudflareStub)
+    await checkBundleSplits(fixtureDir)
   } finally {
     rmSync(fixtureDir, { recursive: true, force: true })
   }

@@ -103,7 +103,7 @@ metadata.
 
 ```txt
 examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpaths
-@yolk-sdk/knowledge -> gpt-tokenizer + @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
+@yolk-sdk/knowledge -> gpt-tokenizer (only src/chunking-tokenizer.ts, loaded lazily by ./chunking) + @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
 @yolk-sdk/mcp -> official @modelcontextprotocol v2 packages + Effect + @yolk-sdk/agent/protocol only for tool/content adapters; @effect/platform-node stays behind Node subpaths
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer; ./cloudflare -> sandbox core/state + Effect + cloudflare:workers (Durable Object class only); no Node builtins or Vercel code
@@ -144,6 +144,15 @@ Conformance import rule (canonical statement; other docs reference it): in `pack
 - Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/codemode/node`, `@yolk-sdk/extractors/node`, `@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`, `@yolk-sdk/emulators/node`, `@yolk-sdk/emulators/fortnox`, `@yolk-sdk/emulators/microsoft`, `@yolk-sdk/emulators/dropbox`, `@yolk-sdk/emulators/notion`, `@yolk-sdk/emulators/todoist`, `@yolk-sdk/emulators/telegram`, `@yolk-sdk/emulators/github`, `@yolk-sdk/emulators/google`, `@yolk-sdk/emulators/linkedin-search`, `@yolk-sdk/emulators/mcp`, `@yolk-sdk/emulators/kie`).
 - Keep Cloudflare Workers APIs (`cloudflare:workers`) behind Workers subpaths (`@yolk-sdk/codemode/cloudflare`, `@yolk-sdk/sandbox/cloudflare`, `@yolk-sdk/vercel-workflows/cloudflare`, `@yolk-sdk/vercel-workflows/cloudflare/api`); type them with a package-local ambient `cloudflare-workers.d.ts`, not `@cloudflare/workers-types`.
 - Prefer runtime-portable Effect APIs in package code.
+- Load heavy dependencies a subpath needs only for some calls with a dynamic `import()` at first use,
+  not a top-level import: hosts import contracts and layers on every request (a Worker isolate
+  evaluates them on each cold start) whether or not the call happens. Keep the dependency in one
+  module that only the dynamic import reaches, never re-export it statically, and test that importing
+  the subpath does not evaluate it. Current cases: `gpt-tokenizer` behind
+  `@yolk-sdk/knowledge/chunking`, Sucrase behind `@yolk-sdk/codemode/cloudflare`, the parsers behind
+  `@yolk-sdk/extractors/node`, and `@emulators/core` behind the stateful emulators.
+  `pnpm packages:import-cost` reports what each subpath evaluates on import; `pnpm packages:smoke`
+  checks the lazy cases on the built packages and in a Vite bundle.
 
 ## Workspace Setup
 

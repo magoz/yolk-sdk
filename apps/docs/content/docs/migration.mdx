@@ -30,6 +30,23 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.152: lazy knowledge tokenizer
+
+`@yolk-sdk/knowledge/chunking` no longer evaluates `gpt-tokenizer` (about 2 MB) on import: the
+default chunker loads it the first time text is chunked or counted. Imports of `KnowledgeChunker`,
+`DefaultKnowledgeChunkerLive`, `makeDefaultKnowledgeChunker`, and `chunkKnowledgeText` are
+unchanged and need no migration.
+
+`countKnowledgeChunkTokens(text)` now returns `Effect<number, KnowledgeChunkingError>` instead of a
+`number`. Run it in your Effect (`const tokens = yield* countKnowledgeChunkTokens(text)`), or call
+`gpt-tokenizer` yourself where you need a synchronous count. `chunkKnowledgeText` and the default
+chunker can also fail with `KnowledgeChunkingError` (`Failed to load the default tokenizer`) when
+the tokenizer module cannot load.
+
+`makeDynamicWorkerCodeModeExecutor` (`@yolk-sdk/codemode/cloudflare`) now loads Sucrase when the
+first script runs instead of on import; if Sucrase cannot load, the execution fails like a sandbox
+that cannot load (`Could not load the script sandbox.`, `onInternalError` stage `load`).
+
 ### Canary.150: pi code mode executor failure messages
 
 `makePiCodeModeExecutor` (`@yolk-sdk/codemode/node`) now answers its own failures with fixed

@@ -2,7 +2,7 @@ import { RpcTarget } from 'cloudflare:workers'
 import { Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
-import { transform } from 'sucrase'
+import type * as Sucrase from 'sucrase'
 import {
   reportInternalError,
   type CodeModeError,
@@ -189,10 +189,10 @@ type Stripped =
   | { readonly ok: false; readonly error: CodeModeError }
 
 /**
- * Strips TypeScript annotations with Sucrase (lines are kept). The script is wrapped in an async
- * function so top-level `return` and `await` parse.
+ * Strips TypeScript annotations with Sucrase's `transform` (lines are kept). The script is wrapped
+ * in an async function so top-level `return` and `await` parse.
  */
-const stripTypes = (code: string): Stripped => {
+const stripTypes = (transform: typeof Sucrase.transform, code: string): Stripped => {
   try {
     const stripped = transform(`${wrapperPrefix}${code}${wrapperSuffix}`, {
       transforms: ['typescript'],
@@ -402,6 +402,8 @@ const isScriptEntrypoint = (value: unknown): value is ScriptEntrypoint =>
 
 const loadFailed = failure({ kind: 'sandbox', message: 'Could not load the script sandbox.' })
 
+const executionAborted = failure({ kind: 'aborted', message: 'Execution aborted' })
+
 const sandboxFailed = failure({ kind: 'sandbox', message: 'The script sandbox failed.' })
 
 // workerd's errors for a Worker past its CPU time ("exceeded CPU time limit", "CPU limit").
@@ -476,9 +478,26 @@ export const makeDynamicWorkerCodeModeExecutor = (
   const cpuMs = Math.max(1, Math.floor(options.cpuMs ?? defaultDynamicWorkerCpuMs))
 
   const execute = async (code: string, execution: CodeModeExecuteOptions) => {
-    if (execution.signal.aborted) return failure({ kind: 'aborted', message: 'Execution aborted' })
+    if (execution.signal.aborted) return executionAborted
 
-    const stripped = stripTypes(code)
+    // Sucrase (about half a megabyte of parser) loads when the first script runs, not when this
+    // subpath is imported: a Worker that builds the executor but runs no script never evaluates
+    // it. The runtime's module cache loads it once per isolate. Keep it a dynamic `import()`.
+    const transform = await import('sucrase').then(
+      sucrase => sucrase.transform,
+      (cause: unknown) => {
+        reportInternalError(options.onInternalError, { stage: 'load', cause })
+
+        return undefined
+      }
+    )
+
+    // The caller may have aborted while Sucrase loaded, before the abort listener below exists.
+    if (execution.signal.aborted) return executionAborted
+
+    if (transform === undefined) return loadFailed
+
+    const stripped = stripTypes(transform, code)
 
     if (!stripped.ok) return failure(stripped.error)
 
@@ -560,11 +579,9 @@ export const makeDynamicWorkerCodeModeExecutor = (
       })
 
       const aborted = new Promise<Settled>(resolve => {
-        controller.signal.addEventListener(
-          'abort',
-          () => resolve({ result: failure({ kind: 'aborted', message: 'Execution aborted' }) }),
-          { once: true }
-        )
+        controller.signal.addEventListener('abort', () => resolve({ result: executionAborted }), {
+          once: true
+        })
       })
 
       // Only the failure that settled the execution is reported: an isolate failing after a

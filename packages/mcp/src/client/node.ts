@@ -1,7 +1,9 @@
 export * from '@modelcontextprotocol/client/stdio'
 
 import { Effect } from 'effect'
-import { NodeServices } from '@effect/platform-node'
+// The module itself, not the package root: the root evaluates every Node platform module (HTTP,
+// sockets, Redis, workers), megabytes this subpath never uses.
+import * as NodeServices from '@effect/platform-node/NodeServices'
 import type { McpLocalServerConfig, McpServerConfig } from './config.ts'
 import {
   callLocalMcpServerTool,

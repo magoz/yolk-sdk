@@ -212,7 +212,9 @@ isolate instead, with `globalOutbound: null` (no network access). The isolate ev
 (vendored from `@earendil-works/pi-codemode` 1.0.0, MIT) around the script, so scripts see the same
 globals (`tools`, `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`/`load`) and the same
 tools guard and rejection codes as on Node. Tool and global calls come back to the calling Worker
-over RPC. TypeScript annotations are stripped with Sucrase first.
+over RPC. TypeScript annotations are stripped with Sucrase first; Sucrase loads when the first script
+runs (a dynamic `import()`, once per isolate), so importing `./cloudflare` or creating the executor
+does not evaluate it.
 
 ```ts
 import { env } from 'cloudflare:workers'
@@ -268,14 +270,14 @@ const executor = makeDynamicWorkerCodeModeExecutor({
 })
 ```
 
-| `stage`     | Executor        | Fixed message the caller or script sees                     | `cause`                                              |
-| ----------- | --------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
-| `load`      | Dynamic Workers | `sandbox`: `Could not load the script sandbox.`             | What `loader()`, `load()` or `getEntrypoint()` threw |
-| `load`      | pi (Node)       | `sandbox`: `Could not create the sandbox.`                  | What `new CodemodeSandbox` threw                     |
-| `isolate`   | Dynamic Workers | `sandbox`: `The script sandbox failed.`                     | The isolate's `run` error                            |
-| `isolate`   | pi (Node)       | `sandbox`: `The script sandbox failed.`                     | pi's `sandbox` error record                          |
-| `cpu-limit` | Dynamic Workers | `timeout`: `Execution exceeded its CPU limit of <cpuMs> ms` | The isolate's `run` error                            |
-| `host-call` | Dynamic Workers | The call rejects with `The call could not reach the host.`  | The RPC error the isolate saw                        |
+| `stage`     | Executor        | Fixed message the caller or script sees                     | `cause`                                                               |
+| ----------- | --------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| `load`      | Dynamic Workers | `sandbox`: `Could not load the script sandbox.`             | What loading Sucrase, `loader()`, `load()` or `getEntrypoint()` threw |
+| `load`      | pi (Node)       | `sandbox`: `Could not create the sandbox.`                  | What `new CodemodeSandbox` threw                                      |
+| `isolate`   | Dynamic Workers | `sandbox`: `The script sandbox failed.`                     | The isolate's `run` error                                             |
+| `isolate`   | pi (Node)       | `sandbox`: `The script sandbox failed.`                     | pi's `sandbox` error record                                           |
+| `cpu-limit` | Dynamic Workers | `timeout`: `Execution exceeded its CPU limit of <cpuMs> ms` | The isolate's `run` error                                             |
+| `host-call` | Dynamic Workers | The call rejects with `The call could not reach the host.`  | The RPC error the isolate saw                                         |
 
 It is called once per such failure and never for what the script controls (its errors, parse
 errors, tool and global rejections), timeouts, or aborts; an isolate that fails after the execution

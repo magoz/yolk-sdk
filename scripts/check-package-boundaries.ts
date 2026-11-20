@@ -381,6 +381,13 @@ const rules: ReadonlyArray<BoundaryRule> = [
     excludedDirs: ['packages/extractors/src/node']
   },
   {
+    // The tokenizer (megabytes of rank tables) stays in the module `chunking.ts` loads with a
+    // dynamic `import()` on first use; `test/lazy-tokenizer.test.ts` checks no entry evaluates it.
+    packageDir: 'packages/knowledge/src',
+    forbiddenImports: ['gpt-tokenizer'],
+    excludedDirs: ['packages/knowledge/src/chunking-tokenizer.ts']
+  },
+  {
     // Knowledge defines the extractor contract; the extractors package adapts to it.
     packageDir: 'packages/knowledge/src',
     forbiddenImports: ['@yolk-sdk/extractors']
