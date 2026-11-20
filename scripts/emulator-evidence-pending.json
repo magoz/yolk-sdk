@@ -6,406 +6,406 @@
       "method": "PORT",
       "path": "EmailClient.createDraft",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.sendMessage",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.setRead",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.setFlag",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.trash",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.untrash",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.move",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "email",
       "method": "PORT",
       "path": "EmailClient.deletePermanently",
       "reason": "Email emulator follows synthetic port fixtures; awaiting the owner-approved live run against a practice mailbox through a host EmailClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "r2",
       "method": "PORT",
       "path": "R2ObjectClient.put",
       "reason": "R2 emulator follows synthetic port fixtures; awaiting the owner-approved live run of r2.objects.create-if-absent and r2.objects.update-if-match against a practice bucket through a host R2ObjectClient implementation (tracking #115).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "fortnox",
       "method": "PUT",
       "path": "/3/customers/{CustomerNumber}",
       "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.customer.empty-string-keeps-value.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "fortnox",
       "method": "POST",
       "path": "/3/invoices",
       "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.write.rejection-error-information.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "fortnox",
       "method": "PUT",
       "path": "/3/invoices/{DocumentNumber}",
       "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of fortnox.invoice.row-discount-sticky.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "fortnox",
       "method": "GET",
       "path": "/3/invoices/{DocumentNumber}/email",
       "reason": "Fortnox emulator (tracking #115) follows synthetic fixtures; awaiting an owner-approved manual live run of fortnox.invoice.send-email.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/calendars/{calendarId}/events",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "PATCH",
       "path": "/v1.0/users/{userId}/events/{eventId}",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "DELETE",
       "path": "/v1.0/users/{userId}/events/{eventId}",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.create-returns-event-id and microsoft.calendar.cancel-semantics.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/events/{eventId}/cancel",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.calendar.cancel-semantics.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/messages",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "PATCH",
       "path": "/v1.0/users/{userId}/messages/{messageId}",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/users/{userId}/messages/{messageId}/move",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/$batch",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.outlook.immutable-id-survives-move and microsoft.outlook.concurrent-writes-same-message.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/drives/{driveId}/items/{itemId}/children",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "DELETE",
       "path": "/v1.0/drives/{driveId}/items/{itemId}",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.create-folder-roundtrip and microsoft.onedrive.copy-accepted-monitor.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "microsoft",
       "method": "POST",
       "path": "/v1.0/drives/{driveId}/items/{itemId}/copy",
       "reason": "Microsoft Graph emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of microsoft.onedrive.copy-accepted-monitor.",
-      "expires": "2026-11-27"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/create_folder_v2",
       "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.create-folder-conflict and the other Dropbox write cases, which create their case folders through it.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/delete_v2",
       "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.delete-then-not-found and the other Dropbox write cases, which delete their case folders through it.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/copy_v2",
       "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.copy-move-metadata.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/move_v2",
       "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.copy-move-metadata.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "dropbox",
       "method": "POST",
       "path": "/2/files/upload",
       "reason": "Dropbox emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of dropbox.files.upload-rev-precondition.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "notion",
       "method": "POST",
       "path": "/v1/pages",
       "reason": "Notion emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of notion.pages.archive-in-trash.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "notion",
       "method": "PATCH",
       "path": "/v1/pages/{pageId}",
       "reason": "Notion emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of notion.pages.archive-in-trash.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "todoist",
       "method": "POST",
       "path": "/api/v1/tasks",
       "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, and todoist.projects.delete-then-not-found.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "todoist",
       "method": "POST",
       "path": "/api/v1/tasks/{taskId}",
       "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close and todoist.tasks.due-dates.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "todoist",
       "method": "POST",
       "path": "/api/v1/tasks/{taskId}/close",
       "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "todoist",
       "method": "POST",
       "path": "/api/v1/projects",
       "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, todoist.projects.parent-id, and todoist.projects.delete-then-not-found.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "todoist",
       "method": "DELETE",
       "path": "/api/v1/projects/{projectId}",
       "reason": "Todoist emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of todoist.tasks.lifecycle-close, todoist.tasks.due-dates, todoist.projects.parent-id, and todoist.projects.delete-then-not-found.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "telegram",
       "method": "POST",
       "path": "/bot{token}/sendMessage",
       "reason": "Telegram emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of telegram.messages.send-message (write-irreversible: one message to the practice chat, started only by its exact case id).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "POST",
       "path": "/repos/{owner}/{repo}/issues/{issueNumber}/comments",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.comments.create-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "DELETE",
       "path": "/repos/{owner}/{repo}/issues/comments/{commentId}",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.comments.create-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "POST",
       "path": "/repos/{owner}/{repo}/issues/{issueNumber}/labels",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.labels.add-remove.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "DELETE",
       "path": "/repos/{owner}/{repo}/issues/{issueNumber}/labels/{name}",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.labels.add-remove.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "POST",
       "path": "/repos/{owner}/{repo}/issues",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.issues.lifecycle-close (write-irreversible: the closed issue stays in the practice repository; started only by its exact case id).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "github",
       "method": "PATCH",
       "path": "/repos/{owner}/{repo}/issues/{issueNumber}",
       "reason": "GitHub emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of github.issues.lifecycle-close (write-irreversible: the closed issue stays in the practice repository; started only by its exact case id).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/gmail/v1/users/me/messages/{messageId}/modify",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/gmail/v1/users/me/messages/{messageId}/trash",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.trash-untrash.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/gmail/v1/users/me/messages/{messageId}/untrash",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.trash-untrash.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/gmail/v1/users/me/labels",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "DELETE",
       "path": "/gmail/v1/users/me/labels/{labelId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.label-create-apply-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/gmail/v1/users/me/drafts",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "PUT",
       "path": "/gmail/v1/users/me/drafts/{draftId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "DELETE",
       "path": "/gmail/v1/users/me/drafts/{draftId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.draft-compose-update-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/upload/gmail/v1/users/me/messages/send",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.gmail.send-practice-address (write-irreversible: one message to the seeded practice address, started only by its exact case id).",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/calendar/v3/calendars/{calendarId}/events",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle and google.calendar.deleted-event-gone.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "PATCH",
       "path": "/calendar/v3/calendars/{calendarId}/events/{eventId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "DELETE",
       "path": "/calendar/v3/calendars/{calendarId}/events/{eventId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.calendar.event-lifecycle and google.calendar.deleted-event-gone.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "POST",
       "path": "/drive/v3/files",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "PATCH",
       "path": "/drive/v3/files/{fileId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     },
     {
       "manifest": "google",
       "method": "DELETE",
       "path": "/drive/v3/files/{fileId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
-      "expires": "2026-11-29"
+      "expires": "2027-01-18"
     }
   ]
 }

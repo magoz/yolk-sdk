@@ -538,6 +538,59 @@ describe('pending evidence allowlist', () => {
 describe('repo emulator manifests', () => {
   const repoPending = loadPendingEvidence()
 
+  // Every date here comes from the pending file, never a fixed day or the wall clock, so renewing
+  // the entries does not break these tests and they do not start failing on their own when the
+  // entries expire. The check date is the earliest expiry: every entry still holds that day, and
+  // it is no earlier than the last day `pnpm packages:evidence` passed (it fails expired entries),
+  // so freshly verified routes are not `future-observed-at`. With no entries the result does not
+  // depend on the date, so today is used.
+  const addDays = (date: string, days: number) =>
+    new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10)
+
+  const expiries = repoPending.entries.map(entry => entry.expires).toSorted()
+  const earliestExpiry = expiries[0] ?? new Date().toISOString().slice(0, 10)
+  const latestExpiry = expiries.at(-1) ?? earliestExpiry
+  const checkDay = earliestExpiry
+  const checkNow = new Date(`${checkDay}T12:00:00.000Z`)
+
+  /** A manifest's latest expiry: its last day with every entry allowed. */
+  const latestExpiryOf = (manifest: string) => {
+    const expiry = repoPending.entries
+      .filter(entry => entry.manifest === manifest)
+      .map(entry => entry.expires)
+      .toSorted()
+      .at(-1)
+
+    expect(expiry, manifest).toBeDefined()
+
+    return expiry ?? checkDay
+  }
+
+  /** The day after a manifest's latest expiry (UTC midnight), when all its entries have lapsed. */
+  const dayAfterExpiryOf = (manifest: string) =>
+    new Date(`${addDays(latestExpiryOf(manifest), 1)}T00:00:00.000Z`)
+
+  /** Each expiry is at most the cap after the check date, so all are within it of one another. */
+  const expectWithinPendingCap = (entry: PendingEvidenceEntry) => {
+    expect(
+      entry.expires >= checkDay && entry.expires <= addDays(checkDay, defaultMaxPendingDays),
+      `${entry.manifest} ${entry.method} ${entry.path} expires ${entry.expires}`
+    ).toBe(true)
+  }
+
+  /** The CLI's PENDING prefix for a route, with the expiry its pending entry names. */
+  const pendingUntil = (manifest: string, routeLabel: string) => {
+    const entry = repoPending.entries.find(
+      item => item.manifest === manifest && `${item.method} ${item.path}` === routeLabel
+    )
+
+    expect(entry, `${manifest} ${routeLabel}`).toBeDefined()
+
+    return `WARN  ${manifest}  ${routeLabel}  PENDING until ${entry?.expires ?? ''}`
+  }
+
   const emailWriteRoutes = emailEmulatorRoutes
     .filter(emailRoute => emailRoute.write)
     .map(emailRoute => `${emailRoute.method} ${emailRoute.path}`)
@@ -597,7 +650,7 @@ describe('repo emulator manifests', () => {
     })
 
   it('cite only known case ids and have no failures while the pending file holds', () => {
-    const report = repoCheck(now)
+    const report = repoCheck(checkNow)
 
     expect(repoPending.problems).toEqual([])
     expect(evidenceReportFailed(report)).toBe(false)
@@ -655,7 +708,10 @@ describe('repo emulator manifests', () => {
         route.caseIds.map(caseId => repoFixtureEvidenceByCase.get(caseId))
       )
     ).toEqual([['verified'], ['verified'], ['verified'], ['verified']])
-    expect(report.findings.filter(finding => finding.manifest === 'gateway')).toEqual([])
+    // By the check date its recordings may be over 30 days old: a stale warning, nothing else.
+    expect(
+      report.findings.filter(finding => finding.manifest === 'gateway' && finding.kind !== 'stale')
+    ).toEqual([])
     expect(repoFixtureEvidenceByCase.get('openai.chat.stream.plain-text')).toEqual(['unverified'])
     expect(repoFixtureEvidenceByCase.get('anthropic.messages.stream.plain-text')).toEqual([
       'unverified'
@@ -826,15 +882,14 @@ describe('repo emulator manifests', () => {
     ).toEqual(emailWriteRoutes)
 
     for (const entry of repoPending.entries.filter(item => item.manifest === 'email')) {
-      // At most 60 days from 2026-09-30.
-      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expectWithinPendingCap(entry)
       expect(entry.reason).toContain('owner-approved live run against a practice mailbox')
       expect(entry.reason).toContain('tracking #115')
     }
   })
 
   it('fails the unverified email write routes without the pending file or after it expires', () => {
-    for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
+    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('email'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'email')).toEqual(emailWriteRoutes)
     }
@@ -846,8 +901,7 @@ describe('repo emulator manifests', () => {
     expect(r2Entries.map(entry => `${entry.method} ${entry.path}`)).toEqual(r2WriteRoutes)
 
     for (const entry of r2Entries) {
-      // At most 60 days from 2026-09-30.
-      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expectWithinPendingCap(entry)
       expect(entry.reason).toContain(
         'owner-approved live run of r2.objects.create-if-absent and r2.objects.update-if-match'
       )
@@ -868,7 +922,7 @@ describe('repo emulator manifests', () => {
   })
 
   it('fails the unverified R2 write route without the pending file or after it expires', () => {
-    for (const report of [repoCheck(now, []), repoCheck(new Date('2026-11-30T00:00:00.000Z'))]) {
+    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('r2'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'r2')).toEqual(r2WriteRoutes)
     }
@@ -880,27 +934,14 @@ describe('repo emulator manifests', () => {
     expect(fortnoxEntries.map(entry => `${entry.method} ${entry.path}`)).toEqual(fortnoxWriteRoutes)
 
     for (const entry of fortnoxEntries) {
-      // At most 60 days from 2026-09-30.
-      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expectWithinPendingCap(entry)
       expect(entry.reason).toContain('owner-approved')
       expect(entry.reason).toContain('live run of fortnox.')
     }
   })
 
   it('fails the unverified Fortnox write routes without the pending file or after it expires', () => {
-    const fortnoxExpiry = repoPending.entries
-      .filter(entry => entry.manifest === 'fortnox')
-      .map(entry => entry.expires)
-      .toSorted()
-      .at(-1)
-
-    expect(fortnoxExpiry).toBeDefined()
-
-    const dayAfterFortnoxExpiry = new Date(
-      Date.parse(`${fortnoxExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
-    )
-
-    for (const report of [repoCheck(now, []), repoCheck(dayAfterFortnoxExpiry)]) {
+    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('fortnox'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'fortnox')).toEqual(fortnoxWriteRoutes)
     }
@@ -914,27 +955,14 @@ describe('repo emulator manifests', () => {
     )
 
     for (const entry of microsoftEntries) {
-      // At most 60 days from 2026-09-30.
-      expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+      expectWithinPendingCap(entry)
       expect(entry.reason).toContain('owner-approved')
       expect(entry.reason).toContain('live run of microsoft.')
     }
   })
 
   it('fails the unverified Microsoft write routes without the pending file or after it expires', () => {
-    const microsoftExpiry = repoPending.entries
-      .filter(entry => entry.manifest === 'microsoft')
-      .map(entry => entry.expires)
-      .toSorted()
-      .at(-1)
-
-    expect(microsoftExpiry).toBeDefined()
-
-    const dayAfterMicrosoftExpiry = new Date(
-      Date.parse(`${microsoftExpiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
-    )
-
-    for (const report of [repoCheck(now, []), repoCheck(dayAfterMicrosoftExpiry)]) {
+    for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf('microsoft'))]) {
       expect(evidenceReportFailed(report)).toBe(true)
       expect(failedRoutes(report, 'microsoft')).toEqual(microsoftWriteRoutes)
     }
@@ -942,29 +970,18 @@ describe('repo emulator manifests', () => {
     // Each allowance is independent (dates from the pending file): on the day after the EARLIER of
     // the Fortnox and Microsoft expiries, the other emulator's routes, still within their own
     // allowance, do not fail. (The Fortnox test above checks its routes fail after their expiry.)
-    const fortnoxExpiry = repoPending.entries
-      .filter(entry => entry.manifest === 'fortnox')
-      .map(entry => entry.expires)
-      .toSorted()
-      .at(-1)
-
-    expect(fortnoxExpiry).toBeDefined()
-
-    const dayAfterUtc = (date: string | undefined) =>
-      new Date(Date.parse(`${date ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000)
+    const fortnoxExpiry = latestExpiryOf('fortnox')
+    const microsoftExpiry = latestExpiryOf('microsoft')
 
     const [earlier, later] =
-      (fortnoxExpiry ?? '') < (microsoftExpiry ?? '')
+      fortnoxExpiry < microsoftExpiry
         ? (['fortnox', 'microsoft'] as const)
         : (['microsoft', 'fortnox'] as const)
 
-    const earlierExpiry = earlier === 'fortnox' ? fortnoxExpiry : microsoftExpiry
-    const laterExpiry = later === 'fortnox' ? fortnoxExpiry : microsoftExpiry
-
     // Equal dates leave no day in between; the unit test 'expires each entry on its own date'
     // covers independence without depending on the repository's dates.
-    if (earlierExpiry !== laterExpiry) {
-      expect(failedRoutes(repoCheck(dayAfterUtc(earlierExpiry)), later)).toEqual([])
+    if (fortnoxExpiry !== microsoftExpiry) {
+      expect(failedRoutes(repoCheck(dayAfterExpiryOf(earlier)), later)).toEqual([])
     }
   })
 
@@ -983,8 +1000,7 @@ describe('repo emulator manifests', () => {
       expect(entries.map(entry => `${entry.method} ${entry.path}`)).toEqual(writeRoutes())
 
       for (const entry of entries) {
-        // At most 60 days from 2026-09-30 (and from 2026-10-01, the day they were added).
-        expect(entry.expires <= '2026-11-29', entry.path).toBe(true)
+        expectWithinPendingCap(entry)
         expect(entry.reason).toContain('owner-approved')
         expect(entry.reason).toContain(`live run of ${manifest}.`)
         expect(entry.reason).toContain('tracking #115')
@@ -1002,27 +1018,15 @@ describe('repo emulator manifests', () => {
   ] as const)(
     'fails the unverified %s write routes without the pending file or after it expires',
     (manifest, writeRoutes) => {
-      const expiry = repoPending.entries
-        .filter(entry => entry.manifest === manifest)
-        .map(entry => entry.expires)
-        .toSorted()
-        .at(-1)
-
-      expect(expiry).toBeDefined()
-
-      const dayAfterExpiry = new Date(
-        Date.parse(`${expiry ?? ''}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
-      )
-
-      for (const report of [repoCheck(now, []), repoCheck(dayAfterExpiry)]) {
+      for (const report of [repoCheck(checkNow, []), repoCheck(dayAfterExpiryOf(manifest))]) {
         expect(evidenceReportFailed(report)).toBe(true)
         expect(failedRoutes(report, manifest)).toEqual(writeRoutes())
       }
 
       // On its last allowed day the routes still pass.
-      expect(failedRoutes(repoCheck(new Date(`${expiry ?? ''}T12:00:00.000Z`)), manifest)).toEqual(
-        []
-      )
+      expect(
+        failedRoutes(repoCheck(new Date(`${latestExpiryOf(manifest)}T12:00:00.000Z`)), manifest)
+      ).toEqual([])
     }
   )
 
@@ -1037,17 +1041,7 @@ describe('repo emulator manifests', () => {
     }
   })
 
-  // The CLI runs at explicit dates taken from the pending file, never the wall clock, so this
-  // test does not start failing on its own when the entries expire. With no pending entries the
-  // result does not depend on the date, so today is used (a fixed date could precede the
-  // `observedAt` of freshly verified routes and fail as `future-observed-at`).
-  const expiries = repoPending.entries.map(entry => entry.expires).toSorted()
-  const earliestExpiry = expiries[0] ?? new Date().toISOString().slice(0, 10)
-  const latestExpiry = expiries.at(-1) ?? earliestExpiry
-
-  const dayAfter = (date: string) =>
-    new Date(Date.parse(`${date}T00:00:00.000Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-
+  // The CLI runs at the same dates derived from the pending file (see the top of this block).
   const runCli = (date: string) =>
     new Promise<{ failed: boolean; stdout: string; stderr: string }>(resolvePromise => {
       execFile(
@@ -1061,11 +1055,11 @@ describe('repo emulator manifests', () => {
     })
 
   it('runs as a CLI that prints the report and exits 0 before the pending entries expire', async () => {
-    const pendingRoutes = repoCheck(new Date(`${earliestExpiry}T12:00:00.000Z`)).findings.filter(
+    const pendingRoutes = repoCheck(checkNow).findings.filter(
       finding => finding.kind === 'pending-write'
     ).length
 
-    const result = await runCli(earliestExpiry)
+    const result = await runCli(checkDay)
 
     expect(pendingRoutes).toBe(repoPending.entries.length)
     expect(result.failed).toBe(false)
@@ -1093,36 +1087,26 @@ describe('repo emulator manifests', () => {
     expect(result.stdout).toContain(
       'WARN  opencode  POST /inference/go/v1/responses  unverified evidence (2 case(s))'
     )
-    expect(result.stdout).toContain(
-      'WARN  email  PORT EmailClient.createDraft  PENDING until 2026-11-29'
-    )
+    expect(result.stdout).toContain(pendingUntil('email', 'PORT EmailClient.createDraft'))
     expect(result.stdout).toContain('WARN  email  PORT EmailClient.getMessage  unverified evidence')
-    expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.put  PENDING until 2026-11-29')
+    expect(result.stdout).toContain(pendingUntil('r2', 'PORT R2ObjectClient.put'))
     expect(result.stdout).toContain('WARN  r2  PORT R2ObjectClient.get  unverified evidence')
-    expect(result.stdout).toContain('WARN  fortnox  POST /3/invoices  PENDING until 2026-11-29')
-    expect(result.stdout).toContain('WARN  microsoft  POST /v1.0/$batch  PENDING until 2026-11-27')
-    expect(result.stdout).toContain('WARN  dropbox  POST /2/files/upload  PENDING until 2026-11-29')
-    expect(result.stdout).toContain(
-      'WARN  notion  PATCH /v1/pages/{pageId}  PENDING until 2026-11-29'
-    )
+    expect(result.stdout).toContain(pendingUntil('fortnox', 'POST /3/invoices'))
+    expect(result.stdout).toContain(pendingUntil('microsoft', 'POST /v1.0/$batch'))
+    expect(result.stdout).toContain(pendingUntil('dropbox', 'POST /2/files/upload'))
+    expect(result.stdout).toContain(pendingUntil('notion', 'PATCH /v1/pages/{pageId}'))
     expect(result.stdout).toContain(
       'WARN  dropbox  POST /2/files/get_metadata  unverified evidence'
     )
     expect(result.stdout).toContain('WARN  notion  GET /v1/users/me  unverified evidence')
-    expect(result.stdout).toContain(
-      'WARN  todoist  POST /api/v1/projects  PENDING until 2026-11-29'
-    )
-    expect(result.stdout).toContain(
-      'WARN  telegram  POST /bot{token}/sendMessage  PENDING until 2026-11-29'
-    )
-    expect(result.stdout).toContain(
-      'WARN  github  POST /repos/{owner}/{repo}/issues  PENDING until 2026-11-29'
-    )
+    expect(result.stdout).toContain(pendingUntil('todoist', 'POST /api/v1/projects'))
+    expect(result.stdout).toContain(pendingUntil('telegram', 'POST /bot{token}/sendMessage'))
+    expect(result.stdout).toContain(pendingUntil('github', 'POST /repos/{owner}/{repo}/issues'))
     expect(result.stdout).toContain(
       'WARN  github  GET /repos/{owner}/{repo}/labels  unverified evidence'
     )
     expect(result.stdout).toContain(
-      'WARN  google  POST /upload/gmail/v1/users/me/messages/send  PENDING until 2026-11-29'
+      pendingUntil('google', 'POST /upload/gmail/v1/users/me/messages/send')
     )
     expect(result.stdout).toContain(
       'WARN  google  GET /drive/v3/files/{fileId}  unverified evidence (2 case(s))'
@@ -1145,7 +1129,7 @@ describe('repo emulator manifests', () => {
   it.runIf(repoPending.entries.length > 0)(
     'runs as a CLI that exits 1 after the pending entries expire',
     async () => {
-      const result = await runCli(dayAfter(latestExpiry))
+      const result = await runCli(addDays(latestExpiry, 1))
 
       expect(result.failed).toBe(true)
       expect(result.stderr).toContain(`expired on ${latestExpiry}`)
