@@ -333,7 +333,8 @@ const isNotFoundErrorEnvelope = (body: string): boolean =>
  * The error case's own HttpClient boundary: wraps the host client so the body of every error
  * response (status 400 or above) is read, kept in `bodies`, and handed on to the provider as the
  * same status, headers, and bytes. Success responses pass through untouched, and the provider's
- * behaviour does not change; the case only gains the envelope the provider does not surface.
+ * behaviour does not change; the case checks the whole envelope, of which the provider surfaces
+ * only `error.type` (as `providerCode`).
  */
 const capturingErrorBodies = (
   client: HttpClient.HttpClient,
@@ -362,7 +363,7 @@ export const anthropicMessagesErrorEnvelopeCase: AnthropicConformanceCase = defi
   title: 'Unknown model ids fail with a sanitized non-retryable 404',
   safety: 'read',
   docs: 'Anthropic errors use the envelope `{ type: "error", error: { type, message } }` with a non-2xx status; an unknown model id is rejected with status 404 and error type `not_found_error`, while a missing or invalid credential is a 401 `authentication_error`.',
-  wire: 'An unknown model id is rejected with a JSON envelope before any stream starts, as a 404 and never a 401/403 authentication or permission failure: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the 404 status, and whose message is sanitized to the provider name and error cause (no upstream body text). The native Messages layer does not surface the envelope, so the case also reads the 404 body at its own HttpClient boundary (handing the same bytes on to the provider) and requires `{ type: "error", error: { type: "not_found_error", message } }`; an empty, non-JSON, or differently shaped body fails the case.',
+  wire: 'An unknown model id is rejected with a JSON envelope before any stream starts, as a 404 and never a 401/403 authentication or permission failure: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps the 404 status, and whose message is sanitized to the provider name and error cause (no upstream body text). The native Messages layer surfaces the envelope `error.type` as `provider.providerCode`, which must be `not_found_error`; the case also reads the 404 body at its own HttpClient boundary (handing the same bytes on to the provider) and requires the whole envelope `{ type: "error", error: { type: "not_found_error", message } }`; an empty, non-JSON, or differently shaped body fails the case.',
   fixtures: [anthropicMessagesErrorEnvelopeFixture.id],
   run: Effect.gen(function* () {
     const settings = yield* AnthropicConformanceConfig
@@ -414,6 +415,11 @@ export const anthropicMessagesErrorEnvelopeCase: AnthropicConformanceCase = defi
       bodies.length === 1 && bodies.every(isNotFoundErrorEnvelope),
       'expected the 404 body to be a `not_found_error` Anthropic error envelope',
       { actual: bodies.map(isNotFoundErrorEnvelope) }
+    )
+    yield* expectEqual(
+      error.provider?.providerCode ?? null,
+      'not_found_error',
+      'expected the envelope error type as the provider code'
     )
   })
 })

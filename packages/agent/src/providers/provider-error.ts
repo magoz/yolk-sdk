@@ -1,3 +1,4 @@
+import { Predicate } from 'effect'
 import {
   ProviderErrorInfo,
   type AgentErrorCode,
@@ -14,6 +15,13 @@ type ProviderFailureInput = {
   readonly body?: string
   readonly message?: string
   readonly providerCode?: string
+  /**
+   * Request values the provider may echo back in its error text (the requested model id, an
+   * envelope `param` such as the Gateway's `param.modelId`). They are removed from `message` and
+   * `body` before the text fallback, so a model id containing words such as "overload" or
+   * "rate_limit" never decides the failure kind.
+   */
+  readonly echoedValues?: ReadonlyArray<string>
   readonly fallbackKind?: ProviderFailureKind
   /** Quota reset already parsed by the vendor adapter; see `ProviderErrorInfo.quotaResetsAtMs`. */
   readonly quotaResetsAtMs?: number
@@ -121,15 +129,33 @@ const kindFromStatus = (status: number | undefined): ProviderFailureKind | undef
   return undefined
 }
 
-const normalizedSignal = (input: ProviderFailureInput) =>
-  [input.providerCode, input.message, input.body]
-    .filter(value => value !== undefined)
-    .join(' ')
-    .toLowerCase()
+/**
+ * The request values an error envelope's `param` echoes: a parameter name (OpenAI `'model'`) or
+ * the string fields of an object (the Gateway's `{ modelId }`). Anything else echoes nothing.
+ */
+export const echoedParamValues = (param: unknown): ReadonlyArray<string> => {
+  if (Predicate.isString(param)) {
+    return [param]
+  }
 
-const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | undefined => {
-  const signal = normalizedSignal(input)
+  return Predicate.isObject(param) ? Object.values(param).filter(Predicate.isString) : []
+}
 
+/** The free text of a failure, lower-cased, with every echoed request value removed. */
+const scannedText = (input: ProviderFailureInput) =>
+  (input.echoedValues ?? []).reduce(
+    (text, value) => {
+      const echoed = value.trim().toLowerCase()
+
+      return echoed.length === 0 ? text : text.replaceAll(echoed, ' ')
+    },
+    [input.message, input.body]
+      .filter(value => value !== undefined)
+      .join(' ')
+      .toLowerCase()
+  )
+
+const kindFromSignal = (signal: string): ProviderFailureKind | undefined => {
   if (
     signal.includes('rate_limit') ||
     signal.includes('rate limit') ||
@@ -167,9 +193,6 @@ const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | unde
   return undefined
 }
 
-export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind =>
-  kindFromSignal(input) ?? kindFromStatus(input.status) ?? input.fallbackKind ?? 'unknown'
-
 export const providerFailureRetryable = (kind: ProviderFailureKind) => {
   switch (kind) {
     case 'rate_limit':
@@ -184,6 +207,38 @@ export const providerFailureRetryable = (kind: ProviderFailureKind) => {
     case 'unknown':
       return false
   }
+}
+
+/**
+ * Classify from structured fields first: the vendor's `providerCode` (`error.type`/`code`) when it
+ * names a kind, then the HTTP status. Free text (`message`, `body`, echoed request values removed)
+ * is the fallback when no status exists (stream error events), and otherwise only refines the
+ * status: it may name a non-retryable kind (an Anthropic 400 "prompt is too long" is
+ * `context_overflow`) or a more specific retryable one for a retryable status (a 503 "service
+ * unavailable" is `overloaded`), but never makes a failure retryable that its status (a 404 model
+ * error, a 401) leaves non-retryable.
+ */
+export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind => {
+  const fromCode =
+    input.providerCode === undefined ? undefined : kindFromSignal(input.providerCode.toLowerCase())
+
+  if (fromCode !== undefined) {
+    return fromCode
+  }
+
+  const fromStatus = kindFromStatus(input.status)
+  const fromText = kindFromSignal(scannedText(input))
+
+  if (
+    fromText !== undefined &&
+    (input.status === undefined ||
+      !providerFailureRetryable(fromText) ||
+      (fromStatus !== undefined && providerFailureRetryable(fromStatus)))
+  ) {
+    return fromText
+  }
+
+  return fromStatus ?? input.fallbackKind ?? 'unknown'
 }
 
 export const providerFailureCause = (kind: ProviderFailureKind): ProviderLlmErrorCause => {

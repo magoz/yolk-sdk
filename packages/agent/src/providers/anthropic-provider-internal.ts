@@ -1823,7 +1823,7 @@ const stringField = (value: Schema.Json | undefined, key: string) => {
   return Predicate.isString(raw) ? raw : undefined
 }
 
-type AnthropicHttpErrorInfo = {
+export type AnthropicHttpErrorInfo = {
   readonly message?: string
   readonly providerCode?: string
 }
@@ -1850,7 +1850,8 @@ const anthropicErrorProviderCode = (error: Schema.Json | undefined) =>
   stringField(error, 'type') ??
   stringField(error, 'code')
 
-const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
+/** The bounded `error.message` and provider code of an Anthropic error envelope, when present. */
+export const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
   Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
     Effect.map(parsed => {
       const error = jsonField(parsed, 'error')
@@ -1889,6 +1890,7 @@ type AnthropicHttpClassifyFields = {
   status: number
   headers: HttpClientResponse.HttpClientResponse['headers']
   body: string
+  echoedValues: ReadonlyArray<string>
   message?: string
   providerCode?: string
   quotaResetsAtMs?: number
@@ -2725,7 +2727,8 @@ const sendAnthropicClaudeRequest = (
             provider: anthropicClaudeProvider,
             status: response.status,
             headers: response.headers,
-            body: errorText
+            body: errorText,
+            echoedValues: [request.model]
           }
 
           if (quotaResetsAtMs !== undefined) {

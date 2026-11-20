@@ -479,6 +479,31 @@ describe('Vercel AI Gateway classifier errors', () => {
     })
   )
 
+  it.effect('never lets the echoed model id decide the kind', () =>
+    Effect.gen(function* () {
+      const model = 'acme/overloaded-context_length'
+
+      const failure = (status: number) =>
+        Effect.flip(
+          runClassify(
+            { state: 'Synthetic.', questions: approvalQuestions },
+            { status, body: `{"message":"Model '${model}' failed","error_type":"upstream_error"}` },
+            [],
+            { ...config, model, maxRetries: 0 }
+          )
+        )
+
+      expect(yield* failure(404)).toMatchObject({
+        retryable: false,
+        provider: { kind: 'unknown', status: 404, providerCode: 'upstream_error' }
+      })
+      expect(yield* failure(503)).toMatchObject({
+        retryable: true,
+        provider: { kind: 'server_error', status: 503, providerCode: 'upstream_error' }
+      })
+    })
+  )
+
   it.effect('reads the OpenAI-compatible envelope and classifies auth and rate limits', () =>
     Effect.gen(function* () {
       expect(

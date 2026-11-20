@@ -52,6 +52,7 @@ import {
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
   classifyProviderFailure,
+  echoedParamValues,
   providerErrorInfo,
   providerFailureCause,
   providerFailureRetryable
@@ -291,16 +292,25 @@ const decodeJsonString = (raw: string, message: string) =>
     Effect.mapError(schemaErrorToLlmError('invalid_response', message))
   )
 
+type OpenAiResponsesHttpError = {
+  readonly code: string | undefined
+  /** Request values the envelope echoes in `error.param`, kept out of the text fallback. */
+  readonly echoedValues: ReadonlyArray<string>
+}
+
 // Machine error codes are safe to surface in provider metadata. Free-text
 // upstream messages stay out of LLMError per provider sanitization policy.
-const decodeOpenAiHttpErrorCode = (raw: string): Effect.Effect<string | undefined> =>
+const decodeOpenAiHttpError = (raw: string): Effect.Effect<OpenAiResponsesHttpError> =>
   Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
     Effect.map(parsed => {
       const error = jsonObjectFromField(parsed, 'error')
 
-      return stringField(error, 'code') ?? stringField(error, 'type')
+      return {
+        code: stringField(error, 'code') ?? stringField(error, 'type'),
+        echoedValues: echoedParamValues(jsonField(error, 'param'))
+      }
     }),
-    Effect.catch(() => Effect.succeed(undefined))
+    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [] }))
   )
 
 const unsupportedContentError = (contentType: string, providerName: string) =>
@@ -1684,7 +1694,8 @@ const sendOpenAiResponsesRequest = (
         )
       )
 
-      const errorCode = yield* decodeOpenAiHttpErrorCode(errorText)
+      const error = yield* decodeOpenAiHttpError(errorText)
+      const echoedValues = [request.model, ...error.echoedValues]
 
       const quotaResetsAtMs = openAiCodexQuotaResetsAtMs({
         status: response.status,
@@ -1699,14 +1710,16 @@ const sendOpenAiResponsesRequest = (
               status: response.status,
               headers: response.headers,
               body: errorText,
-              providerCode: errorCode
+              providerCode: error.code,
+              echoedValues
             }
           : {
               provider: config.providerId,
               status: response.status,
               headers: response.headers,
               body: errorText,
-              providerCode: errorCode,
+              providerCode: error.code,
+              echoedValues,
               quotaResetsAtMs
             }
       )
