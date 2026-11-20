@@ -793,6 +793,60 @@ from another call reusing the id. A replay without event ids of a whole finished
 complete again; dedupe such replays by `eventId`. Until a start is seen, tool events act on the last run holding the call id, as before except those fences; a
 state built before `turnStart` behaves that way too.
 
+Hosts that keep their own snapshot (stored messages, pending requests, accepted interaction
+receipts) rebuild state from it. `toolRuns` can hold runs of several turns for one call id, so
+`buildAgentChatMessages` gives each run to one card, later runs first, each card taking at most one:
+a run holding a call (its own or its request's) takes the last card holding the same call (id, name
+and arguments equal); a run holding no call (an input still streaming, an answer or denial without
+its request) that answers an earlier run's request takes that run's card (a later denial wins over
+the pending approval it denies), else the last card with its id that no run took (one without a result message first while the run
+still waits on its result: an input streaming, a submitted interaction). A card no run reaches shows its own result message: the `ToolResult` after it,
+never another turn's reusing the id (a result with no card before it shows on its own). Give each
+run the call as the transcript holds it (`toolRunsFromHitlRequests` does, from the loop's
+requests): a run whose call equals no card's (arguments the host normalized or re-serialized) falls
+back to the last card with its id and name that no run took and that has no result message, and
+shows nowhere when there is none (a different name is another turn's call). When the snapshot's run
+may resume (a HITL answer, a stopped run going on), mark a run start on the rebuilt state:
+
+```ts
+import { initialAgentClientState, markAgentRunStart } from '@yolk-sdk/agent/client'
+import {
+  buildAgentChatMessages,
+  makeAgentChatEventProjectionState,
+  markChatRunStart
+} from '@yolk-sdk/agent/react'
+
+const projection = markChatRunStart(
+  makeAgentChatEventProjectionState(
+    buildAgentChatMessages({
+      messages,
+      toolRuns,
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      error: null
+    })
+  )
+)
+
+const client = markAgentRunStart({ ...initialAgentClientState, messages, toolRuns })
+```
+
+The resumed run's `AgentStart` can lie before the snapshot's stream cursor, and its tool batch
+runs before its first model turn; without a start, the batch acts on the last card or run holding
+its call id, which can be an earlier turn's (a client snapshot that keeps earlier turns' runs, or
+messages that lag the run). With the run start (`markChatRunStart` after the last message,
+`markAgentRunStart` after the last run), the batch reaches the snapshot's cards and runs only as
+the same call or, for answers, the one holding their request, and adds its own otherwise. A
+snapshot taken mid-turn keeps working: that turn's later host events name calls in the snapshot's
+last message (or runs holding them) and find them as the same call. That turn's later model events
+(input, provider results) before the next `LLMStreamStart` count as replays of an earlier run's, so
+a reused id among them can still reach an earlier turn's call, as without a start; a client that
+missed a run's `LLMStreamStart` otherwise (it connected mid-turn after a local submit, or an
+`AgentStart` replayed without `eventId` after the turn's `LLMStreamStart`, whose replay its event id
+then dedupes) has the same limit.
+The next `AgentStart` or `LLMStreamStart` replaces the run start.
+
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the
 execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
@@ -869,6 +923,8 @@ HITL is protocol-level, not UI-level:
 - Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON. `PlainHitlResponse` is a `Data.taggedEnum` value (`QuestionResponse` / `ToolApprovalResponse` / `InputResponse` / `InteractionResponse`); the helpers omit absent optionals then call those constructors (`_tag` last, plain objects, not Schema classes).
 - A call a remote system paused for input (an MCP server's form) returns `makeInputRequiredToolResult`; a person finishes it through the `makeInputReviewTool` interaction. See [Input-required tool calls](#input-required-tool-calls).
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
+  After rebuilding state from a snapshot whose run may resume, mark a run start
+  (`markChatRunStart`, `markAgentRunStart`; see [Replay-safe chat projection](#replay-safe-chat-projection)).
 - Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive. Typed input and interaction submissions stay pending until server acceptance; accepted interactions stay active until the actual outcome. Never synthesize an interaction result from local submission or acceptance.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 

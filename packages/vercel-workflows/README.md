@@ -476,7 +476,12 @@ Open cases:
   and `reduceAgentEvents` scopes its tool runs the same way (one run per turn for a reused id), so
   only until a client sees a start (it joined mid-turn) can a reused id still update an earlier
   turn's call or run (`AgentStart` and a local submit record a run start, so a resumed run's tool
-  batch before its next model turn stays on the paused call, #352). A client that never saw a later
+  batch before its next model turn stays on the paused call, #352; a host that rebuilds its state
+  from a snapshot and reads the run from a cursor past `AgentStart` marks one itself with
+  `markChatRunStart` / `markAgentRunStart`, #355). A client that joined mid-turn, or rebuilt from
+  a snapshot taken mid-turn, still applies that turn's model events before the next start as
+  replays, where a reused id can reach an earlier turn's call; its host events find calls in the
+  snapshot as the same call. A client that never saw a later
   turn's start has no bound on where a reconciled turn ends; the committed answer takes the first part of each of its calls
   after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes

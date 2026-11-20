@@ -1,5 +1,5 @@
-import { Effect, Layer, Predicate, Stream } from 'effect'
-import { describe, expect, it } from '@effect/vitest'
+import { Effect, Layer, Option, Predicate, Stream } from 'effect'
+import { describe, expect, expectTypeOf, it } from '@effect/vitest'
 import {
   AgentAwaitingInput,
   AssistantAgentMessage,
@@ -36,11 +36,14 @@ import {
 import {
   initialAgentClientState,
   markAgentAborted,
+  markAgentRunStart,
   reduceAgentEvents,
   submitAgentUserMessage,
-  type AgentClientState
+  type AgentClientModelTurnStart,
+  type AgentClientState,
+  type AgentClientTurnStart
 } from '../../src/client'
-import type { AgentToolRun } from '../../src/client/state.ts'
+import { AgentToolRun } from '../../src/client/state.ts'
 import { ContextTransformer, LoopConfig, run } from '../../src/loop/index.ts'
 import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing/index.ts'
 import { AgentChatAction } from '../../src/react/chat-actions.ts'
@@ -48,11 +51,13 @@ import {
   applyAgentEventToChatProjection,
   initialAgentChatState,
   makeAgentChatEventProjectionState,
+  markChatRunStart,
   reduceAgentChatState,
   type AgentChatEventProjectionState,
-  type AgentChatState
+  type AgentChatState,
+  type AgentChatTurnStart
 } from '../../src/react/chat-core.ts'
-import type { AgentChatMessage } from '../../src/react/chat-messages.ts'
+import { buildAgentChatMessages, type AgentChatMessage } from '../../src/react/chat-messages.ts'
 import { makeQuestionToolDef } from '../../src/tools/index.ts'
 
 // A loop resume emits `AgentStart`, then the resumed tool batch (answers, starts, results), before
@@ -401,4 +406,199 @@ describe('a loop resume of a call the client never saw', () => {
         )
       })
   )
+})
+
+describe('a host that rebuilds its state from a snapshot (#355)', () => {
+  // A snapshot host (o-o) rebuilds chat and client state from stored messages and runs, then
+  // streams the run from the snapshot's cursor: a resumed run's `AgentStart` may lie before it.
+  // `markChatRunStart` and `markAgentRunStart` give the rebuilt state the run start `AgentStart`
+  // would have set.
+  type Snapshot = {
+    readonly messages: ReadonlyArray<AgentMessage>
+    readonly toolRuns: ReadonlyArray<AgentToolRun>
+  }
+
+  const fromSnapshot = (snapshot: Snapshot, runStart: boolean): Reducers => {
+    const chatMessages = buildAgentChatMessages({
+      messages: snapshot.messages,
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: snapshot.toolRuns,
+      error: null
+    })
+
+    const rebuilt: Reducers = {
+      client: {
+        ...initialAgentClientState,
+        messages: snapshot.messages,
+        toolRuns: snapshot.toolRuns
+      },
+      projection: makeAgentChatEventProjectionState(chatMessages),
+      chat: { ...initialAgentChatState, chatMessages }
+    }
+
+    return runStart
+      ? {
+          client: markAgentRunStart(rebuilt.client),
+          projection: markChatRunStart(rebuilt.projection),
+          chat: markChatRunStart(rebuilt.chat)
+        }
+      : rebuilt
+  }
+
+  const user = UserMessage.make({ content: 'Weather in Oslo, then Bergen?' })
+
+  /** The earlier turn's run, which the host keeps beside the snapshot's messages. */
+  const osloRun = AgentToolRun.Completed({
+    call: oslo,
+    result: ToolResult.make({ toolCallId: 'call_0', content: '12C' }),
+    startedAtMs: 0,
+    endedAtMs: 0
+  })
+
+  const ended = ['weather {"city":"Oslo"}:Completed', 'weather {"city":"Bergen"}:Completed']
+
+  /** The resumed run's events from the snapshot's cursor: its `AgentStart` lies before it. */
+  const afterCursor = (events: ReadonlyArray<AgentEvent>) =>
+    events.filter(event => !Predicate.isTagged(event, 'AgentStart'))
+
+  it.effect("keeps a resumed approval's batch off an earlier turn's run", () =>
+    Effect.gen(function* () {
+      const approval = ToolApprovalRequest.make({
+        requestId: 'approval:call_0',
+        toolCallId: 'call_0',
+        call: bergen
+      })
+
+      // The person approved; the reconciled snapshot no longer holds the request as pending.
+      const snapshot: Snapshot = {
+        messages: [user, turnOne, osloResult, turnTwo],
+        toolRuns: [osloRun]
+      }
+
+      const resumed = yield* resume({
+        messages: [user, turnOne, osloResult, turnTwo],
+        tools: [gatedWeatherDef],
+        hitlResponses: [
+          ToolApprovalResponse.make({
+            requestId: approval.requestId,
+            toolCallId: 'call_0',
+            decision: 'approved',
+            source: 'user'
+          })
+        ],
+        awaitingRequests: [approval]
+      })
+
+      expect(tags(resumed).slice(0, 4)).toEqual([
+        'AgentStart',
+        'ToolApprovalGranted',
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted'
+      ])
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), afterCursor(resumed)))).toEqual(
+        all(ended)
+      )
+
+      // Without the run start, the client's batch replaced the earlier turn's run.
+      expect(
+        calls(applyEvents(fromSnapshot(snapshot, false), afterCursor(resumed))).client
+      ).toEqual(['weather {"city":"Bergen"}:Completed'])
+    })
+  )
+
+  it.effect(
+    "adds a resumed call the snapshot's messages lack, leaving an earlier turn's call",
+    () =>
+      Effect.gen(function* () {
+        // The host stored the run's messages before turn 2 (`call_0` reused for Bergen) committed;
+        // the stopped batch resumes it.
+        const snapshot: Snapshot = { messages: [user, turnOne, osloResult], toolRuns: [osloRun] }
+
+        const resumed = yield* resume({
+          messages: [user, turnOne, osloResult, turnTwo],
+          tools: [weatherDef]
+        })
+
+        expect(tags(resumed).slice(0, 3)).toEqual([
+          'AgentStart',
+          'ToolExecutionStarted',
+          'ToolExecutionCompleted'
+        ])
+
+        expect(calls(applyEvents(fromSnapshot(snapshot, true), afterCursor(resumed)))).toEqual(
+          all(ended)
+        )
+      })
+  )
+
+  it('types the marked state with its run start, not a narrower start the input had', () => {
+    const modelStart: AgentChatTurnStart & { readonly run?: undefined } = {
+      streamId: 'run-1',
+      turn: 2,
+      after: Option.none()
+    }
+
+    const marked = markChatRunStart({
+      ...makeAgentChatEventProjectionState(),
+      turnStart: modelStart
+    })
+
+    expectTypeOf(marked.turnStart).toEqualTypeOf<AgentChatTurnStart>()
+    expect(marked.turnStart).toEqual({ streamId: '', turn: 0, after: Option.none(), run: true })
+
+    const clientStart: AgentClientModelTurnStart = { streamId: 'run-1', turn: 2, firstRun: 0 }
+    const client = markAgentRunStart({ ...initialAgentClientState, turnStart: clientStart })
+
+    expectTypeOf(client.turnStart).toEqualTypeOf<AgentClientTurnStart | undefined>()
+    expect(client.turnStart).toEqual({ streamId: '', turn: 0, firstRun: 0, run: true })
+  })
+
+  describe('taken mid-turn, while the turn runs its tool batch', () => {
+    // The turn's own later host events name calls in the snapshot's last message: they find them
+    // as the same call, after the run start.
+    const snapshot: Snapshot = {
+      messages: [user, turnOne, osloResult, turnTwo],
+      toolRuns: [osloRun, AgentToolRun.InputReady({ call: bergen })]
+    }
+
+    it("lands the batch on the last message's call", () => {
+      const events = [
+        ToolExecutionStarted.make({ ...host(), call: bergen }),
+        ToolExecutionCompleted.make({
+          ...host(),
+          call: bergen,
+          result: ToolResult.make({ toolCallId: 'call_0', content: '9C' })
+        }),
+        ...modelTurn(3, answer(done))
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+    })
+
+    it("lands a request on the last message's call", () => {
+      const approval = ToolApprovalRequest.make({
+        requestId: 'approval:call_0',
+        toolCallId: 'call_0',
+        call: bergen
+      })
+
+      const events = [
+        ToolApprovalRequested.make({ ...host(), call: bergen, request: approval }),
+        AgentAwaitingInput.make({
+          ...host(),
+          requests: [approval],
+          messages: [turnOne, osloResult, turnTwo],
+          turns: 2,
+          usage: zeroAgentUsage
+        })
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(
+        all(['weather {"city":"Oslo"}:Completed', 'weather {"city":"Bergen"}:ApprovalRequested'])
+      )
+    })
+  })
 })

@@ -1,5 +1,6 @@
 import { Array as Arr, Data, Equal, Match, Option, Predicate } from 'effect'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
+import { isActiveToolRun, toolRunCall, toolRunId, toolRunRequestId } from '../client/state.ts'
 import {
   isInstructionMessage,
   AssistantAgentMessage,
@@ -329,65 +330,192 @@ const toolResultFromMessage = (message: ToolResultMessage): ToolResult =>
     })()
   )
 
-const toolResultEntry = (
-  message: AgentMessage
-): ReadonlyArray<readonly [string, ToolResultMessage]> =>
-  Predicate.isTagged(message, 'ToolResult') ? [[message.toolCallId, message]] : []
+/**
+ * A tool call part of an assistant message in `buildAgentChatMessages`' input: `key` names the part
+ * (`assistantToolPartKey`), `messageIndex` its message.
+ */
+type ToolCallSlot = {
+  readonly key: string
+  readonly messageIndex: number
+  readonly call: ToolCall
+}
 
-const collectToolResultsById = (messages: ReadonlyArray<AgentMessage>) =>
-  new Map(messages.flatMap(toolResultEntry))
+const assistantToolPartKey = (messageIndex: number, partIndex: number) =>
+  `${messageIndex}:${partIndex}`
 
-const collectToolCallIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
-  new Set(
-    messages.flatMap(message =>
-      Predicate.isTagged(message, 'Assistant')
-        ? message.parts.flatMap(part =>
-            Predicate.isTagged(part, 'HostToolCall') || Predicate.isTagged(part, 'ProviderToolCall')
-              ? [part.call.id]
-              : []
-          )
-        : []
+const collectToolCallSlots = (messages: ReadonlyArray<AgentMessage>): ReadonlyArray<ToolCallSlot> =>
+  messages.flatMap((message, messageIndex) =>
+    Predicate.isTagged(message, 'Assistant')
+      ? message.parts.flatMap((part, partIndex) =>
+          Predicate.isTagged(part, 'HostToolCall') || Predicate.isTagged(part, 'ProviderToolCall')
+            ? [
+                {
+                  key: assistantToolPartKey(messageIndex, partIndex),
+                  messageIndex,
+                  call: part.call
+                }
+              ]
+            : []
+        )
+      : []
+  )
+
+const findLastSlot = (
+  slots: ReadonlyArray<ToolCallSlot>,
+  predicate: (slot: ToolCallSlot) => boolean
+): ToolCallSlot | undefined => Option.getOrUndefined(Arr.findLast(slots, predicate))
+
+/** A result message paired with the tool call part it belongs to (`collectToolResultPairs`). */
+type PairedToolResult = {
+  readonly key: string
+  readonly message: ToolResultMessage
+  readonly messageIndex: number
+}
+
+/**
+ * The tool call part each `ToolResult` message belongs to: the last part with its id before it
+ * (providers reuse call ids across turns, so a result never reaches another turn's call, earlier
+ * or later). A result with no part before it pairs with none and shows as its own message; a part
+ * no result follows has none (several results: the last).
+ */
+const collectToolResultPairs = (
+  messages: ReadonlyArray<AgentMessage>,
+  slots: ReadonlyArray<ToolCallSlot>
+): ReadonlyArray<PairedToolResult> =>
+  messages.flatMap((message, messageIndex) => {
+    if (!Predicate.isTagged(message, 'ToolResult')) return []
+
+    const slot = findLastSlot(
+      slots,
+      current => current.messageIndex < messageIndex && current.call.id === message.toolCallId
     )
-  )
 
-const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] =>
-  Match.value(run).pipe(
-    Match.tag('InputStreaming', current => [current.id, current] as const),
-    Match.tag('Denied', current => [current.toolCallId, current] as const),
-    Match.tag('QuestionRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'QuestionAnswered',
-      'QuestionCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag('InputRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'InputSubmitted',
-      'InputCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag('InteractionRequested', current => [current.request.toolCallId, current] as const),
-    Match.tag(
-      'InteractionSubmitted',
-      'InteractionCancelled',
-      current => [current.response.toolCallId, current] as const
-    ),
-    Match.tag(
-      'InputReady',
-      'ApprovalRequested',
-      'Executing',
-      'Accepted',
-      'Completed',
-      'Errored',
-      'ProviderCompleted',
-      current => [current.call.id, current] as const
-    ),
-    Match.exhaustive
-  )
+    return slot === undefined ? [] : [{ key: slot.key, message, messageIndex }]
+  })
 
-const collectToolRunsById = (
-  runs: ReadonlyArray<AgentToolRun>
-): ReadonlyMap<string, AgentToolRun> => new Map(runs.map(toolRunEntry))
+/** A run placed on a part, with its index in `toolRuns`. */
+type PlacedToolRun = {
+  readonly run: AgentToolRun
+  readonly index: number
+}
+
+/**
+ * Whether a run holding no call (`answer`) is the answer to `run`: a denial to a pending approval,
+ * another answer to the run holding the request it answers (`requestId`).
+ */
+const answersToolRun = (answer: AgentToolRun, run: AgentToolRun) => {
+  if (Predicate.isTagged(answer, 'Denied')) return Predicate.isTagged(run, 'ApprovalRequested')
+
+  const requestId = toolRunRequestId(answer)
+
+  return requestId !== undefined && toolRunRequestId(run) === requestId
+}
+
+/**
+ * The run each tool call part shows. `toolRuns` can hold one run per turn for a reused call id
+ * (`reduceAgentEvents`), and snapshot hosts pass runs of several turns (pending requests, accepted
+ * interactions), so a run goes to one part, later runs first (the last run of a call is its
+ * latest), each part taking at most one:
+ *
+ * - A run holding a call (`toolRunCall`: its own, or its request's) takes the last part holding the
+ *   same call (id, name and arguments equal) no later run took; when no part holds it (arguments a
+ *   host normalized), the last untaken part with its id and name and no result message, so a
+ *   pending request is never hidden. A different name is another turn's call: it shows nowhere.
+ * - Then a run holding no call (an input still streaming, an answer or denial without its request)
+ *   that answers an earlier run on a part (`answersToolRun`) replaces it there, as the later state
+ *   of that call (unless a later answer already did); else it takes the last untaken part with its
+ *   id: one without a result message first when the run still waits on its result
+ *   (`isActiveToolRun`: an input streaming, a submitted interaction), any otherwise (a settled
+ *   answer or denial).
+ *
+ * A part no run reaches keeps the state its messages give it.
+ */
+const collectToolRunsByPart = (
+  slots: ReadonlyArray<ToolCallSlot>,
+  runs: ReadonlyArray<AgentToolRun>,
+  results: ReadonlyMap<string, PairedToolResult>
+): ReadonlyMap<string, AgentToolRun> => {
+  const latestFirst = Arr.reverse(runs.map((run, index): PlacedToolRun => ({ run, index })))
+
+  const place = (
+    placed: ReadonlyMap<string, PlacedToolRun>,
+    slot: ToolCallSlot | undefined,
+    run: PlacedToolRun
+  ): ReadonlyMap<string, PlacedToolRun> =>
+    slot === undefined ? placed : new Map([...placed, [slot.key, run]])
+
+  const untaken =
+    (placed: ReadonlyMap<string, PlacedToolRun>, matches: (slot: ToolCallSlot) => boolean) =>
+    (slot: ToolCallSlot) =>
+      !placed.has(slot.key) && matches(slot)
+
+  const withoutResult = (slot: ToolCallSlot) => !results.has(slot.key)
+
+  const byCall = latestFirst.reduce<ReadonlyMap<string, PlacedToolRun>>((placed, current) => {
+    const call = toolRunCall(current.run)
+
+    if (call === undefined) return placed
+
+    const exact = (slot: ToolCallSlot) => Equal.equals(slot.call, call)
+
+    if (slots.some(exact))
+      return place(placed, findLastSlot(slots, untaken(placed, exact)), current)
+
+    return place(
+      placed,
+      findLastSlot(
+        slots,
+        untaken(
+          placed,
+          slot => slot.call.id === call.id && slot.call.name === call.name && withoutResult(slot)
+        )
+      ),
+      current
+    )
+  }, new Map())
+
+  const placed = latestFirst.reduce<ReadonlyMap<string, PlacedToolRun>>((placed, current) => {
+    if (toolRunCall(current.run) !== undefined) return placed
+
+    const id = toolRunId(current.run)
+    const withId = (slot: ToolCallSlot) => slot.call.id === id
+
+    const answered = findLastSlot(slots, slot => {
+      const claimant = byCall.get(slot.key)
+
+      return (
+        withId(slot) &&
+        claimant !== undefined &&
+        claimant.index < current.index &&
+        answersToolRun(current.run, claimant.run)
+      )
+    })
+
+    if (answered !== undefined) {
+      // A later answer of the same call already replaced the run it answers.
+      return placed.get(answered.key) === byCall.get(answered.key)
+        ? place(placed, answered, current)
+        : placed
+    }
+
+    // A run still waiting on its result (an input streaming, a submitted interaction the server has
+    // not run) belongs to a part without one; a settled answer to the plain last part, as before.
+    const waiting = isActiveToolRun(current.run)
+
+    return place(
+      placed,
+      (waiting
+        ? findLastSlot(
+            slots,
+            untaken(placed, slot => withId(slot) && withoutResult(slot))
+          )
+        : undefined) ?? findLastSlot(slots, untaken(placed, withId)),
+      current
+    )
+  }, byCall)
+
+  return new Map(Arr.map([...placed], ([key, current]) => [key, current.run] as const))
+}
 
 const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | undefined =>
   Match.value(state).pipe(
@@ -611,16 +739,25 @@ const toolStateFor = (
   return ChatToolState.Called()
 }
 
+/** Each tool call part's run and result message, by `assistantToolPartKey`. */
+type ToolPartSources = {
+  readonly toolResultsByPart: ReadonlyMap<string, PairedToolResult>
+  readonly toolRunsByPart: ReadonlyMap<string, AgentToolRun>
+}
+
+const noToolPartSources: ToolPartSources = {
+  toolResultsByPart: new Map(),
+  toolRunsByPart: new Map()
+}
+
 const assistantPartsFromMessage = ({
   message,
   messageIndex,
-  toolResultsById,
-  toolRunsById
+  sources
 }: {
   readonly message: Extract<AgentMessage, { readonly _tag: 'Assistant' }>
   readonly messageIndex: number
-  readonly toolResultsById: ReadonlyMap<string, ToolResultMessage>
-  readonly toolRunsById: ReadonlyMap<string, AgentToolRun>
+  readonly sources: ToolPartSources
 }): ReadonlyArray<AgentChatPart> => {
   return message.parts.flatMap((part, partIndex): ReadonlyArray<AgentChatPart> =>
     Match.value(part).pipe(
@@ -648,8 +785,8 @@ const assistantPartsFromMessage = ({
           id: `message-${messageIndex}-tool-call-${current.call.id}`,
           call: current.call,
           state: toolStateFor(
-            toolRunsById.get(current.call.id),
-            toolResultsById.get(current.call.id)
+            sources.toolRunsByPart.get(assistantToolPartKey(messageIndex, partIndex)),
+            sources.toolResultsByPart.get(assistantToolPartKey(messageIndex, partIndex))?.message
           )
         })
       ]),
@@ -673,8 +810,7 @@ const assistantChatMessage = (
   parts: ReadonlyArray<AgentChatPart> = assistantPartsFromMessage({
     message,
     messageIndex: sequence,
-    toolResultsById: new Map(),
-    toolRunsById: new Map()
+    sources: noToolPartSources
   })
 ): AgentChatMessage => ({
   id: messageId(sequence, 'assistant'),
@@ -1457,8 +1593,7 @@ const partsFromAssistantMessage = (
   const parts = assistantPartsFromMessage({
     message,
     messageIndex,
-    toolResultsById: new Map(),
-    toolRunsById: new Map()
+    sources: noToolPartSources
   }).flatMap((part): ReadonlyArray<AgentChatPart> => {
     if (!Predicate.isTagged(part, 'ToolCall')) return [part]
 
@@ -2372,17 +2507,16 @@ const chatMessagesFromProtocolMessage = ({
   sequence,
   currentTurnId,
   toolNames,
-  toolResultsById,
-  toolCallIds,
-  toolRunsById
+  pairedResults,
+  sources
 }: {
   readonly message: AgentMessage
   readonly sequence: number
   readonly currentTurnId: string
   readonly toolNames: ReadonlyMap<string, string>
-  readonly toolResultsById: ReadonlyMap<string, ToolResultMessage>
-  readonly toolCallIds: ReadonlySet<string>
-  readonly toolRunsById: ReadonlyMap<string, AgentToolRun>
+  /** The indices of the result messages a tool call part shows; the others show on their own. */
+  readonly pairedResults: ReadonlySet<number>
+  readonly sources: ToolPartSources
 }): ReadonlyArray<AgentChatMessage> =>
   Match.value(message).pipe(
     Match.withReturnType<ReadonlyArray<AgentChatMessage>>(),
@@ -2398,13 +2532,12 @@ const chatMessagesFromProtocolMessage = ({
         parts: assistantPartsFromMessage({
           message: current,
           messageIndex: sequence,
-          toolResultsById,
-          toolRunsById
+          sources
         })
       }
     ]),
     Match.tag('ToolResult', current =>
-      toolCallIds.has(current.toolCallId)
+      pairedResults.has(sequence)
         ? []
         : [
             {
@@ -2521,9 +2654,15 @@ export const buildAgentChatMessages = ({
   error
 }: BuildAgentChatMessagesInput): ReadonlyArray<AgentChatMessage> => {
   const toolNames = collectToolNames(messages, toolRuns)
-  const toolResultsById = collectToolResultsById(messages)
-  const toolCallIds = collectToolCallIds(messages)
-  const toolRunsById = collectToolRunsById(toolRuns)
+  const slots = collectToolCallSlots(messages)
+  const resultPairs = collectToolResultPairs(messages, slots)
+  const toolResultsByPart = new Map(resultPairs.map(pair => [pair.key, pair] as const))
+  const pairedResults = new Set(resultPairs.map(pair => pair.messageIndex))
+
+  const sources: ToolPartSources = {
+    toolResultsByPart,
+    toolRunsByPart: collectToolRunsByPart(slots, toolRuns, toolResultsByPart)
+  }
 
   const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>(
     (current, message, index) => {
@@ -2540,9 +2679,8 @@ export const buildAgentChatMessages = ({
           sequence: index,
           currentTurnId,
           toolNames,
-          toolResultsById,
-          toolCallIds,
-          toolRunsById
+          pairedResults,
+          sources
         })
       ]
     },

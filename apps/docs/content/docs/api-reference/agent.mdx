@@ -470,6 +470,7 @@ See [Background subagents](../agent/tools-hitl#background-subagents).
 | `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers                   |
 | `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents`                                                                      | client reducer helpers                         |
 | `toolRunsFromHitlRequests`                                                                                                             | paused UI hydration                            |
+| `markAgentRunStart`                                                                                                                    | run start after a snapshot rebuild             |
 | `documentPartFromTextFile`, `textFromBlob`                                                                                             | browser file/blob helpers returning `Effect`   |
 | `BlobTextReadError`                                                                                                                    | file/blob read failure                         |
 | `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
@@ -493,6 +494,7 @@ helpers. Hosts own auth, pending-request matching, and server validation.
 | `buildAgentChatItems`                                                                                                                 | render-friendly item model                    |
 | `applyAgentEventToChatProjection`                                                                                                     | replay-safe durable projection                |
 | `makeAgentChatEventProjectionState`                                                                                                   | projection initial state                      |
+| `markChatRunStart`                                                                                                                    | run start after a snapshot rebuild            |
 | `applyAgentEventToChatMessages`                                                                                                       | ephemeral stream reducer                      |
 | `buildAgentChatMessages`, `toAgentMessages`                                                                                           | convert chat UI messages to protocol messages |
 | `getActiveChatToolParts`, `getCompletedChatToolParts`, `getAgentChatLiveActivityCount`                                                | chat projection selectors                     |
