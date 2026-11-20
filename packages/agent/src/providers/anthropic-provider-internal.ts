@@ -2065,18 +2065,19 @@ const emptyUsageStep = (previous: AnthropicUsageComponents): AnthropicStreamUsag
 })
 
 /**
- * How a response is read. Claude decodes its prefixed tool names, completes at EOF and keeps
- * thinking signatures under `reasoningReplayProvider`; without one, thinking stays text only.
+ * How a response is read. Claude decodes its prefixed tool names, accepts a JSON body without a
+ * `stop_reason` (compatibility) and keeps thinking signatures under `reasoningReplayProvider`;
+ * without one, thinking stays text only. Every stream requires `message_stop`.
  */
 type AnthropicResponseOptions = {
   readonly decodeToolName: (name: string) => string
-  readonly allowEofCompletion: boolean
+  readonly requireJsonStopReason: boolean
   readonly reasoningReplayProvider: string | undefined
 }
 
 const anthropicClaudeResponseOptions: AnthropicResponseOptions = {
   decodeToolName: unprefixClaudeToolName,
-  allowEofCompletion: true,
+  requireJsonStopReason: false,
   reasoningReplayProvider: anthropicClaudeProvider
 }
 
@@ -2178,7 +2179,7 @@ const parseAnthropicJsonResponse = (
     const parsed = yield* decodeAnthropicMessageResponse(json)
 
     if (
-      !options.allowEofCompletion &&
+      options.requireJsonStopReason &&
       (parsed.stop_reason === null || parsed.stop_reason.trim().length === 0)
     ) {
       return yield* Effect.fail(
@@ -2280,6 +2281,19 @@ const anthropicTerminalError = (reason: 'max_tokens' | 'content_filter') =>
         ? 'Anthropic Claude stopped after reaching max_tokens'
         : 'Anthropic Claude response stopped with content_filter',
     retryable: false
+  })
+
+/**
+ * A stream that ended without `message_stop` emitted no `Done`, so it is the loop's incomplete
+ * stream (`missing_done`), raised here so direct consumers of the provider see it too. A
+ * `message_delta` stop reason is not terminal: only `message_stop` ends a message.
+ */
+const missingMessageStopError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Anthropic Messages stream ended without message_stop',
+    retryable: false,
+    responseIssue: 'missing_done'
   })
 
 const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
@@ -2601,24 +2615,7 @@ const finalizeBodyState = (
     }
 
     if (!sseState.hasDone) {
-      if (!options.allowEofCompletion) {
-        return yield* Effect.fail(
-          new LLMError({
-            cause: 'invalid_response',
-            message: 'Anthropic Messages stream ended without message_stop',
-            retryable: false
-          })
-        )
-      }
-
-      const stopReason = sseState.hasToolCall ? 'tool_use' : 'stop'
-
-      // The final usage rides on `message_delta`; cut before it, any usage sent is partial.
-      events.push(
-        sseState.hasFinalUsage
-          ? LLMDone.make({ stopReason })
-          : LLMDone.make({ stopReason, usageUnavailable: true })
-      )
+      return yield* Effect.fail(missingMessageStopError())
     }
 
     return events

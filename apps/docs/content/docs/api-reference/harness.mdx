@@ -168,4 +168,4 @@ That adapter does not persist Inbox, closures, or automatically reconstruct work
 
 `attemptModelTurn` does not add an outer retry loop. Configured `LoopConfig.maxRetries` and provider retry decorators still apply inside that invocation. Hosts that own physical-attempt scheduling should pass `maxRetries: 0` and skip retry decorators.
 
-`onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`. Incomplete streams use kernel `responseIssue: 'missing_done'` only.
+`onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`. Incomplete streams use `responseIssue: 'missing_done'` only (set by the kernel, or by a provider whose stream ended without its terminal event).

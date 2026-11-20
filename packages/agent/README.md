@@ -162,7 +162,7 @@ const program = run({
 Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
 Merge them with `makeAgentLoopLayer`. Omitted tools use `ToolExecutor.unavailable`; omitted transformer/config use identity and `LoopConfig.defaultLayer`.
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
-Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`.
+Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream; the partial keeps reasoning replay state, and an `LLMReasoningReplay` event alone does not count as started output. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`; Anthropic Messages streams (Claude and OpenCode Go `messages`) that end without `message_stop` fail the same way at the provider.
 
 ```ts
 import { makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
@@ -476,7 +476,8 @@ policy and emits protocol-visible retry/error state:
   compaction wrapper may compact and retry once.
 - Anthropic `max_tokens` and OpenAI-compatible `finish_reason: "length"` / `"content_filter"`
   completions fail as non-retryable `invalid_response` instead of reporting truncated or filtered
-  output as complete.
+  output as complete. Anthropic Messages streams cut before `message_stop` fail the same way, with
+  `responseIssue: 'missing_done'`.
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
@@ -741,37 +742,40 @@ changes an earlier turn's call with the same id. `AgentStart` and the `useAgentC
 submit, HITL answer, regenerate and edit record a run start (`turnStart.run`, after the last
 message): a resumed run's tool batch, which the loop runs before its first model turn, then acts
 only on the paused call (or adds its own card), never on an earlier turn's call reusing its id
-(#352). The model's events before the run's first model turn replay an earlier run's: they act on
-a call before the run's messages when one holds their id (never on the resumed batch's call
-reusing it), else as with no start known (a host that streams without `LLMStreamStart`). When the
-turn does not hold the call (a replay without event id, a batch event
-arriving after the next turn started, or a resumed tool batch), a host event acts on an earlier part
-instead of adding a card: a request (approval, question, input, interaction) or a
-tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
-answer (question, input or interaction response, approval denial) on the last earlier part holding
-the request it answers (a denial: a pending approval), else on nothing. A request (including
-`AgentAwaitingInput`'s requests) never reopens a call past its request: a part answered,
-cancelled, denied or finished keeps its state against a request for the same call, with or without
-event id, and the `useAgentChat` reducer keeps its status when every request of an
-`AgentAwaitingInput` names such a call (a replayed pause does not block the run again) and blocks
-only on the pending requests of a pause that names some. The loop asks for a call only until it
-has a result or used an answer: an invalid input answer re-pends the same request while the part
-is still pending (only a valid payload emits `InputSubmitted`), a running call has no result, so
-an abort leaves it running and the next run that resumes it asks again (the card shows), and a
+(#352). The model's events before the run's first model turn replay an earlier run's: they act on a
+call before the run's messages when one holds their id (never on the resumed batch's call reusing
+it), else as with no start known (a host that streams without `LLMStreamStart`). When the turn does
+not hold the call (a replay without event id, a batch event arriving after the next turn started, or
+a resumed tool batch), a host event acts on an earlier part instead of adding a card: a request
+(approval, question, input, interaction) or a tool-batch event on the last earlier part holding the
+same call (id, name and arguments equal); an answer (question, input or interaction response,
+approval denial) on the last earlier part holding the request it answers (a denial: a pending
+approval), else on nothing. A request (including `AgentAwaitingInput`'s requests) never reopens a
+call past its request: a part answered, cancelled, denied or finished keeps its state against a
+request for the same call, with or without event id, and the `useAgentChat` reducer keeps its status
+when every request of an `AgentAwaitingInput` names such a call (a replayed pause does not block the
+run again) and blocks only on the pending requests of a pause that names some. A host that folds
+status itself beside the projection uses `stepAgentChatProjection`: it applies the event as
+`applyAgentEventToChatProjection` does and returns `statusEvent`, the event the reducer's status
+follows (the pause with only its pending requests), or `undefined` when the status must not move (a
+seen or dropped event, a replayed start of a finished call, a pause naming only such calls); fold it
+with `nextAgentStatus` or collect it for `agentStatusFromEvents`. The loop asks for a call only
+until it has a result or used an answer: an invalid input answer re-pends the same request while the
+part is still pending (only a valid payload emits `InputSubmitted`), a running call has no result,
+so an abort leaves it running and the next run that resumes it asks again (the card shows), and a
 later turn reusing the id asks on its own part. Tool-batch and request events must therefore carry
 the call exactly as the model emitted it: a host that normalizes arguments between the model's
 events and its own adds a second card for a replayed or late event. A replayed start of the same
-call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone;
-a start whose arguments differ is another call's and reopens a completed or errored part (an
-accepted one keeps its fence), as in `reduceAgentEvents`.
-Until a start is seen (a state built before `turnStart` too), and always in
-`applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a
-reused id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a
-later call reusing the id whose `AssistantMessage` arrives without `ToolInputStart`/`ToolInputEnd`
-while the earlier call's message is the last assistant message replaces that message, keeps the
-earlier call's settled state and ignores its own request; the loop always emits `ToolInputEnd`,
-which resets the part); answers, approval denials and added acceptance or interaction results
-update that one call, not every call with the id.
+call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone; a
+start whose arguments differ is another call's and reopens a completed or errored part (an accepted
+one keeps its fence), as in `reduceAgentEvents`. Until a start is seen (a state built before
+`turnStart` too), and always in `applyAgentEventToChatMessages`, a tool event matches the last
+message holding the call, so a reused id can still update an earlier turn's call there (in
+`applyAgentEventToChatMessages`, a later call reusing the id whose `AssistantMessage` arrives
+without `ToolInputStart`/`ToolInputEnd` while the earlier call's message is the last assistant
+message replaces that message, keeps the earlier call's settled state and ignores its own request;
+the loop always emits `ToolInputEnd`, which resets the part); answers, approval denials and added
+acceptance or interaction results update that one call, not every call with the id.
 
 `reduceAgentEvents` scopes tool runs the same way: its state records where the latest turn's runs
 start in `toolRuns` (`turnStart`, an `AgentClientTurnStart`), so a later turn's call reusing an id

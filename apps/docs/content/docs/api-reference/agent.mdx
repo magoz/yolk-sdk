@@ -127,7 +127,7 @@ immutable receipt storage and host-owned rendering. `InteractionSubmitted` is no
 | `ContextTransformer`                                                                | host context compaction/injection service                                                                          |
 | `LoopConfig`                                                                        | loop limits/retry config service                                                                                   |
 | `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                                                                                   |
-| `LLMResponseIssue`                                                                  | kernel-only `'missing_done'` literal                                                                               |
+| `LLMResponseIssue`                                                                  | `'missing_done'` literal: a stream that ended without `Done`                                                       |
 | `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                                                                                         |
 | `LLMReasoningReplay`                                                                | provider event closing a reasoning block with its replay state (tag `ReasoningReplay`)                             |
 | `LoopConfigSettings`                                                                | settings object for `LoopConfig.layer` (renamed from `LoopConfigShape`)                                            |
@@ -493,6 +493,7 @@ helpers. Hosts own auth, pending-request matching, and server validation.
 | `useAgentChat`                                                                                                                        | headless chat hook                            |
 | `buildAgentChatItems`                                                                                                                 | render-friendly item model                    |
 | `applyAgentEventToChatProjection`                                                                                                     | replay-safe durable projection                |
+| `stepAgentChatProjection`, `AgentChatProjectionStep`                                                                                  | projection plus the event status follows      |
 | `makeAgentChatEventProjectionState`                                                                                                   | projection initial state                      |
 | `markChatRunStart`                                                                                                                    | run start after a snapshot rebuild            |
 | `applyAgentEventToChatMessages`                                                                                                       | ephemeral stream reducer                      |

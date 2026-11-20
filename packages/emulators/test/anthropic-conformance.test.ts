@@ -14,7 +14,8 @@ import {
   LLMError,
   LLMProvider,
   LLMTextDelta,
-  LLMUsage,
+  makeAgentLoopLayer,
+  runModelTurn,
   type LLMEvent
 } from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
@@ -434,6 +435,7 @@ describe('faults through the native Messages provider (x-api-key)', () => {
 
       expect(error.retryable).toBe(false)
       expect(error.cause).toBe('invalid_response')
+      expect(error.responseIssue).toBe('missing_done')
     })
   )
 })
@@ -441,11 +443,42 @@ describe('faults through the native Messages provider (x-api-key)', () => {
 const doneReasons = (events: Iterable<LLMEvent>) =>
   Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
 
-/** Each Done's stop reason and whether it says the requested usage never arrived. */
-const doneSignals = (events: Iterable<LLMEvent>) =>
-  Array.from(events).flatMap(event =>
-    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
-  )
+const textOf = (events: Iterable<LLMEvent>) =>
+  Array.from(events)
+    .flatMap(event => (event instanceof LLMTextDelta ? [event.text] : []))
+    .join('')
+
+/** Streams until the provider fails; returns the events it emitted first and the error. */
+const failThroughProvider = <E1, E2>(
+  provider: Layer.Layer<LLMProvider, E1, HttpClient.HttpClient>,
+  emulator: AnthropicEmulator,
+  transport: (emulator: AnthropicEmulator) => Layer.Layer<HttpClient.HttpClient, E2>
+) =>
+  Effect.gen(function* () {
+    const llm = yield* LLMProvider
+    const seen = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
+
+    const error = yield* llm
+      .stream({
+        model: anthropicConformanceDefaultModels.plainText,
+        systemPrompt: 'Reply in one short sentence.',
+        messages: [UserMessage.make({ content: 'Say hello.' })],
+        tools: []
+      })
+      .pipe(
+        Stream.runForEach(event => Ref.update(seen, events => [...events, event])),
+        Effect.flip
+      )
+
+    return { events: yield* Ref.get(seen), error: expectLlmError(error) }
+  }).pipe(Effect.provide(provider.pipe(Layer.provide(transport(emulator)))))
+
+/** The loop's incomplete stream: no `Done`, so non-retryable `invalid_response` `missing_done`. */
+const expectMissingDone = (error: LLMError) => {
+  expect(error.cause).toBe('invalid_response')
+  expect(error.retryable).toBe(false)
+  expect(error.responseIssue).toBe('missing_done')
+}
 
 describe('the Claude subscription provider (bearer) against the emulator', () => {
   it.effect('completes a turn and sends the OAuth wire the emulator records', () =>
@@ -510,41 +543,64 @@ describe('the Claude subscription provider (bearer) against the emulator', () =>
       })
   )
 
-  // The default answer streams one event per chunk: message_start, content_block_start, ping,
-  // three text deltas, content_block_stop, message_delta (stop reason and final usage), and
-  // message_stop.
-  it.effect('keeps its EOF-completion compatibility for a stream cut before message_stop', () =>
-    Effect.gen(function* () {
-      // Unlike native Messages, the Claude provider treats EOF without `message_stop` as a
-      // normal end (existing compatibility behaviour, recorded here, not endorsed). The cut
-      // keeps `message_delta`, so the final usage arrived and Done is not marked.
-      const events = yield* streamThroughProvider(
-        claudeProvider,
-        withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]),
-        inProcessLayer
-      )
+  it.effect(
+    'a stream cut after message_delta, before message_stop, fails as missing_done without Done',
+    () =>
+      Effect.gen(function* () {
+        // Eight chunks end with `message_delta` (`stop_reason: end_turn`): its stop reason is not
+        // terminal, only `message_stop` is.
+        const { events, error } = yield* failThroughProvider(
+          claudeProvider,
+          withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]),
+          inProcessLayer
+        )
 
-      expect(doneSignals(events)).toEqual([['stop', undefined]])
+        expectMissingDone(error)
+        expect(textOf(events)).not.toBe('')
+        expect(doneReasons(events)).toEqual([])
+      })
+  )
+
+  it.effect('a stream cut mid-text fails as missing_done after the partial text', () =>
+    Effect.gen(function* () {
+      // message_start, content_block_start, ping, then one text_delta.
+      const { events, error } = yield* failThroughProvider(
+        claudeProvider,
+        withFaults([{ kind: 'truncate-after-chunks', chunks: 4 }]),
+        emulatedLayer
+      ).pipe(Effect.scoped)
+
+      expectMissingDone(error)
+      expect(textOf(events)).not.toBe('')
+      expect(doneReasons(events)).toEqual([])
     })
   )
 
-  it.effect('marks usage unavailable when an EOF completion lost message_delta', () =>
+  it.effect('a truncated stream fails the loop model turn as missing_done', () =>
     Effect.gen(function* () {
-      const emulator = withFaults([{ kind: 'truncate-after-chunks', chunks: 7 }])
-
-      const events = Array.from(
-        yield* streamThroughProvider(claudeProvider, emulator, inProcessLayer)
+      const error = expectLlmError(
+        yield* runModelTurn({
+          model: anthropicConformanceDefaultModels.plainText,
+          systemPrompt: 'Reply in one short sentence.',
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          tools: [],
+          turn: 1
+        }).pipe(
+          Stream.runDrain,
+          Effect.provide(
+            makeAgentLoopLayer({
+              provider: claudeProvider.pipe(
+                Layer.provide(
+                  inProcessLayer(withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]))
+                )
+              )
+            })
+          ),
+          Effect.flip
+        )
       )
 
-      // The text is whole, but the final usage `message_delta` carries never arrived: only the
-      // partial `message_start` usage did.
-      expect(events.some(event => event instanceof LLMTextDelta)).toBe(true)
-      expect(events.filter(event => event instanceof LLMUsage)).toHaveLength(1)
-      expect(doneSignals(events)).toEqual([['stop', true]])
-      expect(emulator.ledger.entries()[0]).toMatchObject({
-        fault: 'truncate-after-chunks',
-        bodyChunks: 7
-      })
+      expectMissingDone(error)
     })
   )
 })

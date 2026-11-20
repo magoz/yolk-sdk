@@ -39,7 +39,8 @@ Durable transports may replay events. Prefer event ids and projection helpers fo
 
 - `useAgentChat`
 - `buildAgentChatItems`
-- `applyAgentEventToChatProjection`
+- `applyAgentEventToChatProjection`, and `stepAgentChatProjection` for a host that folds status
+  beside it
 - chat reducer and selectors
 - tagged constructors: `AgentChatPart`, `ChatToolState`, `AgentChatItem`, `ToolRunState`,
   `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`,
@@ -131,7 +132,9 @@ replayed or late request or tool-batch event updates the earlier part holding th
 the call as the model emitted it), and a replayed answer the part holding its request. A replayed
 request (or `AgentAwaitingInput`) never reopens a call already answered, cancelled, denied or
 finished, and the `useAgentChat` reducer keeps its status when a replayed `AgentAwaitingInput`
-names only such calls (a pause naming some blocks only on its pending requests). An invalid input answer re-pends a request that is still pending, and a
+names only such calls (a pause naming some blocks only on its pending requests); a host folding
+status beside the projection gets the same answer from `stepAgentChatProjection`
+([status](./status#from-live-events)). An invalid input answer re-pends a request that is still pending, and a
 running call stopped by an abort is asked again when the next run resumes it. A replayed start of
 the same call leaves a completed, accepted or errored call, and the status, alone. `AgentStart` and
 a local submit (or answer, regenerate, edit) mark a run start, so a resumed run's tool batch,

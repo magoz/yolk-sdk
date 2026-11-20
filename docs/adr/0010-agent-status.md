@@ -56,7 +56,9 @@ replayed start of a settled call: the client for a call with an acknowledged `To
 `Accepted` or `Errored` tool part of the same call (`isFinishedToolCall`, #352). The React chat reducer and the client reducer also skip status for a
 replayed `AgentAwaitingInput` whose every request names a call already past its request (answered,
 cancelled, denied or finished), whose part or tool run the replay leaves unchanged, and block a
-pause that names some such calls only on its other requests.
+pause that names some such calls only on its other requests. Hosts that keep a chat projection
+and fold status themselves get the React reducer's answer from `stepAgentChatProjection`
+(`statusEvent`), the step the reducer folds.
 
 `AgentError` gains an optional `abortReason` (`AgentAbortReason`, also the loop's `AbortError`
 reason) because the reason only existed inside the message text, and status must never parse
