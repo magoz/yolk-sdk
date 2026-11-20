@@ -283,8 +283,8 @@ tool schema, validation, event metadata shape, and result formatting. Host apps 
 execution: available model/reasoning choices, provider layers, prompts, auth, concrete tools,
 storage, and policy. When choices are configured, the tool exposes optional `model` and
 `reasoning_effort` fields; omission lets the host inherit its current runtime settings. Model ids
-are opaque host values. Reasoning effort values are `minimal`, `low`, `medium`, `high`, and
-`xhigh`.
+are opaque host values. Reasoning effort values are `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`.
 
 Use `makeNonRecursiveSubagentToolModule` for the top-level agent so nested subagents do not receive
 `subagent` again:

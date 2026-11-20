@@ -23,11 +23,14 @@ export type WorkerLoaderCode = {
   readonly modules: Readonly<Record<string, string>>
   /** `null`: the script's isolate has no network access. */
   readonly globalOutbound: null
+  /** CPU time the isolate may use per invocation; past it the runtime throws. */
+  readonly limits: { readonly cpuMs: number }
 }
 
 /**
  * The part of a Worker Loader binding (`worker_loaders` in the Worker's config) the executor uses.
- * Workers types' `WorkerLoader` satisfies it.
+ * Workers types' `WorkerLoader` satisfies it. The loaded Worker and its entrypoint are disposed
+ * (`Symbol.dispose`) when an execution ends, when they have it.
  */
 export interface WorkerLoader {
   load(code: WorkerLoaderCode): { getEntrypoint(): unknown }
@@ -41,10 +44,22 @@ export type DynamicWorkerCodeModeExecutorOptions = {
   readonly loader: () => WorkerLoader
   /** Compatibility date of the script's isolate. Default `2026-05-12`. */
   readonly compatibilityDate?: string
+  /**
+   * CPU milliseconds a script's isolate may use (`limits.cpuMs` of the loaded Worker), floored,
+   * at least 1. Default `defaultDynamicWorkerCpuMs` (500). This is the real ceiling of a script:
+   * the execution's `timeoutMs` only answers the caller early and cannot stop a synchronous loop,
+   * which keeps running (and is billed) until it reaches this limit. Time spent waiting for tool
+   * calls is not CPU time. A script past it fails with `timeout` (`Execution exceeded its CPU limit
+   * of <cpuMs> ms`).
+   */
+  readonly cpuMs?: number
 }
 
 /** Default compatibility date of a script's isolate. */
 export const defaultDynamicWorkerCompatibilityDate = '2026-05-12'
+
+/** Default CPU limit of a script's isolate, in milliseconds. */
+export const defaultDynamicWorkerCpuMs = 500
 
 type CallReply =
   | { readonly ok: true; readonly payload: string | null }
@@ -52,11 +67,31 @@ type CallReply =
 
 const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** The host side of a script's calls, passed to the isolate as an RPC stub. */
+/** What a tool or global call still pending when the execution ended (or arriving later) gets. */
+const executionEndedMessage =
+  'The script ended before this call settled; await every tool call before returning.'
+
+// Tool rejections cross encoded for the tools guard; globals keep pi's plain message.
+const ended = (kind: string): CallReply => ({
+  ok: false,
+  message:
+    kind === 'global'
+      ? executionEndedMessage
+      : encodedRejection(new Error(executionEndedMessage)).message
+})
+
+/**
+ * The host side of a script's calls, passed to the isolate as an RPC stub. Its calls live as long
+ * as the execution (`signal`): once it aborts, calls still pending answer at once with
+ * `executionEndedMessage` (the tools see the signal abort), and later calls get the same answer
+ * without running. A Dynamic Worker counts as in flight while it waits on a call to the host, so an
+ * unawaited call must not keep it open (4 per request, 10 per Durable Object).
+ */
 class ToolHost extends RpcTarget {
   readonly #tools: ReadonlyMap<string, CodeModeExecutorTool>
   readonly #globals: ReadonlyMap<string, CodeModeExecutorGlobal>
   readonly #signal: AbortSignal
+  readonly #ended: Promise<void>
 
   constructor(
     tools: ReadonlyArray<CodeModeExecutorTool>,
@@ -67,10 +102,21 @@ class ToolHost extends RpcTarget {
     this.#tools = new Map(tools.map(tool => [tool.name, tool]))
     this.#globals = new Map(globals.map(global => [global.name, global]))
     this.#signal = signal
+    this.#ended = new Promise(resolve => {
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    })
   }
 
   /** `kind` is `call` (a tool) or `global`; arguments and results cross as JSON text. */
   async call(kind: string, name: string, argsJson: string | null): Promise<CallReply> {
+    if (this.#signal.aborted) return ended(kind)
+
+    const reply = this.#execute(kind, name, argsJson)
+
+    return await Promise.race([reply, this.#ended.then(() => ended(kind))])
+  }
+
+  async #execute(kind: string, name: string, argsJson: string | null): Promise<CallReply> {
     const target = kind === 'global' ? this.#globals.get(name) : this.#tools.get(name)
 
     if (target === undefined) return { ok: false, message: `Unknown ${kind} ${name}` }
@@ -135,6 +181,12 @@ const stripTypes = (code: string): Stripped => {
 }
 
 /**
+ * What a call gets when its RPC to the host itself fails (the host never rejects: it answers with
+ * a reply). Fixed, so runtime error text never reaches the script.
+ */
+const hostCallFailedMessage = 'The call could not reach the host.'
+
+/**
  * The isolate's main module: a `WorkerEntrypoint` whose `run` evaluates pi's prelude around the
  * guarded script and resolves with `{ ok, payload, writes, output }` once the script is done.
  */
@@ -149,7 +201,7 @@ export default class CodeModeScript extends WorkerEntrypoint {
         if (kind === "call" || kind === "global") {
           host.call(kind, b, c === undefined ? null : c).then(
             (reply) => reply.ok ? api.settle(a, true, reply.payload === null ? undefined : reply.payload) : api.settle(a, false, reply.message),
-            (error) => api.settle(a, false, String(error && error.message ? error.message : error))
+            () => api.settle(a, false, ${JSON.stringify(hostCallFailedMessage)})
           );
           return;
         }
@@ -310,29 +362,77 @@ type ScriptEntrypoint = {
 const isScriptEntrypoint = (value: unknown): value is ScriptEntrypoint =>
   Predicate.hasProperty(value, 'run') && Predicate.isFunction(value.run)
 
+const loadFailed = failure({ kind: 'sandbox', message: 'Could not load the script sandbox.' })
+
+const sandboxFailed = failure({ kind: 'sandbox', message: 'The script sandbox failed.' })
+
+// workerd's errors for a Worker past its CPU time ("exceeded CPU time limit", "CPU limit").
+const isCpuLimitError = (error: unknown) => /\bcpu\b.*\blimit/i.test(describeError(error))
+
+/**
+ * A failed `run` (the isolate itself failed, not the script): never the runtime's text, which is
+ * not the script's and may carry host details.
+ */
+const fromRunFailure = (error: unknown, cpuMs: number): CodeModeExecutionResult =>
+  isCpuLimitError(error)
+    ? failure({ kind: 'timeout', message: `Execution exceeded its CPU limit of ${cpuMs} ms` })
+    : sandboxFailed
+
+/**
+ * Disposes a loaded Worker or entrypoint stub when it has `Symbol.dispose`, so its native handle is
+ * released now instead of at garbage collection. Never throws.
+ */
+const disposeQuietly = (resource: unknown) => {
+  if (!Predicate.hasProperty(resource, Symbol.dispose)) return
+
+  const dispose = resource[Symbol.dispose]
+
+  if (!Predicate.isFunction(dispose)) return
+
+  try {
+    dispose.call(resource)
+  } catch {
+    // Best effort: disposal never changes the execution's result.
+  }
+}
+
 /**
  * A `CodeModeExecutor` on Cloudflare Dynamic Workers (a Worker Loader binding): each execution
  * loads a fresh isolate with no network access (`globalOutbound: null`) running pi's prelude
  * (`tools`, `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`/`load`) around the script,
  * and its tool and global calls come back to this Worker over RPC. The same script contract as
  * `makePiCodeModeExecutor` (TypeScript stripped first, the same tools guard and rejection codes),
- * which a Worker cannot run (it needs a worker thread).
+ * which a Worker cannot run (it needs a worker thread). Every execution is one `load()`, one billed
+ * Dynamic Worker.
  *
- * The timeout and abort signal end the execution on the host side; the isolate is dropped with
- * it. `memoryLimitBytes` does not apply (Workers cap isolate memory themselves), and there is no
- * per-executor concurrency cap. Needs the `cloudflare:workers` module, so only a Worker can load
- * this subpath.
+ * Limits: the isolate gets `limits.cpuMs` (`cpuMs`, default 500), the real ceiling of a script.
+ * The timeout and abort signal only answer the caller early: the isolate may keep running until
+ * its CPU limit. When the execution ends (result, timeout, abort, failure), tool and global calls
+ * still pending are answered at once with a fixed "ended" rejection and their signal aborts, later
+ * calls get the same rejection without running, and the loaded Worker and its entrypoint are
+ * disposed. `memoryLimitBytes` does not apply (Workers cap isolate memory themselves), and there is
+ * no per-executor concurrency cap.
+ *
+ * Errors: what the script controls reaches the caller as on Node (its thrown error's name, message
+ * and stack, parse errors, tool and global rejections). Failures of the loader or the isolate
+ * itself become fixed messages (`sandbox`, or `timeout` past the CPU limit), never the runtime's
+ * text.
+ *
+ * Needs the `cloudflare:workers` module, so only a Worker can load this subpath.
  */
 export const makeDynamicWorkerCodeModeExecutor = (
   options: DynamicWorkerCodeModeExecutorOptions
-): CodeModeExecutor => ({
-  execute: async (code: string, execution: CodeModeExecuteOptions) => {
+): CodeModeExecutor => {
+  const cpuMs = Math.max(1, Math.floor(options.cpuMs ?? defaultDynamicWorkerCpuMs))
+
+  const execute = async (code: string, execution: CodeModeExecuteOptions) => {
     if (execution.signal.aborted) return failure({ kind: 'aborted', message: 'Execution aborted' })
 
     const stripped = stripTypes(code)
 
     if (!stripped.ok) return failure(stripped.error)
 
+    // The execution's lifetime: aborted when it ends for any reason, which ends its calls.
     const controller = new AbortController()
     const abort = () => controller.abort()
 
@@ -358,24 +458,34 @@ export const makeDynamicWorkerCodeModeExecutor = (
       )
     )
 
+    const host = new ToolHost(execution.tools, execution.globals, controller.signal)
     let timer: ReturnType<typeof setTimeout> | undefined
+    let worker: unknown
+    let entrypoint: unknown
 
     try {
-      const worker = options.loader().load({
-        compatibilityDate: options.compatibilityDate ?? defaultDynamicWorkerCompatibilityDate,
-        mainModule: 'script.js',
-        modules: { 'script.js': scriptModule(script) },
-        globalOutbound: null
-      })
+      try {
+        const loaded = options.loader().load({
+          compatibilityDate: options.compatibilityDate ?? defaultDynamicWorkerCompatibilityDate,
+          mainModule: 'script.js',
+          modules: { 'script.js': scriptModule(script) },
+          globalOutbound: null,
+          limits: { cpuMs }
+        })
 
-      const host = new ToolHost(execution.tools, execution.globals, controller.signal)
-      const entrypoint = worker.getEntrypoint()
+        worker = loaded
+        entrypoint = loaded.getEntrypoint()
+      } catch {
+        return loadFailed
+      }
 
       if (!isScriptEntrypoint(entrypoint)) {
         return failure({ kind: 'sandbox', message: 'The loaded Worker has no run entrypoint.' })
       }
 
-      const run = entrypoint.run(host, toolsJson, globalsJson, storeJson)
+      const run = entrypoint
+        .run(host, toolsJson, globalsJson, storeJson)
+        .then(fromIsolate, (error: unknown) => fromRunFailure(error, cpuMs))
 
       const deadline = new Promise<CodeModeExecutionResult>(resolve => {
         timer = setTimeout(
@@ -398,18 +508,19 @@ export const makeDynamicWorkerCodeModeExecutor = (
         )
       })
 
-      return await Promise.race([run.then(fromIsolate), deadline, aborted])
-    } catch (error) {
-      return failure({
-        kind: 'sandbox',
-        message: `The script sandbox failed: ${describeError(error)}`
-      })
+      return await Promise.race([run, deadline, aborted])
+    } catch {
+      return sandboxFailed
     } finally {
       if (timer !== undefined) clearTimeout(timer)
 
       execution.signal.removeEventListener('abort', abort)
-      // Cancels tool calls still running (their signal) once the script ended.
+      // Ends the execution: pending calls answer at once and their tools' signal aborts.
       controller.abort()
+      disposeQuietly(entrypoint)
+      disposeQuietly(worker)
     }
   }
-})
+
+  return { execute }
+}

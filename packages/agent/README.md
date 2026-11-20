@@ -248,7 +248,7 @@ unchanged. Messages failures are not re-routed. Errors carrying provider metadat
 `OpenCode Go <cause>`, with the failed check in `provider.providerCode`.
 
 Request `reasoningEffort` becomes chat `reasoning_effort`, Messages `output_config.effort` (omitting
-`minimal`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the
+`minimal`, rejecting `none`), or Responses `reasoning.effort` with `summary: 'auto'`. `reasoningSummary` changes the
 Responses summary mode. Hosts must offer only model-supported efforts and media capabilities.
 Chat preserves provider `reasoning_content` in events and assistant replay. No OAuth, model discovery,
 automatic polling, or example-app UI integration is included.
@@ -282,7 +282,7 @@ Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent 
 `VERCEL_OIDC_TOKEN`, and requires integer
 `AI_GATEWAY_MAX_COMPLETION_TOKENS`. Model ids are opaque `provider/model` strings. Hosts may set
 `fallbackModels`, provider `routing`, and optional `http-referer` / `x-title` attribution headers.
-A request `reasoningEffort` is sent as Gateway `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking` toggle merged into the request body). Hosts remain responsible for offering only efforts supported by the selected model. Required
+A request `reasoningEffort` is sent as Gateway `{ reasoning: { effort } }` by default; `reasoningEffortFormat: 'reasoning-effort'` sends the literal field instead (e.g. for DeepSeek-style hosts, with an optional `thinking` toggle merged into the request body), and `'omit'` never sends the effort and never fails (a model without reasoning behind a shared effort setting). Hosts remain responsible for offering only efforts supported by the selected model. Required
 authorization and JSON headers cannot be replaced through `extraHeaders`. Only override
 `chatCompletionsUrl` with a trusted proxy because it receives the bearer credential.
 
@@ -298,10 +298,19 @@ the OAuth bearer. xAI controls the public CLI OAuth client and private, unsuppor
 so hosts should treat those surfaces as changeable and confirm that their use complies with xAI
 terms.
 
-Set optional `reasoningEffort` on `run` or `runRuntime`; provider adapters lower it to vendor
-configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` through
-`output_config.effort`. It omits `minimal`, which Anthropic does not support. Hosts remain
-responsible for choosing an effort accepted by the selected provider and model.
+Set optional `reasoningEffort` on `run` or `runRuntime` (`none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max`); provider adapters lower it to vendor configuration. Anthropic Claude
+forwards `low`, `medium`, `high`, `xhigh`, and `max` through `output_config.effort`. It omits
+`minimal` and rejects `none` (a `validation_error` `LLMError`), which Anthropic does not support.
+Codex, Grok, Gateway, and OpenAI chat pass every value through; the endpoint rejects what the model
+lacks. Hosts remain responsible for choosing an effort accepted by the selected provider and model.
+
+The OpenAI chat provider sends the effort as `reasoning_effort` on the native endpoint (the default
+`chatCompletionsUrl`). Other endpoints need `reasoningEffortFormat` (`reasoning-effort` or
+`reasoning-object`): without it, a request with an effort fails with a `validation_error` instead of
+being sent without it. `reasoningEffortFormat: 'omit'` never sends the effort and never fails, on
+any endpoint: use it for a model without reasoning (which rejects the field) behind a shared effort
+setting.
 
 Newer Claude models think by default but return empty thinking blocks unless asked. Set
 `thinking: { display: 'summarized' }` on `makeAnthropicClaudeProviderLayer` to stream readable

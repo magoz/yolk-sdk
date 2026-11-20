@@ -1,7 +1,8 @@
-import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Ref, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentReasoningEffort,
   AudioPart,
   AssistantAgentMessage,
   AssistantTextPart,
@@ -193,6 +194,27 @@ describe('OpenAI Codex provider', () => {
       })
 
       expect(body).not.toHaveProperty('max_output_tokens')
+    })
+  )
+
+  it.effect('passes none and max through as request and default efforts', () =>
+    Effect.gen(function* () {
+      for (const value of ['none', 'max']) {
+        // Decoded as a host decodes a stored or submitted effort.
+        const effort = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(value)
+
+        const requested = yield* toOpenAiCodexRequestBody({
+          ...defaultCodexRequest,
+          reasoningEffort: effort
+        })
+
+        const defaulted = yield* toOpenAiCodexRequestBody(defaultCodexRequest, {
+          defaultReasoningEffort: effort
+        })
+
+        expect(requested.reasoning).toEqual({ effort: value, summary: 'auto' })
+        expect(defaulted.reasoning).toEqual({ effort: value, summary: 'auto' })
+      }
     })
   )
 
