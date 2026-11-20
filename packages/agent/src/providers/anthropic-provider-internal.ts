@@ -2198,6 +2198,8 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
+  /** `message_delta` carried usage: its cumulative counts are the message's final usage. */
+  readonly hasFinalUsage: boolean
   /** A thinking block closed without the signature its replay needs. */
   readonly hasUnsignedThinking: boolean
   readonly stopReason?: string
@@ -2207,6 +2209,7 @@ type AnthropicSseState = {
 type AnthropicSseStateFields = {
   hasToolCall: boolean
   hasDone: boolean
+  hasFinalUsage: boolean
   hasUnsignedThinking: boolean
   stopReason?: string
   usage: AnthropicUsageComponents
@@ -2226,6 +2229,7 @@ type AnthropicBodyState = {
 const initialSseState: AnthropicSseState = {
   hasToolCall: false,
   hasDone: false,
+  hasFinalUsage: false,
   hasUnsignedThinking: false,
   usage: zeroAnthropicUsageComponents
 }
@@ -2435,6 +2439,7 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         state: (() => {
           const nextState: AnthropicSseStateFields = {
             ...state,
+            hasFinalUsage: state.hasFinalUsage || Predicate.isTagged(parsedUsage, 'Some'),
             usage: step.snapshot
           }
 
@@ -2606,7 +2611,14 @@ const finalizeBodyState = (
         )
       }
 
-      events.push(LLMDone.make({ stopReason: sseState.hasToolCall ? 'tool_use' : 'stop' }))
+      const stopReason = sseState.hasToolCall ? 'tool_use' : 'stop'
+
+      // The final usage rides on `message_delta`; cut before it, any usage sent is partial.
+      events.push(
+        sseState.hasFinalUsage
+          ? LLMDone.make({ stopReason })
+          : LLMDone.make({ stopReason, usageUnavailable: true })
+      )
     }
 
     return events

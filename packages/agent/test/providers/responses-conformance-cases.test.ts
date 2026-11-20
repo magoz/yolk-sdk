@@ -298,8 +298,11 @@ const completedResponseOf = (event: SseEvent): JsonRecord | undefined =>
     ? event.json.response
     : undefined
 
-const doneReasons = (events: Iterable<LLMEvent>) =>
-  Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
 
 const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
 
@@ -779,6 +782,15 @@ const describeFamily = <Req>(family: Family<Req>) => {
         'no-terminal'
       )
 
+    it.effect('leaves Done unmarked when response.completed carries the usage', () =>
+      Effect.gen(function* () {
+        const events = yield* streamFixture(family.terminal.fixture)
+
+        expect(doneSignals(events)).toEqual([['stop', undefined]])
+        expect(events.map(event => event._tag)).toContain('Usage')
+      })
+    )
+
     if (family.allowsEofCompletion) {
       it.effect(
         'keeps EOF-completion compatibility: no response.completed still completes, and the case fails',
@@ -786,8 +798,9 @@ const describeFamily = <Req>(family: Family<Req>) => {
           Effect.gen(function* () {
             const events = yield* streamFixture(withoutTerminal())
 
-            // The provider treats EOF as a normal end (Done without usage).
-            expect(doneReasons(events)).toEqual(['stop'])
+            // The provider treats EOF as a normal end; its Done says the usage, which only
+            // `response.completed` carries, never arrived.
+            expect(doneSignals(events)).toEqual([['stop', true]])
             expect(events.map(event => event._tag)).not.toContain('Usage')
 
             // The case reads the body, so a missing terminal event still fails it.

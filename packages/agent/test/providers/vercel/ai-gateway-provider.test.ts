@@ -7,15 +7,20 @@ import {
   LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
-  LLMUsage
+  LLMUsage,
+  makeAgentLoopLayer,
+  run
 } from '@yolk-sdk/agent/loop'
 import {
   DocumentPart,
+  LLMStreamEnd,
   ToolCall,
   ToolResult,
   TextPart,
   UserMessage,
   inlineBase64Source,
+  zeroAgentUsage,
+  type AgentEvent,
   type AgentMessage,
   type AgentReasoningEffort
 } from '@yolk-sdk/agent/protocol'
@@ -787,6 +792,18 @@ const textOf = (events: ReadonlyArray<unknown>) =>
 const reasoningOf = (events: ReadonlyArray<unknown>) =>
   events.flatMap(event => (event instanceof LLMReasoningDelta ? [event.text] : [])).join('')
 
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<unknown>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
+
+/** Each protocol `LLMStreamEnd`'s turn and whether it says the turn's usage never arrived. */
+const streamEndSignals = (events: ReadonlyArray<AgentEvent>) =>
+  events.flatMap(event =>
+    event instanceof LLMStreamEnd ? [[event.turn, event.usageUnavailable]] : []
+  )
+
 describe('Vercel AI Gateway wire fixtures', () => {
   it.effect('ship as valid, secret-free fixtures', () =>
     Effect.gen(function* () {
@@ -1203,8 +1220,8 @@ describe('Vercel AI Gateway streaming over replayed fixtures', () => {
 // finish event itself, but OpenAI-compatible APIs with `stream_options.include_usage` may send it
 // as a separate usage-only event (`choices: []`) after the finish. This moves the recorded `usage`
 // out of the finish event into such an event before `[DONE]`; all other events keep their recorded
-// bytes, one per network chunk. It is kept to pin the #109 behaviour where a cut after the finish
-// loses that usage.
+// bytes, one per network chunk. It pins the #109 behaviour: a cut after the finish loses that usage,
+// and the Done says so.
 const usageAfterFinishFixture = (): WireFixture => {
   const base = vercelAiGatewayPlainTextFixture
   const events = recordedSseEvents(base)
@@ -1432,9 +1449,8 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
       )
 
       expect(textOf(streamed)).toBe((yield* fixtureDeltas(fixture)).content)
-      expect(streamed.filter(event => event instanceof LLMDone)).toMatchObject([
-        LLMDone.make({ stopReason: 'stop' })
-      ])
+      // The usage arrived, so the Done does not say it is missing.
+      expect(doneSignals(streamed)).toEqual([['stop', undefined]])
       expect(streamed.some(event => event instanceof LLMUsage)).toBe(true)
 
       const entries = yield* (yield* ReplayLedger).entries
@@ -1454,11 +1470,12 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
     )
   })
 
-  // Pinned current behaviour (follow-up #109): when usage arrives as its own event after the
-  // finish, a cut between the two completes with Done(stop) and silently drops the usage. Uses the
-  // semi-synthetic `usageAfterFinishFixture` above; the live Gateway recording has no such gap.
+  // When usage arrives as its own event after the finish, a cut between the two still completes
+  // with Done(stop) (the answer is whole; failing would re-run and re-bill the model), and the Done
+  // says the requested usage never arrived (#109). Uses the semi-synthetic `usageAfterFinishFixture`
+  // above; the live Gateway recording has no such gap.
   it.effect(
-    'completes a stream truncated between the finish and a later usage event without usage',
+    'completes a stream truncated between the finish and a later usage event, marking usage unavailable',
     () => {
       const derived = usageAfterFinishFixture()
       const events = recordedSseEvents(derived)
@@ -1474,9 +1491,7 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
         )
 
         expect(textOf(streamed)).toBe((yield* fixtureDeltas(fixture)).content)
-        expect(streamed.filter(event => event instanceof LLMDone)).toMatchObject([
-          LLMDone.make({ stopReason: 'stop' })
-        ])
+        expect(doneSignals(streamed)).toEqual([['stop', true]])
         expect(streamed.some(event => event instanceof LLMUsage)).toBe(false)
 
         const entries = yield* (yield* ReplayLedger).entries
@@ -1505,11 +1520,65 @@ describe('Vercel AI Gateway streaming under wire faults', () => {
         yield* gatewayStream({ model: fixtureModel(fixture) }).pipe(Stream.runCollect)
       )
 
-      expect(streamed.filter(event => event instanceof LLMDone)).toMatchObject([
-        LLMDone.make({ stopReason: 'stop' })
-      ])
+      expect(doneSignals(streamed)).toEqual([['stop', undefined]])
       expect(streamed.some(event => event instanceof LLMUsage)).toBe(true)
       yield* expectRecordedRequests(fixture)
     }).pipe(Effect.provide(replayGatewayLayer(config, [usageAfterFinishFixture()])))
+  )
+
+  // The loop forwards the signal on the protocol `LLMStreamEnd`, the event hosts persist, and
+  // still ends the run normally with the usage it has (none here).
+  it.effect('marks the model stream end when a truncated stream loses its usage', () => {
+    const derived = usageAfterFinishFixture()
+    const finishEvent = recordedSseEvents(derived).find(isFinishEvent) ?? expect.fail('no finish')
+
+    return Effect.gen(function* () {
+      const events = Array.from(
+        yield* run({
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          systemPrompt: 'Reply in one short sentence.',
+          tools: [],
+          model: fixtureModel(derived)
+        }).pipe(Stream.runCollect)
+      )
+
+      expect(streamEndSignals(events)).toEqual([[1, true]])
+      expect(events.some(event => Predicate.isTagged(event, 'UsageUpdate'))).toBe(false)
+
+      const end = events.at(-1)
+
+      expect(end?._tag).toBe('AgentEnd')
+      expect(Predicate.isTagged(end, 'AgentEnd') ? end.usage : undefined).toEqual(zeroAgentUsage)
+    }).pipe(
+      Effect.provide(
+        makeAgentLoopLayer({
+          provider: replayGatewayLayer(
+            config,
+            [derived],
+            [WireFault.TruncateAfterChunks({ chunks: finishEvent.chunkIndex + 1 })]
+          )
+        })
+      )
+    )
+  })
+
+  it.effect('leaves the model stream end unmarked when the usage arrives', () =>
+    Effect.gen(function* () {
+      const events = Array.from(
+        yield* run({
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          systemPrompt: 'Reply in one short sentence.',
+          tools: [],
+          model: fixtureModel(fixture)
+        }).pipe(Stream.runCollect)
+      )
+
+      expect(streamEndSignals(events)).toEqual([[1, undefined]])
+      expect(events.some(event => Predicate.isTagged(event, 'UsageUpdate'))).toBe(true)
+    }).pipe(
+      Effect.provide(
+        makeAgentLoopLayer({ provider: replayGatewayLayer(config, [usageAfterFinishFixture()]) })
+      )
+    )
   )
 })

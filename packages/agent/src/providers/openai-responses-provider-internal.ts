@@ -1539,7 +1539,13 @@ const finalizeBodyState = (
         )
       }
 
-      events.push(LLMDone.make({ stopReason: sseState.toolCallIds.size > 0 ? 'tool_use' : 'stop' }))
+      // Usage arrives only on `response.completed`, which never came.
+      events.push(
+        LLMDone.make({
+          stopReason: sseState.toolCallIds.size > 0 ? 'tool_use' : 'stop',
+          usageUnavailable: true
+        })
+      )
     }
 
     return events

@@ -27,7 +27,16 @@ export class LLMReasoningReplay extends Schema.TaggedClass<LLMReasoningReplay>()
 ) {}
 
 export class LLMDone extends Schema.TaggedClass<LLMDone>()('Done', {
-  stopReason: Schema.Literals(['stop', 'tool_use'])
+  stopReason: Schema.Literals(['stop', 'tool_use']),
+  /**
+   * The stream completed without the final usage report its request asked for (a streamed chat
+   * completion with `stream_options.include_usage` that ended without a usage chunk, a Codex
+   * stream ending without `response.completed`, a Claude stream ending without `message_delta`).
+   * The turn is complete, but its token usage is missing, or partial when earlier `Usage` events
+   * arrived. Absent when the report arrived or the request asked for none. The loop forwards it on
+   * `LLMStreamEnd`; hosts decide how to account for it.
+   */
+  usageUnavailable: Schema.optional(Schema.Literal(true))
 }) {}
 
 export class LLMToolCall extends Schema.TaggedClass<LLMToolCall>()('ToolCall', {

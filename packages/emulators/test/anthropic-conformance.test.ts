@@ -9,7 +9,14 @@
 import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMDone, LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
+import {
+  LLMDone,
+  LLMError,
+  LLMProvider,
+  LLMTextDelta,
+  LLMUsage,
+  type LLMEvent
+} from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
@@ -434,6 +441,12 @@ describe('faults through the native Messages provider (x-api-key)', () => {
 const doneReasons = (events: Iterable<LLMEvent>) =>
   Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
 
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
+
 describe('the Claude subscription provider (bearer) against the emulator', () => {
   it.effect('completes a turn and sends the OAuth wire the emulator records', () =>
     Effect.gen(function* () {
@@ -497,17 +510,41 @@ describe('the Claude subscription provider (bearer) against the emulator', () =>
       })
   )
 
+  // The default answer streams one event per chunk: message_start, content_block_start, ping,
+  // three text deltas, content_block_stop, message_delta (stop reason and final usage), and
+  // message_stop.
   it.effect('keeps its EOF-completion compatibility for a stream cut before message_stop', () =>
     Effect.gen(function* () {
       // Unlike native Messages, the Claude provider treats EOF without `message_stop` as a
-      // normal end (existing compatibility behaviour, recorded here, not endorsed).
+      // normal end (existing compatibility behaviour, recorded here, not endorsed). The cut
+      // keeps `message_delta`, so the final usage arrived and Done is not marked.
       const events = yield* streamThroughProvider(
         claudeProvider,
         withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]),
         inProcessLayer
       )
 
-      expect(doneReasons(events)).toEqual(['stop'])
+      expect(doneSignals(events)).toEqual([['stop', undefined]])
+    })
+  )
+
+  it.effect('marks usage unavailable when an EOF completion lost message_delta', () =>
+    Effect.gen(function* () {
+      const emulator = withFaults([{ kind: 'truncate-after-chunks', chunks: 7 }])
+
+      const events = Array.from(
+        yield* streamThroughProvider(claudeProvider, emulator, inProcessLayer)
+      )
+
+      // The text is whole, but the final usage `message_delta` carries never arrived: only the
+      // partial `message_start` usage did.
+      expect(events.some(event => event instanceof LLMTextDelta)).toBe(true)
+      expect(events.filter(event => event instanceof LLMUsage)).toHaveLength(1)
+      expect(doneSignals(events)).toEqual([['stop', true]])
+      expect(emulator.ledger.entries()[0]).toMatchObject({
+        fault: 'truncate-after-chunks',
+        bodyChunks: 7
+      })
     })
   )
 })

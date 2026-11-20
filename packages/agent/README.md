@@ -408,7 +408,8 @@ non-object JSON events are ignored (not failed), while malformed non-JSON event 
 Chat Completions transport defaults to one JSON body. Set `OpenAiProviderConfig.streaming: true` to
 request incremental `chat.completion.chunk` SSE deltas with `stream_options.include_usage`, folded
 into text/reasoning/tool-call events plus terminal and usage events. Unterminated streams fail
-`invalid_response` and never emit `Done`. Hosts must only enable streaming against endpoints that
+`invalid_response` and never emit `Done`; a stream that ends after its finish chunk without the
+usage chunk completes with `Done.usageUnavailable` (see [Usage accounting](#usage-accounting)). Hosts must only enable streaming against endpoints that
 serve chat SSE; OpenCode Go `chat-completions` always sets it.
 
 `OpenAiProviderConfig.extraBody` takes `OpenAiRequestExtras` (JSON-object input). Lowering
@@ -527,6 +528,17 @@ Provider `LLMUsage` events are additive deltas. Adapters normalize vendor counte
 for example, Anthropic stream snapshots become deltas and cached input tokens count toward input
 totals. The loop aggregates usage and emits protocol `UsageUpdate` / terminal usage for hosts to
 persist or display.
+
+A stream can complete without the usage report its request asked for: a streamed chat completion
+(OpenAI-compatible chat, Vercel AI Gateway, OpenCode Go chat) cut after its finish chunk but before
+the usage chunk that `stream_options.include_usage` requested, a Codex stream ending without
+`response.completed`, or a Claude stream ending without `message_delta`. The answer is whole, so
+the turn completes normally (failing it would re-run and re-bill the model), but the provider's
+`LLMDone` carries `usageUnavailable: true` and the loop forwards it on that model stream's
+protocol `LLMStreamEnd`. The turn's usage is then missing from `UsageUpdate` and terminal usage, or
+partial when the stream sent some (Claude's `message_start`). Hosts decide how to account for it:
+estimate it, flag the total as a lower bound, or ignore it. The field is absent when the report
+arrived, when the request asked for none (JSON responses), and on events recorded before it existed.
 
 ## Context compaction
 

@@ -126,6 +126,26 @@ for (const event of events) {
 }
 ```
 
+### Missing usage
+
+`UsageUpdate` carries each model call's token usage as an additive delta, and `AgentEnd` /
+`AgentAwaitingInput` carry the run's total. When a model stream completes without the usage report
+its request asked for (a streamed chat completion cut after its finish chunk, before the
+`stream_options.include_usage` chunk; a Codex stream without `response.completed`; a Claude stream
+without `message_delta`), the turn still completes, and that stream's `LLMStreamEnd` carries
+`usageUnavailable: true`. Its usage is then missing from the totals, or partial when the stream
+sent some `UsageUpdate`s first. Hosts decide how to account for it, for example:
+
+```ts
+import type { AgentEvent } from '@yolk-sdk/agent/protocol'
+
+const unreportedModelCalls = (events: ReadonlyArray<AgentEvent>) =>
+  events.filter(event => event._tag === 'LLMStreamEnd' && event.usageUnavailable === true).length
+```
+
+The field is optional: it is absent when the report arrived or the request asked for none, and on
+events recorded before it existed, so persisted streams decode either way.
+
 ## Validate transcripts before provider calls
 
 Every assistant host tool call must have a matching `ToolResultMessage` before the next provider request. Use `validateNoDanglingHostToolCalls` before lowering transcripts to providers.
