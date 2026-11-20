@@ -1,5 +1,16 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.148
+
+### Patch Changes
+
+- Updated dependencies [1cd7e4c]
+- Updated dependencies [e5bcedb]
+- Updated dependencies [b501399]
+- Updated dependencies [2c8e618]
+- Updated dependencies [cb15a7b]
+  - @yolk-sdk/agent@0.1.0-canary.148
+
 ## 0.1.0-canary.147
 
 ### Patch Changes
