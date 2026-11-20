@@ -708,10 +708,20 @@ export type LiveInputs = {
 
 const decodeSeeds = Schema.decodeUnknownOption(MicrosoftConformanceSeeds)
 
+export const sameChatRefusal =
+  '--send-chat-id must name a dedicated practice chat, not the --chat paging chat'
+
+/** Whether two chat ids name the same chat once percent-decoded (case-insensitive). */
+const sameChatId = (left: string, right: string): boolean => {
+  const decoded = (id: string) => (decodedVariants(id.trim()).at(-1) ?? id).toLowerCase()
+
+  return decoded(left) === decoded(right)
+}
+
 /**
  * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
- * approval, account label, or access token, missing seeds for cases that will run, or seeds that
- * are not valid.
+ * approval, account label, or access token, missing seeds for cases that will run, a send chat that
+ * is the paging chat, or seeds that are not valid.
  */
 export const liveInputs = (
   options: RunOptions,
@@ -744,6 +754,16 @@ export const liveInputs = (
     const flags = [...new Set(missing)].map(seedFlag)
 
     return { refusal: `Missing seed identities for the cases that would run: ${flags.join(', ')}` }
+  }
+
+  // The send's chat must be its own: a send to the paging chat would change what the paging case
+  // reads. Ids are compared percent-decoded and case-insensitively, so an encoded copy is caught.
+  if (
+    options.seeds.chatId !== undefined &&
+    options.seeds.sendChatId !== undefined &&
+    sameChatId(options.seeds.chatId, options.seeds.sendChatId)
+  ) {
+    return { refusal: sameChatRefusal }
   }
 
   // The generated run id is merged over the flag/environment seeds (it is never a flag).
@@ -1075,14 +1095,19 @@ const guidsPattern = new RegExp(guidSource, 'gi')
 /** The synthetic GUIDs the committed fixtures use (`00000000-0000-4000-8000-…`). */
 const syntheticGuid = /^00000000-0000-4000-8000-[0-9a-f]{12}$/i
 
-/** `text` percent-decoded once, or unchanged when it is not valid percent-encoding. */
-const percentDecoded = (text: string): string => {
-  try {
-    return decodeURIComponent(text)
-  } catch {
-    return text
-  }
-}
+/**
+ * `text` percent-decoded once, run by run: every run of `%XX` escapes that is valid UTF-8 is
+ * decoded and any other `%` stays as it is, so one stray `%` (`50% off`) never stops the rest of
+ * the text from decoding.
+ */
+const percentDecoded = (text: string): string =>
+  text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    try {
+      return decodeURIComponent(run)
+    } catch {
+      return run
+    }
+  })
 
 /** Percent-decoding rounds the scan applies, stopping early at a fixed point. */
 const maxDecodeRounds = 3
@@ -1108,6 +1133,16 @@ const captures = (pattern: RegExp, text: string): ReadonlyArray<string> =>
   [...text.matchAll(pattern)].flatMap(match =>
     match.slice(1).flatMap(group => (group === undefined ? [] : [group]))
   )
+
+/**
+ * The base64 or base64url tokens of a text: each whole token (a base64 id may hold `/`) and each of
+ * its `/`-separated parts (an id inside a URL path is one part of a longer token).
+ */
+const base64Candidates = (text: string): ReadonlyArray<string> =>
+  (text.match(base64TokenPattern) ?? []).flatMap(token => [
+    token,
+    ...token.split('/').filter(part => part.length >= 16 && part !== token)
+  ])
 
 /** The GUIDs in the text a base64 or base64url token decodes to (none when it decodes to none). */
 const base64Guids = (token: string): ReadonlyArray<string> =>
@@ -1151,7 +1186,8 @@ const addUserKey = (found: ReviewFindings, raw: string): void => {
  * Collect review candidates from a string under its JSON `key` (and the key of the object holding
  * it, `parent`): every percent-decoding of it (up to `maxDecodeRounds`, so a twice-encoded join
  * link is seen through) is scanned for emails, tenant hosts, tenant GUIDs, `Oid` members,
- * `users('…')` keys, and one-on-one chat ids; base64 tokens are decoded and scanned for GUIDs; and
+ * `users('…')` keys, one-on-one chat ids, and GUIDs inside base64 tokens (whole, and each
+ * `/`-separated part, in every decoded form); and
  * `tenantId`, `userId`, and `user.id` values are taken as they are.
  */
 const collectString = (
@@ -1177,10 +1213,10 @@ const collectString = (
     }
 
     for (const userKey of captures(usersKeyPattern, text)) addUserKey(found, userKey)
-  }
 
-  for (const token of value.match(base64TokenPattern) ?? []) {
-    for (const guid of base64Guids(token)) addGuid(found.userIds, guid)
+    for (const token of base64Candidates(text)) {
+      for (const guid of base64Guids(token)) addGuid(found.userIds, guid)
+    }
   }
 
   if (key === 'tenantId' && guidPattern.test(value)) addGuid(found.tenantIds, value)
@@ -1263,8 +1299,8 @@ const reviewEntry = (fileName: string, items: ReadonlyArray<string>): ReadonlyAr
 ]
 
 /**
- * What a person must check in each staged fixture, and in the staged seeds module (`seedsModule`,
- * its rendered text, when given), before promoting it: email-like strings outside
+ * What a person must check in each staged fixture, and in the staged seeds module (`seeds`, the
+ * seeds it renders, each value scanned on its own, when given), before promoting it: email-like strings outside
  * `example.test`/`example.com`, names, subjects, and chat topics, body text, tenant host names,
  * tenant GUIDs (`tenantId` values, `tenantId=` URL parameters, and join-link `Tid` members), user
  * and object ids (join-link `Oid` members, `users('…')` keys, `userId` and `user.id` values, the
@@ -1275,7 +1311,7 @@ const reviewEntry = (fileName: string, items: ReadonlyArray<string>): ReadonlyAr
  */
 export const recordingReviewChecklist = (
   recorded: ReadonlyArray<{ readonly spec: MicrosoftCaseSpec; readonly fixture: WireFixture }>,
-  seedsModule?: string
+  seeds?: MicrosoftConformanceSeeds
 ): ReadonlyArray<string> => {
   const lines = [
     'REVIEW before promoting (staged files hold practice-tenant data):',
@@ -1309,10 +1345,16 @@ export const recordingReviewChecklist = (
     lines.push(...reviewEntry(spec.fileName, reviewItems(found, binaryBodies)))
   }
 
-  if (seedsModule !== undefined) {
+  if (seeds !== undefined) {
     const found = emptyFindings()
 
-    collectStrings(seedsModule, undefined, found)
+    // Each value on its own, so one value that cannot be decoded never hides another's identifiers.
+    for (const key of seedKeys) {
+      const value = seeds[key]
+
+      if (value !== undefined) collectStrings(value, key, found)
+    }
+
     lines.push(...reviewEntry('seeds.ts', reviewItems(found, 0)))
   }
 
@@ -1421,21 +1463,19 @@ export const stageRecordings = (
 
     const seeds = mergedFixtureSeeds(microsoftConformanceFixtureSeeds, inputs.seeds, recordedIds)
 
-    const seedsModule = renderSeedsModule(seeds)
-
     // Everything verified: render every file before writing any of them.
     const files = [
       ...recorded.map(({ spec, fixture }) => ({
         name: spec.fileName,
         contents: renderFixtureModule(spec, fixture)
       })),
-      { name: 'seeds.ts', contents: seedsModule }
+      { name: 'seeds.ts', contents: renderSeedsModule(seeds) }
     ]
 
     const stale = staleSharedSeeds(microsoftConformanceFixtureSeeds, seeds, recordedIds)
 
     const checklist = [
-      ...recordingReviewChecklist(recorded, seedsModule),
+      ...recordingReviewChecklist(recorded, seeds),
       ...stale.map(
         ({ key, cases }) =>
           `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`

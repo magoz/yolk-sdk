@@ -82,8 +82,20 @@ const runIdSource = 'run-[a-z0-9]+(?:-[a-z0-9]+)*'
 
 const runIdPattern = `(${runIdSource})`
 
-/** The run id a recorded send text names (the fixtures' `run-synthetic`, or a promoted one). */
-const recordedRunIdPattern = new RegExp(runIdSource, 'u')
+/**
+ * The marker the conformance send text starts its run id with (`yolk-conformance <runId>: …`),
+ * copied as data like the fixtures (the emulator never imports SDK code).
+ */
+const conformanceMarker = 'yolk-conformance'
+
+/**
+ * The run id a recorded send text names right after the marker (the fixtures' `run-synthetic`, or
+ * a promoted one), so another `run-` word elsewhere in the text is never taken for it.
+ */
+const recordedRunIdPattern = new RegExp(`${conformanceMarker} (${runIdSource})`, 'u')
+
+/** The marker and a run id, as the send text names them. */
+const markedRunId = (runId: string): string => `${conformanceMarker} ${runId}`
 
 const maxRunIdLength = 40
 
@@ -92,7 +104,10 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 export type SendTemplate = {
   /** The recorded chat id (decoded). */
   readonly chatId: string
-  /** The run id the recorded message content names, taken from the copied fixture body. */
+  /**
+   * The run id the recorded message content names after the marker, taken from the copied fixture
+   * body.
+   */
   readonly runId: string
   /** The recorded message content, matched with any run id in place of the recorded one. */
   readonly content: RegExp
@@ -121,7 +136,7 @@ export const sendTemplateOf = (
   const chatSegment = /^\/v1\.0\/chats\/([^/]+)\/messages$/.exec(new URL(post.request.url).pathname)
   const readbackSegment = /\/messages\/([^/]+)$/.exec(new URL(readback.request.url).pathname)
 
-  const runId = Predicate.isString(content) ? recordedRunIdPattern.exec(content)?.[0] : undefined
+  const runId = Predicate.isString(content) ? recordedRunIdPattern.exec(content)?.[1] : undefined
 
   if (
     !Predicate.isString(content) ||
@@ -135,7 +150,13 @@ export const sendTemplateOf = (
   return {
     chatId: decodeURIComponent(chatSegment[1]),
     runId,
-    content: new RegExp(`^${content.split(runId).map(escapeRegExp).join(runIdPattern)}$`, 'u'),
+    content: new RegExp(
+      `^${content
+        .split(markedRunId(runId))
+        .map(escapeRegExp)
+        .join(`${escapeRegExp(conformanceMarker)} ${runIdPattern}`)}$`,
+      'u'
+    ),
     messageId: readbackSegment[1],
     sent: post.response,
     readback: readback.response
@@ -204,8 +225,11 @@ const substituted = (
   messageId: string
 ): string =>
   body.replace(
-    new RegExp(`${escapeRegExp(template.messageId)}|${escapeRegExp(template.runId)}`, 'gu'),
-    match => (match === template.messageId ? messageId : runId)
+    new RegExp(
+      `${escapeRegExp(template.messageId)}|${escapeRegExp(markedRunId(template.runId))}`,
+      'gu'
+    ),
+    match => (match === template.messageId ? messageId : markedRunId(runId))
   )
 
 /** `GET /sites?search=` (the recorded search). */

@@ -903,7 +903,7 @@ a fault is used:
 The chat send answers only the recorded send chat (a dedicated chat, never the paging chat) and a
 body of exactly `{ body: { contentType: 'html', content } }` whose content is the recorded text with
 any run id (`run-` then lower-case letters, digits, and inner hyphens, at most 40 characters) in
-place of the run id the copied body names (`run-synthetic`): the recorded 201 with that run id and a
+place of the run id the copied body names after the `yolk-conformance` marker (`run-synthetic`): the recorded 201 with that run id and a
 minted message id (`1790000000000` plus the `nextChatMessageNumber` counter, starting at the
 recorded `1790000000101`, which only advances), substituted in one pass. A
 send cannot be undone on Graph, so the emulator keeps it in the state (`chatMessagesSent`); a read

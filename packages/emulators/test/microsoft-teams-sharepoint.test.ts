@@ -11,6 +11,7 @@ import { microsoftConformanceFixtures } from '@yolk-sdk/connectors/microsoft/con
 import {
   emulatorEvidenceHeader,
   makeMicrosoftEmulator,
+  MicrosoftEmulatorStateSchema,
   microsoftEmulatorErrorCodes,
   type MicrosoftEmulator,
   type MicrosoftEmulatorOptions
@@ -108,19 +109,26 @@ const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json)
 /** `text` as a promoted live recording would name its run id. */
 const promoted = (text: string): string => text.replaceAll('run-synthetic', 'run-0f3a9c12')
 
-/** A recorded exchange with every run id promoted, in its body and its answer. */
-const promotedExchange = (exchange: MicrosoftRecordedExchange): MicrosoftRecordedExchange => {
-  const response = { ...exchange.response, body: promoted(exchange.response.body) }
+/** A recorded exchange with `rewrite` applied to its request body and its answer. */
+const rewrittenExchange = (
+  exchange: MicrosoftRecordedExchange,
+  rewrite: (text: string) => string
+): MicrosoftRecordedExchange => {
+  const response = { ...exchange.response, body: rewrite(exchange.response.body) }
   const body = exchange.request.body
 
   if (body === undefined) return { request: exchange.request, response }
 
-  const promotedBody = Option.getOrUndefined(decodeJson(promoted(JSON.stringify(body))))
+  const rewritten = Option.getOrUndefined(decodeJson(rewrite(JSON.stringify(body))))
 
-  return promotedBody === undefined
+  return rewritten === undefined
     ? expect.fail('expected a JSON request body')
-    : { request: { ...exchange.request, body: promotedBody }, response }
+    : { request: { ...exchange.request, body: rewritten }, response }
 }
+
+/** A recorded exchange with every run id promoted, in its body and its answer. */
+const promotedExchange = (exchange: MicrosoftRecordedExchange): MicrosoftRecordedExchange =>
+  rewrittenExchange(exchange, promoted)
 
 describe('Microsoft Teams and SharePoint site routes', () => {
   it('copy the eight connector fixtures as data, in suite order', () => {
@@ -258,6 +266,24 @@ describe('Microsoft Teams and SharePoint site routes', () => {
     )
     expect(sendTemplateOf(microsoftTeamsSitesFixtures)?.runId).toBe('run-synthetic')
   })
+
+  it('take the run id after the marker, not another run- word earlier in the text', () => {
+    const earlier = (text: string) =>
+      text.replaceAll('yolk-conformance run-synthetic', 'run-first yolk-conformance run-0f3a9c12')
+
+    const recorded = microsoftTeamsSitesFixtures.map(fixture => ({
+      ...fixture,
+      exchanges: fixture.exchanges.map(exchange => rewrittenExchange(exchange, earlier))
+    }))
+
+    const template = sendTemplateOf(recorded)
+    const sent = `run-first ${sentContent.replace('run-synthetic', 'run-other')}`
+
+    expect(template?.runId).toBe('run-0f3a9c12')
+    expect(template?.content.exec(sent)?.[1]).toBe('run-other')
+    // The earlier word stays literal: only the marked run id varies.
+    expect(template?.content.test(sent.replace('run-first', 'run-second'))).toBe(false)
+  })
 })
 
 type Refusal = {
@@ -382,6 +408,17 @@ describe('Microsoft Teams and SharePoint site refusals', () => {
       await expectRecorded(await send(target, post.request), post)
       // The send never touches the paging chat, so the suite does not depend on case order.
       await expectRecorded(await send(target, firstPage.request), firstPage)
+    })
+  )
+
+  it.effect('refuse a state snapshot taken before the recordedTeamsSites flag', () =>
+    Effect.promise(async () => {
+      const target = await emulator()
+      const { recordedTeamsSites: _flag, ...older } = target.snapshot()
+      const decode = Schema.decodeUnknownOption(MicrosoftEmulatorStateSchema)
+
+      expect(Option.isSome(decode(target.snapshot()))).toBe(true)
+      expect(Option.isNone(decode(older))).toBe(true)
     })
   )
 

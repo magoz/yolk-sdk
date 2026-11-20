@@ -32,7 +32,9 @@ import {
   microsoftConformanceFixtures,
   microsoftOneDriveCreateFolderFixture,
   microsoftOutlookPagingNextLinkFixture,
-  microsoftTeamsChatsListMembersFixture
+  microsoftSharePointSearchSitesFixture,
+  microsoftTeamsChatsListMembersFixture,
+  microsoftTeamsMeetingTranscriptsFixture
 } from '../../packages/connectors/src/microsoft/conformance/index.ts'
 import {
   liveInCiMessage,
@@ -66,6 +68,7 @@ import {
   renderFixtureModule,
   renderSeedsModule,
   renderedTokenRefusal,
+  sameChatRefusal,
   runMicrosoftInterruptibly,
   runMicrosoftLive,
   runMicrosoftLiveCli,
@@ -387,6 +390,22 @@ describe('run-microsoft-conformance live refusal (no network)', () => {
     })
   })
 
+  it('refuses a send chat that is the paging chat, compared decoded', () => {
+    const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
+    const chatId = microsoftConformanceFixtureSeeds.chatId ?? expect.fail('no chat seed')
+
+    for (const sendChat of [chatId, encodeURIComponent(chatId), chatId.toUpperCase()]) {
+      expect(
+        liveInputs(live([...readSeedFlags, `--send-chat-id=${sendChat}`]), env),
+        sendChat
+      ).toEqual({
+        refusal: sameChatRefusal
+      })
+    }
+
+    expect(liveInputs(live(readSeedFlags), env)).toHaveProperty('inputs')
+  })
+
   it('generates a fresh run id per invocation and merges it over the seeds', () => {
     const env = { MICROSOFT_ACCESS_TOKEN: 'synthetic-token' }
     const options = live(readSeedFlags)
@@ -669,6 +688,68 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
     expect(result.success.checklist.join('\n')).not.toContain('SHARED SEED')
     // The staged seeds module is scanned like the fixtures.
     expect(result.success.checklist).toContain('  seeds.ts: no candidates found; still read it')
+  })
+
+  it('scans the staged seeds one by one, so a stray % never hides a tenant GUID', async () => {
+    const tenant = '7d5c4b3a-2f1e-4d0c-9b8a-6f5e4d3c2b1a'
+    const syntheticTenant = '00000000-0000-4000-8000-00000000c0de'
+    const withTenant = (text: string) => text.replaceAll(syntheticTenant, tenant)
+
+    const rewritten = (
+      fixture: WireFixture,
+      rewrite: (text: string) => string
+    ): ReadonlyArray<WireExchange> =>
+      fixture.exchanges.map(({ request, response }) =>
+        isWireStreamResponse(response) || isWireBase64BodyResponse(response)
+          ? expect.fail('expected text answers')
+          : {
+              request: { ...request, url: rewrite(request.url) },
+              response: { ...response, body: rewrite(response.body) }
+            }
+      )
+
+    const searchId = microsoftSharePointSearchSitesFixture.caseId
+    const meetingId = microsoftTeamsMeetingTranscriptsFixture.caseId
+
+    const recorders = new Map([
+      [
+        searchId,
+        recorderOf(
+          rewritten(microsoftSharePointSearchSitesFixture, text =>
+            text.replace('search=synthetic', 'search=50%25+off')
+          )
+        )
+      ],
+      [meetingId, recorderOf(rewritten(microsoftTeamsMeetingTranscriptsFixture, withTenant))]
+    ])
+
+    const { writer } = memoryWriter()
+
+    const result = await Effect.runPromise(
+      stageRecordings(
+        passedReport([searchId, meetingId]),
+        recorders,
+        {
+          ...recordInputs,
+          seeds: {
+            ...microsoftConformanceFixtureSeeds,
+            siteSearchQuery: '50% off',
+            meetingJoinWebUrl: withTenant(microsoftConformanceFixtureSeeds.meetingJoinWebUrl ?? '')
+          }
+        },
+        { writer, stagingDir, recordedAt: '2026-09-30' }
+      ).pipe(Effect.result)
+    )
+
+    if (Result.isFailure(result) || result.success === undefined) {
+      return expect.fail('expected staged recordings')
+    }
+
+    const { checklist } = result.success
+    const seedsAt = checklist.indexOf('  seeds.ts:')
+
+    expect(seedsAt).toBeGreaterThan(0)
+    expect(checklist.slice(seedsAt + 1)).toContain(`    - tenant GUIDs: "${tenant}"`)
   })
 
   it('leaves no run directory and removes the temp directory when a write fails mid-batch', async () => {
@@ -1016,19 +1097,54 @@ describe('run-microsoft-conformance --record staging (offline)', () => {
       )
     })
 
-    it('scans the staged seeds module too', () => {
-      const seedsModule = renderSeedsModule({
+    it('scans each staged seed value on its own', () => {
+      const checklist = recordingReviewChecklist([], {
         ...microsoftConformanceFixtureSeeds,
         chatId: `19:${person}_${other}@unq.gbl.spaces`
-      })
-
-      const checklist = recordingReviewChecklist([], seedsModule).join('\n')
+      }).join('\n')
 
       expect(checklist).toContain('  seeds.ts:')
       expect(checklist).toContain(`user and object ids: "${person}", "${other}"`)
-      expect(
-        recordingReviewChecklist([], renderSeedsModule(microsoftConformanceFixtureSeeds))
-      ).toContain('  seeds.ts: no candidates found; still read it')
+      expect(recordingReviewChecklist([], microsoftConformanceFixtureSeeds)).toContain(
+        '  seeds.ts: no candidates found; still read it'
+      )
+    })
+
+    it('decodes the other seeds when one holds a stray percent sign', () => {
+      const joinLink = `https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=${encodeURIComponent(context)}`
+
+      const checklist = recordingReviewChecklist([], {
+        ...microsoftConformanceFixtureSeeds,
+        siteSearchQuery: '50% off',
+        meetingJoinWebUrl: joinLink
+      }).join('\n')
+
+      expect(checklist).toContain(`tenant GUIDs: "${tenant}"`)
+      expect(checklist).toContain(`user and object ids: "${person}"`)
+    })
+
+    it('decodes the valid escapes of a string that also holds a stray percent sign', () => {
+      const joinLink = `https://teams.microsoft.com/l/meetup-join/0?context=${encodeURIComponent(context)}`
+
+      expect(checklistOf({ note: `50% off, see ${joinLink}` })).toContain(
+        `tenant GUIDs: "${tenant}"`
+      )
+    })
+
+    it('finds base64 ids inside URL paths and in percent-encoded paths', () => {
+      // `MT8/…`: the id holds `/`, and only its decoded path keeps the token whole and aligned.
+      const slashed = Buffer.from(`1??#${person}`).toString('base64')
+      const plain = Buffer.from(`1?#${other}`).toString('base64')
+
+      expect(slashed).toContain('/')
+
+      const checklist = checklistOf({
+        encoded: `https://graph.microsoft.com/v1.0/x/${encodeURIComponent(slashed)}/messages`,
+        path: `https://graph.microsoft.com/v1.0/sites/a/${plain}/drives`
+      })
+
+      expect(checklist).toContain(person)
+      expect(checklist).toContain(other)
     })
   })
 })

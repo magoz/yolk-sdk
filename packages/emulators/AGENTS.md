@@ -477,7 +477,7 @@ There is no root export or barrel.
   `SyntheticValueNotEmulated` (or `SyntheticQueryNotEmulated`) before anything is written or a fault
   is used. The chat send answers only the recorded send chat (a dedicated chat, apart from the
   paging chat) and text (any run id of the `run-` form, at most 40 characters, in place of the run
-  id the copied body names), mints the message id from `nextChatMessageNumber` (starting at the
+  id the copied body names after the `yolk-conformance` marker), mints the message id from `nextChatMessageNumber` (starting at the
   recorded id, only advancing; both substituted in one pass, so a run id holding the recorded id
   survives), and keeps
   the send in `chatMessagesSent` (Graph cannot undo it; the state-equals-seed proof excludes the
