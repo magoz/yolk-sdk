@@ -1002,9 +1002,35 @@ const answeredRequest =
     return held === undefined ? undefined : held === requestId
   }
 
-/** A denial replays a pending approval; any other part does not say. */
+/**
+ * A denial replays a pending approval. It never answers a part with its result (the loop asks only
+ * before a result) or one holding a question, input or interaction request or answer (a denial
+ * answers only an approval); a part that holds no request does not say. As the client's
+ * `pendingApproval`.
+ */
 const pendingApproval: ReplayedPart = part =>
-  Predicate.isTagged(part.state, 'ApprovalRequested') ? true : undefined
+  Match.value(part.state).pipe(
+    Match.withReturnType<boolean | undefined>(),
+    Match.tag('ApprovalRequested', () => true),
+    Match.tag(
+      'Completed',
+      'Accepted',
+      'Errored',
+      'ProviderCompleted',
+      'QuestionRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InputRequested',
+      'InputSubmitted',
+      'InputCancelled',
+      'InteractionRequested',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      () => false
+    ),
+    Match.tag('Called', 'InputStreaming', 'Running', 'Denied', () => undefined),
+    Match.exhaustive
+  )
 
 /** The last part of `message` holding the call id, if any. */
 const lastToolCallPart = (

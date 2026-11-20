@@ -1267,6 +1267,88 @@ describe('the request an answer reaches', () => {
     expect(stateTags(chats)).toEqual(both(['QuestionAnswered']))
   })
 
+  describe('a replayed denial', () => {
+    // A denial answers only a pending approval, and the loop asks only before a result: turn 1's
+    // denial replayed without event id leaves a later turn's question or finished call alone.
+    const deployKind = approval()
+    const deniedSettle = deployKind.settles[0]
+
+    if (deniedSettle === undefined) throw new Error('expected a denied settle')
+
+    const denial = (requestId: string) =>
+      ToolApprovalDenied.make({
+        toolCallId,
+        reason: 'Not now',
+        response: ToolApprovalResponse.make({
+          requestId,
+          toolCallId,
+          decision: 'denied',
+          source: 'user'
+        })
+      })
+
+    const replayedDenial = denial(deployKind.request.requestId)
+
+    const afterDenial = (events: ReadonlyArray<AgentEvent>) =>
+      applyEvents(settledChats(deployKind, deniedSettle, 'after the next turn started'), [
+        LLMStreamStart.make({ eventId: 'run:start-3', turn: 3 }),
+        ...events
+      ])
+
+    const city = reused(question(), { topic: 'city' })
+
+    const later: ReadonlyArray<{
+      readonly state: ChatToolState['_tag']
+      readonly events: ReadonlyArray<AgentEvent>
+    }> = [
+      {
+        state: 'QuestionRequested',
+        events: [
+          AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(city.call) }),
+          city.requested('run:request-3'),
+          awaiting(city.request, 'run:pause-3')
+        ]
+      },
+      ...finished.filter(({ state }) => state === 'Completed' || state === 'Accepted')
+    ]
+
+    it.each(later)("leaves the later turn's $state part alone", ({ state, events }) => {
+      const chats = afterDenial(events)
+
+      expect(stateTags(chats)).toEqual(both(['Denied', state]))
+
+      expectUnchanged(chats, replayedDenial)
+      expectUnchanged(alone(events), replayedDenial)
+    })
+
+    it("still denies the later turn's pending approval", () => {
+      const chats = afterDenial([
+        AssistantMessageEvent.make({ eventId: 'run:message-3', message: ask(deploy.call) }),
+        deploy.requested('run:request-3'),
+        awaiting(deploy.request, 'run:pause-3'),
+        denial(deploy.request.requestId)
+      ])
+
+      expect(toolStates(chats.projection.chatMessages)).toMatchObject([
+        { _tag: 'Denied' },
+        { _tag: 'Denied', request: deploy.request }
+      ])
+
+      expect(chats.chat.chatMessages).toEqual(chats.projection.chatMessages)
+    })
+
+    it('still denies a running part (it holds no request)', () => {
+      const chats = applyEvents(initialChats, [
+        LLMStreamStart.make({ eventId: 'run:start-1', turn: 1 }),
+        AssistantMessageEvent.make({ eventId: 'run:message-1', message: ask(deployKind.call) }),
+        ToolExecutionStarted.make({ eventId: 'run:started', call: deployKind.call }),
+        replayedDenial
+      ])
+
+      expect(stateTags(chats)).toEqual(both(['Denied']))
+    })
+  })
+
   describe('applyAgentEventToChatMessages', () => {
     // No turn start: the last message holding the call. A stale answer still changes nothing.
     const fold = (events: ReadonlyArray<AgentEvent>) =>

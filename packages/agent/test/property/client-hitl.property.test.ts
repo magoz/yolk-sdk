@@ -414,8 +414,16 @@ describe('client HITL property tests', () => {
     ([kind]) => {
       const state = reduceAgentEvents([
         AgentStart.make({}),
-        ToolApprovalRequested.make({ call, request: approvalRequest }),
-        QuestionRequested.make({ request: questionRequest }),
+        // A denial answers only an approval, so for a denial the approval is asked last.
+        ...(kind === 'approvalDenied'
+          ? [
+              QuestionRequested.make({ request: questionRequest }),
+              ToolApprovalRequested.make({ call, request: approvalRequest })
+            ]
+          : [
+              ToolApprovalRequested.make({ call, request: approvalRequest }),
+              QuestionRequested.make({ request: questionRequest })
+            ]),
         // An answer acts on the run holding its request: an input answer needs its request asked.
         ...(kind === 'inputSubmitted' || kind === 'inputCancelled'
           ? [InputRequested.make({ request: inputRequest })]

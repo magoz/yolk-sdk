@@ -513,9 +513,35 @@ const answeredRequest =
     return held === undefined ? undefined : held === requestId
   }
 
-/** A denial replays a pending approval. */
+/**
+ * A denial replays a pending approval. It never answers a run with its result (the loop asks only
+ * before a result) or one holding a question, input or interaction request or answer (a denial
+ * answers only an approval); a run that holds no request does not say. The chat's
+ * `pendingApproval` keeps the same rule.
+ */
 const pendingApproval: ReplayedRun = run =>
-  Predicate.isTagged(run, 'ApprovalRequested') ? true : undefined
+  Match.value(run).pipe(
+    Match.withReturnType<boolean | undefined>(),
+    Match.tag('ApprovalRequested', () => true),
+    Match.tag(
+      'Completed',
+      'Accepted',
+      'Errored',
+      'ProviderCompleted',
+      'QuestionRequested',
+      'QuestionAnswered',
+      'QuestionCancelled',
+      'InputRequested',
+      'InputSubmitted',
+      'InputCancelled',
+      'InteractionRequested',
+      'InteractionSubmitted',
+      'InteractionCancelled',
+      () => false
+    ),
+    Match.tag('InputStreaming', 'InputReady', 'Executing', 'Denied', () => undefined),
+    Match.exhaustive
+  )
 
 /**
  * The run an event about a call acts on (`-1`: none): the last run of the latest turn holding the
