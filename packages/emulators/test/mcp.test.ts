@@ -122,7 +122,9 @@ const recorded = {
   legacyInitialized: exchangeOf(legacyEra, 2),
   legacyGet: exchangeOf(legacyEra, 3),
   legacyList: exchangeOf(legacyEra, 4),
-  legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -1),
+  // The last exchange is the DELETE that ends the session.
+  legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -2),
+  legacyEnd: exchangeOf('mcp.legacy.session.legacy.synthetic', -1),
   legacyPingInitialize: exchangeOf(serverPing, 1),
   legacyPingAnswer: exchangeOf(serverPing, 2),
   afloatDiscover: exchangeOf('mcp.negotiation.era.afloat.synthetic', 0),
@@ -132,7 +134,8 @@ const recorded = {
   figmaInitialize: exchangeOf('mcp.negotiation.era.figma.synthetic', 1),
   figmaInitialized: exchangeOf('mcp.negotiation.era.figma.synthetic', 2),
   figmaGet: exchangeOf('mcp.negotiation.era.figma.synthetic', 3),
-  figmaList: exchangeOf('mcp.negotiation.era.figma.synthetic', 4)
+  figmaList: exchangeOf('mcp.negotiation.era.figma.synthetic', 4),
+  figmaEnd: exchangeOf('mcp.legacy.session.figma.synthetic', -1)
 }
 
 type Send = {
@@ -270,7 +273,7 @@ const controlPlaneText = async (emulator: McpEmulator) => {
 }
 
 describe('manifest', () => {
-  it('one RPC row per recorded method of each profile, plus the GET row; no writes', () => {
+  it('one RPC row per recorded method of each profile, plus the GET and DELETE rows; no writes', () => {
     expect(mcpEmulatorRoutes.map(route => `${route.method} ${route.path}`)).toEqual([
       `RPC ${row(modernUrl, 'server/discover')}`,
       `RPC ${row(modernUrl, 'tools/list')}`,
@@ -282,6 +285,7 @@ describe('manifest', () => {
       `RPC ${row(legacyUrl, 'tools/call')}`,
       `RPC ${row(legacyUrl, 'response:ping')}`,
       `GET ${legacyUrl}`,
+      `DELETE ${row(legacyUrl, 'session-end')}`,
       `RPC ${row(afloatUrl, 'server/discover')}`,
       `RPC ${row(afloatUrl, 'tools/list')}`,
       `RPC ${row(afloatUrl, 'tools/call')}`,
@@ -290,7 +294,8 @@ describe('manifest', () => {
       `RPC ${row(figmaUrl, 'notifications/initialized')}`,
       `RPC ${row(figmaUrl, 'tools/list')}`,
       `RPC ${row(figmaUrl, 'tools/call')}`,
-      `GET ${figmaUrl}`
+      `GET ${figmaUrl}`,
+      `DELETE ${row(figmaUrl, 'session-end')}`
     ])
 
     for (const route of mcpEmulatorRoutes) {
@@ -322,6 +327,11 @@ describe('manifest', () => {
       'mcp.legacy.server-ping'
     ])
     expect(caseIdsOf(`${legacyUrl}`)).toEqual([...listingCases, 'mcp.legacy.server-ping'])
+    // Every legacy operation that holds a session ends it, so every case with a handshake.
+    expect(caseIdsOf(row(legacyUrl, 'session-end'))).toEqual([
+      ...listingCases,
+      'mcp.legacy.server-ping'
+    ])
     expect(caseIdsOf(row(legacyUrl, 'response:ping'))).toEqual(['mcp.legacy.server-ping'])
     expect(caseIdsOf(row(legacyUrl, 'tools/call'))).toEqual([
       'mcp.tools.call-read',
@@ -346,6 +356,7 @@ describe('manifest', () => {
       ids.filter(id => id !== 'mcp.modern.stateless')
     )
     expect(caseIdsOf(figmaUrl)).toEqual(listingCases)
+    expect(caseIdsOf(row(figmaUrl, 'session-end'))).toEqual(listingCases)
     expect(caseIdsOf(row(figmaUrl, 'tools/call'))).toEqual([
       'mcp.tools.call-read',
       'mcp.tools.call-tool-error',
@@ -360,7 +371,7 @@ describe('manifest', () => {
 
       const counts = emulator.coverage().routes.map(route => route.requests)
 
-      expect(counts).toEqual([1, 1, ...Array<number>(17).fill(0)])
+      expect(counts).toEqual([1, 1, ...Array<number>(19).fill(0)])
 
       const served = await emulator
         .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/coverage`))
@@ -613,14 +624,15 @@ describe('drift: every fixture replayed byte for byte', () => {
         if (seedOf(fixture).seed === undefined) await replay(emulator, fixture)
       }
 
-      const sessions = emulator.snapshot().sessions.map(session => session.id)
+      // Every legacy operation ended the session it minted, on the profile that minted it.
+      const ended = emulator.ledger.entries().filter(entry => entry.method === 'DELETE')
 
-      expect(sessions).toEqual(sessions.map((_, index) => `yolk-emu-session-${index + 1}`))
-      expect(sessions.length).toBe(20)
-      // Each session is bound to the profile that minted it.
-      expect(
-        emulator.snapshot().sessions.filter(session => session.profile === 'figma')
-      ).toHaveLength(10)
+      expect(ended.map(entry => entry.headers['mcp-session-id'])).toEqual(
+        Array.from({ length: 20 }, (_, index) => `yolk-emu-session-${index + 1}`)
+      )
+      expect(ended.every(entry => entry.status === 200)).toBe(true)
+      expect(ended.filter(entry => entry.route === row(figmaUrl, 'session-end'))).toHaveLength(10)
+      expect(emulator.snapshot().sessions).toEqual([])
     })
   })
 })
@@ -706,9 +718,47 @@ const noRoute = 'no emulated MCP route for this method and path'
 
 const refusals: ReadonlyArray<Refusal> = [
   {
-    name: 'DELETE (the client never sends it)',
-    request: () => requestFor(recorded.legacyGet, { method: 'DELETE' }),
+    name: 'a DELETE on the modern profile (no session to end)',
+    request: () => requestFor(recorded.legacyEnd, { url: modernUrl }),
     reason: noRoute
+  },
+  {
+    name: 'a DELETE on a session this emulator never minted',
+    request: () => requestFor(recorded.legacyEnd),
+    reason: 'a request on no ready session of this emulator is not emulated'
+  },
+  {
+    name: 'a DELETE before notifications/initialized',
+    request: async emulator =>
+      onSession(recorded.legacyEnd, await handshake(emulator, 'initializing')),
+    reason: 'a request on no ready session of this emulator is not emulated'
+  },
+  {
+    name: 'a DELETE without a session header',
+    request: () => requestFor(recorded.legacyEnd, { headers: { 'mcp-session-id': undefined } }),
+    reason: 'mcp-session-id must be sent exactly where the recording sends one'
+  },
+  {
+    name: 'a DELETE without mcp-protocol-version',
+    request: async emulator =>
+      onSession(recorded.legacyEnd, await handshake(emulator), {
+        headers: { 'mcp-protocol-version': undefined }
+      }),
+    reason: 'the mcp-protocol-version header must be the recorded value, or absent where none is'
+  },
+  {
+    name: 'a DELETE accepting a media type (neither absent nor the fetch default */*)',
+    request: async emulator =>
+      onSession(recorded.legacyEnd, await handshake(emulator), {
+        headers: { accept: 'application/json' }
+      }),
+    reason: 'the accept header must be absent, as recorded, or the fetch default */*'
+  },
+  {
+    name: 'a DELETE with a body',
+    request: async emulator =>
+      onSession(recorded.legacyEnd, await handshake(emulator), { body: '{}' }),
+    reason: 'this route takes no request body'
   },
   {
     name: 'a GET on the modern profile',
@@ -1675,6 +1725,79 @@ describe('legacy sessions', () => {
           expect(await answer.text()).toBe(recordedText(exchange))
         }
       }
+    })
+  })
+
+  it('a DELETE ends a ready session with the recorded 200: later requests on it are refused', async () => {
+    for (const accept of [undefined, '*/*']) {
+      await withEmulator({}, async emulator => {
+        const ended = await handshake(emulator)
+        const kept = await handshake(emulator)
+
+        const answer = await emulator.fetch(
+          onSession(recorded.legacyEnd, ended, { headers: { accept } })
+        )
+
+        expect(answer.status).toBe(200)
+        expect(responseHeaders(answer)).toEqual(recorded.legacyEnd.response.headers)
+        expect(await answer.text()).toBe('')
+        expect(emulator.ledger.entries().at(-1)).toMatchObject({
+          method: 'DELETE',
+          route: row(legacyUrl, 'session-end'),
+          headers: { 'mcp-session-id': ended },
+          status: 200
+        })
+        expect(emulator.snapshot().sessions).toEqual([{ id: kept, phase: 'ready' }])
+
+        for (const exchange of [recorded.legacyList, recorded.legacyGet, recorded.legacyEnd]) {
+          expect((await emulator.fetch(onSession(exchange, ended))).status).toBe(400)
+        }
+
+        expect((await emulator.fetch(onSession(recorded.legacyList, kept))).status).toBe(200)
+      })
+    }
+  })
+
+  it('a faulted or truncated DELETE ends nothing; the drill answers 404 and ends nothing', async () => {
+    await withEmulator({}, async emulator => {
+      const session = await handshake(emulator)
+      const before = emulator.snapshot()
+
+      emulator.faults.add({
+        kind: 'status',
+        status: 503,
+        count: 1,
+        match: { route: row(legacyUrl, 'session-end') }
+      })
+      emulator.faults.add({
+        kind: 'truncate-after-chunks',
+        chunks: 0,
+        count: 1,
+        match: { route: row(legacyUrl, 'session-end') }
+      })
+
+      expect((await emulator.fetch(onSession(recorded.legacyEnd, session))).status).toBe(503)
+      expect(emulator.snapshot()).toEqual(before)
+
+      // A bodiless answer cannot be truncated: 500, the fault unused, nothing ended.
+      expect((await emulator.fetch(onSession(recorded.legacyEnd, session))).status).toBe(500)
+      expect(emulator.snapshot()).toEqual(before)
+      expect(emulator.faults.list().map(fault => fault.applied)).toEqual([1, 0])
+
+      emulator.faults.clear()
+
+      expect((await emulator.fetch(onSession(recorded.legacyEnd, session))).status).toBe(200)
+      expect(emulator.snapshot().sessions).toEqual([])
+    })
+
+    await withEmulator({ drills: { sessionEndRejected: true } }, async emulator => {
+      const session = await handshake(emulator)
+      const before = emulator.snapshot()
+      const answer = await emulator.fetch(onSession(recorded.legacyEnd, session))
+
+      expect(answer.status).toBe(404)
+      expect(await answer.text()).toBe('')
+      expect(emulator.snapshot()).toEqual(before)
     })
   })
 

@@ -34,17 +34,17 @@ imports `@yolk-sdk/mcp`.
   schemas and descriptions, never Figma's (dynamic discovery owns the real contract). The four
   reads are marked `readOnlyHint: true`, `use_figma` and `create_new_file` `readOnlyHint: false`.
 
-| Case id                           | Applies | Figma claim (as currently understood)                                                                   |
-| --------------------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `mcp.negotiation.era`             | yes     | `server/discover` answers 400 with a JSON-RPC error: the client falls back to the legacy era            |
-| `mcp.modern.stateless`            | no      | The target is legacy-era                                                                                |
-| `mcp.legacy.session`              | yes     | `initialize` issues a session id every later request echoes; initialized gets 202, the standing GET 405 |
-| `mcp.transport.response-encoding` | yes     | Every answer to a request is an SSE stream holding the response, then the end; 202 has no body          |
-| `mcp.tools.list`                  | yes     | One listing page holds every published tool; `use_figma` and `create_new_file` are never read-only      |
-| `mcp.tools.call-read`             | yes     | `get_metadata` answers a text tool result                                                               |
-| `mcp.tools.call-tool-error`       | yes     | Invalid arguments answer `isError: true` with text content, not a JSON-RPC error                        |
-| `mcp.errors.unknown-tool`         | yes     | An absent tool answers JSON-RPC `-32602` with the request id, inside an HTTP 200 SSE stream             |
-| `mcp.auth.rejected`               | yes     | The reserved invalid credential answers 401 with a `WWW-Authenticate` Bearer challenge                  |
+| Case id                           | Applies | Figma claim (as currently understood)                                                                                             |
+| --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `mcp.negotiation.era`             | yes     | `server/discover` answers 400 with a JSON-RPC error: the client falls back to the legacy era                                      |
+| `mcp.modern.stateless`            | no      | The target is legacy-era                                                                                                          |
+| `mcp.legacy.session`              | yes     | `initialize` issues a session id every later request echoes; initialized gets 202, the standing GET 405, the closing `DELETE` 200 |
+| `mcp.transport.response-encoding` | yes     | Every answer to a request is an SSE stream holding the response, then the end; 202 has no body                                    |
+| `mcp.tools.list`                  | yes     | One listing page holds every published tool; `use_figma` and `create_new_file` are never read-only                                |
+| `mcp.tools.call-read`             | yes     | `get_metadata` answers a text tool result                                                                                         |
+| `mcp.tools.call-tool-error`       | yes     | Invalid arguments answer `isError: true` with text content, not a JSON-RPC error                                                  |
+| `mcp.errors.unknown-tool`         | yes     | An absent tool answers JSON-RPC `-32602` with the request id, inside an HTTP 200 SSE stream                                       |
+| `mcp.auth.rejected`               | yes     | The reserved invalid credential answers 401 with a `WWW-Authenticate` Bearer challenge                                            |
 
 `figmaMcpConformanceNotApplicable` lists the case that does not apply and why;
 `selectMcpConformanceCases(cases, 'legacy')` gives the same split.

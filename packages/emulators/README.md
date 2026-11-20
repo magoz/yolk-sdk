@@ -2033,12 +2033,13 @@ A fourth profile, `figma`, answers on the provider endpoint `https://mcp.figma.c
 `@yolk-sdk/connectors/figma/conformance` fixtures (`mcpEmulatorFigmaFixtures`; synthetic
 placeholders, not recorded live and not derived from provider source, unverified), in the legacy era
 exactly as `synthetic-legacy` (the session-less era probe answered 400, `initialize` minting a
-session over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing page of six
-known Figma tool names with synthetic schemas, the `get_metadata` read call, its tool error, the
-absent tool's SSE JSON-RPC error, and the 401). Every legacy session is bound to the profile that
-minted it (Figma sessions carry `profile: 'figma'` in the state), and a legacy profile answers only
-its own sessions. Its bearer follows the plain recognisable-bearer rule (send a synthetic token such
-as `synthetic-figma-token-0001`; a token starting with a hex digit is not emulated), and the public
+session over SSE, `notifications/initialized` 202, the standing `GET` 405, the closing `DELETE` 200,
+one listing page of six known Figma tool names with synthetic schemas, the `get_metadata` read call,
+its tool error, the absent tool's SSE JSON-RPC error, and the 401). Every legacy session is bound to
+the profile that minted it (Figma sessions carry `profile: 'figma'` in the state), and a legacy
+profile answers only its own sessions. Its bearer follows the plain recognisable-bearer rule (send a
+synthetic token such as `synthetic-figma-token-0001`; a token starting with a hex digit is not
+emulated), and the public
 reserved invalid credential `yolk-conformance-invalid-credential-0000` answers the Figma 401 on its
 era probe. Route `https://mcp.figma.com` to it, or serve `fetchOn(mcpEmulatorFigmaOrigin)`.
 
@@ -2066,27 +2067,28 @@ await mcp.close()
 ```
 
 Routes (`mcpEmulatorRoutes`: one `RPC <origin><path>#<method>` row per recorded JSON-RPC method of
-each profile, plus the legacy `GET` row and the synthetic legacy `response:ping` row; every row is a
-read, and every request needs
+each profile, plus the legacy `GET` and `DELETE` (`#session-end`) rows and the synthetic legacy
+`response:ping` row; every row is a read, and every request needs
 `Authorization: Bearer <token>`, a recognisable bearer):
 
-| Row                                     | Answer (the recorded bytes)                                                     |
-| --------------------------------------- | ------------------------------------------------------------------------------- |
-| `/modern/mcp#server/discover`           | The modern discover result                                                      |
-| `/modern/mcp#tools/list`                | The one-page listing, or the paged listing's pages (seed `two-pages`)           |
-| `/modern/mcp#tools/call`                | The read result, the `isError` tool result, or the absent tool's 400 error      |
-| `/legacy/mcp#server/discover`           | The recorded 400 JSON-RPC error that makes the client fall back to `initialize` |
-| `/legacy/mcp#initialize`                | The SSE `initialize` result with a minted `mcp-session-id`                      |
-| `/legacy/mcp#notifications/initialized` | 202, no body, on an initializing session (which becomes ready)                  |
-| `/legacy/mcp#tools/list`                | The SSE listing, on a ready session                                             |
-| `/legacy/mcp#tools/call`                | The three recorded SSE call answers, on a ready session                         |
-| `/legacy/mcp#response:ping`             | 202, no body: the answer to the server ping, once, on a session awaiting it     |
-| `GET /legacy/mcp`                       | 405, no body, on a ready session                                                |
-| `/{modern,legacy}/mcp#server/discover`  | With the reserved invalid credential: the recorded 401, byte for byte           |
-| `useafloat.com/mcp#server/discover`     | The Afloat discover result; with `afloat_yolkconformanceinvalid0000`, the 401   |
-| `useafloat.com/mcp#tools/list`          | The Afloat listing (the published tool subset, one page)                        |
-| `useafloat.com/mcp#tools/call`          | The `list-invoices` result, its tool error, or the absent tool's error          |
-| `mcp.figma.com/mcp#...`, `GET`          | As the legacy rows, from the Figma fixtures, on a session minted by Figma       |
+| Row                                      | Answer (the recorded bytes)                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `/modern/mcp#server/discover`            | The modern discover result                                                       |
+| `/modern/mcp#tools/list`                 | The one-page listing, or the paged listing's pages (seed `two-pages`)            |
+| `/modern/mcp#tools/call`                 | The read result, the `isError` tool result, or the absent tool's 400 error       |
+| `/legacy/mcp#server/discover`            | The recorded 400 JSON-RPC error that makes the client fall back to `initialize`  |
+| `/legacy/mcp#initialize`                 | The SSE `initialize` result with a minted `mcp-session-id`                       |
+| `/legacy/mcp#notifications/initialized`  | 202, no body, on an initializing session (which becomes ready)                   |
+| `/legacy/mcp#tools/list`                 | The SSE listing, on a ready session                                              |
+| `/legacy/mcp#tools/call`                 | The three recorded SSE call answers, on a ready session                          |
+| `/legacy/mcp#response:ping`              | 202, no body: the answer to the server ping, once, on a session awaiting it      |
+| `GET /legacy/mcp`                        | 405, no body, on a ready session                                                 |
+| `DELETE /legacy/mcp#session-end`         | 200, no body, on a ready session, which it ends (every later request is refused) |
+| `/{modern,legacy}/mcp#server/discover`   | With the reserved invalid credential: the recorded 401, byte for byte            |
+| `useafloat.com/mcp#server/discover`      | The Afloat discover result; with `afloat_yolkconformanceinvalid0000`, the 401    |
+| `useafloat.com/mcp#tools/list`           | The Afloat listing (the published tool subset, one page)                         |
+| `useafloat.com/mcp#tools/call`           | The `list-invoices` result, its tool error, or the absent tool's error           |
+| `mcp.figma.com/mcp#...`, `GET`, `DELETE` | As the legacy rows, from the Figma fixtures, on a session minted by Figma        |
 
 Every answer comes from a fixture, byte for byte (the copies live in `mcpEmulatorFixtures`), with
 exactly three request-derived or minted substitutions:
@@ -2100,7 +2102,9 @@ exactly three request-derived or minted substitutions:
   resets (reset, seed, and a ledger clear never rewind it), a form no seed can hold (seeds hold no
   sessions); the SSE answers carry the session's id in the recorded `mcp-session-id` header. At most
   256 sessions are held (`mcpEmulatorSessionCap`): another `initialize` is refused before any
-  fault. `reset()` and `seed()` clear the sessions.
+  fault. The `DELETE` the client sends as it closes a legacy operation (MCP `2025-11-25`
+  basic/transports, "Session Management" item 5) answers the recorded 200 on a ready session and
+  ends it, so later requests on it are refused. `reset()` and `seed()` clear the sessions.
 - **The cursor.** With `seed: { modernListing: 'two-pages' }`, the first page issues the recorded
   `synthetic-cursor-0001` in the generation that first issues it and `<cursor>.g<generation>` after
   a reset or seed (each starts a generation); the second page answers only the cursor issued in the
@@ -2158,63 +2162,64 @@ on the Afloat era probe.
   JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters
   where the recording has an id; any non-empty `name` and `version` (and no other key) in the
   `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this
-  emulator minted on the same profile since the last reset or seed where the recording sends
-  `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer to the
-  server ping, ready otherwise); and, with the seed's `two-pages` listing, the cursor this emulator
-  issued in the current generation on the second page. `Authorization` must be exactly
-  `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any query,
-  other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without
-  `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
-  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
-  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches, client-sent
-  responses other than the answer to the recorded server ping (exactly as recorded, the server's
-  ping id included, on a session awaiting it), other members, a JSON body
-  repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
-  (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
-  the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
-  headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and
-  `last-event-id` other than the recorded values or present where none is recorded, any other
-  `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or present where
-  not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
-  a reserved invalid credential on anything but its profile's era probe, a bearer repeated anywhere
-  in the request, and a bearer an answer or a minted session id or cursor would repeat)
-  is not emulated.
+  emulator minted on the same profile since the last reset or seed, and that no `DELETE` has ended,
+  where the recording sends `mcp-session-id` (initializing for `notifications/initialized`, either
+  phase for the answer to the server ping, ready otherwise); on the `DELETE` that ends a session, an
+  `accept` of any media type (the Fetch default an HTTP layer adds where the recording sends none);
+  and, with the seed's `two-pages` listing, the cursor this emulator issued in the current
+  generation on the second page. `Authorization` must be exactly `Bearer <token>` (that spelling,
+  one space). Everything else (another origin or path, any query, other HTTP methods, a `GET` or
+  `DELETE` on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with
+  it on the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one
+  starting with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
+  `resources/*`, or `prompts/*`, batches, client-sent responses other than the answer to the
+  recorded server ping (exactly as recorded, the server's ping id included, on a session awaiting
+  it), other members, a JSON body repeating a key (compared after unescaping), a `null`, negative,
+  or fractional id, other params (other tools, arguments, protocol versions, or capabilities, extra
+  client-info keys, a cursor on the Afloat listing, and a legacy `initialize` client info other than
+  the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
+  `mcp-name`, and `last-event-id` other than the recorded values or present where none is recorded,
+  any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or
+  present where not, an unknown session or one in the wrong phase, a cursor not issued in the
+  current generation, a reserved invalid credential on anything but its profile's era probe, a
+  bearer repeated anywhere in the request, and a bearer an answer or a minted session id or cursor
+  would repeat) is not emulated.
 
-Not emulated (a constant-text 400 that writes nothing and uses up no fault): `DELETE` (the client
-never sends it), the client's own `ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`,
-`tasks/*` (`@yolk-sdk/mcp/client` sends none of them), JSON-RPC batches, client-sent responses other
-than the answer to the recorded server ping, a JSON body repeating a key (compared after unescaping;
-the wrapper's opt-in `uniqueJsonKeys`), `mcp-*` headers no recording carries (such as
-`mcp-param-*`), cursors this emulator did not issue, any other tool or arguments, any other origin,
-path, or query, and a missing `Authorization` (no fixture records the answer to one). A closed
-emulator answers 503; a route that throws answers an evidence-tagged 500 with `responseError` in the
-ledger. `makeMcpEmulator` throws when a copied recording is not canonical JSON (every JSON body and
-SSE `data:` payload equal to `JSON.stringify(JSON.parse(text))`), which id substitution relies on.
+Not emulated (a constant-text 400 that writes nothing and uses up no fault): the client's own
+`ping`, `resources/*`, `prompts/*`, `logging/*`, `completion/*`, `tasks/*` (`@yolk-sdk/mcp/client`
+sends none of them), JSON-RPC batches, client-sent responses other than the answer to the recorded
+server ping, a JSON body repeating a key (compared after unescaping; the wrapper's opt-in
+`uniqueJsonKeys`), `mcp-*` headers no recording carries (such as `mcp-param-*`), cursors this
+emulator did not issue, any other tool or arguments, any other origin, path, or query, and a missing
+`Authorization` (no fixture records the answer to one). A closed emulator answers 503; a route that
+throws answers an evidence-tagged 500 with `responseError` in the ledger. `makeMcpEmulator` throws
+when a copied recording is not canonical JSON (every JSON body and SSE `data:` payload equal to
+`JSON.stringify(JSON.parse(text))`), which id substitution relies on.
 
 Faults are status faults (400-599) and `truncate-after-chunks` faults (`McpFault`), decided only
 after a request is admitted and planned, against the answer the plan prepared; a faulted request
-writes nothing. In `match`, `method` is the HTTP method (`POST` or `GET`, never a row's `RPC`),
-`path` the raw request path, and `route` one manifest row (for example
+writes nothing. In `match`, `method` is the HTTP method (`POST`, `GET`, or `DELETE`, never a row's
+`RPC`), `path` the raw request path, and `route` one manifest row (for example
 `https://mcp.example.test/legacy/mcp#tools/list`); a `route` naming no row is rejected when the
 fault is added. An SSE answer has two chunks (the notification, then the response) and a JSON answer
 one, so truncating an SSE answer after one chunk ends the stream before its response: the client
 fails the operation as an `McpError` at its timeout, never hangs. A truncation sends the prepared
 answer cut short and never runs its commit: a truncated `initialize` holds no session and leaves the
 counter and the session cap where they were, and a truncated first page of the two-page listing
-issues no cursor, so its continuation is refused. A truncation that cannot apply (a 202 or 405 has
-no chunk) answers 500 and is not used up. The ledger, coverage (per row), recovery, and the control
+issues no cursor, so its continuation is refused. A faulted `DELETE` ends no session. A truncation
+that cannot apply (a 202, a 405, or the `DELETE`'s 200 has no chunk) answers 500 and is not used up. The ledger, coverage (per row), recovery, and the control
 plane behave as in the Dropbox emulator; `/_emulate/state` also reports `nextSession`,
 `cursorGeneration`, and `issuedCursor`.
 
 **Drill knobs (tests only).** `drills: { discoverCarriesErrorResponse, discoverWithoutResultType,
 sessionIdNotVisibleAscii, discoverAnsweredTwice, writeToolMarkedReadOnly, readCallAnswersToolError,
 invalidCallAnswersRpcError, absentCallAnswersResult, unauthorizedWithoutChallenge,
-pingAnswerRejected }` (booleans) each make the emulator disagree with exactly one MCP conformance
-case, on every profile whose answers they change (the Afloat profile included, except the
-legacy-only session knob; `pingAnswerRejected` answers the client's answer to the server ping 400
-with no body, failing the opt-in `mcp.legacy.server-ping`, and changes nothing without the
-`server-ping` seed), only to prove that
-case catches it.
+pingAnswerRejected, sessionEndRejected }` (booleans) each make the emulator disagree with exactly
+one MCP conformance case, on every profile whose answers they change (the Afloat profile included,
+except the legacy-only session knobs; `pingAnswerRejected` answers the client's answer to the server
+ping 400 with no body, failing the opt-in `mcp.legacy.server-ping`, and changes nothing without the
+`server-ping` seed; `sessionEndRejected` answers the `DELETE` 404 with no body and ends nothing,
+failing `mcp.legacy.session` on both legacy profiles), only to prove that case catches it.
 
 ## Kie emulator
 

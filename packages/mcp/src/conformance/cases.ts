@@ -75,12 +75,16 @@
  * `mcp.legacy.server-ping` (a server's ping answered by the client: `2025-11-25` lets a server ping
  * but never requires it, and `2026-07-28` removed `ping`).
  *
+ * Closing a legacy client that holds a session sends `DELETE` with it (`terminateSession()`,
+ * best effort, at most 2 s; basic/transports "Session Management" item 5): `mcp.legacy.session`
+ * covers it, and every legacy fixture with a session ends with it.
+ *
  * Not covered, because the client never sends them (`listTools` and `callTool` only; spec sources
- * in `AGENTS.md`): `DELETE` (`close()` only aborts; the SDK's `terminateSession()` is never
- * called), the client's own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`
- * (removed in `2026-07-28`), `tasks/*` (no task capability is declared; an extension in
- * `2026-07-28`), and JSON-RPC batches (removed in `2025-06-18`); servers' `notifications/message`
- * are only ignored (the legacy fixtures carry one). URL policy, stdio and timeouts are unit tests.
+ * in `AGENTS.md`): the client's own `ping`, `resources/*`, `prompts/*`, `completion/*`,
+ * `logging/setLevel` (removed in `2026-07-28`), `tasks/*` (no task capability is declared; an
+ * extension in `2026-07-28`), and JSON-RPC batches (removed in `2025-06-18`); servers'
+ * `notifications/message` are only ignored (the legacy fixtures carry one). URL policy, stdio and
+ * timeouts are unit tests.
  *
  * @experimental
  */
@@ -763,10 +767,11 @@ export const mcpModernStatelessCase: McpConformanceCase = defineConformanceCase(
 
 export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
   id: 'mcp.legacy.session',
-  title: 'the legacy handshake issues a usable session and acknowledges initialized with 202',
+  title:
+    'the legacy handshake issues a usable session, acknowledges initialized with 202, and the client ends the session',
   safety: 'read',
-  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request.',
-  wire: '`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live).',
+  docs: 'In the legacy era the client (`StreamableHTTPClientTransport`) sends `initialize` with protocolVersion `2025-11-25`, reads the `mcp-session-id` answer header, sends `notifications/initialized` (a 202 makes it open a standing GET event stream; 405 is accepted), and echoes the session id and `mcp-protocol-version` on every later request. Each operation is its own connection, so the client no longer needs the session when it closes: it sends `DELETE` with the session id (MCP `2025-11-25` basic/transports, "Session Management" item 5: a client SHOULD; the server MAY answer 405), awaited but best effort with a short timeout (at most 2 s), never changing the operation\'s result. Without a session id, or when the operation was interrupted, it sends none.',
+  wire: "`initialize` answers a `protocolVersion` the SDK supports (and equal to `target.protocolVersion`) with `capabilities.tools`. Any issued `mcp-session-id` is visible ASCII, is echoed on every later request, and is accepted (the listing succeeds). `notifications/initialized` gets 202 with an empty body. The standing `GET`, when answered before the client closes, gets 405 or an event stream (unverified: which, live). With a session issued, the client sends exactly one `DELETE` to the target URL, after its last POST, carrying the session id; the server answers it 2xx (the session ended) or 405 (it does not let clients end sessions) within the client's termination timeout (no answer is no evidence, and fails). Without one, the client sends no `DELETE`.",
   fixtures: [mcpLegacySessionFixture.id],
   run: Effect.gen(function* () {
     const target = yield* McpConformanceTarget
@@ -844,6 +849,48 @@ export const mcpLegacySessionCase: McpConformanceCase = defineConformanceCase({
     if (Exit.isFailure(exit)) {
       return yield* exit
     }
+
+    // The session end (basic/transports, "Session Management" item 5); its session echo is
+    // checked above with every later request.
+    const deletes = exchanges.filter(exchange => exchange.method === 'DELETE')
+
+    if (session === undefined) {
+      return yield* expectEqual(
+        deletes.length,
+        0,
+        'expected no DELETE when initialize issued no session id'
+      )
+    }
+
+    yield* expectEqual(
+      deletes.length,
+      1,
+      'expected the client to end the issued session with one DELETE'
+    )
+
+    const [end] = deletes
+
+    if (end === undefined) {
+      return
+    }
+
+    yield* expectConformance(
+      end.url === urlKey(target.url) &&
+        exchanges.indexOf(end) > exchanges.map(exchange => exchange.method).lastIndexOf('POST'),
+      'expected the DELETE to go to the target URL after the last POST'
+    )
+
+    // No status is no evidence: the observer records the request before the transport answers,
+    // and the client gives up on the DELETE after its short timeout without failing.
+    yield* expectConformance(
+      end.status !== undefined,
+      "expected the server to answer the DELETE (no answer was observed: a transport failure, or the client's termination timeout)"
+    )
+    yield* expectConformance(
+      end.status === undefined || (end.status >= 200 && end.status < 300) || end.status === 405,
+      'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)',
+      { actual: end.status ?? null }
+    )
   })
 })
 

@@ -5,8 +5,9 @@
  * client and fail-closed call gate; the Afloat and Figma targets come from the real
  * `afloat.mcp_auth` and `figma.mcp_auth`), per profile,
  * both in-process and over a loopback socket, each case alone and all of them in sequence on one
- * emulator; every case is a read, so each emulator ends at its seed except the legacy sessions the
- * handshakes minted; each drill knob makes exactly its case fail; an SSE answer truncated before
+ * emulator; every case is a read and every legacy operation ends its session with `DELETE`, so
+ * each emulator ends exactly at its seed; each drill knob makes exactly its case fail; an SSE
+ * answer truncated before
  * its response fails the operation as an `McpError` at the client's timeout, never a hang; and the
  * opt-in `mcp.legacy.server-ping` passes on the synthetic legacy profile under its seed, both
  * in-process and over loopback, with its own drill.
@@ -171,11 +172,14 @@ const expectAllPassed = (report: ConformanceReport, count: number) => {
 const requests = (entries: ReadonlyArray<McpLedgerEntry>) =>
   entries.map(entry => `${entry.method} ${entry.route ?? entry.path} ${entry.status}`)
 
-/** The requests each case sends on a fresh emulator, per era (the standing GET may race). */
+/**
+ * The requests each case sends on a fresh emulator, per era (the standing GET may race): every
+ * legacy operation ends its session with the `DELETE`.
+ */
 const expectedRequests = (era: McpConformanceEra, id: string): ReadonlyArray<string> => {
   const row = (method: string) => `${mcpEmulatorOrigin}/${era}/mcp#${method}`
 
-  const listing =
+  const opened =
     era === 'modern'
       ? [`POST ${row('server/discover')} 200`, `POST ${row('tools/list')} 200`]
       : [
@@ -186,7 +190,9 @@ const expectedRequests = (era: McpConformanceEra, id: string): ReadonlyArray<str
           `POST ${row('tools/list')} 200`
         ]
 
-  const call = (status: number) => [...listing, `POST ${row('tools/call')} ${status}`]
+  const ended = era === 'modern' ? [] : [`DELETE ${row('session-end')} 200`]
+  const listing = [...opened, ...ended]
+  const call = (status: number) => [...opened, `POST ${row('tools/call')} ${status}`, ...ended]
   const absentStatus = era === 'modern' ? 400 : 200
 
   switch (id) {
@@ -227,17 +233,15 @@ const expectNoCredential = async (emulator: McpEmulator) => {
   expect(recorded.toLowerCase()).not.toContain('bearer')
 }
 
-/** Every case is a read: the state ends at its seed except the sessions the handshakes minted. */
-const expectAtSeed = (era: McpConformanceEra, emulator: McpEmulator) => {
+/**
+ * Every case is a read, and every legacy operation ends the session its handshake minted: the
+ * state ends exactly at its seed.
+ */
+const expectAtSeed = (emulator: McpEmulator) => {
   const state = emulator.snapshot()
 
   expect(state.modernListing).toBe('one-page')
-
-  if (era === 'modern') {
-    expect(state.sessions).toEqual([])
-  } else {
-    expect(state.sessions.every(session => session.phase === 'ready')).toBe(true)
-  }
+  expect(state.sessions).toEqual([])
 }
 
 describe('the synthetic targets are the emulated profiles', () => {
@@ -267,7 +271,7 @@ for (const era of eras) {
                 ),
                 id
               ).toBe(true)
-              expectAtSeed(era, emulator)
+              expectAtSeed(emulator)
             })
 
             expectAllPassed(report, cases.length)
@@ -298,12 +302,16 @@ for (const era of eras) {
               expect(
                 emulator.ledger.entries().every(entry => entry.notEmulated === undefined)
               ).toBe(true)
-              expectAtSeed(era, emulator)
+              expectAtSeed(emulator)
 
-              // Sessions are minted from one counter: each legacy handshake got its own.
-              const sessions = emulator.snapshot().sessions.map(session => session.id)
+              // Sessions are minted from one counter: each legacy handshake got its own, and its
+              // operation ended that one.
+              const ended = emulator.ledger
+                .entries()
+                .filter(entry => entry.method === 'DELETE')
+                .map(entry => entry.headers['mcp-session-id'])
 
-              expect(new Set(sessions).size).toBe(sessions.length)
+              expect(new Set(ended).size).toBe(ended.length)
 
               yield* Effect.promise(() => expectNoCredential(emulator))
             })
@@ -497,9 +505,8 @@ describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
                 sorted([...expectedRequests('legacy', id), `POST ${pingRow} 202`])
               )
               expect(entries.every(entry => entry.notEmulated === undefined)).toBe(true)
-              expect(emulator.snapshot().sessions).toEqual([
-                { id: 'yolk-emu-session-1', phase: 'ready' }
-              ])
+              // The listing ended the session after the ping was answered.
+              expect(emulator.snapshot().sessions).toEqual([])
             }
           )
 
@@ -530,13 +537,7 @@ describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
             expect(answers.map(entry => entry.status)).toEqual(
               Array<number>((cases.length - 1) * 2).fill(202)
             )
-            expect(
-              emulator
-                .snapshot()
-                .sessions.every(
-                  session => session.phase === 'ready' && session.awaitingPingAnswer === undefined
-                )
-            ).toBe(true)
+            expect(emulator.snapshot().sessions).toEqual([])
 
             yield* Effect.promise(() => expectNoCredential(emulator))
           })
@@ -613,6 +614,58 @@ describe('the opt-in server ping (seed legacyInitialize: server-ping)', () => {
         )
 
         expectAllPassed(plain, applicable('legacy').length)
+      }),
+    60_000
+  )
+})
+
+describe('the session-end drill (sessionEndRejected): the DELETE answered 404', () => {
+  const message =
+    'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)'
+
+  const expectOnlySessionCase = (report: ConformanceReport) => {
+    const failed = report.results.filter(result => result.status === 'failed')
+
+    expect(failed.map(result => result.id)).toEqual(['mcp.legacy.session'])
+    expect(failed[0]?.failure?.tag).toBe('ConformanceMismatch')
+    expect(failed[0]?.failure?.message).toContain(message)
+  }
+
+  const knobs: McpEmulatorDrills = { sessionEndRejected: true }
+
+  it.effect(
+    'fails only mcp.legacy.session on the synthetic legacy and Figma profiles; modern unchanged',
+    () =>
+      Effect.gen(function* () {
+        expectOnlySessionCase(
+          yield* runEach(
+            'legacy',
+            applicable('legacy'),
+            { drills: knobs },
+            { kind: 'in-process' },
+            inProcessLayer
+          )
+        )
+        expectOnlySessionCase(
+          yield* runFigma(
+            figmaCases,
+            { drills: knobs },
+            { kind: 'in-process' },
+            figmaInProcessLayer
+          )
+        )
+
+        // The modern profile holds no session, so the knob changes none of its answers.
+        expectAllPassed(
+          yield* runEach(
+            'modern',
+            applicable('modern'),
+            { drills: knobs },
+            { kind: 'in-process' },
+            inProcessLayer
+          ),
+          applicable('modern').length
+        )
       }),
     60_000
   )
@@ -914,11 +967,14 @@ const figmaTransports: ReadonlyArray<readonly [ConformanceTarget, Transport]> = 
   [{ kind: 'emulated' }, figmaEmulatedLayer]
 ]
 
-/** The requests each case sends to the Figma profile on a fresh emulator (the GET may race). */
+/**
+ * The requests each case sends to the Figma profile on a fresh emulator (the GET may race): every
+ * operation ends its session with the `DELETE`.
+ */
 const figmaExpectedRequests = (id: string): ReadonlyArray<string> => {
   const row = (method: string) => `${mcpEmulatorFigmaOrigin}/mcp#${method}`
 
-  const listing = [
+  const opened = [
     `POST ${row('server/discover')} 400`,
     `POST ${row('initialize')} 200`,
     `POST ${row('notifications/initialized')} 202`,
@@ -926,7 +982,9 @@ const figmaExpectedRequests = (id: string): ReadonlyArray<string> => {
     `POST ${row('tools/list')} 200`
   ]
 
-  const call = [...listing, `POST ${row('tools/call')} 200`]
+  const ended = `DELETE ${row('session-end')} 200`
+  const listing = [...opened, ended]
+  const call = [...opened, `POST ${row('tools/call')} 200`, ended]
 
   switch (id) {
     case 'mcp.errors.unknown-tool':
@@ -1024,15 +1082,12 @@ for (const [target, transport] of figmaTransports) {
               id
             ).toBe(true)
 
-            const state = emulator.snapshot()
-
-            expect(state.modernListing).toBe('one-page')
-            expect(
-              state.sessions.every(
-                session => session.phase === 'ready' && session.profile === 'figma'
-              ),
-              id
-            ).toBe(true)
+            // Every operation ended the Figma session it minted.
+            expect(emulator.snapshot(), id).toEqual({
+              modernListing: 'one-page',
+              legacyInitialize: 'plain',
+              sessions: []
+            })
           })
 
           expectAllPassed(report, figmaCases.length)

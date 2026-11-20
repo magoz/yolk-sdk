@@ -729,7 +729,7 @@ export const decodeToolCallResult = Schema.decodeUnknownEffect(ToolCallResult)
 
 export const encodeJsonRpcMessage = (
   server: string,
-  message: JsonRpcRequest | JsonRpcNotification
+  message: JsonRpcRequest | JsonRpcNotification | JsonRpcResponse
 ) =>
   Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(message).pipe(
     Effect.mapError(

@@ -153,6 +153,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -294,6 +309,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
           chunks: [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]
@@ -437,6 +467,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -579,6 +624,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -720,6 +780,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
           chunks: [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       },
       {
@@ -885,6 +960,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"Synthetic metadata of node 0:1."}]}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -1026,6 +1116,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
           chunks: [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       },
       {
@@ -1191,6 +1296,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
             'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"Invalid arguments: nodeId must be a string."}],"isError":true}}\n\n'
           ]
         }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
+        }
       }
     ]
   },
@@ -1332,6 +1452,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
           chunks: [
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"get_design_context","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_metadata","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"get_screenshot","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"nodeId":{"type":"string"}},"required":["nodeId"],"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"whoami","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{},"additionalProperties":false},"annotations":{"readOnlyHint":true}},{"name":"use_figma","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"instructions":{"type":"string"}},"required":["instructions"],"additionalProperties":false},"annotations":{"readOnlyHint":false}},{"name":"create_new_file","description":"Synthetic placeholder description.","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"annotations":{"readOnlyHint":false}}]}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       },
       {
@@ -1494,6 +1629,21 @@ export const mcpEmulatorFigmaFixtures: ReadonlyArray<McpRecordedFixture> = [
           chunks: [
             'event: message\ndata: {"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"Tool yolk_conformance_absent not found"}}\n\n'
           ]
+        }
+      },
+      {
+        request: {
+          method: 'DELETE',
+          url: 'https://mcp.figma.com/mcp',
+          headers: {
+            'mcp-protocol-version': '2025-11-25',
+            'mcp-session-id': 'yolk-synthetic-figma-session-0001'
+          }
+        },
+        response: {
+          status: 200,
+          headers: {},
+          body: ''
         }
       }
     ]

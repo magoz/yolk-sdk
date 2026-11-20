@@ -392,6 +392,91 @@ describe('mcp.legacy.session', () => {
       )
     })
   )
+
+  const deleteIndex = mcpLegacySessionFixture.exchanges.findIndex(
+    exchange => exchange.request.method === 'DELETE'
+  )
+
+  const deleteAnswered = (status: number) =>
+    withResponse(mcpLegacySessionFixture, deleteIndex, { status, headers: {}, body: '' })
+
+  it('the fixture ends the session with DELETE after the last POST', () => {
+    expect(deleteIndex).toBe(mcpLegacySessionFixture.exchanges.length - 1)
+    expect(mcpLegacySessionFixture.exchanges[deleteIndex]?.request.headers).toEqual({
+      'mcp-protocol-version': '2025-11-25',
+      'mcp-session-id': 'yolk-synthetic-session-0001'
+    })
+  })
+
+  it.effect('passes a DELETE answered 405 (the server does not let clients end sessions)', () =>
+    passAgainst(mcpLegacySessionCase, deleteAnswered(405))
+  )
+
+  it.effect('fails a DELETE answered with another status, the listing unchanged', () =>
+    Effect.gen(function* () {
+      for (const status of [400, 404, 500]) {
+        const error = yield* failureAgainst(mcpLegacySessionCase, deleteAnswered(status))
+
+        expect(error.message, String(status)).toBe(
+          'expected the DELETE to be answered 2xx (the session ended) or 405 (the server does not let clients end sessions)'
+        )
+      }
+    })
+  )
+
+  it.effect('fails a DELETE that gets no answer (the listing still succeeds)', () =>
+    Effect.gen(function* () {
+      // Without its recorded exchange, replay fails the DELETE as a transport failure.
+      const [first, ...rest] = mcpLegacySessionFixture.exchanges.filter(
+        (_, index) => index !== deleteIndex
+      )
+
+      if (first === undefined) {
+        return expect.fail('empty fixture')
+      }
+
+      const error = yield* failureAgainst(mcpLegacySessionCase, {
+        ...mcpLegacySessionFixture,
+        exchanges: [first, ...rest]
+      })
+
+      expect(error.message).toBe(
+        "expected the server to answer the DELETE (no answer was observed: a transport failure, or the client's termination timeout)"
+      )
+    })
+  )
+
+  it.effect('passes a server that issues no session id: the client sends no DELETE', () =>
+    Effect.gen(function* () {
+      const withoutSession = (headers: Readonly<Record<string, string>> | undefined) =>
+        Object.fromEntries(
+          Object.entries(headers ?? {}).filter(([name]) => name !== 'mcp-session-id')
+        )
+
+      const sessionless = drillFixture(
+        'mcp.legacy.session',
+        'legacy',
+        legacyListingExchanges()
+          .filter(exchange => exchange.request.method !== 'DELETE')
+          .map(exchange => ({
+            request: { ...exchange.request, headers: withoutSession(exchange.request.headers) },
+            response: { ...exchange.response, headers: withoutSession(exchange.response.headers) }
+          }))
+      )
+
+      const ledger = yield* Ref.make<ReplayLedgerApi | undefined>(undefined)
+
+      yield* passAgainst(mcpLegacySessionCase, sessionless, 'legacy', { ledger })
+
+      expect(yield* ledgerMethods(ledger)).toEqual([
+        'server/discover',
+        'initialize',
+        'notifications/initialized',
+        'GET',
+        'tools/list'
+      ])
+    })
+  )
 })
 
 /** The priming event the official server's `writePrimingEvent` sends first (empty data). */

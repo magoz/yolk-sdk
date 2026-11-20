@@ -866,10 +866,12 @@ There is no root export or barrel.
   only as `afloat_<remainder>` with a recognisable remainder (an Afloat key starts with the hex
   digit `a`), and the remainder is the guarded secret and the digest input; a bearer without the
   prefix there, or with it on the synthetic origin, is an unrecognisable `Authorization` header.
-  Four wire routes (`POST /modern/mcp`, `POST /legacy/mcp`, `GET /legacy/mcp`, and `POST /mcp` on
-  the Afloat origin) answer the manifest as route variants: one `RPC <origin><path>#<method>` row
-  per recorded JSON-RPC method of each profile, plus the `GET` row and the `response:ping` row of
-  the opt-in server ping below, thirteen rows, none a write (no pending entry). Answering the two
+  Five wire routes (`POST /modern/mcp`, `POST /legacy/mcp`, `GET /legacy/mcp`, `DELETE /legacy/mcp`,
+  and `POST /mcp` on the Afloat origin) answer the manifest as route variants: one
+  `RPC <origin><path>#<method>` row per recorded JSON-RPC method of each profile, plus the `GET`
+  row, the `DELETE` row (`<origin><path>#session-end`, the session end below), and the
+  `response:ping` row of the opt-in server ping below, fourteen rows, none a write (no pending
+  entry). Answering the two
   derived Afloat `tools/call` fixtures (not only recorded calls) is in scope by the owner's
   decision; they stay unverified until a live call is recorded. Promoting a live Afloat recording
   updates the connectors fixtures, the connectors and runner tests, and
@@ -893,14 +895,18 @@ There is no root export or barrel.
   either phase (over a socket it may arrive after `notifications/initialized`), with the recorded
   202 on the `RPC https://mcp.example.test/legacy/mcp#response:ping` row, whose commit clears the
   mark (the Figma profile records no ping and ignores the seed); `tools/list`, `tools/call`, and the
-  standing `GET` (the recorded 405) answer only on a ready session; at most 256 sessions are held
-  and another `initialize` is refused before any fault; `reset` and `seed` clear the sessions (the
-  state-equals-seed proof excludes only them). The seed's `modernListing` picks the recorded modern
-  listing (`one-page`, the default, or `two-pages`); the two-page listing's cursor is the fixture's
-  value in the generation that first issues it and `<cursor>.g<generation>` afterwards (every reset
-  and seed starts a generation), accepted only as issued in the current generation. The bearer is
-  never stored, ledgered, or echoed: routes see only its `bearerDigest` (SHA-256 of the origin, a
-  space, and the bearer), compared only with the digest of the public reserved invalid credential
+  standing `GET` (the recorded 405) answer only on a ready session; the `DELETE` that ends a session
+  (MCP `2025-11-25` basic/transports, "Session Management" item 5; every legacy fixture with a
+  session records it after its last POST) answers the recorded 200 (no body) only on a ready
+  session, and its commit drops the session, so every later request on it is refused; at most 256
+  sessions are held and another `initialize` is refused before any fault; `reset` and `seed` clear
+  the sessions (every legacy operation ends its own, so the cross-checks end exactly at the seed).
+  The seed's `modernListing` picks the recorded modern listing (`one-page`, the default, or
+  `two-pages`); the two-page listing's cursor is the fixture's value in the generation that first
+  issues it and `<cursor>.g<generation>` afterwards (every reset and seed starts a generation),
+  accepted only as issued in the current generation. The bearer is never stored, ledgered, or
+  echoed: routes see only its `bearerDigest` (SHA-256 of the origin, a space, and the bearer),
+  compared only with the digest of the public reserved invalid credential
   `yolk-conformance-invalid-credential-0000` (a recognisable bearer, checked at build), or on the
   Afloat profile of the remainder of `afloat_yolkconformanceinvalid0000` (recognisable, checked at
   build), which answers the recorded 401 byte for byte on its profile's era probe and is refused
@@ -912,51 +918,52 @@ There is no root export or barrel.
   or by state, is ledgered with constant text only (`/<unrecognised>`, a standard method or
   `<other>`, an empty query, no headers or body, a constant reason, and the route template or row),
   writes nothing, and uses up no fault. Every plan prepares its answer (`StreamedCommit`); its
-  commit (minting or readying a session, issuing a cursor) runs only when no fault answers. Status
-  and `truncate-after-chunks` faults apply only after admission and plan, and a faulted request
-  writes nothing: a truncation sends the prepared answer cut short and never commits (a truncated
-  `initialize` holds no session and moves neither the counter nor the cap; a truncated first page
-  issues no cursor, so its continuation is refused). `match.route` selects one row (a value naming
-  no row is rejected when the fault is added) and `match.method` is the HTTP method; a truncation of
-  a bodiless answer cannot apply (500, unused). `makeMcpEmulator` throws when a copied recording is
-  not canonical JSON (every JSON body and SSE `data:` payload equal to
+  commit (minting, readying, or ending a session, issuing a cursor) runs only when no fault answers.
+  Status and `truncate-after-chunks` faults apply only after admission and plan, and a faulted
+  request writes nothing: a truncation sends the prepared answer cut short and never commits (a
+  truncated `initialize` holds no session and moves neither the counter nor the cap; a truncated
+  first page issues no cursor, so its continuation is refused). `match.route` selects one row (a
+  value naming no row is rejected when the fault is added) and `match.method` is the HTTP method; a
+  truncation of a bodiless answer cannot apply (500, unused). `makeMcpEmulator` throws when a copied
+  recording is not canonical JSON (every JSON body and SSE `data:` payload equal to
   `JSON.stringify(JSON.parse(text))`), which id substitution relies on, so provider recordings in
-  another form fail loudly. Not emulated: `DELETE`, the client's own `ping`, `resources/*`,
-  `prompts/*`, `logging/*`, `completion/*`, `tasks/*` (`@yolk-sdk/mcp/client` sends none of them),
-  batches, client-sent responses other than the answer to the recorded server ping, a JSON body
-  repeating a key, `mcp-*` headers no recording carries (such as `mcp-param-*`; routes see header
-  names through `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or
-  arguments, and a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte,
-  alone (with the recorded ids, and again with other ids substituted only at the recorded place) and
-  all one-page fixtures in suite order on one emulator, substituting only the minted session id in
-  the `mcp-session-id` header (the Afloat answers carry the request id last, in the server SDK's
-  member order). Drill knobs (`drills`, booleans) each fail exactly one case, on every era and
-  profile whose answers they change (`pingAnswerRejected` answers the client's answer to the server
-  ping 400 with no body and changes nothing without the `server-ping` seed);
-  `test/mcp-conformance.test.ts` runs every applicable case per profile (the Afloat target built by
-  the real `afloat.mcp_auth`; the opt-in server ping on the synthetic legacy profile under its seed)
-  in-process and over loopback.
+  another form fail loudly. Not emulated: the client's own `ping`, `resources/*`, `prompts/*`,
+  `logging/*`, `completion/*`, `tasks/*` (`@yolk-sdk/mcp/client` sends none of them), batches,
+  client-sent responses other than the answer to the recorded server ping, a JSON body repeating a
+  key, `mcp-*` headers no recording carries (such as `mcp-param-*`; routes see header names through
+  `EmulatedRequest.headerNames`), cursors the emulator did not issue, other tools or arguments, and
+  a missing `Authorization`. `test/mcp.test.ts` replays every fixture byte for byte, alone (with the
+  recorded ids, and again with other ids substituted only at the recorded place) and all one-page
+  fixtures in suite order on one emulator, substituting only the minted session id in the
+  `mcp-session-id` header (the Afloat answers carry the request id last, in the server SDK's member
+  order). Drill knobs (`drills`, booleans) each fail exactly one case, on every era and profile
+  whose answers they change (`pingAnswerRejected` answers the client's answer to the server ping 400
+  with no body and changes nothing without the `server-ping` seed; `sessionEndRejected` answers the
+  `DELETE` 404 with no body and ends nothing, failing only `mcp.legacy.session` on both legacy
+  profiles); `test/mcp-conformance.test.ts` runs every applicable case per profile (the Afloat
+  target built by the real `afloat.mcp_auth`; the opt-in server ping on the synthetic legacy profile
+  under its seed) in-process and over loopback.
 - The MCP Figma profile (`mcpEmulatorFigmaOrigin` plus `mcpEmulatorFigmaPath`, the provider endpoint
   `https://mcp.figma.com/mcp`) answers the eight synthetic `@yolk-sdk/connectors/figma/conformance`
   fixtures (placeholders, not recorded live and not derived from provider source; copied as data in
   `src/mcp/figma-recordings.ts`; `test/mcp.test.ts` fails on drift) in the legacy era exactly as
   `synthetic-legacy` does (the session-less era probe answered 400, `initialize` minting a session
-  over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing page, the read
-  call, its tool error, the absent tool, and the 401), as six more unverified read rows (nineteen in
-  all; no pending entry). Every legacy session is bound to the profile that minted it (`profile:
-'figma'` on Figma sessions; absent on the synthetic legacy profile's), and each legacy profile
-  answers only its own sessions. Its bearer follows the plain recognisable-bearer rule (a token
-  starting with a hex digit is refused), and its reserved invalid credential is the public
-  `yolk-conformance-invalid-credential-0000`, compared through its digest for the Figma origin. The
-  Afloat and Figma POST routes share the template `/mcp` on their own origins, so the shared
-  wrapper's route matcher (`routeMatcher`) allows one method and template on two recorded origins
-  and picks the route recorded on the arrival origin, falling back to the first route of the table
-  (whose origin check refuses the request); a table without such a pair matches exactly as before,
-  and the same template twice on one origin, or a shared template with a route on no recorded
-  origin, is refused at build. The legacy-era drills fail exactly their case on the Figma profile
-  too; no knob can break only `mcp.negotiation.era` or `mcp.transport.response-encoding` on a
-  legacy profile (every case starts with the probe and a listing), so the connectors tests drill
-  those two on the replayed fixtures.
+  over SSE, `notifications/initialized` 202, the standing `GET` 405, the closing `DELETE` 200, one
+  listing page, the read call, its tool error, the absent tool, and the 401), as seven more
+  unverified read rows (twenty-one in all; no pending entry). Every legacy session is bound to the
+  profile that minted it (`profile: 'figma'` on Figma sessions; absent on the synthetic legacy
+  profile's), and each legacy profile answers only its own sessions. Its bearer follows the plain
+  recognisable-bearer rule (a token starting with a hex digit is refused), and its reserved invalid
+  credential is the public `yolk-conformance-invalid-credential-0000`, compared through its digest
+  for the Figma origin. The Afloat and Figma POST routes share the template `/mcp` on their own
+  origins, so the shared wrapper's route matcher (`routeMatcher`) allows one method and template on
+  two recorded origins and picks the route recorded on the arrival origin, falling back to the first
+  route of the table (whose origin check refuses the request); a table without such a pair matches
+  exactly as before, and the same template twice on one origin, or a shared template with a route on
+  no recorded origin, is refused at build. The legacy-era drills fail exactly their case on the
+  Figma profile too; no knob can break only `mcp.negotiation.era` or
+  `mcp.transport.response-encoding` on a legacy profile (every case starts with the probe and a
+  listing), so the connectors tests drill those two on the replayed fixtures.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (on the
@@ -972,28 +979,29 @@ There is no root export or barrel.
   that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the recording
   has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client info
   (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted on
-  the same profile since the last reset or seed where the recording sends `mcp-session-id`
-  (initializing for `notifications/initialized`, either phase for the answer to the server ping,
-  ready otherwise); and, with the seed's `two-pages` listing, the cursor this emulator issued in the
-  current generation on the second page. `Authorization` must be exactly `Bearer <token>` (that
-  spelling, one space). Everything else (another origin or path, any query, other HTTP methods such
-  as `DELETE` or a `GET` on the modern or Afloat profile, a bearer without `afloat_` on the Afloat
-  profile or with it on the synthetic profiles, an Afloat key whose remainder fails the rule above
-  (such as one starting with a hex digit), JSON-RPC methods no fixture of the profile records such
-  as `ping`, `resources/*`, or `prompts/*`, batches, client-sent responses other than the answer to
-  the recorded server ping (exactly as recorded, the server's ping id included, on a session
-  awaiting it), other members, a JSON body repeating a key
-  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
-  arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
-  listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
-  `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
-  other than the recorded values or present where none is recorded, any other `mcp-*` header (such
-  as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
-  session or one in the wrong phase, a cursor not issued in the current generation, a reserved
-  invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
-  request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
-  The bullet has four copies that change together with `test/mcp.test.ts`: this one, the
-  `src/mcp.ts` header, `README.md` (MCP emulator), and
+  the same profile since the last reset or seed, and that no `DELETE` has ended, where the recording
+  sends `mcp-session-id` (initializing for `notifications/initialized`, either phase for the answer
+  to the server ping, ready otherwise); on the `DELETE` that ends a session, an `accept` of any
+  media type (the Fetch default an HTTP layer adds where the recording sends none); and, with the
+  seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
+  second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
+  Everything else (another origin or path, any query, other HTTP methods, a `GET` or `DELETE` on the
+  modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the
+  synthetic profiles, an Afloat key whose remainder fails the rule above (such as one starting with
+  a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+  `prompts/*`, batches, client-sent responses other than the answer to the recorded server ping
+  (exactly as recorded, the server's ping id included, on a session awaiting it), other members, a
+  JSON body repeating a key (compared after unescaping), a `null`, negative, or fractional id, other
+  params (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a
+  cursor on the Afloat listing, and a legacy `initialize` client info other than the recorded one),
+  the MCP headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and
+  `last-event-id` other than the recorded values or present where none is recorded, any other
+  `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or present where
+  not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
+  a reserved invalid credential on anything but its profile's era probe, a bearer repeated anywhere
+  in the request, and a bearer an answer or a minted session id or cursor would repeat)
+  is not emulated. The bullet has four copies that change together with `test/mcp.test.ts`: this
+  one, the `src/mcp.ts` header, `README.md` (MCP emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (MCP emulator).
 - Kie (`src/kie.ts` + `src/kie/{state,api}.ts`) is stateful AND fixture-only, without exceptions, on
   `src/stateful-emulator.ts` in its opt-in fail-closed mode with the opt-in `bearerDigest`, and
@@ -1221,7 +1229,9 @@ answers the next valid request, the output guard (`Bearer yolk-emu-session-1` on
 `Bearer synthetic-mcp` against the discover answer, a bearer naming the minted cursor: refused with
 no session, cursor, or counter change, checked against the real response text and headers,
 `snapshot()`, and `/_emulate/*`), the canonical-recordings check (a respaced copy fails), the
-session lifecycle and cap, the opt-in server ping (its seed, the answer accepted once in either
+session lifecycle and cap, the session end (the `DELETE` answered the recorded 200 and the session
+refused afterwards, its refusals, a faulted or truncated `DELETE` ending nothing, the drill), the
+opt-in server ping (its seed, the answer accepted once in either
 phase with the recorded 202, its refusals, a row-matched fault that clears nothing, the drill),
 cursor issuance across resets and seeds, a stale cursor refused before
 any fault, row-matched status and truncation faults (a truncated `initialize` mints no session and
@@ -1237,12 +1247,14 @@ loopback socket, each on its own emulator and twice in sequence on one, the read
 and the creates recording only their tasks, no key anywhere; one drill per case failing exactly that
 case), `test/mcp-conformance.test.ts` (every applicable case per profile through the real
 `@yolk-sdk/mcp/client`, its observer, and its call gate, in-process and over a loopback socket, each
-case on a fresh emulator ending at its seed except the minted sessions, and all cases twice in
+case on a fresh emulator ending exactly at its seed (every legacy operation ends its session with
+`DELETE`), and all cases twice in
 sequence on one emulator; the paged listing across a reset; one drill per case failing exactly that
 case on every era it changes; an SSE answer truncated before its response failing as `McpError` at
 the timeout, not a hang; the opt-in `mcp.legacy.server-ping` on the synthetic legacy profile under
 its seed, alone and beside the non-calling cases twice on one emulator, the calling cases refusing a
-pinging server with no `tools/call` sent, and its drill failing only it), and
+pinging server with no `tools/call` sent, and its drill failing only it; the session-end drill
+failing only `mcp.legacy.session` on both legacy profiles), and
 `test/stateful-emulator.test.ts` (the shared wrapper's `{name+}`
 parameters, raw parameter patterns matched in full (alternation and lazy quantifiers included), the
 opt-in fail-closed mode over a fake core (credential-repeating requests ledgered with constant text

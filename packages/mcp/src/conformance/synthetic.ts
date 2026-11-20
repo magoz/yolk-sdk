@@ -404,6 +404,25 @@ export const legacyHandshakeExchanges = (): ReadonlyArray<WireExchange> => {
   ]
 }
 
+/**
+ * The client ending its session as it closes (MCP `2025-11-25` basic/transports, "Session
+ * Management" item 5: a client that no longer needs a session SHOULD send `DELETE` with its
+ * `MCP-Session-Id`): no body, only the session and `mcp-protocol-version` headers, answered 200
+ * with no body as the official server SDK answers it (a server MAY answer 405 instead). Every
+ * legacy operation ends with it, after its last POST.
+ */
+export const legacySessionEndExchange = (): WireExchange => ({
+  request: {
+    method: 'DELETE',
+    url: mcpConformanceSyntheticLegacyUrl,
+    headers: {
+      'mcp-protocol-version': mcpConformanceSyntheticLegacyProtocolVersion,
+      'mcp-session-id': mcpConformanceSyntheticSessionId
+    }
+  },
+  response: { status: 200, headers: {}, body: '' }
+})
+
 const legacyToolsList = (): WireExchange => ({
   request: {
     method: 'POST',
@@ -414,10 +433,14 @@ const legacyToolsList = (): WireExchange => ({
   response: legacySseAnswer(success(1, { tools: [...mcpConformanceSyntheticTools] }))
 })
 
-/** `listRemoteMcpServerTools` against the legacy server: the handshake, then tools/list (id 1). */
+/**
+ * `listRemoteMcpServerTools` against the legacy server: the handshake, tools/list (id 1), and the
+ * `DELETE` that ends the session.
+ */
 export const legacyListingExchanges = (): ReadonlyArray<WireExchange> => [
   ...legacyHandshakeExchanges(),
-  legacyToolsList()
+  legacyToolsList(),
+  legacySessionEndExchange()
 ]
 
 /** The JSON-RPC id of the `ping` request the synthetic legacy server sends during `initialize`. */
@@ -479,15 +502,17 @@ export const legacyServerPingListingExchanges = (): ReadonlyArray<WireExchange> 
 }
 
 /**
- * `callRemoteMcpServerTool` against the legacy server: the handshake, tools/list (id 1), and
- * tools/call (id 2). The answer is SSE with HTTP 200 (a legacy server answers a JSON-RPC error
- * inside the stream too); `status` of an error answer is ignored.
+ * `callRemoteMcpServerTool` against the legacy server: the handshake, tools/list (id 1),
+ * tools/call (id 2), and the `DELETE` that ends the session. The answer is SSE with HTTP 200 (a
+ * legacy server answers a JSON-RPC error inside the stream too); `status` of an error answer is
+ * ignored.
  */
 export const legacyCallExchanges = (
   call: { readonly name: string; readonly arguments: Schema.JsonObject },
   answer: McpSyntheticCallAnswer
 ): ReadonlyArray<WireExchange> => [
-  ...legacyListingExchanges(),
+  ...legacyHandshakeExchanges(),
+  legacyToolsList(),
   {
     request: {
       method: 'POST',
@@ -503,7 +528,8 @@ export const legacyCallExchanges = (
     response: legacySseAnswer(
       answer.kind === 'result' ? success(2, answer.result) : failure(2, answer.code, answer.message)
     )
-  }
+  },
+  legacySessionEndExchange()
 ]
 
 /** The answer the synthetic servers give a credential they reject. */

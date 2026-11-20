@@ -104,11 +104,12 @@ describe('the observing HttpClient', () => {
       const initialize = exchanges.find(exchange => exchange.status === 200)
 
       expect(initialize?.responseSession).toEqual({ id: 'session#1', visibleAscii: true })
+      // notifications/initialized, the standing GET, tools/list, and the closing DELETE.
       expect(
         exchanges
           .filter(exchange => exchange.requestSession !== undefined)
           .map(exchange => exchange.requestSession?.id)
-      ).toEqual(['session#1', 'session#1', 'session#1'])
+      ).toEqual(['session#1', 'session#1', 'session#1', 'session#1'])
     })
   )
 

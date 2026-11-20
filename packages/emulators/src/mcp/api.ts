@@ -1,10 +1,11 @@
 /**
  * MCP emulator route table (internal): one wire route per recorded HTTP shape (`POST /modern/mcp`,
- * `POST /legacy/mcp`, `GET /legacy/mcp` on the synthetic origin, `POST /mcp` on the Afloat origin,
- * and `POST /mcp` and `GET /mcp` on the Figma origin), each answering only the JSON-RPC methods its
- * profile's fixtures record, as manifest variants (`RPC <origin><path>#<method>`, plus each legacy
- * profile's `GET` row, and the synthetic legacy profile's `RPC <origin><path>#response:ping` row:
- * the client's answer to the recorded server ping).
+ * `POST /legacy/mcp`, `GET /legacy/mcp`, `DELETE /legacy/mcp` on the synthetic origin, `POST /mcp`
+ * on the Afloat origin, and `POST /mcp`, `GET /mcp`, and `DELETE /mcp` on the Figma origin), each
+ * answering only the JSON-RPC methods its profile's fixtures record, as manifest variants
+ * (`RPC <origin><path>#<method>`, plus each legacy profile's `GET` and `DELETE` rows, and the
+ * synthetic legacy profile's `RPC <origin><path>#response:ping` row: the client's answer to the
+ * recorded server ping).
  *
  * A request is admitted only when it equals a recorded request (`src/mcp/recordings.ts`) within
  * the latitude: the MCP headers (`accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
@@ -82,6 +83,8 @@ export type McpEmulatorDrills = {
   readonly unauthorizedWithoutChallenge?: boolean
   /** `mcp.legacy.server-ping`: the client's answer to the server ping is refused 400. */
   readonly pingAnswerRejected?: boolean
+  /** `mcp.legacy.session`: the `DELETE` that ends a session is answered 404 (it stays held). */
+  readonly sessionEndRejected?: boolean
 }
 
 export const mcpEmulatorDrillKnobs: ReadonlyArray<keyof McpEmulatorDrills> = [
@@ -94,7 +97,8 @@ export const mcpEmulatorDrillKnobs: ReadonlyArray<keyof McpEmulatorDrills> = [
   'invalidCallAnswersRpcError',
   'absentCallAnswersResult',
   'unauthorizedWithoutChallenge',
-  'pingAnswerRejected'
+  'pingAnswerRejected',
+  'sessionEndRejected'
 ]
 
 export type McpApiEnv = {
@@ -141,6 +145,21 @@ const exchangeOf = (fixtureId: string, index: number): McpRecordedExchange => {
   return exchange
 }
 
+/** The last exchange of a fixture that sends `method` (a JSON-RPC method, or `DELETE`). */
+const lastSending = (fixtureId: string, method: string): McpRecordedExchange => {
+  const exchange = (allFixtures.find(fixture => fixture.id === fixtureId)?.exchanges ?? [])
+    .filter(
+      ({ request }) => request.method === method || fieldOf(request.body, 'method') === method
+    )
+    .at(-1)
+
+  if (exchange === undefined) {
+    throw new Error(`the MCP recordings have no ${method} in ${fixtureId}`)
+  }
+
+  return exchange
+}
+
 const modern = (caseId: string) => `${caseId}.modern.synthetic`
 
 const legacy = (caseId: string) => `${caseId}.legacy.synthetic`
@@ -155,35 +174,37 @@ const recorded = {
   modernList: exchangeOf(modern('mcp.negotiation.era'), 1),
   modernFirstPage: exchangeOf(modern('mcp.tools.list'), 1),
   modernSecondPage: exchangeOf(modern('mcp.tools.list'), 2),
-  modernCallRead: exchangeOf(modern('mcp.tools.call-read'), -1),
-  modernCallToolError: exchangeOf(modern('mcp.tools.call-tool-error'), -1),
-  modernCallAbsent: exchangeOf(modern('mcp.errors.unknown-tool'), -1),
+  modernCallRead: lastSending(modern('mcp.tools.call-read'), 'tools/call'),
+  modernCallToolError: lastSending(modern('mcp.tools.call-tool-error'), 'tools/call'),
+  modernCallAbsent: lastSending(modern('mcp.errors.unknown-tool'), 'tools/call'),
   legacyDiscover: exchangeOf(legacy('mcp.negotiation.era'), 0),
   legacyRejected: exchangeOf(legacy('mcp.auth.rejected'), 0),
   legacyInitialize: exchangeOf(legacy('mcp.negotiation.era'), 1),
   legacyInitialized: exchangeOf(legacy('mcp.negotiation.era'), 2),
   legacyGet: exchangeOf(legacy('mcp.negotiation.era'), 3),
   legacyList: exchangeOf(legacy('mcp.negotiation.era'), 4),
-  legacyCallRead: exchangeOf(legacy('mcp.tools.call-read'), -1),
-  legacyCallToolError: exchangeOf(legacy('mcp.tools.call-tool-error'), -1),
-  legacyCallAbsent: exchangeOf(legacy('mcp.errors.unknown-tool'), -1),
+  legacyCallRead: lastSending(legacy('mcp.tools.call-read'), 'tools/call'),
+  legacyCallToolError: lastSending(legacy('mcp.tools.call-tool-error'), 'tools/call'),
+  legacyCallAbsent: lastSending(legacy('mcp.errors.unknown-tool'), 'tools/call'),
+  legacyEnd: lastSending(legacy('mcp.legacy.session'), 'DELETE'),
   legacyPingInitialize: exchangeOf(legacy('mcp.legacy.server-ping'), 1),
   legacyPingAnswer: exchangeOf(legacy('mcp.legacy.server-ping'), 2),
   afloatDiscover: exchangeOf(afloat('mcp.negotiation.era'), 0),
   afloatRejected: exchangeOf(afloat('mcp.auth.rejected'), 0),
   afloatList: exchangeOf(afloat('mcp.negotiation.era'), 1),
-  afloatCallRead: exchangeOf(afloat('mcp.tools.call-read'), -1),
-  afloatCallToolError: exchangeOf(afloat('mcp.tools.call-tool-error'), -1),
-  afloatCallAbsent: exchangeOf(afloat('mcp.errors.unknown-tool'), -1),
+  afloatCallRead: lastSending(afloat('mcp.tools.call-read'), 'tools/call'),
+  afloatCallToolError: lastSending(afloat('mcp.tools.call-tool-error'), 'tools/call'),
+  afloatCallAbsent: lastSending(afloat('mcp.errors.unknown-tool'), 'tools/call'),
   figmaDiscover: exchangeOf(figma('mcp.negotiation.era'), 0),
   figmaRejected: exchangeOf(figma('mcp.auth.rejected'), 0),
   figmaInitialize: exchangeOf(figma('mcp.negotiation.era'), 1),
   figmaInitialized: exchangeOf(figma('mcp.negotiation.era'), 2),
   figmaGet: exchangeOf(figma('mcp.negotiation.era'), 3),
   figmaList: exchangeOf(figma('mcp.negotiation.era'), 4),
-  figmaCallRead: exchangeOf(figma('mcp.tools.call-read'), -1),
-  figmaCallToolError: exchangeOf(figma('mcp.tools.call-tool-error'), -1),
-  figmaCallAbsent: exchangeOf(figma('mcp.errors.unknown-tool'), -1)
+  figmaEnd: lastSending(figma('mcp.legacy.session'), 'DELETE'),
+  figmaCallRead: lastSending(figma('mcp.tools.call-read'), 'tools/call'),
+  figmaCallToolError: lastSending(figma('mcp.tools.call-tool-error'), 'tools/call'),
+  figmaCallAbsent: lastSending(figma('mcp.errors.unknown-tool'), 'tools/call')
 }
 
 type RecordedKey = keyof typeof recorded
@@ -199,7 +220,8 @@ const recordedCursor = (() => {
   return cursor
 })()
 
-// The manifest: one row per recorded JSON-RPC method of each profile, plus the GET row.
+// The manifest: one row per recorded JSON-RPC method of each profile, plus the GET and DELETE
+// rows.
 
 const casesSending = (
   origin: string,
@@ -291,6 +313,24 @@ const getRowOf = (origin: string, path: string): EmulatorRouteEvidence => ({
   kind: 'connector',
   write: false,
   caseIds: casesSending(origin, path, request => request.method === 'GET'),
+  evidence: 'unverified'
+})
+
+/** The suffix of the `DELETE` row's path (row paths are unique; the `GET` row holds the URL). */
+const sessionEndVariant = 'session-end'
+
+/**
+ * The `DELETE` row of a legacy profile (`<origin><path>#session-end`): the client ending its
+ * session as it closes (MCP `2025-11-25` basic/transports, "Session Management" item 5), cited by
+ * every case whose fixtures record it (every legacy operation that holds a session ends with it;
+ * `mcp.legacy.session` checks it).
+ */
+const deleteRowOf = (origin: string, path: string): EmulatorRouteEvidence => ({
+  method: 'DELETE',
+  path: `${origin}${path}#${sessionEndVariant}`,
+  kind: 'connector',
+  write: false,
+  caseIds: casesSending(origin, path, request => request.method === 'DELETE'),
   evidence: 'unverified'
 })
 
@@ -701,6 +741,7 @@ type LegacyProfile = {
   readonly reserved: (request: EmulatedRequest, env: McpApiEnv) => boolean
   readonly rows: ReadonlyArray<EmulatorRouteEvidence>
   readonly getRow: EmulatorRouteEvidence
+  readonly deleteRow: EmulatorRouteEvidence
   /**
    * The recorded server-ping handshake, when the profile records one: the `initialize` answer that
    * pings (sent under the seed's `legacyInitialize: 'server-ping'`) and the client's answer to it.
@@ -717,6 +758,7 @@ type LegacyProfile = {
     readonly get: RecordedKey
     readonly list: RecordedKey
     readonly calls: ReadonlyArray<RecordedKey>
+    readonly end: RecordedKey
   }
 }
 
@@ -1074,6 +1116,26 @@ const matchPingAnswer = (request: EmulatedRequest, key: RecordedKey): Matched | 
   return { key, id: undefined, cursor: undefined }
 }
 
+/**
+ * The `DELETE` that ends a ready session of `profile`: the recorded answer (200, no body), and the
+ * commit drops the session, so every later request on it is refused. The drill answers 404 and
+ * keeps it.
+ */
+const planSessionEnd =
+  (profile: LegacyProfile): Plan =>
+  (state, admitted, env) => {
+    const session = sessionOf(state, admitted, 'ready', profile)
+
+    if (session === undefined) return unknownSession('ready')
+
+    // The recorded answer carries no request id, so the drill applies here, not in `drilled`.
+    if (env.drills.sessionEndRejected) return answerOnly({ status: 404, headers: {}, chunks: [] })
+
+    return streamedCommit(recordedAnswer(profile.keys.end, undefined, env), () => {
+      state.sessions = state.sessions.filter(held => held.id !== session.id)
+    })
+  }
+
 const planAnswer =
   (key: RecordedKey): Plan =>
   (_state, admitted, env) =>
@@ -1266,6 +1328,56 @@ const legacyGetRoute = (profile: LegacyProfile): McpRoute => ({
   }
 })
 
+/**
+ * The `accept` a fetch implementation adds to a request that sets none (the Fetch standard's
+ * default, which Node's fetch sends): the recorded `DELETE` carries no `accept`, so over a socket
+ * it arrives with this one.
+ */
+const fetchDefaultAccept = '*/*'
+
+/**
+ * `DELETE <path>` of a legacy profile: the client ending a ready session (the recorded headers, an
+ * `accept` absent as recorded or the fetch default `*\/*`, and no body), answered the recorded
+ * 200; the session ends.
+ */
+const legacyDeleteRoute = (profile: LegacyProfile): McpRoute => ({
+  ...routeEvidenceOf('DELETE', profile.path, [profile.deleteRow], profile.origin),
+  body: 'none',
+  admit: (request, env) => {
+    const query = noQuery(request)
+
+    if (query !== undefined) return query
+
+    if (profile.reserved(request, env)) return notEmulated(reservedOnlyOnProbe)
+
+    const accept = request.header('accept')
+
+    const problem =
+      unrecordedMcpHeader(request) ??
+      headerProblem(
+        request,
+        recorded[profile.keys.end].request,
+        comparedHeaders.filter(name => name !== 'accept')
+      ) ??
+      (accept === undefined || accept === fetchDefaultAccept
+        ? undefined
+        : notEmulated('the accept header must be absent, as recorded, or the fetch default */*'))
+
+    if (problem !== undefined) return problem
+
+    return admission(
+      profile.deleteRow.path,
+      {
+        key: profile.keys.end,
+        id: undefined,
+        cursor: undefined,
+        session: request.header(sessionHeader)
+      },
+      planSessionEnd(profile)
+    )
+  }
+})
+
 /** The synthetic legacy server on `https://mcp.example.test/legacy/mcp`. */
 const syntheticLegacyProfile: LegacyProfile = {
   origin: mcpEmulatorOrigin,
@@ -1275,6 +1387,7 @@ const syntheticLegacyProfile: LegacyProfile = {
   reserved: isReserved,
   rows: legacyRows,
   getRow: getRowOf(mcpEmulatorOrigin, mcpEmulatorLegacyPath),
+  deleteRow: deleteRowOf(mcpEmulatorOrigin, mcpEmulatorLegacyPath),
   serverPing: { initialize: 'legacyPingInitialize', answer: 'legacyPingAnswer' },
   keys: {
     discover: 'legacyDiscover',
@@ -1283,7 +1396,8 @@ const syntheticLegacyProfile: LegacyProfile = {
     initialized: 'legacyInitialized',
     get: 'legacyGet',
     list: 'legacyList',
-    calls: ['legacyCallRead', 'legacyCallToolError', 'legacyCallAbsent']
+    calls: ['legacyCallRead', 'legacyCallToolError', 'legacyCallAbsent'],
+    end: 'legacyEnd'
   }
 }
 
@@ -1301,6 +1415,7 @@ const figmaProfile: LegacyProfile = {
   reserved: (request, env) => request.bearerDigest === env.figmaReservedDigest,
   rows: figmaRows,
   getRow: getRowOf(mcpEmulatorFigmaOrigin, mcpEmulatorFigmaPath),
+  deleteRow: deleteRowOf(mcpEmulatorFigmaOrigin, mcpEmulatorFigmaPath),
   keys: {
     discover: 'figmaDiscover',
     rejected: 'figmaRejected',
@@ -1308,7 +1423,8 @@ const figmaProfile: LegacyProfile = {
     initialized: 'figmaInitialized',
     get: 'figmaGet',
     list: 'figmaList',
-    calls: ['figmaCallRead', 'figmaCallToolError', 'figmaCallAbsent']
+    calls: ['figmaCallRead', 'figmaCallToolError', 'figmaCallAbsent'],
+    end: 'figmaEnd'
   }
 }
 
@@ -1369,7 +1485,9 @@ export const mcpApiRoutes: ReadonlyArray<McpRoute> = [
   modernRoute,
   legacyPostRoute(syntheticLegacyProfile),
   legacyGetRoute(syntheticLegacyProfile),
+  legacyDeleteRoute(syntheticLegacyProfile),
   afloatRoute,
   legacyPostRoute(figmaProfile),
-  legacyGetRoute(figmaProfile)
+  legacyGetRoute(figmaProfile),
+  legacyDeleteRoute(figmaProfile)
 ]
