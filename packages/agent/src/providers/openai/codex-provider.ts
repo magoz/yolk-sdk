@@ -161,23 +161,47 @@ const normalizeCodexContextWindowError = (error: LLMError) =>
         })()
       )
 
-const noteCodexToolCall =
-  (hasToolCallRef: Ref.Ref<boolean>) =>
-  (event: LLMEvent): Effect.Effect<LLMEvent> => {
-    if (!Predicate.isTagged(event, 'ToolCall')) return Effect.succeed(event)
+/** What the stream emitted before a failure the provider may recover from. */
+type CodexStreamSeen = {
+  readonly toolCall: boolean
+  readonly usage: boolean
+}
 
-    return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
+const nothingSeen: CodexStreamSeen = { toolCall: false, usage: false }
+
+const noteCodexEvent =
+  (seenRef: Ref.Ref<CodexStreamSeen>) =>
+  (event: LLMEvent): Effect.Effect<LLMEvent> => {
+    if (Predicate.isTagged(event, 'ToolCall')) {
+      return Ref.update(seenRef, seen => ({ ...seen, toolCall: true })).pipe(Effect.as(event))
+    }
+
+    if (Predicate.isTagged(event, 'Usage')) {
+      return Ref.update(seenRef, seen => ({ ...seen, usage: true })).pipe(Effect.as(event))
+    }
+
+    return Effect.succeed(event)
   }
 
+/**
+ * `response.completed` arrived without a readable final output: the turn ends with what streamed.
+ * Its usage could not be read either, so Done says so unless the stream already reported usage.
+ */
 const recoverMissingCodexFinalOutput = (
-  hasToolCallRef: Ref.Ref<boolean>,
+  seenRef: Ref.Ref<CodexStreamSeen>,
   error: LLMError
 ): Stream.Stream<LLMEvent, LLMProviderError> => {
   if (!isMissingCodexFinalOutputError(error)) return Stream.fail(error)
 
   return Stream.fromEffect(
-    Ref.get(hasToolCallRef).pipe(
-      Effect.map(hasToolCall => LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
+    Ref.get(seenRef).pipe(
+      Effect.map(seen => {
+        const stopReason = seen.toolCall ? 'tool_use' : 'stop'
+
+        return seen.usage
+          ? LLMDone.make({ stopReason })
+          : LLMDone.make({ stopReason, usageUnavailable: true })
+      })
     )
   )
 }
@@ -215,15 +239,15 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
   return decorateLLMProvider(provider =>
     LLMProvider.of({
       stream: request =>
-        Stream.fromEffect(Ref.make(false)).pipe(
-          Stream.flatMap(hasToolCallRef =>
+        Stream.fromEffect(Ref.make(nothingSeen)).pipe(
+          Stream.flatMap(seenRef =>
             provider.stream(request).pipe(
-              Stream.mapEffect(noteCodexToolCall(hasToolCallRef)),
+              Stream.mapEffect(noteCodexEvent(seenRef)),
               Stream.catchTags({
                 LLMError: error =>
                   isCodexContextWindowError(error)
                     ? Stream.fail(normalizeCodexContextWindowError(error))
-                    : recoverMissingCodexFinalOutput(hasToolCallRef, error)
+                    : recoverMissingCodexFinalOutput(seenRef, error)
               })
             )
           )

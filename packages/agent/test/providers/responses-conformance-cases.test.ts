@@ -809,6 +809,34 @@ const describeFamily = <Req>(family: Family<Req>) => {
             )
           })
       )
+
+      it.effect(
+        'recovers a response.completed without output, marking its unreadable usage unavailable',
+        () =>
+          Effect.gen(function* () {
+            const events = sseEvents(family.plainText.fixture)
+
+            // The recorded terminal event reports usage; only its `output` is dropped.
+            expect(events.some(event => isRecord(completedResponseOf(event)?.usage))).toBe(true)
+
+            const withoutOutput = events.map(event =>
+              mapJson(event, json => {
+                if (json.type === 'response.completed' && isRecord(json.response)) {
+                  delete json.response.output
+                }
+              })
+            )
+
+            const streamed = yield* streamFixture(
+              withEvents(family.plainText.fixture, withoutOutput, 'no-output')
+            )
+
+            // The streamed text stands; the usage in the unreadable response never reached Usage.
+            expect(streamed.map(event => event._tag)).toContain('TextDelta')
+            expect(streamed.map(event => event._tag)).not.toContain('Usage')
+            expect(doneSignals(streamed)).toEqual([['stop', true]])
+          })
+      )
     } else {
       it.effect(
         'requires the terminal event: no response.completed is a non-retryable invalid response',

@@ -78,7 +78,15 @@ with sanitized errors.
 
 Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events. Tool calls are decoded as protocol `ToolCall`; a malformed one (empty or padded id or name) fails the request with a typed `LLMError`, never a thrown defect.
 
-A stream that completes without the usage report its request asked for still ends with `LLMDone`, marked `usageUnavailable: true`: streamed chat completions (generic OpenAI-compatible chat, Vercel AI Gateway, OpenCode Go chat) that end after the finish chunk without the `stream_options.include_usage` chunk, Codex streams ending without `response.completed`, and Claude streams ending without `message_delta`. The loop forwards it on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
+A stream that completes without the usage report its request asked for still ends with `LLMDone`, marked `usageUnavailable: true`:
+
+| Provider                                                               | Marked when                                                                                          |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, OpenCode Go chat) | the stream ends after the finish chunk, without the `stream_options.include_usage` usage chunk       |
+| OpenAI Codex                                                           | the stream ends without `response.completed`, or `response.completed` has no readable output         |
+| Anthropic Claude, native Messages (OpenCode Go `messages`)             | `message_stop` arrives without a `message_delta` carrying usage (only `message_start` usage, if any) |
+
+Grok and OpenCode Go Responses fail without `response.completed`, and Messages streams fail without `message_stop`, so neither completes that way. The loop forwards the mark on the protocol `LLMStreamEnd` ([Protocol](./protocol#missing-usage)).
 
 ## OpenAI JSON admission
 

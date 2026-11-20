@@ -131,8 +131,9 @@ for (const event of events) {
 `UsageUpdate` carries each model call's token usage as an additive delta, and `AgentEnd` /
 `AgentAwaitingInput` carry the run's total. When a model stream completes without the usage report
 its request asked for (a streamed chat completion cut after its finish chunk, before the
-`stream_options.include_usage` chunk; a Codex stream without `response.completed`; a Claude stream
-without `message_delta`), the turn still completes, and that stream's `LLMStreamEnd` carries
+`stream_options.include_usage` chunk; a Codex stream without a readable `response.completed`; a
+Claude or native Messages stream whose `message_stop` came without a `message_delta` carrying
+usage), the turn still completes, and that stream's `LLMStreamEnd` carries
 `usageUnavailable: true`. Its usage is then missing from the totals, or partial when the stream
 sent some `UsageUpdate`s first. Hosts decide how to account for it, for example:
 

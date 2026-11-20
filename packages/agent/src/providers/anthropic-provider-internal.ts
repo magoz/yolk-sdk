@@ -2199,7 +2199,7 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
-  /** `message_delta` carried usage: its cumulative counts are the message's final usage. */
+  /** A `message_delta` carried usage: its cumulative counts are the message's final usage. */
   readonly hasFinalUsage: boolean
   /** A thinking block closed without the signature its replay needs. */
   readonly hasUnsignedThinking: boolean
@@ -2476,9 +2476,17 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         return Effect.fail(unsignedThinkingError())
       }
 
+      const stopReason = state.hasToolCall ? 'tool_use' : 'stop'
+
+      // Messages always reports usage, its final counts on `message_delta`. A `message_stop`
+      // without one ends the message whole, but its usage is missing or only `message_start`'s.
       return Effect.succeed({
         state: { ...state, hasDone: true },
-        events: [LLMDone.make({ stopReason: state.hasToolCall ? 'tool_use' : 'stop' })]
+        events: [
+          state.hasFinalUsage
+            ? LLMDone.make({ stopReason })
+            : LLMDone.make({ stopReason, usageUnavailable: true })
+        ]
       })
     }
 
