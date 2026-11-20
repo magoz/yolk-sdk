@@ -503,6 +503,51 @@ describe('Anthropic errors classify from error.type behind a details.error_code'
   }
 })
 
+describe('an error type that names a kind behind a code that names none', () => {
+  for (const target of openAiEnvelopeTargets) {
+    it.effect(`${target.name}: a 400 typed rate_limit_exceeded is a retryable rate limit`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          {
+            kind: 'status',
+            status: 400,
+            body: { error: { message: 'Slow down.', type: 'rate_limit_exceeded', code: '1302' } }
+          },
+          'gpt-4.1-nano'
+        )
+
+        expect(error).toMatchObject({
+          cause: 'rate_limit',
+          retryable: true,
+          provider: { kind: 'rate_limit', status: 400, providerCode: '1302' }
+        })
+      })
+    )
+  }
+})
+
+describe('pathological error bodies classify by status', () => {
+  const deepBody = `${'['.repeat(10_000)}${']'.repeat(10_000)}`
+
+  const largeBody = `${'x'.repeat(1024 * 1024)} prompt is too long`
+
+  for (const [name, body] of [
+    ['nested 10,000 levels deep', deepBody],
+    ['of 1 MB', largeBody]
+  ] as const) {
+    it.effect(`the Gateway 503 with a body ${name} stays a retryable server error`, () =>
+      Effect.gen(function* () {
+        const error = yield* gatewayTarget.failWith({ kind: 'status', status: 503, body }, 'x')
+
+        expect(error).toMatchObject({
+          retryable: true,
+          provider: { kind: 'server_error', status: 503 }
+        })
+      })
+    )
+  }
+})
+
 describe('the native Messages layer surfaces the envelope error.type', () => {
   it.effect('an unknown model is a non-retryable 404 with providerCode not_found_error', () =>
     Effect.gen(function* () {

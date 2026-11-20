@@ -266,6 +266,34 @@ describe('providerFailureKind precedence', () => {
     ).toBe('rate_limit')
   })
 
+  it('classifies a body nested 10,000 levels deep by its status without throwing', () => {
+    const arrays = `${'['.repeat(10_000)}${']'.repeat(10_000)}`
+    const objects = `${'{"a":'.repeat(10_000)}null${'}'.repeat(10_000)}`
+
+    for (const body of [arrays, objects]) {
+      expect(kindOf({ status: 503, body })).toBe('server_error')
+      expect(kindOf({ status: 404, body })).toBe('unknown')
+    }
+  })
+
+  it('scans the raw head of a deep body, so its text still refines a retryable status', () => {
+    const body = `${'['.repeat(100)}"Service Unavailable"${']'.repeat(100)}`
+
+    expect(kindOf({ status: 503, body })).toBe('overloaded')
+    expect(kindOf({ status: 404, body })).toBe('unknown')
+  })
+
+  it('scans only the first 64 KiB of a 1 MB body', () => {
+    const tail = `${'x'.repeat(1024 * 1024)} prompt is too long`
+    const head = `prompt is too long ${'x'.repeat(1024 * 1024)}`
+
+    expect(kindOf({ status: 503, body: tail })).toBe('server_error')
+    expect(kindOf({ status: 503, body: head })).toBe('context_overflow')
+    expect(
+      kindOf({ status: 503, body: JSON.stringify({ error: { message: 'x'.repeat(1024 * 1024) } }) })
+    ).toBe('server_error')
+  })
+
   it('treats a 408 request timeout as a retryable network failure', () => {
     expect(kindOf({ status: 408 })).toBe('network')
     expect(providerFailureRetryable(kindOf({ status: 408 }))).toBe(true)

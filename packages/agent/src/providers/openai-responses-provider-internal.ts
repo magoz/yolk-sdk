@@ -296,7 +296,13 @@ type OpenAiResponsesHttpError = {
   readonly code: string | undefined
   /** Request values the envelope echoes in `error.param`, kept out of the text fallback. */
   readonly echoedValues: ReadonlyArray<string>
+  /** `error.type`, classified when the reported `code` names no kind. */
+  readonly kindCodes: ReadonlyArray<string>
 }
+
+/** An error object's `type`, classified when its reported `code` names no kind. */
+const typeKindCodes = (error: Schema.Json | undefined): ReadonlyArray<string> =>
+  [stringField(error, 'type')].filter(Predicate.isString)
 
 // Machine error codes are safe to surface in provider metadata. Free-text
 // upstream messages stay out of LLMError per provider sanitization policy.
@@ -307,10 +313,11 @@ const decodeOpenAiHttpError = (raw: string): Effect.Effect<OpenAiResponsesHttpEr
 
       return {
         code: stringField(error, 'code') ?? stringField(error, 'type'),
-        echoedValues: echoedParamValues(jsonField(error, 'param'))
+        echoedValues: echoedParamValues(jsonField(error, 'param')),
+        kindCodes: typeKindCodes(error)
       }
     }),
-    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [] }))
+    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [], kindCodes: [] }))
   )
 
 const unsupportedContentError = (contentType: string, providerName: string) =>
@@ -822,12 +829,14 @@ export const withOpenAiResponsesProviderName = (providerName: string, error: LLM
 type OpenAiResponsesClassifyFields = {
   provider: string
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
   fallbackKind?: ProviderFailureKind
 }
 
 type OpenAiResponsesSignalInputFields = {
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
 }
 
@@ -836,6 +845,7 @@ const providerSignalError = (
   input: {
     readonly message: string
     readonly providerCode?: string
+    readonly kindCodes?: ReadonlyArray<string>
     readonly fallbackKind?: ProviderFailureKind
   }
 ) => {
@@ -843,7 +853,8 @@ const providerSignalError = (
     (() => {
       const fields: OpenAiResponsesClassifyFields = {
         provider: descriptor.providerId,
-        message: input.message
+        message: input.message,
+        kindCodes: input.kindCodes ?? []
       }
 
       if (input.providerCode !== undefined) {
@@ -1395,7 +1406,10 @@ const processSseData = (
         providerSignalError(
           descriptor,
           (() => {
-            const fields: OpenAiResponsesSignalInputFields = { message }
+            const fields: OpenAiResponsesSignalInputFields = {
+              message,
+              kindCodes: typeKindCodes(error)
+            }
 
             if (providerCode !== undefined) {
               fields.providerCode = providerCode
@@ -1431,8 +1445,10 @@ const processSseData = (
         providerSignalError(
           descriptor,
           (() => {
+            // An `error` event's `type` is the event type, not an error type: no kind codes.
             const fields: OpenAiResponsesSignalInputFields = {
-              message: parsed.message
+              message: parsed.message,
+              kindCodes: []
             }
 
             if (providerCode !== undefined) {
@@ -1711,7 +1727,8 @@ const sendOpenAiResponsesRequest = (
               headers: response.headers,
               body: errorText,
               providerCode: error.code,
-              echoedValues
+              echoedValues,
+              kindCodes: error.kindCodes
             }
           : {
               provider: config.providerId,
@@ -1720,6 +1737,7 @@ const sendOpenAiResponsesRequest = (
               body: errorText,
               providerCode: error.code,
               echoedValues,
+              kindCodes: error.kindCodes,
               quotaResetsAtMs
             }
       )

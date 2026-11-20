@@ -491,6 +491,8 @@ type OpenAiHttpError = {
   readonly code: string | undefined
   /** Request values the envelope echoes in `error.param`, kept out of the text fallback. */
   readonly echoedValues: ReadonlyArray<string>
+  /** `error.type`, classified when the reported `code` names no kind. */
+  readonly kindCodes: ReadonlyArray<string>
 }
 
 // Machine error codes are safe to surface in provider metadata. Free-text
@@ -502,10 +504,11 @@ const decodeOpenAiHttpError = (raw: string): Effect.Effect<OpenAiHttpError> =>
 
       return {
         code: stringField(error, 'code') ?? stringField(error, 'type'),
-        echoedValues: echoedParamValues(jsonField(error, 'param'))
+        echoedValues: echoedParamValues(jsonField(error, 'param')),
+        kindCodes: [stringField(error, 'type')].filter(Predicate.isString)
       }
     }),
-    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [] }))
+    Effect.catch(() => Effect.succeed({ code: undefined, echoedValues: [], kindCodes: [] }))
   )
 
 const schemaErrorMessage = (error: Schema.SchemaError) => error.message
@@ -1359,7 +1362,8 @@ const chatStreamError = (
       provider: providerIdentity.id,
       body: raw,
       providerCode: error.code,
-      echoedValues: error.echoedValues
+      echoedValues: error.echoedValues,
+      kindCodes: error.kindCodes
     })
 
     return yield* Effect.fail(
@@ -1877,7 +1881,8 @@ const postOpenAiRequest = (
         headers: response.headers,
         body: errorText,
         providerCode: error.code,
-        echoedValues: [request.model, ...error.echoedValues]
+        echoedValues: [request.model, ...error.echoedValues],
+        kindCodes: error.kindCodes
       })
 
       return yield* Effect.fail(

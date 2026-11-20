@@ -154,12 +154,53 @@ const minEchoedValueLength = 3
 
 const JsonFromString = Schema.fromJsonString(Schema.Json)
 
+/** Only the head of an error body is scanned: a body is classified, never fully read as text. */
+const maxScannedBodyLength = 64 * 1024
+
+/** Deeper JSON bodies are scanned as raw text, so decoding and `jsonStrings` stay shallow. */
+const maxJsonDepth = 32
+
+/**
+ * Whether the JSON text nests arrays and objects at most `maxDepth` deep, checked in one pass
+ * without recursion (brackets inside strings do not count), before anything recursive reads it.
+ */
+const jsonNestsWithin = (text: string, maxDepth: number): boolean => {
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+    } else if (char === '"') {
+      inString = true
+    } else if (char === '{' || char === '[') {
+      depth += 1
+
+      if (depth > maxDepth) {
+        return false
+      }
+    } else if (char === '}' || char === ']') {
+      depth -= 1
+    }
+  }
+
+  return true
+}
+
 const isJsonArray = (value: Schema.JsonArray | Schema.JsonObject): value is Schema.JsonArray =>
   Array.isArray(value)
 
 /**
  * The string values of a decoded JSON body (its keys and the `param` subtree, which holds request
- * values, left out), so echoed values compare against decoded text, never JSON escapes.
+ * values, left out), so echoed values compare against decoded text, never JSON escapes. Its
+ * recursion is bounded by `maxJsonDepth`: `bodyText` decodes only bodies that nest within it.
  */
 const jsonStrings = (value: Schema.Json): ReadonlyArray<string> => {
   if (Predicate.isString(value)) {
@@ -179,12 +220,22 @@ const jsonStrings = (value: Schema.Json): ReadonlyArray<string> => {
   )
 }
 
-/** A JSON body as its decoded strings; any other body as its text. */
-const bodyText = (body: string): string =>
-  Option.match(Schema.decodeUnknownOption(JsonFromString)(body), {
-    onNone: () => body,
+/**
+ * A JSON body as its decoded strings; any other body, one longer than `maxScannedBodyLength`, or
+ * one nested deeper than `maxJsonDepth`, as the raw text of its head.
+ */
+const bodyText = (body: string): string => {
+  const head = body.slice(0, maxScannedBodyLength)
+
+  if (head.length < body.length || !jsonNestsWithin(head, maxJsonDepth)) {
+    return head
+  }
+
+  return Option.match(Schema.decodeUnknownOption(JsonFromString)(head), {
+    onNone: () => head,
     onSome: json => jsonStrings(json).join(' ')
   })
+}
 
 /** The free text of a failure, lower-cased, with every echoed request value removed. */
 const scannedText = (input: ProviderFailureInput) =>
@@ -256,12 +307,12 @@ export const providerFailureRetryable = (kind: ProviderFailureKind) => {
 
 /**
  * Classify from structured fields first: the vendor's `providerCode` (`error.type`/`code`), then
- * its `kindCodes`, when one names a kind, then the HTTP status. Free text (`message`, `body`, echoed request values removed)
- * is the fallback when no status exists (stream error events), and otherwise only refines the
- * status: it may name a non-retryable kind (an Anthropic 400 "prompt is too long" is
- * `context_overflow`) or a more specific retryable one for a retryable status (a 503 "service
- * unavailable" is `overloaded`), but never makes a failure retryable that its status (a 404 model
- * error, a 401) leaves non-retryable.
+ * its `kindCodes`, when one names a kind, then the HTTP status. Free text (`message`, `body`,
+ * echoed request values removed) is the fallback when no status exists (stream error events), and
+ * otherwise only refines the status: it may name a non-retryable kind (an Anthropic 400 "prompt
+ * is too long" is `context_overflow`) or a more specific retryable one for a retryable status (a
+ * 503 "service unavailable" is `overloaded`), but never makes a failure retryable that its status
+ * (a 404 model error, a 401) leaves non-retryable.
  */
 export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind => {
   for (const code of [input.providerCode, ...(input.kindCodes ?? [])]) {
