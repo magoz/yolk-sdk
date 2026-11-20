@@ -26,7 +26,8 @@ Effect `HttpClient` routing that points code at them.
 | `@yolk-sdk/emulators/github`          | `src/github.ts`                          | Stateful, fixture-only GitHub REST emulator on `@emulators/core` (issues, comments, labels, contents; fail closed; minted `Link`)                                                                                                                                                                                  |
 | `@yolk-sdk/emulators/google`          | `src/google.ts`                          | Stateful, fixture-only Gmail, Calendar, and Drive emulator on `@emulators/core` (two origins; fail closed; the practice send recorded in state)                                                                                                                                                                    |
 | `@yolk-sdk/emulators/linkedin-search` | `src/linkedin-search.ts`                 | Stateful, fixture-only Exa and Enrich Layer emulator on `@emulators/core` (two origins; fail closed; reads only; rejected keys kept as per-origin digests)                                                                                                                                                         |
-| `@yolk-sdk/emulators/mcp`             | `src/mcp.ts`                             | Stateful, fixture-only MCP servers on `@emulators/core` (synthetic modern and legacy profiles, the derived Afloat profile; JSON-RPC rows; fail closed, constant refusals; minted sessions)                                                                                                                         |
+| `@yolk-sdk/emulators/mcp`             | `src/mcp.ts`                             | Stateful, fixture-only MCP servers on `@emulators/core` (synthetic modern and legacy profiles, the derived Afloat profile, the synthetic Figma profile; JSON-RPC rows; fail closed, constant refusals; minted sessions)                                                                                            |
+| `@yolk-sdk/emulators/kie`             | `src/kie.ts`                             | Stateful, fixture-only Kie Market API emulator on `@emulators/core` (task read and create; fail closed; bearer digest; created tasks recorded in state, never readable)                                                                                                                                            |
 | (internal)                            | `src/emulator-kernel.ts`                 | Shared kernel: faults, scripted turns, ledger, pull-driven bodies, control plane, evidence tagging, route binding (`makeEmulatorKernel`)                                                                                                                                                                           |
 | (internal)                            | `src/chat-completions.ts`                | Shared OpenAI-compatible Chat Completions core (`makeChatCompletionsEmulator`)                                                                                                                                                                                                                                     |
 | (internal)                            | `src/messages.ts`                        | Anthropic Messages core (`makeMessagesEmulator`)                                                                                                                                                                                                                                                                   |
@@ -50,7 +51,7 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/microsoft/graph.ts`                 | Graph error envelope and codes, `$select`, paging/nextLink, `Prefer`, handler types                                                                                                                                                                                                                                |
 | (internal)                            | `src/microsoft/{calendar,mail,drive}.ts` | Calendar, Outlook (with `$batch`), and OneDrive (with copy monitor) handlers                                                                                                                                                                                                                                       |
 | (internal)                            | `src/microsoft/teams-sites*.ts`          | Fixture-only SharePoint site and Teams handlers (`teams-sites.ts`) and the eight fixtures copied as data (`teams-sites-recordings.ts`)                                                                                                                                                                             |
-| (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, bearer prefixes, variants, truncation; no core import)                     |
+| (internal)                            | `src/stateful-emulator.ts`               | Shared wrapper of `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`, `/kie`: routes, shape checks, 400 not-emulated, faults, ledger, control plane; opt-ins (fail-closed, resolved mode, digest, bearer prefixes, variants, truncation; no core import)             |
 | (internal)                            | `src/stateful-core.ts`                   | The `@emulators/core` adapter every subpath on the stateful wrapper passes as `createCore` (`statefulCoreRuntime`; Node-only, loads the core lazily)                                                                                                                                                               |
 | (internal)                            | `src/dropbox/{state,api}.ts`             | Dropbox state/seed schemas and default seed; route table, fixture error envelopes, metadata, cursors                                                                                                                                                                                                               |
 | (internal)                            | `src/notion/{state,api}.ts`              | Notion state/seed schemas and default seed; route table, error envelopes, object rendering, cursor paging                                                                                                                                                                                                          |
@@ -62,7 +63,8 @@ Effect `HttpClient` routing that points code at them.
 | (internal)                            | `src/google/shared.ts`                   | Google origins, env, drills, response and error-envelope helpers, run-scoped text, page tokens                                                                                                                                                                                                                     |
 | (internal)                            | `src/google/{gmail,calendar,drive}.ts`   | Gmail, Calendar, and Drive route tables with raw parameter patterns (evidence, request shapes, plans, commits)                                                                                                                                                                                                     |
 | (internal)                            | `src/linkedin-search/{state,api}.ts`     | LinkedIn search state/seed schemas, default seed (fixture entities), per-origin key digests; Exa and Enrich Layer route table, error bodies, drills                                                                                                                                                                |
-| (internal)                            | `src/mcp/{state,api,*recordings}.ts`     | MCP state/seed schemas, profiles, minted forms, digest; JSON-RPC route table (rows, matching, id/session/cursor substitution, drills); the 16 synthetic and 8 Afloat fixtures as data                                                                                                                              |
+| (internal)                            | `src/mcp/{state,api,*recordings}.ts`     | MCP state/seed schemas, profiles, minted forms, digest; JSON-RPC route table (rows, matching, id/session/cursor substitution, drills); the 16 synthetic, 8 Afloat, and 8 Figma fixtures as data; legacy profiles (synthetic, Figma) with profile-bound sessions                                                    |
+| (internal)                            | `src/kie/{state,api}.ts`                 | Kie state/seed schemas, default seed (fixture tasks), key digests, minted created-task ids; route table, error bodies, drills                                                                                                                                                                                      |
 
 There is no root export or barrel.
 
@@ -78,28 +80,29 @@ There is no root export or barrel.
   `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`, `src/notion.ts`,
   `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`, `src/telegram/**`,
   `src/github.ts`, `src/github/**`, `src/google.ts`, `src/google/**`, `src/linkedin-search.ts`,
-  `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`, and `src/stateful-core.ts` (also
-  enforced). `src/fortnox.ts` and `src/microsoft.ts` import the core lazily (`await import`) inside
-  their `make*Emulator`; `src/dropbox.ts`, `src/notion.ts`, `src/todoist.ts`, `src/telegram.ts`,
-  `src/github.ts`, `src/google.ts`, `src/linkedin-search.ts`, and `src/mcp.ts` do it through the
-  shared adapter `statefulCoreRuntime` (`src/stateful-core.ts`), which imports it lazily when their
-  `make*Emulator` (`makeDropboxEmulator`, `makeNotionEmulator`, `makeTodoistEmulator`,
-  `makeTelegramEmulator`, `makeGithubEmulator`, `makeGoogleEmulator`, `makeLinkedInSearchEmulator`,
-  `makeMcpEmulator`) builds the runtime. So importing a subpath (for example the manifest, from the
+  `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`, `src/kie.ts`, `src/kie/**`, and
+  `src/stateful-core.ts` (also enforced). `src/fortnox.ts` and `src/microsoft.ts` import the core
+  lazily (`await import`) inside their `make*Emulator`; `src/dropbox.ts`, `src/notion.ts`,
+  `src/todoist.ts`, `src/telegram.ts`, `src/github.ts`, `src/google.ts`, `src/linkedin-search.ts`,
+  `src/mcp.ts`, and `src/kie.ts` do it through the shared adapter `statefulCoreRuntime`
+  (`src/stateful-core.ts`), which imports it lazily when their `make*Emulator`
+  (`makeDropboxEmulator`, `makeNotionEmulator`, `makeTodoistEmulator`, `makeTelegramEmulator`,
+  `makeGithubEmulator`, `makeGoogleEmulator`, `makeLinkedInSearchEmulator`, `makeMcpEmulator`,
+  `makeKieEmulator`) builds the runtime. So importing a subpath (for example the manifest, from the
   evidence check) has no side effects. The one shared stateful wrapper, `src/stateful-emulator.ts`,
   never imports the core: each subpath hands it the runtime (issue #139 merged the second wrapper,
   `src/stateful-fixture.ts`, into it). Its credential guarding and unrecognised-ledger constants
   live in `src/stateful-secrets.ts`, which imports no wrapper; the `/r2` port emulator also imports
   it (`textClosureOutcome`, through `src/r2-guard.ts`). Build every new fixture-only stateful
-  emulator on `src/stateful-emulator.ts` (as `/github`, `/google`, `/linkedin-search`, and `/mcp`
-  are, in its opt-in fail-closed mode); a guarantee it lacks is added as an opt-in that leaves the
-  other emulators unchanged (shared helpers go to `src/stateful-secrets.ts`), with tests
+  emulator on `src/stateful-emulator.ts` (as `/github`, `/google`, `/linkedin-search`, `/mcp`, and
+  `/kie` are, in its opt-in fail-closed mode); a guarantee it lacks is added as an opt-in that
+  leaves the other emulators unchanged (shared helpers go to `src/stateful-secrets.ts`), with tests
   (`test/stateful-emulator.test.ts`), never as a second wrapper.
 - `router` is Effect code; `gateway`, `openai`, `anthropic`, `codex`, `xai`, and `opencode` are
   plain Web fetch handlers (no Effect runtime needed, no Node builtins); `email` and `r2` are plain
   structural objects (no HTTP, socket, TLS, MIME, mail library, SigV4 signer, or S3 client); `node`,
   `fortnox`, `microsoft`, `dropbox`, `notion`, `todoist`, `telegram`, `github`, `google`,
-  `linkedin-search`, and `mcp` are the Node subpaths.
+  `linkedin-search`, `mcp`, and `kie` are the Node subpaths.
 - No top-level side effects, env reads, or network calls. `NODE_ENV` is read with `Config` inside
   `Effect.gen` when a router layer builds.
 - `@emulators/core` is Apache-2.0 and a dependency (not vendored or bundled; `tsdown` never bundles
@@ -126,46 +129,48 @@ There is no root export or barrel.
   the Gateway route is `verified`, with `test/gateway-recordings.test.ts` comparing the emulator's
   response shapes with them; the OpenAI, Anthropic, Codex, Grok, OpenCode Go, and subscription-usage
   ones are synthetic placeholders), copied as data, never imported. Each emulated route lists the
-  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`, `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`,
-  `anthropicEmulatorRoutes`, `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`,
-  `openCodeGoEmulatorRoutes`, `anthropicSubscriptionUsageEmulatorRoutes`,
-  `codexSubscriptionUsageEmulatorRoutes`, `xAiGrokSubscriptionUsageEmulatorRoutes`,
-  `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`, `dropboxEmulatorRoutes`,
-  `notionEmulatorRoutes`, `todoistEmulatorRoutes`, `telegramEmulatorRoutes`, `githubEmulatorRoutes`,
-  `googleEmulatorRoutes`, `linkedInSearchEmulatorRoutes`, `mcpEmulatorRoutes`). Each manifest route
+  conformance case ids it follows in its manifest (`gatewayEmulatorRoutes`,
+  `gatewayEvaluateEmulatorRoutes`, `openAiEmulatorRoutes`, `anthropicEmulatorRoutes`,
+  `codexEmulatorRoutes`, `xAiGrokEmulatorRoutes`, `openCodeGoEmulatorRoutes`,
+  `anthropicSubscriptionUsageEmulatorRoutes`, `codexSubscriptionUsageEmulatorRoutes`,
+  `xAiGrokSubscriptionUsageEmulatorRoutes`, `fortnoxEmulatorRoutes`, `microsoftEmulatorRoutes`,
+  `dropboxEmulatorRoutes`, `notionEmulatorRoutes`, `todoistEmulatorRoutes`,
+  `telegramEmulatorRoutes`, `githubEmulatorRoutes`, `googleEmulatorRoutes`,
+  `linkedInSearchEmulatorRoutes`, `mcpEmulatorRoutes`, `kieEmulatorRoutes`). Each manifest route
   needs its own handler: the fetch-handler emulators use `bindRouteHandlers`
   (`src/route-evidence.ts`), which pairs them at construction and throws `EmulatorRouteUnmapped` for
   a manifest route without a handler or a handler without a manifest route; Fortnox, Microsoft,
-  Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP derive both from one
-  table (`src/fortnox/api.ts`, `src/microsoft/api.ts`, `src/dropbox/api.ts`, `src/notion/api.ts`,
-  `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`, `src/google.ts` over
-  `src/google/{gmail,calendar,drive}.ts`, `src/linkedin-search/api.ts`, and `src/mcp/api.ts`, whose
-  routes list their JSON-RPC rows as variants). Every Fortnox route cites a case. Besides the seven
-  invoice and customer cases, fourteen `read` cases cite `GET /3/companyinformation`,
-  `GET /3/customers` (and `GET /3/customers/{CustomerNumber}`), and the 34 read-only `GET` routes
-  of `src/fortnox/read-api.ts` (articles, price lists and prices, cost centers, customer and
-  supplier invoice payments, offers and the offer preview, print templates, the inbox, company
-  settings, the locked period, predefined accounts, labels, the five settings registers, `/me`).
-  As for every emulator, the wire shapes come from those conformance fixtures: synthetic bodies
-  shaped from the Fortnox OpenAPI spec and the archived resource pages' JSON examples (first
-  rendered by this emulator's default seed, which fixed their key order, `@url` links, and extra
-  fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends every read
-  fixture request to the default emulator and requires the fixture's status, content type, and body
-  byte for byte, so the emulator cannot drift from them; a fixture edit needs a cited spec or
-  live-run reason, never only an emulator change. The shapes stay minimal ones named after the connector's read fields, rendered in the wire types
-  the connector's schemas accept; like every `/fortnox` route, they also answer requests no fixture
-  records (other pages, filters, searches, ids) from the state. Their writes (and side-effecting
-  GETs such as `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a
-  connector write route needs verified evidence or a pending entry naming a conformance case's live
-  run, and none of them has a case yet. The owner-approved exception for fixtureless Fortnox reads
-  (PR #202) is retired: no Fortnox route is without a fixture, and no other emulator ever had a
-  fixtureless-route exception (the Microsoft emulator's legacy extrapolations, below, are
-  behaviours on fixture-backed routes, not routes without a fixture). The fixture-only `/todoist`,
-  `/telegram`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators never add a route
-  without a fixture: every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`,
-  the GitHub one's `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing,
-  draft search, free-text event query, and trashed-included Drive listing have no fixture, so they
-  are not emulated and the lookups fail closed until a fixture records them).
+  Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, and Kie derive both from
+  one table (`src/fortnox/api.ts`, `src/microsoft/api.ts`, `src/dropbox/api.ts`,
+  `src/notion/api.ts`, `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`,
+  `src/google.ts` over `src/google/{gmail,calendar,drive}.ts`, `src/linkedin-search/api.ts`,
+  `src/mcp/api.ts`, whose routes list their JSON-RPC rows as variants, and `src/kie/api.ts`). Every
+  Fortnox route cites a case. Besides the seven invoice and customer cases, fourteen `read` cases
+  cite `GET /3/companyinformation`, `GET /3/customers` (and `GET /3/customers/{CustomerNumber}`),
+  and the 34 read-only `GET` routes of `src/fortnox/read-api.ts` (articles, price lists and prices,
+  cost centers, customer and supplier invoice payments, offers and the offer preview, print
+  templates, the inbox, company settings, the locked period, predefined accounts, labels, the five
+  settings registers, `/me`). As for every emulator, the wire shapes come from those conformance
+  fixtures: synthetic bodies shaped from the Fortnox OpenAPI spec and the archived resource pages'
+  JSON examples (first rendered by this emulator's default seed, which fixed their key order, `@url`
+  links, and extra fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends
+  every read fixture request to the default emulator and requires the fixture's status, content
+  type, and body byte for byte, so the emulator cannot drift from them; a fixture edit needs a cited
+  spec or live-run reason, never only an emulator change. The shapes stay minimal ones named after
+  the connector's read fields, rendered in the wire types the connector's schemas accept; like every
+  `/fortnox` route, they also answer requests no fixture records (other pages, filters, searches,
+  ids) from the state. Their writes (and side-effecting GETs such as
+  `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a connector write
+  route needs verified evidence or a pending entry naming a conformance case's live run, and none of
+  them has a case yet. The owner-approved exception for fixtureless Fortnox reads (PR #202) is
+  retired: no Fortnox route is without a fixture, and no other emulator ever had a fixtureless-route
+  exception (the Microsoft emulator's legacy extrapolations, below, are behaviours on fixture-backed
+  routes, not routes without a fixture). The fixture-only `/todoist`, `/telegram`, `/github`,
+  `/google`, `/linkedin-search`, `/mcp`, and `/kie` emulators never add a route without a fixture:
+  every route cites a case (the Todoist leftover lookup's `GET /api/v1/projects`, the GitHub one's
+  `GET /repos/{owner}/{repo}/issues`, and the Google one's Gmail label listing, draft search,
+  free-text event query, and trashed-included Drive listing have no fixture, so they are not
+  emulated and the lookups fail closed until a fixture records them).
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -182,14 +187,14 @@ There is no root export or barrel.
   unverified manifest `gatewayEvaluateEmulatorRoutes` and control plane `/_emulate/evaluate/*`,
   composed beside the chat route like the usage routes) today, on `src/fixture-route.ts`, the `/email` port emulator (its own
   latitude, not-emulated answer, faults, and parity test, below; it does not use the kernel), and
-  the stateful `/dropbox`, `/notion`, `/github`, `/google`, `/linkedin-search`, and `/mcp` emulators
-  and `/todoist` and `/telegram` emulators (all on `src/stateful-emulator.ts`; each with its own
-  latitude and drift tests, below). The earlier model routes (`/gateway`, `/openai`,
+  the stateful `/dropbox`, `/notion`, `/github`, `/google`, `/linkedin-search`, `/mcp`, and `/kie`
+  emulators and `/todoist` and `/telegram` emulators (all on `src/stateful-emulator.ts`; each with
+  its own latitude and drift tests, below). The earlier model routes (`/gateway`, `/openai`,
   `/anthropic`, `/codex`, `/xai` Messages and Responses) predate the rule and keep their synthetic
   behaviour and 404 fallback unchanged; do not copy that behaviour into new routes. The stateful
-  `/fortnox` and `/microsoft` emulators predate the rule and are not fixture-only: they keep entity state on
-  `@emulators/core`, answer unknown routes with a ledgered 404 in the provider's error envelope, and
-  fail closed on anything not emulated (below).
+  `/fortnox` and `/microsoft` emulators predate the rule and are not fixture-only: they keep entity
+  state on `@emulators/core`, answer unknown routes with a ledgered 404 in the provider's error
+  envelope, and fail closed on anything not emulated (below).
 - Request-shape latitude (fixture-only HTTP routes, the only accepted deviations): any credential
   value (never checked or stored); extra request headers; JSON key order; any string value except the
   discriminators `model`, `role`, `type`, and `phase`; any positive integer where the recording has
@@ -207,13 +212,13 @@ There is no root export or barrel.
 - Evidence policy: unknown emulated API routes fail closed and are written to the ledger (404 JSON
   on the earlier model-route emulators, `/fortnox`, and `/microsoft`, 400 not-emulated on
   fixture-only routes, `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`,
-  `/linkedin-search`, and `/mcp`; control-plane requests are never recorded); unverified routes
-  answer but carry `x-emulator-evidence: unverified` (the `/email` port emulator has no headers: its
-  ledger entries carry `evidence`), are tagged in the ledger, and are listed by the evidence check;
-  evidence older than 30 days warns; connector write routes need `verified` evidence with a
-  readable, not-future `observedAt` and at least one cited case, and a verified route fails when
-  none of its cited cases has a `verified` fixture (the check fails otherwise, except for pending
-  entries below).
+  `/linkedin-search`, `/mcp`, and `/kie`; control-plane requests are never recorded); unverified
+  routes answer but carry `x-emulator-evidence: unverified` (the `/email` port emulator has no
+  headers: its ledger entries carry `evidence`), are tagged in the ledger, and are listed by the
+  evidence check; evidence older than 30 days warns; connector write routes need `verified` evidence
+  with a readable, not-future `observedAt` and at least one cited case, and a verified route fails
+  when none of its cited cases has a `verified` fixture (the check fails otherwise, except for
+  pending entries below).
 - Pending evidence: `scripts/emulator-evidence-pending.json` is the only way to keep an unverified
   connector write route from failing the check, and only until its `expires` date (a PENDING
   warning, reported first). Never weaken the rule, extend an expiry silently, or add an entry
@@ -221,42 +226,55 @@ There is no root export or barrel.
   check warns about stale entries). An expiry more than 60 days away fails. The eight `/email`
   write routes are pending (tracking #115), and so are the four Fortnox write routes, the twelve
   Microsoft write routes, the five Dropbox write routes, the two Notion write routes, the five
-  Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, and the
-  fifteen Google write routes (the three `/linkedin-search` routes and the twelve `/mcp` rows are
-  reads and need none); expiry dates live only in that file.
-  A new entry expires at most 60 days out and its reason cites tracking #115 and names the
-  owner-approved live run (`live run of <case ids>`).
-  204, 205, and 3xx; header names/values are validated and `location` is rejected when a fault or
-  turn is added. Route statuses follow the fixtures instead (for example a bodiless 204, or a 202
-  with a monitor `Location`). All emulators share the header validators (`src/emulator-http.ts`,
-  internal, no Node builtins); the fixture-only emulators check fault statuses as 400-599 in
-  their own schema, so a rejection names that range. Build a response before consuming its fault; a response that cannot
-  be built, or a stateful route handler that throws, answers an evidence-tagged 500 in the
-  service's error envelope, recorded in the ledger (`responseError`); that recovery never depends
-  on the injectable clock (a clock that throws falls back to a fixed synthetic date). The
-  fixture-only `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`,
-  `/linkedin-search`, and `/mcp` answer `{ error: { type: 'emulator_error' } }` instead and their
-  recovery reads no clock at all (see below).
+  Todoist write routes, the Telegram `sendMessage` route, the six GitHub write routes, the fifteen
+  Google write routes, and the Kie `createTask` route (the three `/linkedin-search` routes and the
+  eighteen `/mcp` rows are reads and need none); expiry dates live only in that file. A new entry
+  expires at most 60 days out and its reason cites tracking #115 and names the owner-approved live
+  run (`live run of <case ids>`). 204, 205, and 3xx; header names/values are validated and
+  `location` is rejected when a fault or turn is added. Route statuses follow the fixtures instead
+  (for example a bodiless 204, or a 202 with a monitor `Location`). All emulators share the header
+  validators (`src/emulator-http.ts`, internal, no Node builtins); the fixture-only emulators check
+  fault statuses as 400-599 in their own schema, so a rejection names that range. Build a response
+  before consuming its fault; a response that cannot be built, or a stateful route handler that
+  throws, answers an evidence-tagged 500 in the service's error envelope, recorded in the ledger
+  (`responseError`); that recovery never depends on the injectable clock (a clock that throws falls
+  back to a fixed synthetic date). The fixture-only `/dropbox`, `/notion`, `/todoist`, `/telegram`,
+  `/github`, `/google`, `/linkedin-search`, `/mcp`, and `/kie` answer
+  `{ error: { type: 'emulator_error' } }` instead and their recovery reads no clock at all (see
+  below).
 - Every model and fixture-route fetch-handler emulator is built on `src/emulator-kernel.ts` (the
   `/email` port emulator is not; the stateful `/fortnox` and `/microsoft` keep their own wrappers,
-  `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, and
-  `/mcp` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
-  decoding), the ledger, pull-driven bodies with
-  `error-after-chunks` / `truncate-after-chunks`, status-fault and scripted-error responses, the
-  `/_emulate/*` control plane, coverage, evidence tagging, and route binding (`serve` throws
-  `EmulatorRouteUnmapped`). Wire cores add only request parsing, framing, their ledger fields, and
-  wire-specific faults; do not re-implement kernel pieces in a core.
+  `/dropbox`, `/notion`, `/todoist`, `/telegram`, `/github`, `/google`, `/linkedin-search`, `/mcp`,
+  and `/kie` share `src/stateful-emulator.ts`; see below): fault and scripted-turn state (strict
+  decoding), the ledger, pull-driven bodies with `error-after-chunks` / `truncate-after-chunks`,
+  status-fault and scripted-error responses, the `/_emulate/*` control plane, coverage, evidence
+  tagging, and route binding (`serve` throws `EmulatorRouteUnmapped`). Wire cores add only request
+  parsing, framing, their ledger fields, and wire-specific faults; do not re-implement kernel pieces
+  in a core.
 - OpenAI-compatible Chat Completions emulators share `src/chat-completions.ts`: request parsing,
   SSE framing, JSON mode, and scripted completions on top of the kernel. Each subpath supplies only its path and manifest, model lists, error envelope
   and unknown-model status and error (or whole body), 401 error, completion-token field (recorded in the ledger as
-  `maxCompletionTokens`, never validated), whether reasoning is emulated, its turn schema, its
+  `maxCompletionTokens`, never validated), whether and how reasoning is emulated, the parameters
+  its models reject, its turn schema, its
   input-invalid error, and its wire profile (`ChatWireProfile`; omitted is the plain OpenAI wire).
   The Gateway profile must match its verified recordings structurally (keys and value types; values synthetic);
   the wire fields it sends are listed once in `README.md` (Gateway emulator). Any core
   change is a profile or config parameter: keep the OpenAI wire unchanged (`test/openai.test.ts`
   and `test/openai-conformance.test.ts` are the guards) and the Gateway matching its recordings
-  (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). `/openai` does not emulate reasoning yet: its turn
-  schema rejects reasoning fields and `/_emulate/state` omits `reasoningModels`.
+  (`test/gateway.test.ts`, `test/gateway-recordings.test.ts`). Reasoning is a config parameter:
+  `reasoningOutput: 'requested-deltas'` (the Gateway; reasoning text streamed on request) or
+  `'hidden'` (`/openai`: reasoning models reason unless `reasoning_effort` is `none`, send no
+  reasoning text, and report `completion_tokens_details.reasoning_tokens`), and
+  `reasoningModelUnsupportedParameters` (the 400 a reasoning model answers to a present non-null
+  parameter, after model validation, never for a scripted turn, using up no fault). `/openai`
+  follows its three reasoning fixtures: reasoning models take `reasoning_effort` and
+  `max_completion_tokens`, send no reasoning text, report `completion_tokens_details.reasoning_tokens`,
+  and reject `max_tokens` with the unsupported-parameter fixture's envelope (copied as data); its
+  turn schema rejects reasoning text fields (the fixtures have none; script `usage.reasoningTokens`).
+  Synthetic, not fixture-backed: `reasoning_effort: 'none'` reports 0 reasoning tokens. Known
+  leniency, not emulated until a fixture backs it: sampling parameter rules on reasoning models
+  (`temperature`, `top_p`, `logprobs`, `top_logprobs` are accepted), `reasoning_effort` on a model
+  that does not reason (recorded and ignored), and per-model effort values (not checked).
 - `/anthropic` uses `src/messages.ts`: Messages request parsing (`model`, a positive integer
   `max_tokens` or 400, `system`, `messages`, `tools`, `tool_choice`, `thinking`, `stream`), SSE in
   the real event order (`message_start`; per block `content_block_start`, deltas,
@@ -918,6 +936,27 @@ There is no root export or barrel.
   order). Drill knobs (`drills`, booleans) each fail exactly one case, on every era and profile
   whose answers they change; `test/mcp-conformance.test.ts` runs every applicable case per profile
   (the Afloat target built by the real `afloat.mcp_auth`) in-process and over loopback.
+- The MCP Figma profile (`mcpEmulatorFigmaOrigin` plus `mcpEmulatorFigmaPath`, the provider endpoint
+  `https://mcp.figma.com/mcp`) answers the eight synthetic `@yolk-sdk/connectors/figma/conformance`
+  fixtures (placeholders, not recorded live and not derived from provider source; copied as data in
+  `src/mcp/figma-recordings.ts`; `test/mcp.test.ts` fails on drift) in the legacy era exactly as
+  `synthetic-legacy` does (the session-less era probe answered 400, `initialize` minting a session
+  over SSE, `notifications/initialized` 202, the standing `GET` 405, one listing page, the read
+  call, its tool error, the absent tool, and the 401), as six more unverified read rows (eighteen in
+  all; no pending entry). Every legacy session is bound to the profile that minted it (`profile:
+'figma'` on Figma sessions; absent on the synthetic legacy profile's), and each legacy profile
+  answers only its own sessions. Its bearer follows the plain recognisable-bearer rule (a token
+  starting with a hex digit is refused), and its reserved invalid credential is the public
+  `yolk-conformance-invalid-credential-0000`, compared through its digest for the Figma origin. The
+  Afloat and Figma POST routes share the template `/mcp` on their own origins, so the shared
+  wrapper's route matcher (`routeMatcher`) allows one method and template on two recorded origins
+  and picks the route recorded on the arrival origin, falling back to the first route of the table
+  (whose origin check refuses the request); a table without such a pair matches exactly as before,
+  and the same template twice on one origin, or a shared template with a route on no recorded
+  origin, is refused at build. The legacy-era drills fail exactly their case on the Figma profile
+  too; no knob can break only `mcp.negotiation.era` or `mcp.transport.response-encoding` on a
+  legacy profile (every case starts with the probe and a listing), so the connectors tests drill
+  those two on the replayed fixtures.
 - Request-shape latitude (`/mcp`, the only accepted deviations): any bearer value in the RFC 6750
   `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
   `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]` (on the
@@ -932,27 +971,71 @@ There is no root export or barrel.
   headers that the HTTP layer joins into the recorded value; JSON key order; any JSON-RPC request id
   that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII characters where the recording
   has an id; any non-empty `name` and `version` (and no other key) in the `_meta` client info
-  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted
-  since the last reset or seed where the recording sends `mcp-session-id` (initializing for
-  `notifications/initialized`, ready otherwise); and, with the seed's `two-pages` listing, the
-  cursor this emulator issued in the current generation on the second page. `Authorization` must be
-  exactly `Bearer <token>` (that spelling, one space). Everything else (another origin or path, any
-  query, other HTTP methods such as `DELETE` or a `GET` on the modern or Afloat profile, a bearer
-  without `afloat_` on the Afloat profile or with it on the synthetic profiles, an Afloat key whose
-  remainder fails the rule above (such as one starting with a hex digit), JSON-RPC methods no
-  fixture of the profile records such as `ping`, `resources/*`, or `prompts/*`, batches and
-  client-sent responses, other members, a JSON body repeating a key (compared after unescaping), a
-  `null`, negative, or fractional id, other params (other tools, arguments, protocol versions, or
-  capabilities, extra client-info keys, a cursor on the Afloat listing, and a legacy `initialize`
-  client info other than the recorded one), the MCP headers `accept`, `content-type`, `mcp-method`,
-  `mcp-protocol-version`, `mcp-name`, and `last-event-id` other than the recorded values or present
-  where none is recorded, any other `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing
-  where recorded or present where not, an unknown session or one in the wrong phase, a cursor not
-  issued in the current generation, a reserved invalid credential on anything but its profile's era
-  probe, a bearer repeated anywhere in the request, and a bearer an answer or a minted session id or
-  cursor would repeat) is not emulated. The bullet has four copies that change together with
-  `test/mcp.test.ts`: this one, the `src/mcp.ts` header, `README.md` (MCP emulator), and
+  (`io.modelcontextprotocol/clientInfo`) of a modern request; a session id this emulator minted on
+  the same profile since the last reset or seed where the recording sends `mcp-session-id`
+  (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
+  listing, the cursor this emulator issued in the current generation on the second page.
+  `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
+  (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
+  or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the synthetic
+  profiles, an Afloat key whose remainder fails the rule above (such as one starting with a hex
+  digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
+  `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
+  (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
+  arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
+  listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
+  `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
+  other than the recorded values or present where none is recorded, any other `mcp-*` header (such
+  as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
+  session or one in the wrong phase, a cursor not issued in the current generation, a reserved
+  invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
+  request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
+  The bullet has four copies that change together with `test/mcp.test.ts`: this one, the
+  `src/mcp.ts` header, `README.md` (MCP emulator), and
   `apps/docs/content/docs/api-reference/emulators.mdx` (MCP emulator).
+- Kie (`src/kie.ts` + `src/kie/{state,api}.ts`) is stateful AND fixture-only, without exceptions, on
+  `src/stateful-emulator.ts` in its opt-in fail-closed mode with the opt-in `bearerDigest`, and
+  follows the shared fail-closed rule stated for GitHub above, unchanged (no route has a path
+  parameter, so every raw path is matched exactly; every route's query uses `exactQuery`'s opt-in
+  `rawNames`). It emulates only the two Market API routes the six Kie conformance cases send, on
+  their recorded origin `https://api.kie.ai`: `GET /api/v1/jobs/recordInfo` (a read) and `POST
+/api/v1/jobs/createTask` (a connector write, pending in `scripts/emulator-evidence-pending.json`
+  until an owner-approved live run of `kie.tasks.create-image-task` and
+  `kie.tasks.create-video-task`, both write-irreversible). `recordInfo` answers a held finished
+  task's record (the default seed: the fixtures' `success` and `fail` tasks), the recorded not-found
+  envelope (envelope `code` 422 at HTTP 200) for a seeded absent task id, and, for a key the seed
+  marks as rejected (the state holds only its digest; by default the synthetic invalid key the
+  unauthorized case sends), the recorded 401 for any well-formed task id. `createTask` accepts only
+  the two recorded create flows and answers envelope `code` 200 with a minted task id
+  (`yolk_synthetic_task_created_<4 digits>` from the state's `nextCreated`, which only advances; no
+  seeded id may take that form; past `_9999` a create is refused before any fault); the created task
+  is recorded in `createdTasks` (a create is irreversible on Kie) and is never readable, since no
+  fixture records a created task's `recordInfo`. A faulted create records nothing and mints nothing.
+  Error bodies are the fixtures' byte for byte (`kieEmulatorErrorBodies`), and `Accept:
+application/json` is required (`requestProblem`). `test/kie.test.ts` replays every fixture byte
+  for byte, in suite order on one emulator (the minted ids are the fixtures') and each alone
+  (substituting only the minted id). The reads end at the seed; each create ends at the seed plus
+  its recorded task and the advanced counter (the cross-checks prove exactly that). Drill knobs
+  (`drills`, booleans) each fail exactly one case.
+- Request-shape latitude (`/kie`, the only accepted deviations): any bearer value in the RFC 6750
+  `b64token` syntax (`[A-Za-z0-9\-._~+/]+=*`) of at least 8 characters, starting with a character in
+  `[G-Zg-z\-._~+/]` other than `n`, `r`, `t`, `u`, with at least one outside `[0-9.eE+-]`, that
+  occurs nowhere else in the request (never stored or ledgered; only its digest is compared, with
+  the digests of the keys the seed marks as rejected); extra request headers; JSON key order;
+  `content-type` media-type parameters on the create; with a key the seed marks as rejected, any
+  `recordInfo` task id of 1 to 128 letters, digits, underscores, or hyphens, answered the recorded
+  401; any non-empty `prompt` within the connector's limit (20000 characters for GPT Image 2, 5000
+  for Wan 2.7); and any absolute https `first_frame_url` without credentials or whitespace of at
+  most 2048 characters. `Authorization` must be exactly `Bearer <token>` (that spelling, one space),
+  and `Accept` `application/json`. Everything else (a request without `Authorization`, other body
+  keys or values, a `callBackUrl`, another model, aspect ratio, resolution, or duration,
+  `input_urls`, a task id the state holds neither as a finished task nor as absent, a created task's
+  `recordInfo`, a create with a rejected key, any query parameter on the create, other, missing, or
+  repeated query parameters on `recordInfo`, a query parameter name in any but its plain form, empty
+  query components such as a bare `?` or a stray `&`, another origin, and a bearer repeated anywhere
+  in the request) is not emulated. The bullet has four copies that change together with
+  `test/kie.test.ts`: this one, the `src/kie.ts` header, `README.md` (Kie emulator), and
+  `apps/docs/content/docs/api-reference/emulators.mdx` (Kie emulator).
 - Control-plane routes live under `/_emulate/*`. Control inputs (faults, turns) decode strictly
   (unknown keys rejected); the JS API throws `GatewayEmulatorInputInvalid` /
   `OpenAiEmulatorInputInvalid` / `AnthropicEmulatorInputInvalid` / `CodexEmulatorInputInvalid` /
@@ -1144,7 +1227,16 @@ no session, cursor, or counter change, checked against the real response text an
 session lifecycle and cap, cursor issuance across resets and seeds, a stale cursor refused before
 any fault, row-matched status and truncation faults (a truncated `initialize` mints no session and
 moves no counter; a truncated first page issues no cursor), seeds, control plane),
-`test/mcp-conformance.test.ts` (every applicable case per profile through the real
+`test/kie.test.ts` (manifest, the data copies and error bodies, the drift test replaying every
+fixture byte for byte in suite order on one emulator and each alone substituting only the minted
+task id, the reads ending at the seed and each create recording exactly its task, the latitude,
+every fail-closed refusal asserting a ledgered 400, an unchanged state, and an unused match-all
+fault, constant-text unrecognised shapes, the bearer and the rejected key never ledgered, stored, or
+echoed, a faulted create recording nothing and minting nothing, seed errors in constant text,
+reset), `test/kie-conformance.test.ts` (cross-checks A and B: all six cases in-process and over a
+loopback socket, each on its own emulator and twice in sequence on one, the reads ending at the seed
+and the creates recording only their tasks, no key anywhere; one drill per case failing exactly that
+case), `test/mcp-conformance.test.ts` (every applicable case per profile through the real
 `@yolk-sdk/mcp/client`, its observer, and its call gate, in-process and over a loopback socket, each
 case on a fresh emulator ending at its seed except the minted sessions, and all cases twice in
 sequence on one emulator; the paged listing across a reset; one drill per case failing exactly that
@@ -1161,8 +1253,11 @@ bearer absent from every response, the ledger, the snapshot, and every `/_emulat
 digest that throws, repeats the bearer, or is no string answering the 500 with no fault used), the
 constant-reason `exactBodyKeys` and `exactQuery` (with `rawNames` comparing raw parameter names, and
 the raw query the wrapper hands routes), route variants (manifest rows, ledger routes, coverage,
-`match.route`, build checks), truncation faults on streamed commits (`makeChunkedStatefulEmulator`;
-a truncated writing row writes nothing; one that cannot apply answers 500 unused), `match.route`
+`match.route`, build checks), the origin-aware route matcher (one method and template on two
+recorded origins picks the arrival origin's route, a shared template with a route on no recorded
+origin refused at build, and the last-resort 500 behind a loopback rewrite tagged with the `fetchOn`
+origin's route evidence), truncation faults on streamed commits (`makeChunkedStatefulEmulator`; a
+truncated writing row writes nothing; one that cannot apply answers 500 unused), `match.route`
 naming a manifest row (a template on an emulator without variants; an unknown route or a variant
 route's template rejected at `faults.add` and over `/_emulate/faults`), `constantRefusals` (no
 request text before admission, a match-all fault unused), `guardOutput` (a prepared answer header, a
@@ -1174,15 +1269,15 @@ the opt-in resolved mode (`resolveRequest`: refused with fail-closed mode at bui
 requests ledgered as constants with the method as sent; a refused resolution answered before the
 body is read, its fields scrubbed; a path-carried token and its secret part repeated in the query,
 the guarded path, a body value, a JSON-escaped value, a key, an exponent-notation number, or a
-percent-encoded body refused with no body kept, no fault used, and nothing written; faults
-matching, and the core seeing, only the ledgered path; the query recorded as sent), `json-or-empty`
-bodies, `makeHeaderlessStatefulEmulator` (no `headers` field), `errorTexts`, and the unchanged
-behaviour without these options and without fail-closed mode; resolved mode also: routes seeing
-the ledgered path and no header names, `recordHeaders` and a throwing resolution, consumed and
-locked bodies, the body read once (a body repeat consumes it, a query repeat does not), a core
-answering without dispatching when closed meanwhile, header rules reading `content-type` only,
-fault answers and refusals readable after a reset or a close over a core that cancels its own
-bodies, and an unencodable plan reason answering the 500), and
-`test/stateful-public-types.test.ts` (compile coverage of the public Todoist and Telegram fault,
-fault-match, fault-state, ledger-entry, and coverage types: old-shaped values, status-only ledger
-faults, no `headers` field). Loopback sockets only; never call real services.
+percent-encoded body refused with no body kept, no fault used, and nothing written; faults matching,
+and the core seeing, only the ledgered path; the query recorded as sent), `json-or-empty` bodies,
+`makeHeaderlessStatefulEmulator` (no `headers` field), `errorTexts`, and the unchanged behaviour
+without these options and without fail-closed mode; resolved mode also: routes seeing the ledgered
+path and no header names, `recordHeaders` and a throwing resolution, consumed and locked bodies, the
+body read once (a body repeat consumes it, a query repeat does not), a core answering without
+dispatching when closed meanwhile, header rules reading `content-type` only, fault answers and
+refusals readable after a reset or a close over a core that cancels its own bodies, and an
+unencodable plan reason answering the 500), and `test/stateful-public-types.test.ts` (compile
+coverage of the public Todoist and Telegram fault, fault-match, fault-state, ledger-entry, and
+coverage types: old-shaped values, status-only ledger faults, no `headers` field). Loopback sockets
+only; never call real services.

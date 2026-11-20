@@ -10,6 +10,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  type AgentReasoningEffort,
   type ToolCall,
   attachmentSourceText,
   assistantContent,
@@ -207,13 +208,55 @@ type AnthropicThinkingRequest = {
   }
 }
 
+/** Messages `output_config.effort` levels (model dependent; `xhigh` and `max` on newer models). */
+type AnthropicEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/**
+ * How each request effort reaches Messages. Messages has no effort below `low`: `minimal` is left
+ * out, so the model's own default applies (kept for hosts that already send it), and `none` is
+ * rejected rather than sent as a default that reasons.
+ */
+const anthropicEffortLowering = {
+  none: 'unsupported',
+  minimal: 'omit',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max'
+} satisfies {
+  readonly [Effort in AgentReasoningEffort]: AnthropicEffort | 'omit' | 'unsupported'
+}
+
+const anthropicOutputConfig = (
+  effort: AgentReasoningEffort | undefined
+): Effect.Effect<{ readonly effort: AnthropicEffort } | undefined, LLMError> => {
+  if (effort === undefined) return Effect.succeed(undefined)
+
+  const lowered = anthropicEffortLowering[effort]
+
+  if (lowered === 'omit') return Effect.succeed(undefined)
+
+  if (lowered === 'unsupported') {
+    return Effect.fail(
+      new LLMError({
+        cause: 'validation_error',
+        message: `Anthropic Messages does not support reasoning effort ${effort}`,
+        retryable: false
+      })
+    )
+  }
+
+  return Effect.succeed({ effort: lowered })
+}
+
 type AnthropicRequestBody = {
   readonly model: string
   readonly system: ReadonlyArray<AnthropicSystemBlock>
   readonly messages: ReadonlyArray<AnthropicMessage>
   readonly max_tokens: number
   readonly output_config?: {
-    readonly effort: 'low' | 'medium' | 'high' | 'xhigh'
+    readonly effort: AnthropicEffort
   }
   readonly thinking?: AnthropicThinkingRequest
   readonly stream?: true
@@ -1747,10 +1790,7 @@ export const toAnthropicRequestBody = (
       request.turnContext
     )
 
-    const outputConfig =
-      request.reasoningEffort === undefined || request.reasoningEffort === 'minimal'
-        ? undefined
-        : { effort: request.reasoningEffort }
+    const outputConfig = yield* anthropicOutputConfig(request.reasoningEffort)
 
     type AnthropicBaseRequestBodyFields = {
       model: string

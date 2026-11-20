@@ -2,10 +2,22 @@
  * Stateful MCP emulator (the two synthetic servers of the MCP conformance fixtures: profile
  * `synthetic-modern` on `https://mcp.example.test/modern/mcp`, stateless `2026-07-28` with JSON
  * answers, and profile `synthetic-legacy` on `https://mcp.example.test/legacy/mcp`, an
- * `initialize` handshake with sessions and SSE answers; and profile `afloat` on the provider
- * endpoint `https://useafloat.com/mcp`, stateless `2026-07-28` with JSON answers and no session),
- * built on the upstream `@emulators/core` custom runtime, with a request ledger, status and
- * truncation faults, and an `/_emulate/*` control plane.
+ * `initialize` handshake with sessions and SSE answers; profile `afloat` on the provider
+ * endpoint `https://useafloat.com/mcp`, stateless `2026-07-28` with JSON answers and no session;
+ * and profile `figma` on the provider endpoint `https://mcp.figma.com/mcp`, the legacy era like
+ * `synthetic-legacy`), built on the upstream `@emulators/core` custom runtime, with a request
+ * ledger, status and truncation faults, and an `/_emulate/*` control plane.
+ *
+ * The Figma profile answers the eight synthetic `@yolk-sdk/connectors/figma/conformance` fixtures
+ * (copied as data in `src/mcp/figma-recordings.ts`; placeholders, not recorded live): the
+ * session-less era probe answered 400, `initialize` over SSE with a minted session, the 202, the
+ * standing `GET` 405, one listing page of six known Figma tool names with synthetic schemas, the
+ * `get_metadata` read call, its tool error, the absent tool, and the 401 (the public reserved
+ * invalid credential, compared through its digest for the Figma origin). Every legacy session is
+ * bound to the profile that minted it (`profile: 'figma'`), and a legacy profile answers only its
+ * own sessions. Its bearer follows the plain recognisable-bearer rule. The Afloat and Figma POST
+ * routes share the template `/mcp` on their own origins; the wrapper's route matcher picks the
+ * route recorded on the arrival origin.
  *
  * It never imports SDK code: its answers are the sixteen synthetic `@yolk-sdk/mcp/conformance`
  * fixtures copied as data (`src/mcp/recordings.ts`) and the eight derived
@@ -96,24 +108,25 @@
  * any JSON-RPC request id that is an integer from 0 to 2^53 - 1 or 1 to 64 printable ASCII
  * characters where the recording has an id; any non-empty `name` and `version` (and no other key)
  * in the `_meta` client info (`io.modelcontextprotocol/clientInfo`) of a modern request; a session
- * id this emulator minted since the last reset or seed where the recording sends `mcp-session-id`
- * (initializing for `notifications/initialized`, ready otherwise); and, with the seed's `two-pages`
- * listing, the cursor this emulator issued in the current generation on the second page.
- * `Authorization` must be exactly `Bearer <token>` (that spelling, one space). Everything else
- * (another origin or path, any query, other HTTP methods such as `DELETE` or a `GET` on the modern
- * or Afloat profile, a bearer without `afloat_` on the Afloat profile or with it on the synthetic
- * profiles, an Afloat key whose remainder fails the rule above (such as one starting with a hex
- * digit), JSON-RPC methods no fixture of the profile records such as `ping`, `resources/*`, or
- * `prompts/*`, batches and client-sent responses, other members, a JSON body repeating a key
- * (compared after unescaping), a `null`, negative, or fractional id, other params (other tools,
- * arguments, protocol versions, or capabilities, extra client-info keys, a cursor on the Afloat
- * listing, and a legacy `initialize` client info other than the recorded one), the MCP headers
- * `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and `last-event-id`
- * other than the recorded values or present where none is recorded, any other `mcp-*` header (such
- * as `mcp-param-*`), `mcp-session-id` missing where recorded or present where not, an unknown
- * session or one in the wrong phase, a cursor not issued in the current generation, a reserved
- * invalid credential on anything but its profile's era probe, a bearer repeated anywhere in the
- * request, and a bearer an answer or a minted session id or cursor would repeat) is not emulated.
+ * id this emulator minted on the same profile since the last reset or seed where the recording
+ * sends `mcp-session-id` (initializing for `notifications/initialized`, ready otherwise); and, with
+ * the seed's `two-pages` listing, the cursor this emulator issued in the current generation on the
+ * second page. `Authorization` must be exactly `Bearer <token>` (that spelling, one space).
+ * Everything else (another origin or path, any query, other HTTP methods such as `DELETE` or a
+ * `GET` on the modern or Afloat profile, a bearer without `afloat_` on the Afloat profile or with
+ * it on the synthetic profiles, an Afloat key whose remainder fails the rule above (such as one
+ * starting with a hex digit), JSON-RPC methods no fixture of the profile records such as `ping`,
+ * `resources/*`, or `prompts/*`, batches and client-sent responses, other members, a JSON body
+ * repeating a key (compared after unescaping), a `null`, negative, or fractional id, other params
+ * (other tools, arguments, protocol versions, or capabilities, extra client-info keys, a cursor on
+ * the Afloat listing, and a legacy `initialize` client info other than the recorded one), the MCP
+ * headers `accept`, `content-type`, `mcp-method`, `mcp-protocol-version`, `mcp-name`, and
+ * `last-event-id` other than the recorded values or present where none is recorded, any other
+ * `mcp-*` header (such as `mcp-param-*`), `mcp-session-id` missing where recorded or present where
+ * not, an unknown session or one in the wrong phase, a cursor not issued in the current generation,
+ * a reserved invalid credential on anything but its profile's era probe, a bearer repeated anywhere
+ * in the request, and a bearer an answer or a minted session id or cursor would repeat)
+ * is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeMcpEmulator` (importing this module has no side effects).
@@ -129,6 +142,7 @@ import {
   type McpEmulatorDrills
 } from './mcp/api.ts'
 import { mcpEmulatorAfloatFixtures } from './mcp/afloat-recordings.ts'
+import { mcpEmulatorFigmaFixtures } from './mcp/figma-recordings.ts'
 import { mcpEmulatorFixtures } from './mcp/recordings.ts'
 import {
   buildSeedState,
@@ -138,6 +152,7 @@ import {
   mcpEmulatorAfloatKeyPrefix,
   mcpEmulatorAfloatOrigin,
   mcpEmulatorAfloatReservedInvalidCredential,
+  mcpEmulatorFigmaOrigin,
   mcpEmulatorOrigin,
   mcpEmulatorReservedInvalidCredential,
   type McpEmulatorSeed,
@@ -174,6 +189,8 @@ export {
   mcpEmulatorAfloatOrigin,
   mcpEmulatorAfloatPath,
   mcpEmulatorAfloatReservedInvalidCredential,
+  mcpEmulatorFigmaOrigin,
+  mcpEmulatorFigmaPath,
   mcpEmulatorLegacyPath,
   mcpEmulatorModernPath,
   mcpEmulatorOrigin,
@@ -184,6 +201,8 @@ export {
 } from './mcp/state.ts'
 
 export { mcpEmulatorAfloatFixtures } from './mcp/afloat-recordings.ts'
+
+export { mcpEmulatorFigmaFixtures } from './mcp/figma-recordings.ts'
 
 export {
   mcpEmulatorFixtures,
@@ -295,7 +314,8 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
   // JSON form would answer other bytes, so it fails here, loudly.
   const recordingProblems = mcpRecordingProblems([
     ...mcpEmulatorFixtures,
-    ...mcpEmulatorAfloatFixtures
+    ...mcpEmulatorAfloatFixtures,
+    ...mcpEmulatorFigmaFixtures
   ])
 
   if (recordingProblems.length > 0) {
@@ -319,6 +339,10 @@ export const makeMcpEmulator = async (options: McpEmulatorOptions = {}): Promise
     },
     reservedDigest: mcpBearerDigest(mcpEmulatorReservedInvalidCredential, mcpEmulatorOrigin),
     afloatReservedDigest: mcpBearerDigest(afloatReservedRemainder, mcpEmulatorAfloatOrigin),
+    figmaReservedDigest: mcpBearerDigest(
+      mcpEmulatorReservedInvalidCredential,
+      mcpEmulatorFigmaOrigin
+    ),
     runtime
   }
 

@@ -1,0 +1,88 @@
+---
+title: Kie conformance
+description: Experimental Kie conformance cases for tests and hand-run practice-account checks, and the Kie emulator.
+---
+
+Kie actions are documented in the [connectors package guide](./index) and the
+[integrations reference](../integrations/connectors#kie). This page lists the experimental
+conformance cases only.
+
+## Conformance cases
+
+> **Experimental.** For tests and hand-run checks against a practice Kie account.
+
+`@yolk-sdk/connectors/kie/conformance` exports conformance cases for `@yolk-sdk/conformance/runner`.
+Every case runs the real Kie actions (`kie.get_task`, `kie.create_image_task`,
+`kie.create_video_task`) over the connector ports and checks one wire claim the connector relies on.
+The actions return only their decoded output, so the envelope `code` and the HTTP status are
+observed at the `ConnectorHttpClient` port the host provides; the cases send no request of their own.
+The claims are as currently understood; none is observed live yet.
+
+| Case id                       | Safety               | Seeds                    | Claim (as currently understood)                                                                                                   |
+| ----------------------------- | -------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `kie.tasks.get-success`       | `read`               | `successTaskId`          | One GET `recordInfo?taskId=` answered HTTP 200, envelope `code` 200, `state: success`, and https result URLs in `resultJson`      |
+| `kie.tasks.get-failed`        | `read`               | `failedTaskId`           | A failed task reads HTTP 200 with envelope `code` 200 and `state: fail`, no result URLs, and a non-empty `failMsg` or `failCode`  |
+| `kie.errors.task-not-found`   | `read`               | none                     | An unknown task id answers Kie code 404 or 422 (any other code, such as 429 or 455, fails), never a success                       |
+| `kie.errors.unauthorized`     | `read`               | none                     | A synthetic invalid key answers code 401 (`kie_unauthorized`), whether as HTTP 401 or as an envelope at HTTP 200                  |
+| `kie.tasks.create-image-task` | `write-irreversible` | `runId`                  | One POST `createTask` (GPT Image 2 text-to-image, square at `1K`) answered HTTP 200, envelope `code` 200, a non-empty `taskId`    |
+| `kie.tasks.create-video-task` | `write-irreversible` | `firstFrameUrl`, `runId` | One POST `createTask` (Wan 2.7 image-to-video, `720p` for 5 seconds) answered HTTP 200, envelope `code` 200, a non-empty `taskId` |
+
+Claims no live run has settled yet, marked "(unverified: ...)" in each case's `wire`:
+
+- GPT Image 2 results are listed under `resultJson.resultUrls`, not another key.
+- Which of `failMsg` and `failCode` a failed task fills, and whether its `resultJson` is null or
+  empty.
+- An unknown task id answers envelope `code` 422 (`recordInfo is null`) at HTTP 200, or 404.
+- An invalid key answers HTTP 401 with envelope `code` 401, or HTTP 200 with envelope `code` 401.
+- Kie accepts a create before generating it (a later generation failure shows only in
+  `kie.get_task`), and accepts a video task before fetching its first frame.
+
+`KieConformanceConfig` holds the seeds: `successTaskId` (a finished GPT Image 2 task of the practice
+account whose state is `success`), `failedTaskId` (a finished task whose state is `fail`),
+`firstFrameUrl` (a public https URL of a small still image Kie fetches as the first video frame),
+and `runId`. Cases never hard-code account data, and a missing seed fails the case with a
+`precondition:` mismatch before any request. Credentials bind through `kieConformanceIntegration()`
+(`kie.api_key`, credential ref `kie.conformance`); the unauthorized case swaps the
+`CredentialResolver` for the synthetic `kieConformanceInvalidApiKey`.
+
+### The creates are irreversible
+
+**Each create case submits a real task that spends Kie credits, and the connector cannot cancel or
+delete it.** Both are therefore `write-irreversible`: neither runs under
+`allowWrites: 'reversible'`, and a runner starts each only when a person names its exact id (the
+live runner's `--allow-irreversible kie.tasks.create-image-task` or
+`--allow-irreversible kie.tasks.create-video-task`). Nothing is cleaned up afterwards.
+
+- The prompts name the `runId` seed (`yolk-conformance <runId>: ...`), a per-invocation `run-<hex>`
+  value (the fixtures replay with `run-synthetic`; the live runner generates a fresh one every time
+  and never takes it as a flag), so each run's tasks are distinct.
+- The create, its classification, and the decoding of its observed answer run together without
+  interruption; an interruption waits for the answer.
+- A definitive rejection created nothing: an HTTP 4xx, or at HTTP 2xx an envelope 4xx (Kie answers
+  most failures with HTTP 200 and a non-200 envelope `code`), other than 408 and Kie's 455 (service
+  unavailable). The case fails without advice.
+- Anything else that is not a 2xx with envelope `code` 200 and a non-empty `taskId` (a transport or
+  decoding failure, no status, a 408, 455, or 5xx, an empty `taskId`) is ambiguous: a task may exist
+  and spend credits. The case fails with `KieConformanceActionFailed` (`taskOutcome: 'unknown'`)
+  naming the run id to look for in the Kie task log; when that happens while the case is being
+  interrupted, the message is also handed to `ConformanceCleanupReporter`, which the live runner
+  prints as a WARN line.
+
+There is no leftover lookup: the connector reads no task listing, and there is nothing to clean up.
+
+The shipped fixtures are synthetic (`evidence: 'unverified'`): `yolk_synthetic_task_*` task ids,
+`example.com` URLs, and only the keys the connector decodes (an allowlist test refuses anything
+else). In this repository, `pnpm conformance:kie` dry-runs by default;
+`--live --owner-approved --account <label>` (refused whenever `CI` is non-empty) needs `KIE_API_KEY`
+(refused before any request unless it has 16 to 256 letters, digits, `_`, or `-`) and the seeds of
+the cases that will run. The four reads spend no credits; each create runs only with its exact
+`--allow-irreversible` id (`--allow-writes` never starts one). `--record` stages verified recordings
+in the gitignored `.conformance-recordings/kie/`; before promoting, replace each recorded 2xx body
+wholesale with a minimal synthetic body. See
+[Conformance APIs](../api-reference/conformance#connector-conformance) for the bridges.
+
+For offline tests, the experimental [Kie emulator](../api-reference/emulators#kie-emulator)
+(`@yolk-sdk/emulators/kie`) is a stateful, fixture-only stand-in that passes these cases, including
+both creates (recorded in its state, never readable), without ever keeping or echoing an API key.
+Its create route is a connector write whose evidence stays pending until an owner-approved live run
+of the two create cases.

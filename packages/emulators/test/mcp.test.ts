@@ -26,6 +26,12 @@ import {
   afloatMcpConformanceFixtures,
   afloatMcpConformanceInvalidCredential
 } from '@yolk-sdk/connectors/afloat/conformance'
+import { figmaMcpServerUrl } from '@yolk-sdk/connectors/figma'
+import {
+  figmaMcpConformanceFixtures,
+  figmaMcpConformanceInvalidCredential,
+  figmaMcpConformanceSessionId
+} from '@yolk-sdk/connectors/figma/conformance'
 import {
   McpEmulatorInputInvalid,
   emulatorEvidenceHeader,
@@ -36,6 +42,9 @@ import {
   mcpEmulatorAfloatOrigin,
   mcpEmulatorAfloatPath,
   mcpEmulatorAfloatReservedInvalidCredential,
+  mcpEmulatorFigmaFixtures,
+  mcpEmulatorFigmaOrigin,
+  mcpEmulatorFigmaPath,
   mcpEmulatorFixtures,
   mcpEmulatorOrigin,
   mcpEmulatorReservedInvalidCredential,
@@ -56,6 +65,8 @@ const legacyUrl = `${mcpEmulatorOrigin}/legacy/mcp`
 
 const afloatUrl = `${mcpEmulatorAfloatOrigin}${mcpEmulatorAfloatPath}`
 
+const figmaUrl = `${mcpEmulatorFigmaOrigin}${mcpEmulatorFigmaPath}`
+
 /** A synthetic Afloat key the emulator accepts: `afloat_` and a recognisable remainder. */
 const afloatToken = 'afloat_synthetic-mcp-unit-key-0001'
 
@@ -69,9 +80,11 @@ const reserved = mcpEmulatorReservedInvalidCredential
 const row = (url: string, method: string) => `${url}#${method}`
 
 const fixtureById = (id: string): McpRecordedFixture => {
-  const fixture = [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures].find(
-    candidate => candidate.id === id
-  )
+  const fixture = [
+    ...mcpEmulatorFixtures,
+    ...mcpEmulatorAfloatFixtures,
+    ...mcpEmulatorFigmaFixtures
+  ].find(candidate => candidate.id === id)
 
   if (fixture === undefined) throw new Error(`no fixture ${id}`)
 
@@ -104,7 +117,12 @@ const recorded = {
   legacyCallRead: exchangeOf('mcp.tools.call-read.legacy.synthetic', -1),
   afloatDiscover: exchangeOf('mcp.negotiation.era.afloat.synthetic', 0),
   afloatList: exchangeOf('mcp.negotiation.era.afloat.synthetic', 1),
-  afloatCallRead: exchangeOf('mcp.tools.call-read.afloat.synthetic', -1)
+  afloatCallRead: exchangeOf('mcp.tools.call-read.afloat.synthetic', -1),
+  figmaDiscover: exchangeOf('mcp.negotiation.era.figma.synthetic', 0),
+  figmaInitialize: exchangeOf('mcp.negotiation.era.figma.synthetic', 1),
+  figmaInitialized: exchangeOf('mcp.negotiation.era.figma.synthetic', 2),
+  figmaGet: exchangeOf('mcp.negotiation.era.figma.synthetic', 3),
+  figmaList: exchangeOf('mcp.negotiation.era.figma.synthetic', 4)
 }
 
 type Send = {
@@ -255,7 +273,13 @@ describe('manifest', () => {
       `GET ${legacyUrl}`,
       `RPC ${row(afloatUrl, 'server/discover')}`,
       `RPC ${row(afloatUrl, 'tools/list')}`,
-      `RPC ${row(afloatUrl, 'tools/call')}`
+      `RPC ${row(afloatUrl, 'tools/call')}`,
+      `RPC ${row(figmaUrl, 'server/discover')}`,
+      `RPC ${row(figmaUrl, 'initialize')}`,
+      `RPC ${row(figmaUrl, 'notifications/initialized')}`,
+      `RPC ${row(figmaUrl, 'tools/list')}`,
+      `RPC ${row(figmaUrl, 'tools/call')}`,
+      `GET ${figmaUrl}`
     ])
 
     for (const route of mcpEmulatorRoutes) {
@@ -302,6 +326,17 @@ describe('manifest', () => {
       'mcp.tools.call-tool-error',
       'mcp.errors.unknown-tool'
     ])
+
+    // The Figma profile is legacy-era: every case but mcp.modern.stateless.
+    expect(caseIdsOf(row(figmaUrl, 'server/discover'))).toEqual(
+      ids.filter(id => id !== 'mcp.modern.stateless')
+    )
+    expect(caseIdsOf(figmaUrl)).toEqual(listingCases)
+    expect(caseIdsOf(row(figmaUrl, 'tools/call'))).toEqual([
+      'mcp.tools.call-read',
+      'mcp.tools.call-tool-error',
+      'mcp.errors.unknown-tool'
+    ])
   })
 
   it('coverage counts each row; the control plane serves the same', async () => {
@@ -311,7 +346,7 @@ describe('manifest', () => {
 
       const counts = emulator.coverage().routes.map(route => route.requests)
 
-      expect(counts).toEqual([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+      expect(counts).toEqual([1, 1, ...Array<number>(16).fill(0)])
 
       const served = await emulator
         .fetch(new Request(`${mcpEmulatorOrigin}/_emulate/coverage`))
@@ -336,6 +371,13 @@ describe('the data copy', () => {
     expect(afloatUrl).toBe(afloatMcpServerUrl)
     expect(mcpEmulatorAfloatReservedInvalidCredential).toBe(afloatMcpConformanceInvalidCredential)
     expect(mcpRecordingProblems(mcpEmulatorAfloatFixtures)).toEqual([])
+  })
+
+  it('the Figma copy equals @yolk-sdk/connectors/figma/conformance, and the constants agree', () => {
+    expect(mcpEmulatorFigmaFixtures).toEqual(figmaMcpConformanceFixtures)
+    expect(figmaUrl).toBe(figmaMcpServerUrl)
+    expect(mcpEmulatorReservedInvalidCredential).toBe(figmaMcpConformanceInvalidCredential)
+    expect(mcpRecordingProblems(mcpEmulatorFigmaFixtures)).toEqual([])
   })
 
   it('every recorded answer is canonical JSON; a non-canonical copy fails loudly', () => {
@@ -412,6 +454,10 @@ const bearerOf = (fixture: McpRecordedFixture) => {
   return afloat ? afloatToken : token
 }
 
+/** The session id a fixture records (the emulator mints its own in its place). */
+const recordedSessionOf = (fixture: McpRecordedFixture) =>
+  fixture.endpoint === figmaUrl ? figmaMcpConformanceSessionId : mcpConformanceSyntheticSessionId
+
 /** Seed a fixture's replay needs (the paged listing only for `mcp.tools.list` modern). */
 const seedOf = (fixture: McpRecordedFixture): McpEmulatorOptions =>
   fixture.id === 'mcp.tools.list.modern.synthetic' ? { seed: { modernListing: 'two-pages' } } : {}
@@ -468,7 +514,7 @@ const replay = async (
     const expectedHeaders = { ...exchange.response.headers }
 
     if (expectedHeaders['mcp-session-id'] !== undefined) {
-      expect(expectedHeaders['mcp-session-id'], label).toBe(mcpConformanceSyntheticSessionId)
+      expect(expectedHeaders['mcp-session-id'], label).toBe(recordedSessionOf(fixture))
       expectedHeaders['mcp-session-id'] = session ?? ''
     }
 
@@ -504,8 +550,13 @@ const replay = async (
 }
 
 describe('drift: every fixture replayed byte for byte', () => {
-  // The data copies, equal to `mcpConformanceFixtures` and `afloatMcpConformanceFixtures`.
-  for (const fixture of [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures]) {
+  // The data copies, equal to `mcpConformanceFixtures`, `afloatMcpConformanceFixtures`, and
+  // `figmaMcpConformanceFixtures`.
+  for (const fixture of [
+    ...mcpEmulatorFixtures,
+    ...mcpEmulatorAfloatFixtures,
+    ...mcpEmulatorFigmaFixtures
+  ]) {
     it(`${fixture.id} alone`, async () => {
       await withEmulator(seedOf(fixture), async emulator => {
         await replay(emulator, fixture)
@@ -524,14 +575,22 @@ describe('drift: every fixture replayed byte for byte', () => {
 
   it('every one-page fixture in suite order on ONE emulator', async () => {
     await withEmulator({}, async emulator => {
-      for (const fixture of [...mcpEmulatorFixtures, ...mcpEmulatorAfloatFixtures]) {
+      for (const fixture of [
+        ...mcpEmulatorFixtures,
+        ...mcpEmulatorAfloatFixtures,
+        ...mcpEmulatorFigmaFixtures
+      ]) {
         if (seedOf(fixture).seed === undefined) await replay(emulator, fixture)
       }
 
       const sessions = emulator.snapshot().sessions.map(session => session.id)
 
       expect(sessions).toEqual(sessions.map((_, index) => `yolk-emu-session-${index + 1}`))
-      expect(sessions.length).toBe(10)
+      expect(sessions.length).toBe(20)
+      // Each session is bound to the profile that minted it.
+      expect(
+        emulator.snapshot().sessions.filter(session => session.profile === 'figma')
+      ).toHaveLength(10)
     })
   })
 })
@@ -662,10 +721,11 @@ const refusals: ReadonlyArray<Refusal> = [
     reason: 'an unrecognisable Authorization header is not emulated'
   },
   {
+    // The Figma profile records `GET /mcp` on its own origin only.
     name: 'a GET on the Afloat profile',
     request: () =>
       requestFor(recorded.afloatDiscover, { method: 'GET', body: undefined, bearer: afloatToken }),
-    reason: noRoute
+    reason: 'this route is recorded on https://mcp.figma.com only'
   },
   {
     name: 'a cursor on the Afloat listing',
@@ -1778,6 +1838,96 @@ describe('seeds, options, and the control plane', () => {
         cursorGeneration: 2,
         issuedCursor: null
       })
+    })
+  })
+})
+
+describe('the Figma profile: legacy sessions bound to their profile', () => {
+  /** The Figma handshake: answers the minted, ready session id. */
+  const figmaHandshake = async (emulator: McpEmulator): Promise<string> => {
+    const initialized = await emulator.fetch(requestFor(recorded.figmaInitialize))
+    const session = initialized.headers.get('mcp-session-id')
+
+    await initialized.text()
+
+    if (session === null) throw new Error('no session minted')
+
+    const ready = await emulator.fetch(
+      requestFor(recorded.figmaInitialized, { headers: { 'mcp-session-id': session } })
+    )
+
+    expect(ready.status).toBe(202)
+
+    return session
+  }
+
+  it('mints sessions marked figma that answer the listing and the standing GET', async () => {
+    await withEmulator({}, async emulator => {
+      const session = await figmaHandshake(emulator)
+
+      expect(emulator.snapshot().sessions).toEqual([
+        { id: session, phase: 'ready', profile: 'figma' }
+      ])
+
+      const listed = await emulator.fetch(onSession(recorded.figmaList, session))
+
+      expect(listed.status).toBe(200)
+      expect(await listed.text()).toContain('"use_figma"')
+      expect((await emulator.fetch(onSession(recorded.figmaGet, session))).status).toBe(405)
+    })
+  })
+
+  it('a session of one legacy profile is never answered on the other', async () => {
+    await withEmulator({}, async emulator => {
+      const figmaSession = await figmaHandshake(emulator)
+      const legacySession = await handshake(emulator)
+
+      for (const request of [
+        onSession(recorded.legacyList, figmaSession),
+        onSession(recorded.figmaList, legacySession),
+        onSession(recorded.figmaGet, legacySession)
+      ]) {
+        const answer = await emulator.fetch(request)
+
+        expect(answer.status).toBe(400)
+        expect(await answer.text()).toContain('no ready session of this emulator')
+      }
+    })
+  })
+
+  it('answers the reserved invalid credential the recorded 401 on the Figma probe only', async () => {
+    await withEmulator({}, async emulator => {
+      const rejected = await emulator.fetch(
+        requestFor(recorded.figmaDiscover, { bearer: reserved })
+      )
+
+      expect(rejected.status).toBe(401)
+      expect(rejected.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"')
+
+      const refused = await emulator.fetch(
+        requestFor(recorded.figmaInitialize, { bearer: reserved })
+      )
+
+      expect(refused.status).toBe(400)
+      expect(await refused.text()).toContain('answered only on the era probe')
+
+      // The probe with an accepted bearer answers the recorded session-less 400.
+      const probe = await emulator.fetch(requestFor(recorded.figmaDiscover))
+
+      expect(probe.status).toBe(400)
+      expect(await probe.text()).toBe(recordedText(recorded.figmaDiscover))
+    })
+  })
+
+  it('a POST on the Figma path from another origin is refused by origin', async () => {
+    await withEmulator({}, async emulator => {
+      const answer = await emulator.fetch(
+        requestFor(recorded.figmaInitialize, { url: 'https://mcp.example.test/mcp' })
+      )
+
+      expect(answer.status).toBe(400)
+      expect(await answer.text()).toContain('this route is recorded on')
+      expect(emulator.snapshot().sessions).toEqual([])
     })
   })
 })

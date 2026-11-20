@@ -7,6 +7,8 @@ import { dropboxConformanceFixtures } from '../../packages/connectors/src/dropbo
 import { fortnoxConformanceFixtures } from '../../packages/connectors/src/fortnox/conformance/index.ts'
 import { googleConformanceFixtures } from '../../packages/connectors/src/google/conformance/index.ts'
 import { afloatMcpConformanceFixtures } from '../../packages/connectors/src/afloat/conformance/index.ts'
+import { figmaMcpConformanceFixtures } from '../../packages/connectors/src/figma/conformance/index.ts'
+import { kieConformanceFixtures } from '../../packages/connectors/src/kie/conformance/index.ts'
 import { linkedInSearchConformanceFixtures } from '../../packages/connectors/src/linkedin-search/conformance/index.ts'
 import { emailConformanceCases } from '../../packages/connectors/src/email/conformance/cases.ts'
 import { r2ConformanceCases } from '../../packages/connectors/src/r2-storage/conformance/cases.ts'
@@ -21,6 +23,7 @@ import { emailEmulatorRoutes } from '../../packages/emulators/src/email.ts'
 import { r2EmulatorRoutes } from '../../packages/emulators/src/r2.ts'
 import { fortnoxEmulatorRoutes } from '../../packages/emulators/src/fortnox.ts'
 import { googleEmulatorRoutes } from '../../packages/emulators/src/google.ts'
+import { kieEmulatorRoutes } from '../../packages/emulators/src/kie.ts'
 import { linkedInSearchEmulatorRoutes } from '../../packages/emulators/src/linkedin-search.ts'
 import { mcpEmulatorRoutes } from '../../packages/emulators/src/mcp.ts'
 import { microsoftEmulatorRoutes } from '../../packages/emulators/src/microsoft.ts'
@@ -228,7 +231,9 @@ describe('checkEmulatorEvidence', () => {
     ...googleConformanceFixtures,
     ...linkedInSearchConformanceFixtures,
     ...mcpConformanceFixtures,
-    ...afloatMcpConformanceFixtures
+    ...afloatMcpConformanceFixtures,
+    ...figmaMcpConformanceFixtures,
+    ...kieConformanceFixtures
   ]
 
   const hasVerifiedFixture = (caseId: string) =>
@@ -287,7 +292,9 @@ describe('checkEmulatorEvidence', () => {
     ['Google', googleConformanceFixtures],
     ['LinkedIn search', linkedInSearchConformanceFixtures],
     ['MCP', mcpConformanceFixtures],
-    ['Afloat MCP', afloatMcpConformanceFixtures]
+    ['Afloat MCP', afloatMcpConformanceFixtures],
+    ['Figma MCP', figmaMcpConformanceFixtures],
+    ['Kie', kieConformanceFixtures]
   ])(
     'fails unbacked-verified for a verified route citing only still-unverified repo cases (%s)',
     (_name, fixtures) => {
@@ -665,6 +672,10 @@ describe('repo emulator manifests', () => {
     .filter(googleRoute => googleRoute.write)
     .map(googleRoute => `${googleRoute.method} ${googleRoute.path}`)
 
+  const kieWriteRoutes = kieEmulatorRoutes
+    .filter(kieRoute => kieRoute.write)
+    .map(kieRoute => `${kieRoute.method} ${kieRoute.path}`)
+
   const failedRoutes = (report: ReturnType<typeof repoCheck>, manifest: string) =>
     report.findings
       .filter(finding => finding.severity === 'fail' && finding.manifest === manifest)
@@ -709,6 +720,7 @@ describe('repo emulator manifests', () => {
     expect(knownConformanceCaseIds.has('google.gmail.send-practice-address')).toBe(true)
     expect(knownConformanceCaseIds.has('linkedin-search.errors.profile-not-found')).toBe(true)
     expect(knownConformanceCaseIds.has('mcp.auth.rejected')).toBe(true)
+    expect(knownConformanceCaseIds.has('kie.tasks.create-video-task')).toBe(true)
     expect(emulatorManifests.map(manifest => manifest.name)).toEqual([
       'gateway',
       'gateway-evaluate',
@@ -731,7 +743,8 @@ describe('repo emulator manifests', () => {
       'github',
       'google',
       'linkedin-search',
-      'mcp'
+      'mcp',
+      'kie'
     ])
     // The Gateway route is verified (aligned with the live recordings), backed by verified fixtures.
     expect(emulatorManifests[0]?.routes.map(route => [route.evidence, route.observedAt])).toEqual([
@@ -767,7 +780,8 @@ describe('repo emulator manifests', () => {
       'dropbox',
       'notion',
       'google',
-      'linkedin-search'
+      'linkedin-search',
+      'kie'
     ]) {
       const routes = emulatorManifests.find(manifest => manifest.name === name)?.routes ?? []
 
@@ -782,7 +796,8 @@ describe('repo emulator manifests', () => {
       }
     }
 
-    // Each MCP case has a modern and a legacy fixture, plus a derived Afloat one, all unverified.
+    // Each MCP case has a modern and a legacy fixture, plus a derived Afloat one and a synthetic
+    // Figma one (every case but mcp.modern.stateless), all unverified.
     expect(mcpEmulatorRoutes.length).toBeGreaterThan(0)
 
     for (const route of mcpEmulatorRoutes) {
@@ -790,9 +805,11 @@ describe('repo emulator manifests', () => {
 
       for (const caseId of route.caseIds) {
         expect(repoFixtureEvidenceByCase.get(caseId), `${route.path} ${caseId}`).toEqual(
-          [...mcpConformanceFixtures, ...afloatMcpConformanceFixtures].flatMap(fixture =>
-            fixture.caseId === caseId ? ['unverified'] : []
-          )
+          [
+            ...mcpConformanceFixtures,
+            ...afloatMcpConformanceFixtures,
+            ...figmaMcpConformanceFixtures
+          ].flatMap(fixture => (fixture.caseId === caseId ? ['unverified'] : []))
         )
       }
     }
@@ -823,7 +840,8 @@ describe('repo emulator manifests', () => {
       ...todoistWriteRoutes,
       ...telegramWriteRoutes,
       ...githubWriteRoutes,
-      ...googleWriteRoutes
+      ...googleWriteRoutes,
+      ...kieWriteRoutes
     ])
     expect(r2WriteRoutes).toEqual(['PORT R2ObjectClient.put'])
     expect(fortnoxWriteRoutes).toEqual([
@@ -887,6 +905,7 @@ describe('repo emulator manifests', () => {
       'PATCH /drive/v3/files/{fileId}',
       'DELETE /drive/v3/files/{fileId}'
     ])
+    expect(kieWriteRoutes).toEqual(['POST /api/v1/jobs/createTask'])
     // Fixture-only: every Todoist, Telegram, GitHub, Google, LinkedIn search, and MCP route cites a
     // case (no uncited route). Every LinkedIn search and MCP row is a read: no pending entry.
     expect(linkedInSearchEmulatorRoutes.filter(route => route.write)).toEqual([])
@@ -902,7 +921,8 @@ describe('repo emulator manifests', () => {
               finding.manifest === 'github' ||
               finding.manifest === 'google' ||
               finding.manifest === 'linkedin-search' ||
-              finding.manifest === 'mcp') &&
+              finding.manifest === 'mcp' ||
+              finding.manifest === 'kie') &&
             finding.kind === 'no-case-ids'
         )
         .map(finding => finding.route)
@@ -1034,7 +1054,8 @@ describe('repo emulator manifests', () => {
     ['todoist', 'Todoist', () => todoistWriteRoutes],
     ['telegram', 'Telegram', () => telegramWriteRoutes],
     ['github', 'GitHub', () => githubWriteRoutes],
-    ['google', 'Google', () => googleWriteRoutes]
+    ['google', 'Google', () => googleWriteRoutes],
+    ['kie', 'Kie', () => kieWriteRoutes]
   ] as const)(
     'ships one pending entry per %s write route, at most 60 days out, naming the live run',
     (manifest, _label, writeRoutes) => {
@@ -1057,7 +1078,8 @@ describe('repo emulator manifests', () => {
     ['todoist', () => todoistWriteRoutes],
     ['telegram', () => telegramWriteRoutes],
     ['github', () => githubWriteRoutes],
-    ['google', () => googleWriteRoutes]
+    ['google', () => googleWriteRoutes],
+    ['kie', () => kieWriteRoutes]
   ] as const)(
     'fails the unverified %s write routes without the pending file or after it expires',
     (manifest, writeRoutes) => {
@@ -1158,6 +1180,13 @@ describe('repo emulator manifests', () => {
       'WARN  mcp  RPC https://mcp.example.test/legacy/mcp#tools/call  unverified evidence (3 case(s))'
     )
     expect(result.stdout).not.toMatch(/mcp {2}\S+ \S+ {2}PENDING/)
+    expect(result.stdout).toContain(pendingUntil('kie', 'POST /api/v1/jobs/createTask'))
+    expect(result.stdout).toContain(
+      'WARN  kie  GET /api/v1/jobs/recordInfo  unverified evidence (4 case(s))'
+    )
+    expect(result.stdout).toContain(
+      'WARN  mcp  RPC https://mcp.figma.com/mcp#tools/call  unverified evidence (3 case(s))'
+    )
 
     // The PENDING count comes from the pending file, not a hard-coded number.
     const pendingLine = result.stdout.split('\n').find(line => line.startsWith('PENDING: '))

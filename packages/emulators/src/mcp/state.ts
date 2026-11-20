@@ -2,9 +2,9 @@
  * MCP emulator state, seed, profiles, and minted value forms (internal).
  *
  * The state holds the modern listing the seed selects and the legacy sessions minted since the
- * last reset or seed; a seed holds no session, so no seeded value can take the minted
- * `yolk-emu-session-<n>` form. The session counter and the cursor generation are runtime data
- * that never reset (`McpRuntime`).
+ * last reset or seed (each bound to the profile that minted it); a seed holds no session, so no
+ * seeded value can take the minted `yolk-emu-session-<n>` form. The session counter and the
+ * cursor generation are runtime data that never reset (`McpRuntime`).
  *
  * @experimental
  */
@@ -46,6 +46,12 @@ export const mcpEmulatorAfloatKeyPrefix = 'afloat_'
  */
 export const mcpEmulatorAfloatReservedInvalidCredential = 'afloat_yolkconformanceinvalid0000'
 
+/** The Figma profile's origin (the provider endpoint `https://mcp.figma.com/mcp`). */
+export const mcpEmulatorFigmaOrigin = 'https://mcp.figma.com'
+
+/** The Figma profile: an `initialize` handshake, a session, and SSE answers (the legacy era). */
+export const mcpEmulatorFigmaPath = '/mcp'
+
 /** The minted session id form (`yolk-emu-session-<n>`, `n` from a counter that never resets). */
 export const mcpEmulatorSessionPrefix = 'yolk-emu-session-'
 
@@ -61,10 +67,15 @@ export const McpEmulatorModernListing = Schema.Literals(['one-page', 'two-pages'
 
 export type McpEmulatorModernListing = typeof McpEmulatorModernListing.Type
 
-/** A legacy session: minted by `initialize`, ready after `notifications/initialized`. */
+/**
+ * A legacy session: minted by `initialize`, ready after `notifications/initialized`, and bound to
+ * the profile that minted it (`profile: 'figma'` on the Figma profile; absent on the synthetic
+ * legacy profile), so a session is answered only on its own profile.
+ */
 export const McpEmulatorSession = Schema.Struct({
   id: Schema.String,
-  phase: Schema.Literals(['initializing', 'ready'])
+  phase: Schema.Literals(['initializing', 'ready']),
+  profile: Schema.optionalKey(Schema.Literal('figma'))
 })
 
 export type McpEmulatorSession = typeof McpEmulatorSession.Type

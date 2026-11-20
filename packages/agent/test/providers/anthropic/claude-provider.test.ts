@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentReasoningEffort,
   AssistantAgentMessage,
   DocumentPart,
   HostToolCallPart,
@@ -442,6 +443,35 @@ describe('Anthropic Claude provider', () => {
       })
 
       expect(body).not.toHaveProperty('output_config')
+    })
+  )
+
+  it.effect('sends max effort and rejects none, which Messages does not support', () =>
+    Effect.gen(function* () {
+      const request = {
+        model: 'claude-opus-5-5',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'analyze' })],
+        tools: []
+      }
+
+      // Decoded as a host decodes a stored or submitted effort.
+      const max = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)('max')
+      const none = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)('none')
+
+      const body = yield* toAnthropicClaudeRequestBody({ ...request, reasoningEffort: max })
+
+      const error = yield* toAnthropicClaudeRequestBody({ ...request, reasoningEffort: none }).pipe(
+        Effect.flip
+      )
+
+      expect(body).toMatchObject({ output_config: { effort: 'max' } })
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'validation_error',
+        retryable: false,
+        message: 'Anthropic Messages does not support reasoning effort none'
+      })
     })
   )
 

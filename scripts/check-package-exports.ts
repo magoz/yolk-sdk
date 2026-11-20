@@ -173,6 +173,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './email',
       './email/conformance',
       './figma',
+      './figma/conformance',
       './fortnox',
       './fortnox/conformance',
       './github',
@@ -180,6 +181,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './google',
       './google/conformance',
       './kie',
+      './kie/conformance',
       './linkedin-search',
       './linkedin-search/conformance',
       './microsoft',
@@ -288,7 +290,8 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
       './github',
       './google',
       './linkedin-search',
-      './mcp'
+      './mcp',
+      './kie'
     ],
     root: 'none'
   }

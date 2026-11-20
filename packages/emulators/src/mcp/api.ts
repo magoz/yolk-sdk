@@ -1,8 +1,9 @@
 /**
  * MCP emulator route table (internal): one wire route per recorded HTTP shape (`POST /modern/mcp`,
- * `POST /legacy/mcp`, `GET /legacy/mcp` on the synthetic origin, and `POST /mcp` on the Afloat
- * origin), each answering only the JSON-RPC methods its profile's fixtures record, as manifest
- * variants (`RPC <origin><path>#<method>`, plus the `GET` row).
+ * `POST /legacy/mcp`, `GET /legacy/mcp` on the synthetic origin, `POST /mcp` on the Afloat origin,
+ * and `POST /mcp` and `GET /mcp` on the Figma origin), each answering only the JSON-RPC methods its
+ * profile's fixtures record, as manifest variants (`RPC <origin><path>#<method>`, plus each legacy
+ * profile's `GET` row).
  *
  * A request is admitted only when it equals a recorded request (`src/mcp/recordings.ts`) within
  * the latitude: the MCP headers (`accept`, `content-type`, `mcp-method`, `mcp-protocol-version`,
@@ -35,6 +36,7 @@ import {
   type StreamedAnswer
 } from '../stateful-emulator.ts'
 import { mcpEmulatorAfloatFixtures } from './afloat-recordings.ts'
+import { mcpEmulatorFigmaFixtures } from './figma-recordings.ts'
 import {
   mcpEmulatorFixtures,
   type McpRecordedExchange,
@@ -45,6 +47,8 @@ import {
 import {
   mcpEmulatorAfloatOrigin,
   mcpEmulatorAfloatPath,
+  mcpEmulatorFigmaOrigin,
+  mcpEmulatorFigmaPath,
   mcpEmulatorLegacyPath,
   mcpEmulatorModernPath,
   mcpEmulatorOrigin,
@@ -94,6 +98,8 @@ export type McpApiEnv = {
   readonly reservedDigest: string
   /** The digest of the reserved invalid Afloat credential's remainder on the Afloat origin. */
   readonly afloatReservedDigest: string
+  /** The digest of the reserved invalid credential on the Figma origin. */
+  readonly figmaReservedDigest: string
   /** Runtime data the commits advance (never in the state). */
   readonly runtime: McpRuntime
 }
@@ -109,10 +115,11 @@ const fieldOf = (value: Schema.Json | undefined, key: string): Schema.Json | und
 
 // The recorded exchanges the routes answer, by fixture id and exchange index.
 
-/** Every copied fixture: the synthetic profiles', then the Afloat profile's. */
+/** Every copied fixture: the synthetic profiles', then the Afloat profile's, then Figma's. */
 const allFixtures: ReadonlyArray<McpRecordedFixture> = [
   ...mcpEmulatorFixtures,
-  ...mcpEmulatorAfloatFixtures
+  ...mcpEmulatorAfloatFixtures,
+  ...mcpEmulatorFigmaFixtures
 ]
 
 const exchangeOf = (fixtureId: string, index: number): McpRecordedExchange => {
@@ -130,6 +137,8 @@ const modern = (caseId: string) => `${caseId}.modern.synthetic`
 const legacy = (caseId: string) => `${caseId}.legacy.synthetic`
 
 const afloat = (caseId: string) => `${caseId}.afloat.synthetic`
+
+const figma = (caseId: string) => `${caseId}.figma.synthetic`
 
 const recorded = {
   modernDiscover: exchangeOf(modern('mcp.negotiation.era'), 0),
@@ -154,7 +163,16 @@ const recorded = {
   afloatList: exchangeOf(afloat('mcp.negotiation.era'), 1),
   afloatCallRead: exchangeOf(afloat('mcp.tools.call-read'), -1),
   afloatCallToolError: exchangeOf(afloat('mcp.tools.call-tool-error'), -1),
-  afloatCallAbsent: exchangeOf(afloat('mcp.errors.unknown-tool'), -1)
+  afloatCallAbsent: exchangeOf(afloat('mcp.errors.unknown-tool'), -1),
+  figmaDiscover: exchangeOf(figma('mcp.negotiation.era'), 0),
+  figmaRejected: exchangeOf(figma('mcp.auth.rejected'), 0),
+  figmaInitialize: exchangeOf(figma('mcp.negotiation.era'), 1),
+  figmaInitialized: exchangeOf(figma('mcp.negotiation.era'), 2),
+  figmaGet: exchangeOf(figma('mcp.negotiation.era'), 3),
+  figmaList: exchangeOf(figma('mcp.negotiation.era'), 4),
+  figmaCallRead: exchangeOf(figma('mcp.tools.call-read'), -1),
+  figmaCallToolError: exchangeOf(figma('mcp.tools.call-tool-error'), -1),
+  figmaCallAbsent: exchangeOf(figma('mcp.errors.unknown-tool'), -1)
 }
 
 type RecordedKey = keyof typeof recorded
@@ -229,18 +247,20 @@ const afloatRows = modernMethods.map(method =>
   rpcRow(mcpEmulatorAfloatOrigin, mcpEmulatorAfloatPath, method)
 )
 
-const getRow: EmulatorRouteEvidence = {
+/** The Figma profile records the legacy methods (a handshake, a session, no paging). */
+const figmaRows = legacyMethods.map(method =>
+  rpcRow(mcpEmulatorFigmaOrigin, mcpEmulatorFigmaPath, method)
+)
+
+/** The `GET` row of a legacy profile: the client's standing event stream. */
+const getRowOf = (origin: string, path: string): EmulatorRouteEvidence => ({
   method: 'GET',
-  path: `${mcpEmulatorOrigin}${mcpEmulatorLegacyPath}`,
+  path: `${origin}${path}`,
   kind: 'connector',
   write: false,
-  caseIds: casesSending(
-    mcpEmulatorOrigin,
-    mcpEmulatorLegacyPath,
-    request => request.method === 'GET'
-  ),
+  caseIds: casesSending(origin, path, request => request.method === 'GET'),
   evidence: 'unverified'
-}
+})
 
 const rowOf = (path: string, method: string, origin: string = mcpEmulatorOrigin): string =>
   `${origin}${path}#${method}`
@@ -634,8 +654,44 @@ const admission = (
 /** A commit that answers `answer` and writes nothing. */
 const answerOnly = (answer: StreamedAnswer): Planned => streamedCommit(answer)
 
-const sessionOf = (state: McpEmulatorState, admitted: Admitted, phase: 'initializing' | 'ready') =>
-  state.sessions.find(session => session.id === admitted.session && session.phase === phase)
+/**
+ * A legacy profile: the synthetic legacy server or Figma, each on its own origin and path, with its
+ * recorded exchanges, its manifest rows, the digest of its reserved invalid credential, and the
+ * mark its sessions carry (a session is answered only on the profile that minted it).
+ */
+type LegacyProfile = {
+  readonly origin: string
+  readonly path: string
+  /** How refusals name the profile (`the legacy profile`). */
+  readonly label: string
+  /** The `profile` its sessions carry (absent on the synthetic legacy profile). */
+  readonly sessionProfile: 'figma' | undefined
+  readonly reserved: (request: EmulatedRequest, env: McpApiEnv) => boolean
+  readonly rows: ReadonlyArray<EmulatorRouteEvidence>
+  readonly getRow: EmulatorRouteEvidence
+  readonly keys: {
+    readonly discover: RecordedKey
+    readonly rejected: RecordedKey
+    readonly initialize: RecordedKey
+    readonly initialized: RecordedKey
+    readonly get: RecordedKey
+    readonly list: RecordedKey
+    readonly calls: ReadonlyArray<RecordedKey>
+  }
+}
+
+const sessionOf = (
+  state: McpEmulatorState,
+  admitted: Admitted,
+  phase: 'initializing' | 'ready',
+  profile: LegacyProfile
+) =>
+  state.sessions.find(
+    session =>
+      session.id === admitted.session &&
+      session.phase === phase &&
+      session.profile === profile.sessionProfile
+  )
 
 const unknownSession = (phase: 'initializing' | 'ready') =>
   notEmulated(
@@ -654,7 +710,8 @@ const drillErrorResponse = JSON.stringify({
 /** The listed tools that write, which the `writeToolMarkedReadOnly` drill marks read-only. */
 const writeToolNames: ReadonlySet<string> = new Set([
   'create_synthetic_note',
-  'create-receipt-upload'
+  'create-receipt-upload',
+  'use_figma'
 ])
 
 /** Drill transforms of an answer, by the recorded exchange it answers. */
@@ -700,6 +757,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
     case 'modernSecondPage':
     case 'legacyList':
     case 'afloatList':
+    case 'figmaList':
       return drills.writeToolMarkedReadOnly
         ? mapResponse(
             answer,
@@ -724,6 +782,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
     case 'modernCallRead':
     case 'legacyCallRead':
     case 'afloatCallRead':
+    case 'figmaCallRead':
       return drills.readCallAnswersToolError
         ? mapResponse(
             answer,
@@ -735,6 +794,7 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
     case 'modernCallToolError':
     case 'legacyCallToolError':
     case 'afloatCallToolError':
+    case 'figmaCallToolError':
       return drills.invalidCallAnswersRpcError
         ? mapResponse(answer, id, () => ({
             jsonrpc: '2.0',
@@ -745,7 +805,8 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
 
     case 'modernCallAbsent':
     case 'legacyCallAbsent':
-    case 'afloatCallAbsent': {
+    case 'afloatCallAbsent':
+    case 'figmaCallAbsent': {
       if (!drills.absentCallAnswersResult) return answer
 
       const result: JsonObject = {
@@ -756,13 +817,18 @@ const drilled = (key: RecordedKey, answer: StreamedAnswer, id: RpcId, env: McpAp
       return mapResponse({ ...answer, status: 200 }, id, () => ({
         jsonrpc: '2.0',
         id,
-        result: key === 'legacyCallAbsent' ? result : { ...result, resultType: 'complete' }
+        // A legacy result carries no `resultType`.
+        result:
+          key === 'legacyCallAbsent' || key === 'figmaCallAbsent'
+            ? result
+            : { ...result, resultType: 'complete' }
       }))
     }
 
     case 'modernRejected':
     case 'legacyRejected':
-    case 'afloatRejected': {
+    case 'afloatRejected':
+    case 'figmaRejected': {
       if (!drills.unauthorizedWithoutChallenge) return answer
 
       const { 'www-authenticate': _challenge, ...headers } = answer.headers
@@ -828,46 +894,55 @@ const planModernSecondPage: Plan = (state, admitted, env) =>
         'a cursor this emulator did not issue since the last reset or seed is not emulated'
       )
 
-const planInitialize: Plan = (state, admitted, env) => {
-  const number = env.runtime.nextSession
+const planInitialize =
+  (profile: LegacyProfile): Plan =>
+  (state, admitted, env) => {
+    const number = env.runtime.nextSession
 
-  if (state.sessions.length >= mcpEmulatorSessionCap || !Number.isSafeInteger(number + 1)) {
-    return notEmulated('the emulator holds as many sessions as it takes')
+    if (state.sessions.length >= mcpEmulatorSessionCap || !Number.isSafeInteger(number + 1)) {
+      return notEmulated('the emulator holds as many sessions as it takes')
+    }
+
+    const session = env.drills.sessionIdNotVisibleAscii
+      ? `yolk-emu-session ${number}`
+      : `${mcpEmulatorSessionPrefix}${number}`
+
+    const answer = withSession(recordedAnswer(profile.keys.initialize, admitted.id, env), session)
+
+    const minted =
+      profile.sessionProfile === undefined
+        ? { id: session, phase: 'initializing' as const }
+        : { id: session, phase: 'initializing' as const, profile: profile.sessionProfile }
+
+    // The session is minted only by the commit, so a faulted or truncated `initialize` holds none
+    // and leaves the counter where it was.
+    return streamedCommit(answer, () => {
+      env.runtime.nextSession = number + 1
+      state.sessions = [...state.sessions, minted]
+    }, [session])
   }
 
-  const session = env.drills.sessionIdNotVisibleAscii
-    ? `yolk-emu-session ${number}`
-    : `${mcpEmulatorSessionPrefix}${number}`
-
-  const answer = withSession(recordedAnswer('legacyInitialize', admitted.id, env), session)
-
-  // The session is minted only by the commit, so a faulted or truncated `initialize` holds none
-  // and leaves the counter where it was.
-  return streamedCommit(answer, () => {
-    env.runtime.nextSession = number + 1
-    state.sessions = [...state.sessions, { id: session, phase: 'initializing' }]
-  }, [session])
-}
-
-const planInitialized: Plan = (state, admitted, env) => {
-  const session = sessionOf(state, admitted, 'initializing')
-
-  if (session === undefined) return unknownSession('initializing')
-
-  const answer = recordedAnswer('legacyInitialized', undefined, env)
-
-  return streamedCommit(answer, () => {
-    state.sessions = state.sessions.map(held =>
-      held.id === session.id ? { id: held.id, phase: 'ready' } : held
-    )
-  })
-}
-
-/** A legacy answer on a ready session: the recorded answer with the session's id. */
-const planOnSession =
-  (key: RecordedKey): Plan =>
+const planInitialized =
+  (profile: LegacyProfile): Plan =>
   (state, admitted, env) => {
-    const session = sessionOf(state, admitted, 'ready')
+    const session = sessionOf(state, admitted, 'initializing', profile)
+
+    if (session === undefined) return unknownSession('initializing')
+
+    const answer = recordedAnswer(profile.keys.initialized, undefined, env)
+
+    return streamedCommit(answer, () => {
+      state.sessions = state.sessions.map(held =>
+        held.id === session.id ? { ...held, phase: 'ready' } : held
+      )
+    })
+  }
+
+/** A legacy answer on a ready session of `profile`: the recorded answer with the session's id. */
+const planOnSession =
+  (profile: LegacyProfile, key: RecordedKey): Plan =>
+  (state, admitted, env) => {
+    const session = sessionOf(state, admitted, 'ready', profile)
 
     return session === undefined
       ? unknownSession('ready')
@@ -958,9 +1033,9 @@ const modernRoute: McpRoute = {
   }
 }
 
-/** `POST /legacy/mcp`: the initialize-based synthetic server (SSE answers, sessions). */
-const legacyRoute: McpRoute = {
-  ...routeEvidenceOf('POST', mcpEmulatorLegacyPath, legacyRows),
+/** `POST <path>` of a legacy profile: the initialize-based server (SSE answers, sessions). */
+const legacyPostRoute = (profile: LegacyProfile): McpRoute => ({
+  ...routeEvidenceOf('POST', profile.path, profile.rows, profile.origin),
   body: 'json',
   admit: (request, env) => {
     const query = noQuery(request)
@@ -968,19 +1043,19 @@ const legacyRoute: McpRoute = {
     if (query !== undefined) return query
 
     const method = fieldOf(request.json, 'method')
-    const variant = (name: string) => rowOf(mcpEmulatorLegacyPath, name)
+    const variant = (name: string) => rowOf(profile.path, name, profile.origin)
 
     if (method === 'server/discover') {
-      const matched = matchRpc(request, ['legacyDiscover'])
+      const matched = matchRpc(request, [profile.keys.discover])
 
       if (isNotEmulated(matched)) return matched
 
-      return isReserved(request, env)
-        ? admission(variant(method), admitted(matched, request), planAnswer('legacyRejected'))
-        : admission(variant(method), admitted(matched, request), planAnswer('legacyDiscover'))
+      return profile.reserved(request, env)
+        ? admission(variant(method), admitted(matched, request), planAnswer(profile.keys.rejected))
+        : admission(variant(method), admitted(matched, request), planAnswer(profile.keys.discover))
     }
 
-    if (isReserved(request, env)) return notEmulated(reservedOnlyOnProbe)
+    if (profile.reserved(request, env)) return notEmulated(reservedOnlyOnProbe)
 
     const single = (key: RecordedKey, name: string, plan: Plan) => {
       const matched = matchRpc(request, [key])
@@ -990,57 +1065,106 @@ const legacyRoute: McpRoute = {
         : admission(variant(name), admitted(matched, request), plan)
     }
 
-    if (method === 'initialize') return single('legacyInitialize', method, planInitialize)
-
-    if (method === 'notifications/initialized') {
-      return single('legacyInitialized', method, planInitialized)
+    if (method === 'initialize') {
+      return single(profile.keys.initialize, method, planInitialize(profile))
     }
 
-    if (method === 'tools/list') return single('legacyList', method, planOnSession('legacyList'))
+    if (method === 'notifications/initialized') {
+      return single(profile.keys.initialized, method, planInitialized(profile))
+    }
+
+    if (method === 'tools/list') {
+      return single(profile.keys.list, method, planOnSession(profile, profile.keys.list))
+    }
 
     if (method === 'tools/call') {
-      const matched = matchRpc(request, [
-        'legacyCallRead',
-        'legacyCallToolError',
-        'legacyCallAbsent'
-      ])
+      const matched = matchRpc(request, profile.keys.calls)
 
       if (isNotEmulated(matched)) return matched
 
-      return admission(variant(method), admitted(matched, request), planOnSession(matched.key))
+      return admission(
+        variant(method),
+        admitted(matched, request),
+        planOnSession(profile, matched.key)
+      )
     }
 
-    return notEmulated('this JSON-RPC method is not emulated on the legacy profile')
+    return notEmulated(`this JSON-RPC method is not emulated on ${profile.label}`)
   }
-}
+})
 
-/** `GET /legacy/mcp`: the client's standing event stream, answered the recorded 405. */
-const legacyGetRoute: McpRoute = {
-  ...routeEvidenceOf('GET', mcpEmulatorLegacyPath, [getRow]),
+/** `GET <path>` of a legacy profile: the client's standing event stream, answered the 405. */
+const legacyGetRoute = (profile: LegacyProfile): McpRoute => ({
+  ...routeEvidenceOf('GET', profile.path, [profile.getRow], profile.origin),
   body: 'none',
   admit: (request, env) => {
     const query = noQuery(request)
 
     if (query !== undefined) return query
 
-    if (isReserved(request, env)) return notEmulated(reservedOnlyOnProbe)
+    if (profile.reserved(request, env)) return notEmulated(reservedOnlyOnProbe)
 
     const problem =
       unrecordedMcpHeader(request) ??
-      headerProblem(request, recorded.legacyGet.request, comparedHeaders)
+      headerProblem(request, recorded[profile.keys.get].request, comparedHeaders)
 
     if (problem !== undefined) return problem
 
     return admission(
-      getRow.path,
+      profile.getRow.path,
       {
-        key: 'legacyGet',
+        key: profile.keys.get,
         id: undefined,
         cursor: undefined,
         session: request.header(sessionHeader)
       },
-      planOnSession('legacyGet')
+      planOnSession(profile, profile.keys.get)
     )
+  }
+})
+
+/** The synthetic legacy server on `https://mcp.example.test/legacy/mcp`. */
+const syntheticLegacyProfile: LegacyProfile = {
+  origin: mcpEmulatorOrigin,
+  path: mcpEmulatorLegacyPath,
+  label: 'the legacy profile',
+  sessionProfile: undefined,
+  reserved: isReserved,
+  rows: legacyRows,
+  getRow: getRowOf(mcpEmulatorOrigin, mcpEmulatorLegacyPath),
+  keys: {
+    discover: 'legacyDiscover',
+    rejected: 'legacyRejected',
+    initialize: 'legacyInitialize',
+    initialized: 'legacyInitialized',
+    get: 'legacyGet',
+    list: 'legacyList',
+    calls: ['legacyCallRead', 'legacyCallToolError', 'legacyCallAbsent']
+  }
+}
+
+/**
+ * The Figma profile on the provider endpoint `https://mcp.figma.com/mcp` (the legacy era: a
+ * handshake, sessions bound to this profile, SSE answers). Its bearer follows the plain rule, and
+ * its reserved invalid credential is the public MCP one, compared through the digest for the Figma
+ * origin.
+ */
+const figmaProfile: LegacyProfile = {
+  origin: mcpEmulatorFigmaOrigin,
+  path: mcpEmulatorFigmaPath,
+  label: 'the Figma profile',
+  sessionProfile: 'figma',
+  reserved: (request, env) => request.bearerDigest === env.figmaReservedDigest,
+  rows: figmaRows,
+  getRow: getRowOf(mcpEmulatorFigmaOrigin, mcpEmulatorFigmaPath),
+  keys: {
+    discover: 'figmaDiscover',
+    rejected: 'figmaRejected',
+    initialize: 'figmaInitialize',
+    initialized: 'figmaInitialized',
+    get: 'figmaGet',
+    list: 'figmaList',
+    calls: ['figmaCallRead', 'figmaCallToolError', 'figmaCallAbsent']
   }
 }
 
@@ -1099,7 +1223,9 @@ const afloatRoute: McpRoute = {
 /** The route table: one wire route per recorded HTTP shape, each with its manifest variants. */
 export const mcpApiRoutes: ReadonlyArray<McpRoute> = [
   modernRoute,
-  legacyRoute,
-  legacyGetRoute,
-  afloatRoute
+  legacyPostRoute(syntheticLegacyProfile),
+  legacyGetRoute(syntheticLegacyProfile),
+  afloatRoute,
+  legacyPostRoute(figmaProfile),
+  legacyGetRoute(figmaProfile)
 ]

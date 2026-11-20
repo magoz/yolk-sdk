@@ -413,6 +413,13 @@
       "path": "/drive/v3/files/{fileId}",
       "reason": "Google emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of google.drive.folder-trash-delete.",
       "expires": "2027-01-18"
+    },
+    {
+      "manifest": "kie",
+      "method": "POST",
+      "path": "/api/v1/jobs/createTask",
+      "reason": "Kie emulator (tracking #115) follows synthetic fixtures; awaiting the owner-approved live run of kie.tasks.create-image-task and kie.tasks.create-video-task (write-irreversible: each submits one paid task to the practice account, started only by its exact case id).",
+      "expires": "2027-01-18"
     }
   ]
 }

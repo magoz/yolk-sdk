@@ -10,8 +10,12 @@
  * those conformance case ids in `openAiEmulatorRoutes`. The Chat Completions
  * machinery is shared with the Gateway emulator (`chat-completions.ts`).
  *
- * Reasoning models are not emulated yet: no default model streams reasoning,
- * and scripted turns cannot carry reasoning.
+ * Reasoning models follow the three synthetic reasoning fixtures (their notes
+ * cite the OpenAI docs they are shaped on): they take `reasoning_effort` and
+ * `max_completion_tokens`, return no reasoning text, report reasoning only as
+ * `usage.completion_tokens_details.reasoning_tokens`, and reject `max_tokens`
+ * (400 `unsupported_parameter`). Scripted turns cannot carry reasoning text
+ * (the fixtures have none); script reasoning as `usage.reasoningTokens`.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`,
  * `TextEncoder`, `URL`); no Effect runtime is required to use it.
@@ -34,6 +38,7 @@ import {
   type ChatFaultState,
   type ChatLedgerEntry,
   type ChatRouteCoverage,
+  type ChatUnsupportedParameter,
   type ChatWireError
 } from './chat-completions.ts'
 import type { EmulatorRouteEvidence } from './route-evidence.ts'
@@ -45,7 +50,14 @@ export { emulatorEvidenceHeader } from './route-evidence.ts'
 export const openAiChatCompletionsPath = '/v1/chat/completions'
 
 /** Synthetic-safe default model ids, including the OpenAI chat conformance defaults. */
-export const openAiEmulatorDefaultModels: ReadonlyArray<string> = ['gpt-4.1-nano', 'gpt-4.1-mini']
+export const openAiEmulatorDefaultModels: ReadonlyArray<string> = [
+  'gpt-4.1-nano',
+  'gpt-4.1-mini',
+  'gpt-6-luna'
+]
+
+/** Reasoning models (hidden reasoning, reasoning-model parameter rules), the conformance default. */
+export const openAiEmulatorDefaultReasoningModels: ReadonlyArray<string> = ['gpt-6-luna']
 
 /**
  * Route evidence manifest: every emulated OpenAI route and the conformance
@@ -61,7 +73,10 @@ export const openAiEmulatorRoutes: ReadonlyArray<EmulatorRouteEvidence> = [
       'openai.chat.stream.plain-text',
       'openai.chat.stream.tool-call-deltas',
       'openai.chat.stream.error-envelope',
-      'openai.chat.json.plain-text'
+      'openai.chat.json.plain-text',
+      'openai.chat.stream.reasoning-effort',
+      'openai.chat.json.reasoning-usage',
+      'openai.chat.stream.unsupported-parameter'
     ],
     evidence: 'unverified',
     observedAt: undefined
@@ -101,7 +116,9 @@ export type OpenAiScriptedToolCall = ChatScriptedToolCall
  * A scripted completion. Every field is exact (nothing is filled in) except:
  * `usage` omitted is synthesized when the request asks for usage, and `null`
  * drops it; `finishReason` omitted is `tool_calls` with tool calls, else
- * `stop`. Reasoning is not emulated: reasoning fields are rejected.
+ * `stop`. OpenAI Chat Completions never returns reasoning text, so reasoning
+ * text fields (`reasoning`, `reasoningField`, `order`) are rejected; script a
+ * reasoning model's reasoning as `usage.reasoningTokens`.
  */
 export const OpenAiScriptedCompletion = Schema.Struct(chatScriptedCompletionFields)
 
@@ -138,13 +155,33 @@ export type OpenAiCoverage = ChatCoverage
 export type OpenAiEmulatorOptions = {
   /** Model ids that exist. Defaults to `openAiEmulatorDefaultModels`. */
   readonly knownModels?: ReadonlyArray<string>
+  /** Model ids that reason. Defaults to `openAiEmulatorDefaultReasoningModels`. */
+  readonly reasoningModels?: ReadonlyArray<string>
 }
 
 export type OpenAiEmulator = ChatCompletionsEmulator<OpenAiScriptedTurn>
 
 const openAiErrorEnvelope = (error: ChatWireError): Schema.Json => ({
-  error: { message: error.message, type: error.type, param: null, code: error.code }
+  error: { message: error.message, type: error.type, param: error.param ?? null, code: error.code }
 })
+
+/**
+ * Rejected by reasoning models: only `max_tokens`, copied as data from the synthetic
+ * `openai.chat.stream.unsupported-parameter` fixture (its 400 envelope). Other parameter rules
+ * are not emulated until a fixture backs them.
+ */
+const reasoningModelUnsupportedParameters: ReadonlyArray<ChatUnsupportedParameter> = [
+  {
+    parameter: 'max_tokens',
+    error: {
+      message:
+        "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+      type: 'invalid_request_error',
+      param: 'max_tokens',
+      code: 'unsupported_parameter'
+    }
+  }
+]
 
 /**
  * Create an OpenAI Chat Completions emulator. Each call has independent
@@ -161,18 +198,32 @@ const openAiErrorEnvelope = (error: ChatWireError): Schema.Json => ({
  * routes get a 404 JSON error. The ledger records the
  * `max_completion_tokens` limit as `maxCompletionTokens`.
  *
+ * A reasoning model (`reasoningModels`) reasons unless `reasoning_effort` is
+ * `none`, sends no reasoning text, and reports
+ * `usage.completion_tokens_details.reasoning_tokens` (0 when it did not
+ * reason), counted in `completion_tokens`; other models report no
+ * `completion_tokens_details`, as before. A reasoning model answers a non-null
+ * `max_tokens` with the unsupported-parameter fixture's 400 (`param:
+ * 'max_tokens'`, `code: 'unsupported_parameter'`; the ledger's
+ * `unsupportedParameter`). Not emulated until a fixture backs them: sampling
+ * parameter rules, `reasoning_effort` on a model that does not reason (it is
+ * recorded and ignored, as before), and per-model effort values (recorded,
+ * not checked).
+ *
  * Precedence per chat request matches the Gateway emulator: authentication and
  * JSON validation, then the first matching `status` fault, then the next
- * scripted turn, then model validation and defaults; a first matching chunk
- * fault then shapes the body. Credential headers are never recorded, and the
- * bearer value is never checked or stored.
+ * scripted turn, then model validation, unsupported parameters, and defaults;
+ * a first matching chunk fault then shapes the body. Credential headers are
+ * never recorded, and the bearer value is never checked or stored.
  */
 export const makeOpenAiEmulator = (options: OpenAiEmulatorOptions = {}): OpenAiEmulator =>
   makeChatCompletionsEmulator({
     path: openAiChatCompletionsPath,
     routes: openAiEmulatorRoutes,
     knownModels: options.knownModels ?? openAiEmulatorDefaultModels,
-    reasoningModels: undefined,
+    reasoningModels: options.reasoningModels ?? openAiEmulatorDefaultReasoningModels,
+    reasoningOutput: 'hidden',
+    reasoningModelUnsupportedParameters,
     errorEnvelope: openAiErrorEnvelope,
     // Copied data shape of the synthetic OpenAI error-envelope fixture (unknown model id).
     unknownModel: {

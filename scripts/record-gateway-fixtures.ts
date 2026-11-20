@@ -37,7 +37,7 @@ import { Data, Effect, Layer, Predicate, Redacted, Result } from 'effect'
 import * as Base64 from 'effect/encoding/Base64'
 import type * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient } from 'effect/http'
-import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
+import { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { vercelAiGatewayChatCompletionsUrl } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 import {
   VercelAiGatewayConformanceConfig,
@@ -93,13 +93,8 @@ export const defaultProbeOptions: ProbeOptions = {
   account: undefined
 }
 
-const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = [
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh'
-]
+// Every protocol effort: the Gateway accepts them all and the model decides what it supports.
+const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = AgentReasoningEffort.literals
 
 const defaultModels = defaultProbeOptions.models
 
