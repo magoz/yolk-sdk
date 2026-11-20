@@ -30,6 +30,16 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.150: pi code mode executor failure messages
+
+`makePiCodeModeExecutor` (`@yolk-sdk/codemode/node`) now answers its own failures with fixed
+messages, as the Dynamic Worker executor does: a sandbox that cannot be created fails with `Could
+not create the sandbox.` (before: `Could not create the sandbox: <error>`), and a `sandbox` failure
+of pi's worker or QuickJS VM (`Failed to load QuickJS: …`, `Failed to start worker: …`, a worker
+crash or exit) with `The script sandbox failed.`. Script errors, timeouts, and aborts are unchanged.
+Code matching the old text needs the new messages; to log the original error, pass the new
+`onInternalError` option (both executors).
+
 ### Canary.149: reasoning effort levels and OpenAI chat effort
 
 `AgentReasoningEffort` adds `none` and `max` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`,

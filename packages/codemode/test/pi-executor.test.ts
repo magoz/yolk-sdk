@@ -30,7 +30,9 @@ import {
   codeModeStoreFromToolResults,
   makeCodeModeTool,
   type CodeModeExecuteOptions,
-  type CodeModeExecutorTool
+  type CodeModeExecutorTool,
+  type CodeModeInternalError,
+  type CodeModeInternalErrorObserver
 } from '../src/index.ts'
 import { makePiCodeModeExecutor } from '../src/node.ts'
 import {
@@ -1272,6 +1274,163 @@ describe('pi executor concurrency', () => {
 
       expect(text(next.content)).toContain('Return value:\n"next"')
       expect(Date.now() - startedAt).toBeLessThan(3_000)
+    })
+  )
+})
+
+describe('pi executor internal errors (onInternalError)', () => {
+  const secret = 'sk-live-0123456789'
+
+  const options = (overrides: Partial<CodeModeExecuteOptions> = {}): CodeModeExecuteOptions => ({
+    tools: [],
+    globals: [],
+    timeoutMs: 10_000,
+    memoryLimitBytes: 64 * 1024 * 1024,
+    store: {},
+    signal: new AbortController().signal,
+    ...overrides
+  })
+
+  // pi rejects a global name with more than two parts when the sandbox is created.
+  const invalidGlobal = { name: `a.b.${secret}`, execute: async () => undefined }
+
+  /** QuickJS that fails to load: pi ends the execution with a `sandbox` error naming the cause. */
+  const failingWasm = () => {
+    const wasm: Promise<never> = Promise.reject(new Error(`ENOENT ${secret}`))
+
+    // pi attaches its handler once an execution starts.
+    wasm.catch(() => undefined)
+
+    return wasm
+  }
+
+  const observed = () => {
+    const reports: Array<CodeModeInternalError> = []
+
+    return { reports, observe: (error: CodeModeInternalError) => void reports.push(error) }
+  }
+
+  it.live('reports a sandbox that cannot be created as load, with a fixed message', () =>
+    Effect.promise(async () => {
+      const { reports, observe } = observed()
+      const piExecutor = makePiCodeModeExecutor({ onInternalError: observe })
+      const result = await piExecutor.execute('return 1', options({ globals: [invalidGlobal] }))
+
+      expect(result).toEqual({
+        ok: false,
+        error: { kind: 'sandbox', message: 'Could not create the sandbox.' },
+        output: []
+      })
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.stage).toBe('load')
+      expect(reports[0]?.cause).toBeInstanceOf(Error)
+      expect(String(reports[0]?.cause)).toContain(secret)
+    })
+  )
+
+  it.live(
+    'reports a failed sandbox as isolate with the pi error record, with a fixed message',
+    () =>
+      Effect.promise(async () => {
+        const { reports, observe } = observed()
+        const piExecutor = makePiCodeModeExecutor({ wasm: failingWasm(), onInternalError: observe })
+        const result = await piExecutor.execute('return 1', options())
+
+        expect(result).toEqual({
+          ok: false,
+          error: { kind: 'sandbox', message: 'The script sandbox failed.' },
+          output: []
+        })
+        expect(reports).toEqual([
+          {
+            stage: 'isolate',
+            cause: { kind: 'sandbox', message: `Failed to load QuickJS: ENOENT ${secret}` }
+          }
+        ])
+      })
+  )
+
+  it.live('ignores an observer that throws or rejects', () =>
+    Effect.promise(async () => {
+      let calls = 0
+
+      const throwing: CodeModeInternalErrorObserver = () => {
+        calls++
+
+        throw new Error('observer failed')
+      }
+
+      // Assignable to the `void` observer type; its rejection must not go unhandled.
+      const rejecting = async () => {
+        calls++
+
+        throw new Error('observer rejected')
+      }
+
+      for (const observe of [throwing, rejecting]) {
+        const created = makePiCodeModeExecutor({ onInternalError: observe })
+        const failing = makePiCodeModeExecutor({ wasm: failingWasm(), onInternalError: observe })
+
+        expect(
+          await created.execute('return 1', options({ globals: [invalidGlobal] }))
+        ).toMatchObject({
+          ok: false,
+          error: { kind: 'sandbox', message: 'Could not create the sandbox.' }
+        })
+        expect(await failing.execute('return 1', options())).toMatchObject({
+          ok: false,
+          error: { kind: 'sandbox', message: 'The script sandbox failed.' }
+        })
+      }
+
+      expect(calls).toBe(4)
+    })
+  )
+
+  it.live('is not called for script errors, rejections, timeouts or aborts', () =>
+    Effect.promise(async () => {
+      const { reports, observe } = observed()
+      const piExecutor = makePiCodeModeExecutor({ onInternalError: observe })
+      const aborted = new AbortController()
+
+      aborted.abort()
+
+      const rejectingTool = {
+        name: 'lookup',
+        execute: async () => {
+          throw new Error('not found')
+        }
+      }
+
+      const rejectingGlobal = {
+        name: 'find',
+        execute: async () => {
+          throw new Error('no match')
+        }
+      }
+
+      const outcomes = [
+        await piExecutor.execute('throw new Error("boom")', options()),
+        await piExecutor.execute('return (', options()),
+        await piExecutor.execute('await tools.lookup({})', options({ tools: [rejectingTool] })),
+        await piExecutor.execute('await find("x")', options({ globals: [rejectingGlobal] })),
+        await piExecutor.execute('while (true) {}', options({ timeoutMs: 200 })),
+        await piExecutor.execute('return 1', options({ signal: aborted.signal }))
+      ]
+
+      expect(outcomes.map(outcome => outcome.error?.kind)).toEqual([
+        'script',
+        'script',
+        'script',
+        'script',
+        'timeout',
+        'aborted'
+      ])
+      expect(reports).toEqual([])
+
+      // The same observer sees a sandbox that cannot be created.
+      await piExecutor.execute('return 1', options({ globals: [invalidGlobal] }))
+      expect(reports.map(report => report.stage)).toEqual(['load'])
     })
   )
 })
