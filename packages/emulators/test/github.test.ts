@@ -568,6 +568,15 @@ describe('request-shape latitude', () => {
     expect(await search.text()).toBe(JSON.stringify(githubEmulatorErrorBodies.searchTooLong))
   })
 
+  it('lists open issues of a seed that names impliedIssues closed itself', async () => {
+    const target = await emulator({ seed: { nextIssueNumber: 100, impliedIssues: 'closed' } })
+
+    const response = await call(target, 'GET', repo('/issues?state=open&per_page=100&page=1'))
+
+    expect(response.status).toBe(200)
+    expect(await jsonOf(response)).toEqual([expect.objectContaining({ number: 1 })])
+  })
+
   it('lists open issues newest first for any per_page, without the closed ones', async () => {
     const target = await emulator()
 
@@ -1074,6 +1083,24 @@ describe('fail closed: 400 not-emulated, nothing written, a matching fault left 
       {},
       'implied issue numbers may be open',
       (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
+      'an open-issue listing after a seed raises nextIssueNumber (implied numbers no fixture records)',
+      (target: GithubEmulator) => target.seed({ nextIssueNumber: 100 }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'implied issue numbers may be open',
+      (target: GithubEmulator) => call(target, 'GET', repo('/issues/1'))
+    ],
+    [
+      'an open-issue listing after a seed replaces the issues',
+      (target: GithubEmulator) => target.seed({ issues: [] }),
+      'GET',
+      repo('/issues?state=open&per_page=100&page=1'),
+      {},
+      'implied issue numbers may be open',
+      validRequest
     ],
     [
       'an open-issue listing without open issues (no fixture records an empty listing)',

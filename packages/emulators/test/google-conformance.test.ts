@@ -637,7 +637,7 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       {
         id: 'google.calendar.free-text-query',
         tag: 'ConformanceMismatch',
-        message: 'expected every listed event to mention the query yolk-conformance'
+        message: 'expected every listed event to mention yolk or conformance'
       }
     ],
     [
@@ -674,12 +674,12 @@ describe('disagreement drills (tests-only knobs): each fails exactly its case', 
       }
     ],
     [
-      { trashedListingDropsUntrashed: true },
+      { trashedListingOmitsTrashed: true },
       {
         id: 'google.drive.list-includes-trashed',
         tag: 'ConformanceMismatch',
         message:
-          'expected the listing with trashed items to answer every file of the default listing'
+          'expected the listing with trashed items to answer the seeded trashed file, trashed'
       }
     ],
     [

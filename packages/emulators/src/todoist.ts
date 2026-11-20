@@ -287,11 +287,11 @@ export const makeTodoistEmulator = async (
       buildSeed: buildTodoistSeedState,
       resolveRequest: resolve,
       errorTexts,
+      // The cursor counters never reset (as Dropbox's and Notion's), so no cursor value issued
+      // before a reset or seed is ever issued again.
       clearRuntime: () => {
         env.cursors.clear()
-        env.cursorCounter.next = 1
         env.projectCursors.clear()
-        env.projectCursorCounter.next = 1
       },
       runtimeState: () => ({
         runtime: {

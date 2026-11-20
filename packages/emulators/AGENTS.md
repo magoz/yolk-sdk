@@ -172,9 +172,12 @@ There is no root export or barrel.
   draft search, free-text event query, and trashed-included Drive listing,
   `google.gmail.label-listing`, `google.gmail.draft-search`, `google.calendar.free-text-query`,
   `google.drive.list-includes-trashed`). The Google draft search and event query are recorded only
-  empty: they answer only while the state can match nothing (no draft; no event, cancelled
-  included, holding `yolk` or `conformance`) and fail closed otherwise, since Gmail's search syntax
-  and Calendar's free-text matching cannot be emulated.
+  empty: they answer only while the state can match nothing (the draft search: no draft created
+  here and no held message labelled `DRAFT`; the event query: no event of the calendar, cancelled
+  included, holding `yolk` or `conformance` in any case in its summary or description, and, while
+  the calendar holds any event, neither word in the calendar's id or summary (the organizer) or the
+  practice address (the creator)) and fail closed otherwise, since Gmail's search syntax and
+  Calendar's free-text matching cannot be emulated.
 - Fixture-only rule (lasting; every new emulator and route follows it, without exceptions):
   response behaviour comes only from the committed fixtures. A request matching a recorded request's shape, within the
   documented request-shape latitude, gets that fixture's response, copied as data (default content
@@ -679,7 +682,8 @@ There is no root export or barrel.
   empty answer); issue create; rename and close-as-completed of an issue created here); the
   open-issue listing (`state=open`, `page=1`; the open issues, newest first, on one page, as the
   open-listing fixture records; only while the state's `impliedIssues` is `closed` or no number is
-  implied) and the first comment page (`page=1` instead of `since`), the leftover lookup's reads;
+  implied; a seed defaults to the profile's value only while it replaces neither `issues` nor
+  `nextIssueNumber`, otherwise to `unknown`) and the first comment page (`page=1` instead of `since`), the leftover lookup's reads;
   anything else, including the lifecycle restore's close as `not_planned`, a comment listing of more
   than one comment, rendering an issue that holds comments, and issue paging, is not emulated. A write case ends at the seed except the counters, the deleted comment's id
   (`deletedComments`, so a second delete answers the recorded 404), and the lifecycle case's closed

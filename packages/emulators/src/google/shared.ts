@@ -52,7 +52,7 @@ export type GoogleEmulatorDrills = {
   readonly drivePageRepeats?: boolean
   /** `drive.get_file` answers no `parents`. */
   readonly getFileWithoutParents?: boolean
-  /** Folder listings include trashed children. */
+  /** Folder listings without trashed items still include the trashed folders created here. */
   readonly listIncludesTrashed?: boolean
   /** The label listing leaves out every user label. */
   readonly labelListingOmitsUserLabels?: boolean
@@ -60,8 +60,8 @@ export type GoogleEmulatorDrills = {
   readonly draftSearchDraftsNull?: boolean
   /** The free-text event query ignores `q` and lists every live event of the calendar. */
   readonly eventQueryIgnored?: boolean
-  /** A folder listing with trashed items answers only the trashed children. */
-  readonly trashedListingDropsUntrashed?: boolean
+  /** A folder listing with trashed items leaves the trashed children out. */
+  readonly trashedListingOmitsTrashed?: boolean
 }
 
 export const googleEmulatorDrillKnobs: ReadonlyArray<keyof GoogleEmulatorDrills> = [
@@ -83,7 +83,7 @@ export const googleEmulatorDrillKnobs: ReadonlyArray<keyof GoogleEmulatorDrills>
   'labelListingOmitsUserLabels',
   'draftSearchDraftsNull',
   'eventQueryIgnored',
-  'trashedListingDropsUntrashed'
+  'trashedListingOmitsTrashed'
 ]
 
 /** A page token this emulator issued: where its list continues, and the list it was issued for. */

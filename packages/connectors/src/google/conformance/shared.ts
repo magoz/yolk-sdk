@@ -108,6 +108,11 @@ export const GoogleConformanceSeeds = Schema.Struct({
   /** A practice file directly inside `driveFolderId`. */
   driveFileId: Schema.optionalKey(DriveId),
   /**
+   * A practice file directly inside `driveFolderId` that is in Trash (trashed there, not deleted),
+   * which the trashed-listing case expects with trashed items and not without them.
+   */
+  driveTrashedFileId: Schema.optionalKey(DriveId),
+  /**
    * Invocation-unique segment of every label name, draft subject, sent subject, event summary, and
    * folder name a case writes. Replay uses the fixed synthetic id of the fixtures; the live runner
    * generates a fresh random one per invocation.
@@ -157,6 +162,18 @@ export const googleLeftoverLookup = {
   filePageSize: 100,
   pageCap: 4
 } as const
+
+/**
+ * Whether the draft and event lifecycle cases also check that the leftover lookup's search finds
+ * their own item (recall) before deleting it. Off by default: the committed fixtures record no
+ * such search, and the Google emulator answers the lookup's draft search and event query only
+ * empty, so it would refuse them while the case's item exists. The repository's live runner turns
+ * it on; promoting a live recording drops those searches, since replay runs with it off.
+ */
+export const GoogleConformanceLookupRecall = Context.Reference<boolean>(
+  '@yolk-sdk/connectors/google/conformance/GoogleConformanceLookupRecall',
+  { defaultValue: () => false }
+)
 
 /** Synthetic marker every case-written name, subject, and summary starts with. */
 export const googleConformanceMarker = 'yolk-conformance'
@@ -269,6 +286,7 @@ const seedRules: Readonly<Record<GoogleConformanceSeedKey, string>> = {
   eventRangeEnd: 'an RFC 3339 instant with Z or an offset',
   driveFolderId: 'a Drive id (10 or more letters, digits, _ and -)',
   driveFileId: 'a Drive id (10 or more letters, digits, _ and -)',
+  driveTrashedFileId: 'a Drive id (10 or more letters, digits, _ and -)',
   runId: 'run- then lower-case letters, digits, and inner hyphens, at most 40 characters'
 }
 

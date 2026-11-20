@@ -19,6 +19,7 @@ import {
 import { ReplayHttpClient } from '../../packages/conformance/src/replay.ts'
 import type { ConformanceReport } from '../../packages/conformance/src/runner.ts'
 import {
+  calendarEventLifecycleFixture,
   driveFolderLifecycleFixture,
   gmailDraftLifecycleFixture,
   gmailLabelLifecycleFixture,
@@ -92,7 +93,8 @@ const allSeedFlags = [
   '--event-range-start=2026-09-01T00:00:00Z',
   '--event-range-end=2026-09-08T00:00:00Z',
   '--drive-folder=synthetic-practice-folder-0001',
-  '--drive-file=synthetic-practice-file-0001'
+  '--drive-file=synthetic-practice-file-0001',
+  '--drive-trashed-file=synthetic-practice-trash-0001'
 ]
 
 // No long run of one character: the staging guard refuses any 16-character window of the token,
@@ -210,7 +212,7 @@ describe('run-google-conformance plan', () => {
         'SKIP  google.calendar.deleted-event-gone  [write-reversible]  writes-not-allowed',
         'RUN   google.drive.list-page-token  [read]  needs --drive-folder',
         'RUN   google.drive.get-file-fields  [read]  needs --drive-file, --drive-folder',
-        'RUN   google.drive.list-includes-trashed  [read]  needs --drive-folder',
+        'RUN   google.drive.list-includes-trashed  [read]  needs --drive-folder, --drive-trashed-file',
         'SKIP  google.drive.folder-trash-delete  [write-reversible]  writes-not-allowed',
         `Use a practice Google account only, with the repository owner's approval; never in CI. Write cases ${googleRunner.writeNote}. ${googleRunner.irreversibleNote}.`
       ]
@@ -234,7 +236,7 @@ describe('run-google-conformance live refusal (no network)', () => {
       )
     ).toEqual({
       refusal:
-        'Missing seed identities for the cases that would run: --paging-label, --attachment-message, --practice-address, --event-range-start, --event-range-end, --drive-folder, --drive-file'
+        'Missing seed identities for the cases that would run: --paging-label, --attachment-message, --practice-address, --event-range-start, --event-range-end, --drive-folder, --drive-file, --drive-trashed-file'
     })
   })
 
@@ -496,6 +498,47 @@ const withResponse = (
     position === index ? { ...exchange, response: response(exchange.response) } : exchange
   )
 
+/**
+ * A live recording of `fixture`: the committed exchanges, plus, for the draft and event lifecycle
+ * cases, the leftover lookup's search answering the case's own item before its delete, which a
+ * live run sends (`GoogleConformanceLookupRecall` is on in `casePorts`, and the staging replay uses
+ * `casePorts` too).
+ */
+const liveRecording = (fixture: WireFixture): ReadonlyArray<WireExchange> => {
+  const json = (body: unknown): WireResponse => ({
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=UTF-8' },
+    body: JSON.stringify(body)
+  })
+
+  const created = JSON.parse(textBody(fixture.exchanges[0].response))
+
+  const search: WireExchange | undefined =
+    fixture.caseId === gmailDraftLifecycleFixture.caseId
+      ? {
+          request: {
+            method: 'GET',
+            url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?q=subject%3Ayolk-conformance&maxResults=100'
+          },
+          response: json({ drafts: [created], resultSizeEstimate: 1 })
+        }
+      : fixture.caseId === calendarEventLifecycleFixture.caseId
+        ? {
+            request: {
+              method: 'GET',
+              url: `${fixture.exchanges[0].request.url}?q=yolk-conformance&maxResults=250`
+            },
+            response: json({ kind: 'calendar#events', items: [created] })
+          }
+        : undefined
+
+  const index = fixture.exchanges.findIndex(exchange => exchange.request.method === 'DELETE')
+
+  return search === undefined
+    ? fixture.exchanges
+    : [...fixture.exchanges.slice(0, index), search, ...fixture.exchanges.slice(index)]
+}
+
 describe('run-google-conformance --record staging (offline)', () => {
   it('stages every case under the gitignored google recordings root', async () => {
     expect(recordingsRoot).toBe(join(repoRoot, '.conformance-recordings', 'google'))
@@ -504,7 +547,10 @@ describe('run-google-conformance --record staging (offline)', () => {
 
     const result = await stage(
       new Map(
-        googleConformanceFixtures.map(fixture => [fixture.caseId, recorderOf(fixture.exchanges)])
+        googleConformanceFixtures.map(fixture => [
+          fixture.caseId,
+          recorderOf(liveRecording(fixture))
+        ])
       ),
       writer
     )

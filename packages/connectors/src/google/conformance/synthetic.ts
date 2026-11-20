@@ -369,6 +369,14 @@ export const driveSyntheticChildren: ReadonlyArray<Schema.Json> = [
   })
 ]
 
+/** A file in Trash directly inside the synthetic practice folder (the trashed-listing seed). */
+export const driveSyntheticTrashedChild: Schema.Json = driveSyntheticFile({
+  id: 'synthetic-practice-trash-0001',
+  name: 'Synthetic practice old notes.txt',
+  mimeType: 'text/plain',
+  trashed: true
+})
+
 type SyntheticFileListHead = {
   readonly kind: string
   readonly incompleteSearch: boolean

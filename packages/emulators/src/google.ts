@@ -280,7 +280,7 @@ export const makeGoogleEmulator = async (
       labelListingOmitsUserLabels: drills.labelListingOmitsUserLabels === true,
       draftSearchDraftsNull: drills.draftSearchDraftsNull === true,
       eventQueryIgnored: drills.eventQueryIgnored === true,
-      trashedListingDropsUntrashed: drills.trashedListingDropsUntrashed === true
+      trashedListingOmitsTrashed: drills.trashedListingOmitsTrashed === true
     },
     pageTokens: new Map(),
     generation: { current: 0 },

@@ -69,6 +69,7 @@ import {
   GoogleConformanceActionFailed,
   googleConformanceIntegration as integration,
   googleConformanceMarker,
+  GoogleConformanceLookupRecall,
   googleLeftoverLookup,
   isNotFound,
   observed,
@@ -819,7 +820,7 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
     'A draft round-trips its subject and UTF-8 body through compose, update, and get_thread, then deletes',
   safety: 'write-reversible',
   docs: '`gmail.draft_compose` and `gmail.draft_update` build a 7-bit MIME message (`Subject` RFC 2047-encoded when not ASCII, `MIME-Version: 1.0`, and for a plain-text body `multipart/alternative; boundary="=_yolk-draft-alternative"` holding a text/plain part with the body and a text/html part derived from it, both `charset=UTF-8` and quoted-printable with lines of at most 76 characters), base64url-encode it, and send POST .../drafts `{ message: { raw } }` or PUT .../drafts/{id} `{ id, message: { raw } }`, returning the draft answer undecoded; `gmail.get_thread` with `format: "full"` decodes each text part from its base64url `body.data` as UTF-8 (never applying the part\'s Content-Transfer-Encoding again), prefers text/plain, and keeps selected headers; `gmail.draft_delete` sends DELETE .../drafts/{id} and treats any 2xx as deleted without reading the (empty) body.',
-  wire: '`gmail.draft_compose` with no recipient, a run-scoped ASCII subject, and a body with non-ASCII characters answers a draft id and a message id and thread id, and `gmail.get_message` of that message (`format: "metadata"`) reads the `DRAFT` label, the run-scoped subject, and no recipient header (unverified: that a metadata read of a fresh draft returns `DRAFT` and the subject exactly as sent; if not, the case refuses its own draft and leaves it for the leftover lookup) (checked before the case adopts the draft: a draft that is not provably its own is never updated or deleted); `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the multipart/alternative draft as written and answers its text/plain part\'s `body.data` transfer-decoded, so it carries the body\'s UTF-8 bytes); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers 2xx or `google_not_found` (unverified: which), after which its message still answers `google_not_found`; the cleanup accepts either answer and then verifies the message is gone. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.',
+  wire: "`gmail.draft_compose` with no recipient, a run-scoped ASCII subject, and a body with non-ASCII characters answers a draft id and a message id and thread id, and `gmail.get_message` of that message (`format: \"metadata\"`) reads the `DRAFT` label, the run-scoped subject, and no recipient header (unverified: that a metadata read of a fresh draft returns `DRAFT` and the subject exactly as sent; if not, the case refuses its own draft and leaves it for the leftover lookup) (checked before the case adopts the draft: a draft that is not provably its own is never updated or deleted); `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the multipart/alternative draft as written and answers its text/plain part's `body.data` transfer-decoded, so it carries the body's UTF-8 bytes); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; live only (`GoogleConformanceLookupRecall`, which the repository's live runner turns on; the fixtures and the emulator answer the lookup's draft search only empty), `gmail.list_drafts` with the leftover lookup's search (`subject:yolk-conformance`, `maxResults: 100`) then answers the draft (unverified: that Gmail's search finds a fresh draft at once); `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers 2xx or `google_not_found` (unverified: which), after which its message still answers `google_not_found`; the cleanup accepts either answer and then verifies the message is gone. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.",
   fixtures: [gmailDraftLifecycleFixture.id],
   run: Effect.gen(function* () {
     const subject = yield* runText('draft', 'synthetic conformance draft, safe to delete')
@@ -888,6 +889,27 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
             [updatedSubject, gmailConformanceUpdatedDraftText, 'text/plain'],
             'expected get_thread to read back the updated subject and body exactly'
           )
+
+          // Live only (`GoogleConformanceLookupRecall`): the leftover lookup's search finds the draft.
+          if (yield* GoogleConformanceLookupRecall) {
+            const found = yield* gmailListDraftsAction
+              .executeTyped({
+                integration,
+                input: GmailListInput.make({
+                  query: googleLeftoverLookup.draftQuery,
+                  maxResults: googleLeftoverLookup.draftPageSize
+                })
+              })
+              .pipe(
+                Effect.flatMap(successValue(gmailListDraftsAction.id)),
+                Effect.flatMap(decodeOutput(GmailDraftSearch, 'gmail.list_drafts to answer drafts'))
+              )
+
+            yield* expectConformance(
+              (found.drafts ?? []).some(entry => entry.id === draft.id),
+              'expected the leftover lookup draft search to find the case draft'
+            )
+          }
 
           yield* deleteDraft(draft.id).pipe(
             Effect.flatMap(successValue(gmailDraftDeleteAction.id)),

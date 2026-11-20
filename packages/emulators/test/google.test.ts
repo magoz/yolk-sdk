@@ -711,6 +711,35 @@ describe('the leftover lookup reads (label listing, draft search, event query, t
     )
   })
 
+  it.each(['messages', 'impliedMessages'] as const)(
+    'refuses the draft search while a seeded %s entry carries DRAFT (Gmail would list it)',
+    async key => {
+      const target = await emulator()
+      const seeded = target.snapshot()
+
+      await target.seed(
+        key === 'messages'
+          ? {
+              messages: seeded.messages.map((message, index) =>
+                index === 0 ? { ...message, labelIds: [...message.labelIds, 'DRAFT'] } : message
+              )
+            }
+          : {
+              impliedMessages: seeded.impliedMessages.map((message, index) =>
+                index === 0 ? { ...message, labelIds: [...message.labelIds, 'DRAFT'] } : message
+              )
+            }
+      )
+
+      await expectRefusedWithoutFault(
+        target,
+        () => call(target, 'GET', draftSearch),
+        'a draft-labelled message',
+        'a draft search while the state holds a draft is not emulated'
+      )
+    }
+  )
+
   it.each([
     ['another q', `${gm}/drafts?q=subject%3Aother&maxResults=100`],
     ['maxResults 501', `${gm}/drafts?q=subject%3Ayolk-conformance&maxResults=501`],
@@ -791,9 +820,11 @@ describe('the leftover lookup reads (label listing, draft search, event query, t
 
     const untrashed = await filesOf(`${drv}?${listQuery(practiceFolder, 100)}`)
 
-    // The trashed folder is listed last, rendered as the trash answer renders it.
+    // The seeded trashed file follows the untrashed children, and the folder trashed here comes
+    // last, rendered as the trash answer renders it.
     expect(await filesOf(trashedListing(practiceFolder))).toEqual([
       ...(Array.isArray(untrashed) ? untrashed : expect.fail('no files')),
+      expect.objectContaining({ id: 'synthetic-practice-trash-0001', trashed: true }),
       await trashed.json()
     ])
   })

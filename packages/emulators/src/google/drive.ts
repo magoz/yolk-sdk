@@ -293,19 +293,20 @@ const listFiles: GoogleRoute = statefulRoute(
       return notEmulated('listing anything but a folder the state holds is not emulated')
     }
 
-    // The drill answers only the trashed children of a listing that includes them.
-    const dropsUntrashed = input.includeTrashed && env.drills.trashedListingDropsUntrashed
+    // A listing with trashed items answers every child (the drill leaves the trashed ones out); a
+    // listing without them leaves Trash out (the drill keeps the trashed folders created here).
+    const listed = (file: GoogleEmulatorDriveFile): boolean =>
+      !file.trashed ||
+      (input.includeTrashed
+        ? !env.drills.trashedListingOmitsTrashed
+        : env.drills.listIncludesTrashed && isCreatedHere(file))
 
     const children = state.files.filter(
-      file =>
-        file.parents.includes(input.parentId) &&
-        (dropsUntrashed
-          ? file.trashed
-          : input.includeTrashed || env.drills.listIncludesTrashed || !file.trashed)
+      file => file.parents.includes(input.parentId) && listed(file)
     )
 
     // Every recorded listing has children; an empty one is no fixture's answer.
-    if (children.length === 0 && !dropsUntrashed) {
+    if (children.length === 0) {
       return notEmulated('a folder listing without items is not emulated (no fixture records one)')
     }
 

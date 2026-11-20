@@ -59,6 +59,7 @@ export {
   GoogleConformanceConfig,
   googleConformanceCredentialRef,
   googleConformanceIntegration,
+  GoogleConformanceLookupRecall,
   googleConformanceMarker,
   GoogleConformanceRestoreFailed,
   googleConformanceRunPrefix,

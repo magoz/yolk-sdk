@@ -1354,7 +1354,8 @@ emulator mints (it never mints anything else):
   reserved prefix `6XEmu`, which a seed may not use (it is rejected), so seeded and created ids
   never collide. Cursors are runtime data (`cursors()` for task listings, `/_emulate/state` for
   both), valid only as issued since the last `reset` or `seed`; a project cursor also only while
-  the project listing is unchanged.
+  the project listing is unchanged. The cursor counters never reset, so no cursor value issued
+  before a `reset` or `seed` is ever issued again.
 - **Removal.** A deleted project and its task are removed from the state, so a write case ends at
   the seed except the counters.
 - **Request-shape latitude** (the only accepted deviations from the fixture requests): any
@@ -1564,7 +1565,9 @@ emulator mints (it never mints anything else):
   one is not emulated. Numbers at or above it answer the not-found fixture's 404. The open-issue
   listing answers only when the state's `impliedIssues` is `closed` (the default seed's, from the
   open-issue listing fixture, which answers only the work issue while the repository has reached
-  issue 41) or no number is implied; with `unknown` (the `empty` profile's) it is not emulated.
+  issue 41) or no number is implied; with `unknown` (the `empty` profile's) it is not emulated. A
+  seed on the default profile keeps `closed` only while it replaces neither `issues` nor
+  `nextIssueNumber`; otherwise it gets `unknown` unless it names `impliedIssues: 'closed'` itself.
 - **Open-issue listing.** The open issues the state holds, newest first (GitHub's default
   `sort=created`, `direction=desc`), rendered as issue reads render them, on one page without
   `Link`, as the open-listing fixture records; more open issues than `per_page` (no fixture records
@@ -1903,7 +1906,7 @@ Faults and the control plane behave as in the Dropbox emulator (the ledger recor
 `google_rate_limited` with `retryAfterMs`.
 
 **Drill knobs (tests only).**
-`drills: { gmailPageRepeats, attachmentStandardBase64, notFoundWithoutMessage, gmailThreadPageRepeats, metadataHeadersIgnored, labelListingOmitsUserLabels, draftSearchDraftsNull, labelDeleteKeepsOnMessages, draftUpdateKeepsContent, trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventQueryIgnored, eventPatchKeepsSummary, repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, trashedListingDropsUntrashed, listIncludesTrashed }`
+`drills: { gmailPageRepeats, attachmentStandardBase64, notFoundWithoutMessage, gmailThreadPageRepeats, metadataHeadersIgnored, labelListingOmitsUserLabels, draftSearchDraftsNull, labelDeleteKeepsOnMessages, draftUpdateKeepsContent, trashAnswerOmitsTrash, sentMessageWithoutTo, calendarPageRepeats, eventQueryIgnored, eventPatchKeepsSummary, repeatedEventDeleteConflict, drivePageRepeats, getFileWithoutParents, trashedListingOmitsTrashed, listIncludesTrashed }`
 (booleans) each make the emulator disagree with exactly one Google case, only to prove that case
 catches it.
 

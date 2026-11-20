@@ -4,13 +4,15 @@ import {
   driveReadRequestHeaders,
   driveSyntheticChildren,
   driveSyntheticFileList,
-  driveSyntheticFolderId
+  driveSyntheticFolderId,
+  driveSyntheticTrashedChild
 } from './synthetic.ts'
 
 /**
  * The seeded practice folder listed without trashed items, then with them, as the read-only
- * leftover lookup lists it (`includeTrashed`, `pageSize=100`): the folder holds nothing in Trash,
- * so both answer the same five children.
+ * leftover lookup lists it (`includeTrashed`, `pageSize=100`): the first answers the five
+ * untrashed children, the second the same five and the seeded trashed file
+ * (`synthetic-practice-trash-0001`, `trashed: true`).
  *
  * Synthetic placeholder (`evidence: 'unverified'`) until a live recording replaces it. The shapes
  * follow the Drive API reference, fetched 2026-11-20: `files.list` (it "returns all files by
@@ -30,7 +32,7 @@ export const driveListTrashedFixture: WireFixture = {
   recordedAt: '2026-11-20',
   account: 'synthetic',
   endpoint: 'https://www.googleapis.com/drive/v3',
-  note: "List the practice folder without trashed items, then with them (q='<folder>' in parents, as the leftover lookup sends it): the same five children, none in Trash. Synthetic placeholder shaped from the Drive API reference (fetched 2026-11-20; files.list returns trashed files unless q says trashed = false, a FileList of files: https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list; the q syntax: https://developers.google.com/workspace/drive/api/guides/search-files) and the file shape of the other Drive fixtures. Not recorded from a live service.",
+  note: "List the practice folder without trashed items, then with them (q='<folder>' in parents, as the leftover lookup sends it): the five untrashed children, then the same five and the seeded trashed file synthetic-practice-trash-0001 (trashed: true, its trashedTime synthetic). Synthetic placeholder shaped from the Drive API reference (fetched 2026-11-20; files.list returns trashed files unless q says trashed = false, a FileList of files: https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list; the q syntax: https://developers.google.com/workspace/drive/api/guides/search-files) and the file shape of the other Drive fixtures. Not recorded from a live service.",
   exchanges: [
     {
       request: {
@@ -46,7 +48,7 @@ export const driveListTrashedFixture: WireFixture = {
         url: driveListUrl(driveSyntheticFolderId, { pageSize: 100, includeTrashed: true }),
         headers: driveReadRequestHeaders
       },
-      response: driveSyntheticFileList(driveSyntheticChildren)
+      response: driveSyntheticFileList([...driveSyntheticChildren, driveSyntheticTrashedChild])
     }
   ]
 }

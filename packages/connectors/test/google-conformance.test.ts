@@ -63,6 +63,7 @@ import {
   gmailTrashUntrashCase,
   gmailTrashUntrashFixture,
   GoogleConformanceConfig,
+  GoogleConformanceLookupRecall,
   googleConformanceCases,
   googleConformanceFixtures,
   googleConformanceFixtureSeeds,
@@ -239,7 +240,9 @@ describe('Google conformance cases', () => {
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
       'google.gmail.draft-compose-update-delete',
+      'google.gmail.draft-compose-update-delete',
       'google.calendar.free-text-query',
+      'google.calendar.event-lifecycle',
       'google.calendar.event-lifecycle',
       'google.calendar.deleted-event-gone',
       'google.calendar.deleted-event-gone',
@@ -623,7 +626,7 @@ const tampers: ReadonlyArray<{
       0,
       () => exchangeAt(calendarListRangeFixture, 0).response
     ),
-    message: 'expected every listed event to mention the query yolk-conformance'
+    message: 'expected every listed event to mention yolk or conformance'
   },
   {
     // The rename is ignored; the restore still deletes the event.
@@ -661,14 +664,13 @@ const tampers: ReadonlyArray<{
     message: 'expected get_file to answer the same metadata as the list entry'
   },
   {
-    // The listing with trashed items drops an untrashed file.
-    fixture: replaceResponse(driveListTrashedFixture, 1, () =>
-      json(200, {
-        ...jsonOf(driveListTrashedFixture, 1),
-        files: jsonOf(driveListTrashedFixture, 1).files.slice(1)
-      })
+    // The listing with trashed items omits the trashed children (the default listing again).
+    fixture: replaceResponse(
+      driveListTrashedFixture,
+      1,
+      () => exchangeAt(driveListTrashedFixture, 0).response
     ),
-    message: 'expected the listing with trashed items to answer every file of the default listing'
+    message: 'expected the listing with trashed items to answer the seeded trashed file, trashed'
   },
   {
     // The trashed folder is still listed; the restore still deletes it.
@@ -703,7 +705,54 @@ describe('Google conformance drills (one per case)', () => {
     )
   }
 
+  // Google searches fields the connector does not decode (organizer and attendee names), and the
+  // reference does not say how it splits the hyphenated query: a match on one token anywhere
+  // Google searches is a correct answer.
+  for (const [label, change] of [
+    [
+      'an organizer-only match',
+      { organizer: { email: 'team@example.test', displayName: 'Yolk Conformance Team' } }
+    ],
+    ['a creator-only match', { creator: { email: 'yolk@example.test' } }],
+    [
+      'an attendee name match',
+      { attendees: [{ email: 'a@example.test', displayName: 'Conformance Bot' }] }
+    ],
+    ['a single-token summary match', { summary: 'Conformance review' }]
+  ] as const) {
+    it.effect(`the free-text query case accepts ${label}`, () =>
+      Effect.gen(function* () {
+        const [event] = jsonOf(calendarListRangeFixture, 0).items
+
+        const matched = replaceResponse(calendarQueryFixture, 0, () =>
+          json(200, { ...jsonOf(calendarQueryFixture, 0), items: [{ ...event, ...change }] })
+        )
+
+        expect(yield* suiteFailures(withReplaced(matched))).toEqual([])
+      })
+    )
+  }
+
   for (const [label, tampered, message] of [
+    [
+      'a listing with trashed items that drops an untrashed file',
+      replaceResponse(driveListTrashedFixture, 1, () =>
+        json(200, {
+          ...jsonOf(driveListTrashedFixture, 1),
+          files: jsonOf(driveListTrashedFixture, 1).files.slice(1)
+        })
+      ),
+      'expected the listing with trashed items to answer every file of the default listing'
+    ],
+    [
+      'a default listing that answers the trashed file',
+      replaceResponse(
+        driveListTrashedFixture,
+        0,
+        () => exchangeAt(driveListTrashedFixture, 1).response
+      ),
+      'expected the default listing to leave the seeded trashed file out'
+    ],
     [
       'a repeated message id on a later page',
       replaceResponse(
@@ -924,6 +973,128 @@ const labelRestored = withoutExchanges(labelUnapplied, [2, 5])
 
 const labelRecovery =
   'delete the Gmail label Label_9101 ("yolk-conformance run-synthetic label") by hand if it still exists'
+
+describe('Google conformance lookup recall (live only)', () => {
+  /** `fixture` with `exchange` inserted before its first DELETE (the case's own delete). */
+  const withSearchBeforeDelete = (fixture: WireFixture, exchange: WireExchange): WireFixture => {
+    const index = fixture.exchanges.findIndex(candidate => candidate.request.method === 'DELETE')
+    const [first, ...rest] = fixture.exchanges
+
+    return index < 1
+      ? expect.fail(`no delete after the create in ${fixture.id}`)
+      : {
+          ...fixture,
+          exchanges: [first, ...rest.slice(0, index - 1), exchange, ...rest.slice(index - 1)]
+        }
+  }
+
+  const draftId = String(jsonOf(gmailDraftLifecycleFixture, 0).id)
+
+  const draftSearch = (found: boolean): WireExchange => ({
+    request: {
+      method: 'GET',
+      url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?q=subject%3Ayolk-conformance&maxResults=100'
+    },
+    response: json(
+      200,
+      found
+        ? {
+            drafts: [
+              { id: draftId, message: { id: '18f00000000000d1', threadId: '18f00000000000d1' } }
+            ],
+            resultSizeEstimate: 1
+          }
+        : { resultSizeEstimate: 0 }
+    )
+  })
+
+  const eventQuery = (found: boolean): WireExchange => ({
+    request: {
+      method: 'GET',
+      url: `${exchangeAt(calendarEventLifecycleFixture, 0).request.url}?q=yolk-conformance&maxResults=250`
+    },
+    response: json(200, {
+      ...jsonOf(calendarQueryFixture, 0),
+      items: found ? [jsonOf(calendarEventLifecycleFixture, 0)] : []
+    })
+  })
+
+  const runWithRecall = (testCase: GoogleConformanceCase, fixture: WireFixture, recall: boolean) =>
+    Effect.gen(function* () {
+      yield* atTestNow
+
+      const report = yield* runConformance([testCase], {
+        target: everyCase,
+        now,
+        layer: candidate =>
+          recall
+            ? Layer.merge(
+                replayLayerOver([fixture])(candidate),
+                Layer.succeed(GoogleConformanceLookupRecall, true)
+              )
+            : replayLayerOver([fixture])(candidate)
+      })
+
+      return report.results.map(result => [result.status, result.failure?.message ?? null])
+    })
+
+  it.effect('the draft case finds its draft with the lookup search when recall is on', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* runWithRecall(
+          gmailDraftLifecycleCase,
+          withSearchBeforeDelete(gmailDraftLifecycleFixture, draftSearch(true)),
+          true
+        )
+      ).toEqual([['passed', null]])
+
+      const [result] = yield* runWithRecall(
+        gmailDraftLifecycleCase,
+        withSearchBeforeDelete(gmailDraftLifecycleFixture, draftSearch(false)),
+        true
+      )
+
+      expect(result).toEqual([
+        'failed',
+        expect.stringContaining('expected the leftover lookup draft search to find the case draft')
+      ])
+    })
+  )
+
+  it.effect('the event case finds its event with the lookup query when recall is on', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* runWithRecall(
+          calendarEventLifecycleCase,
+          withSearchBeforeDelete(calendarEventLifecycleFixture, eventQuery(true)),
+          true
+        )
+      ).toEqual([['passed', null]])
+
+      const [result] = yield* runWithRecall(
+        calendarEventLifecycleCase,
+        withSearchBeforeDelete(calendarEventLifecycleFixture, eventQuery(false)),
+        true
+      )
+
+      expect(result).toEqual([
+        'failed',
+        expect.stringContaining('expected the leftover lookup event query to find the case event')
+      ])
+    })
+  )
+
+  it.effect('recall is off by default: the committed fixtures record no lookup search', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* runWithRecall(gmailDraftLifecycleCase, gmailDraftLifecycleFixture, false)
+      ).toEqual([['passed', null]])
+      expect(
+        yield* runWithRecall(calendarEventLifecycleCase, calendarEventLifecycleFixture, false)
+      ).toEqual([['passed', null]])
+    })
+  )
+})
 
 describe('Google conformance restore', () => {
   it.effect('still deletes the label, by id, when a claim fails mid-flow', () =>

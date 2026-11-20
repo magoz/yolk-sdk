@@ -82,9 +82,11 @@ export type TodoistApiEnv = {
   readonly drills: Required<TodoistEmulatorDrills>
   /** Task-listing cursors by id (runtime-only; cleared by reset and seed). */
   readonly cursors: Map<string, TodoistCursor>
+  /** Next task-cursor number; never reset, so no cursor value crosses a reset or seed. */
   readonly cursorCounter: { next: number }
   /** Project-listing cursors by id (runtime-only; cleared by reset and seed). */
   readonly projectCursors: Map<string, TodoistProjectCursor>
+  /** Next project-cursor number; never reset, like `cursorCounter`. */
   readonly projectCursorCounter: { next: number }
 }
 

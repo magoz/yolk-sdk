@@ -87,6 +87,9 @@ const call = (
 
 const api = (path: string) => `/api/v1${path}`
 
+const field = (value: unknown, key: string): unknown =>
+  Predicate.isObject(value) ? value[key] : undefined
+
 const createProject = (target: TodoistEmulator, suffix = 'parent', runId = 'run-synthetic') =>
   call(target, 'POST', api('/projects'), {
     body: { name: `yolk-conformance-${runId}-${suffix}`, parent_id: '6XSyntheticWork0' }
@@ -250,6 +253,43 @@ describe('drift: every fixture exchange answered as recorded', () => {
       }
     }
   })
+})
+
+describe('cursors never cross a reset or seed', () => {
+  it.each([
+    [
+      'task',
+      api('/tasks?project_id=6XSyntheticPage0&limit=2'),
+      'project_id=6XSyntheticPage0&limit=2'
+    ],
+    ['project', api('/projects?limit=1'), 'limit=1']
+  ] as const)(
+    'a %s cursor issued before a reset is refused after one is issued again',
+    async (_kind, first, query) => {
+      const target = await emulator()
+
+      const cursorOf = async (): Promise<unknown> =>
+        field(await (await call(target, 'GET', first)).json(), 'next_cursor')
+
+      const stale = await cursorOf()
+
+      await target.reset()
+
+      const fresh = await cursorOf()
+
+      // The counters never reset, so the cursor issued after the reset is a new value.
+      expect(fresh).not.toEqual(stale)
+
+      const reused = await call(
+        target,
+        'GET',
+        `${first.split('?')[0]}?${query}&cursor=${String(stale)}`
+      )
+
+      expect(reused.status).toBe(400)
+      expect(await reused.text()).toContain('did not issue')
+    }
+  )
 })
 
 describe('request-shape latitude', () => {

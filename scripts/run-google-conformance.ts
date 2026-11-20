@@ -38,8 +38,10 @@
  * `.conformance-recordings/google/`. Promotion is manual: scrub the staged files of
  * practice-account data (addresses, message, thread, draft, label, event, and file ids, subjects,
  * snippets, message and attachment bodies, names, page tokens, links), set each Calendar and Drive
- * fixture's `endpoint` to its own API base URL (staged recordings all carry the Gmail one), copy
- * them into `packages/connectors/src/google/conformance/`, run `pnpm format:fix`, and update
+ * fixture's `endpoint` to its own API base URL (staged recordings all carry the Gmail one), drop
+ * the draft and event cases' recall searches (live runs turn on `GoogleConformanceLookupRecall`;
+ * replay does not), copy them into `packages/connectors/src/google/conformance/`, run
+ * `pnpm format:fix`, and update
  * `packages/connectors/test/google-conformance.test.ts` and
  * `scripts/test/run-google-conformance.test.ts` in the same change. See
  * `connector-conformance-internal.ts` for the shared gates.
@@ -61,6 +63,7 @@ import { BearerTokenCredential } from '../packages/connectors/src/credential.ts'
 import {
   findGoogleConformanceLeftovers,
   GoogleConformanceConfig,
+  GoogleConformanceLookupRecall,
   googleConformanceCases,
   googleConformanceFixtureSeeds,
   GoogleConformanceSeeds,
@@ -135,6 +138,12 @@ export const googleSeedSources: ReadonlyArray<SeedSource<GoogleConformanceSeedKe
     flag: '--drive-file',
     env: 'GOOGLE_CONFORMANCE_DRIVE_FILE',
     description: 'practice Drive file id directly inside --drive-folder'
+  },
+  {
+    key: 'driveTrashedFileId',
+    flag: '--drive-trashed-file',
+    env: 'GOOGLE_CONFORMANCE_DRIVE_TRASHED_FILE',
+    description: 'practice Drive file id in Trash, directly inside --drive-folder'
   }
 ]
 
@@ -278,11 +287,11 @@ export const googleCaseSpecs: ReadonlyArray<CaseSpec<GoogleConformanceSeedKey>> 
   },
   {
     caseId: 'google.drive.list-includes-trashed',
-    seeds: ['driveFolderId'],
+    seeds: ['driveFolderId', 'driveTrashedFileId'],
     optionalSeeds: [],
     fileName: 'drive-list-trashed.ts',
     exportName: 'driveListTrashedFixture',
-    doc: 'The practice folder listed without trashed items, then with them, as the leftover lookup lists it.'
+    doc: 'The practice folder listed without trashed items, then with them (the seeded trashed file among them), as the leftover lookup lists it.'
   },
   {
     caseId: 'google.drive.folder-trash-delete',
@@ -309,7 +318,9 @@ const casePorts = (
   Layer.mergeAll(
     connectorHttpClientsFromEffectHttpClientLayer.pipe(Layer.provide(httpLayer)),
     staticCredentialResolverLayer(liveCredential(accessToken)),
-    Layer.succeed(GoogleConformanceConfig, seeds)
+    Layer.succeed(GoogleConformanceConfig, seeds),
+    // Live only: the draft and event cases check that the leftover lookup finds their own item.
+    Layer.succeed(GoogleConformanceLookupRecall, true)
   )
 
 export const googleRunner = {

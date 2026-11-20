@@ -785,7 +785,8 @@ work. Bodies, 404 envelopes (`{ error, error_code, error_extra, error_tag, http_
 and due objects follow the synthetic fixtures; created ids (reserved prefix `6XEmu`, which seeds may
 not use) and `event_id`s come from counters that only advance, timestamps from the injectable `now`
 clock, and cursors are valid only as issued since the last reset or seed (a project cursor also only
-while the project listing is unchanged).
+while the project listing is unchanged); the cursor counters never reset, so no cursor value crosses
+a reset or seed.
 
 It is **fixture-only**, with no synthesised answers: anything the fixtures do not record answers one
 ledgered 400 `{ error: { type: 'not_emulated', message } }` before anything is written and before
@@ -929,7 +930,8 @@ minted form at or above its counter, and a create past the last addressable numb
 refused), the issue and comment ids derived from them in the fixtures' form, and timestamps from the
 injectable `now` clock. Issue numbers below the counter that the state does not hold are implied,
 never rendered; the open-issue listing answers only while the seed's `impliedIssues` is `closed`
-(the default seed's, as the open-listing fixture records) or no number is implied. Label pages are page numbers, not cursors, and the label list never changes within a
+(the default seed's, as the open-listing fixture records) or no number is implied; a seed that
+replaces `issues` or sets `nextIssueNumber` gets `unknown` unless it names `impliedIssues: 'closed'`. Label pages are page numbers, not cursors, and the label list never changes within a
 seed (no route writes labels). A deleted comment's id and a closed issue stay in the state (GitHub
 keeps both), so a write case ends at the seed except those and the counters.
 
@@ -1054,9 +1056,10 @@ free-text event query (`google.calendar.free-text-query`), and the folder listin
 items (`google.drive.list-includes-trashed`). So the lookup runs against the default seed and lists
 a run label or a run folder (in Trash too) the state holds. The draft search and the event query
 are recorded only empty, and stay fixture-only: the draft search answers only while the state holds
-no draft (Gmail's search syntax is not emulated), and the event query only while no event of the
-calendar, cancelled or not, holds `yolk` or `conformance` in any case in its summary or description
-(nor its organizer or creator): Google's free-text matching cannot be emulated honestly. Otherwise
+no draft and no message labelled `DRAFT` (Gmail's search syntax is not emulated), and the event
+query only while no event of the calendar, cancelled or not, holds `yolk` or `conformance` in any
+case in its summary or description, nor, while the calendar holds events, its id or summary (the
+organizer) or the practice address (the creator): Google's free-text matching cannot be emulated honestly. Otherwise
 they answer the ledgered 400 not-emulated, so after the event cases, whose cancelled run events stay
 in the state, the lookup fails closed and a runner prints its lookup-failed `WARN`.
 

@@ -596,6 +596,17 @@ const practiceChildren: ReadonlyArray<GoogleEmulatorDriveFile> = [
   child('synthetic-practice-file-0004', 'Synthetic practice report.pdf', 'application/pdf')
 ]
 
+/**
+ * The seeded file in Trash inside the practice folder (`driveTrashedFileId`), as the trashed-listing
+ * fixture records it.
+ */
+const practiceTrashedFile: GoogleEmulatorDriveFile = {
+  ...child('synthetic-practice-trash-0001', 'Synthetic practice old notes.txt', 'text/plain'),
+  trashed: true,
+  explicitlyTrashed: true,
+  trashedTime: '2026-09-30T12:00:02.000Z'
+}
+
 type ProfileEntities = Omit<GoogleEmulatorState, 'counters' | 'labels' | 'drafts'>
 
 const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
@@ -610,7 +621,7 @@ const profileEntities = (profile: GoogleEmulatorProfile): ProfileEntities =>
         attachments: [{ messageId: attachmentMessage.id, attachmentId, size: 6, data: '-_-_Pj_-' }],
         calendars: [practiceCalendar],
         events: rangeEvents,
-        files: practiceChildren,
+        files: [...practiceChildren, practiceTrashedFile],
         impliedFolderIds: [practiceFolderId]
       }
     : {
