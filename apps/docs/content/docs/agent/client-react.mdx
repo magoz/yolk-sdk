@@ -132,8 +132,11 @@ the call as the model emitted it), and a replayed answer the part holding its re
 request (or `AgentAwaitingInput`) never reopens a call already answered, cancelled, denied or
 finished, and the `useAgentChat` reducer keeps its status when a replayed `AgentAwaitingInput`
 names only such calls (a pause naming some blocks only on its pending requests). An invalid input answer re-pends a request that is still pending, and a
-running call stopped by an abort is asked again when the next run resumes it. Before any
-start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
+running call stopped by an abort is asked again when the next run resumes it. A replayed start of
+the same call leaves a completed, accepted or errored call, and the status, alone. `AgentStart` and
+a local submit (or answer, regenerate, edit) mark a run start, so a resumed run's tool batch,
+which runs before the run's first model turn, acts on the paused call, or adds its own, never on an
+earlier turn's call reusing its id. Before any start is seen, and in `applyAgentEventToChatMessages`, a tool event matches the last message
 holding the call (answers and added results update only that one). `reduceAgentEvents` scopes its
 tool runs the same way (`turnStart` on its state): a later turn's call reusing an id gets its own
 run, also when the id was an accepted background call's, so `toolRuns` can hold one run per turn

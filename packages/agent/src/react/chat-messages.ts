@@ -1198,13 +1198,7 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
     }
   }
 
-  if (
-    Predicate.isTagged(next, 'Running') &&
-    (Predicate.isTagged(existing, 'Completed') || Predicate.isTagged(existing, 'Accepted'))
-  ) {
-    return existing
-  }
-
+  // A start of a finished call is kept out by `keepsToolState` (same call only, as the client).
   return next
 }
 
@@ -1295,20 +1289,47 @@ const isPastRequestToolState = (state: ChatToolState): boolean =>
     Match.exhaustive
   )
 
+/** A finished call the tool batch ran: a replayed start of it must not reopen it. */
+const isFinishedToolState = (state: ChatToolState) =>
+  Predicate.isTagged(state, 'Completed') ||
+  Predicate.isTagged(state, 'Accepted') ||
+  Predicate.isTagged(state, 'Errored')
+
 /**
  * Whether a call's part keeps its state when an event sets `state` for `call`: an accepted call
- * ignores open states (replays of its start or request), and a call past its request ignores a
- * request for the same call. The loop asks for a call only until it has a result or an answer it
- * used: an invalid input re-pends the same request while the part still pends (the server emits
- * `InputSubmitted` only for a valid payload, and the chat reducer never applies an input or
- * interaction answer locally), and a later turn reusing the id asks on its own part. So such a
- * request, with or without event id, is a replay; a request naming another call with the id is
- * that call's and applies. Hosts never re-ask a call whose answer or denial the chat applied
- * locally (`patterns/AGENT_HITL.md`).
+ * ignores open states (replays of its start or request), a finished call (completed, accepted,
+ * errored) ignores a start of the same call (a replayed tool-batch event), and a call past its
+ * request ignores a request for the same call. The loop asks for a call only until it has a result
+ * or an answer it used: an invalid input re-pends the same request while the part still pends (the
+ * server emits `InputSubmitted` only for a valid payload, and the chat reducer never applies an
+ * input or interaction answer locally), and a later turn reusing the id asks on its own part. So
+ * such a request, with or without event id, is a replay; a request or start naming another call
+ * with the id is that call's and applies. Hosts never re-ask a call whose answer or denial the chat
+ * applied locally (`patterns/AGENT_HITL.md`). `reduceAgentEvents` keeps the same fences
+ * (`keepsToolRun`).
  */
 const keepsToolState = (part: ToolCallPart, call: ToolCall, state: ChatToolState) =>
   (Predicate.isTagged(part.state, 'Accepted') && isOpenToolState(state)) ||
+  (Predicate.isTagged(state, 'Running') &&
+    isFinishedToolState(part.state) &&
+    sameCall(call)(part)) ||
   (isRequestToolState(state) && isPastRequestToolState(part.state) && sameCall(call)(part))
+
+/**
+ * Whether the call a tool-batch event names (`call`, of the latest turn started after `anchor`) is
+ * already finished (`hostToolCallMessage`, `isFinishedToolState`): a start of it is a replay.
+ */
+export const isFinishedToolCall = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  call: ToolCall,
+  anchor: ChatTurnAnchor
+) =>
+  hostToolCallMessage(messages, call, anchor)?.parts.some(
+    part =>
+      Predicate.isTagged(part, 'ToolCall') &&
+      sameCall(call)(part) &&
+      isFinishedToolState(part.state)
+  ) === true
 
 /**
  * Whether the call a request names (`call`, of the latest turn started after `anchor`) is already
@@ -2027,17 +2048,20 @@ export const applyAgentEventToChatMessages = (
 ): ReadonlyArray<AgentChatMessage> =>
   applyExecutionEventToChatMessages(messages, event, options, {
     foreign: noForeignMessages,
-    turn: undefined
+    turn: undefined,
+    modelTurn: undefined
   })
 
 /**
  * What an event may change: never a message in `foreign`, another model-step execution's output
  * (an earlier turn's answer kept for reconciling), and a tool call only in the event's turn, the
- * messages after `turn` (providers reuse call ids across turns).
+ * messages after `turn` (providers reuse call ids across turns); the model's events after
+ * `modelTurn` (unknown before a run's first model turn, `AgentChatTurnStart.run`).
  */
 type ChatEventScope = {
   readonly foreign: ForeignMessages
   readonly turn: ChatTurnAnchor
+  readonly modelTurn: ChatTurnAnchor
 }
 
 /**
@@ -2054,11 +2078,19 @@ export const applyExecutionEventToChatMessages = (
   const eventTimeMs = event.createdAtMs ?? options.nowMs ?? 0
   const foreign = scope.foreign
 
-  const from = turnStartIndex(messages, scope.turn)
   // The model's stream never changes another execution's output; a host step acts on any call.
-  const model: ToolPartScope = { from, foreign, replays: false }
+  const model: ToolPartScope = {
+    from: turnStartIndex(messages, scope.modelTurn),
+    foreign,
+    replays: false
+  }
+
   // Requests, the tool batch and answers act on a call the model placed, maybe a replay of one.
-  const host: ToolPartScope = { from, foreign: noForeignMessages, replays: true }
+  const host: ToolPartScope = {
+    from: turnStartIndex(messages, scope.turn),
+    foreign: noForeignMessages,
+    replays: true
+  }
 
   return Match.value(event)
     .pipe(

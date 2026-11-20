@@ -1,0 +1,404 @@
+import { Effect, Layer, Predicate, Stream } from 'effect'
+import { describe, expect, it } from '@effect/vitest'
+import {
+  AgentAwaitingInput,
+  AssistantAgentMessage,
+  AssistantMessageEvent,
+  AssistantTextPart,
+  BackgroundToolAccepted,
+  HostToolCallPart,
+  LLMStreamStart,
+  QuestionAnswer,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionRequested,
+  QuestionResponse,
+  ToolApprovalPolicy,
+  ToolApprovalRequest,
+  ToolApprovalRequested,
+  ToolApprovalResponse,
+  ToolCall,
+  ToolDef,
+  ToolExecutionAccepted,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
+  ToolInputEnd,
+  ToolResult,
+  ToolResultMessage,
+  UserMessage,
+  makeBackgroundToolAcceptedResult,
+  zeroAgentUsage,
+  type AgentEvent,
+  type AgentMessage,
+  type HitlRequest,
+  type HitlResponse
+} from '@yolk-sdk/agent/protocol'
+import {
+  initialAgentClientState,
+  markAgentAborted,
+  reduceAgentEvents,
+  submitAgentUserMessage,
+  type AgentClientState
+} from '../../src/client'
+import type { AgentToolRun } from '../../src/client/state.ts'
+import { ContextTransformer, LoopConfig, run } from '../../src/loop/index.ts'
+import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing/index.ts'
+import { AgentChatAction } from '../../src/react/chat-actions.ts'
+import {
+  applyAgentEventToChatProjection,
+  initialAgentChatState,
+  makeAgentChatEventProjectionState,
+  reduceAgentChatState,
+  type AgentChatEventProjectionState,
+  type AgentChatState
+} from '../../src/react/chat-core.ts'
+import type { AgentChatMessage } from '../../src/react/chat-messages.ts'
+import { makeQuestionToolDef } from '../../src/tools/index.ts'
+
+// A loop resume emits `AgentStart`, then the resumed tool batch (answers, starts, results), before
+// its first model turn. Providers reuse `call_0` in every turn: the batch acts on the paused call,
+// never on an earlier turn's call that reused the id. Every scenario resumes through the real
+// loop and runs through the client state, the chat projection and the `useAgentChat` reducer.
+
+type Reducers = {
+  readonly client: AgentClientState
+  readonly projection: AgentChatEventProjectionState
+  readonly chat: AgentChatState
+}
+
+const initial: Reducers = {
+  client: initialAgentClientState,
+  projection: makeAgentChatEventProjectionState(),
+  chat: initialAgentChatState
+}
+
+const applyEvents = (reducers: Reducers, events: ReadonlyArray<AgentEvent>): Reducers => ({
+  client: reduceAgentEvents(events, reducers.client),
+  projection: events.reduce(
+    (projection, event) => applyAgentEventToChatProjection(projection, event),
+    reducers.projection
+  ),
+  chat: events.reduce(
+    (chat, event) => reduceAgentChatState(chat, AgentChatAction.Event({ event })),
+    reducers.chat
+  )
+})
+
+/** A call as `name params:state`. */
+const describeCall = (call: ToolCall, state: string) =>
+  `${call.name} ${JSON.stringify(call.params)}:${state}`
+
+const describeRun = (run: AgentToolRun) => {
+  if ('call' in run) return describeCall(run.call, run._tag)
+
+  if ('request' in run && run.request !== undefined) return describeCall(run.request.call, run._tag)
+
+  return run._tag
+}
+
+const chatCalls = (messages: ReadonlyArray<AgentChatMessage>) =>
+  messages.flatMap(message =>
+    message.parts.flatMap(part =>
+      Predicate.isTagged(part, 'ToolCall') ? [describeCall(part.call, part.state._tag)] : []
+    )
+  )
+
+const calls = (reducers: Reducers) => ({
+  client: reducers.client.toolRuns.map(describeRun),
+  projection: chatCalls(reducers.projection.chatMessages),
+  chat: chatCalls(reducers.chat.chatMessages)
+})
+
+const all = <Value>(value: Value) => ({ client: value, projection: value, chat: value })
+
+let sequence = 0
+
+const host = () => ({ eventId: `run-1:${(sequence += 1)}`, streamId: 'run-1' })
+
+const answer = (content: string, toolCalls: ReadonlyArray<ToolCall> = []) =>
+  AssistantAgentMessage.make({
+    parts: [
+      AssistantTextPart.make({ content }),
+      ...toolCalls.map(call => HostToolCallPart.make({ call }))
+    ]
+  })
+
+/** One model turn: its start, the call's input and its `AssistantMessage`. */
+const modelTurn = (turn: number, message: AssistantAgentMessage, call?: ToolCall) => [
+  LLMStreamStart.make({ ...host(), turn }),
+  ...(call === undefined ? [] : [ToolInputEnd.make({ ...host(), call })]),
+  AssistantMessageEvent.make({ ...host(), message })
+]
+
+const weather = (city: string) => ToolCall.make({ id: 'call_0', name: 'weather', params: { city } })
+
+const oslo = weather('Oslo')
+
+const bergen = weather('Bergen')
+
+const weatherDef = ToolDef.make({
+  name: 'weather',
+  description: 'Weather.',
+  parameters: { type: 'object', properties: { city: { type: 'string' } } }
+})
+
+const gatedWeatherDef = ToolDef.make({
+  name: 'weather',
+  description: 'Weather.',
+  parameters: { type: 'object', properties: { city: { type: 'string' } } },
+  approval: ToolApprovalPolicy.make({ mode: 'manual' })
+})
+
+const turnOne = answer('Oslo first', [oslo])
+
+const osloResult = ToolResultMessage.make({ toolCallId: 'call_0', content: '12C' })
+
+const turnTwo = answer('Now Bergen', [bergen])
+
+const done = 'Bergen is 9C'
+
+/** The real loop resuming a transcript whose last assistant message has calls without results. */
+const resume = (input: {
+  readonly messages: ReadonlyArray<AgentMessage>
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
+  readonly awaitingRequests?: ReadonlyArray<HitlRequest>
+}) =>
+  run({
+    messages: input.messages,
+    systemPrompt: 'Weather.',
+    tools: input.tools,
+    model: 'faux',
+    resume: true,
+    hitlResponses: input.hitlResponses,
+    awaitingRequests: input.awaitingRequests
+  }).pipe(
+    Stream.runCollect,
+    Effect.map(chunk => Array.from(chunk)),
+    Effect.provide(
+      Layer.mergeAll(
+        ContextTransformer.identity,
+        LoopConfig.defaultLayer,
+        FauxProvider.layer(Reply.text(done)),
+        TestToolExecutor.layer({ weather: '9C', export: 'exported' })
+      )
+    )
+  )
+
+const tags = (events: ReadonlyArray<AgentEvent>) => events.map(event => event._tag)
+
+describe('a loop resume after a pause', () => {
+  it.effect("acts on the paused call, not an earlier turn's accepted background call", () =>
+    Effect.gen(function* () {
+      const exporting = ToolCall.make({ id: 'call_0', name: 'export', params: { format: 'csv' } })
+
+      const accepted = makeBackgroundToolAcceptedResult({
+        toolCallId: exporting.id,
+        acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:export' })
+      })
+
+      const acknowledged = ToolResultMessage.make({
+        toolCallId: exporting.id,
+        content: accepted.content,
+        acceptance: accepted.acceptance
+      })
+
+      const startedExport = answer('Starting the export', [exporting])
+
+      const approval = ToolApprovalRequest.make({
+        requestId: 'approval:call_0',
+        toolCallId: 'call_0',
+        call: bergen
+      })
+
+      // `tool-run-turns.test.ts`'s pause: turn 1 handed `call_0` to a background owner, turn 2
+      // reused the id for a call waiting on its approval.
+      const paused = applyEvents(initial, [
+        ...modelTurn(1, startedExport, exporting),
+        ToolExecutionStarted.make({ ...host(), call: exporting }),
+        ToolExecutionAccepted.make({ ...host(), call: exporting, result: accepted }),
+        ...modelTurn(2, turnTwo, bergen),
+        ToolApprovalRequested.make({ ...host(), call: bergen, request: approval }),
+        AgentAwaitingInput.make({
+          ...host(),
+          requests: [approval],
+          messages: [startedExport, acknowledged, turnTwo],
+          turns: 2,
+          usage: zeroAgentUsage
+        })
+      ])
+
+      expect(calls(paused)).toEqual({
+        client: ['export {"format":"csv"}:Accepted', 'weather {"city":"Bergen"}:ApprovalRequested'],
+        projection: [
+          'export {"format":"csv"}:Accepted',
+          'weather {"city":"Bergen"}:ApprovalRequested'
+        ],
+        chat: ['export {"format":"csv"}:Accepted', 'weather {"city":"Bergen"}:ApprovalRequested']
+      })
+
+      const resumed = yield* resume({
+        messages: [
+          UserMessage.make({ content: 'Export, then Bergen' }),
+          startedExport,
+          acknowledged,
+          turnTwo
+        ],
+        tools: [gatedWeatherDef],
+        hitlResponses: [
+          ToolApprovalResponse.make({
+            requestId: approval.requestId,
+            toolCallId: 'call_0',
+            decision: 'approved',
+            source: 'user'
+          })
+        ],
+        awaitingRequests: [approval]
+      })
+
+      expect(tags(resumed).slice(0, 4)).toEqual([
+        'AgentStart',
+        'ToolApprovalGranted',
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted'
+      ])
+
+      const ended = applyEvents(paused, resumed)
+
+      expect(calls(ended)).toEqual(
+        all(['export {"format":"csv"}:Accepted', 'weather {"city":"Bergen"}:Completed'])
+      )
+
+      expect(ended.client.status._tag).toBe('Done')
+      expect(ended.chat.status._tag).toBe('Done')
+    })
+  )
+
+  it.effect("acts on the paused question, not an earlier turn's completed call", () =>
+    Effect.gen(function* () {
+      const prompts = [
+        QuestionPrompt.make({ id: 'unit', prompt: 'Celsius or Fahrenheit?' })
+      ] as const
+
+      const unit = ToolCall.make({ id: 'call_0', name: 'question', params: { questions: prompts } })
+
+      const asking = answer('Which unit?', [unit])
+
+      const question = QuestionRequest.make({
+        requestId: 'question:call_0',
+        toolCallId: 'call_0',
+        call: unit,
+        questions: prompts
+      })
+
+      const paused = applyEvents(initial, [
+        ...modelTurn(1, turnOne, oslo),
+        ToolExecutionStarted.make({ ...host(), call: oslo }),
+        ToolExecutionCompleted.make({
+          ...host(),
+          call: oslo,
+          result: ToolResult.make({ toolCallId: 'call_0', content: '12C' })
+        }),
+        ...modelTurn(2, asking, unit),
+        QuestionRequested.make({ ...host(), request: question }),
+        AgentAwaitingInput.make({
+          ...host(),
+          requests: [question],
+          messages: [turnOne, osloResult, asking],
+          turns: 2,
+          usage: zeroAgentUsage
+        })
+      ])
+
+      const resumed = yield* resume({
+        messages: [UserMessage.make({ content: 'Weather?' }), turnOne, osloResult, asking],
+        tools: [weatherDef, makeQuestionToolDef()],
+        hitlResponses: [
+          QuestionResponse.make({
+            requestId: question.requestId,
+            toolCallId: 'call_0',
+            outcome: 'answered',
+            source: 'user',
+            answers: [QuestionAnswer.make({ questionId: 'unit', customAnswer: 'Celsius' })]
+          })
+        ],
+        awaitingRequests: [question]
+      })
+
+      const batch = resumed.slice(0, 3)
+
+      expect(tags(batch)).toEqual(['AgentStart', 'QuestionAnswered', 'ToolExecutionCompleted'])
+
+      // The answer reaches no run (the client dropped the pending question at `AgentStart`): it
+      // adds one, leaving the earlier turn's call.
+      expect(calls(applyEvents(paused, batch.slice(0, 2))).client).toEqual([
+        'weather {"city":"Oslo"}:Completed',
+        'QuestionAnswered'
+      ])
+
+      const ended = applyEvents(paused, resumed)
+
+      const expected = [
+        'weather {"city":"Oslo"}:Completed',
+        `question ${JSON.stringify(unit.params)}:Completed`
+      ]
+
+      expect(calls(ended)).toEqual(all(expected))
+    })
+  )
+})
+
+describe('a loop resume of a call the client never saw', () => {
+  // A host that streams without `AgentStart` relies on the local submit's run start.
+  it.effect.each(['with AgentStart', 'without AgentStart'] as const)(
+    "adds the resumed call, leaving an earlier turn's call with its id (%s)",
+    start =>
+      Effect.gen(function* () {
+        // The person stopped the run while turn 2 streamed; the host committed turn 2 (`call_0`
+        // reused for Bergen) without the client seeing it. "Go on" resumes the call.
+        const stopped = applyEvents(initial, [
+          ...modelTurn(1, turnOne, oslo),
+          ToolExecutionStarted.make({ ...host(), call: oslo }),
+          ToolExecutionCompleted.make({
+            ...host(),
+            call: oslo,
+            result: ToolResult.make({ toolCallId: 'call_0', content: '12C' })
+          }),
+          LLMStreamStart.make({ ...host(), turn: 2 })
+        ])
+
+        const goOn = UserMessage.make({ content: 'Go on' })
+
+        const submitted: Reducers = {
+          client: submitAgentUserMessage(markAgentAborted(stopped.client), goOn),
+          projection: stopped.projection,
+          chat: reduceAgentChatState(
+            reduceAgentChatState(stopped.chat, AgentChatAction.Abort()),
+            AgentChatAction.Submit({ message: goOn })
+          )
+        }
+
+        const resumed = yield* resume({
+          messages: [UserMessage.make({ content: 'Weather?' }), turnOne, osloResult, turnTwo, goOn],
+          tools: [weatherDef]
+        })
+
+        expect(tags(resumed).slice(0, 3)).toEqual([
+          'AgentStart',
+          'ToolExecutionStarted',
+          'ToolExecutionCompleted'
+        ])
+
+        const streamed =
+          start === 'with AgentStart'
+            ? resumed
+            : resumed.filter(event => !Predicate.isTagged(event, 'AgentStart'))
+
+        const ended = applyEvents(submitted, streamed)
+
+        expect(calls(ended)).toEqual(
+          all(['weather {"city":"Oslo"}:Completed', 'weather {"city":"Bergen"}:Completed'])
+        )
+      })
+  )
+})

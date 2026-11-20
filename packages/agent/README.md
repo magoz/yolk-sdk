@@ -725,9 +725,14 @@ turn). `applyAgentEventToChatProjection` and the `useAgentChat` reducer record w
 model turn starts (`turnStart`, at each `LLMStreamStart`, with or without `executionId`), and a
 turn's tool events (input, its `AssistantMessage`'s calls, provider results, the tool batch,
 approvals, questions and their answers) match a call only after it, so a later turn's call never
-changes an earlier turn's call with the same id. When the turn does not hold the call (a replay
-without event id, or a batch event arriving after the next turn started), a host event acts on an
-earlier part instead of adding a card: a request (approval, question, input, interaction) or a
+changes an earlier turn's call with the same id. `AgentStart` and the `useAgentChat` reducer's local
+submit, HITL answer, regenerate and edit record a run start (`turnStart.run`, after the last
+message): a resumed run's tool batch, which the loop runs before its first model turn, then acts
+only on the paused call (or adds its own card), never on an earlier turn's call reusing its id
+(#352); the model's events before the run's first model turn replay an earlier run's and match as
+with no start known. When the turn does not hold the call (a replay without event id, a batch event
+arriving after the next turn started, or a resumed tool batch), a host event acts on an earlier part
+instead of adding a card: a request (approval, question, input, interaction) or a
 tool-batch event on the last earlier part holding the same call (id, name and arguments equal); an
 answer (question, input or interaction response, approval denial) on the last earlier part holding
 the request it answers (a denial: a pending approval), else on nothing. A request (including
@@ -741,7 +746,9 @@ is still pending (only a valid payload emits `InputSubmitted`), a running call h
 an abort leaves it running and the next run that resumes it asks again (the card shows), and a
 later turn reusing the id asks on its own part. Tool-batch and request events must therefore carry
 the call exactly as the model emitted it: a host that normalizes arguments between the model's
-events and its own adds a second card for a replayed or late event. Until a start is seen (and after `AgentStart`), and always in
+events and its own adds a second card for a replayed or late event. A replayed start of the same
+call leaves a completed, accepted or errored part, and the `useAgentChat` reducer's status, alone.
+Until a start is seen (a state built before `turnStart` too), and always in
 `applyAgentEventToChatMessages`, a tool event matches the last message holding the call, so a
 reused id can still update an earlier turn's call there (in `applyAgentEventToChatMessages`, a
 later call reusing the id whose `AssistantMessage` arrives without `ToolInputStart`/`ToolInputEnd`
@@ -755,10 +762,10 @@ start in `toolRuns` (`turnStart`, an `AgentClientTurnStart`), so a later turn's 
 gets a run of its own after the earlier turn's (`toolRuns` can hold one run per turn for an id; read
 by id, the last is the latest). The model's events (input, provider results) act only on the latest
 turn's run; host events act on it first, else a request or tool-batch event on the last earlier run
-holding the same call and an answer on the last earlier run holding its request; the latest turn's
-run also gives way to that earlier run when it holds another call or request (an answer for a call
-another turn holds with another request, or that only a run holding another request holds, changes
-nothing). A replay without event id of an accepted (background) call's start or request still leaves
+holding the same call and an answer on the last earlier run holding its request, else they add a
+run to the latest turn; the latest turn's run also gives way to that earlier run when it holds
+another call or request (an answer reaching a latest-turn run that holds another request, with no
+run holding its own, changes nothing). A replay without event id of an accepted (background) call's start or request still leaves
 its `Accepted` run alone, and with a turn start known, the transcript's acknowledgement fences only
 events naming the acknowledged call, not a later call reusing its id. The request rule and status
 fence are the chat's: a request never reopens a run past its request (answered or submitted,
@@ -768,13 +775,13 @@ it, so the run that resumes it after an abort or a pause asks again and that req
 pause blocks only on its requests still pending (none: the status stays). A replayed start of the
 same call also leaves a completed, errored or accepted run, and the status, alone. A turn reconciled
 after later turns started (`AgentAwaitingInput`, `AgentEnd`) changes only its own runs, between its
-start and the next (`turnStart.earlier`). Until a start is seen (and after `AgentStart` or a local
-submit), tool events act on the last run holding the call id, as before except those fences; a
-state built before `turnStart` behaves that way too. So a run resumed with `AgentStart` (a loop
-resume) runs its tool batch before any start, and a reused id can still update an earlier turn's
-run there, in both reducers (#352). The client's replayed-start fence keeps a completed, errored or
-accepted run of the same call, the chat's a completed or accepted part with the id (#352 aligns
-them).
+start and the next (`turnStart.earlier`). `AgentStart` and `submitAgentUserMessage` record a run
+start (`turnStart.run`; the runs kept so far are earlier turns'), so a loop resume's tool batch,
+which runs before the run's first model turn, acts only on the paused call's run or adds its own
+(an answer whose pending run `AgentStart` dropped adds one), never on an earlier turn's run reusing
+its id (#352); the model's events before that first turn act as with no start known. Until a start
+is seen, tool events act on the last run holding the call id, as before except those fences; a
+state built before `turnStart` behaves that way too.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the

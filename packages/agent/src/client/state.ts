@@ -23,7 +23,7 @@ import {
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { Array as Arr, Data, Equal, Match, Option, Predicate, Struct } from 'effect'
+import { Array as Arr, Data, Equal, Match, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   agentEventToolCallIds,
@@ -154,32 +154,42 @@ export type AgentClientState = {
   readonly executions?: AgentExecutions<AgentClientExecutionOutput>
   /**
    * The latest model turn's start (`AgentClientTurnStart`); carry it with `seenEventIds` and
-   * `toolRuns`. Absent until a start is seen, after `AgentStart` and a local submit, and in states
-   * built before it: tool events then act on the last run holding a call id, in any turn.
+   * `toolRuns`. `AgentStart` and a local submit set a run start (`runTurnStart`). Absent until a
+   * start is seen and in states built before it: tool events then act on the last run holding a
+   * call id, in any turn.
    */
   readonly turnStart?: AgentClientTurnStart
 }
 
 /**
  * The start of the latest model turn the client state saw (its `LLMStreamStart`, with or without
- * `executionId`). Providers reuse tool call ids across turns, so a turn's events act on its own
- * runs, from `firstRun` on: the model's events (input, provider results) only there, so a later
- * turn's call reusing an id gets a run of its own; host events (requests, the tool batch, answers)
- * there first, else on the earlier run they replay (a replay without event id, or a batch event
- * after the next turn started): a request or batch event the last earlier run holding the same
- * call, an answer the last earlier run holding its request.
+ * `executionId`), or of the run (`AgentStart`, a local submit: `runTurnStart`). Providers reuse
+ * tool call ids across turns, so a turn's events act on its own runs, from `firstRun` on: the
+ * model's events (input, provider results) only there, so a later turn's call reusing an id gets a
+ * run of its own; host events (requests, the tool batch, answers) there first, else on the earlier
+ * run they replay (a replay without event id, a batch event after the next turn started, or a
+ * resumed run's tool batch before its first model turn): a request or batch event the last earlier
+ * run holding the same call, an answer the last earlier run holding its request.
  */
 export type AgentClientTurnStart = {
   /** The start's `streamId` (`''` when none). */
   readonly streamId: string
+  /** The `LLMStreamStart`'s turn; `0` for a run start (the loop numbers model turns from 1). */
   readonly turn: number
   /** The index in `toolRuns` of the turn's first run; the runs before it are earlier turns'. */
   readonly firstRun: number
   /**
-   * A terminal event or user message followed the start: a later start of the same turn number is
-   * a new turn (a run that numbers its turns afresh), not a retry of this one.
+   * A terminal event or user message followed the start, or it is a run start: a later start of
+   * the same turn number is a new turn (a run that numbers its turns afresh), not a retry of this
+   * one.
    */
   readonly closed?: true
+  /**
+   * A run start (`AgentStart`, a local submit), before the run's first model turn: it bounds host
+   * events only. The model's events then act as with no start known (any turn): a run's own model
+   * output follows an `LLMStreamStart`, so model events before it replay an earlier run's.
+   */
+  readonly run?: true
   /**
    * The starts of the earlier turns seen since `AgentStart` (oldest first; absent in states built
    * before it): each earlier turn's runs run from its `firstRun` up to the next start's, so a
@@ -292,6 +302,26 @@ const turnFirstRun = (state: AgentClientState) =>
   state.turnStart === undefined
     ? 0
     : Math.min(Math.max(state.turnStart.firstRun, 0), state.toolRuns.length)
+
+/**
+ * The index of the latest turn's first run for the model's events: `0` (every run) also before a
+ * run's first model turn (`AgentClientTurnStart.run`), where model events replay an earlier run's.
+ */
+const modelTurnFirstRun = (state: AgentClientState) =>
+  state.turnStart?.run === true ? 0 : turnFirstRun(state)
+
+/**
+ * A run's start (`AgentStart`, a local submit): the runs kept so far are earlier turns'. A resumed
+ * run's tool batch comes before its first model turn: its host events reach those runs only as the
+ * same call or the request an answer answers, else add runs of their own, so a provider's reused
+ * call id never lands on an earlier turn's call. Closed, so the run's first start is a new turn;
+ * earlier turns' starts are dropped (`AgentStart` and a submit leave no model-stream run of them to
+ * reconcile).
+ */
+const runTurnStart = (state: AgentClientState, streamId: string): AgentClientState => ({
+  ...state,
+  turnStart: { streamId, turn: 0, firstRun: state.toolRuns.length, closed: true, run: true }
+})
 
 /**
  * Rewrites each run into none, itself or others, keeping the latest turn's start on the runs that
@@ -444,14 +474,14 @@ const pendingApproval: ReplayedRun = run =>
  * also gives way to that earlier run when it is known to be another call or to hold another request
  * (a replay without event id of an earlier turn's event, after a later turn reused the id). The
  * model's events (`replayed` absent) never act on an earlier turn's run: a later call reusing the
- * id is another.
+ * id is another (before a run's first model turn, `modelTurnFirstRun`, every run is theirs).
  */
 const toolRunIndex = (
   state: AgentClientState,
   callId: string,
   replayed: ReplayedRun | undefined
 ) => {
-  const from = turnFirstRun(state)
+  const from = replayed === undefined ? modelTurnFirstRun(state) : turnFirstRun(state)
 
   const index = findLastRunIndex(
     state.toolRuns,
@@ -472,7 +502,11 @@ const toolRunIndex = (
   return earlier === -1 ? index : earlier
 }
 
-/** Where an answer goes: the run it acts on, a new run (`-1`: no run holds the call), or none. */
+/**
+ * Where an answer goes: the run it acts on, a new run in the latest turn (`-1`: the turn lacks the
+ * call and no earlier run holds its request, for example a resumed run's answer whose pending run
+ * `AgentStart` dropped; an earlier turn's call reusing the id is another call), or none.
+ */
 const answerRunIndex = (
   state: AgentClientState,
   callId: string,
@@ -481,12 +515,11 @@ const answerRunIndex = (
   const index = toolRunIndex(state, callId, replayed)
   const run = toolRunAt(state, index)
 
-  // A run holding another request, with no run holding this one: a stale answer (its request's
-  // run was never seen, for example after hydration) answers nothing here.
-  if (run !== undefined) return replayed(run) === false ? Option.none() : Option.some(index)
+  if (run === undefined) return Option.some(-1)
 
-  // A call another turn holds, whose request this answer does not answer: not this call's.
-  return state.toolRuns.some(run => toolRunId(run) === callId) ? Option.none() : Option.some(-1)
+  // The latest turn's run of the call holds another request, and no run holds this one: a stale
+  // answer (its request's run was never seen, for example after hydration) answers nothing here.
+  return replayed(run) === false ? Option.none() : Option.some(index)
 }
 
 /** A pending human request: approval, question, typed input or interaction. */
@@ -861,14 +894,15 @@ export const applyAgentEventWithOptions = (
  * The latest turn's start after an event: an `LLMStreamStart` (tagged or not) starts a turn whose
  * runs follow the current ones, unless it retries the latest turn (same stream and turn, no
  * terminal event or user message since), which keeps its start and runs; a terminal event or user
- * message closes the start to retries; `AgentStart` clears it (a run's turns are numbered afresh).
+ * message closes the start to retries; `AgentStart` sets a run start (`runTurnStart`; a run's turns
+ * are numbered afresh).
  */
 const nextTurnStart = (
   state: AgentClientState,
   event: AgentEvent,
   route: AgentExecutionRoute<AgentClientExecutionOutput>
 ): AgentClientState => {
-  if (Predicate.isTagged(event, 'AgentStart')) return Struct.omit(state, ['turnStart'])
+  if (Predicate.isTagged(event, 'AgentStart')) return runTurnStart(state, event.streamId ?? '')
 
   const latest = state.turnStart
 
@@ -1112,10 +1146,10 @@ const eventForStatus = (applied: AgentClientState, event: AgentEvent): AgentEven
 /**
  * Whether an event that opens a run (input, a request, a start) replays a call the transcript
  * acknowledged (an accepted background call), and then which stale active runs to drop. With no
- * turn start known, any such event about an acknowledged id replays it. Otherwise the model's
- * events and events about the call the latest turn holds under the id are that turn's own call
- * (providers reuse ids across turns); another host event replays it when it names the call the
- * transcript acknowledged.
+ * turn start known (for the model's events, also a run start), any such event about an
+ * acknowledged id replays it. Otherwise the model's events and events about the call the latest
+ * turn holds under the id are that turn's own call (providers reuse ids across turns); another host
+ * event replays it when it names the call the transcript acknowledged.
  */
 const acknowledgedReplay = (
   state: AgentClientState,
@@ -1129,15 +1163,23 @@ const acknowledgedReplay = (
 
   if (acknowledged.length === 0) return Option.none()
 
-  if (state.turnStart === undefined) {
+  const call = hostEventToolCall(event)
+
+  // No model turn start known for this event (none seen, or a model event before a run's first
+  // model turn): any event about the id replays it.
+  if (state.turnStart === undefined || (call === undefined && state.turnStart.run === true)) {
     return Option.some(run => toolRunId(run) === callId && isActiveToolRun(run))
   }
 
-  const call = hostEventToolCall(event)
-
   if (call === undefined) return Option.none()
 
-  const current = toolRunAt(state, toolRunIndex(state, callId, undefined))
+  const from = turnFirstRun(state)
+
+  const current = toolRunAt(
+    state,
+    findLastRunIndex(state.toolRuns, (run, index) => index >= from && toolRunId(run) === callId)
+  )
+
   const same = sameCall(call)
 
   // The latest turn's run of this call (or one that does not say which call it is).
@@ -1147,8 +1189,6 @@ const acknowledgedReplay = (
   const replays = acknowledged.some(held =>
     Option.match(held, { onNone: () => true, onSome: named => Equal.equals(named, call) })
   )
-
-  const from = turnFirstRun(state)
 
   return replays
     ? Option.some((run, index) => index < from && isActiveToolRun(run) && same(run) === true)
@@ -1225,7 +1265,7 @@ const discardUnfinishedStream = (state: AgentClientState): AgentClientState => {
 
 /** Appends streamed input to the latest turn's run of the call. */
 const appendToolInputDelta = (state: AgentClientState, id: string, delta: string) => {
-  const from = turnFirstRun(state)
+  const from = modelTurnFirstRun(state)
 
   return flatMapToolRuns(state, (run, index) =>
     index >= from && Predicate.isTagged(run, 'InputStreaming') && run.id === id
@@ -1451,8 +1491,9 @@ export const submitAgentUserMessage = (
 ): AgentClientState =>
   withStatusTree(
     {
-      // A new stream starts: its event ids, executions and turns are its own.
-      ...Struct.omit(retainSettledToolRuns(state), ['turnStart']),
+      // A new stream starts: its event ids, executions and turns are its own (a run start, so a
+      // resumed tool batch without `AgentStart` still stays off earlier turns' calls).
+      ...runTurnStart(retainSettledToolRuns(state), ''),
       messages: appendAgentMessage(state.messages, message),
       liveMessages: [],
       text: '',
