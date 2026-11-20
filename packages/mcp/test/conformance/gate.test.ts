@@ -49,7 +49,7 @@ import {
   type McpConformanceCase
 } from '../../src/conformance/index.ts'
 import { gateVerdict, type McpCallGate } from '../../src/conformance/call-gate.ts'
-import type { McpObservedExchange } from '../../src/conformance/observe.ts'
+import type { McpObservedExchange, McpObservedSession } from '../../src/conformance/observe.ts'
 import {
   decodeAsTextDecoderStream,
   sseAllPayloads,
@@ -568,8 +568,9 @@ const answerWith =
 const accepted = answerWith(202)
 
 /**
- * Run `testCase` against `fixture` replayed, with every client-sent response answered by
- * `serverAnswer` (the call operation's by `callAnswer`); count the client's answers and calls.
+ * Run `testCase` against `fixture` replayed: the client's answer in the precondition listing is
+ * accepted (202, no body), and its answer in the call operation is answered by `callAnswer`;
+ * count the client's answers and calls.
  */
 const runPinged = (
   testCase: McpConformanceCase,
@@ -803,6 +804,29 @@ const pingedOperation: ReadonlyArray<McpObservedExchange> = [
   listing()
 ]
 
+const session1 = { id: 'session#1', visibleAscii: true }
+
+const session2 = { id: 'session#2', visibleAscii: true }
+
+/**
+ * `pingedOperation` as the observer records a session: `initialize` answered with `session#1`, the
+ * later requests sending it, and the ping's answer sending `answerSession` (none when absent).
+ */
+const sessionedOperation = (answerSession?: McpObservedSession) =>
+  pingedOperation.map((exchange, index) => {
+    if (index === 1) {
+      return { ...exchange, responseSession: session1 }
+    }
+
+    if (index === 2) {
+      return answerSession === undefined ? exchange : { ...exchange, requestSession: answerSession }
+    }
+
+    return index > 2
+      ? { ...exchange, requestSession: session1, responseSession: session1 }
+      : exchange
+  })
+
 const verdictOf = (earlier: ReadonlyArray<McpObservedExchange>) =>
   gateVerdict(readGate, call, earlier, () => undefined)
 
@@ -838,6 +862,10 @@ describe('the gate understands only an accepted answer to a plain server ping (#
         standingGet(),
         listing()
       ]
+    },
+    {
+      label: 'a ping answered in the session initialize issued',
+      earlier: sessionedOperation(session1)
     },
     {
       label: 'a ping in the listing answer, answered before the call',
@@ -930,6 +958,8 @@ describe('the gate understands only an accepted answer to a plain server ping (#
       )
     },
     { label: 'an answer to another id', earlier: replaced(2, pingAnswer('server-ping-2')) },
+    { label: 'an answer in another session', earlier: sessionedOperation(session2) },
+    { label: 'an answer without the issued session', earlier: sessionedOperation() },
     {
       label: 'the ping answered twice',
       earlier: replaced(2, pingAnswer('server-ping-1'), pingAnswer('server-ping-1'))

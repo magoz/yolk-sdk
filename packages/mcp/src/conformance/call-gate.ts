@@ -31,11 +31,15 @@
  *    client's requests and can carry no listing; the client's answer carries only the empty
  *    result, and its 202 without a body delivers nothing back. So the round trip changes neither
  *    what the client saw nor what the gate proves (#382). `2026-07-28` has no ping (changelog,
- *    major changes 5 and 7): this matters for legacy servers only. The gate decides when the
- *    call is about to be sent, from what it has recorded by then: a ping inside a `tools/list`
- *    answer is answered concurrently with the call, so it is understood only when its accepted
- *    answer was recorded before the call is gated; otherwise the gate refuses (it fails closed),
- *    so a live server that pings there can see occasional refusals.
+ *    major changes 5 and 7): this matters for legacy servers only. The answer must also carry the
+ *    session of the exchange whose answer held the ping (its answer's session, else its
+ *    request's). The gate decides from what it has recorded when the call is about to be sent.
+ *    Pings during `initialize` and in the answers of earlier `tools/list` pages are normally
+ *    settled by then, since more round trips follow them (if not, the gate refuses). A ping in the LAST `tools/list` page's answer
+ *    almost always refuses against a live server: `makeEffectFetch` buffers the whole page, the
+ *    SDK sends the ping's answer and resolves `listTools` at almost the same moment, and the
+ *    client does no network I/O between `listTools` and `callTool`, so the call is gated before
+ *    the answer's 202 returns (fail closed).
  * 2. The operation's listing is complete: at least one `tools/list` page, each answered with a
  *    `result.tools` array, each page after the first sending the previous page's `nextCursor`,
  *    and the last page carrying no `nextCursor`.
@@ -238,12 +242,17 @@ const pingAnswerIdOf = (exchange: McpObservedExchange): RpcId | undefined => {
 }
 
 /**
- * Whether every benign ping in `earlier` was answered exactly once, after it, with the empty
- * result, and the server accepted that answer with 202 and an empty body; and whether every such
+ * Whether every benign ping in `earlier` was answered exactly once, after it, in its session, with
+ * the empty result, and the server accepted that answer with 202 and an empty body; and whether every such
  * answer answers exactly one of those pings (see the module doc, rule 1).
  */
 const pingsSettled = (earlier: ReadonlyArray<McpObservedExchange>): boolean => {
-  const pings = earlier.flatMap((exchange, index) => pingIdsOf(exchange).map(id => ({ id, index })))
+  const pings = earlier.flatMap((exchange, index) => {
+    // The session the ping belongs to: the one its carrier's answer issued, else the one sent.
+    const session = exchange.responseSession?.id ?? exchange.requestSession?.id
+
+    return pingIdsOf(exchange).map(id => ({ id, index, session }))
+  })
 
   const answers = earlier.flatMap((exchange, index) => {
     const id = pingAnswerIdOf(exchange)
@@ -260,6 +269,7 @@ const pingsSettled = (earlier: ReadonlyArray<McpObservedExchange>): boolean => {
         matching.length === 1 &&
         answer !== undefined &&
         answer.index > ping.index &&
+        answer.exchange.requestSession?.id === ping.session &&
         answer.exchange.status === 202 &&
         answer.exchange.responseBody === ''
       )

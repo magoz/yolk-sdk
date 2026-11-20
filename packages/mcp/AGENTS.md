@@ -184,13 +184,15 @@
   notifications and error responses (after the probe window closes, the rest of the probe stream
   reaches the client's protocol `onmessage`), or any server request but one: a plain server
   `ping` in a POST's answer (`jsonrpc: "2.0"`, a string or number id, no member but `params`,
-  which is absent or empty) that the client answered exactly once, after it, with a POST whose
-  body is only the empty result, accepted with 202 and no body (`pingsSettled`). A ping is
+  which is absent or empty) that the client answered exactly once, after it, in the carrier's
+  session, with a POST whose body is only the empty result, accepted with 202 and no body
+  (`pingsSettled`). A ping in the last `tools/list` page's answer almost always refuses live: the
+  answer and the call go out together, so the call is gated before the 202 returns. A ping is
   side-effect free (`2025-11-25` basic/utilities/ping: its only answer is an empty result; the
   SDK's handler returns `{}`), resolves no client request, carries no listing, and its accepted
   answer delivers nothing back (#382). A ping with params, a ping not answered exactly once, an
-  answer with no status yet, rejected, or with a body, any other server request, and any other
-  client-sent response stay uncertainty. A refusal is answered locally with a transport
+  answer with no status yet, rejected, with a body, or in another session, any other server
+  request, and any other client-sent response stay uncertainty. A refusal is answered locally with a transport
   failure and recorded with its `refused` reason. A refusal before any forwarded `tools/call`
   fails the precondition with zero forwarded calls (drills assert this); a refused client retry
   after a forwarded call (a `HeaderMismatch` retry or an input-required re-send) is reported as
@@ -295,9 +297,17 @@
   carries params, or the server sends `roots/list` instead, plus `gateVerdict` tables over
   observed exchanges (unanswered, in-flight, twice-answered, early, mismatched or non-empty
   answers; malformed pings; pings on the standing GET; other server requests answered with an
-  accepted empty result); the `JSON.parse`, dispatch-schema and terminal-CR
+  accepted empty result, an answer in another session); the `JSON.parse`, dispatch-schema and
+  terminal-CR
   edge cases; the `eventsource-parser` copy parity test; the decoder-and-parser parity with the
   real pipeline; and the decoder-flush regressions through the real client.
+  `test/property/call-gate.property.test.ts` checks the server-ping rule over generated call
+  operations (ping shapes, id repeats, other server messages, the client's answers with their
+  order, status, body, members and session): whenever the gate forwards, every server message is
+  a response to its own request, a notification, or a param-less ping with exactly one later,
+  accepted, empty answer in its session, and every client-sent response answers such a ping (Effect
+  `Arbitrary`, 3000 runs by default, `PROPERTY_RUNS` to stress; a sampling test keeps it from
+  holding vacuously).
   `observer.test.ts` covers the header allowlist, session evidence and bodies kept as received.
   `in-process.test.ts` runs the cases against `makeMcpToolServer` and states which cases do not
   apply.

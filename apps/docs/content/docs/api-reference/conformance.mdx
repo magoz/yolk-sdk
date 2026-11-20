@@ -360,10 +360,13 @@ basic/utilities/ping: its only answer is an empty result, and the SDK's handler 
 touches no state); it is a request, so it resolves none of the client's requests and carries no
 listing, and the accepted answer delivers nothing back. Any other server request, a ping with
 params, a ping not answered exactly once, or an answer with no status yet, rejected, or with a body
-still refuses (#382). The gate decides from what it has recorded when the call is about to be
-sent: a ping inside a `tools/list` answer is forwarded only once its accepted answer was recorded
-before the call is gated; otherwise the gate refuses (it fails closed), so a live server that pings
-there can see occasional refusals. A refusal before any forwarded call fails the precondition
+still refuses, as does an answer in another session than the exchange that carried the ping
+(#382). The gate decides from what it has recorded when the call is about to be sent. Pings during
+`initialize` and in the answers of earlier `tools/list` pages are normally settled by then, since
+more round trips follow them (if not, the gate refuses). A ping in the
+last `tools/list` page's answer almost always refuses against a live server: the client buffers the
+whole page, sends the ping's answer and finishes the listing at almost the same moment, and does no
+network I/O before the call, so the call is gated before the answer's 202 returns (fail closed). A refusal before any forwarded call fails the precondition
 with zero forwarded calls; a refused client retry after a forwarded call is reported as a retry.
 Earlier preflight listings stay as friendly early failures. Answers are read as the SDK reads them:
 JSON with `JSON.parse` semantics, and event streams with the SDK's own parser
