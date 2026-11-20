@@ -214,11 +214,70 @@ describe('providerFailureKind precedence', () => {
     ).toBe('server_error')
     expect(kindOf({ message: 'overloaded', echoedValues: ['', '  '] })).toBe('overloaded')
   })
+
+  it('removes echoed values from the decoded JSON body, whatever its escapes', () => {
+    const model = 'acme/context_length-preview'
+
+    for (const body of [
+      '{"error":{"message":"Model acme\\/context_length-preview unavailable"}}',
+      '{"error":{"message":"Model acme\\u002fcontext_length-preview unavailable"}}'
+    ]) {
+      expect(kindOf({ status: 503, body, echoedValues: [model] }), body).toBe('server_error')
+    }
+  })
+
+  it('reads the decoded strings of a JSON body and the text of any other body', () => {
+    expect(kindOf({ status: 503, body: '{"error":{"message":"Service\\u0020Unavailable"}}' })).toBe(
+      'overloaded'
+    )
+    expect(kindOf({ status: 503, body: 'Service Unavailable' })).toBe('overloaded')
+    expect(kindOf({ status: 503, body: '{"error":{"param":{"modelId":"overloaded"}}}' })).toBe(
+      'server_error'
+    )
+  })
+
+  it('keeps a string param and ignores echoed values shorter than three characters', () => {
+    const body = JSON.stringify({
+      error: { message: 'input is too long', type: 'invalid_request_error', param: 'input' }
+    })
+
+    expect(
+      kindOf({
+        status: 400,
+        body,
+        providerCode: 'invalid_request_error',
+        echoedValues: echoedParamValues('input')
+      })
+    ).toBe('context_overflow')
+    expect(kindOf({ status: 400, message: 'input is too long', echoedValues: ['n', 'in'] })).toBe(
+      'context_overflow'
+    )
+  })
+
+  it('classifies a further structured code when the provider code names no kind', () => {
+    expect(
+      kindOf({ status: 400, providerCode: 'specific_error_code', kindCodes: ['overloaded_error'] })
+    ).toBe('overloaded')
+    expect(kindOf({ providerCode: 'specific_error_code', kindCodes: ['rate_limit_error'] })).toBe(
+      'rate_limit'
+    )
+    expect(
+      kindOf({ status: 529, providerCode: 'rate_limit_error', kindCodes: ['overloaded_error'] })
+    ).toBe('rate_limit')
+  })
+
+  it('treats a 408 request timeout as a retryable network failure', () => {
+    expect(kindOf({ status: 408 })).toBe('network')
+    expect(providerFailureRetryable(kindOf({ status: 408 }))).toBe(true)
+    expect(kindOf({ status: 409 })).toBe('unknown')
+    expect(kindOf({ status: 425 })).toBe('unknown')
+  })
 })
 
 describe('echoedParamValues', () => {
-  it('reads a parameter name or the string fields of a param object', () => {
-    expect(echoedParamValues('model')).toEqual(['model'])
+  it('reads the string fields of a param object, never a parameter name', () => {
+    expect(echoedParamValues('model')).toEqual([])
+    expect(echoedParamValues('input')).toEqual([])
     expect(echoedParamValues({ modelId: 'acme/model', retries: 2, nested: { id: 'x' } })).toEqual([
       'acme/model'
     ])

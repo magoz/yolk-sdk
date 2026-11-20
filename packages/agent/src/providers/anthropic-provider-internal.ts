@@ -1826,11 +1826,14 @@ const stringField = (value: Schema.Json | undefined, key: string) => {
 export type AnthropicHttpErrorInfo = {
   readonly message?: string
   readonly providerCode?: string
+  /** `error.type`, then `error.code`: classified when `providerCode` names no kind. */
+  readonly kindCodes: ReadonlyArray<string>
 }
 
 type AnthropicHttpErrorInfoFields = {
   message?: string
   providerCode?: string
+  kindCodes: ReadonlyArray<string>
 }
 
 const maxAnthropicHttpErrorMessageCharacters = 1_000
@@ -1850,6 +1853,14 @@ const anthropicErrorProviderCode = (error: Schema.Json | undefined) =>
   stringField(error, 'type') ??
   stringField(error, 'code')
 
+/**
+ * The generic codes of an Anthropic error object (`type`, then `code`), classified when the
+ * reported `details.error_code` names no failure kind: a specific code must not hide an
+ * `overloaded_error` or `rate_limit_error` type.
+ */
+const anthropicErrorKindCodes = (error: Schema.Json | undefined): ReadonlyArray<string> =>
+  [stringField(error, 'type'), stringField(error, 'code')].filter(Predicate.isString)
+
 /** The bounded `error.message` and provider code of an Anthropic error envelope, when present. */
 export const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
   Schema.decodeUnknownEffect(JsonFromJsonString)(raw).pipe(
@@ -1858,7 +1869,7 @@ export const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<Anthrop
       const message = stringField(error, 'message')
       const providerCode = anthropicErrorProviderCode(error)
 
-      const fields: AnthropicHttpErrorInfoFields = {}
+      const fields: AnthropicHttpErrorInfoFields = { kindCodes: anthropicErrorKindCodes(error) }
 
       if (message !== undefined) {
         fields.message = boundedAnthropicHttpErrorMessage(message)
@@ -1870,18 +1881,20 @@ export const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<Anthrop
 
       return fields
     }),
-    Effect.catch(() => Effect.succeed({}))
+    Effect.catch(() => Effect.succeed({ kindCodes: [] }))
   )
 
 type AnthropicProviderSignalClassifyFields = {
   provider: string
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
   fallbackKind?: ProviderFailureKind
 }
 
 type AnthropicProviderSignalInputFields = {
   message: string
+  kindCodes: ReadonlyArray<string>
   providerCode?: string
 }
 
@@ -1891,6 +1904,7 @@ type AnthropicHttpClassifyFields = {
   headers: HttpClientResponse.HttpClientResponse['headers']
   body: string
   echoedValues: ReadonlyArray<string>
+  kindCodes: ReadonlyArray<string>
   message?: string
   providerCode?: string
   quotaResetsAtMs?: number
@@ -1899,13 +1913,15 @@ type AnthropicHttpClassifyFields = {
 const providerSignalError = (input: {
   readonly message: string
   readonly providerCode?: string
+  readonly kindCodes?: ReadonlyArray<string>
   readonly fallbackKind?: ProviderFailureKind
 }) => {
   const provider = classifyProviderFailure(
     (() => {
       const fields: AnthropicProviderSignalClassifyFields = {
         provider: anthropicClaudeProvider,
-        message: input.message
+        message: input.message,
+        kindCodes: input.kindCodes ?? []
       }
 
       if (input.providerCode !== undefined) {
@@ -2487,7 +2503,8 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         providerSignalError(
           (() => {
             const fields: AnthropicProviderSignalInputFields = {
-              message: stringField(error, 'message') ?? 'Anthropic Claude stream error'
+              message: stringField(error, 'message') ?? 'Anthropic Claude stream error',
+              kindCodes: anthropicErrorKindCodes(error)
             }
 
             if (providerCode !== undefined) {
@@ -2728,7 +2745,8 @@ const sendAnthropicClaudeRequest = (
             status: response.status,
             headers: response.headers,
             body: errorText,
-            echoedValues: [request.model]
+            echoedValues: [request.model],
+            kindCodes: errorInfo.kindCodes
           }
 
           if (quotaResetsAtMs !== undefined) {

@@ -459,8 +459,9 @@ policy and emits protocol-visible retry/error state:
 - Claude subscription (`anthropic_claude`) HTTP and stream errors use `error.details.error_code`
   (for example `claude_code_version_too_old`), then `error.type`, then `error.code`; so do native
   Messages HTTP errors (OpenCode Go `messages`), so an unknown model reads `not_found_error`.
-- Retryability comes from structured fields: a provider code that names a kind, then the HTTP
-  status. Upstream text only refines a status (an Anthropic 400 "prompt is too long" is
+- Retryability comes from structured fields: a provider code that names a kind (for Claude and
+  Messages, `error.type` when `details.error_code` names none), then the HTTP status (a 408 is a
+  retryable `network` failure). Upstream text only refines a status (an Anthropic 400 "prompt is too long" is
   `context_overflow`) and decides alone only when there is no status (stream error events); it
   never makes a 4xx such as a 404 model error retryable. Request values the upstream echoes (the
   model id, the Gateway's `param.modelId`) are ignored in that text.

@@ -1,4 +1,5 @@
-import { Predicate } from 'effect'
+import { Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
   ProviderErrorInfo,
   type AgentErrorCode,
@@ -16,10 +17,16 @@ type ProviderFailureInput = {
   readonly message?: string
   readonly providerCode?: string
   /**
-   * Request values the provider may echo back in its error text (the requested model id, an
-   * envelope `param` such as the Gateway's `param.modelId`). They are removed from `message` and
-   * `body` before the text fallback, so a model id containing words such as "overload" or
-   * "rate_limit" never decides the failure kind.
+   * Further structured codes, in order, consulted when `providerCode` names no kind: Anthropic
+   * reports the specific `details.error_code` as `providerCode` and classifies from `error.type`.
+   * They are never reported.
+   */
+  readonly kindCodes?: ReadonlyArray<string>
+  /**
+   * Request values the provider may echo back in its error text (the requested model id, the
+   * Gateway's `param.modelId`). They are removed from `message` and the decoded `body` before the
+   * text fallback, so a model id containing words such as "overload" or "rate_limit" never decides
+   * the failure kind. Values shorter than three characters are ignored.
    */
   readonly echoedValues?: ReadonlyArray<string>
   readonly fallbackKind?: ProviderFailureKind
@@ -122,6 +129,11 @@ const kindFromStatus = (status: number | undefined): ProviderFailureKind | undef
     return 'auth'
   }
 
+  // A request timeout: the request never got an answer, so it is a transport failure.
+  if (status === 408) {
+    return 'network'
+  }
+
   if (status >= 500) {
     return 'server_error'
   }
@@ -130,16 +142,49 @@ const kindFromStatus = (status: number | undefined): ProviderFailureKind | undef
 }
 
 /**
- * The request values an error envelope's `param` echoes: a parameter name (OpenAI `'model'`) or
- * the string fields of an object (the Gateway's `{ modelId }`). Anything else echoes nothing.
+ * The request values an error envelope's `param` echoes: the string fields of an object (the
+ * Gateway's `{ modelId }`). A string `param` (OpenAI `'input'`, `'messages'`) names the rejected
+ * parameter, not a value the request sent, so it echoes nothing; so does anything else.
  */
-export const echoedParamValues = (param: unknown): ReadonlyArray<string> => {
-  if (Predicate.isString(param)) {
-    return [param]
+export const echoedParamValues = (param: unknown): ReadonlyArray<string> =>
+  Predicate.isObject(param) ? Object.values(param).filter(Predicate.isString) : []
+
+/** Shorter echoed values could match inside ordinary words, so they are never removed. */
+const minEchoedValueLength = 3
+
+const JsonFromString = Schema.fromJsonString(Schema.Json)
+
+const isJsonArray = (value: Schema.JsonArray | Schema.JsonObject): value is Schema.JsonArray =>
+  Array.isArray(value)
+
+/**
+ * The string values of a decoded JSON body (its keys and the `param` subtree, which holds request
+ * values, left out), so echoed values compare against decoded text, never JSON escapes.
+ */
+const jsonStrings = (value: Schema.Json): ReadonlyArray<string> => {
+  if (Predicate.isString(value)) {
+    return [value]
   }
 
-  return Predicate.isObject(param) ? Object.values(param).filter(Predicate.isString) : []
+  if (value === null || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
+    return []
+  }
+
+  if (isJsonArray(value)) {
+    return value.flatMap(item => jsonStrings(item))
+  }
+
+  return Object.entries(value).flatMap(([key, field]) =>
+    key === 'param' ? [] : jsonStrings(field)
+  )
 }
+
+/** A JSON body as its decoded strings; any other body as its text. */
+const bodyText = (body: string): string =>
+  Option.match(Schema.decodeUnknownOption(JsonFromString)(body), {
+    onNone: () => body,
+    onSome: json => jsonStrings(json).join(' ')
+  })
 
 /** The free text of a failure, lower-cased, with every echoed request value removed. */
 const scannedText = (input: ProviderFailureInput) =>
@@ -147,9 +192,9 @@ const scannedText = (input: ProviderFailureInput) =>
     (text, value) => {
       const echoed = value.trim().toLowerCase()
 
-      return echoed.length === 0 ? text : text.replaceAll(echoed, ' ')
+      return echoed.length < minEchoedValueLength ? text : text.replaceAll(echoed, ' ')
     },
-    [input.message, input.body]
+    [input.message, input.body === undefined ? undefined : bodyText(input.body)]
       .filter(value => value !== undefined)
       .join(' ')
       .toLowerCase()
@@ -210,8 +255,8 @@ export const providerFailureRetryable = (kind: ProviderFailureKind) => {
 }
 
 /**
- * Classify from structured fields first: the vendor's `providerCode` (`error.type`/`code`) when it
- * names a kind, then the HTTP status. Free text (`message`, `body`, echoed request values removed)
+ * Classify from structured fields first: the vendor's `providerCode` (`error.type`/`code`), then
+ * its `kindCodes`, when one names a kind, then the HTTP status. Free text (`message`, `body`, echoed request values removed)
  * is the fallback when no status exists (stream error events), and otherwise only refines the
  * status: it may name a non-retryable kind (an Anthropic 400 "prompt is too long" is
  * `context_overflow`) or a more specific retryable one for a retryable status (a 503 "service
@@ -219,11 +264,12 @@ export const providerFailureRetryable = (kind: ProviderFailureKind) => {
  * error, a 401) leaves non-retryable.
  */
 export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind => {
-  const fromCode =
-    input.providerCode === undefined ? undefined : kindFromSignal(input.providerCode.toLowerCase())
+  for (const code of [input.providerCode, ...(input.kindCodes ?? [])]) {
+    const fromCode = code === undefined ? undefined : kindFromSignal(code.toLowerCase())
 
-  if (fromCode !== undefined) {
-    return fromCode
+    if (fromCode !== undefined) {
+      return fromCode
+    }
   }
 
   const fromStatus = kindFromStatus(input.status)

@@ -39,6 +39,7 @@ type AnthropicMessagesClassifyFields = {
   headers: HttpClientResponse.HttpClientResponse['headers']
   body: string
   echoedValues: ReadonlyArray<string>
+  kindCodes: ReadonlyArray<string>
   message?: string
   providerCode?: string
 }
@@ -159,7 +160,8 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
                       status: response.status,
                       headers: response.headers,
                       body,
-                      echoedValues: [request.model]
+                      echoedValues: [request.model],
+                      kindCodes: errorInfo.kindCodes
                     }
 
                     if (errorInfo.message !== undefined) {

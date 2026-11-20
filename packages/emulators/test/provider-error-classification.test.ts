@@ -414,6 +414,95 @@ describe('a 5xx that echoes a model id naming a context overflow', () => {
   )
 })
 
+describe('echoed values are removed from the decoded JSON body', () => {
+  // The echo with its slash escaped (`\/`, `\u002f`): removal from the raw text misses it.
+  for (const message of [
+    'Model acme\\/context_length-preview is temporarily unavailable',
+    'Model acme\\u002fcontext_length-preview is temporarily unavailable'
+  ]) {
+    it.effect(`the Gateway 503 "${message}" stays a retryable server error`, () =>
+      Effect.gen(function* () {
+        const error = yield* gatewayTarget.failWith(
+          {
+            kind: 'status',
+            status: 503,
+            body: `{"error":{"message":"${message}","type":"upstream_error"}}`
+          },
+          contextLengthModel
+        )
+
+        expect(error).toMatchObject({
+          retryable: true,
+          provider: { kind: 'server_error', status: 503, providerCode: 'upstream_error' }
+        })
+      })
+    )
+  }
+})
+
+describe('a string param names a parameter, not an echoed value', () => {
+  for (const target of openAiEnvelopeTargets) {
+    it.effect(
+      `${target.name}: a 400 "input is too long" with param input is a context overflow`,
+      () =>
+        Effect.gen(function* () {
+          const error = yield* target.failWith(
+            {
+              kind: 'status',
+              status: 400,
+              body: {
+                error: {
+                  message: 'input is too long',
+                  type: 'invalid_request_error',
+                  param: 'input'
+                }
+              }
+            },
+            'gpt-4.1-nano'
+          )
+
+          expect(error).toMatchObject({
+            cause: 'context_overflow',
+            retryable: false,
+            provider: { kind: 'context_overflow', status: 400 }
+          })
+        })
+    )
+  }
+})
+
+describe('Anthropic errors classify from error.type behind a details.error_code', () => {
+  // A guard: the status and text also name this overload. The stream case without a status,
+  // where only the type names it, is in `claude-provider.test.ts`.
+  for (const target of anthropicEnvelopeTargets) {
+    it.effect(`${target.name}: a 500 overloaded_error with an error_code is an overload`, () =>
+      Effect.gen(function* () {
+        const error = yield* target.failWith(
+          {
+            kind: 'status',
+            status: 500,
+            body: {
+              type: 'error',
+              error: {
+                type: 'overloaded_error',
+                message: 'Try again soon.',
+                details: { error_code: 'capacity_exhausted' }
+              }
+            }
+          },
+          'claude-haiku-4-5'
+        )
+
+        expect(error).toMatchObject({
+          cause: 'overloaded',
+          retryable: true,
+          provider: { kind: 'overloaded', status: 500, providerCode: 'capacity_exhausted' }
+        })
+      })
+    )
+  }
+})
+
 describe('the native Messages layer surfaces the envelope error.type', () => {
   it.effect('an unknown model is a non-retryable 404 with providerCode not_found_error', () =>
     Effect.gen(function* () {
@@ -445,7 +534,7 @@ describe('the native Messages layer surfaces the envelope error.type', () => {
 
 describe('genuinely retryable failures stay retryable', () => {
   for (const target of allTargets) {
-    it.effect(`${target.name}: 429, 500, and 503 are retryable`, () =>
+    it.effect(`${target.name}: 429, 408, 500, and 503 are retryable`, () =>
       Effect.gen(function* () {
         const rateLimited = yield* target.failWith({ kind: 'status', status: 429 }, overloadedModel)
 
@@ -453,6 +542,13 @@ describe('genuinely retryable failures stay retryable', () => {
           cause: 'rate_limit',
           retryable: true,
           provider: { kind: 'rate_limit', status: 429 }
+        })
+
+        const timedOut = yield* target.failWith({ kind: 'status', status: 408 }, overloadedModel)
+
+        expect(timedOut, '408').toMatchObject({
+          retryable: true,
+          provider: { kind: 'network', status: 408 }
         })
 
         for (const status of [500, 503]) {
