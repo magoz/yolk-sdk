@@ -9,10 +9,11 @@
  *
  * Each emulator subpath (`gateway`, `openai`) supplies what differs: the path and route evidence
  * manifest, model lists, the error envelope and the unknown-model status and error, the 401
- * error, the completion-token request field, whether reasoning is emulated, its scripted-turn
- * schema, and its wire profile (`ChatWireProfile`: events per network chunk, usage placement, the
- * reasoning field, and extra per-chunk fields). Without a profile the plain OpenAI Chat
- * Completions wire is sent.
+ * error, the completion-token request field, whether and how reasoning is emulated (streamed
+ * reasoning text on request, or hidden reasoning reported only as usage reasoning tokens), the
+ * request parameters reasoning models reject, its scripted-turn schema, and its wire profile
+ * (`ChatWireProfile`: events per network chunk, usage placement, the reasoning field, and extra
+ * per-chunk fields). Without a profile the plain OpenAI Chat Completions wire is sent.
  *
  * Runtime-portable Web APIs only (`Request`, `Response`, `ReadableStream`, `TextEncoder`, `URL`);
  * no Node builtins and no SDK imports.
@@ -168,6 +169,8 @@ export type ChatLedgerEntry = {
   readonly reasoningEffort?: string
   readonly thinking?: Schema.Json
   readonly toolNames: ReadonlyArray<string>
+  /** The request parameter the model rejected (answered 400 with the emulator's error). */
+  readonly unsupportedParameter?: string
   /** Kind of the fault that shaped the response. */
   readonly fault?: ChatFaultKind
   /** Why a matching fault could not take effect (the response was a 500 emulator error). */
@@ -199,7 +202,27 @@ export type ChatWireError = {
   readonly message: string
   readonly type: string
   readonly code: string
+  /** The request parameter the error names, for envelopes that carry one (OpenAI `param`). */
+  readonly param?: string
 }
+
+/** A request parameter a model rejects, and the error it answers (status 400). */
+export type ChatUnsupportedParameter = {
+  /** Top-level request key; present with any non-null value, it is rejected. */
+  readonly parameter: string
+  readonly error: ChatWireError
+}
+
+/**
+ * How reasoning models reason (only with `reasoningModels`):
+ *
+ * - `requested-deltas` (default; the Gateway): a reasoning model streams reasoning text only when
+ *   the request asks for it (`reasoning_effort` other than `none`, or `thinking.type: 'enabled'`).
+ * - `hidden` (OpenAI): a reasoning model always reasons unless `reasoning_effort` is `none`, never
+ *   sends reasoning text, and reports it only as `completion_tokens_details.reasoning_tokens` in
+ *   usage (0 when it did not reason).
+ */
+export type ChatReasoningOutput = 'requested-deltas' | 'hidden'
 
 /** The id and model every chunk of one emulated response repeats. */
 export type ChatResponseIdentity = { readonly id: string; readonly model: string }
@@ -257,11 +280,19 @@ export type ChatCompletionsEmulatorConfig<Turn extends ChatScriptedReasoningTurn
   readonly routes: ReadonlyArray<EmulatorRouteEvidence>
   readonly knownModels: ReadonlyArray<string>
   /**
-   * Streamed reasoning: `undefined` when the emulator does not emulate reasoning (default plans
-   * never reason and `/_emulate/state` omits `reasoningModels`); otherwise the models that stream
-   * reasoning when a request asks for it.
+   * Reasoning: `undefined` when the emulator does not emulate reasoning (default plans never
+   * reason and `/_emulate/state` omits `reasoningModels`); otherwise the models that reason, as
+   * `reasoningOutput` describes.
    */
   readonly reasoningModels: ReadonlyArray<string> | undefined
+  /** How reasoning models reason; default `requested-deltas`. */
+  readonly reasoningOutput?: ChatReasoningOutput
+  /**
+   * Request parameters reasoning models (`reasoningModels`) reject, checked in order after model
+   * validation (never for a scripted turn): the first present one answers 400 with its error,
+   * writes `unsupportedParameter` to the ledger, and uses up no fault. Default: none.
+   */
+  readonly reasoningModelUnsupportedParameters?: ReadonlyArray<ChatUnsupportedParameter>
   /** Renders a wire error as the service's JSON error envelope. */
   readonly errorEnvelope: (error: ChatWireError) => Schema.Json
   /**
@@ -327,6 +358,11 @@ const bearerPattern = /^bearer\s+\S+/i
 
 type CompletionPlan = {
   readonly reasoning: ReadonlyArray<string>
+  /**
+   * `sent`: reasoning text goes on the wire (and usage reports reasoning tokens only when there
+   * is some); `hidden`: never on the wire, and usage always reports reasoning tokens.
+   */
+  readonly reasoningVisibility: 'sent' | 'hidden'
   readonly reasoningField: 'reasoning_content' | 'reasoning'
   readonly order: 'reasoning-first' | 'text-first'
   readonly text: ReadonlyArray<string>
@@ -342,14 +378,21 @@ type CompletionPlan = {
 
 const defaultReasoning = ['The user wants a short reply.', ' Keep it brief.']
 
+const requestedEffort = (request: ChatRequest): string | undefined =>
+  request.reasoning_effort?.trim().toLowerCase()
+
 const reasoningRequested = (request: ChatRequest): boolean => {
-  const effort = request.reasoning_effort?.trim().toLowerCase()
+  const effort = requestedEffort(request)
 
   return (
     (effort !== undefined && effort.length > 0 && effort !== 'none') ||
     stringField(request.thinking, 'type') === 'enabled'
   )
 }
+
+/** Whether a reasoning model reasons for this request, per the emulator's reasoning output. */
+const reasons = (request: ChatRequest, output: ChatReasoningOutput): boolean =>
+  output === 'hidden' ? requestedEffort(request) !== 'none' : reasoningRequested(request)
 
 const chosenTool = (request: ChatRequest) => {
   const tools = request.tools ?? []
@@ -363,25 +406,34 @@ const chosenTool = (request: ChatRequest) => {
   return tools.find(tool => tool.function.name === forced) ?? tools[0]
 }
 
+/** How one request's reasoning model status and the emulator's reasoning output shape a plan. */
+type PlanReasoning = {
+  readonly reasoningModel: boolean
+  readonly output: ChatReasoningOutput
+  readonly field: CompletionPlan['reasoningField']
+}
+
+const visibilityOf = (reasoning: PlanReasoning): CompletionPlan['reasoningVisibility'] =>
+  reasoning.reasoningModel && reasoning.output === 'hidden' ? 'hidden' : 'sent'
+
 const defaultPlan = (
   request: ChatRequest,
   seq: number,
-  reasoningModels: ReadonlyArray<string>,
-  defaultText: ReadonlyArray<string>,
-  reasoningField: CompletionPlan['reasoningField']
+  planReasoning: PlanReasoning,
+  defaultText: ReadonlyArray<string>
 ): CompletionPlan => {
   const reasoning =
-    request.model !== undefined &&
-    reasoningModels.includes(request.model) &&
-    reasoningRequested(request)
-      ? defaultReasoning
-      : []
+    planReasoning.reasoningModel && reasons(request, planReasoning.output) ? defaultReasoning : []
 
   const tool = chosenTool(request)
 
-  const base: Pick<CompletionPlan, 'reasoning' | 'reasoningField' | 'order' | 'usage'> = {
+  const base: Pick<
+    CompletionPlan,
+    'reasoning' | 'reasoningVisibility' | 'reasoningField' | 'order' | 'usage'
+  > = {
     reasoning,
-    reasoningField,
+    reasoningVisibility: visibilityOf(planReasoning),
+    reasoningField: planReasoning.field,
     order: 'reasoning-first',
     usage: undefined
   }
@@ -411,7 +463,7 @@ const defaultPlan = (
 const scriptedPlan = (
   turn: ChatScriptedReasoningCompletion,
   seq: number,
-  reasoningField: CompletionPlan['reasoningField']
+  planReasoning: PlanReasoning
 ): CompletionPlan => {
   const toolCalls = (turn.toolCalls ?? []).map((call, index) => ({
     id: call.id ?? `call_synthetic_${seq}_${index}`,
@@ -421,7 +473,8 @@ const scriptedPlan = (
 
   return {
     reasoning: turn.reasoning ?? [],
-    reasoningField: turn.reasoningField ?? reasoningField,
+    reasoningVisibility: visibilityOf(planReasoning),
+    reasoningField: turn.reasoningField ?? planReasoning.field,
     order: turn.order ?? 'reasoning-first',
     text: turn.text ?? [],
     toolCalls,
@@ -550,10 +603,16 @@ const usageCounts = (plan: CompletionPlan, requestText: string): ChatUsageCounts
     ...plan.toolCalls.flatMap(call => call.fragments)
   ].join('')
 
+  // Completion tokens include the reasoning tokens, sent or hidden.
   return {
     promptTokens: approximateTokens(requestText),
     completionTokens: approximateTokens(outputText),
-    reasoningTokens: reasoningText.length > 0 ? approximateTokens(reasoningText) : undefined
+    reasoningTokens:
+      reasoningText.length > 0
+        ? approximateTokens(reasoningText)
+        : plan.reasoningVisibility === 'hidden'
+          ? 0
+          : undefined
   }
 }
 
@@ -638,7 +697,10 @@ const streamEvents = (
     finish_reason: finishReason
   })
 
+  // Hidden reasoning never goes on the wire: usage reports it as reasoning tokens.
   const reasoningEvents = () => {
+    if (plan.reasoningVisibility === 'hidden') return
+
     for (const text of plan.reasoning) {
       event([choice(reasoningDelta(plan.reasoningField, text, wire.reasoningDetails))])
     }
@@ -705,9 +767,11 @@ const completionBody = (
     content: plan.text.length > 0 ? plan.text.join('') : null
   }
 
-  if (plan.reasoning.length > 0 && plan.reasoningField === 'reasoning') {
+  const sendsReasoning = plan.reasoningVisibility === 'sent' && plan.reasoning.length > 0
+
+  if (sendsReasoning && plan.reasoningField === 'reasoning') {
     message.reasoning = plan.reasoning.join('')
-  } else if (plan.reasoning.length > 0) {
+  } else if (sendsReasoning) {
     message.reasoning_content = plan.reasoning.join('')
   }
 
@@ -742,6 +806,7 @@ type MutableLedgerEntry = KernelLedgerEntry<ChatFaultKind> & {
   reasoningEffort?: string
   thinking?: Schema.Json
   toolNames: ReadonlyArray<string>
+  unsupportedParameter?: string
   scripted?: 'completion' | 'error'
 }
 
@@ -751,17 +816,38 @@ type MutableLedgerEntry = KernelLedgerEntry<ChatFaultKind> & {
  *
  * Precedence per chat request: authentication and JSON validation, then the
  * first matching fault if it is a `status` fault, then the next scripted
- * turn, then model validation and defaults; a first matching chunk fault then
- * shapes the body. Only the first matching fault (in insertion order)
- * applies. Credential headers are never recorded, and the bearer value is
- * never checked or stored.
+ * turn, then model validation, unsupported parameters, and defaults; a first
+ * matching chunk fault then shapes the body. Only the first matching fault (in
+ * insertion order) applies. Credential headers are never recorded, and the
+ * bearer value is never checked or stored.
  */
 export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTurn>(
   config: ChatCompletionsEmulatorConfig<Turn>
 ): ChatCompletionsEmulator<Turn> => {
   const knownModels = [...config.knownModels]
   const reasoningModels = config.reasoningModels === undefined ? [] : [...config.reasoningModels]
+  const reasoningOutput = config.reasoningOutput ?? 'requested-deltas'
   const wire = resolveWireProfile(config.wire)
+
+  const reasoningModelUnsupportedParameters = [
+    ...(config.reasoningModelUnsupportedParameters ?? [])
+  ]
+
+  const isReasoningModel = (model: string | undefined): boolean =>
+    model !== undefined && reasoningModels.includes(model)
+
+  /** The first listed parameter a reasoning model's request carries with a non-null value. */
+  const unsupportedParameterOf = (
+    json: Schema.Json,
+    model: string | undefined
+  ): ChatUnsupportedParameter | undefined =>
+    isReasoningModel(model)
+      ? reasoningModelUnsupportedParameters.find(rule => {
+          const value = jsonField(json, rule.parameter)
+
+          return value !== undefined && value !== null
+        })
+      : undefined
 
   const unknownModelResponse = (model: string | undefined): Response =>
     'body' in config.unknownModel
@@ -881,12 +967,27 @@ export const makeChatCompletionsEmulator = <Turn extends ChatScriptedReasoningTu
       return unknownModelResponse(chat.model)
     }
 
+    const unsupported = turn === undefined ? unsupportedParameterOf(json, chat.model) : undefined
+
+    if (unsupported !== undefined) {
+      entry.status = 400
+      entry.unsupportedParameter = unsupported.parameter
+
+      return errorResponse(400, unsupported.error)
+    }
+
     if (turn !== undefined) entry.scripted = 'completion'
+
+    const planReasoning: PlanReasoning = {
+      reasoningModel: isReasoningModel(chat.model),
+      output: reasoningOutput,
+      field: wire.reasoningField
+    }
 
     const plan =
       turn === undefined
-        ? defaultPlan(chat, seq, reasoningModels, config.defaultText, wire.reasoningField)
-        : scriptedPlan(turn, seq, wire.reasoningField)
+        ? defaultPlan(chat, seq, planReasoning, config.defaultText)
+        : scriptedPlan(turn, seq, planReasoning)
 
     const identity: ChatResponseIdentity = {
       id: `${config.responseIdPrefix}-${seq}`,

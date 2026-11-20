@@ -5,9 +5,9 @@
  * subscription provider).
  *
  * The current fixtures are synthetic placeholders (`evidence: 'unverified'`) shaped like the
- * OpenAI Chat Completions and Responses wires; live probes replace them with verified recordings
- * (`pnpm conformance:openai`; `pnpm conformance:codex`, subscription OAuth, owner approval
- * required).
+ * OpenAI Chat Completions (including a reasoning model) and Responses wires; live probes replace
+ * them with verified recordings (`pnpm conformance:openai`; `pnpm conformance:codex`,
+ * subscription OAuth, owner approval required).
  *
  * Also exports the Codex subscription-usage case and fixture (`openAiCodexUsageSnapshotCase`,
  * `OpenAiCodexUsageConformanceConfig`; `pnpm conformance:usage --family codex`), kept apart from
@@ -18,8 +18,11 @@ import {
   OpenAiConformanceConfig,
   openAiChatErrorEnvelopeCase,
   openAiChatJsonPlainTextCase,
+  openAiChatJsonReasoningUsageCase,
   openAiChatPlainTextCase,
+  openAiChatReasoningEffortCase,
   openAiChatToolCallDeltasCase,
+  openAiChatUnsupportedParameterCase,
   openAiConformanceCases,
   openAiConformanceChatCompletionsUrl,
   openAiConformanceDefaultModels,
@@ -58,15 +61,21 @@ import {
 import { openAiCodexUsageSnapshotFixture } from './codex-usage-snapshot.ts'
 import { openAiChatErrorEnvelopeFixture } from './error-envelope.ts'
 import { openAiChatJsonPlainTextFixture } from './json-plain-text.ts'
+import { openAiChatJsonReasoningUsageFixture } from './json-reasoning-usage.ts'
 import { openAiChatPlainTextFixture } from './plain-text.ts'
+import { openAiChatReasoningEffortFixture } from './reasoning-effort.ts'
 import { openAiChatToolCallDeltasFixture } from './tool-call-deltas.ts'
+import { openAiChatUnsupportedParameterFixture } from './unsupported-parameter.ts'
 
 export {
   OpenAiConformanceConfig,
   openAiChatErrorEnvelopeCase,
   openAiChatJsonPlainTextCase,
+  openAiChatJsonReasoningUsageCase,
   openAiChatPlainTextCase,
+  openAiChatReasoningEffortCase,
   openAiChatToolCallDeltasCase,
+  openAiChatUnsupportedParameterCase,
   openAiConformanceCases,
   openAiConformanceChatCompletionsUrl,
   openAiConformanceDefaultModels,
@@ -76,8 +85,11 @@ export {
   type OpenAiConformanceSettings,
   openAiChatErrorEnvelopeFixture,
   openAiChatJsonPlainTextFixture,
+  openAiChatJsonReasoningUsageFixture,
   openAiChatPlainTextFixture,
+  openAiChatReasoningEffortFixture,
   openAiChatToolCallDeltasFixture,
+  openAiChatUnsupportedParameterFixture,
   OpenAiCodexConformanceConfig,
   openAiCodexConformanceCases,
   openAiCodexConformanceDefaultModels,
@@ -109,7 +121,10 @@ export const openAiConformanceFixtures: ReadonlyArray<WireFixture> = [
   openAiChatPlainTextFixture,
   openAiChatToolCallDeltasFixture,
   openAiChatErrorEnvelopeFixture,
-  openAiChatJsonPlainTextFixture
+  openAiChatJsonPlainTextFixture,
+  openAiChatReasoningEffortFixture,
+  openAiChatJsonReasoningUsageFixture,
+  openAiChatUnsupportedParameterFixture
 ]
 
 /** Every Codex Responses wire fixture, for replaying the Codex conformance suite at once. */

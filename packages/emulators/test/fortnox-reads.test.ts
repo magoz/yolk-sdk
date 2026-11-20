@@ -986,10 +986,53 @@ describe('the real connector against the read-only routes', () => {
 })
 
 describe('manifest', () => {
-  it('lists 34 read-only routes, none a write, none citing a case', () => {
+  it('lists 34 read-only routes, none a write, each citing the read case that records it', () => {
     const reads = fortnoxEmulatorRoutes.slice(10)
 
     expect(reads).toHaveLength(34)
-    expect(reads.filter(route => route.write || route.caseIds.length > 0)).toEqual([])
+    expect(reads.filter(route => route.write || route.caseIds.length === 0)).toEqual([])
+    expect(
+      Object.fromEntries(reads.map(route => [`${route.method} ${route.path}`, route.caseIds]))
+    ).toEqual({
+      'GET /3/articles': [
+        'fortnox.article.list-row-numeric-strings',
+        'fortnox.price.tier-matches-sublist'
+      ],
+      'GET /3/articles/{ArticleNumber}': ['fortnox.article.list-row-numeric-strings'],
+      'GET /3/pricelists': ['fortnox.price.tier-matches-sublist'],
+      'GET /3/pricelists/{Code}': ['fortnox.price.tier-matches-sublist'],
+      'GET /3/prices/sublist/{PriceList}/{ArticleNumber}': ['fortnox.price.tier-matches-sublist'],
+      'GET /3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}': [
+        'fortnox.price.tier-matches-sublist'
+      ],
+      'GET /3/costcenters': ['fortnox.cost-center.list-matches-get'],
+      'GET /3/costcenters/{Code}': ['fortnox.cost-center.list-matches-get'],
+      'GET /3/invoicepayments': ['fortnox.payment.invoice-payment-wire-numbers'],
+      'GET /3/invoicepayments/{Number}': ['fortnox.payment.invoice-payment-wire-numbers'],
+      'GET /3/supplierinvoicepayments': ['fortnox.payment.supplier-payment-wire-numbers'],
+      'GET /3/supplierinvoicepayments/{Number}': ['fortnox.payment.supplier-payment-wire-numbers'],
+      'GET /3/offers': ['fortnox.offer.rows-on-get-and-preview-pdf'],
+      'GET /3/offers/{DocumentNumber}': ['fortnox.offer.rows-on-get-and-preview-pdf'],
+      'GET /3/offers/{DocumentNumber}/preview': ['fortnox.offer.rows-on-get-and-preview-pdf'],
+      'GET /3/printtemplates': ['fortnox.print-templates.unpaginated'],
+      'GET /3/inbox': ['fortnox.inbox.file-bytes-match-size'],
+      'GET /3/inbox/{Id}': ['fortnox.inbox.file-bytes-match-size'],
+      'GET /3/settings/company': ['fortnox.settings.company-and-locked-period'],
+      'GET /3/settings/lockedperiod': ['fortnox.settings.company-and-locked-period'],
+      'GET /3/predefinedaccounts': ['fortnox.settings.predefined-accounts-and-labels'],
+      'GET /3/predefinedaccounts/{Name}': ['fortnox.settings.predefined-accounts-and-labels'],
+      'GET /3/labels': ['fortnox.settings.predefined-accounts-and-labels'],
+      'GET /3/modesofpayments': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/modesofpayments/{Code}': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/termsofpayments': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/termsofpayments/{Code}': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/termsofdeliveries': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/termsofdeliveries/{Code}': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/wayofdeliveries': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/wayofdeliveries/{Code}': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/units': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/units/{Code}': ['fortnox.settings.registers-list-matches-get'],
+      'GET /3/me': ['fortnox.profile.me']
+    })
   })
 })

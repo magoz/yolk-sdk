@@ -16,7 +16,7 @@ Emulators never import other `@yolk-sdk/*` code: their wire shapes follow confor
 (verified recordings for the Gateway, synthetic placeholders elsewhere), and each emulated route
 names the conformance cases behind it. The Fortnox emulator is a stateful stand-in for the Fortnox
 `/3` API that reproduces the observed quirks the Fortnox conformance cases claim (and answers the
-connector's other reads with unverified synthetic shapes), the Microsoft
+connector's other reads with the unverified synthetic shapes of its read case fixtures), the Microsoft
 Graph emulator is a stateful stand-in for the Outlook, calendar, and OneDrive routes the Microsoft
 conformance cases use. The Dropbox, Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, and
 MCP emulators are stateful, fixture-only stand-ins for the Dropbox RPC and upload routes, the Notion
@@ -218,13 +218,28 @@ What differs:
 - Streaming uses the plain OpenAI framing: one event per network chunk, a
   `{ role: 'assistant', content: '' }` opening delta, and usage in a trailing chunk with empty
   `choices`, without the Gateway's metadata fields.
-- `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`).
+- `knownModels` defaults to `openAiEmulatorDefaultModels` (`gpt-4.1-nano`, `gpt-4.1-mini`,
+  `gpt-6-luna`); `reasoningModels` defaults to `openAiEmulatorDefaultReasoningModels`
+  (`gpt-6-luna`), and `/_emulate/state` lists them.
 - Errors use the OpenAI envelope `{ error: { message, type, param, code } }`; an unknown model gets
   404 with code `model_not_found`, and a missing `Authorization: Bearer <non-empty>` header gets
   401 with code `invalid_api_key`. The token is never checked or stored.
 - The ledger records `max_completion_tokens` as `maxCompletionTokens` (never validated).
-- Reasoning models are not emulated yet: no default output streams reasoning, scripted turns
-  reject `reasoning`, `reasoningField`, and `order`, and `/_emulate/state` has no `reasoningModels`.
+- Reasoning models follow the three synthetic reasoning fixtures in
+  `@yolk-sdk/agent/providers/openai/conformance`: a reasoning model takes `reasoning_effort` and
+  `max_completion_tokens`, sends no reasoning text, and reports its reasoning only as
+  `usage.completion_tokens_details.reasoning_tokens`, counted in `completion_tokens`. Other models
+  keep the plain usage (no `completion_tokens_details`). Synthetic, not fixture-backed:
+  `reasoning_effort: 'none'` reports 0 reasoning tokens.
+- A reasoning model answers a non-null `max_tokens` with the unsupported-parameter fixture's 400
+  `{ error: { message, type: 'invalid_request_error', param: 'max_tokens', code:
+'unsupported_parameter' } }` after model validation (never for a scripted turn), uses up no
+  fault, and sets the ledger's `unsupportedParameter`. Not emulated until a fixture backs them:
+  sampling parameter rules (`temperature`, `top_p`, `logprobs`, `top_logprobs` are accepted),
+  `reasoning_effort` on a model that does not reason (recorded and ignored), and per-model effort
+  values (not checked).
+- Scripted turns reject `reasoning`, `reasoningField`, and `order` (the wire has no reasoning
+  text); script a reasoning model's reasoning as `usage.reasoningTokens`.
 - Invalid faults or turns throw `OpenAiEmulatorInputInvalid`.
 
 ```ts
@@ -705,10 +720,18 @@ downloads):
 | `GET /3/modesofpayments`, `termsofpayments`, `termsofdeliveries`, `wayofdeliveries`, `units` (and `/{Code}`)    | `page`/`limit`, `MetaInformation`; a mode of payment's `AccountNumber` is a string in list rows                                                                                                                                        |
 | `GET /3/me`                                                                                                     | `{ Me }`                                                                                                                                                                                                                               |
 
-`GET /3/companyinformation`, `GET /3/customers`, and every read-only route above have no recorded
-fixture: they cite no conformance case ids, use minimal synthetic shapes named after the
-connector's read fields (in the wire types the connector's schemas accept), and are unverified,
-uncited read routes (the evidence check warns about them). Their writes (`POST`, `PUT`, `DELETE`,
+`GET /3/companyinformation`, `GET /3/customers`, and every read-only route above cite the Fortnox
+read conformance cases (`fortnox.company.information-decodes`, `fortnox.customer.list-matches-get`,
+and one case per resource module; see the
+[Fortnox guide](https://github.com/magoz/yolk-sdk/blob/main/apps/docs/content/docs/connectors/fortnox.mdx#conformance-cases)),
+whose synthetic fixtures are the source of these answers: bodies shaped from the Fortnox OpenAPI
+spec and archived resource pages (first rendered by the default seed, then checked against the
+spec). A test requires the default emulator to answer every read fixture request with the fixture's
+body byte for byte, so the emulator cannot drift; a fixture changes only for a cited spec or
+live-run reason. They use minimal synthetic shapes named after
+the connector's read fields (in the wire types the connector's schemas accept), are unverified, and
+answer requests no fixture records (other pages, filters, searches, ids) from the state. Their
+writes (`POST`, `PUT`, `DELETE`,
 and side-effecting `GET`s such as `/offers/{DocumentNumber}/email` and `/print`) are not emulated
 and fail closed with the 404 below: emulating a connector write needs a conformance case and its
 live run first. Lists of `/3/offers` filter on the stored fields (unverified: `expired` is an

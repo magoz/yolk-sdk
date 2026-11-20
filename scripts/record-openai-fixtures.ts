@@ -32,6 +32,7 @@ import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { Data, Effect, Layer, Redacted } from 'effect'
 import { FetchHttpClient, HttpClient } from 'effect/http'
+import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import {
   OpenAiConformanceConfig,
   openAiConformanceCases,
@@ -60,8 +61,12 @@ export type ProbeOptions = {
   readonly ownerApproved: boolean
   /** Model ids per case; default `openAiConformanceDefaultModels`. */
   readonly models: OpenAiConformanceModels
-  /** Sent as `max_completion_tokens`. */
+  /** Sent as `max_completion_tokens` (as `max_tokens` by the unsupported-parameter case). */
   readonly maxTokens: number
+  /** `max_completion_tokens` of the reasoning cases. */
+  readonly reasoningMaxTokens: number
+  /** `reasoning_effort` of the reasoning cases. */
+  readonly reasoningEffort: AgentReasoningEffort
   /** Synthetic, non-identifying fixture account label. Required with `--live`. */
   readonly account: string | undefined
 }
@@ -74,8 +79,17 @@ export const defaultProbeOptions: ProbeOptions = {
   ownerApproved: false,
   models: openAiConformanceDefaultModels,
   maxTokens: 64,
+  reasoningMaxTokens: 1024,
+  reasoningEffort: 'medium',
   account: undefined
 }
+
+/**
+ * Efforts the reasoning cases accept. `minimal` is left out: a correct API may report 0 reasoning
+ * tokens at that effort, which fails the cases' `reasoning > 0` claim. `xhigh` needs a larger
+ * `--reasoning-max-tokens`, since the limit bounds reasoning and answer tokens together.
+ */
+const reasoningEfforts: ReadonlyArray<AgentReasoningEffort> = ['low', 'medium', 'high', 'xhigh']
 
 const defaultModels = defaultProbeOptions.models
 
@@ -100,8 +114,17 @@ Options:
   --owner-approved                confirm the repository owner approved this live run
   --plain-model <id>              default ${defaultModels.plainText} (streamed and JSON plain text)
   --tool-model <id>               default ${defaultModels.toolCall}
+  --reasoning-model <id>          default ${defaultModels.reasoning} (a Chat Completions reasoning
+                                  model: reasoning cases and the max_tokens rejection)
   --invalid-model <id>            default ${defaultModels.invalid} (must NOT exist)
-  --max-tokens <n>                default ${defaultProbeOptions.maxTokens} (max_completion_tokens)
+  --max-tokens <n>                default ${defaultProbeOptions.maxTokens} (max_completion_tokens;
+                                  max_tokens in the unsupported-parameter case)
+  --reasoning-max-tokens <n>      default ${defaultProbeOptions.reasoningMaxTokens} (max_completion_tokens of the
+                                  reasoning cases)
+  --reasoning-effort <effort>     default ${defaultProbeOptions.reasoningEffort} (reasoning_effort of the reasoning
+                                  cases): low, medium, high, or xhigh (raise
+                                  --reasoning-max-tokens for xhigh); not minimal, which
+                                  may report no reasoning tokens
   --account <label>               required with --live: synthetic, non-identifying fixture
                                   account label (for example synthetic); never a real
                                   organization, project, or person name
@@ -174,12 +197,30 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>, env: ProbeEnv = {}):
       case '--tool-model':
         setModel('toolCall', value())
         break
+      case '--reasoning-model':
+        setModel('reasoning', value())
+        break
       case '--invalid-model':
         setModel('invalid', value())
         break
       case '--max-tokens':
         options.maxTokens = positiveInteger(flag, value())
         break
+      case '--reasoning-max-tokens':
+        options.reasoningMaxTokens = positiveInteger(flag, value())
+        break
+      case '--reasoning-effort': {
+        const effort = value()
+        const known = reasoningEfforts.find(candidate => candidate === effort)
+
+        if (known === undefined) {
+          throw new Error(`--reasoning-effort must be one of ${reasoningEfforts.join(', ')}`)
+        }
+
+        options.reasoningEffort = known
+        break
+      }
+
       case '--account':
         options.account = value()
         break
@@ -202,7 +243,8 @@ export const parseProbeArgs = (argv: ReadonlyArray<string>, env: ProbeEnv = {}):
 /**
  * Where a conformance case's recording is written. File and export names are stable so the
  * fixture modules and the conformance `index.ts` never change shape. `model` names the
- * `OpenAiConformanceModels` entry the case uses.
+ * `OpenAiConformanceModels` entry the case uses; `reasoning` marks the cases that use the
+ * reasoning token limit and effort.
  */
 export type OpenAiFixtureModule = {
   readonly caseId: string
@@ -210,6 +252,7 @@ export type OpenAiFixtureModule = {
   readonly exportName: string
   readonly doc: string
   readonly model: keyof OpenAiConformanceModels
+  readonly reasoning: boolean
 }
 
 export const openAiFixtureModules: ReadonlyArray<OpenAiFixtureModule> = [
@@ -218,28 +261,56 @@ export const openAiFixtureModules: ReadonlyArray<OpenAiFixtureModule> = [
     fileName: 'plain-text.ts',
     exportName: 'openAiChatPlainTextFixture',
     doc: 'Streamed plain-text answer from OpenAI Chat Completions: text deltas, a finish chunk, a usage chunk, and `data: [DONE]`.',
-    model: 'plainText'
+    model: 'plainText',
+    reasoning: false
   },
   {
     caseId: 'openai.chat.stream.tool-call-deltas',
     fileName: 'tool-call-deltas.ts',
     exportName: 'openAiChatToolCallDeltasFixture',
     doc: 'Streamed OpenAI tool call, forced with `tool_choice`, whose JSON arguments arrive as `delta.tool_calls` fragments that assemble into one call.',
-    model: 'toolCall'
+    model: 'toolCall',
+    reasoning: false
   },
   {
     caseId: 'openai.chat.stream.error-envelope',
     fileName: 'error-envelope.ts',
     exportName: 'openAiChatErrorEnvelopeFixture',
     doc: 'Non-2xx OpenAI JSON error envelope (`model_not_found`) for a request with an unknown model id.',
-    model: 'invalid'
+    model: 'invalid',
+    reasoning: false
   },
   {
     caseId: 'openai.chat.json.plain-text',
     fileName: 'json-plain-text.ts',
     exportName: 'openAiChatJsonPlainTextFixture',
     doc: 'Non-streamed OpenAI plain-text answer: one `chat.completion` JSON body.',
-    model: 'plainText'
+    model: 'plainText',
+    reasoning: false
+  },
+  {
+    caseId: 'openai.chat.stream.reasoning-effort',
+    fileName: 'reasoning-effort.ts',
+    exportName: 'openAiChatReasoningEffortFixture',
+    doc: 'Streamed answer from an OpenAI reasoning model asked with `reasoning_effort`: text deltas only, and usage reporting `completion_tokens_details.reasoning_tokens`.',
+    model: 'reasoning',
+    reasoning: true
+  },
+  {
+    caseId: 'openai.chat.json.reasoning-usage',
+    fileName: 'json-reasoning-usage.ts',
+    exportName: 'openAiChatJsonReasoningUsageFixture',
+    doc: 'Non-streamed answer from an OpenAI reasoning model: one `chat.completion` JSON body with no reasoning text and usage reporting `completion_tokens_details.reasoning_tokens`.',
+    model: 'reasoning',
+    reasoning: true
+  },
+  {
+    caseId: 'openai.chat.stream.unsupported-parameter',
+    fileName: 'unsupported-parameter.ts',
+    exportName: 'openAiChatUnsupportedParameterFixture',
+    doc: 'OpenAI 400 JSON error envelope (`unsupported_parameter`, `param: "max_tokens"`) for a reasoning model sent `max_tokens`.',
+    model: 'reasoning',
+    reasoning: false
   }
 ]
 
@@ -252,6 +323,8 @@ export type OpenAiProbePlanEntry = {
   readonly fixtureModule: OpenAiFixtureModule
   readonly model: string
   readonly maxTokens: number
+  /** Only for the reasoning cases. */
+  readonly reasoningEffort: AgentReasoningEffort | undefined
 }
 
 /**
@@ -271,7 +344,8 @@ export const planOpenAiProbe = (options: ProbeOptions): ReadonlyArray<OpenAiProb
       testCase,
       fixtureModule,
       model: options.models[fixtureModule.model],
-      maxTokens: options.maxTokens
+      maxTokens: fixtureModule.reasoning ? options.reasoningMaxTokens : options.maxTokens,
+      reasoningEffort: fixtureModule.reasoning ? options.reasoningEffort : undefined
     }
   })
 
@@ -282,6 +356,8 @@ export const openAiConformanceSettings = (
 ): OpenAiConformanceSettings => ({
   apiKey,
   maxCompletionTokens: options.maxTokens,
+  reasoningMaxCompletionTokens: options.reasoningMaxTokens,
+  reasoningEffort: options.reasoningEffort,
   models: options.models
 })
 
@@ -296,6 +372,7 @@ export const dryRunReport = (options: ProbeOptions): string =>
         `- ${entry.testCase.id} [${entry.testCase.safety}]`,
         `model ${entry.model}`,
         `max completion tokens ${entry.maxTokens}`,
+        `reasoning effort ${entry.reasoningEffort ?? 'not sent'}`,
         `-> ${entry.fixtureModule.fileName}`
       ].join('  ')
     ),

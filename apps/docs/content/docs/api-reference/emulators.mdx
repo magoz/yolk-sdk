@@ -139,14 +139,15 @@ planned response cannot be built, the emulator answers an evidence-tagged 500, r
 
 `@yolk-sdk/emulators/openai`
 
-| Export                                | Purpose                                                                              |
-| ------------------------------------- | ------------------------------------------------------------------------------------ |
-| `makeOpenAiEmulator(options?)`        | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions` |
-| `openAiEmulatorRoutes`                | Route evidence manifest linked to the OpenAI chat conformance cases                  |
-| `OpenAiFault`, `OpenAiScriptedTurn`   | Schemas and types for wire faults and scripted turns (no reasoning fields)           |
-| `OpenAiLedgerEntry`, `OpenAiCoverage` | Ledger entry and coverage report types                                               |
-| `openAiEmulatorDefaultModels`         | Synthetic-safe default model ids (`gpt-4.1-nano`, `gpt-4.1-mini`)                    |
-| `OpenAiEmulatorInputInvalid`          | Thrown by `faults.add` / `script.enqueue` for invalid input                          |
+| Export                                 | Purpose                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `makeOpenAiEmulator(options?)`         | `{ fetch, ledger, reset, faults, script, coverage }` for `POST /v1/chat/completions` |
+| `openAiEmulatorRoutes`                 | Route evidence manifest linked to the OpenAI chat conformance cases                  |
+| `OpenAiFault`, `OpenAiScriptedTurn`    | Schemas and types for wire faults and scripted turns (no reasoning text fields)      |
+| `OpenAiLedgerEntry`, `OpenAiCoverage`  | Ledger entry and coverage report types                                               |
+| `openAiEmulatorDefaultModels`          | Synthetic-safe default model ids (`gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-6-luna`)      |
+| `openAiEmulatorDefaultReasoningModels` | Default reasoning model ids (`gpt-6-luna`)                                           |
+| `OpenAiEmulatorInputInvalid`           | Thrown by `faults.add` / `script.enqueue` for invalid input                          |
 
 It stands in for OpenAI Chat Completions at `https://api.openai.com` and shares the Gateway
 emulator's Chat Completions core, so JSON mode, tool-call fragments, scripted turns, faults, the
@@ -154,8 +155,18 @@ ledger, and the control plane behave the same. Streaming uses the plain OpenAI f
 per network chunk, usage in a trailing chunk, none of the Gateway's metadata fields). Errors use the OpenAI envelope
 `{ error: { message, type, param, code } }`: an unknown model gets 404 `model_not_found`, and a
 missing bearer credential gets 401 `invalid_api_key` (the credential is never checked or stored).
-The ledger records `max_completion_tokens` as `maxCompletionTokens`. Reasoning models are not
-emulated for `/openai` yet: scripted turns reject reasoning fields.
+The ledger records `max_completion_tokens` as `maxCompletionTokens`.
+
+Reasoning models (`reasoningModels`, default `openAiEmulatorDefaultReasoningModels`) follow the
+three synthetic OpenAI reasoning conformance fixtures: they take `reasoning_effort` and
+`max_completion_tokens`, send no reasoning text, and report it only as
+`usage.completion_tokens_details.reasoning_tokens`, counted in `completion_tokens`. A non-null
+`max_tokens` gets the fixture's 400 `{ error: { message, type: 'invalid_request_error', param:
+'max_tokens', code: 'unsupported_parameter' } }` (after model validation, never for a scripted
+turn; the ledger's `unsupportedParameter`). Scripted turns reject reasoning text fields; script
+reasoning as `usage.reasoningTokens`. Not emulated until a fixture backs them: sampling parameter
+rules, `reasoning_effort` on a model that does not reason (recorded and ignored), and per-model
+effort values. `reasoning_effort: 'none'` reporting 0 reasoning tokens is synthetic.
 
 ## Anthropic emulator
 
@@ -434,9 +445,13 @@ lists, prices (`/3/prices/sublist/{PriceList}/{ArticleNumber}` and
 `/3/prices/{PriceList}/{ArticleNumber}/{FromQuantity}`), cost centers, customer and supplier invoice
 payments, offers and their preview PDF, print templates, the inbox (folder JSON; a file id answers
 the file bytes), company settings, the locked period, predefined accounts, labels, the modes and
-terms of payment, terms and ways of delivery, and units registers, and `/3/me`. No fixture records
-these 34 routes: they cite no conformance case, are `unverified`, and use minimal synthetic shapes
-named after the fields the connector reads. Their writes (and side-effecting reads such as
+terms of payment, terms and ways of delivery, and units registers, and `/3/me`. These 34 routes,
+`GET /3/companyinformation`, and `GET /3/customers` cite the Fortnox read conformance cases, whose
+synthetic fixtures are the source of these answers (bodies shaped from the Fortnox OpenAPI spec and
+its archived examples; a test requires every read fixture request to get the fixture's body byte
+for byte, so the emulator cannot drift from them). They are `unverified`, use minimal synthetic shapes named after the fields the connector
+reads, and answer requests no fixture records (other pages, filters, searches, ids) from the state.
+Their writes (and side-effecting reads such as
 `/3/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404; a key the state
 does not hold answers 404 code `2999011`; `lastmodified` gets a 400 on every list.
 

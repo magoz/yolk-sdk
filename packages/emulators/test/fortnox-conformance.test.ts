@@ -1,8 +1,10 @@
 /**
  * Cross-checks: the Fortnox emulator must satisfy the same conformance cases the replayed
  * fixtures satisfy, through the REAL Fortnox connector actions, both in-process and over a
- * loopback socket; and each drill knob must make exactly its case fail. Tests may import SDK
- * packages; the emulator source never does.
+ * loopback socket; each drill knob must make exactly its case fail, and so must each read case's
+ * disagreement drill (a 200 fault answering one route with a body that breaks the case's claim);
+ * and the default emulator must answer every read case fixture request with the recorded answer,
+ * byte for byte. Tests may import SDK packages; the emulator source never does.
  */
 import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
@@ -20,17 +22,34 @@ import {
   staticCredentialResolverLayer
 } from '@yolk-sdk/connectors/conformance'
 import { fortnoxApiBaseUrl } from '@yolk-sdk/connectors/fortnox'
+import { isWireBase64BodyResponse, isWireStreamResponse } from '@yolk-sdk/conformance/fixture'
 import {
   FortnoxConformanceConfig,
+  fortnoxArticleListRowNumbersFixture,
+  fortnoxCompanyInformationFixture,
   fortnoxConformanceCases,
   fortnoxConformanceCommentsMarker,
-  fortnoxConformanceFixtureSeeds
+  fortnoxConformanceFixtureSeeds,
+  fortnoxCostCenterListMatchesGetFixture,
+  fortnoxCustomerListMatchesGetFixture,
+  fortnoxInboxFolderFileBytesFixture,
+  fortnoxInvoicePaymentReadFixture,
+  fortnoxOfferRowsAndPreviewFixture,
+  fortnoxPredefinedAccountsAndLabelsFixture,
+  fortnoxPriceTierMatchesSublistFixture,
+  fortnoxPrintTemplatesUnpaginatedFixture,
+  fortnoxProfileMeFixture,
+  fortnoxReadConformanceCases,
+  fortnoxSettingsCompanyAndLockedPeriodFixture,
+  fortnoxSettingsRegistersFixture,
+  fortnoxSupplierInvoicePaymentReadFixture
 } from '@yolk-sdk/connectors/fortnox/conformance'
 import {
   makeFortnoxEmulator,
   type FortnoxEmulator,
   type FortnoxEmulatorQuirks,
   type FortnoxEmulatorState,
+  type FortnoxFault,
   type FortnoxLedgerEntry
 } from '../src/fortnox.ts'
 import { serveFetchHandler } from '../src/node.ts'
@@ -73,17 +92,22 @@ const emulatedLayer = (emulator: FortnoxEmulator) =>
 
 type Emulators = ReadonlyMap<string, FortnoxEmulator>
 
-/** One fresh emulator per case (same seed), closed when the effect ends. */
+/** One fresh emulator per case (same seed, `faults` added to each), closed when the effect ends. */
 const withEmulators = <A, E, R>(
   quirks: FortnoxEmulatorQuirks,
-  use: (emulators: Emulators) => Effect.Effect<A, E, R>
+  use: (emulators: Emulators) => Effect.Effect<A, E, R>,
+  faults: ReadonlyArray<FortnoxFault> = []
 ) =>
   Effect.acquireUseRelease(
     Effect.promise(async () => {
       const emulators = new Map<string, FortnoxEmulator>()
 
       for (const testCase of fortnoxConformanceCases) {
-        emulators.set(testCase.id, await makeFortnoxEmulator({ now: () => now.getTime(), quirks }))
+        const emulator = await makeFortnoxEmulator({ now: () => now.getTime(), quirks })
+
+        for (const fault of faults) emulator.faults.add(fault)
+
+        emulators.set(testCase.id, emulator)
       }
 
       return emulators
@@ -120,7 +144,7 @@ const runAll = <E>(
 
 const expectAllPassed = (report: ConformanceReport) => {
   expect(report.summary, formatConformanceReport(report)).toEqual({
-    passed: 7,
+    passed: fortnoxConformanceCases.length,
     failed: 0,
     skipped: 0
   })
@@ -179,11 +203,13 @@ describe('cross-check A: in-process emulator through the real connector', () => 
           const ledgerOf = (id: string) => emulatorFor(emulators, id).ledger.entries()
 
           // Read cases change nothing.
-          for (const id of [
-            'fortnox.invoice.list-populated',
-            'fortnox.invoice.preview-pdf',
-            'fortnox.invoice.payment-filters-exclude-unbooked'
-          ]) {
+          const readIds = fortnoxConformanceCases
+            .filter(testCase => testCase.safety === 'read')
+            .map(testCase => testCase.id)
+
+          expect(readIds).toHaveLength(17)
+
+          for (const id of readIds) {
             expect(stateOf(id), id).toEqual(seedOf(id))
             expect(
               ledgerOf(id).every(entry => entry.method === 'GET' && entry.status === 200),
@@ -330,12 +356,16 @@ describe('cross-check B: emulated over a loopback socket', () => {
   )
 })
 
-const drill = (quirks: FortnoxEmulatorQuirks) =>
-  withEmulators(quirks, emulators => runAll(emulators, { kind: 'in-process' }, inProcessLayer))
+const drill = (quirks: FortnoxEmulatorQuirks, faults: ReadonlyArray<FortnoxFault> = []) =>
+  withEmulators(
+    quirks,
+    emulators => runAll(emulators, { kind: 'in-process' }, inProcessLayer),
+    faults
+  )
 
 const expectOnlyFailure = (report: ConformanceReport, caseId: string, message: string) => {
   expect(report.summary, formatConformanceReport(report)).toEqual({
-    passed: 6,
+    passed: fortnoxConformanceCases.length - 1,
     failed: 1,
     skipped: 0
   })
@@ -375,6 +405,313 @@ describe('disagreement drill (quirk knobs)', () => {
         'fortnox.invoice.payment-filters-exclude-unbooked',
         'expected the unbooked invoice to be absent from filter=unpaid'
       )
+    })
+  )
+})
+
+/** A 200 answer for exactly one `GET` path: every emulator answers it with `body` instead. */
+const answer = (path: string, body: FortnoxFault['body']): FortnoxFault => ({
+  kind: 'status',
+  status: 200,
+  body,
+  match: { method: 'GET', path }
+})
+
+const meta = { '@CurrentPage': 1, '@TotalPages': 1, '@TotalResources': 1 }
+
+/**
+ * One disagreement drill per read case: the route answers with a body that contradicts the case's
+ * claim (installed on every case's emulator), and exactly that case fails with that message.
+ */
+const readDrills: ReadonlyArray<{
+  readonly caseId: string
+  readonly fault: FortnoxFault
+  readonly message: string
+  /** Text from the drill body the report must never echo (it may be personal data). */
+  readonly unechoed?: string
+}> = [
+  {
+    caseId: 'fortnox.company.information-decodes',
+    fault: answer('/3/companyinformation', { CompanyInformation: { CompanyName: ' ' } }),
+    message: 'expected a non-empty CompanyName'
+  },
+  {
+    caseId: 'fortnox.customer.list-matches-get',
+    fault: answer('/3/customers', {
+      Customers: [{ CustomerNumber: '1001', Name: 'Drill name' }],
+      MetaInformation: meta
+    }),
+    message: 'expected the listed customer to read back with the same Name',
+    unechoed: 'Drill name'
+  },
+  {
+    caseId: 'fortnox.article.list-row-numeric-strings',
+    fault: answer('/3/articles/KIT-1', {
+      Article: {
+        ArticleNumber: 'KIT-1',
+        Description: 'Workshop kit (synthetic)',
+        VAT: 25,
+        SalesPrice: 999,
+        PurchasePrice: 120,
+        QuantityInStock: 15
+      }
+    }),
+    message: 'expected the list row and the single read to decode to the same amounts'
+  },
+  {
+    caseId: 'fortnox.price.tier-matches-sublist',
+    fault: answer('/3/prices/A/KIT-1/0', {
+      Price: { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 0, Price: 1 }
+    }),
+    message: 'expected the price tier to read back as listed'
+  },
+  {
+    // The first tier (10) reads back as listed; the base tier disagrees with SalesPrice (250).
+    caseId: 'fortnox.price.tier-matches-sublist',
+    fault: answer('/3/prices/sublist/A/KIT-1', {
+      Prices: [
+        { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 10, Price: 220 },
+        { PriceList: 'A', ArticleNumber: 'KIT-1', FromQuantity: 0, Price: 1 }
+      ],
+      MetaInformation: { '@CurrentPage': 1, '@TotalPages': 1, '@TotalResources': 2 }
+    }),
+    message: 'expected the article SalesPrice to equal its base price in the PreSelected price list'
+  },
+  {
+    caseId: 'fortnox.cost-center.list-matches-get',
+    fault: answer('/3/costcenters/CC1', {
+      CostCenter: { Code: 'CC1', Description: 'Sales (synthetic)', Note: '', Active: false }
+    }),
+    message: 'expected the listed cost center to read back as listed'
+  },
+  {
+    caseId: 'fortnox.payment.invoice-payment-wire-numbers',
+    fault: answer('/3/invoicepayments/1', {
+      InvoicePayment: {
+        Number: '1',
+        InvoiceNumber: '101',
+        Amount: 1250,
+        PaymentDate: '2026-09-20',
+        VoucherNumber: '2',
+        VoucherYear: '3',
+        ModeOfPaymentAccount: '1930'
+      }
+    }),
+    message: 'expected the listed invoice payment to read back as listed'
+  },
+  {
+    caseId: 'fortnox.payment.supplier-payment-wire-numbers',
+    fault: answer('/3/supplierinvoicepayments/1', {
+      SupplierInvoicePayment: {
+        Number: '1',
+        InvoiceNumber: '1',
+        Amount: 500,
+        PaymentDate: '2026-09-25',
+        VoucherNumber: '3',
+        VoucherYear: '3'
+      }
+    }),
+    message: 'expected the listed supplier invoice payment to read back as listed'
+  },
+  {
+    caseId: 'fortnox.offer.rows-on-get-and-preview-pdf',
+    fault: answer('/3/offers', {
+      Offers: [{ DocumentNumber: '1', CustomerNumber: '1001', OfferRows: [{ Quantity: '1.00' }] }],
+      MetaInformation: meta
+    }),
+    message: 'expected offer list rows to carry no OfferRows'
+  },
+  {
+    caseId: 'fortnox.offer.rows-on-get-and-preview-pdf',
+    fault: answer('/3/offers/1/preview', '%PDF-1.4 cut short'),
+    message: 'expected a complete PDF ending with an %%EOF trailer'
+  },
+  {
+    caseId: 'fortnox.print-templates.unpaginated',
+    fault: answer('/3/printtemplates', {
+      PrintTemplates: [{ Template: 'invoice-standard', Name: 'Standard invoice (synthetic)' }],
+      MetaInformation: meta
+    }),
+    message: 'expected the invoice print templates to carry no MetaInformation'
+  },
+  {
+    caseId: 'fortnox.inbox.file-bytes-match-size',
+    fault: answer('/3/inbox/00000000-0000-4000-8000-000000000001', 'drill'),
+    message: 'expected the downloaded file to be exactly its listed Size in bytes'
+  },
+  {
+    caseId: 'fortnox.settings.company-and-locked-period',
+    fault: answer('/3/settings/company', { CompanySettings: { Name: ' ' } }),
+    message: 'expected CompanySettings to carry a non-empty Name'
+  },
+  {
+    caseId: 'fortnox.settings.company-and-locked-period',
+    fault: answer('/3/settings/lockedperiod', { LockedPeriod: { EndDate: '30/06/2026' } }),
+    message: 'expected the locked period EndDate to be a YYYY-MM-DD date, empty, or unset'
+  },
+  {
+    // A company without a locked period: Fortnox may answer 404 (unverified).
+    caseId: 'fortnox.settings.company-and-locked-period',
+    fault: {
+      kind: 'status',
+      status: 404,
+      match: { method: 'GET', path: '/3/settings/lockedperiod' }
+    },
+    message: 'precondition: HTTP 404: no locked period, or the route is missing'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/predefinedaccounts/BG', { PreDefinedAccount: { Name: 'BG', Account: 1931 } }),
+    message: 'expected the listed predefined account to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/predefinedaccounts', {
+      PreDefinedAccounts: [{ Name: 'BG', Account: 1930 }],
+      MetaInformation: meta
+    }),
+    message: 'expected the predefined accounts to carry no MetaInformation'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/labels', {
+      Labels: [{ Id: 1, Description: 'Priority (synthetic)' }],
+      MetaInformation: meta
+    }),
+    message: 'expected the labels to carry no MetaInformation'
+  },
+  {
+    caseId: 'fortnox.settings.predefined-accounts-and-labels',
+    fault: answer('/3/labels', {
+      Labels: [
+        { Id: 1, Description: 'Priority (synthetic)' },
+        { Id: 1, Description: 'Follow up (synthetic)' }
+      ]
+    }),
+    message: 'expected every label to carry a distinct Id'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/modesofpayments/BG', {
+      ModeOfPayment: { Code: 'BG', Description: 'Bankgiro (synthetic)', AccountNumber: 1931 }
+    }),
+    message: 'expected the listed mode of payment to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/termsofpayments/10', {
+      TermsOfPayment: { Code: '10', Description: 'Drill' }
+    }),
+    message: 'expected the listed terms of payment to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/termsofdeliveries/EXW', {
+      TermsOfDelivery: { Code: 'EXW', Description: 'Ex works (synthetic)', DescriptionEnglish: '' }
+    }),
+    message: 'expected the listed terms of delivery to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/wayofdeliveries/P', {
+      WayOfDelivery: { Code: 'P', Description: 'Drill', DescriptionEnglish: 'Mail' }
+    }),
+    message: 'expected the listed way of delivery to read back as listed'
+  },
+  {
+    caseId: 'fortnox.settings.registers-list-matches-get',
+    fault: answer('/3/units/h', { Unit: { Code: 'h', Description: 'Hour (synthetic)' } }),
+    message: 'expected the listed unit to read back as listed'
+  },
+  {
+    caseId: 'fortnox.profile.me',
+    fault: answer('/3/me', { Me: { Id: ' ' } }),
+    message: 'expected the profile to carry a non-empty Id'
+  }
+]
+
+const readCaseIds = fortnoxReadConformanceCases.map(testCase => testCase.id)
+
+describe('disagreement drill (read cases)', () => {
+  it('covers every read case without a quirk knob, in case order', () => {
+    expect([...new Set(readDrills.map(entry => entry.caseId))]).toEqual(readCaseIds)
+  })
+
+  for (const entry of readDrills) {
+    it.effect(`${entry.fault.match?.path} fails only ${entry.caseId}: ${entry.message}`, () =>
+      Effect.gen(function* () {
+        const report = yield* drill({}, [entry.fault])
+
+        expectOnlyFailure(report, entry.caseId, entry.message)
+
+        if (entry.unechoed !== undefined) {
+          expect(formatConformanceReport(report)).not.toContain(entry.unechoed)
+          expect(JSON.stringify(report.results)).not.toContain(entry.unechoed)
+        }
+      })
+    )
+  }
+})
+
+/** The read case fixtures, the source of the default emulator's read answers. */
+const readFixtures = [
+  fortnoxCompanyInformationFixture,
+  fortnoxCustomerListMatchesGetFixture,
+  fortnoxArticleListRowNumbersFixture,
+  fortnoxPriceTierMatchesSublistFixture,
+  fortnoxCostCenterListMatchesGetFixture,
+  fortnoxInvoicePaymentReadFixture,
+  fortnoxSupplierInvoicePaymentReadFixture,
+  fortnoxOfferRowsAndPreviewFixture,
+  fortnoxPrintTemplatesUnpaginatedFixture,
+  fortnoxInboxFolderFileBytesFixture,
+  fortnoxSettingsCompanyAndLockedPeriodFixture,
+  fortnoxPredefinedAccountsAndLabelsFixture,
+  fortnoxSettingsRegistersFixture,
+  fortnoxProfileMeFixture
+]
+
+const base64Of = (bytes: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+
+describe('read case fixtures and the default emulator', () => {
+  it('cover every read case without a quirk knob, in case order', () => {
+    expect(readFixtures.map(fixture => fixture.caseId)).toEqual(readCaseIds)
+  })
+
+  it.effect('answer every recorded request with the recorded status, content type, and body', () =>
+    Effect.promise(async () => {
+      const emulator = await makeFortnoxEmulator({ now: () => now.getTime() })
+
+      try {
+        for (const fixture of readFixtures) {
+          for (const { request, response } of fixture.exchanges) {
+            const answered = await emulator.fetch(
+              new Request(request.url, {
+                method: request.method,
+                headers: { ...request.headers, authorization: 'Bearer synthetic-parity-token' }
+              })
+            )
+
+            expect(answered.status, request.url).toBe(response.status)
+            expect(answered.headers.get('content-type'), request.url).toBe(
+              response.headers?.['content-type']
+            )
+
+            if (isWireBase64BodyResponse(response)) {
+              expect(base64Of(await answered.arrayBuffer()), request.url).toBe(response.bodyBase64)
+            } else if (isWireStreamResponse(response)) {
+              expect.fail(`${request.url}: no read fixture streams`)
+            } else {
+              expect(await answered.text(), request.url).toBe(response.body)
+            }
+          }
+        }
+
+        // Reading every fixture request changed nothing.
+        expect(emulator.ledger.entries().every(entry => entry.method === 'GET')).toBe(true)
+      } finally {
+        await emulator.close()
+      }
     })
   )
 })
