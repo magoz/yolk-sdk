@@ -220,7 +220,7 @@
   SSE stream carrying it ends (a server waiting for the answer before ending the stream stalls
   until the timeout; unverified live, as is a ping on the standing GET). The local stdio client
   does not answer pings: it reads stdout lines as responses only, so a server `ping` line fails the
-  call as a broken session (tracked in an issue). A pinging server also makes the calling cases
+  call as a broken session (#386). A pinging server also makes the calling cases
   refuse: the call gate treats any server request as uncertainty (#382).
 - Real-code facts the cases pin (pinned `@modelcontextprotocol/client` 2.4.0; trust the SDK source
   over the design and keep the `cases.ts` header in sync):
