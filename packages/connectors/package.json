@@ -66,6 +66,10 @@
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
     },
+    "./figma/conformance": {
+      "types": "./src/figma/conformance/index.ts",
+      "default": "./src/figma/conformance/index.ts"
+    },
     "./fortnox": {
       "types": "./src/fortnox/index.ts",
       "default": "./src/fortnox/index.ts"
@@ -93,6 +97,10 @@
     "./kie": {
       "types": "./src/kie/index.ts",
       "default": "./src/kie/index.ts"
+    },
+    "./kie/conformance": {
+      "types": "./src/kie/conformance/index.ts",
+      "default": "./src/kie/conformance/index.ts"
     },
     "./linkedin-search": {
       "types": "./src/linkedin-search/index.ts",
@@ -205,6 +213,11 @@
         "import": "./dist/figma/index.mjs",
         "default": "./dist/figma/index.mjs"
       },
+      "./figma/conformance": {
+        "types": "./dist/figma/conformance/index.d.mts",
+        "import": "./dist/figma/conformance/index.mjs",
+        "default": "./dist/figma/conformance/index.mjs"
+      },
       "./fortnox": {
         "types": "./dist/fortnox/index.d.mts",
         "import": "./dist/fortnox/index.mjs",
@@ -239,6 +252,11 @@
         "types": "./dist/kie/index.d.mts",
         "import": "./dist/kie/index.mjs",
         "default": "./dist/kie/index.mjs"
+      },
+      "./kie/conformance": {
+        "types": "./dist/kie/conformance/index.d.mts",
+        "import": "./dist/kie/conformance/index.mjs",
+        "default": "./dist/kie/conformance/index.mjs"
       },
       "./linkedin-search": {
         "types": "./dist/linkedin-search/index.d.mts",

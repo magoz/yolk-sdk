@@ -105,6 +105,10 @@
     "./mcp": {
       "types": "./src/mcp.ts",
       "default": "./src/mcp.ts"
+    },
+    "./kie": {
+      "types": "./src/kie.ts",
+      "default": "./src/kie.ts"
     }
   },
   "files": [
@@ -218,6 +222,11 @@
         "types": "./dist/mcp.d.mts",
         "import": "./dist/mcp.mjs",
         "default": "./dist/mcp.mjs"
+      },
+      "./kie": {
+        "types": "./dist/kie.d.mts",
+        "import": "./dist/kie.mjs",
+        "default": "./dist/kie.mjs"
       }
     }
   },

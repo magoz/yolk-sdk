@@ -588,10 +588,17 @@ const wholePattern = (pattern: RegExp): RegExp =>
  * A matcher over a route table: the route answering `method` + raw `path`, with its parameters
  * decoded once, or `undefined` (also for a parameter that is not valid percent-encoding). A raw
  * parameter pattern must match the whole raw parameter; a pattern with the `g` or `y` flag (whose
- * matches depend on earlier ones) is refused when the matcher is built.
+ * matches depend on earlier ones) is refused when the matcher is built. Two routes may share a
+ * method and path template only when each is recorded on its own origin (`origin`); a request then
+ * matches the route recorded on the origin it `arrivedOn`, and otherwise the first route of the
+ * table whose shape it has (whose origin check refuses it). A table without such a pair matches
+ * exactly as before.
  */
 export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<State, Env>>) => {
-  const keys = routes.map(route => emulatorRouteKey(route.method, route.path))
+  const keys = routes.map(
+    route => `${route.origin ?? '<any origin>'} ${emulatorRouteKey(route.method, route.path)}`
+  )
+
   const duplicate = keys.find((key, index) => keys.indexOf(key) !== index)
 
   if (duplicate !== undefined) {
@@ -619,8 +626,19 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
     multi: new Set([...route.path.matchAll(/\{([A-Za-z]+)\+\}/g)].map(match => match[1] ?? ''))
   }))
 
-  return (method: string, path: string): MatchedRoute<State, Env> | undefined => {
-    for (const candidate of compiled) {
+  const templateKeys = routes.map(route => emulatorRouteKey(route.method, route.path))
+
+  // Templates two routes share (each on its own recorded origin, checked above).
+  const sharedTemplates = new Set(
+    templateKeys.filter((key, index) => templateKeys.indexOf(key) !== index)
+  )
+
+  const matchIn = (
+    candidates: typeof compiled,
+    method: string,
+    path: string
+  ): MatchedRoute<State, Env> | undefined => {
+    for (const candidate of candidates) {
       if (candidate.route.method !== method.toUpperCase()) continue
 
       const match = candidate.pattern.exec(path)
@@ -654,6 +672,28 @@ export const routeMatcher = <State, Env>(routes: ReadonlyArray<StatefulRoute<Sta
     }
 
     return undefined
+  }
+
+  return (
+    method: string,
+    path: string,
+    arrivedOn?: string
+  ): MatchedRoute<State, Env> | undefined => {
+    if (arrivedOn !== undefined && sharedTemplates.size > 0) {
+      const onOrigin = matchIn(
+        compiled.filter(
+          candidate =>
+            candidate.route.origin === arrivedOn &&
+            sharedTemplates.has(emulatorRouteKey(candidate.route.method, candidate.route.path))
+        ),
+        method,
+        path
+      )
+
+      if (onOrigin !== undefined) return onOrigin
+    }
+
+    return matchIn(compiled, method, path)
   }
 }
 
@@ -2171,7 +2211,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
     const matched: MatchedRoute<State, Env> | undefined =
       resolution === undefined
-        ? match(request.method, url.pathname)
+        ? match(request.method, url.pathname, arrivedOn)
         : {
             route: resolution.route,
             params: resolution.kind === 'route' ? resolution.params : {}
@@ -2467,7 +2507,7 @@ const buildStatefulEmulator = async <State, Env, Seed, Entry>(
 
     if (path === undefined || isControlPath(path) || resolveRequest !== undefined) return failed
 
-    const matched = match(request.method, path)
+    const matched = match(request.method, path, new URL(request.url).origin)
 
     return matched === undefined ? failed : withEvidence(failed, matched.route.evidence)
   }

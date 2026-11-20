@@ -440,11 +440,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   // Node builtins and the Node-only `@emulators/core` stay behind the Node subpaths: the loopback
   // server (`src/node.ts`) and the stateful Fortnox, Microsoft, Dropbox, Notion, Todoist,
-  // Telegram, GitHub, Google, LinkedIn search, and MCP emulators (`src/fortnox.ts`,
+  // Telegram, GitHub, Google, LinkedIn search, MCP, and Kie emulators (`src/fortnox.ts`,
   // `src/fortnox/**`, `src/microsoft.ts`, `src/microsoft/**`, `src/dropbox.ts`, `src/dropbox/**`,
   // `src/notion.ts`, `src/notion/**`, `src/todoist.ts`, `src/todoist/**`, `src/telegram.ts`,
   // `src/telegram/**`, `src/github.ts`, `src/github/**`, `src/google.ts`, `src/google/**`,
-  // `src/linkedin-search.ts`, `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`), and the
+  // `src/linkedin-search.ts`, `src/linkedin-search/**`, `src/mcp.ts`, `src/mcp/**`,
+  // `src/kie.ts`, `src/kie/**`), and the
   // core adapter they share (`src/stateful-core.ts`). Their shared wrapper
   // (`src/stateful-emulator.ts`) and its credential helpers (`src/stateful-secrets.ts`) stay
   // runtime-portable and take the core from them.
@@ -473,6 +474,8 @@ const rules: ReadonlyArray<BoundaryRule> = [
       'packages/emulators/src/linkedin-search',
       'packages/emulators/src/mcp.ts',
       'packages/emulators/src/mcp',
+      'packages/emulators/src/kie.ts',
+      'packages/emulators/src/kie',
       'packages/emulators/src/stateful-core.ts'
     ]
   }

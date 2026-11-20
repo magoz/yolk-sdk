@@ -410,7 +410,14 @@ previews the run (a dry run: no network, no credential read); adding `--live --o
 --account <label>` runs the cases by hand with the owner's approval (`AFLOAT_API_KEY` from the
 environment only; refused in CI; tool calls only with the `--read-tool` flag, never from the
 environment); the MCP emulator serves them as profile `afloat`. See [Afloat MCP
-conformance](../connectors/afloat#conformance-cases). The Figma target is not available yet.
+conformance](../connectors/afloat#conformance-cases). `@yolk-sdk/connectors/figma/conformance`
+builds the Figma target the same way, by running the real `figma.mcp_auth`
+(`makeFigmaMcpConformanceTarget`: `https://mcp.figma.com/mcp`, the legacy era with protocol
+`2025-11-25`, unverified, and the access token as `Authorization: Bearer`), names six known Figma
+tool names with synthetic schemas as seeds, and ships eight synthetic placeholder fixtures (every
+case but `mcp.modern.stateless` applies); `pnpm conformance:mcp --target figma` stays refused until
+an owner-approved practice seat exists, and the MCP emulator serves the fixtures as profile `figma`.
+See [Figma MCP conformance](../connectors/figma#conformance-cases).
 
 ## Connector conformance
 
@@ -588,6 +595,19 @@ no leftover lookup. Live recordings hold real third parties' personal data: prom
 each recorded 2xx body wholesale with a minimal synthetic body that keeps only the keys and types
 the case reads. See [LinkedIn search conformance
 cases](../connectors/linkedin-search#conformance-cases).
+
+`@yolk-sdk/connectors/kie/conformance` exports six Kie cases (`kieConformanceCases`), their
+synthetic fixtures (`kieConformanceFixtures`), and the seeds they replay with
+(`kieConformanceFixtureSeeds`). Cases need `ConnectorHttpClient`, `CredentialResolver`, and
+`KieConformanceConfig` (a finished `success` task id, a finished `fail` task id, a public
+first-frame URL, and the run id). Four reads (a finished task with result URLs, a failed task read
+as a success, an unknown task id answering an envelope 4xx, an invalid key answering
+`kie_unauthorized`) and two **write-irreversible** creates (every task spends credits and the
+connector cannot cancel one), which run only when a person names their exact ids. Envelope `code`
+and HTTP status claims are observed at the `ConnectorHttpClient` port. A create whose outcome is
+unknown fails with `KieConformanceActionFailed` (`taskOutcome: 'unknown'`) naming the run id to look
+for. There is nothing to clean up and no leftover lookup. See [Kie conformance
+cases](../connectors/kie#conformance-cases).
 
 `@yolk-sdk/connectors/r2-storage/conformance` exports six port-level R2 cases
 (`r2ConformanceCases`), their synthetic `PortFixture`s (`r2ConformanceFixtures`), and the seeds they

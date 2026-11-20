@@ -19,7 +19,7 @@
  *   classifier, OpenAI chat,
  *   Codex Responses, Anthropic Messages, Grok Responses, OpenCode Go, subscription-usage (Claude,
  *   Codex, Grok), Fortnox, Microsoft, Dropbox, Notion, Todoist, Telegram, GitHub, Google,
- *   LinkedIn search, MCP, email port, and R2 port fixtures).
+ *   LinkedIn search, MCP (synthetic, Afloat, Figma), Kie, email port, and R2 port fixtures).
  * - WARN: a route's evidence is `unverified` (fetch-handler emulators tag their responses
  *   `x-emulator-evidence: unverified`; the email and R2 port emulators tag their ledger entries).
  * - WARN: `observedAt` is more than 30 days old; on other routes also when it is unreadable, in
@@ -82,6 +82,9 @@ import { googleConformanceCases } from '../packages/connectors/src/google/confor
 import { googleConformanceFixtures } from '../packages/connectors/src/google/conformance/index.ts'
 import { linkedInSearchConformanceCases } from '../packages/connectors/src/linkedin-search/conformance/cases.ts'
 import { afloatMcpConformanceFixtures } from '../packages/connectors/src/afloat/conformance/index.ts'
+import { figmaMcpConformanceFixtures } from '../packages/connectors/src/figma/conformance/index.ts'
+import { kieConformanceCases } from '../packages/connectors/src/kie/conformance/cases.ts'
+import { kieConformanceFixtures } from '../packages/connectors/src/kie/conformance/index.ts'
 import { linkedInSearchConformanceFixtures } from '../packages/connectors/src/linkedin-search/conformance/index.ts'
 import { microsoftConformanceCases } from '../packages/connectors/src/microsoft/conformance/cases.ts'
 import { microsoftConformanceFixtures } from '../packages/connectors/src/microsoft/conformance/index.ts'
@@ -112,6 +115,7 @@ import {
 } from '../packages/emulators/src/gateway.ts'
 import { githubEmulatorRoutes } from '../packages/emulators/src/github.ts'
 import { googleEmulatorRoutes } from '../packages/emulators/src/google.ts'
+import { kieEmulatorRoutes } from '../packages/emulators/src/kie.ts'
 import { linkedInSearchEmulatorRoutes } from '../packages/emulators/src/linkedin-search.ts'
 import { mcpEmulatorRoutes } from '../packages/emulators/src/mcp.ts'
 import { microsoftEmulatorRoutes } from '../packages/emulators/src/microsoft.ts'
@@ -223,7 +227,8 @@ export const emulatorManifests: ReadonlyArray<EvidenceManifest> = [
   { name: 'github', routes: githubEmulatorRoutes },
   { name: 'google', routes: googleEmulatorRoutes },
   { name: 'linkedin-search', routes: linkedInSearchEmulatorRoutes },
-  { name: 'mcp', routes: mcpEmulatorRoutes }
+  { name: 'mcp', routes: mcpEmulatorRoutes },
+  { name: 'kie', routes: kieEmulatorRoutes }
 ]
 
 /** The repo's pending-evidence allowlist. */
@@ -349,6 +354,7 @@ export const knownConformanceCaseIds: ReadonlySet<string> = new Set([
   ...googleConformanceCases.map(testCase => testCase.id),
   ...linkedInSearchConformanceCases.map(testCase => testCase.id),
   ...mcpConformanceCases.map(testCase => testCase.id),
+  ...kieConformanceCases.map(testCase => testCase.id),
   ...emailConformanceCases.map(testCase => testCase.id),
   ...r2ConformanceCases.map(testCase => testCase.id)
 ])
@@ -390,8 +396,8 @@ export const portFixtureEvidence = (
 /**
  * Evidence of every committed Gateway (chat and classifier), OpenAI chat, Codex Responses, Anthropic Messages, Grok
  * Responses, OpenCode Go, subscription-usage (Claude, Codex, Grok), Fortnox, Microsoft, Dropbox,
- * Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP, email port, and R2 port
- * fixture, by case id.
+ * Notion, Todoist, Telegram, GitHub, Google, LinkedIn search, MCP (synthetic, Afloat, Figma), Kie,
+ * email port, and R2 port fixture, by case id.
  */
 export const repoFixtureEvidenceByCase: ReadonlyMap<
   string,
@@ -418,6 +424,8 @@ export const repoFixtureEvidenceByCase: ReadonlyMap<
   ...linkedInSearchConformanceFixtures,
   ...mcpConformanceFixtures,
   ...afloatMcpConformanceFixtures,
+  ...figmaMcpConformanceFixtures,
+  ...kieConformanceFixtures,
   ...portFixtureEvidence(emailConformanceCases, emailConformanceFixtures),
   ...portFixtureEvidence(r2ConformanceCases, r2ConformanceFixtures)
 ])

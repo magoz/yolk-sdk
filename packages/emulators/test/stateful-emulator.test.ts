@@ -231,6 +231,34 @@ describe('route templates', () => {
       expect(() => routeMatcher([flagged])).toThrow('raw patterns take no g or y flag')
     }
   })
+
+  it('one method and template on two recorded origins: the arrival origin picks the route', () => {
+    const on = (origin: string | undefined) => {
+      const evidence = { ...echo, path: '/mcp', params: {} }
+
+      return statefulRoute<State, undefined, string>(
+        origin === undefined ? evidence : { ...evidence, origin },
+        'none',
+        () => '',
+        () => () => new Response('')
+      )
+    }
+
+    const first = on('https://one.example.test')
+    const second = on('https://two.example.test')
+    const match = routeMatcher([first, second])
+
+    expect(match('GET', '/mcp', 'https://one.example.test')?.route).toBe(first)
+    expect(match('GET', '/mcp', 'https://two.example.test')?.route).toBe(second)
+    // Another origin (or none) gets the first route of the table, whose origin check refuses it.
+    expect(match('GET', '/mcp', 'https://three.example.test')?.route).toBe(first)
+    expect(match('GET', '/mcp')?.route).toBe(first)
+    // The same template on one origin twice, or twice without an origin, is still refused.
+    expect(() => routeMatcher([first, on('https://one.example.test')])).toThrow(
+      'duplicate emulator route'
+    )
+    expect(() => routeMatcher([on(undefined), on(undefined)])).toThrow('duplicate emulator route')
+  })
 })
 
 describe('fail-closed mode', () => {
