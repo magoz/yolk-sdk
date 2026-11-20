@@ -298,8 +298,11 @@ const completedResponseOf = (event: SseEvent): JsonRecord | undefined =>
     ? event.json.response
     : undefined
 
-const doneReasons = (events: Iterable<LLMEvent>) =>
-  Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
 
 const mismatch = (message: string) => ({ kind: 'failure', tag: 'ConformanceMismatch', message })
 
@@ -779,6 +782,54 @@ const describeFamily = <Req>(family: Family<Req>) => {
         'no-terminal'
       )
 
+    // Responses always reports usage on `response.completed`; a completed stream without it still
+    // completes, and its Done says the usage never arrived.
+    it.effect('marks Done when the streamed response.completed carries no usage', () =>
+      Effect.gen(function* () {
+        const withoutUsage = sseEvents(family.plainText.fixture).map(event =>
+          mapJson(event, json => {
+            if (isRecord(json.response)) delete json.response.usage
+          })
+        )
+
+        const events = yield* streamFixture(
+          withEvents(family.plainText.fixture, withoutUsage, 'no-usage')
+        )
+
+        expect(events.map(event => event._tag)).not.toContain('Usage')
+        expect(doneSignals(events)).toEqual([['stop', true]])
+      })
+    )
+
+    it.effect('never marks a JSON response, even one without usage', () =>
+      Effect.gen(function* () {
+        const completed = sseEvents(family.plainText.fixture).flatMap(event => {
+          const response = completedResponseOf(event)
+
+          return response === undefined ? [] : [response]
+        })
+
+        const response = completed[0] ?? expect.fail('no response.completed')
+        const { usage: _usage, ...withoutUsage } = response
+
+        const events = yield* streamFixture(
+          withResponse(family.plainText.fixture, 'json-no-usage', 200, JSON.stringify(withoutUsage))
+        )
+
+        expect(events.map(event => event._tag)).not.toContain('Usage')
+        expect(doneSignals(events)).toEqual([['stop', undefined]])
+      })
+    )
+
+    it.effect('leaves Done unmarked when response.completed carries the usage', () =>
+      Effect.gen(function* () {
+        const events = yield* streamFixture(family.terminal.fixture)
+
+        expect(doneSignals(events)).toEqual([['stop', undefined]])
+        expect(events.map(event => event._tag)).toContain('Usage')
+      })
+    )
+
     if (family.allowsEofCompletion) {
       it.effect(
         'keeps EOF-completion compatibility: no response.completed still completes, and the case fails',
@@ -786,8 +837,9 @@ const describeFamily = <Req>(family: Family<Req>) => {
           Effect.gen(function* () {
             const events = yield* streamFixture(withoutTerminal())
 
-            // The provider treats EOF as a normal end (Done without usage).
-            expect(doneReasons(events)).toEqual(['stop'])
+            // The provider treats EOF as a normal end; its Done says the usage, which only
+            // `response.completed` carries, never arrived.
+            expect(doneSignals(events)).toEqual([['stop', true]])
             expect(events.map(event => event._tag)).not.toContain('Usage')
 
             // The case reads the body, so a missing terminal event still fails it.
@@ -796,7 +848,125 @@ const describeFamily = <Req>(family: Family<Req>) => {
             )
           })
       )
+
+      it.effect(
+        'recovers a response.completed without output, marking its unreadable usage unavailable',
+        () =>
+          Effect.gen(function* () {
+            const events = sseEvents(family.plainText.fixture)
+
+            // The recorded terminal event reports usage; only its `output` is dropped.
+            expect(events.some(event => isRecord(completedResponseOf(event)?.usage))).toBe(true)
+
+            const withoutOutput = events.map(event =>
+              mapJson(event, json => {
+                if (json.type === 'response.completed' && isRecord(json.response)) {
+                  delete json.response.output
+                }
+              })
+            )
+
+            const streamed = yield* streamFixture(
+              withEvents(family.plainText.fixture, withoutOutput, 'no-output')
+            )
+
+            // The streamed text stands; the usage in the unreadable response never reached Usage.
+            expect(streamed.map(event => event._tag)).toContain('TextDelta')
+            expect(streamed.map(event => event._tag)).not.toContain('Usage')
+            expect(doneSignals(streamed)).toEqual([['stop', true]])
+          })
+      )
+
+      it.effect(
+        'recovers a response.completed whose output item lacks a required key, marked',
+        () =>
+          Effect.gen(function* () {
+            const events = sseEvents(family.functionCall.fixture)
+
+            const withoutCallId = events.map(event =>
+              mapJson(event, json => {
+                if (json.type !== 'response.completed' || !isRecord(json.response)) return
+
+                const output = Array.isArray(json.response.output) ? json.response.output : []
+
+                for (const item of output) {
+                  if (isRecord(item) && item.type === 'function_call') delete item.call_id
+                }
+              })
+            )
+
+            // The terminal event records a function call (with usage) to strip the id from.
+            expect(
+              events.some(event => {
+                const output = completedResponseOf(event)?.output
+
+                return (
+                  Array.isArray(output) &&
+                  output.some(item => isRecord(item) && item.type === 'function_call')
+                )
+              })
+            ).toBe(true)
+
+            const streamed = yield* streamFixture(
+              withEvents(family.functionCall.fixture, withoutCallId, 'no-call-id')
+            )
+
+            // The streamed calls stand; the undecodable response's usage never reached Usage.
+            expect(streamed.map(event => event._tag)).toContain('ToolCall')
+            expect(streamed.map(event => event._tag)).not.toContain('Usage')
+            expect(doneSignals(streamed)).toEqual([['tool_use', true]])
+          })
+      )
+
+      it.effect('recovers a JSON response without output unmarked, as before', () =>
+        Effect.gen(function* () {
+          const completed = sseEvents(family.plainText.fixture).flatMap(event => {
+            const response = completedResponseOf(event)
+
+            return response === undefined ? [] : [response]
+          })
+
+          const response = completed[0] ?? expect.fail('no response.completed')
+          const { output: _output, ...withoutOutput } = response
+
+          // The JSON body still reports usage; recovery cannot read it, and JSON is never marked.
+          expect(isRecord(withoutOutput.usage)).toBe(true)
+
+          const events = yield* streamFixture(
+            withResponse(
+              family.plainText.fixture,
+              'json-no-output',
+              200,
+              JSON.stringify(withoutOutput)
+            )
+          )
+
+          expect(events.map(event => event._tag)).toEqual(['Done'])
+          expect(doneSignals(events)).toEqual([['stop', undefined]])
+        })
+      )
     } else {
+      it.effect('fails a response.completed without output instead of recovering it', () =>
+        Effect.gen(function* () {
+          const withoutOutput = sseEvents(family.plainText.fixture).map(event =>
+            mapJson(event, json => {
+              if (json.type === 'response.completed' && isRecord(json.response)) {
+                delete json.response.output
+              }
+            })
+          )
+
+          const error = expectLlmError(
+            yield* streamFixture(
+              withEvents(family.plainText.fixture, withoutOutput, 'no-output')
+            ).pipe(Effect.flip)
+          )
+
+          expect(error.cause).toBe('invalid_response')
+          expect(error.retryable).toBe(false)
+        })
+      )
+
       it.effect(
         'requires the terminal event: no response.completed is a non-retryable invalid response',
         () =>
@@ -959,3 +1129,51 @@ const describeFamily = <Req>(family: Family<Req>) => {
 describeFamily(codex)
 
 describeFamily(grok)
+
+describe('Grok never takes Codex missing-output recovery', () => {
+  it.effect('fails a response.completed without output even when a caller asks for recovery', () =>
+    Effect.gen(function* () {
+      // A runtime config object carrying the private Codex flag: the Grok layer spreads its config.
+      const config = {
+        token: grokSettings.token,
+        clientVersion: grokSettings.clientVersion,
+        maxOutputTokens: grokSettings.maxOutputTokens,
+        recoverMissingFinalOutput: true
+      }
+
+      const withoutOutput = sseEvents(xAiGrokPlainTextFixture).map(event =>
+        mapJson(event, json => {
+          if (json.type === 'response.completed' && isRecord(json.response)) {
+            delete json.response.output
+          }
+        })
+      )
+
+      const error = yield* Effect.gen(function* () {
+        const llm = yield* LLMProvider
+
+        return yield* llm
+          .stream({
+            model: xAiGrokPlainTextFixture.model ?? 'unknown',
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: []
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(
+        Effect.provide(
+          makeXAiGrokProviderLayer(config).pipe(
+            Layer.provide(
+              ReplayHttpClient.layer([
+                withEvents(xAiGrokPlainTextFixture, withoutOutput, 'no-output')
+              ])
+            )
+          )
+        ),
+        Effect.flip
+      )
+
+      expect(expectLlmError(error).cause).toBe('invalid_response')
+    })
+  )
+})

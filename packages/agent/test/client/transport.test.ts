@@ -12,6 +12,7 @@ import {
   AgentEnd,
   AgentError,
   AgentStart,
+  LLMStreamEnd,
   LLMTextDelta,
   InteractionResponse,
   InteractionResponseInput,
@@ -150,6 +151,34 @@ describe('collectAgentEvents', () => {
       JSON.stringify({ sessionId: 'session_1', messages, reasoningEffort: 'high' })
     )
     expect(Array.from(events)).toEqual(responseEvents)
+  })
+
+  // The NDJSON lines `writeDurableAgentEvent` (@yolk-sdk/vercel-workflows) writes for a marked
+  // stream end and for one recorded before the mark existed.
+  it('decodes the stream end usage mark from durable NDJSON, and lines without it', async () => {
+    const body = [
+      '{"_tag":"LLMStreamEnd","turn":1,"usageUnavailable":true,"eventId":"workflow:run-1:1:4","streamId":"workflow:run-1"}',
+      '{"_tag":"LLMStreamEnd","turn":2,"eventId":"workflow:run-1:2:9","streamId":"workflow:run-1"}'
+    ].join('\n')
+
+    const events = await Effect.runPromise(
+      collectAgentEvents({
+        endpoint: '/api/agent',
+        sessionId: 'session_1',
+        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+        httpClientLayer: makeHttpClientLayer(new Response(`${body}\n`), [])
+      })
+    )
+
+    expect(Array.from(events)).toEqual([
+      LLMStreamEnd.make({
+        turn: 1,
+        usageUnavailable: true,
+        eventId: 'workflow:run-1:1:4',
+        streamId: 'workflow:run-1'
+      }),
+      LLMStreamEnd.make({ turn: 2, eventId: 'workflow:run-1:2:9', streamId: 'workflow:run-1' })
+    ])
   })
 
   it('fails on malformed agent event lines', async () => {

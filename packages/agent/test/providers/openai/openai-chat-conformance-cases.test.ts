@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Stream } from 'effect'
 import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -11,8 +11,12 @@ import {
 import {
   makeReplayHttpClient,
   ReplayHttpClient,
+  ReplayLedger,
+  WireFault,
   type ReplayLedgerApi
 } from '@yolk-sdk/conformance/replay'
+import { LLMDone, LLMProvider, LLMUsage, type LLMEvent } from '@yolk-sdk/agent/loop'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   conformanceReportFailed,
   formatConformanceReport,
@@ -35,6 +39,7 @@ import {
   type OpenAiConformanceCase,
   type OpenAiConformanceSettings
 } from '../../../src/providers/openai/conformance/index.ts'
+import { makeOpenAiProviderLayer } from '../../../src/providers/openai/provider.ts'
 
 const now = new Date('2026-09-30T12:00:00.000Z')
 
@@ -747,4 +752,103 @@ describe('OpenAI chat conformance disagreement drills', () => {
       /Invalid conformance case/
     )
   })
+})
+
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
+
+// The generic chat provider with the plain-text case's request, over the recorded stream.
+const streamPlainText = (faults: ReadonlyArray<WireFault> = []) =>
+  Effect.gen(function* () {
+    const provider = yield* LLMProvider
+
+    const events = yield* provider
+      .stream({
+        model: settings.models.plainText,
+        systemPrompt: 'Reply in one short sentence.',
+        messages: [UserMessage.make({ content: 'Say hello.' })],
+        tools: []
+      })
+      .pipe(Stream.runCollect)
+
+    const entries = yield* (yield* ReplayLedger).entries
+
+    return { events: Array.from(events), entries }
+  }).pipe(
+    Effect.provide(
+      makeOpenAiProviderLayer({
+        apiKey: settings.apiKey,
+        maxCompletionTokens: settings.maxCompletionTokens,
+        streaming: true
+      }).pipe(Layer.provideMerge(ReplayHttpClient.layer([openAiChatPlainTextFixture], { faults })))
+    )
+  )
+
+const hasFinish = (event: SseEvent): boolean => {
+  const choices =
+    isRecord(event.json) && Array.isArray(event.json.choices) ? event.json.choices : []
+
+  return choices.some(choice => isRecord(choice) && Predicate.isString(choice.finish_reason))
+}
+
+const hasUsage = (event: SseEvent): boolean => isRecord(event.json) && isRecord(event.json.usage)
+
+// The fixture's first `count` network chunks, as a truncating wire would deliver them.
+const firstChunks = (fixture: WireFixture, count: number): WireFixture => ({
+  ...fixture,
+  exchanges: [
+    {
+      request: fixture.exchanges[0].request,
+      response: {
+        ...streamResponse(fixture),
+        chunks: streamResponse(fixture).chunks.slice(0, count)
+      }
+    }
+  ]
+})
+
+// The fewest network chunks that carry the whole finish event.
+const chunksThroughFinish = (fixture: WireFixture): number => {
+  const index = streamResponse(fixture).chunks.findIndex((_, chunk) =>
+    sseEvents(firstChunks(fixture, chunk + 1)).some(hasFinish)
+  )
+
+  return index === -1 ? expect.fail(`${fixture.id} records no finish event`) : index + 1
+}
+
+describe('OpenAI chat streaming under wire faults', () => {
+  it.effect('completes a stream cut after the finish chunk, marking usage unavailable', () =>
+    Effect.gen(function* () {
+      const fixture = openAiChatPlainTextFixture
+      const kept = chunksThroughFinish(fixture)
+      const keptEvents = sseEvents(firstChunks(fixture, kept))
+
+      // The cut keeps the finish and drops the separate usage chunk.
+      expect(keptEvents.some(hasFinish)).toBe(true)
+      expect(keptEvents.some(hasUsage)).toBe(false)
+      expect(sseEvents(fixture).some(hasUsage)).toBe(true)
+
+      const { events, entries } = yield* streamPlainText([
+        WireFault.TruncateAfterChunks({ chunks: kept })
+      ])
+
+      expect(doneSignals(events)).toEqual([['stop', true]])
+      expect(events.some(event => event instanceof LLMUsage)).toBe(false)
+      expect(entries.map(entry => [entry.match.outcome, entry.fault])).toEqual([
+        ['matched', 'TruncateAfterChunks']
+      ])
+    })
+  )
+
+  it.effect('leaves Done unmarked when the usage chunk arrives', () =>
+    Effect.gen(function* () {
+      const { events } = yield* streamPlainText()
+
+      expect(doneSignals(events)).toEqual([['stop', undefined]])
+      expect(events.some(event => event instanceof LLMUsage)).toBe(true)
+    })
+  )
 })

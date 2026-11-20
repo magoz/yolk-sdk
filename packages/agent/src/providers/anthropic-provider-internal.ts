@@ -2199,6 +2199,8 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
+  /** A `message_delta` carried an output count: its cumulative usage is the message's final one. */
+  readonly hasFinalUsage: boolean
   /** A thinking block closed without the signature its replay needs. */
   readonly hasUnsignedThinking: boolean
   readonly stopReason?: string
@@ -2208,6 +2210,7 @@ type AnthropicSseState = {
 type AnthropicSseStateFields = {
   hasToolCall: boolean
   hasDone: boolean
+  hasFinalUsage: boolean
   hasUnsignedThinking: boolean
   stopReason?: string
   usage: AnthropicUsageComponents
@@ -2227,6 +2230,7 @@ type AnthropicBodyState = {
 const initialSseState: AnthropicSseState = {
   hasToolCall: false,
   hasDone: false,
+  hasFinalUsage: false,
   hasUnsignedThinking: false,
   usage: zeroAnthropicUsageComponents
 }
@@ -2449,6 +2453,11 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         state: (() => {
           const nextState: AnthropicSseStateFields = {
             ...state,
+            // Every usage field is optional: only an output count (0 included) is a final report.
+            hasFinalUsage:
+              state.hasFinalUsage ||
+              (Predicate.isTagged(parsedUsage, 'Some') &&
+                Predicate.isNumber(parsedUsage.value.output_tokens)),
             usage: step.snapshot
           }
 
@@ -2471,9 +2480,17 @@ const makeAnthropicStreamEmitter = (options: AnthropicResponseOptions) => {
         return Effect.fail(unsignedThinkingError())
       }
 
+      const stopReason = state.hasToolCall ? 'tool_use' : 'stop'
+
+      // Messages always reports usage, its final counts on `message_delta`. A `message_stop`
+      // without one ends the message whole, but its usage is missing or only `message_start`'s.
       return Effect.succeed({
         state: { ...state, hasDone: true },
-        events: [LLMDone.make({ stopReason: state.hasToolCall ? 'tool_use' : 'stop' })]
+        events: [
+          state.hasFinalUsage
+            ? LLMDone.make({ stopReason })
+            : LLMDone.make({ stopReason, usageUnavailable: true })
+        ]
       })
     }
 

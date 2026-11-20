@@ -408,8 +408,10 @@ non-object JSON events are ignored (not failed), while malformed non-JSON event 
 Chat Completions transport defaults to one JSON body. Set `OpenAiProviderConfig.streaming: true` to
 request incremental `chat.completion.chunk` SSE deltas with `stream_options.include_usage`, folded
 into text/reasoning/tool-call events plus terminal and usage events. Unterminated streams fail
-`invalid_response` and never emit `Done`. Hosts must only enable streaming against endpoints that
-serve chat SSE; OpenCode Go `chat-completions` always sets it.
+`invalid_response` and never emit `Done`; a stream that ends after its finish chunk without the
+usage chunk completes with `Done.usageUnavailable` (see [Usage accounting](#usage-accounting)).
+Hosts must only enable streaming against endpoints that serve chat SSE; OpenCode Go
+`chat-completions` always sets it.
 
 `OpenAiProviderConfig.extraBody` takes `OpenAiRequestExtras` (JSON-object input). Lowering
 projects enumerable own string fields into an independent portable-data snapshot. Canonical
@@ -528,6 +530,27 @@ Provider `LLMUsage` events are additive deltas. Adapters normalize vendor counte
 for example, Anthropic stream snapshots become deltas and cached input tokens count toward input
 totals. The loop aggregates usage and emits protocol `UsageUpdate` / terminal usage for hosts to
 persist or display.
+
+A stream can complete without the usage report its request asked for (or its protocol always
+sends):
+
+| Provider                                                      | Completes without the final usage when                                                                     |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Streamed chat (OpenAI-compatible, Vercel AI Gateway, Go chat) | the stream ends after its finish chunk, before the `stream_options.include_usage` usage chunk              |
+| Streamed Responses (Codex, Grok, Go `responses`)              | `response.completed` carries no `usage`                                                                    |
+| Codex                                                         | the stream ends without `response.completed`, or that event's `output` is missing or misses a required key |
+| Claude, native Messages (Go `messages`)                       | `message_stop` arrives without a `message_delta` carrying an output count                                  |
+
+These streams completed successfully before the mark existed, and still do: failing them would
+re-run and re-bill the model. A chat stream cut after its finish chunk holds the whole answer;
+Codex's EOF compatibility accepts any stream end without `response.completed`, including a
+premature cut. The provider's `LLMDone` carries `usageUnavailable: true` and the loop forwards it on
+that model stream's protocol `LLMStreamEnd`. The turn's usage is then missing from `UsageUpdate`
+and terminal usage, or partial when the stream sent some (Messages' `message_start`). Hosts decide
+how to account for it: estimate it, flag the total as a lower bound, or ignore it. The field is
+absent when the report arrived and on events recorded before it existed; non-streamed (JSON)
+responses are never marked. Grok and Go Responses streams fail without `response.completed`, and
+Messages streams fail without `message_stop`, so they never complete without a terminal event.
 
 ## Context compaction
 

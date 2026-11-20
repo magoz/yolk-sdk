@@ -149,6 +149,12 @@ const lookupWeatherTool = ToolDef.make({
 const doneReasons = (events: Iterable<LLMEvent>) =>
   Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
 
+/** Each Done's stop reason and whether it says the requested usage never arrived. */
+const doneSignals = (events: Iterable<LLMEvent>) =>
+  Array.from(events).flatMap(event =>
+    event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+  )
+
 const expectLlmError = (error: unknown): LLMError =>
   error instanceof LLMError ? error : expect.fail(`expected an LLMError, got ${String(error)}`)
 
@@ -475,8 +481,9 @@ const describeFamily = <Req>(family: Family<Req>) => {
               inProcessLayer
             )
 
-            // Existing Codex compatibility behaviour, recorded here, not endorsed.
-            expect(doneReasons(events)).toEqual(['stop'])
+            // Existing Codex compatibility behaviour, recorded here, not endorsed. The usage only
+            // `response.completed` carries never arrived, and Done says so.
+            expect(doneSignals(events)).toEqual([['stop', true]])
             expect(events.map(event => event._tag)).not.toContain('Usage')
           })
       )

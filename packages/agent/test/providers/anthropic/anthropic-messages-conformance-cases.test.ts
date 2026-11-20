@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Redacted, Ref } from 'effect'
+import { Effect, Layer, Predicate, Redacted, Ref, Stream } from 'effect'
 import { HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
 import { defineConformanceCase, type ConformanceCase } from '@yolk-sdk/conformance/case'
@@ -39,6 +39,11 @@ import {
   type AnthropicConformanceCase,
   type AnthropicConformanceSettings
 } from '../../../src/providers/anthropic/conformance/index.ts'
+import { makeAnthropicClaudeProviderLayer } from '../../../src/providers/anthropic/claude-provider.ts'
+import { makeAnthropicMessagesProviderLayer } from '../../../src/providers/anthropic-messages-provider-internal.ts'
+import { LLMDone, LLMProvider, LLMUsage, type LLMEvent } from '@yolk-sdk/agent/loop'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
 
 const now = new Date('2026-09-30T12:00:00.000Z')
 
@@ -837,4 +842,136 @@ describe('Anthropic Messages conformance disagreement drills', () => {
       defineConformanceCase({ ...anthropicMessagesPlainTextCase, id: 'Anthropic.Bad' })
     ).toThrow(/Invalid conformance case/)
   })
+})
+
+// The final usage of a Messages stream rides on `message_delta`. A `message_stop` without one still
+// ends the message (the reader shared by native Messages and Claude), so Done must say the usage
+// never arrived.
+describe('Anthropic Messages usage reports through the providers', () => {
+  const providers = {
+    native: makeAnthropicMessagesProviderLayer({
+      providerId: 'anthropic_messages',
+      providerName: 'Anthropic Messages',
+      messagesUrl: anthropicConformanceMessagesUrl,
+      maxTokens: settings.maxTokens,
+      headers: {
+        'x-api-key': Redacted.value(settings.apiKey),
+        'anthropic-version': anthropicConformanceVersion,
+        accept: 'text/event-stream',
+        'content-type': 'application/json'
+      }
+    }),
+    // Pointed at the recorded URL: replay matches method and URL only.
+    claude: makeAnthropicClaudeProviderLayer({
+      token: new OAuthAccessToken({
+        provider: 'anthropic-claude',
+        accessToken: 'synthetic-claude-oauth-token',
+        expiresAt: 1_900_000_000_000
+      }),
+      maxTokens: settings.maxTokens,
+      messagesUrl: anthropicConformanceMessagesUrl
+    })
+  }
+
+  const stream = (
+    provider: Layer.Layer<LLMProvider, never, HttpClient.HttpClient>,
+    fixture: WireFixture
+  ) =>
+    Effect.gen(function* () {
+      const llm = yield* LLMProvider
+
+      return Array.from(
+        yield* llm
+          .stream({
+            model: settings.models.plainText,
+            systemPrompt: 'Reply in one short sentence.',
+            messages: [UserMessage.make({ content: 'Say hello.' })],
+            tools: []
+          })
+          .pipe(Stream.runCollect)
+      )
+    }).pipe(Effect.provide(provider.pipe(Layer.provide(ReplayHttpClient.layer([fixture])))))
+
+  /** Each Done's stop reason and whether it says the requested usage never arrived. */
+  const doneSignals = (events: ReadonlyArray<LLMEvent>) =>
+    events.flatMap(event =>
+      event instanceof LLMDone ? [[event.stopReason, event.usageUnavailable]] : []
+    )
+
+  const usageCount = (events: ReadonlyArray<LLMEvent>) =>
+    events.filter(event => event instanceof LLMUsage).length
+
+  const recorded = sseEvents(anthropicMessagesPlainTextFixture)
+
+  for (const [name, provider] of Object.entries(providers)) {
+    it.effect(`${name}: Done stays unmarked when message_delta reports the final usage`, () =>
+      Effect.gen(function* () {
+        const events = yield* stream(provider, anthropicMessagesPlainTextFixture)
+
+        expect(doneSignals(events)).toEqual([['stop', undefined]])
+        expect(usageCount(events)).toBe(2)
+      })
+    )
+
+    it.effect(`${name}: marks usage unavailable for a message_stop without message_delta`, () =>
+      Effect.gen(function* () {
+        const withoutDelta = recorded.filter(event => typeOf(event) !== 'message_delta')
+
+        expect(withoutDelta.map(typeOf)).toContain('message_stop')
+
+        const events = yield* stream(
+          provider,
+          withEvents(anthropicMessagesPlainTextFixture, withoutDelta)
+        )
+
+        // Only the partial `message_start` usage arrived.
+        expect(usageCount(events)).toBe(1)
+        expect(doneSignals(events)).toEqual([['stop', true]])
+      })
+    )
+
+    // Every usage field is optional on the wire: only an output count is a final report.
+    for (const [label, usage, marked] of [
+      ['an empty usage object', {}, true],
+      ['a null output count', { output_tokens: null }, true],
+      ['a zero output count', { output_tokens: 0 }, false]
+    ] as const) {
+      it.effect(
+        `${name}: ${marked ? 'marks' : 'does not mark'} a message_delta with ${label}`,
+        () =>
+          Effect.gen(function* () {
+            const edited = recorded.map(event =>
+              mapJson(event, json => {
+                if (json.type === 'message_delta') json.usage = { ...usage }
+              })
+            )
+
+            const events = yield* stream(
+              provider,
+              withEvents(anthropicMessagesPlainTextFixture, edited)
+            )
+
+            expect(doneSignals(events)).toEqual([['stop', marked ? true : undefined]])
+          })
+      )
+    }
+
+    it.effect(`${name}: marks usage unavailable when message_delta carries no usage`, () =>
+      Effect.gen(function* () {
+        const withoutUsage = recorded.map(event =>
+          mapJson(event, json => {
+            if (json.type === 'message_delta') delete json.usage
+          })
+        )
+
+        const events = yield* stream(
+          provider,
+          withEvents(anthropicMessagesPlainTextFixture, withoutUsage)
+        )
+
+        expect(usageCount(events)).toBe(1)
+        expect(doneSignals(events)).toEqual([['stop', true]])
+      })
+    )
+  }
 })
