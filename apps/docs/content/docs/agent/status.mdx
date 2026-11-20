@@ -56,6 +56,13 @@ before, so a resumed durable stream leaves `Blocked` even when it does not repla
 Dedupe replayed events by `eventId` before folding them. `agentStatusRetry(status)` returns the
 pending `AgentRetry` while retrying.
 
+The `useAgentChat` reducer and `reduceAgentEvents` also fence replays without `eventId`: a replayed
+`AgentAwaitingInput` blocks only on the requests their chat or tool runs still show pending, and
+leaves the status as it was when every request names a call (same id, name and arguments) already
+answered, cancelled, denied or finished. A host that folds status itself beside
+`applyAgentEventToChatProjection` should skip such a pause the same way, or rely on `eventId`
+dedupe; otherwise the run shows `Blocked` with no card to answer.
+
 ## From stored state
 
 Store the encoded status in the same commit as the rest of the run, and reconcile it when you read
