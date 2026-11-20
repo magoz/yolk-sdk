@@ -526,25 +526,37 @@ describe('an error type that names a kind behind a code that names none', () => 
   }
 })
 
+// Every target reads such a body twice: its vendor envelope decoder (the full body through
+// `Schema.fromJsonString(Schema.Json)`, which is stack-safe at any depth) and the shared
+// classifier's bounded scan. Neither may turn the failure into a defect.
 describe('pathological error bodies classify by status', () => {
-  const deepBody = `${'['.repeat(10_000)}${']'.repeat(10_000)}`
-
-  const largeBody = `${'x'.repeat(1024 * 1024)} prompt is too long`
-
-  for (const [name, body] of [
-    ['nested 10,000 levels deep', deepBody],
-    ['of 1 MB', largeBody]
-  ] as const) {
-    it.effect(`the Gateway 503 with a body ${name} stays a retryable server error`, () =>
-      Effect.gen(function* () {
-        const error = yield* gatewayTarget.failWith({ kind: 'status', status: 503, body }, 'x')
-
-        expect(error).toMatchObject({
-          retryable: true,
-          provider: { kind: 'server_error', status: 503 }
-        })
+  const bodies: ReadonlyArray<readonly [string, string]> = [
+    ['arrays nested 10,000 levels deep', `${'['.repeat(10_000)}${']'.repeat(10_000)}`],
+    ['objects nested 10,000 levels deep', `${'{"error":'.repeat(10_000)}null${'}'.repeat(10_000)}`],
+    ['of 1 MB of text', `${'x'.repeat(1024 * 1024)} prompt is too long`],
+    ['of 1 MB nested 524,288 levels deep', `${'['.repeat(512 * 1024)}${']'.repeat(512 * 1024)}`],
+    [
+      'of a 1 MB JSON envelope',
+      JSON.stringify({
+        type: 'error',
+        error: { type: 'api_error', message: `${'x'.repeat(1024 * 1024)} prompt is too long` }
       })
-    )
+    ]
+  ]
+
+  for (const target of allTargets) {
+    for (const [name, body] of bodies) {
+      it.effect(`${target.name}: a 503 with a body ${name} stays a retryable server error`, () =>
+        Effect.gen(function* () {
+          const error = yield* target.failWith({ kind: 'status', status: 503, body }, 'x-model')
+
+          expect(error).toMatchObject({
+            retryable: true,
+            provider: { kind: 'server_error', status: 503 }
+          })
+        })
+      )
+    }
   }
 })
 
