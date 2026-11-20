@@ -5,12 +5,12 @@
  *
  * Fixture-only: it never imports SDK code; its wire shapes and default seed are copied as data
  * from the synthetic Todoist conformance fixtures, and every route names the conformance cases it
- * follows in `todoistEmulatorRoutes`. Only the routes the seven Todoist cases (with their cleanup)
+ * follows in `todoistEmulatorRoutes`. Only the routes the eight Todoist cases (with their cleanup)
  * need are emulated; anything the fixtures do not record answers one ledgered 400
- * `{ error: { type: 'not_emulated', message } }`. That includes the project listing of the
- * read-only leftover lookup (`findTodoistConformanceLeftovers`), which no fixture records: the
- * lookup fails (`todoist_list_projects_failed`, HTTP 400), and runners print their lookup-failed
- * WARN instead of leftover warnings.
+ * `{ error: { type: 'not_emulated', message } }`. The project listing of the read-only leftover
+ * lookup (`findTodoistConformanceLeftovers`) is recorded by the project paging case
+ * (`todoist.projects.list-cursor-paging`), so the lookup runs against the emulator: it lists the
+ * `yolk-conformance-run-*` projects the state holds.
  *
  * Fail closed: a request on no emulated route (or with a raw id segment that is not a Todoist id)
  * is ledgered and answered with constant text only (`/<unrecognised>`, a standard method or
@@ -18,8 +18,9 @@
  * present but is not one recognisable bearer, whatever its route: its credential cannot be
  * extracted and scrubbed.
  *
- * No answer is synthesised: a seeded project (whose object no fixture records) answers
- * not-emulated on a read; only items created through the recorded create flow are updated,
+ * No answer is synthesised: a seeded project answers not-emulated on a single read (only the
+ * project listing fixture records its object); only items created through the recorded create flow
+ * are updated,
  * closed, or deleted; a case project takes one task and a seeded parent one sub-project (the
  * fixtures record `child_order: 1` only). Minted ids use the reserved prefix `6XEmu`, which seeds
  * may not use. The bearer value is guarded like the Telegram token: scrubbed from everything
@@ -34,7 +35,8 @@
  * writes: only items created through the recorded create flow; a new project's `parent_id`: a
  * seeded project); any `run-` run id (at most 40 characters) in a case project name; any non-empty
  * task `content`; a task update sending `content`, `due_datetime`, or both; a label listing `limit`
- * of 1 to 200 that covers every label.
+ * of 1 to 200 that covers every label; a project listing `limit` of 1 to 200, its pages chained
+ * through cursors this emulator issued for the same `limit` and unchanged listing.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeTodoistEmulator` (importing this module has no side effects).
@@ -239,7 +241,7 @@ const inputInvalid = (input: StatefulInputKind, reason: string) =>
  *
  * Routes (under `/api/v1`, `Authorization: Bearer <token of at least 8 characters>`): task
  * listing with cursor paging, task read, create, update, and close, label listing, and project
- * create, read, and delete.
+ * listing with cursor paging, create, read, and delete.
  * See `README.md` (Todoist emulator) for the wire claims.
  */
 export const makeTodoistEmulator = async (
@@ -262,10 +264,13 @@ export const makeTodoistEmulator = async (
       listIncludesClosed: drills.listIncludesClosed ?? false,
       ignoreDue: drills.ignoreDue ?? false,
       createOmitsParent: drills.createOmitsParent ?? false,
-      deleteKeepsTasks: drills.deleteKeepsTasks ?? false
+      deleteKeepsTasks: drills.deleteKeepsTasks ?? false,
+      projectCursorRestarts: drills.projectCursorRestarts ?? false
     },
     cursors: new Map(),
-    cursorCounter: { next: 1 }
+    cursorCounter: { next: 1 },
+    projectCursors: new Map(),
+    projectCursorCounter: { next: 1 }
   }
 
   const cursorList = (): ReadonlyArray<TodoistCursor> => [...env.cursors.values()]
@@ -282,11 +287,18 @@ export const makeTodoistEmulator = async (
       buildSeed: buildTodoistSeedState,
       resolveRequest: resolve,
       errorTexts,
+      // The cursor counters never reset (as Dropbox's and Notion's), so no cursor value issued
+      // before a reset or seed is ever issued again.
       clearRuntime: () => {
         env.cursors.clear()
-        env.cursorCounter.next = 1
+        env.projectCursors.clear()
       },
-      runtimeState: () => ({ runtime: { cursors: cursorList().map(cursor => ({ ...cursor })) } }),
+      runtimeState: () => ({
+        runtime: {
+          cursors: cursorList().map(cursor => ({ ...cursor })),
+          projectCursors: [...env.projectCursors.values()].map(cursor => ({ ...cursor }))
+        }
+      }),
       seedSummary: state => ({
         projects: state.projects.length,
         tasks: state.tasks.length,

@@ -5,17 +5,22 @@
  * flags, then exits without any network call.
  *
  * `--live --owner-approved --account <label>`: runs the cases against the real Microsoft Graph API
- * with a `FetchHttpClient`: Outlook and OneDrive cases through the real connector actions, calendar
- * cases through raw Graph requests over the same connector ports (the connector has no calendar
- * actions yet). Refused whenever `CI` is non-empty (`0` and `false` included) and without
- * `--owner-approved` (the repository owner's explicit approval), in both cases before any
- * credential read. Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a flag; a delegated
- * token for the practice user with Mail.ReadWrite, Calendars.ReadWrite, and Files.ReadWrite) and the
- * seed identities of every case that will run (flags or environment, see `usage`). The label is
- * synthetic and non-identifying (for example `practice`): it is printed in reports and recorded in
- * fixtures. Read cases always run; `--allow-writes reversible` adds the write-reversible cases,
- * which create their own event, draft, or folder and always remove it again. There are no
- * write-irreversible Microsoft cases: nothing sends mail or invitations.
+ * with a `FetchHttpClient`: Outlook, OneDrive, SharePoint site, and Teams cases through the real
+ * connector actions, calendar cases through raw Graph requests over the same connector ports (the
+ * connector has no calendar actions yet). Refused whenever `CI` is non-empty (`0` and `false`
+ * included) and without `--owner-approved` (the repository owner's explicit approval), in both
+ * cases before any credential read. Requires `MICROSOFT_ACCESS_TOKEN` (environment only, never a
+ * flag; a delegated token for the practice user with the scopes of the cases that will run, see
+ * `usage`) and the seed identities of every case that will run (flags or environment, see
+ * `usage`). The label is synthetic and non-identifying (for example `practice`): it is printed in
+ * reports and recorded in fixtures. Read cases always run; `--allow-writes reversible` adds the
+ * write-reversible cases, which create their own event, draft, or folder and always remove it
+ * again. Nothing sends mail or invitations. The write-irreversible
+ * `microsoft.teams.send-chat-message` posts one real message that the connector cannot remove to
+ * the `--send-chat-id` practice chat (a dedicated chat, apart from the `--chat` paging chat); it
+ * runs only with `--allow-irreversible microsoft.teams.send-chat-message` (`--allow-writes` never
+ * starts it), and its text names a fresh random `runId` the runner generates per invocation (never
+ * a flag), printed before any case when the send will run.
  *
  * `--record` (with `--live`) wraps the live client with the conformance `WireRecorder`. After the
  * run it builds `verified` fixtures (today's date, the account label) for the cases that passed,
@@ -31,8 +36,8 @@
  * that is not physically where it appears to be (every component checked with lstat, symlinks
  * refused, dangling ones included, re-checked before the rename); this guards against
  * misconfiguration, not a concurrent local process. It then prints a review checklist (email-like
- * strings outside `example.test`/`example.com`, names and subjects, body text, tenant URLs, binary
- * bodies, and shared seeds that changed).
+ * strings outside `example.test`/`example.com`, names, subjects, and chat topics, body text, tenant
+ * URLs and tenant GUIDs, binary bodies, and shared seeds that changed).
  *
  * Live runs are interruptible (the shared `runInterruptibly`): the first SIGINT/SIGTERM interrupts
  * the run fiber, so a running write case still attempts its uninterruptible removal of the event,
@@ -199,8 +204,66 @@ export const microsoftSeedSources: ReadonlyArray<SeedSource> = [
     flag: '--copy-source',
     env: 'MICROSOFT_CONFORMANCE_COPY_SOURCE',
     description: 'small file the copy case copies into its own folder'
+  },
+  {
+    key: 'siteSearchQuery',
+    flag: '--site-query',
+    env: 'MICROSOFT_CONFORMANCE_SITE_QUERY',
+    description: 'keyword sharepoint.search_sites finds the --site site with (first page)'
+  },
+  {
+    key: 'siteId',
+    flag: '--site',
+    env: 'MICROSOFT_CONFORMANCE_SITE',
+    description: 'SharePoint site id ({hostname},{collection-id},{web-id}) with a library'
+  },
+  {
+    key: 'chatId',
+    flag: '--chat',
+    env: 'MICROSOFT_CONFORMANCE_CHAT',
+    description: 'Teams chat with more than two messages (read only)'
+  },
+  {
+    key: 'sendChatId',
+    flag: '--send-chat-id',
+    env: 'MICROSOFT_CONFORMANCE_SEND_CHAT',
+    description: 'dedicated practice Teams chat the irreversible send posts to'
+  },
+  {
+    key: 'teamId',
+    flag: '--team',
+    env: 'MICROSOFT_CONFORMANCE_TEAM',
+    description: 'team the signed-in user joined'
+  },
+  {
+    key: 'channelId',
+    flag: '--channel',
+    env: 'MICROSOFT_CONFORMANCE_CHANNEL',
+    description: 'channel of that team (on the first page of its channels)'
+  },
+  {
+    key: 'channelMessageId',
+    flag: '--channel-message',
+    env: 'MICROSOFT_CONFORMANCE_CHANNEL_MESSAGE',
+    description: 'top-level post of that channel with at least one reply'
+  },
+  {
+    key: 'meetingJoinWebUrl',
+    flag: '--meeting-join-url',
+    env: 'MICROSOFT_CONFORMANCE_MEETING_JOIN_URL',
+    description: 'https://teams.microsoft.com join link of a transcribed meeting'
   }
 ]
+
+/**
+ * Seeds the live runner generates itself, fresh per invocation (never flags or environment): the
+ * send case's invocation-unique `runId`. Case specs list them; they are never reported missing,
+ * and they are rendered into the staged seeds module like any other seed.
+ */
+export const microsoftGeneratedSeedKeys: ReadonlyArray<MicrosoftConformanceSeedKey> = ['runId']
+
+/** A fresh `run-<8 hex>` run id for one live invocation. */
+export const generateRunId = (): string => `run-${randomBytes(4).toString('hex')}`
 
 export type MicrosoftCaseSpec = {
   readonly caseId: string
@@ -304,8 +367,77 @@ export const microsoftCaseSpecs: ReadonlyArray<MicrosoftCaseSpec> = [
     fileName: 'onedrive-copy-monitor.ts',
     exportName: 'microsoftOneDriveCopyMonitorFixture',
     doc: 'Source read, folder create, copy accepted with a monitor `Location`, status polls, the folder listing, and the folder removal.'
+  },
+  {
+    caseId: 'microsoft.sharepoint.search-finds-site',
+    seeds: ['siteSearchQuery', 'siteId'],
+    optionalSeeds: [],
+    fileName: 'sharepoint-search-sites.ts',
+    exportName: 'microsoftSharePointSearchSitesFixture',
+    doc: 'A keyword site search that lists the seeded team site with its comma-separated site id.'
+  },
+  {
+    caseId: 'microsoft.sharepoint.site-drives-libraries',
+    seeds: ['siteId'],
+    optionalSeeds: [],
+    fileName: 'sharepoint-site-drives.ts',
+    exportName: 'microsoftSharePointSiteDrivesFixture',
+    doc: "The seeded site's document libraries, listed by its site id with literal commas."
+  },
+  {
+    caseId: 'microsoft.teams.chats-list-members',
+    seeds: [],
+    optionalSeeds: [],
+    fileName: 'teams-chats-list.ts',
+    exportName: 'microsoftTeamsChatsListMembersFixture',
+    doc: "A page of the signed-in user's chats with their members, then the first chat by id."
+  },
+  {
+    caseId: 'microsoft.teams.chat-messages-paging',
+    seeds: ['chatId'],
+    optionalSeeds: [],
+    fileName: 'teams-chat-messages-paging.ts',
+    exportName: 'microsoftTeamsChatMessagesPagingFixture',
+    doc: 'A two-message first page of the seeded chat with `@odata.nextLink`, the page the link returns, and the first message by id.'
+  },
+  {
+    caseId: 'microsoft.teams.team-channels',
+    seeds: ['teamId', 'channelId'],
+    optionalSeeds: [],
+    fileName: 'teams-team-channels.ts',
+    exportName: 'microsoftTeamsTeamChannelsFixture',
+    doc: 'The joined teams, the seeded team by id, its channels, and the seeded channel by id.'
+  },
+  {
+    caseId: 'microsoft.teams.channel-message-replies',
+    seeds: ['teamId', 'channelId', 'channelMessageId'],
+    optionalSeeds: [],
+    fileName: 'teams-channel-replies.ts',
+    exportName: 'microsoftTeamsChannelMessageRepliesFixture',
+    doc: "The seeded channel's top-level posts, the seeded post by id, and its replies."
+  },
+  {
+    caseId: 'microsoft.teams.meeting-transcripts',
+    seeds: ['meetingJoinWebUrl'],
+    optionalSeeds: [],
+    fileName: 'teams-meeting-transcripts.ts',
+    exportName: 'microsoftTeamsMeetingTranscriptsFixture',
+    doc: 'The seeded meeting found by its join link, then its transcripts by meeting id.'
+  },
+  {
+    caseId: 'microsoft.teams.send-chat-message',
+    seeds: ['sendChatId', 'runId'],
+    optionalSeeds: [],
+    fileName: 'teams-send-chat-message.ts',
+    exportName: 'microsoftTeamsSendChatMessageFixture',
+    doc: 'A plain-text message posted to the seeded send chat (escaped HTML, `<br>` line break), then read back by the returned id.'
   }
 ]
+
+/** Ids of the write-irreversible cases (the only values `--allow-irreversible` takes). */
+export const microsoftIrreversibleCaseIds: ReadonlyArray<string> = microsoftConformanceCases
+  .filter(testCase => testCase.safety === 'write-irreversible')
+  .map(testCase => testCase.id)
 
 export type RunOptions = {
   readonly live: boolean
@@ -316,6 +448,8 @@ export type RunOptions = {
   /** Synthetic, non-identifying account label. Required with `--live`. */
   readonly account: string | undefined
   readonly allowWrites: 'none' | 'reversible'
+  /** Exact ids of write-irreversible cases a person explicitly started (`--allow-irreversible`). */
+  readonly allowIrreversible: ReadonlyArray<string>
   /** Raw seed identities from flags or environment (validated before a live run). */
   readonly seeds: Readonly<Partial<Record<MicrosoftConformanceSeedKey, string>>>
 }
@@ -327,6 +461,7 @@ export const defaultRunOptions: RunOptions = {
   ownerApproved: false,
   account: undefined,
   allowWrites: 'none',
+  allowIrreversible: [],
   seeds: {}
 }
 
@@ -353,6 +488,9 @@ Options:
   --allow-writes <none|reversible>
                                   default none; reversible runs the write-reversible cases (each
                                   creates its own event, draft, or folder and removes it again)
+  --allow-irreversible <case-id>  run this exact write-irreversible case, which cannot be undone
+                                  (repeatable; only microsoft.teams.send-chat-message, which posts
+                                  a real message naming a fresh run id to the --send-chat-id chat)
   --record                        with --live: record the cases that passed, verify on replay,
                                   and stage them in a new run directory under
                                   .conformance-recordings/microsoft/ (gitignored) for manual
@@ -366,15 +504,20 @@ ${microsoftSeedSources
   --help
 
 MICROSOFT_ACCESS_TOKEN is read from the environment only: a delegated token for the practice
-user (Mail.ReadWrite, Calendars.ReadWrite, Files.ReadWrite). Use a practice tenant, never a real
-one, and never run live in CI. Recordings are never written over committed fixtures: scrub the
-staged files, copy them into packages/connectors/src/microsoft/conformance/, and update the
-Microsoft conformance tests in the same change (fixture ids, evidence, and account change).`
+user with the scopes of the cases that will run (Mail.ReadWrite, Calendars.ReadWrite, and
+Files.ReadWrite; Sites.Read.All for the SharePoint site cases; Chat.Read, Team.ReadBasic.All,
+Channel.ReadBasic.All, ChannelMessage.Read.All, OnlineMeetings.Read, and
+OnlineMeetingTranscript.Read.All for the Teams reads; ChatMessage.Send for the Teams send). Use a
+practice tenant, never a real one, and never run live in CI. Recordings are never written over
+committed fixtures: scrub the staged files, copy them into
+packages/connectors/src/microsoft/conformance/, and update the Microsoft conformance tests in the
+same change (fixture ids, evidence, and account change).`
 
 /**
  * Parse CLI arguments (without the node/script prefix) and seed environment variables. Throws on
- * unknown flags, missing values, invalid labels, `--record` without `--live`, and `--live` in CI
- * (`CI` non-empty), without `--owner-approved`, or without `--account`.
+ * unknown flags, missing values, invalid labels, an `--allow-irreversible` value that is not the
+ * exact id of a write-irreversible case, `--record` without `--live`, and `--live` in CI (`CI`
+ * non-empty), without `--owner-approved`, or without `--account`.
  */
 export const parseRunArgs = (
   argv: ReadonlyArray<string>,
@@ -386,6 +529,7 @@ export const parseRunArgs = (
   let ownerApproved = false
   let account: string | undefined
   let allowWrites: RunOptions['allowWrites'] = 'none'
+  const allowIrreversible: Array<string> = []
   const seeds: Partial<Record<MicrosoftConformanceSeedKey, string>> = {}
 
   for (const source of microsoftSeedSources) {
@@ -457,6 +601,22 @@ export const parseRunArgs = (
         break
       }
 
+      case '--allow-irreversible': {
+        const caseId = value()
+
+        if (!microsoftIrreversibleCaseIds.includes(caseId)) {
+          throw new Error(
+            `--allow-irreversible takes an exact write-irreversible case id: ${microsoftIrreversibleCaseIds.join(', ')}`
+          )
+        }
+
+        if (!allowIrreversible.includes(caseId)) {
+          allowIrreversible.push(caseId)
+        }
+
+        break
+      }
+
       default:
         throw new Error(unknownArgumentMessage)
     }
@@ -478,7 +638,7 @@ export const parseRunArgs = (
     throw new Error(liveAccountRequiredMessage)
   }
 
-  return { live, help, record, ownerApproved, account, allowWrites, seeds }
+  return { live, help, record, ownerApproved, account, allowWrites, allowIrreversible, seeds }
 }
 
 /** The live target the chosen flags describe (the dry run plans against the same target). */
@@ -486,7 +646,7 @@ export const liveTarget = (options: RunOptions): ConformanceTarget => ({
   kind: 'live',
   account: options.account ?? 'dry-run',
   allowWrites: options.allowWrites,
-  allowIrreversible: []
+  allowIrreversible: options.allowIrreversible
 })
 
 const specFor = (caseId: string): MicrosoftCaseSpec | undefined =>
@@ -507,7 +667,7 @@ export const planMicrosoftRun = (options: RunOptions): ReadonlyArray<PlannedCase
     safety: testCase.safety,
     skipReason: conformanceSkipReason(liveTarget(options), testCase),
     missingSeeds: (specFor(testCase.id)?.seeds ?? []).filter(
-      key => options.seeds[key] === undefined
+      key => options.seeds[key] === undefined && !microsoftGeneratedSeedKeys.includes(key)
     )
   }))
 
@@ -533,9 +693,10 @@ export const dryRunReport = (options: RunOptions): string => {
 
   return [
     'DRY RUN: no network request was made and no credential was read. Pass --live --owner-approved --account <label> to run (needs MICROSOFT_ACCESS_TOKEN).',
-    `Plan for a live target: allowWrites=${options.allowWrites}${options.record ? ', record' : ''}`,
+    `Plan for a live target: allowWrites=${options.allowWrites}${options.allowIrreversible.length === 0 ? '' : `, allowIrreversible=[${options.allowIrreversible.join(', ')}]`}${options.record ? ', record' : ''}`,
     ...lines,
-    "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations."
+    "Use a Microsoft 365 practice tenant only, with the repository owner's approval; never in CI. Write-reversible cases create their own event, draft, or folder and remove it again; nothing sends mail or invitations.",
+    'The write-irreversible microsoft.teams.send-chat-message case posts a real message naming a fresh run id to --send-chat-id that the connector cannot remove; it runs only with --allow-irreversible microsoft.teams.send-chat-message.'
   ].join('\n')
 }
 
@@ -547,14 +708,25 @@ export type LiveInputs = {
 
 const decodeSeeds = Schema.decodeUnknownOption(MicrosoftConformanceSeeds)
 
+export const sameChatRefusal =
+  '--send-chat-id must name a dedicated practice chat, not the --chat paging chat'
+
+/** Whether two chat ids name the same chat once percent-decoded (case-insensitive). */
+const sameChatId = (left: string, right: string): boolean => {
+  const decoded = (id: string) => (decodedVariants(id.trim()).at(-1) ?? id).toLowerCase()
+
+  return decoded(left) === decoded(right)
+}
+
 /**
  * Everything a live run needs, or why it must refuse (before any network): CI, a missing owner
- * approval, account label, or access token, missing seeds for cases that will run, or seeds that
- * are not valid.
+ * approval, account label, or access token, missing seeds for cases that will run, a send chat that
+ * is the paging chat, or seeds that are not valid.
  */
 export const liveInputs = (
   options: RunOptions,
-  env: Readonly<Record<string, string | undefined>>
+  env: Readonly<Record<string, string | undefined>>,
+  runId: string = generateRunId()
 ): { readonly refusal: string } | { readonly inputs: LiveInputs } => {
   if (isCiEnvironment(env)) {
     return { refusal: liveInCiMessage }
@@ -584,7 +756,18 @@ export const liveInputs = (
     return { refusal: `Missing seed identities for the cases that would run: ${flags.join(', ')}` }
   }
 
-  const seeds = decodeSeeds(options.seeds)
+  // The send's chat must be its own: a send to the paging chat would change what the paging case
+  // reads. Ids are compared percent-decoded and case-insensitively, so an encoded copy is caught.
+  if (
+    options.seeds.chatId !== undefined &&
+    options.seeds.sendChatId !== undefined &&
+    sameChatId(options.seeds.chatId, options.seeds.sendChatId)
+  ) {
+    return { refusal: sameChatRefusal }
+  }
+
+  // The generated run id is merged over the flag/environment seeds (it is never a flag).
+  const seeds = decodeSeeds({ ...options.seeds, runId })
 
   if (Option.isNone(seeds)) {
     return {
@@ -661,15 +844,38 @@ export const renderFixtureModule = (spec: MicrosoftCaseSpec, fixture: WireFixtur
   ].join('\n')
 
 const quoted = (value: string): string =>
-  /^[\w .:/@+=!-]*$/.test(value) ? `'${value}'` : JSON.stringify(value)
+  /^[^'\\\u0000-\u001f\u007f\u2028\u2029]*$/u.test(value) ? `'${value}'` : JSON.stringify(value)
+
+/** Every seed key in the seeds module's order: the flag/environment seeds, then generated ones. */
+const seedKeys: ReadonlyArray<MicrosoftConformanceSeedKey> = [
+  ...microsoftSeedSources.map(source => source.key),
+  ...microsoftGeneratedSeedKeys
+]
+
+/** Longest line Oxfmt keeps on one line in the committed seeds module. */
+const seedLineWidth = 100
+
+/**
+ * One `key: value` entry (`separator` is the `,` every entry but the last ends with), moved onto
+ * its own line as Oxfmt does when the entry would pass the width.
+ */
+const seedEntry = (key: string, value: string, separator: string): string => {
+  const line = `  ${key}: ${quoted(value)}${separator}`
+
+  return line.length > seedLineWidth ? `  ${key}:\n    ${quoted(value)}${separator}` : line
+}
 
 /** The seeds module, in the exact committed format. */
 export const renderSeedsModule = (seeds: MicrosoftConformanceSeeds): string => {
-  const entries = microsoftSeedSources.flatMap(source => {
-    const value = seeds[source.key]
+  const present = seedKeys.flatMap(key => {
+    const value = seeds[key]
 
-    return value === undefined ? [] : [`  ${source.key}: ${quoted(value)}`]
+    return value === undefined ? [] : [{ key, value }]
   })
+
+  const entries = present.map(({ key, value }, index) =>
+    seedEntry(key, value, index === present.length - 1 ? '' : ',')
+  )
 
   return [
     "import type { MicrosoftConformanceSeeds } from './cases.ts'",
@@ -680,7 +886,7 @@ export const renderSeedsModule = (seeds: MicrosoftConformanceSeeds): string => {
     ' * updated copy for manual promotion together with the fixtures it records.',
     ' */',
     'export const microsoftConformanceFixtureSeeds: MicrosoftConformanceSeeds = {',
-    entries.join(',\n'),
+    entries.join('\n'),
     '}',
     ''
   ].join('\n')
@@ -731,7 +937,7 @@ export const staleSharedSeeds = (
   readonly key: MicrosoftConformanceSeedKey
   readonly cases: ReadonlyArray<string>
 }> =>
-  microsoftSeedSources.flatMap(({ key }) => {
+  seedKeys.flatMap(key => {
     if (current[key] === merged[key]) {
       return []
     }
@@ -840,14 +1046,16 @@ const allowedEmailDomains = ['example.test', 'example.com']
 
 const emailPattern = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
 
+const wholeEmailPattern = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/
+
 const isAllowedEmail = (email: string): boolean => {
   const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase()
 
   return allowedEmailDomains.some(allowed => domain === allowed || domain.endsWith(`.${allowed}`))
 }
 
-/** Keys whose string values usually name a person, a thread, or a file. */
-const isNameKey = (key: string): boolean => /^(?:name|displayName|subject)$/.test(key)
+/** Keys whose string values usually name a person, a thread (a Teams chat `topic`), or a file. */
+const isNameKey = (key: string): boolean => /^(?:name|displayName|subject|topic)$/.test(key)
 
 /** Keys whose string values hold message or event text. */
 const isTextKey = (key: string): boolean => /^(?:bodyPreview|content)$/.test(key)
@@ -857,45 +1065,206 @@ const tenantHostPattern = /\b[a-z0-9-]+(?:-my)?\.sharepoint\.com\b/gi
 
 const syntheticTenantHost = /^synthetic(?:-my)?\.sharepoint\.com$/i
 
+const guidSource = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+/**
+ * Tenant GUIDs in text: a `tenantId=` URL parameter (Teams `webUrl` values) or a `"Tid":"…"` member
+ * of a join link's percent-encoded `context` (Teams `joinWebUrl` values).
+ */
+const tenantGuidPattern = new RegExp(`(?:tenantId=|"Tid"\\s*:\\s*")(${guidSource})`, 'gi')
+
+/** A user (object) GUID in a join link's `context`: its `"Oid":"…"` member. */
+const objectGuidPattern = new RegExp(`"Oid"\\s*:\\s*"(${guidSource})`, 'gi')
+
+/** A one-on-one chat id names both users: `19:<oid>_<oid>@unq.gbl.spaces`. */
+const oneOnOneChatPattern = new RegExp(
+  `19:(${guidSource})_(${guidSource})@unq\\.gbl\\.spaces`,
+  'gi'
+)
+
+/** A user segment of a Graph path or `@odata.context`: `users('…')`. */
+const usersKeyPattern = /users\('([^']+)'\)/gi
+
+/** A token that may be a base64 or base64url id (Teams member, transcript, and meeting ids). */
+const base64TokenPattern = /[A-Za-z0-9+/_-]{16,}={0,2}/g
+
+const guidPattern = new RegExp(`^${guidSource}$`, 'i')
+
+const guidsPattern = new RegExp(guidSource, 'gi')
+
+/** The synthetic GUIDs the committed fixtures use (`00000000-0000-4000-8000-…`). */
+const syntheticGuid = /^00000000-0000-4000-8000-[0-9a-f]{12}$/i
+
+/**
+ * `text` percent-decoded once, run by run: every run of `%XX` escapes that is valid UTF-8 is
+ * decoded and any other `%` stays as it is, so one stray `%` (`50% off`) never stops the rest of
+ * the text from decoding.
+ */
+const percentDecoded = (text: string): string =>
+  text.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    try {
+      return decodeURIComponent(run)
+    } catch {
+      return run
+    }
+  })
+
+/** Percent-decoding rounds the scan applies, stopping early at a fixed point. */
+const maxDecodeRounds = 3
+
+/** `text` and its percent-decodings, up to `maxDecodeRounds` rounds or a fixed point. */
+const decodedVariants = (text: string): ReadonlyArray<string> => {
+  const variants = [text]
+
+  for (let round = 0; round < maxDecodeRounds; round++) {
+    const previous = variants.at(-1) ?? text
+    const next = percentDecoded(previous)
+
+    if (next === previous) break
+
+    variants.push(next)
+  }
+
+  return variants
+}
+
+/** Every capture of every group of `pattern` in `text`. */
+const captures = (pattern: RegExp, text: string): ReadonlyArray<string> =>
+  [...text.matchAll(pattern)].flatMap(match =>
+    match.slice(1).flatMap(group => (group === undefined ? [] : [group]))
+  )
+
+/**
+ * The base64 or base64url tokens of a text: each whole token (a base64 id may hold `/`) and each of
+ * its `/`-separated parts (an id inside a URL path is one part of a longer token).
+ */
+const base64Candidates = (text: string): ReadonlyArray<string> =>
+  (text.match(base64TokenPattern) ?? []).flatMap(token => [
+    token,
+    ...token.split('/').filter(part => part.length >= 16 && part !== token)
+  ])
+
+/** The GUIDs in the text a base64 or base64url token decodes to (none when it decodes to none). */
+const base64Guids = (token: string): ReadonlyArray<string> =>
+  [...new Set([Buffer.from(token, 'base64'), Buffer.from(token, 'base64url')])].flatMap(bytes =>
+    [...bytes.toString('latin1').matchAll(guidsPattern)].map(match => match[0])
+  )
+
 type ReviewFindings = {
   readonly emails: Set<string>
   readonly names: Set<string>
   readonly texts: Set<string>
   readonly tenantHosts: Set<string>
+  readonly tenantIds: Set<string>
+  readonly userIds: Set<string>
 }
 
-const collectStrings = (value: unknown, key: string | undefined, found: ReviewFindings): void => {
+const addGuid = (target: Set<string>, guid: string): void => {
+  if (!syntheticGuid.test(guid)) target.add(guid.toLowerCase())
+}
+
+/**
+ * Teams thread ids look like addresses (`19:…@thread.v2`, `19:…@unq.gbl.spaces`) but are not:
+ * their GUIDs are scanned as chat ids instead.
+ */
+const teamsThreadDomain = /@(?:thread\.(?:v2|tacv2|skype)|unq\.gbl\.spaces)$/i
+
+const addEmail = (found: ReviewFindings, email: string): void => {
+  if (!isAllowedEmail(email) && !teamsThreadDomain.test(email)) found.emails.add(email)
+}
+
+/** A `users('…')` key: an allowed address, a synthetic GUID, or a user identifier to review. */
+const addUserKey = (found: ReviewFindings, raw: string): void => {
+  const key = decodedVariants(raw).at(-1) ?? raw
+
+  if (wholeEmailPattern.test(key)) addEmail(found, key)
+  else if (guidPattern.test(key)) addGuid(found.userIds, key)
+  else found.userIds.add(key)
+}
+
+/**
+ * Collect review candidates from a string under its JSON `key` (and the key of the object holding
+ * it, `parent`): every percent-decoding of it (up to `maxDecodeRounds`, so a twice-encoded join
+ * link is seen through) is scanned for emails, tenant hosts, tenant GUIDs, `Oid` members,
+ * `users('…')` keys, one-on-one chat ids, and GUIDs inside base64 tokens (whole, and each
+ * `/`-separated part, in every decoded form); and
+ * `tenantId`, `userId`, and `user.id` values are taken as they are.
+ */
+const collectString = (
+  value: string,
+  key: string | undefined,
+  parent: string | undefined,
+  found: ReviewFindings
+): void => {
+  for (const text of decodedVariants(value)) {
+    for (const email of text.match(emailPattern) ?? []) addEmail(found, email)
+
+    for (const host of text.match(tenantHostPattern) ?? []) {
+      if (!syntheticTenantHost.test(host)) found.tenantHosts.add(host.toLowerCase())
+    }
+
+    for (const guid of captures(tenantGuidPattern, text)) addGuid(found.tenantIds, guid)
+
+    for (const guid of [
+      ...captures(objectGuidPattern, text),
+      ...captures(oneOnOneChatPattern, text)
+    ]) {
+      addGuid(found.userIds, guid)
+    }
+
+    for (const userKey of captures(usersKeyPattern, text)) addUserKey(found, userKey)
+
+    for (const token of base64Candidates(text)) {
+      for (const guid of base64Guids(token)) addGuid(found.userIds, guid)
+    }
+  }
+
+  if (key === 'tenantId' && guidPattern.test(value)) addGuid(found.tenantIds, value)
+
+  if ((key === 'userId' || (key === 'id' && parent === 'user')) && value.trim().length > 0) {
+    if (guidPattern.test(value)) addGuid(found.userIds, value)
+    else found.userIds.add(value)
+  }
+
+  if (key !== undefined && value.trim().length > 0) {
+    if (isTextKey(key)) found.texts.add(value)
+    else if (isNameKey(key)) found.names.add(value)
+  }
+}
+
+const collectStrings = (
+  value: unknown,
+  key: string | undefined,
+  found: ReviewFindings,
+  parent?: string
+): void => {
   if (Predicate.isString(value)) {
-    for (const email of value.match(emailPattern) ?? []) {
-      if (!isAllowedEmail(email)) {
-        found.emails.add(email)
-      }
-    }
-
-    for (const host of value.match(tenantHostPattern) ?? []) {
-      if (!syntheticTenantHost.test(host)) {
-        found.tenantHosts.add(host.toLowerCase())
-      }
-    }
-
-    if (key !== undefined && value.trim().length > 0) {
-      if (isTextKey(key)) found.texts.add(value)
-      else if (isNameKey(key)) found.names.add(value)
-    }
+    collectString(value, key, parent, found)
 
     return
   }
 
   if (Array.isArray(value)) {
-    for (const item of value) collectStrings(item, key, found)
+    for (const item of value) collectStrings(item, key, found, parent)
 
     return
   }
 
   if (Predicate.isObject(value)) {
-    for (const [childKey, child] of Object.entries(value)) collectStrings(child, childKey, found)
+    for (const [childKey, child] of Object.entries(value)) {
+      collectStrings(child, childKey, found, key)
+    }
   }
 }
+
+const emptyFindings = (): ReviewFindings => ({
+  emails: new Set(),
+  names: new Set(),
+  texts: new Set(),
+  tenantHosts: new Set(),
+  tenantIds: new Set(),
+  userIds: new Set()
+})
 
 /** A text body as JSON when it parses, otherwise the raw text (still scanned for emails). */
 const parsedText = (text: string): unknown => {
@@ -909,13 +1278,40 @@ const parsedText = (text: string): unknown => {
 const quotedList = (values: ReadonlySet<string>): string =>
   [...values].map(value => JSON.stringify(value)).join(', ')
 
+/** The review items of one file's findings (and its binary body count). */
+const reviewItems = (found: ReviewFindings, binaryBodies: number): ReadonlyArray<string> =>
+  [
+    found.emails.size > 0
+      ? `emails outside ${allowedEmailDomains.join('/')}: ${quotedList(found.emails)}`
+      : undefined,
+    found.tenantHosts.size > 0 ? `tenant host names: ${quotedList(found.tenantHosts)}` : undefined,
+    found.tenantIds.size > 0 ? `tenant GUIDs: ${quotedList(found.tenantIds)}` : undefined,
+    found.userIds.size > 0 ? `user and object ids: ${quotedList(found.userIds)}` : undefined,
+    found.names.size > 0 ? `names and subjects: ${quotedList(found.names)}` : undefined,
+    found.texts.size > 0 ? `body text: ${quotedList(found.texts)}` : undefined,
+    binaryBodies > 0 ? `${binaryBodies} binary body: open it and check its content` : undefined
+  ].filter((item): item is string => item !== undefined)
+
+/** One file's checklist entry: its name, then its review items. */
+const reviewEntry = (fileName: string, items: ReadonlyArray<string>): ReadonlyArray<string> => [
+  `  ${fileName}: ${items.length === 0 ? 'no candidates found; still read it' : ''}`.trimEnd(),
+  ...items.map(item => `    - ${item}`)
+]
+
 /**
- * What a person must check in each staged fixture before promoting it: email-like strings outside
- * `example.test`/`example.com`, names and subjects, body text, tenant host names, and binary bodies.
- * The script only lists candidates; it does not decide what is personal data.
+ * What a person must check in each staged fixture, and in the staged seeds module (`seeds`, the
+ * seeds it renders, each value scanned on its own, when given), before promoting it: email-like strings outside
+ * `example.test`/`example.com`, names, subjects, and chat topics, body text, tenant host names,
+ * tenant GUIDs (`tenantId` values, `tenantId=` URL parameters, and join-link `Tid` members), user
+ * and object ids (join-link `Oid` members, `users('…')` keys, `userId` and `user.id` values, the
+ * GUIDs of one-on-one chat ids, and GUIDs inside base64 ids), and binary bodies. Every string is
+ * also scanned percent-decoded, up to three rounds. The fixtures' synthetic
+ * `00000000-0000-4000-8000-…` GUIDs are never listed. The script only lists candidates; it does not
+ * decide what is personal data.
  */
 export const recordingReviewChecklist = (
-  recorded: ReadonlyArray<{ readonly spec: MicrosoftCaseSpec; readonly fixture: WireFixture }>
+  recorded: ReadonlyArray<{ readonly spec: MicrosoftCaseSpec; readonly fixture: WireFixture }>,
+  seeds?: MicrosoftConformanceSeeds
 ): ReadonlyArray<string> => {
   const lines = [
     'REVIEW before promoting (staged files hold practice-tenant data):',
@@ -923,12 +1319,7 @@ export const recordingReviewChecklist = (
   ]
 
   for (const { spec, fixture } of recorded) {
-    const found: ReviewFindings = {
-      emails: new Set(),
-      names: new Set(),
-      texts: new Set(),
-      tenantHosts: new Set()
-    }
+    const found = emptyFindings()
 
     let binaryBodies = 0
 
@@ -951,22 +1342,20 @@ export const recordingReviewChecklist = (
       }
     }
 
-    const items = [
-      found.emails.size > 0
-        ? `emails outside ${allowedEmailDomains.join('/')}: ${quotedList(found.emails)}`
-        : undefined,
-      found.tenantHosts.size > 0
-        ? `tenant host names: ${quotedList(found.tenantHosts)}`
-        : undefined,
-      found.names.size > 0 ? `names and subjects: ${quotedList(found.names)}` : undefined,
-      found.texts.size > 0 ? `body text: ${quotedList(found.texts)}` : undefined,
-      binaryBodies > 0 ? `${binaryBodies} binary body: open it and check its content` : undefined
-    ].filter((item): item is string => item !== undefined)
+    lines.push(...reviewEntry(spec.fileName, reviewItems(found, binaryBodies)))
+  }
 
-    lines.push(
-      `  ${spec.fileName}: ${items.length === 0 ? 'no candidates found; still read it' : ''}`.trimEnd(),
-      ...items.map(item => `    - ${item}`)
-    )
+  if (seeds !== undefined) {
+    const found = emptyFindings()
+
+    // Each value on its own, so one value that cannot be decoded never hides another's identifiers.
+    for (const key of seedKeys) {
+      const value = seeds[key]
+
+      if (value !== undefined) collectStrings(value, key, found)
+    }
+
+    lines.push(...reviewEntry('seeds.ts', reviewItems(found, 0)))
   }
 
   lines.push(
@@ -1086,7 +1475,7 @@ export const stageRecordings = (
     const stale = staleSharedSeeds(microsoftConformanceFixtureSeeds, seeds, recordedIds)
 
     const checklist = [
-      ...recordingReviewChecklist(recorded),
+      ...recordingReviewChecklist(recorded, seeds),
       ...stale.map(
         ({ key, cases }) =>
           `SHARED SEED ${key} changed: the committed fixtures of ${cases.join(', ')} still use the old value; re-record them or keep the old seed.`
@@ -1147,6 +1536,19 @@ export const stageRecordings = (
   })
 
 /**
+ * When the write-irreversible send will run, the run id its message names, printed before any case
+ * so the owner can find the message in the chat even after a forced exit.
+ */
+export const runIdLines = (options: RunOptions, inputs: LiveInputs): ReadonlyArray<string> =>
+  planMicrosoftRun(options).some(
+    entry => entry.skipReason === undefined && entry.safety === 'write-irreversible'
+  ) && inputs.seeds.runId !== undefined
+    ? [
+        `runId for this run: ${inputs.seeds.runId} (the Teams send names it in the message it posts to --send-chat-id)`
+      ]
+    : []
+
+/**
  * One live run over checked inputs: every case (with the stderr WARN cleanup reporter provided
  * around `runConformance`, so a removal that fails, or an id-less or ambiguous create answered,
  * while the run is interrupted prints a WARN line naming the case or create), the report, and the
@@ -1162,6 +1564,11 @@ export const runMicrosoftLive = (
   Effect.gen(function* () {
     const io = redactingLiveRunIo(liveIo, inputs.accessToken)
     const recorders = yield* Ref.make(new Map<string, WireRecorderApi>())
+
+    // Printed before any case, so the owner can find the message even after a forced exit.
+    for (const line of runIdLines(options, inputs)) {
+      io.out(line)
+    }
 
     const httpFor = (testCase: MicrosoftConformanceCase): Layer.Layer<HttpClient.HttpClient> =>
       options.record
@@ -1230,10 +1637,11 @@ const parseCliArgs = (): RunOptions | undefined => {
 /**
  * What an interrupted Microsoft run may have left behind and where to look, for the interruption
  * and forced-exit messages of `runInterruptibly` (this runner has no leftover lookup). The mailbox
- * and calendar seeds are optional, and the immutable-id case moves its draft to Deleted Items.
+ * and calendar seeds are optional, the immutable-id case moves its draft to Deleted Items, and the
+ * write-irreversible Teams send leaves its message in the chat.
  */
 export const microsoftRecoveryAdvice =
-  "Case-created items may remain; their subjects and names start with yolk-conformance. Look for messages in the --mailbox mailbox (without it, the token user's mailbox), in Drafts and Deleted Items too; events in the --calendar calendar (without it, the default calendar); and folders under the --drive-parent folder. Remove them by hand (removed folders also sit in the OneDrive recycle bin)."
+  "Case-created items may remain; their subjects and names start with yolk-conformance. Look for messages in the --mailbox mailbox (without it, the token user's mailbox), in Drafts and Deleted Items too; events in the --calendar calendar (without it, the default calendar); and folders under the --drive-parent folder. Remove them by hand (removed folders also sit in the OneDrive recycle bin). A Teams send (only with --allow-irreversible) may have posted a yolk-conformance run- message to the --send-chat-id chat; the connector cannot remove it."
 
 /** `runInterruptibly` options of the Microsoft runner: its recovery advice; its cases clean up. */
 export const microsoftInterruptOptions: Pick<

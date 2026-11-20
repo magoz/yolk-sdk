@@ -5,11 +5,12 @@
  *
  * It never imports SDK code: its wire shapes, error bodies, and default seed are copied as data
  * from the synthetic GitHub conformance fixtures, and every route names the conformance cases it
- * follows in `githubEmulatorRoutes`. Only the routes those seven cases send are emulated. Response
+ * follows in `githubEmulatorRoutes`. Only the routes those eight cases send are emulated. Response
  * behaviour comes only from the fixtures: anything they do not show answers one ledgered 400
- * not-emulated, writes nothing, and uses up no fault. That includes the leftover lookup's
- * open-issue listing (`GET /repos/{owner}/{repo}/issues`, no fixture), so the read-only lookup
- * fails and the live runner prints its lookup-failed WARN. Every route answers only on the
+ * not-emulated, writes nothing, and uses up no fault. The leftover lookup's reads (the open-issue
+ * listing and the work issue's first comment page) are the ones the open-listing case records
+ * (`github.issues.open-listing`), so the read-only lookup runs against the emulator. Every route
+ * answers only on the
  * recorded origin `https://api.github.com` (`fetchOn(origin)` serves it behind a loopback
  * rewrite).
  *
@@ -59,16 +60,18 @@
  * compared against anything, stored, or ledgered); extra request headers; JSON key order;
  * `content-type` media-type parameters; the order of query parameters; any non-empty issue title
  * and comment body, and any issue body text; any comment listing `since` of the form
- * `YYYY-MM-DDTHH:MM:SSZ`; any label listing `per_page` from 1 to 100, with no `page` or a `page`
- * from 2 to one past the last page; any issue search `q` that starts with the seeded
+ * `YYYY-MM-DDTHH:MM:SSZ` (or, instead of `since`, `page=1`); any label listing `per_page` from 1
+ * to 100, with no `page` or a `page` from 2 to one past the last page; any open-issue listing
+ * (`state=open`, `page=1`) `per_page` from 1 to 100; any issue search `q` that starts with the
+ * seeded
  * `repo:<owner>/<repo>` qualifier and whose query after it is longer than 256 characters (answered
  * the recorded 422); any issue number the repository has not reached (answered the recorded 404);
  * and any issue, comment, repository label, or file the state holds where a fixture has one, under
  * the per-route state rules. `Authorization` must be exactly `Bearer <token>` (that spelling, one
  * space), `Accept` `application/vnd.github+json`, and `X-GitHub-Api-Version` `2026-03-10`.
  * Everything else (other keys and values, query parameters, empty query components such as a bare
- * `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1`, and
- * a comment listing `per_page` other than 100) is not emulated.
+ * `?` or a stray `&`, another origin or repository, a repeated query key, an explicit `page=1` on
+ * the label listing, and a comment listing `per_page` other than 100) is not emulated.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeGithubEmulator` (importing this module has no side effects).
@@ -120,6 +123,7 @@ export {
 export {
   GithubEmulatorComment,
   GithubEmulatorFile,
+  GithubEmulatorImpliedIssues,
   GithubEmulatorIssue,
   GithubEmulatorLabel,
   GithubEmulatorProfile,
@@ -228,7 +232,8 @@ export const makeGithubEmulator = async (
       contentUnfolded: drills.contentUnfolded === true,
       sinceExcludesEqual: drills.sinceExcludesEqual === true,
       addAnswerOmitsLabel: drills.addAnswerOmitsLabel === true,
-      closeWithoutClosedAt: drills.closeWithoutClosedAt === true
+      closeWithoutClosedAt: drills.closeWithoutClosedAt === true,
+      issueListingLinksNext: drills.issueListingLinksNext === true
     }
   }
 

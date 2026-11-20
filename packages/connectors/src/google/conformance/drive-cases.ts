@@ -2,7 +2,7 @@
  * Google Drive conformance cases (internal module; exported through `cases.ts`). See `cases.ts` for
  * the write-safety contract every write case follows.
  */
-import { Effect, Ref } from 'effect'
+import { Effect, Predicate, Ref } from 'effect'
 import {
   ConformanceMismatch,
   defineConformanceCase,
@@ -24,10 +24,12 @@ import {
 import { driveFolderLifecycleFixture } from './drive-folder-lifecycle.ts'
 import { driveGetFileFieldsFixture } from './drive-get-file-fields.ts'
 import { driveListPagingFixture } from './drive-list-paging.ts'
+import { driveListTrashedFixture } from './drive-list-trashed.ts'
 import {
   GoogleConformanceConfig,
   googleConformanceIntegration as integration,
   googleConformanceMarker,
+  googleLeftoverLookup,
   isNotFound,
   outcomeOf,
   requireSeed,
@@ -178,6 +180,78 @@ export const driveGetFileFieldsCase: GoogleConformanceCase = defineConformanceCa
       [file.id, file.name, file.mimeType, parentsOf(file)],
       [entry.id, entry.name, entry.mimeType, parentsOf(entry)],
       'expected get_file to answer the same metadata as the list entry'
+    )
+  })
+})
+
+export const driveListTrashedCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.drive.list-includes-trashed',
+  title: 'A folder listing with trashed items adds the trashed children, the seeded one among them',
+  safety: 'read',
+  docs: "`drive.list_files` with `includeTrashed: true` drops the `trashed = false` clause, so its `q` is `'<parentId>' in parents` alone; `findGoogleConformanceLeftovers` lists the seeded folder that way (`pageSize: 100`) to report run folders left in Trash, reading each file's `trashed`.",
+  wire: "For the seeded practice folder (at most 100 items, Trash included) holding the seeded trashed file, `drive.list_files` with `parentId` and `pageSize: 100` and the same listing with `includeTrashed: true` (the leftover lookup's request) each answer one page; the first leaves the trashed file out, the second answers it with `trashed: true` and every file of the first (compared by id), each listing the folder among its `parents`, and every file it adds answers `trashed: true` (unverified: that `'<id>' in parents` without `trashed = false` lists the folder's trashed children, as the files.list reference says). So a listing that omits the trashed children fails the case; when the seeded file is in neither listing, the case reads it with `drive.get_file` first, and a seed that is gone (Drive empties Trash after 30 days) or no longer in Trash in the folder is a `precondition:` failure, not a claim failure.",
+  fixtures: [driveListTrashedFixture.id],
+  run: Effect.gen(function* () {
+    const folderId = yield* requireSeed('driveFolderId')
+    const trashedFileId = yield* requireSeed('driveTrashedFileId')
+    const untrashed = yield* folderChildren(folderId)
+
+    yield* expectConformance(
+      untrashed.every(file => file.id !== trashedFileId),
+      'expected the default listing to leave the seeded trashed file out'
+    )
+
+    const listing = yield* listFiles({
+      parentId: folderId,
+      pageSize: googleLeftoverLookup.filePageSize,
+      includeTrashed: true
+    })
+
+    if (listing.nextPageToken !== undefined) {
+      return yield* new ConformanceMismatch({
+        message: `precondition: driveFolderId must hold at most ${googleLeftoverLookup.filePageSize} items, Trash included`
+      })
+    }
+
+    const listed = [...listing.files]
+    const ids = listed.map(file => file.id)
+
+    // In neither listing: Drive empties Trash after 30 days, so read the seed before blaming the
+    // listing. A seed that is gone or no longer in Trash is stale (a precondition); one still in
+    // Trash in the folder is a listing that left it out.
+    if (!ids.includes(trashedFileId)) {
+      const read = yield* getFile(trashedFileId)
+      const seeded = Predicate.isTagged(read, 'Success') ? read.value : undefined
+
+      if (
+        seeded === undefined ||
+        seeded.trashed !== true ||
+        !parentsOf(seeded).includes(folderId)
+      ) {
+        return yield* new ConformanceMismatch({
+          message: `precondition: driveTrashedFileId must be a file in Trash directly inside driveFolderId (Drive empties Trash after 30 days; re-trash a practice file there); get_file answers ${isNotFound(read) ? 'not found' : outcomeOf(read)}`
+        })
+      }
+    }
+
+    yield* expectConformance(
+      listed.some(file => file.id === trashedFileId && file.trashed === true),
+      'expected the listing with trashed items to answer the seeded trashed file, trashed'
+    )
+    yield* expectConformance(
+      untrashed.every(file => ids.includes(file.id)),
+      'expected the listing with trashed items to answer every file of the default listing',
+      { actual: untrashed.filter(file => !ids.includes(file.id)).length }
+    )
+    yield* expectConformance(
+      listed.every(file => parentsOf(file).includes(folderId)),
+      'expected every file of the listing with trashed items to list the folder among its parents'
+    )
+    yield* expectConformance(
+      listed.every(
+        file => file.trashed === true || untrashed.some(candidate => candidate.id === file.id)
+      ),
+      'expected every file only the listing with trashed items answers to be trashed'
     )
   })
 })

@@ -177,9 +177,10 @@ describe('route evidence manifest', () => {
       'POST /v1.0/$batch',
       'POST /v1.0/drives/{driveId}/items/{itemId}/children',
       'DELETE /v1.0/drives/{driveId}/items/{itemId}',
-      'POST /v1.0/drives/{driveId}/items/{itemId}/copy'
+      'POST /v1.0/drives/{driveId}/items/{itemId}/copy',
+      'POST /v1.0/chats/{chatId}/messages'
     ])
-    expect(microsoftEmulatorRoutes).toHaveLength(19)
+    expect(microsoftEmulatorRoutes).toHaveLength(35)
 
     for (const route of microsoftEmulatorRoutes) {
       expect(route).toMatchObject({ kind: 'connector', evidence: 'unverified' })

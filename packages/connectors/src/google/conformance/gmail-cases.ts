@@ -33,7 +33,9 @@ import {
   gmailListAction,
   gmailListAttachmentsAction,
   GmailListAttachmentsInput,
+  gmailListDraftsAction,
   GmailListInput,
+  gmailListLabelsAction,
   gmailListThreadsAction,
   GmailListThreadsInput,
   GmailMessageIdInput,
@@ -45,7 +47,9 @@ import {
 } from '../gmail.ts'
 import { gmailAttachmentFixture } from './gmail-attachment.ts'
 import { gmailDraftLifecycleFixture } from './gmail-draft-lifecycle.ts'
+import { gmailDraftSearchFixture } from './gmail-draft-search.ts'
 import { gmailLabelLifecycleFixture } from './gmail-label-lifecycle.ts'
+import { gmailLabelListingFixture } from './gmail-label-listing.ts'
 import { gmailListPagingFixture } from './gmail-list-paging.ts'
 import { gmailListThreadsPagingFixture } from './gmail-list-threads-paging.ts'
 import { gmailMetadataHeadersFixture } from './gmail-metadata-headers.ts'
@@ -65,7 +69,10 @@ import {
   GoogleConformanceActionFailed,
   googleConformanceIntegration as integration,
   googleConformanceMarker,
+  GoogleConformanceLookupRecall,
+  googleLeftoverLookup,
   isNotFound,
+  searchUntilFound,
   observed,
   outcomeOf,
   requireSeed,
@@ -536,6 +543,93 @@ export const gmailMetadataHeadersCase: GoogleConformanceCase = defineConformance
   })
 })
 
+/** A label listing entry: its `id`, `name`, and `type` (`system` or `user`). */
+const GmailLabelListing = Schema.Struct({
+  labels: Schema.Array(
+    Schema.Struct({
+      id: Schema.NonEmptyString,
+      name: Schema.NonEmptyString,
+      type: Schema.optionalKey(Schema.String)
+    })
+  )
+})
+
+export const gmailLabelListingCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.label-listing',
+  title: 'The label listing the leftover lookup reads names every user label',
+  safety: 'read',
+  docs: '`gmail.list_labels` sends GET /gmail/v1/users/me/labels and passes the JSON answer through undecoded; `findGoogleConformanceLeftovers` reads its `labels` (`id` and `name`) and reports the user labels named with the run prefix.',
+  wire: '`gmail.list_labels` answers `labels`, each with a non-empty `id` and `name`, no `id` twice, among them the seeded paging label with `type: "user"` (so the listing includes user labels, as the leftover lookup needs) and `INBOX` with `type: "system"`.',
+  fixtures: [gmailLabelListingFixture.id],
+  run: Effect.gen(function* () {
+    const pagingLabelId = yield* requireSeed('pagingLabelId')
+
+    const listing = yield* gmailListLabelsAction
+      .executeTyped({ integration, input: {} })
+      .pipe(
+        Effect.flatMap(successValue(gmailListLabelsAction.id)),
+        Effect.flatMap(decodeOutput(GmailLabelListing, 'gmail.list_labels to answer labels'))
+      )
+
+    const ids = listing.labels.map(label => label.id)
+
+    yield* expectConformance(
+      new Set(ids).size === ids.length,
+      'expected the label listing to name every label once'
+    )
+
+    const typeOf = (id: string) => listing.labels.find(label => label.id === id)?.type ?? null
+
+    yield* expectEqual(
+      [typeOf(pagingLabelId), typeOf('INBOX')],
+      ['user', 'system'],
+      'expected the label listing to include the seeded paging label (user) and INBOX (system)'
+    )
+  })
+})
+
+/** A draft search page: drafts (each with its message), when any match. */
+const GmailDraftSearch = Schema.Struct({
+  drafts: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        message: Schema.Struct({ id: Schema.NonEmptyString })
+      })
+    )
+  ),
+  resultSizeEstimate: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+})
+
+export const gmailDraftSearchCase: GoogleConformanceCase = defineConformanceCase({
+  id: 'google.gmail.draft-search',
+  title: 'The draft search the leftover lookup sends is accepted and lists drafts by id',
+  safety: 'read',
+  docs: '`gmail.list_drafts` sends GET /gmail/v1/users/me/drafts with `q` (the Gmail search box syntax) and `maxResults`, and passes the JSON answer through undecoded; `findGoogleConformanceLeftovers` searches `subject:yolk-conformance` (`maxResults: 100`, one page) and reports every draft it answers by `id`, treating a missing `drafts` as none.',
+  wire: '`gmail.list_drafts` with `query: "subject:yolk-conformance"` and `maxResults: 100` (the leftover lookup\'s request) answers 2xx with at most 100 `drafts`, each with a non-empty `id` and a `message` with a non-empty `id`, or none (`drafts` absent or empty), and any `resultSizeEstimate` is a non-negative integer.',
+  fixtures: [gmailDraftSearchFixture.id],
+  run: Effect.gen(function* () {
+    const page = yield* gmailListDraftsAction
+      .executeTyped({
+        integration,
+        input: GmailListInput.make({
+          query: googleLeftoverLookup.draftQuery,
+          maxResults: googleLeftoverLookup.draftPageSize
+        })
+      })
+      .pipe(
+        Effect.flatMap(successValue(gmailListDraftsAction.id)),
+        Effect.flatMap(decodeOutput(GmailDraftSearch, 'gmail.list_drafts to answer drafts'))
+      )
+
+    yield* expectConformance(
+      (page.drafts ?? []).length <= googleLeftoverLookup.draftPageSize,
+      'expected the draft search to answer at most maxResults drafts',
+      { actual: (page.drafts ?? []).length }
+    )
+  })
+})
+
 // Write cases.
 
 const labelCaseId = 'google.gmail.label-create-apply-delete'
@@ -727,7 +821,7 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
     'A draft round-trips its subject and UTF-8 body through compose, update, and get_thread, then deletes',
   safety: 'write-reversible',
   docs: '`gmail.draft_compose` and `gmail.draft_update` build a 7-bit MIME message (`Subject` RFC 2047-encoded when not ASCII, `MIME-Version: 1.0`, and for a plain-text body `multipart/alternative; boundary="=_yolk-draft-alternative"` holding a text/plain part with the body and a text/html part derived from it, both `charset=UTF-8` and quoted-printable with lines of at most 76 characters), base64url-encode it, and send POST .../drafts `{ message: { raw } }` or PUT .../drafts/{id} `{ id, message: { raw } }`, returning the draft answer undecoded; `gmail.get_thread` with `format: "full"` decodes each text part from its base64url `body.data` as UTF-8 (never applying the part\'s Content-Transfer-Encoding again), prefers text/plain, and keeps selected headers; `gmail.draft_delete` sends DELETE .../drafts/{id} and treats any 2xx as deleted without reading the (empty) body.',
-  wire: '`gmail.draft_compose` with no recipient, a run-scoped ASCII subject, and a body with non-ASCII characters answers a draft id and a message id and thread id, and `gmail.get_message` of that message (`format: "metadata"`) reads the `DRAFT` label, the run-scoped subject, and no recipient header (unverified: that a metadata read of a fresh draft returns `DRAFT` and the subject exactly as sent; if not, the case refuses its own draft and leaves it for the leftover lookup) (checked before the case adopts the draft: a draft that is not provably its own is never updated or deleted); `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the multipart/alternative draft as written and answers its text/plain part\'s `body.data` transfer-decoded, so it carries the body\'s UTF-8 bytes); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers 2xx or `google_not_found` (unverified: which), after which its message still answers `google_not_found`; the cleanup accepts either answer and then verifies the message is gone. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.',
+  wire: "`gmail.draft_compose` with no recipient, a run-scoped ASCII subject, and a body with non-ASCII characters answers a draft id and a message id and thread id, and `gmail.get_message` of that message (`format: \"metadata\"`) reads the `DRAFT` label, the run-scoped subject, and no recipient header (unverified: that a metadata read of a fresh draft returns `DRAFT` and the subject exactly as sent; if not, the case refuses its own draft and leaves it for the leftover lookup) (checked before the case adopts the draft: a draft that is not provably its own is never updated or deleted); `gmail.get_thread` of that thread reads back the subject and exactly that body (trailing whitespace aside) as text/plain (unverified: that Gmail keeps the multipart/alternative draft as written and answers its text/plain part's `body.data` transfer-decoded, so it carries the body's UTF-8 bytes); `gmail.draft_update` of the same draft with a new subject and body answers the same draft id with a new message, which `gmail.get_thread` reads back the same way; live only (`GoogleConformanceLookupRecall`, which the repository's live runner turns on; the fixtures and the emulator answer the lookup's draft search only empty), `gmail.list_drafts` with the leftover lookup's search (`subject:yolk-conformance`, `maxResults: 100`) then answers the draft (unverified: that Gmail's search finds a fresh draft within three tries over about 6 seconds); `gmail.draft_delete` answers 2xx; afterwards `gmail.get_message` of the draft message answers `google_not_found` (unverified: deleting a draft deletes its message), and deleting the draft again answers 2xx or `google_not_found` (unverified: which), after which its message still answers `google_not_found`; the cleanup accepts either answer and then verifies the message is gone. The draft has no recipient, so nothing can be sent; the case deletes it again, by id, even when a step fails.",
   fixtures: [gmailDraftLifecycleFixture.id],
   run: Effect.gen(function* () {
     const subject = yield* runText('draft', 'synthetic conformance draft, safe to delete')
@@ -796,6 +890,35 @@ export const gmailDraftLifecycleCase: GoogleConformanceCase = defineConformanceC
             [updatedSubject, gmailConformanceUpdatedDraftText, 'text/plain'],
             'expected get_thread to read back the updated subject and body exactly'
           )
+
+          // Live only (`GoogleConformanceLookupRecall`): the lookup's search finds the draft.
+          if (yield* GoogleConformanceLookupRecall) {
+            const listsDraft = (page: typeof GmailDraftSearch.Type) =>
+              (page.drafts ?? []).some(entry => entry.id === draft.id)
+
+            const found = yield* searchUntilFound(
+              gmailListDraftsAction
+                .executeTyped({
+                  integration,
+                  input: GmailListInput.make({
+                    query: googleLeftoverLookup.draftQuery,
+                    maxResults: googleLeftoverLookup.draftPageSize
+                  })
+                })
+                .pipe(
+                  Effect.flatMap(successValue(gmailListDraftsAction.id)),
+                  Effect.flatMap(
+                    decodeOutput(GmailDraftSearch, 'gmail.list_drafts to answer drafts')
+                  )
+                ),
+              listsDraft
+            )
+
+            yield* expectConformance(
+              listsDraft(found),
+              'expected the leftover lookup draft search to find the case draft'
+            )
+          }
 
           yield* deleteDraft(draft.id).pipe(
             Effect.flatMap(successValue(gmailDraftDeleteAction.id)),

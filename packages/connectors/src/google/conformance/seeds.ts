@@ -20,5 +20,6 @@ export const googleConformanceFixtureSeeds: GoogleConformanceSeeds = {
   eventRangeEnd: '2026-09-08T00:00:00Z',
   driveFolderId: 'synthetic-practice-folder-0001',
   driveFileId: 'synthetic-practice-file-0001',
+  driveTrashedFileId: 'synthetic-practice-trash-0001',
   runId: GoogleConformanceRunId.make('run-synthetic')
 }

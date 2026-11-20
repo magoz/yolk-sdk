@@ -4,7 +4,7 @@
  * (`../../conformance/owned-write.ts`) bound to the Google errors. See `cases.ts` for the
  * write-safety contract.
  */
-import { Context, Data, Effect, Predicate, Ref, Result } from 'effect'
+import { Context, Data, Effect, Predicate, Ref, Result, Schedule } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ConformanceMismatch, type ConformanceCase } from '@yolk-sdk/conformance/case'
 import {
@@ -108,6 +108,11 @@ export const GoogleConformanceSeeds = Schema.Struct({
   /** A practice file directly inside `driveFolderId`. */
   driveFileId: Schema.optionalKey(DriveId),
   /**
+   * A practice file directly inside `driveFolderId` that is in Trash (trashed there, not deleted),
+   * which the trashed-listing case expects with trashed items and not without them.
+   */
+  driveTrashedFileId: Schema.optionalKey(DriveId),
+  /**
    * Invocation-unique segment of every label name, draft subject, sent subject, event summary, and
    * folder name a case writes. Replay uses the fixed synthetic id of the fixtures; the live runner
    * generates a fresh random one per invocation.
@@ -142,6 +147,44 @@ export const googleConformanceIntegration: ConnectorIntegration = makeIntegratio
     })
   ]
 })
+
+/**
+ * The requests of the read-only leftover lookup (`findGoogleConformanceLeftovers`), which the
+ * label-listing, draft-search, free-text-query, and trashed-listing cases send exactly: the draft
+ * search and its page size, the event query and its page size, the Drive page size, and the pages
+ * the paged reads follow before giving up.
+ */
+export const googleLeftoverLookup = {
+  draftQuery: 'subject:yolk-conformance',
+  draftPageSize: 100,
+  eventQuery: 'yolk-conformance',
+  eventPageSize: 250,
+  filePageSize: 100,
+  pageCap: 4
+} as const
+
+/**
+ * Whether the draft and event lifecycle cases also check that the leftover lookup's search finds
+ * their own item (recall) before deleting it. Off by default: the committed fixtures record no
+ * such search, and the Google emulator answers the lookup's draft search and event query only
+ * empty, so it would refuse them while the case's item exists. The repository's live runner turns
+ * it on; promoting a live recording drops those searches, since replay runs with it off.
+ */
+export const GoogleConformanceLookupRecall = Context.Reference<boolean>(
+  '@yolk-sdk/connectors/google/conformance/GoogleConformanceLookupRecall',
+  { defaultValue: () => false }
+)
+
+/**
+ * Run a live recall search until `found` holds for its answer: the first try, then at most two more
+ * 3 seconds apart (about 6 seconds in all), since search indexing can lag behind a fresh write.
+ * Answers the last search's value either way; the caller asserts on it.
+ */
+export const searchUntilFound = <A, E, R>(
+  search: Effect.Effect<A, E, R>,
+  found: (value: A) => boolean
+): Effect.Effect<A, E, R> =>
+  Effect.repeat(search, { until: found, times: 2, schedule: Schedule.spaced('3 seconds') })
 
 /** Synthetic marker every case-written name, subject, and summary starts with. */
 export const googleConformanceMarker = 'yolk-conformance'
@@ -254,6 +297,7 @@ const seedRules: Readonly<Record<GoogleConformanceSeedKey, string>> = {
   eventRangeEnd: 'an RFC 3339 instant with Z or an offset',
   driveFolderId: 'a Drive id (10 or more letters, digits, _ and -)',
   driveFileId: 'a Drive id (10 or more letters, digits, _ and -)',
+  driveTrashedFileId: 'a Drive id (10 or more letters, digits, _ and -)',
   runId: 'run- then lower-case letters, digits, and inner hyphens, at most 40 characters'
 }
 

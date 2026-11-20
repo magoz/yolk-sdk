@@ -1,5 +1,16 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.150
+
+### Minor Changes
+
+- 3d379c1: `makeDynamicWorkerCodeModeExecutor` (`@yolk-sdk/codemode/cloudflare`) and `makePiCodeModeExecutor` (`@yolk-sdk/codemode/node`) take a new option `onInternalError` (`CodeModeInternalErrorObserver`: `(error: CodeModeInternalError) => void`, `CodeModeInternalError` being `{ stage, cause }`), so the host can log the original error behind a failure that the result and the script only see as a fixed message. `stage` (`CodeModeInternalErrorStage`) is `load` (the sandbox could not be created or loaded), `isolate` (it failed while running), `cpu-limit` (a Dynamic Worker past its CPU limit), or `host-call` (a Dynamic Worker call's RPC to the host failed; at most `maxDynamicWorkerHostCallFailureReports`, 10, per execution, since the script's isolate reports it and a script could fake one). It is called once per such failure with the original error, never for script errors, parse errors, tool and global rejections, timeouts, or aborts, and whatever it throws or rejects with is ignored. The cause never reaches the script, the result, or the model.
+- 3d379c1: `makePiCodeModeExecutor` (`@yolk-sdk/codemode/node`) now answers its own failures with fixed messages, as the Dynamic Worker executor does, so runtime error text never reaches the model: `Could not create the sandbox.` (before: `Could not create the sandbox: <error>`), and `The script sandbox failed.` for pi's `sandbox` failures (before: pi's text, such as `Failed to load QuickJS: <error>` or a worker crash). `onInternalError` receives the original error (`load` and `isolate`). Script errors, timeouts, and aborts are unchanged.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.150
+
 ## 0.1.0-canary.149
 
 ### Minor Changes

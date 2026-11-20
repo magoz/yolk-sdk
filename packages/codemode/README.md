@@ -249,9 +249,39 @@ and stack, parse errors, tool and global rejections). Failures of the loader or 
 become fixed messages (`sandbox`: `Could not load the script sandbox.`, `The script sandbox
 failed.`; `timeout` past the CPU limit), and a call whose RPC to the host fails rejects with `The
 call could not reach the host.`; the runtime's error text never reaches the caller or the script.
+`onInternalError` receives the original error for host logs ([Internal errors](#internal-errors)).
 
 Other differences from the Node executor: `memoryLimitBytes` does not apply (Workers bound isolate
 memory themselves); there is no per-executor concurrency cap; stack frames are not filtered.
+
+## Internal errors
+
+Both executors answer their own failures (not the script's) with fixed messages, so runtime error
+text, which may carry host details or secrets, never reaches the script, the result, or the model.
+To log the original error, pass `onInternalError` (`CodeModeInternalErrorObserver`):
+
+```ts
+const executor = makeDynamicWorkerCodeModeExecutor({
+  loader: () => env.LOADER,
+  // Host logs only: `cause` may carry secrets; never return it to the model.
+  onInternalError: ({ stage, cause }) => logger.error('code mode executor failed', { stage, cause })
+})
+```
+
+| `stage`     | Executor        | Fixed message the caller or script sees                     | `cause`                                              |
+| ----------- | --------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `load`      | Dynamic Workers | `sandbox`: `Could not load the script sandbox.`             | What `loader()`, `load()` or `getEntrypoint()` threw |
+| `load`      | pi (Node)       | `sandbox`: `Could not create the sandbox.`                  | What `new CodemodeSandbox` threw                     |
+| `isolate`   | Dynamic Workers | `sandbox`: `The script sandbox failed.`                     | The isolate's `run` error                            |
+| `isolate`   | pi (Node)       | `sandbox`: `The script sandbox failed.`                     | pi's `sandbox` error record                          |
+| `cpu-limit` | Dynamic Workers | `timeout`: `Execution exceeded its CPU limit of <cpuMs> ms` | The isolate's `run` error                            |
+| `host-call` | Dynamic Workers | The call rejects with `The call could not reach the host.`  | The RPC error the isolate saw                        |
+
+It is called once per such failure and never for what the script controls (its errors, parse
+errors, tool and global rejections), timeouts, or aborts; an isolate that fails after the execution
+already timed out or was aborted is not reported. Whatever it throws or rejects with is ignored.
+`host-call` reports come from the script's isolate, which the script shares, so a script can fake
+one; the executor accepts at most `maxDynamicWorkerHostCallFailureReports` (10) per execution.
 
 ## Classifier tool
 

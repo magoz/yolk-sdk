@@ -149,6 +149,33 @@ type SyntheticBoundary =
   | { readonly dateTime: string; readonly timeZone?: string }
   | { readonly date: string }
 
+type SyntheticEventsPage = {
+  readonly kind: string
+  readonly summary: string
+  readonly timeZone: string
+  readonly accessRole: string
+  readonly items: Array<Schema.Json>
+  nextPageToken?: string
+}
+
+/** A Calendar events page as the events listing answers it (the practice calendar's fields). */
+export const calendarSyntheticPage = (
+  items: ReadonlyArray<Schema.Json>,
+  nextPageToken?: string
+): WireResponse => {
+  const body: SyntheticEventsPage = {
+    kind: 'calendar#events',
+    summary: 'Synthetic practice calendar',
+    timeZone: 'UTC',
+    accessRole: 'owner',
+    items: [...items]
+  }
+
+  if (nextPageToken !== undefined) body.nextPageToken = nextPageToken
+
+  return googleJson(200, body)
+}
+
 type SyntheticEventHead = {
   readonly kind: string
   readonly etag: string
@@ -203,10 +230,17 @@ export const calendarSyntheticEvent = (fields: {
   }
 }
 
-/** The URL `drive.list_files` builds for `parentId` (parameters in the connector's order). */
+/**
+ * The URL `drive.list_files` builds for `parentId` (parameters in the connector's order); with
+ * `includeTrashed`, its `q` keeps trashed items.
+ */
 export const driveListUrl = (
   parentId: string,
-  query: { readonly pageSize: number; readonly pageToken?: string }
+  query: {
+    readonly pageSize: number
+    readonly pageToken?: string
+    readonly includeTrashed?: boolean
+  }
 ): string => {
   const params = new URLSearchParams()
 
@@ -214,7 +248,12 @@ export const driveListUrl = (
 
   if (query.pageToken !== undefined) params.set('pageToken', query.pageToken)
 
-  params.set('q', `'${parentId}' in parents and trashed = false`)
+  params.set(
+    'q',
+    query.includeTrashed === true
+      ? `'${parentId}' in parents`
+      : `'${parentId}' in parents and trashed = false`
+  )
   params.set('spaces', 'drive')
   params.set('supportsAllDrives', 'true')
   params.set('includeItemsFromAllDrives', 'true')
@@ -329,6 +368,14 @@ export const driveSyntheticChildren: ReadonlyArray<Schema.Json> = [
     mimeType: 'application/pdf'
   })
 ]
+
+/** A file in Trash directly inside the synthetic practice folder (the trashed-listing seed). */
+export const driveSyntheticTrashedChild: Schema.Json = driveSyntheticFile({
+  id: 'synthetic-practice-trash-0001',
+  name: 'Synthetic practice old notes.txt',
+  mimeType: 'text/plain',
+  trashed: true
+})
 
 type SyntheticFileListHead = {
   readonly kind: string

@@ -1,3 +1,4 @@
+import { Predicate } from 'effect'
 import type * as Schema from 'effect/Schema'
 import type { ToolJsonSchema } from '@yolk-sdk/agent/protocol'
 
@@ -73,6 +74,53 @@ export type CodeModeError = {
   readonly kind: CodeModeErrorKind
   readonly message: string
   readonly stack?: string
+}
+
+/**
+ * Where an executor's own failure happened, when it answered with a fixed message instead of the
+ * runtime's error text:
+ * - `load`: the sandbox could not be created or loaded (Dynamic Workers: the `loader()` binding,
+ *   `load()` or `getEntrypoint()`; pi: `new CodemodeSandbox`).
+ * - `isolate`: the sandbox failed while running the script (Dynamic Workers: the isolate's `run`;
+ *   pi: a `sandbox` failure of its worker or QuickJS VM).
+ * - `cpu-limit`: the Dynamic Worker isolate failed for its CPU limit (the result is a `timeout`).
+ * - `host-call`: a Dynamic Worker call's RPC to the host failed (the script sees a fixed rejection).
+ */
+export type CodeModeInternalErrorStage = 'load' | 'isolate' | 'cpu-limit' | 'host-call'
+
+/**
+ * An executor's own failure, for host logs only (`onInternalError`). `cause` is the original
+ * thrown value (pi: its `sandbox` error record; `host-call`: the error as the script's isolate
+ * reported it over RPC). It never reaches the script, the result, or the model; it may carry
+ * host details, so treat it as a secret-bearing log value.
+ */
+export type CodeModeInternalError = {
+  readonly stage: CodeModeInternalErrorStage
+  readonly cause: unknown
+}
+
+/**
+ * Observer of an executor's own failures (`CodeModeInternalError`), called once per failure that
+ * the result or the script only sees as a fixed message. Never called for what the script controls
+ * (its errors, parse errors, tool and global rejections), timeouts, or aborts. A throw (or a
+ * rejected promise) from it is ignored: it never changes the result.
+ */
+export type CodeModeInternalErrorObserver = (error: CodeModeInternalError) => void
+
+/** Calls the host's observer; whatever it throws or rejects with is ignored. */
+export const reportInternalError = (
+  observer: CodeModeInternalErrorObserver | undefined,
+  error: CodeModeInternalError
+) => {
+  if (observer === undefined) return
+
+  try {
+    const returned: unknown = observer(error)
+
+    if (Predicate.isPromiseLike(returned)) returned.then(undefined, () => undefined)
+  } catch {
+    // An observer failure never changes the execution's result.
+  }
 }
 
 /** Keys a successful script changed with `store()`; `delete` lists keys stored as `undefined`. */

@@ -1,5 +1,18 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.150
+
+### Minor Changes
+
+- 8a1475a: `@yolk-sdk/mcp/conformance` adds the opt-in `mcpServerPingCase` (`mcp.legacy.server-ping`, read, legacy era only; not in `mcpConformanceCases`) and its synthetic fixture `mcpConformanceServerPingFixtures` (`evidence: 'unverified'`; its note cites MCP `2025-11-25` basic/utilities/ping, basic/transports and basic/lifecycle), with the builder `legacyServerPingListingExchanges` and the constant `mcpConformanceServerPingRequestId`. Run it for a legacy target that pings its clients: the listing must hold a server `ping` request (else the precondition fails), and the real client must answer each ping exactly once with an empty JSON-RPC result on a POST carrying the issued session, which the server accepts with 202 and no body. `2026-07-28` removed `ping` and server-to-client requests, so it never applies to modern targets. `mcp.transport.response-encoding` no longer reads a client-sent response (such as the answer to a server ping) as a request, so it passes against a pinging server. Methods the client never sends (`DELETE`, its own `ping`, `resources/*`, `prompts/*`, `completion/*`, `logging/setLevel`, `tasks/*`, batches) stay uncovered, with the reasons in the package notes.
+
+  `@yolk-sdk/emulators/mcp` answers it on the synthetic legacy profile: the seed gains `legacyInitialize` (`plain`, the default, or `server-ping`; new export `McpEmulatorLegacyInitialize`), the state gains `legacyInitialize`, and a session may carry `awaitingPingAnswer`. Under `server-ping`, `initialize` answers the fixture's pinging SSE answer, and the new manifest row `RPC https://mcp.example.test/legacy/mcp#response:ping` (nineteen rows) accepts the client's answer once, exactly as recorded, in either session phase, with the recorded 202. New exports `mcpEmulatorServerPingFixtures` (the data copy) and the drill knob `pingAnswerRejected`. The Figma profile records no ping and ignores the seed. Both packages take a minor bump: hosts that read the emulator state or seed summary see the new `legacyInitialize` field, and the conformance subpath gains public exports.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.150
+- @yolk-sdk/conformance@0.1.0-canary.150
+
 ## 0.1.0-canary.149
 
 ### Patch Changes

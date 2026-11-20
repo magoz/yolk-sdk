@@ -179,6 +179,7 @@ describe('run-github-conformance plan', () => {
         'RUN   github.errors.not-found-envelope  [read]  needs --owner, --repo',
         'RUN   github.errors.validation-envelope  [read]  needs --owner, --repo',
         'RUN   github.contents.base64-file  [read]  needs --owner, --repo, --file-path',
+        'RUN   github.issues.open-listing  [read]  needs --owner, --repo, --work-issue',
         'RUN   github.comments.create-delete  [write-reversible]  needs --owner, --repo, --work-issue',
         'RUN   github.labels.add-remove  [write-reversible]  needs --owner, --repo, --work-issue, --label',
         `SKIP  ${lifecycleId}  [write-irreversible]  manual-only`,
