@@ -28,10 +28,16 @@ import {
   openAiChatErrorEnvelopeFixture,
   openAiChatJsonPlainTextCase,
   openAiChatJsonPlainTextFixture,
+  openAiChatJsonReasoningUsageCase,
+  openAiChatJsonReasoningUsageFixture,
   openAiChatPlainTextCase,
   openAiChatPlainTextFixture,
+  openAiChatReasoningEffortCase,
+  openAiChatReasoningEffortFixture,
   openAiChatToolCallDeltasCase,
   openAiChatToolCallDeltasFixture,
+  openAiChatUnsupportedParameterCase,
+  openAiChatUnsupportedParameterFixture,
   openAiConformanceCases,
   openAiConformanceChatCompletionsUrl,
   openAiConformanceDefaultModels,
@@ -46,6 +52,8 @@ const now = new Date('2026-09-30T12:00:00.000Z')
 const settings: OpenAiConformanceSettings = {
   apiKey: Redacted.make('synthetic-openai-key'),
   maxCompletionTokens: 64,
+  reasoningMaxCompletionTokens: 1024,
+  reasoningEffort: 'medium',
   models: openAiConformanceDefaultModels
 }
 
@@ -99,7 +107,7 @@ describe('OpenAI chat conformance cases', () => {
       })
 
       expect(report.target).toEqual({ kind: 'replay' })
-      expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       // Expected warnings and report lines derive from the fixtures, so a verified live recording
@@ -119,7 +127,7 @@ describe('OpenAI chat conformance cases', () => {
             fixture.evidence === 'unverified' ? `, unverified-fixture:${fixture.id}` : ''
           ].join('')
         ),
-        '4 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
+        '7 passed, 0 failed, 0 skipped; target replay; started 2026-09-30T12:00:00.000Z'
       ])
     })
   )
@@ -134,7 +142,7 @@ describe('OpenAI chat conformance cases', () => {
         layer: replayCaseLayer
       })
 
-      expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
       expect(report.results.map(result => result.warnings)).toEqual(
         openAiConformanceCases.map(() => [{ kind: 'unverified-case' }])
       )
@@ -162,7 +170,7 @@ describe('OpenAI chat conformance cases', () => {
           )
       })
 
-      expect(report.summary.passed).toBe(4)
+      expect(report.summary.passed).toBe(7)
 
       const byCase = yield* Ref.get(ledgers)
 
@@ -232,22 +240,77 @@ describe('OpenAI chat conformance cases', () => {
       })
       expect(jsonBody).not.toHaveProperty('stream_options')
       expect(jsonBody).not.toHaveProperty('max_tokens')
+
+      const reasoningBody = yield* entriesOf(openAiChatReasoningEffortCase, 'text/event-stream')
+
+      expect(reasoningBody).toMatchObject({
+        model: settings.models.reasoning,
+        reasoning_effort: settings.reasoningEffort,
+        max_completion_tokens: settings.reasoningMaxCompletionTokens,
+        stream: true,
+        stream_options: { include_usage: true }
+      })
+      expect(reasoningBody).not.toHaveProperty('max_tokens')
+
+      const jsonReasoningBody = yield* entriesOf(
+        openAiChatJsonReasoningUsageCase,
+        'application/json'
+      )
+
+      expect(jsonReasoningBody).toMatchObject({
+        model: settings.models.reasoning,
+        reasoning_effort: settings.reasoningEffort,
+        max_completion_tokens: settings.reasoningMaxCompletionTokens,
+        stream: false
+      })
+      expect(jsonReasoningBody).not.toHaveProperty('max_tokens')
+
+      const unsupportedBody = yield* entriesOf(
+        openAiChatUnsupportedParameterCase,
+        'text/event-stream'
+      )
+
+      expect(unsupportedBody).toMatchObject({
+        model: settings.models.reasoning,
+        max_tokens: settings.maxCompletionTokens,
+        stream: true
+      })
+      expect(unsupportedBody).not.toHaveProperty('max_completion_tokens')
+      expect(unsupportedBody).not.toHaveProperty('reasoning_effort')
     })
   )
 
   it('record the request bodies the provider sends in the fixtures', () => {
     // Replay matches on method + URL only, so the committed request bodies are informational;
     // keep them aligned with the claimed request fields.
-    const bodies = openAiConformanceFixtures.map(fixture => fixture.exchanges[0].request.body)
+    const bodyOf = (fixture: WireFixture) => fixture.exchanges[0].request.body
 
-    for (const body of bodies) {
-      expect(body).toMatchObject({ max_completion_tokens: settings.maxCompletionTokens })
-      expect(body).not.toHaveProperty('max_tokens')
-    }
+    const limitFields = openAiConformanceFixtures.map(fixture => {
+      const body = bodyOf(fixture)
 
-    expect(
-      bodies.map(body => (Predicate.hasProperty(body, 'stream') ? body.stream : null))
-    ).toEqual([true, true, true, false])
+      return [
+        fixture.caseId,
+        Predicate.hasProperty(body, 'max_completion_tokens') ? body.max_completion_tokens : null,
+        Predicate.hasProperty(body, 'max_tokens') ? body.max_tokens : null,
+        Predicate.hasProperty(body, 'reasoning_effort') ? body.reasoning_effort : null,
+        Predicate.hasProperty(body, 'stream') ? body.stream : null
+      ]
+    })
+
+    const plainLimit = settings.maxCompletionTokens
+    const reasoningLimit = settings.reasoningMaxCompletionTokens
+    const effort = settings.reasoningEffort
+
+    // Only the unsupported-parameter case sends `max_tokens`; only the reasoning cases an effort.
+    expect(limitFields).toEqual([
+      ['openai.chat.stream.plain-text', plainLimit, null, null, true],
+      ['openai.chat.stream.tool-call-deltas', plainLimit, null, null, true],
+      ['openai.chat.stream.error-envelope', plainLimit, null, null, true],
+      ['openai.chat.json.plain-text', plainLimit, null, null, false],
+      ['openai.chat.stream.reasoning-effort', reasoningLimit, null, effort, true],
+      ['openai.chat.json.reasoning-usage', reasoningLimit, null, effort, false],
+      ['openai.chat.stream.unsupported-parameter', null, plainLimit, null, true]
+    ])
   })
 })
 
@@ -744,6 +807,211 @@ describe('OpenAI chat conformance disagreement drills', () => {
         tag: 'LLMError',
         message: 'OpenAI returned 429'
       })
+    })
+  )
+
+  // Edits the usage object of every recorded event that carries one.
+  const withStreamedUsage = (suffix: string, update: (usage: JsonRecord) => void): WireFixture => {
+    const events = sseEvents(openAiChatReasoningEffortFixture).map(event => {
+      const json = cloneJson(event)
+
+      if (isRecord(json) && isRecord(json.usage)) {
+        update(json.usage)
+      }
+
+      return { data: event.data, json }
+    })
+
+    return {
+      ...withEvents(openAiChatReasoningEffortFixture, events),
+      id: `${openAiChatReasoningEffortFixture.id}.${suffix}`
+    }
+  }
+
+  it.effect('passes the reasoning-effort case against an unchanged rewrite of its recording', () =>
+    Effect.gen(function* () {
+      const unchanged = withStreamedUsage('unchanged', () => {})
+
+      expect((yield* drill(openAiChatReasoningEffortCase, unchanged))?.status).toBe('passed')
+    })
+  )
+
+  it.effect('fails the reasoning-effort case when usage counts no reasoning tokens', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* failedDrill(
+          openAiChatReasoningEffortCase,
+          withStreamedUsage('no-details', usage => {
+            delete usage.completion_tokens_details
+          })
+        )
+      ).toEqual(mismatch('expected the usage report to count reasoning tokens'))
+
+      expect(
+        yield* failedDrill(
+          openAiChatReasoningEffortCase,
+          withStreamedUsage('zero', usage => {
+            usage.completion_tokens_details = { reasoning_tokens: 0 }
+          })
+        )
+      ).toEqual(mismatch('expected the usage report to count reasoning tokens'))
+    })
+  )
+
+  it.effect('fails the reasoning-effort case when reasoning exceeds the output total', () =>
+    Effect.gen(function* () {
+      expect(
+        yield* failedDrill(
+          openAiChatReasoningEffortCase,
+          withStreamedUsage('over', usage => {
+            const completion = usage.completion_tokens
+
+            usage.completion_tokens_details = {
+              reasoning_tokens: Predicate.isNumber(completion) ? completion + 1 : 1
+            }
+          })
+        )
+      ).toEqual(mismatch('expected reasoning tokens counted within the output total'))
+    })
+  )
+
+  it.effect('fails the reasoning-effort case when the stream carries reasoning text', () =>
+    Effect.gen(function* () {
+      const events = sseEvents(openAiChatReasoningEffortFixture)
+      const firstText = events.findIndex(hasText)
+
+      const withReasoning = events.map((event, index) =>
+        index === firstText
+          ? mapDeltas(event, delta => {
+              delta.reasoning_content = 'Synthetic reasoning.'
+            })
+          : event
+      )
+
+      expect(
+        yield* failedDrill(
+          openAiChatReasoningEffortCase,
+          withEvents(openAiChatReasoningEffortFixture, withReasoning)
+        )
+      ).toEqual(mismatch('expected no reasoning text (OpenAI Chat Completions returns none)'))
+    })
+  )
+
+  const jsonReasoningCompletion = (): JsonRecord => {
+    const parsed = parseJson(responseBody(openAiChatJsonReasoningUsageFixture))
+
+    return isRecord(parsed) && isRecord(parsed.usage)
+      ? structuredClone(parsed)
+      : expect.fail('JSON reasoning fixture has no usage')
+  }
+
+  const withJsonReasoningBody = (suffix: string, completion: JsonRecord): WireFixture =>
+    withResponse(openAiChatJsonReasoningUsageFixture, suffix, 200, JSON.stringify(completion))
+
+  it.effect('fails the JSON reasoning case when usage counts no reasoning tokens', () =>
+    Effect.gen(function* () {
+      const completion = jsonReasoningCompletion()
+
+      if (isRecord(completion.usage)) {
+        delete completion.usage.completion_tokens_details
+      }
+
+      expect(
+        yield* failedDrill(
+          openAiChatJsonReasoningUsageCase,
+          withJsonReasoningBody('no-details', completion)
+        )
+      ).toEqual(mismatch('expected the usage report to count reasoning tokens'))
+    })
+  )
+
+  it.effect('fails the JSON reasoning case when the message carries reasoning text', () =>
+    Effect.gen(function* () {
+      const completion = jsonReasoningCompletion()
+
+      for (const message of messagesOf(completion)) {
+        message.reasoning_content = 'Synthetic reasoning.'
+      }
+
+      expect(
+        yield* failedDrill(
+          openAiChatJsonReasoningUsageCase,
+          withJsonReasoningBody('reasoning-text', completion)
+        )
+      ).toEqual(mismatch('expected no reasoning text (OpenAI Chat Completions returns none)'))
+    })
+  )
+
+  const unsupportedEnvelope = (): JsonRecord => {
+    const parsed = parseJson(responseBody(openAiChatUnsupportedParameterFixture))
+
+    return isRecord(parsed) && isRecord(parsed.error)
+      ? structuredClone(parsed)
+      : expect.fail('unsupported-parameter fixture has no JSON error envelope')
+  }
+
+  it.effect('fails the unsupported-parameter case when max_tokens is accepted', () =>
+    Effect.gen(function* () {
+      const accepted: WireFixture = {
+        ...openAiChatUnsupportedParameterFixture,
+        id: `${openAiChatUnsupportedParameterFixture.id}.accepted`,
+        exchanges: [
+          {
+            request: openAiChatUnsupportedParameterFixture.exchanges[0].request,
+            response: streamResponse(openAiChatPlainTextFixture)
+          }
+        ]
+      }
+
+      expect(yield* failedDrill(openAiChatUnsupportedParameterCase, accepted)).toEqual(
+        mismatch('expected a rejection, the request succeeded')
+      )
+    })
+  )
+
+  it.effect('fails the unsupported-parameter case for another code or status', () =>
+    Effect.gen(function* () {
+      const otherCode = unsupportedEnvelope()
+
+      if (isRecord(otherCode.error)) {
+        otherCode.error.code = 'invalid_value'
+      }
+
+      expect(
+        yield* failedDrill(
+          openAiChatUnsupportedParameterCase,
+          withResponse(
+            openAiChatUnsupportedParameterFixture,
+            'invalid-value',
+            400,
+            JSON.stringify(otherCode)
+          )
+        )
+      ).toEqual(mismatch('expected the provider code `unsupported_parameter`'))
+
+      expect(
+        yield* failedDrill(
+          openAiChatUnsupportedParameterCase,
+          withResponse(
+            openAiChatUnsupportedParameterFixture,
+            'status-422',
+            422,
+            JSON.stringify(unsupportedEnvelope())
+          )
+        )
+      ).toEqual(mismatch('expected status 400'))
+
+      expect(
+        yield* failedDrill(
+          openAiChatUnsupportedParameterCase,
+          withResponse(
+            openAiChatUnsupportedParameterFixture,
+            'status-401',
+            401,
+            JSON.stringify(unsupportedEnvelope())
+          )
+        )
+      ).toEqual(mismatch('expected a request rejection, not an authentication failure'))
     })
   )
 

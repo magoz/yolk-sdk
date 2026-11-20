@@ -351,7 +351,7 @@ const main = async () => {
           'const gatewayClassifier = await import("@yolk-sdk/agent/providers/vercel/ai-gateway-classifier")',
           'if (typeof gatewayClassifier.makeVercelAiGatewayClassifierLayer !== "function" || gatewayClassifier.vercelAiGatewayClassifierDefaultModel !== "typesafe-ai/jev") throw new Error("Missing Gateway classifier exports")',
           'const openAiConformance = await import("@yolk-sdk/agent/providers/openai/conformance")',
-          'if (openAiConformance.openAiConformanceFixtures.length !== 4 || openAiConformance.openAiConformanceCases.length !== 4 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
+          'if (openAiConformance.openAiConformanceFixtures.length !== 7 || openAiConformance.openAiConformanceCases.length !== 7 || !openAiConformance.openAiConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing OpenAI conformance cases/fixtures")',
           'const anthropicConformance = await import("@yolk-sdk/agent/providers/anthropic/conformance")',
           'if (anthropicConformance.anthropicConformanceFixtures.length !== 5 || anthropicConformance.anthropicConformanceCases.length !== 5 || !anthropicConformance.anthropicConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Anthropic conformance cases/fixtures")',
           'if (openAiConformance.openAiCodexConformanceFixtures.length !== 4 || openAiConformance.openAiCodexConformanceCases.length !== 4 || !openAiConformance.openAiCodexConformanceCases.every(testCase => testCase.safety === "read")) throw new Error("Missing Codex conformance cases/fixtures")',

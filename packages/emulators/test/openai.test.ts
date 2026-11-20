@@ -5,6 +5,7 @@ import {
   emulatorEvidenceHeader,
   makeOpenAiEmulator,
   openAiEmulatorDefaultModels,
+  openAiEmulatorDefaultReasoningModels,
   openAiEmulatorRoutes,
   type OpenAiEmulator,
   type OpenAiScriptedTurn
@@ -22,7 +23,11 @@ type ChatBody = {
   readonly stream_options?: { readonly include_usage: boolean } | undefined
   readonly max_completion_tokens?: number
   readonly max_tokens?: number
-  readonly reasoning_effort?: string
+  readonly reasoning_effort?: string | null
+  readonly temperature?: number | null
+  readonly top_p?: number
+  readonly logprobs?: boolean
+  readonly top_logprobs?: number
   readonly tools?: ReadonlyArray<{
     readonly type: 'function'
     readonly function: { readonly name: string; readonly parameters?: Schema.Json }
@@ -73,11 +78,18 @@ type Delta = {
   }>
 }
 
+type Usage = {
+  readonly prompt_tokens: number
+  readonly completion_tokens: number
+  readonly total_tokens: number
+  readonly completion_tokens_details?: { readonly reasoning_tokens: number }
+}
+
 type ChunkPayload = {
   readonly object: string
   readonly id: string
   readonly choices: ReadonlyArray<{ readonly delta: Delta; readonly finish_reason: string | null }>
-  readonly usage?: { readonly prompt_tokens: number; readonly completion_tokens: number }
+  readonly usage?: Usage
 }
 
 type SseEvent = { readonly done: true } | { readonly done: false; readonly data: ChunkPayload }
@@ -144,19 +156,13 @@ describe('openai emulator defaults', () => {
     })
   })
 
-  it('never emulates reasoning, even when a request asks for it', async () => {
+  it('reports no completion_tokens_details for a model that does not reason', async () => {
     const emulator = makeOpenAiEmulator()
+    const events = sseEvents(await (await chat(emulator, plainRequest())).text())
+    const usage = payloads(events).at(-1)?.usage
 
-    for (const stream of [true, false]) {
-      const text = await (
-        await chat(emulator, plainRequest({ stream, reasoning_effort: 'high' }))
-      ).text()
-
-      expect(text).not.toContain('reasoning_content')
-      expect(text).not.toContain('"reasoning"')
-    }
-
-    expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(['high', 'high'])
+    expect(usage).toBeDefined()
+    expect(usage).not.toHaveProperty('completion_tokens_details')
   })
 
   it('streams a schema-synthesized tool call in fragments', async () => {
@@ -324,6 +330,244 @@ describe('openai emulator defaults', () => {
   })
 })
 
+const reasoningModel = 'gpt-6-luna'
+
+const reasoningRequest = (overrides: ChatBody = {}): ChatBody =>
+  plainRequest({
+    model: reasoningModel,
+    max_completion_tokens: 1024,
+    reasoning_effort: 'medium',
+    ...overrides
+  })
+
+const unsupportedParameterEnvelope = (parameter: string, message: string) => ({
+  error: {
+    message,
+    type: 'invalid_request_error',
+    param: parameter,
+    code: 'unsupported_parameter'
+  }
+})
+
+describe('openai emulator reasoning models', () => {
+  it('reasons by default with gpt-6-luna, a known model', () => {
+    expect(openAiEmulatorDefaultReasoningModels).toEqual([reasoningModel])
+    expect(openAiEmulatorDefaultModels).toContain(reasoningModel)
+  })
+
+  it('streams text only and reports hidden reasoning as usage reasoning tokens', async () => {
+    const emulator = makeOpenAiEmulator()
+    const response = await chat(emulator, reasoningRequest())
+
+    expect(response.status).toBe(200)
+
+    const text = await response.text()
+    const events = sseEvents(text)
+    const usage = payloads(events).at(-1)?.usage
+
+    expect(text).not.toContain('reasoning_content')
+    expect(text).not.toContain('"reasoning"')
+    expect(
+      deltas(events)
+        .flatMap(delta => (delta.content ? [delta.content] : []))
+        .join('')
+    ).toBe('Hello from the synthetic OpenAI emulator.')
+    expect(usage?.completion_tokens_details?.reasoning_tokens).toBeGreaterThan(0)
+    // Completion tokens include the reasoning tokens.
+    expect(usage?.completion_tokens).toBeGreaterThan(
+      usage?.completion_tokens_details?.reasoning_tokens ?? Number.POSITIVE_INFINITY
+    )
+    expect(usage?.total_tokens).toBe((usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0))
+    expect(emulator.ledger.entries()).toMatchObject([
+      {
+        model: reasoningModel,
+        reasoningEffort: 'medium',
+        maxCompletionTokens: 1024,
+        status: 200
+      }
+    ])
+  })
+
+  it('answers one chat.completion JSON body without reasoning text', async () => {
+    const emulator = makeOpenAiEmulator()
+    const response = await chat(emulator, reasoningRequest({ stream: false }))
+    const text = await response.text()
+
+    expect(text).not.toContain('reasoning_content')
+    expect(text).not.toContain('"reasoning"')
+    expect(JSON.parse(text)).toMatchObject({
+      object: 'chat.completion',
+      model: reasoningModel,
+      choices: [
+        { message: { role: 'assistant', content: 'Hello from the synthetic OpenAI emulator.' } }
+      ],
+      usage: { completion_tokens_details: { reasoning_tokens: expect.any(Number) } }
+    })
+  })
+
+  it('reasons without an effort, and reports zero reasoning tokens for effort none', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const usageOf = async (body: ChatBody) =>
+      payloads(sseEvents(await (await chat(emulator, body)).text())).at(-1)?.usage
+
+    const defaultEffort = await usageOf(reasoningRequest({ reasoning_effort: undefined }))
+    const noEffort = await usageOf(reasoningRequest({ reasoning_effort: null }))
+    const none = await usageOf(reasoningRequest({ reasoning_effort: 'none' }))
+
+    expect(defaultEffort?.completion_tokens_details?.reasoning_tokens).toBeGreaterThan(0)
+    expect(noEffort?.completion_tokens_details?.reasoning_tokens).toBeGreaterThan(0)
+    expect(none?.completion_tokens_details).toEqual({ reasoning_tokens: 0 })
+  })
+
+  it('rejects max_tokens on a reasoning model with the OpenAI unsupported_parameter 400', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const response = await chat(
+      emulator,
+      reasoningRequest({ max_completion_tokens: undefined, max_tokens: 64 })
+    )
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get(emulatorEvidenceHeader)).toBe('unverified')
+    expect(await response.json()).toEqual(
+      unsupportedParameterEnvelope(
+        'max_tokens',
+        "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+      )
+    )
+    expect(emulator.ledger.entries()).toMatchObject([
+      { model: reasoningModel, status: 400, unsupportedParameter: 'max_tokens' }
+    ])
+  })
+
+  it('rejects the sampling parameters reasoning models do not take, first listed first', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const samples: ReadonlyArray<readonly [string, ChatBody]> = [
+      ['temperature', { temperature: 0 }],
+      ['temperature', { temperature: 1 }],
+      ['top_p', { top_p: 0.5 }],
+      ['logprobs', { logprobs: true }],
+      ['top_logprobs', { top_logprobs: 2 }],
+      ['max_tokens', { max_tokens: 64, temperature: 0 }]
+    ]
+
+    for (const [parameter, overrides] of samples) {
+      const response = await chat(emulator, reasoningRequest(overrides))
+
+      expect(response.status, parameter).toBe(400)
+      expect(await response.json(), parameter).toEqual(
+        unsupportedParameterEnvelope(
+          parameter,
+          parameter === 'max_tokens'
+            ? "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+            : `Unsupported parameter: '${parameter}' is not supported with this model.`
+        )
+      )
+    }
+
+    // A null value counts as absent.
+    expect((await chat(emulator, reasoningRequest({ temperature: null }))).status).toBe(200)
+  })
+
+  it('takes the sampling parameters and max_tokens on a model that does not reason', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const response = await chat(
+      emulator,
+      plainRequest({ max_tokens: 64, temperature: 0, top_p: 0.5, logprobs: true, top_logprobs: 2 })
+    )
+
+    expect(response.status).toBe(200)
+    expect(emulator.ledger.entries()[0]?.unsupportedParameter).toBeUndefined()
+  })
+
+  it('rejects reasoning_effort on a model that does not reason', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    for (const stream of [true, false]) {
+      const response = await chat(emulator, plainRequest({ stream, reasoning_effort: 'high' }))
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual(
+        unsupportedParameterEnvelope(
+          'reasoning_effort',
+          "Unsupported parameter: 'reasoning_effort' is not supported with this model."
+        )
+      )
+    }
+
+    expect(emulator.ledger.entries().map(entry => entry.reasoningEffort)).toEqual(['high', 'high'])
+    expect((await chat(emulator, plainRequest({ reasoning_effort: null }))).status).toBe(200)
+  })
+
+  it('answers the unknown model before checking parameters', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    const response = await chat(
+      emulator,
+      plainRequest({ model: 'yolk-conformance-model-does-not-exist', reasoning_effort: 'low' })
+    )
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ error: { code: 'model_not_found' } })
+  })
+
+  it('uses up no fault on a rejected parameter; a scripted turn answers before the check', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    emulator.faults.add({ kind: 'truncate-after-chunks', chunks: 1, count: 1 })
+
+    const rejected = await chat(emulator, reasoningRequest({ max_tokens: 64 }))
+
+    expect(rejected.status).toBe(400)
+    expect(emulator.faults.list()).toMatchObject([{ remaining: 1 }])
+    expect(emulator.ledger.entries()[0]?.fault).toBeUndefined()
+
+    emulator.faults.clear()
+    emulator.script.enqueue({ text: ['391'], usage: null })
+
+    const scripted = await chat(emulator, reasoningRequest({ max_tokens: 64 }))
+
+    expect(scripted.status).toBe(200)
+    expect(emulator.ledger.entries()[1]).toMatchObject({ scripted: 'completion', status: 200 })
+    expect(emulator.ledger.entries()[1]?.unsupportedParameter).toBeUndefined()
+  })
+
+  it('scripts reasoning as usage reasoning tokens, sent for any model', async () => {
+    const emulator = makeOpenAiEmulator()
+
+    emulator.script.enqueue({
+      text: ['391'],
+      usage: { promptTokens: 20, completionTokens: 66, reasoningTokens: 64 }
+    })
+
+    const events = sseEvents(await (await chat(emulator, reasoningRequest())).text())
+
+    expect(payloads(events).at(-1)?.usage).toEqual({
+      prompt_tokens: 20,
+      completion_tokens: 66,
+      total_tokens: 86,
+      completion_tokens_details: { reasoning_tokens: 64 }
+    })
+  })
+
+  it('takes custom reasoning models', async () => {
+    const emulator = makeOpenAiEmulator({
+      knownModels: ['example-model-a', 'example-reasoner'],
+      reasoningModels: ['example-reasoner']
+    })
+
+    expect(
+      (await chat(emulator, reasoningRequest({ model: 'example-reasoner', max_tokens: 64 }))).status
+    ).toBe(400)
+    expect(
+      (await chat(emulator, plainRequest({ model: 'example-model-a', max_tokens: 64 }))).status
+    ).toBe(200)
+  })
+})
+
 describe('openai emulator ledger', () => {
   it('records max_completion_tokens as maxCompletionTokens and ignores max_tokens', async () => {
     const emulator = makeOpenAiEmulator()
@@ -366,7 +610,7 @@ describe('openai emulator scripted turns and faults', () => {
     expect(emulator.ledger.entries()[0]?.scripted).toBe('completion')
   })
 
-  it('rejects reasoning in scripted turns (reasoning is not emulated)', async () => {
+  it('rejects reasoning text in scripted turns (OpenAI Chat Completions sends none)', async () => {
     const emulator = makeOpenAiEmulator()
 
     // Held in variables (no excess-property check), as untyped JS callers would pass them: the JS
@@ -434,7 +678,7 @@ describe('openai emulator scripted turns and faults', () => {
 })
 
 describe('openai emulator control plane', () => {
-  it('reports state without reasoning models, and coverage for the manifest', async () => {
+  it('reports state with the reasoning models, and coverage for the manifest', async () => {
     const emulator = makeOpenAiEmulator()
 
     await (await chat(emulator, plainRequest())).text()
@@ -443,6 +687,7 @@ describe('openai emulator control plane', () => {
 
     expect(state).toEqual({
       knownModels: [...openAiEmulatorDefaultModels],
+      reasoningModels: [...openAiEmulatorDefaultReasoningModels],
       pendingTurns: 0,
       faults: [],
       ledgerEntries: 1
@@ -469,7 +714,10 @@ describe('openAiEmulatorRoutes', () => {
           'openai.chat.stream.plain-text',
           'openai.chat.stream.tool-call-deltas',
           'openai.chat.stream.error-envelope',
-          'openai.chat.json.plain-text'
+          'openai.chat.json.plain-text',
+          'openai.chat.stream.reasoning-effort',
+          'openai.chat.json.reasoning-usage',
+          'openai.chat.stream.unsupported-parameter'
         ],
         evidence: 'unverified',
         observedAt: undefined

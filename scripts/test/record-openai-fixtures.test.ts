@@ -56,7 +56,9 @@ describe('record-openai-fixtures arguments', () => {
       live: false,
       account: undefined,
       models: openAiConformanceDefaultModels,
-      maxTokens: 64
+      maxTokens: 64,
+      reasoningMaxTokens: 1024,
+      reasoningEffort: 'medium'
     })
   })
 
@@ -74,16 +76,21 @@ describe('record-openai-fixtures arguments', () => {
     expect(parseProbeArgs(['--live', '--help']).help).toBe(true)
   })
 
-  it('overrides each model and the limit in both --flag value and --flag=value forms', () => {
+  it('overrides each model, limit, and the effort in both --flag value and --flag=value forms', () => {
     expect(
       parseProbeArgs([
         '--live',
         '--plain-model',
         'example-plain',
         '--tool-model=example-tools',
+        '--reasoning-model',
+        'example-reasoning',
         '--invalid-model=example-missing',
         '--max-tokens',
         '32',
+        '--reasoning-max-tokens=2048',
+        '--reasoning-effort',
+        'high',
         '--account=synthetic',
         '--owner-approved'
       ])
@@ -94,19 +101,25 @@ describe('record-openai-fixtures arguments', () => {
       models: {
         plainText: 'example-plain',
         toolCall: 'example-tools',
+        reasoning: 'example-reasoning',
         invalid: 'example-missing'
       },
       maxTokens: 32,
+      reasoningMaxTokens: 2048,
+      reasoningEffort: 'high',
       account: 'synthetic'
     })
     expect(defaultProbeOptions.models).toEqual(openAiConformanceDefaultModels)
   })
 
-  it('rejects unknown flags, missing values, invalid numbers, and reasoning flags', () => {
+  it('rejects unknown flags, missing values, invalid numbers, and unknown efforts', () => {
     expect(() => parseProbeArgs(['--nope'])).toThrow('Unknown argument')
     expect(() => parseProbeArgs(['--tool-model'])).toThrow('requires a value')
     expect(() => parseProbeArgs(['--max-tokens=0'])).toThrow('positive integer')
-    expect(() => parseProbeArgs(['--reasoning-effort=high'])).toThrow('Unknown argument')
+    expect(() => parseProbeArgs(['--reasoning-max-tokens=-1'])).toThrow('positive integer')
+    expect(() => parseProbeArgs(['--reasoning-effort=max'])).toThrow(
+      '--reasoning-effort must be one of minimal, low, medium, high, xhigh'
+    )
   })
 })
 
@@ -239,12 +252,27 @@ describe('record-openai-fixtures plan', () => {
         'openAiChatToolCallDeltasFixture'
       ],
       ['openai.chat.stream.error-envelope', 'error-envelope.ts', 'openAiChatErrorEnvelopeFixture'],
-      ['openai.chat.json.plain-text', 'json-plain-text.ts', 'openAiChatJsonPlainTextFixture']
+      ['openai.chat.json.plain-text', 'json-plain-text.ts', 'openAiChatJsonPlainTextFixture'],
+      [
+        'openai.chat.stream.reasoning-effort',
+        'reasoning-effort.ts',
+        'openAiChatReasoningEffortFixture'
+      ],
+      [
+        'openai.chat.json.reasoning-usage',
+        'json-reasoning-usage.ts',
+        'openAiChatJsonReasoningUsageFixture'
+      ],
+      [
+        'openai.chat.stream.unsupported-parameter',
+        'unsupported-parameter.ts',
+        'openAiChatUnsupportedParameterFixture'
+      ]
     ])
     expect(openAiConformanceFixtures.map(fixture => fixture.caseId)).toEqual(caseIds)
   })
 
-  it('plans each case with its model and token limit', () => {
+  it('plans each case with its model, token limit, and reasoning effort', () => {
     const models = openAiConformanceDefaultModels
 
     expect(
@@ -252,13 +280,17 @@ describe('record-openai-fixtures plan', () => {
         entry.testCase.id,
         entry.testCase.safety,
         entry.model,
-        entry.maxTokens
+        entry.maxTokens,
+        entry.reasoningEffort
       ])
     ).toEqual([
-      ['openai.chat.stream.plain-text', 'read', models.plainText, 64],
-      ['openai.chat.stream.tool-call-deltas', 'read', models.toolCall, 64],
-      ['openai.chat.stream.error-envelope', 'read', models.invalid, 64],
-      ['openai.chat.json.plain-text', 'read', models.plainText, 64]
+      ['openai.chat.stream.plain-text', 'read', models.plainText, 64, undefined],
+      ['openai.chat.stream.tool-call-deltas', 'read', models.toolCall, 64, undefined],
+      ['openai.chat.stream.error-envelope', 'read', models.invalid, 64, undefined],
+      ['openai.chat.json.plain-text', 'read', models.plainText, 64, undefined],
+      ['openai.chat.stream.reasoning-effort', 'read', models.reasoning, 1024, 'medium'],
+      ['openai.chat.json.reasoning-usage', 'read', models.reasoning, 1024, 'medium'],
+      ['openai.chat.stream.unsupported-parameter', 'read', models.reasoning, 64, undefined]
     ])
   })
 
@@ -367,7 +399,7 @@ describe('record-openai-fixtures replay verification', () => {
 
     expect(conformanceReportFailed(report)).toBe(false)
     expect(report.target).toEqual({ kind: 'replay' })
-    expect(report.summary).toEqual({ passed: 4, failed: 0, skipped: 0 })
+    expect(report.summary).toEqual({ passed: 7, failed: 0, skipped: 0 })
     expect(casesWithoutSingleFixture(openAiConformanceFixtures)).toEqual([])
   })
 

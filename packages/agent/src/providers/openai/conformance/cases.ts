@@ -5,8 +5,10 @@
  * endpoint and `max_completion_tokens`) from `OpenAiConformanceConfig`, sends one request through
  * `LLMProvider`, and asserts one wire claim from the events it sees. Cases need only
  * `HttpClient.HttpClient` and the config service, so the same case runs against replayed fixtures
- * (`ReplayHttpClient`), an emulator, or a host's live `HttpClient`. All four are `read` cases;
- * none is observed live yet (`observed` absent = unverified).
+ * (`ReplayHttpClient`), an emulator, or a host's live `HttpClient`. All seven are `read` cases;
+ * none is observed live yet (`observed` absent = unverified). Three cover a reasoning model: the
+ * effort sent and the hidden reasoning reported as usage reasoning tokens (streamed and JSON),
+ * and the provider's handling of a parameter reasoning models reject (`max_tokens`).
  */
 import { Context, Effect, Predicate, Result, Stream, type Redacted } from 'effect'
 import type { HttpClient } from 'effect/http'
@@ -23,16 +25,20 @@ import {
   LLMProvider,
   LLMTextDelta,
   LLMToolCall,
+  LLMUsage,
   type LLMEvent,
   type LLMProviderError,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
+import { ToolDef, UserMessage, type AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { makeOpenAiProviderLayer, type OpenAiProviderConfig } from '../provider.ts'
 import { openAiChatErrorEnvelopeFixture } from './error-envelope.ts'
 import { openAiChatJsonPlainTextFixture } from './json-plain-text.ts'
+import { openAiChatJsonReasoningUsageFixture } from './json-reasoning-usage.ts'
 import { openAiChatPlainTextFixture } from './plain-text.ts'
+import { openAiChatReasoningEffortFixture } from './reasoning-effort.ts'
 import { openAiChatToolCallDeltasFixture } from './tool-call-deltas.ts'
+import { openAiChatUnsupportedParameterFixture } from './unsupported-parameter.ts'
 
 /** The OpenAI Chat Completions endpoint the cases (and the provider's default) call. */
 export const openAiConformanceChatCompletionsUrl = 'https://api.openai.com/v1/chat/completions'
@@ -41,6 +47,11 @@ export const openAiConformanceChatCompletionsUrl = 'https://api.openai.com/v1/ch
 export type OpenAiConformanceModels = {
   readonly plainText: string
   readonly toolCall: string
+  /**
+   * A reasoning model on Chat Completions: takes `reasoning_effort`, reports
+   * `completion_tokens_details.reasoning_tokens`, and rejects `max_tokens`.
+   */
+  readonly reasoning: string
   readonly invalid: string
 }
 
@@ -48,14 +59,22 @@ export type OpenAiConformanceModels = {
 export const openAiConformanceDefaultModels: OpenAiConformanceModels = {
   plainText: 'gpt-4.1-nano',
   toolCall: 'gpt-4.1-nano',
+  reasoning: 'gpt-6-luna',
   invalid: 'yolk-conformance-model-does-not-exist'
 }
 
 export type OpenAiConformanceSettings = {
   /** OpenAI API key. Any value works under replay or against an emulator. */
   readonly apiKey: Redacted.Redacted<string>
-  /** Sent as `max_completion_tokens`. */
+  /** Sent as `max_completion_tokens` (as `max_tokens` by the unsupported-parameter case). */
   readonly maxCompletionTokens: number
+  /**
+   * `max_completion_tokens` of the reasoning cases: it bounds reasoning and answer tokens
+   * together, so it leaves room for both.
+   */
+  readonly reasoningMaxCompletionTokens: number
+  /** Sent as `reasoning_effort` by the reasoning cases. */
+  readonly reasoningEffort: AgentReasoningEffort
   readonly models: OpenAiConformanceModels
 }
 
@@ -281,10 +300,154 @@ export const openAiChatJsonPlainTextCase: OpenAiConformanceCase = defineConforma
   })
 })
 
+// A prompt that needs a little reasoning, so a reasoning model reports some reasoning tokens.
+const reasoningPrompt = 'What is 17 times 23? Answer with the number only.'
+
+/**
+ * The provider as a host configures it for an OpenAI reasoning model: `reasoning_effort` sent
+ * (the provider's `reasoning-effort` format) and reasoning content kept, so any reasoning text the
+ * endpoint sent would surface as ReasoningDelta events.
+ */
+const reasoningConfig = (
+  settings: OpenAiConformanceSettings,
+  streaming: boolean
+): OpenAiProviderConfig => ({
+  apiKey: settings.apiKey,
+  maxCompletionTokens: settings.reasoningMaxCompletionTokens,
+  reasoningEffortFormat: 'reasoning-effort',
+  reasoningContent: true,
+  streaming
+})
+
+const reasoningRequest = (settings: OpenAiConformanceSettings): LLMRequest => ({
+  ...userRequest(settings.models.reasoning, reasoningPrompt),
+  reasoningEffort: settings.reasoningEffort
+})
+
+/**
+ * Shared claim of both reasoning cases: non-empty text, one Done(stop), no reasoning text, and
+ * exactly one usage report whose output counts a positive number of reasoning tokens, no more
+ * than its output total.
+ */
+const expectHiddenReasoningAnswer = (events: ReadonlyArray<LLMEvent>) =>
+  Effect.gen(function* () {
+    const tags = tagsOf(events)
+    const usages = events.flatMap(event => (event instanceof LLMUsage ? [event.usage] : []))
+
+    yield* expectEqual(doneReasons(events), ['stop'], 'expected exactly one Done(stop)')
+    yield* expectConformance(textOf(events).trim().length > 0, 'expected non-empty answer text')
+    yield* expectConformance(
+      !tags.includes('ReasoningDelta'),
+      'expected no reasoning text (OpenAI Chat Completions returns none)',
+      { actual: tags }
+    )
+    yield* expectEqual(usages.length, 1, 'expected exactly one usage report')
+
+    const output = usages[0]?.output
+    const reasoning = output?.reasoning
+
+    yield* expectConformance(
+      reasoning !== undefined && reasoning > 0,
+      'expected the usage report to count reasoning tokens',
+      { actual: reasoning ?? null }
+    )
+    yield* expectConformance(
+      output !== undefined && reasoning !== undefined && reasoning <= output.total,
+      'expected reasoning tokens counted within the output total',
+      { expected: output?.total ?? null, actual: reasoning ?? null }
+    )
+  })
+
+export const openAiChatReasoningEffortCase: OpenAiConformanceCase = defineConformanceCase({
+  id: 'openai.chat.stream.reasoning-effort',
+  title: 'A reasoning model takes reasoning_effort and reports hidden reasoning as usage',
+  safety: 'read',
+  docs: 'OpenAI reasoning models take `reasoning_effort` on Chat Completions and `max_completion_tokens`, which bounds answer and reasoning tokens together. Chat Completions returns no reasoning text: a streamed response reports the reasoning only in the usage chunk as `usage.completion_tokens_details.reasoning_tokens`, counted in `completion_tokens`.',
+  wire: 'A streamed request to a reasoning model with `reasoning_effort` (provider option `reasoningEffortFormat: "reasoning-effort"`) and `max_completion_tokens` succeeds: non-empty answer text, exactly one Done(stop), no ReasoningDelta although the provider keeps reasoning content, and exactly one Usage whose output counts a positive number of reasoning tokens no larger than its output total.',
+  fixtures: [openAiChatReasoningEffortFixture.id],
+  run: Effect.gen(function* () {
+    const settings = yield* OpenAiConformanceConfig
+
+    const events = yield* collectEvents(reasoningConfig(settings, true), reasoningRequest(settings))
+
+    yield* expectHiddenReasoningAnswer(events)
+  })
+})
+
+export const openAiChatJsonReasoningUsageCase: OpenAiConformanceCase = defineConformanceCase({
+  id: 'openai.chat.json.reasoning-usage',
+  title: 'A non-streamed reasoning completion reports reasoning tokens in usage',
+  safety: 'read',
+  docs: 'A non-streamed `chat.completion` from an OpenAI reasoning model carries the answer in `choices[0].message.content` and no reasoning text; its `usage.completion_tokens_details.reasoning_tokens` counts the hidden reasoning tokens, which `completion_tokens` includes.',
+  wire: 'A non-streamed request to a reasoning model with `reasoning_effort` and `max_completion_tokens` succeeds with one JSON completion: non-empty answer text, exactly one Done(stop), no ReasoningDelta, and exactly one Usage whose output counts a positive number of reasoning tokens no larger than its output total.',
+  fixtures: [openAiChatJsonReasoningUsageFixture.id],
+  run: Effect.gen(function* () {
+    const settings = yield* OpenAiConformanceConfig
+
+    const events = yield* collectEvents(
+      reasoningConfig(settings, false),
+      reasoningRequest(settings)
+    )
+
+    yield* expectHiddenReasoningAnswer(events)
+  })
+})
+
+const unsupportedParameterCode = 'unsupported_parameter'
+
+export const openAiChatUnsupportedParameterCase: OpenAiConformanceCase = defineConformanceCase({
+  id: 'openai.chat.stream.unsupported-parameter',
+  title: 'A reasoning model rejects max_tokens with a sanitized non-retryable error',
+  safety: 'read',
+  docs: 'OpenAI reasoning models reject `max_tokens` (deprecated in favour of `max_completion_tokens`, and not compatible with reasoning models) with status 400 and the envelope `{ error: { message, type: "invalid_request_error", param: "max_tokens", code: "unsupported_parameter" } }`.',
+  wire: 'A streamed request to a reasoning model whose output limit is sent as `max_tokens` (provider option `completionTokenField: "max_tokens"`) is rejected before any stream starts: the provider fails with a non-retryable LLMError that is not classified as `auth`, keeps status 400 and the provider code `unsupported_parameter`, and whose message is status-only (no upstream body text).',
+  fixtures: [openAiChatUnsupportedParameterFixture.id],
+  run: Effect.gen(function* () {
+    const settings = yield* OpenAiConformanceConfig
+
+    const outcome = yield* collectEvents(
+      { ...providerConfig(settings, true), completionTokenField: 'max_tokens' },
+      userRequest(settings.models.reasoning, 'Say hello.')
+    ).pipe(Effect.result)
+
+    if (Result.isSuccess(outcome)) {
+      return yield* expectConformance(false, 'expected a rejection, the request succeeded', {
+        actual: tagsOf(outcome.success)
+      })
+    }
+
+    const error = outcome.failure
+
+    if (!(error instanceof LLMError)) {
+      return yield* expectConformance(false, 'expected an LLMError', { actual: error._tag })
+    }
+
+    yield* expectEqual(error.retryable, false, 'expected a non-retryable error')
+    yield* expectConformance(
+      error.provider?.kind !== 'auth',
+      'expected a request rejection, not an authentication failure',
+      { actual: error.provider?.kind ?? null }
+    )
+    yield* expectEqual(error.provider?.status ?? null, 400, 'expected status 400')
+    yield* expectEqual(
+      error.provider?.providerCode ?? null,
+      unsupportedParameterCode,
+      'expected the provider code `unsupported_parameter`'
+    )
+    yield* expectConformance(
+      sanitizedStatusMessage.test(error.message),
+      'expected a status-only message without upstream body text'
+    )
+  })
+})
+
 /** Every OpenAI chat conformance case, in fixture order. */
 export const openAiConformanceCases: ReadonlyArray<OpenAiConformanceCase> = [
   openAiChatPlainTextCase,
   openAiChatToolCallDeltasCase,
   openAiChatErrorEnvelopeCase,
-  openAiChatJsonPlainTextCase
+  openAiChatJsonPlainTextCase,
+  openAiChatReasoningEffortCase,
+  openAiChatJsonReasoningUsageCase,
+  openAiChatUnsupportedParameterCase
 ]
