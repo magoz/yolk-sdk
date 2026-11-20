@@ -34,9 +34,10 @@ import {
   AgentChatExecutionOutput,
   discardChatExecutionOutput,
   executionTurnAnchor,
-  hostToolCallMessage,
+  isFinishedToolCall,
   isLatestTurnAnchor,
   isPastRequestToolCall,
+  messagesAfterAnchor,
   replaceWithCommittedAnswer,
   deleteChatTurn,
   editChatUserMessage,
@@ -77,18 +78,46 @@ export type AgentChatState = {
 }
 
 /**
- * The start of the latest model turn a chat projection saw (its `LLMStreamStart`, tagged or not).
- * Providers reuse tool call ids across turns, so the turn's tool events match a call only in the
- * messages after `after`: the model's stream (its own execution's start, when tagged) and host
- * events (the tool batch, approvals, questions and their answers act on the latest turn's calls).
+ * The start of the latest model turn a chat projection saw (its `LLMStreamStart`, tagged or not),
+ * or of the run (`AgentStart`, the chat reducer's local submit/HITL/regenerate/edit:
+ * `runTurnStart`). Providers reuse tool call ids across turns, so the turn's tool events match a
+ * call only in the messages after `after`: the model's stream (its own execution's start, when
+ * tagged) and host events (the tool batch, approvals, questions and their answers act on the latest
+ * turn's calls; on a miss, on the earlier part holding the same call or the request an answer
+ * answers, as a resumed run's tool batch does before its first model turn).
  */
 export type AgentChatTurnStart = {
   /** The start's `streamId` (`''` when none). */
   readonly streamId: string
+  /** The `LLMStreamStart`'s turn; `0` for a run start (the loop numbers model turns from 1). */
   readonly turn: number
   /** The turn's output follows this chat message (none: the chat was empty). */
   readonly after: Option.Option<string>
+  /**
+   * A run start, before the run's first model turn: it bounds host events. The model's tool events
+   * before the run's first `LLMStreamStart` replay an earlier run's (a run's own model output
+   * follows a start), so they act on a call before the run's messages when one holds their id, else
+   * as usual (`ChatEventScope.runOutput`). The run's first `LLMStreamStart` starts a new turn, never
+   * retries this one.
+   */
+  readonly run?: true
 }
+
+/**
+ * A run's start (`AgentStart`, a local submit/HITL/regenerate/edit): its turn's output follows the
+ * last chat message. A resumed run's tool batch comes before its first model turn: it reaches
+ * earlier parts only as the same call or the request an answer answers, else adds parts of its
+ * own, so a provider's reused call id never lands on an earlier turn's call.
+ */
+const runTurnStart = (
+  streamId: string,
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentChatTurnStart => ({
+  streamId,
+  turn: 0,
+  after: Option.fromNullishOr(messages.at(-1)?.id),
+  run: true
+})
 
 export type AgentChatEventProjectionState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
@@ -101,8 +130,8 @@ export type AgentChatEventProjectionState = {
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
   /**
    * The latest model turn's start (`AgentChatTurnStart`); carry it with `seenEventIds`. Absent
-   * until a start is seen and after `AgentStart`: tool events then match the last message holding
-   * a call, in any turn.
+   * until a start (or `AgentStart`) is seen and in states built before it: tool events then match
+   * the last message holding a call, in any turn.
    */
   readonly turnStart?: AgentChatTurnStart
 }
@@ -139,14 +168,12 @@ const withStatusTree = (state: AgentChatState, tree: AgentStatusTree): AgentChat
     ? state
     : { ...state, status: tree.root, subagents: tree.subagents }
 
-/** Whether the call a tool-batch event acts on (`hostToolCallMessage`) already settled. */
+/**
+ * Whether the call a tool-batch event acts on (`hostToolCallMessage`) is that call, finished
+ * (`isFinishedToolCall`): a start of it is a replay the chat keeps, as `reduceAgentEvents` does.
+ */
 const isSettledToolCall = (state: AgentChatState, call: ToolCall) =>
-  hostToolCallMessage(state.chatMessages, call, state.turnStart?.after)?.parts.some(
-    part =>
-      Predicate.isTagged(part, 'ToolCall') &&
-      part.call.id === call.id &&
-      (Predicate.isTagged(part.state, 'Completed') || Predicate.isTagged(part.state, 'Accepted'))
-  ) === true
+  isFinishedToolCall(state.chatMessages, call, state.turnStart?.after)
 
 const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
   withStatusTree(next, startAgentStatusTree(statusTree(state)))
@@ -271,14 +298,20 @@ const projectExecutionEvent = (
     ? turnAnchor(route.superseded, started)
     : undefined
 
-  const turn =
-    startAnchor ??
-    (owner === undefined ? undefined : executionTurnAnchor(owner.output)) ??
-    latest?.after
+  const ownTurn =
+    startAnchor ?? (owner === undefined ? undefined : executionTurnAnchor(owner.output))
+
+  const turn = ownTurn ?? latest?.after
+
+  // Model events before a run's first model turn replay an earlier run's (any turn, an earlier
+  // run's call first), never the resumed batch's call reusing its id.
+  const runStart = ownTurn === undefined && latest?.run === true ? latest : undefined
 
   const chatMessages = applyExecutionEventToChatMessages(committed, event, options, {
     foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
-    turn
+    turn,
+    modelTurn: runStart === undefined ? turn : undefined,
+    runOutput: runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
   })
 
   const after = recordAgentExecutionEvent(
@@ -321,7 +354,7 @@ const projectExecutionEvent = (
 /**
  * The latest turn's start after an event: an `LLMStreamStart` records its turn (a tagged one where
  * its execution's turn starts; an untagged retry of the latest turn keeps that turn's start), and
- * `AgentStart` clears it (a run's turns are numbered afresh).
+ * `AgentStart` sets a run start (`runTurnStart`; a run's turns are numbered afresh).
  */
 const nextTurnStart = (
   latest: AgentChatTurnStart | undefined,
@@ -330,7 +363,7 @@ const nextTurnStart = (
   startAnchor: Option.Option<string> | undefined,
   messages: ReadonlyArray<AgentChatMessage>
 ): AgentChatTurnStart | undefined => {
-  if (Predicate.isTagged(event, 'AgentStart')) return undefined
+  if (Predicate.isTagged(event, 'AgentStart')) return runTurnStart(event.streamId ?? '', messages)
 
   if (!Predicate.isTagged(event, 'LLMStreamStart') || Predicate.isTagged(route, 'Owned')) {
     return latest
@@ -341,6 +374,7 @@ const nextTurnStart = (
   if (startAnchor !== undefined) return { streamId, turn: event.turn, after: startAnchor }
 
   return latest !== undefined &&
+    latest.run !== true &&
     latest.streamId === streamId &&
     latest.turn === event.turn &&
     isLatestTurnAnchor(messages, latest.after)
@@ -505,11 +539,20 @@ export type AgentChatAction =
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
-/** A new stream starts: its event ids, executions, turns and pauses are its own. */
-const restarted = (state: AgentChatState) => ({
-  ...Struct.omit(state, ['turnStart', 'hitlPauses']),
+/**
+ * A new stream starts with `chatMessages`: its event ids, executions, turns and pauses are its own,
+ * from a run start after the last message (`runTurnStart`), so a resumed tool batch without
+ * `AgentStart` still stays off earlier turns' calls.
+ */
+const restarted = (
+  state: AgentChatState,
+  chatMessages: ReadonlyArray<AgentChatMessage>
+): AgentChatState => ({
+  ...Struct.omit(state, ['hitlPauses']),
+  chatMessages,
   seenEventIds: [],
-  executions: []
+  executions: [],
+  turnStart: runTurnStart('', chatMessages)
 })
 
 /**
@@ -567,8 +610,7 @@ export const reduceAgentChatState = (
     ),
     Match.tag('Submit', current =>
       started(state, {
-        ...restarted(state),
-        chatMessages: appendProtocolMessage(state.chatMessages, current.message),
+        ...restarted(state, appendProtocolMessage(state.chatMessages, current.message)),
         sessionEvents: [
           ...state.sessionEvents,
           UserMessageSubmitted.make({ message: current.message })
@@ -586,16 +628,18 @@ export const reduceAgentChatState = (
       })
     ),
     Match.tag('SubmitHitlResponse', current =>
-      started(state, {
-        ...restarted(state),
-        // User data is not a validated tool result until the server accepts it. Keep the
-        // form mounted while submitting and never replay an optimistic invalid payload.
-        chatMessages:
+      started(
+        state,
+        restarted(
+          state,
+          // User data is not a validated tool result until the server accepts it. Keep the
+          // form mounted while submitting and never replay an optimistic invalid payload.
           Predicate.isTagged(current.response, 'InputResponse') ||
-          Predicate.isTagged(current.response, 'InteractionResponse')
+            Predicate.isTagged(current.response, 'InteractionResponse')
             ? state.chatMessages
             : applyAgentEventToChatMessages(state.chatMessages, hitlResponseEvent(current.response))
-      })
+        )
+      )
     ),
     Match.tag('DeleteTurn', current =>
       Match.value(deleteChatTurn(state.chatMessages, current.messageId)).pipe(
@@ -623,8 +667,7 @@ export const reduceAgentChatState = (
         Match.tag('NotFound', () => state),
         Match.tag('Regenerated', next =>
           started(state, {
-            ...restarted(state),
-            chatMessages: next.messages,
+            ...restarted(state, next.messages),
             sessionEvents: [
               ...state.sessionEvents,
               MessagesRegenerated.make({
@@ -643,8 +686,7 @@ export const reduceAgentChatState = (
         Match.tag('NotFound', 'NotUserMessage', () => state),
         Match.tag('Edited', next =>
           started(state, {
-            ...restarted(state),
-            chatMessages: next.messages,
+            ...restarted(state, next.messages),
             sessionEvents: [
               ...state.sessionEvents,
               UserMessageEdited.make({

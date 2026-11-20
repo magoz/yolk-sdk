@@ -451,6 +451,43 @@ describe('a replayed request after its call settled', () => {
   })
 })
 
+describe('a replayed start of a finished call', () => {
+  // The same fence as `reduceAgentEvents`: a completed, accepted or errored call keeps its state and
+  // the run status when the tool batch's start of the same call replays.
+  const kind = approval()
+
+  const cases = kind.settles
+    .filter(settle => settle.state === 'Completed' || settle.state === 'Errored')
+    .flatMap(settle =>
+      positions.flatMap(position =>
+        (['without', 'with'] as const).map(ids => ({
+          title: `${settle.name}, ${position}, ${ids} event id`,
+          settle,
+          position,
+          ids
+        }))
+      )
+    )
+
+  it.each(cases)('keeps the call and the run status ($title)', ({ settle, position, ids }) => {
+    const settled = settledChats(kind, settle, position)
+
+    expect(stateTags(settled)).toEqual(both([settle.state]))
+
+    const replayed = applyEvent(
+      settled,
+      ToolExecutionStarted.make({
+        eventId: ids === 'with' ? 'replayed-start' : undefined,
+        call: kind.call
+      })
+    )
+
+    expect(replayed.projection.chatMessages).toEqual(settled.projection.chatMessages)
+    expect(replayed.chat.chatMessages).toEqual(settled.chat.chatMessages)
+    expect(replayed.chat.status).toEqual(settled.chat.status)
+  })
+})
+
 describe('a request for a call still pending', () => {
   it('replaces the pending request with a newer one (a recomputed approval preview)', () => {
     const kind = approval()

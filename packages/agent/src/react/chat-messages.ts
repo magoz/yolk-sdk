@@ -1198,13 +1198,7 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
     }
   }
 
-  if (
-    Predicate.isTagged(next, 'Running') &&
-    (Predicate.isTagged(existing, 'Completed') || Predicate.isTagged(existing, 'Accepted'))
-  ) {
-    return existing
-  }
-
+  // A start of a finished call is kept out by `keepsToolState` (same call only, as the client).
   return next
 }
 
@@ -1295,20 +1289,47 @@ const isPastRequestToolState = (state: ChatToolState): boolean =>
     Match.exhaustive
   )
 
+/** A finished call the tool batch ran: a replayed start of it must not reopen it. */
+const isFinishedToolState = (state: ChatToolState) =>
+  Predicate.isTagged(state, 'Completed') ||
+  Predicate.isTagged(state, 'Accepted') ||
+  Predicate.isTagged(state, 'Errored')
+
 /**
  * Whether a call's part keeps its state when an event sets `state` for `call`: an accepted call
- * ignores open states (replays of its start or request), and a call past its request ignores a
- * request for the same call. The loop asks for a call only until it has a result or an answer it
- * used: an invalid input re-pends the same request while the part still pends (the server emits
- * `InputSubmitted` only for a valid payload, and the chat reducer never applies an input or
- * interaction answer locally), and a later turn reusing the id asks on its own part. So such a
- * request, with or without event id, is a replay; a request naming another call with the id is
- * that call's and applies. Hosts never re-ask a call whose answer or denial the chat applied
- * locally (`patterns/AGENT_HITL.md`).
+ * ignores open states (replays of its start or request), a finished call (completed, accepted,
+ * errored) ignores a start of the same call (a replayed tool-batch event), and a call past its
+ * request ignores a request for the same call. The loop asks for a call only until it has a result
+ * or an answer it used: an invalid input re-pends the same request while the part still pends (the
+ * server emits `InputSubmitted` only for a valid payload, and the chat reducer never applies an
+ * input or interaction answer locally), and a later turn reusing the id asks on its own part. So
+ * such a request, with or without event id, is a replay; a request or start naming another call
+ * with the id is that call's and applies. Hosts never re-ask a call whose answer or denial the chat
+ * applied locally (`patterns/AGENT_HITL.md`). `reduceAgentEvents` keeps the same fences
+ * (`keepsToolRun`).
  */
 const keepsToolState = (part: ToolCallPart, call: ToolCall, state: ChatToolState) =>
   (Predicate.isTagged(part.state, 'Accepted') && isOpenToolState(state)) ||
+  (Predicate.isTagged(state, 'Running') &&
+    isFinishedToolState(part.state) &&
+    sameCall(call)(part)) ||
   (isRequestToolState(state) && isPastRequestToolState(part.state) && sameCall(call)(part))
+
+/**
+ * Whether the call a tool-batch event names (`call`, of the latest turn started after `anchor`) is
+ * already finished (`hostToolCallMessage`, `isFinishedToolState`): a start of it is a replay.
+ */
+export const isFinishedToolCall = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  call: ToolCall,
+  anchor: ChatTurnAnchor
+) =>
+  hostToolCallMessage(messages, call, anchor)?.parts.some(
+    part =>
+      Predicate.isTagged(part, 'ToolCall') &&
+      sameCall(call)(part) &&
+      isFinishedToolState(part.state)
+  ) === true
 
 /**
  * Whether the call a request names (`call`, of the latest turn started after `anchor`) is already
@@ -2027,17 +2048,39 @@ export const applyAgentEventToChatMessages = (
 ): ReadonlyArray<AgentChatMessage> =>
   applyExecutionEventToChatMessages(messages, event, options, {
     foreign: noForeignMessages,
-    turn: undefined
+    turn: undefined,
+    modelTurn: undefined,
+    runOutput: undefined
   })
 
 /**
- * What an event may change: never a message in `foreign`, another model-step execution's output
- * (an earlier turn's answer kept for reconciling), and a tool call only in the event's turn, the
- * messages after `turn` (providers reuse call ids across turns).
+ * What an event may change: the model's stream never a message in `foreign` (another model-step
+ * execution's output, an earlier turn's answer kept for reconciling), and a tool call only in the
+ * event's turn: host events after `turn`, the model's after `modelTurn` (providers reuse call ids
+ * across turns). Before a run's first model turn (`AgentChatTurnStart.run`), `runOutput` holds the
+ * run's messages: a model tool event then replays an earlier run's and acts on a call before them
+ * when one holds its id, else as usual (a host that streams without `LLMStreamStart`).
  */
 type ChatEventScope = {
   readonly foreign: ForeignMessages
   readonly turn: ChatTurnAnchor
+  readonly modelTurn: ChatTurnAnchor
+  readonly runOutput: ForeignMessages | undefined
+}
+
+/**
+ * The chat messages after a run's start (`anchor`; none: every message); none when the anchor
+ * message is gone.
+ */
+export const messagesAfterAnchor = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  anchor: Option.Option<string>
+): ForeignMessages => {
+  const index = indexOfMessage(messages, anchor)
+
+  return Option.isSome(anchor) && index === -1
+    ? noForeignMessages
+    : new Set(messages.slice(index + 1).map(message => message.id))
 }
 
 /**
@@ -2054,11 +2097,34 @@ export const applyExecutionEventToChatMessages = (
   const eventTimeMs = event.createdAtMs ?? options.nowMs ?? 0
   const foreign = scope.foreign
 
-  const from = turnStartIndex(messages, scope.turn)
   // The model's stream never changes another execution's output; a host step acts on any call.
-  const model: ToolPartScope = { from, foreign, replays: false }
+  const model: ToolPartScope = {
+    from: turnStartIndex(messages, scope.modelTurn),
+    foreign,
+    replays: false
+  }
+
   // Requests, the tool batch and answers act on a call the model placed, maybe a replay of one.
-  const host: ToolPartScope = { from, foreign: noForeignMessages, replays: true }
+  const host: ToolPartScope = {
+    from: turnStartIndex(messages, scope.turn),
+    foreign: noForeignMessages,
+    replays: true
+  }
+
+  // Before a run's first model turn, a model tool event replays an earlier run's: a call before the
+  // run's messages comes first, never the resumed batch's call reusing its id.
+  const replayed: ToolPartScope | undefined =
+    scope.runOutput === undefined
+      ? undefined
+      : { from: 0, foreign: new Set([...foreign, ...scope.runOutput]), replays: false }
+
+  const modelScope = (callId: string): ToolPartScope =>
+    replayed !== undefined && toolCallMessageIndex(messages, callId, replayed) !== -1
+      ? replayed
+      : model
+
+  const upsertModelToolCallPart = (call: ToolCall, state: ChatToolState) =>
+    upsertToolCallPart(messages, call, state, modelScope(call.id))
 
   return Match.value(event)
     .pipe(
@@ -2081,22 +2147,20 @@ export const applyExecutionEventToChatMessages = (
       // `AssistantMessage` brings the replay state and one part per block.
       Match.tag('LLMReasoningReplay', () => messages),
       Match.tag('ToolInputEnd', current =>
-        upsertToolCallPart(messages, current.call, ChatToolState.Called(), model)
+        upsertModelToolCallPart(current.call, ChatToolState.Called())
       ),
       Match.tag('UserMessage', current => appendProtocolMessage(messages, current.message)),
       Match.tag('AssistantMessage', current =>
         appendOrReplaceAssistantMessage(messages, current.message, model)
       ),
       Match.tag('ToolInputStart', current =>
-        upsertToolCallPart(
-          messages,
+        upsertModelToolCallPart(
           inputStreamingToolCall(current.id, current.name),
-          ChatToolState.InputStreaming({ input: '' }),
-          model
+          ChatToolState.InputStreaming({ input: '' })
         )
       ),
       Match.tag('ToolInputDelta', current =>
-        appendToolInputDelta(messages, current.id, current.delta, model)
+        appendToolInputDelta(messages, current.id, current.delta, modelScope(current.id))
       ),
       Match.tag('ToolApprovalRequested', current =>
         upsertToolCallPart(
@@ -2247,11 +2311,9 @@ export const applyExecutionEventToChatMessages = (
         )
       ),
       Match.tag('ProviderToolResult', current =>
-        upsertToolCallPart(
-          messages,
+        upsertModelToolCallPart(
           current.call,
-          ChatToolState.ProviderCompleted({ result: current.result }),
-          model
+          ChatToolState.ProviderCompleted({ result: current.result })
         )
       ),
       Match.tag('AgentError', current => markChatError(messages, current.message)),
