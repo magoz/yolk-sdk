@@ -1,6 +1,6 @@
 import { Array as Arr, Data, Equal, Match, Option, Predicate } from 'effect'
 import type { AgentToolRun } from '@yolk-sdk/agent/client'
-import { toolRunCall, toolRunId, toolRunRequestId } from '../client/state.ts'
+import { isActiveToolRun, toolRunCall, toolRunId, toolRunRequestId } from '../client/state.ts'
 import {
   isInstructionMessage,
   AssistantAgentMessage,
@@ -424,7 +424,9 @@ const answersToolRun = (answer: AgentToolRun, run: AgentToolRun) => {
  * - Then a run holding no call (an input still streaming, an answer or denial without its request)
  *   that answers an earlier run on a part (`answersToolRun`) replaces it there, as the later state
  *   of that call (unless a later answer already did); else it takes the last untaken part with its
- *   id, one without a result message first.
+ *   id: one without a result message first when the run still waits on its result
+ *   (`isActiveToolRun`: an input streaming, a submitted interaction), any otherwise (a settled
+ *   answer or denial).
  *
  * A part no run reaches keeps the state its messages give it.
  */
@@ -496,12 +498,18 @@ const collectToolRunsByPart = (
         : placed
     }
 
+    // A run still waiting on its result (an input streaming, a submitted interaction the server has
+    // not run) belongs to a part without one; a settled answer to the plain last part, as before.
+    const waiting = isActiveToolRun(current.run)
+
     return place(
       placed,
-      findLastSlot(
-        slots,
-        untaken(placed, slot => withId(slot) && withoutResult(slot))
-      ) ?? findLastSlot(slots, untaken(placed, withId)),
+      (waiting
+        ? findLastSlot(
+            slots,
+            untaken(placed, slot => withId(slot) && withoutResult(slot))
+          )
+        : undefined) ?? findLastSlot(slots, untaken(placed, withId)),
       current
     )
   }, byCall)

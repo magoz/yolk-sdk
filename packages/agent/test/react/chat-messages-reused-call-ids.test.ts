@@ -299,6 +299,43 @@ describe('buildAgentChatMessages with a call id reused across turns (#356)', () 
       ])
     })
 
+    it('gives a settled answer without its request the plain last card with its id', () => {
+      // Turn 1's interaction has no result yet; turn 2's call reusing the id was answered (its
+      // result follows it). Only a run still waiting on its result prefers a card without one.
+      const ask = ToolCall.make({ id: 'call_0', name: 'question', params: { questions: [] } })
+
+      const answered = AgentToolRun.QuestionAnswered({
+        response: QuestionResponse.make({
+          requestId: 'question:call_0',
+          toolCallId: 'call_0',
+          outcome: 'answered',
+          source: 'user'
+        })
+      })
+
+      expect(
+        cards(
+          [
+            turn('Reviewing', review),
+            turn('Asking', ask),
+            ToolResultMessage.make({ toolCallId: 'call_0', content: 'Yes' })
+          ],
+          [answered]
+        )
+      ).toEqual(['review_document:Called', 'question:QuestionAnswered'])
+
+      expect(
+        cards(
+          [
+            turn('Reviewing', review),
+            turn('Sending', send),
+            ToolResultMessage.make({ toolCallId: 'call_0', content: 'Tool call denied: No' })
+          ],
+          [AgentToolRun.Denied({ toolCallId: 'call_0', reason: 'No' })]
+        )
+      ).toEqual(['review_document:Called', 'send:Denied'])
+    })
+
     it("gives o-o's accepted interaction and pending approval their own cards, in any order", () => {
       const messages = [turn('Reviewing', review), turn('Sending', send)]
 

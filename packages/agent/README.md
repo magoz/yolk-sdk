@@ -799,8 +799,8 @@ receipts) rebuild state from it. `toolRuns` can hold runs of several turns for o
 a run holding a call (its own or its request's) takes the last card holding the same call (id, name
 and arguments equal); a run holding no call (an input still streaming, an answer or denial without
 its request) that answers an earlier run's request takes that run's card (a later denial wins over
-the pending approval it denies), else the last card with its id that no run took, one without a
-result message first. A card no run reaches shows its own result message: the `ToolResult` after it,
+the pending approval it denies), else the last card with its id that no run took (one without a result message first while the run
+still waits on its result: an input streaming, a submitted interaction). A card no run reaches shows its own result message: the `ToolResult` after it,
 never another turn's reusing the id (a result with no card before it shows on its own). Give each
 run the call as the transcript holds it (`toolRunsFromHitlRequests` does, from the loop's
 requests): a run whose call equals no card's (arguments the host normalized or re-serialized) falls

@@ -154,7 +154,8 @@ runs first, each card taking at most one. A run holding a call (its own or its r
 last card holding the same call (id, name and arguments equal). A run holding no call (an input
 still streaming, an answer or denial without its request) that answers an earlier run's request
 takes that run's card (a later denial wins over the pending approval it denies), else the last card
-with its id that no run took, one without a result message first. A card no run reaches shows its
+with its id that no run took (one without a result message first while the run still waits on
+its result: an input streaming, a submitted interaction). A card no run reaches shows its
 own result message: the result after it, never another turn's reusing the id (a result with no
 card before it shows on its own).
 
