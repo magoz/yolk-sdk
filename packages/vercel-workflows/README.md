@@ -474,8 +474,9 @@ Open cases:
   latest turn start they saw (a replayed or late request or tool-batch event for a call that turn
   lacks acts on the earlier part holding the same call, an answer on the part holding its request),
   and `reduceAgentEvents` scopes its tool runs the same way (one run per turn for a reused id), so
-  only until a client sees a start (it joined mid-turn) or after `AgentStart` can a reused id still
-  update an earlier turn's call or run. A client that never saw a later turn's start has no bound
+  only until a client sees a start (it joined mid-turn) or after `AgentStart` (including a resumed
+  run's tool batch before its next model turn, #352) can a reused id still update an earlier turn's
+  call or run. A client that never saw a later turn's start has no bound
   on where a reconciled turn ends; the committed answer takes the first part of each of its calls
   after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes

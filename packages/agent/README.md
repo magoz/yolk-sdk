@@ -769,8 +769,12 @@ pause blocks only on its requests still pending (none: the status stays). A repl
 same call also leaves a completed, errored or accepted run, and the status, alone. A turn reconciled
 after later turns started (`AgentAwaitingInput`, `AgentEnd`) changes only its own runs, between its
 start and the next (`turnStart.earlier`). Until a start is seen (and after `AgentStart` or a local
-submit), tool events act on the last run holding the call id, as before; a state built before
-`turnStart` behaves that way too.
+submit), tool events act on the last run holding the call id, as before except those fences; a
+state built before `turnStart` behaves that way too. So a run resumed with `AgentStart` (a loop
+resume) runs its tool batch before any start, and a reused id can still update an earlier turn's
+run there, in both reducers (#352). The client's replayed-start fence keeps a completed, errored or
+accepted run of the same call, the chat's a completed or accepted part with the id (#352 aligns
+them).
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
 optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequencer) naming the

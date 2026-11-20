@@ -1106,16 +1106,7 @@ const eventForStatus = (applied: AgentClientState, event: AgentEvent): AgentEven
 
   if (!Arr.isReadonlyArrayNonEmpty(pending)) return undefined
 
-  return AgentAwaitingInput.make({
-    eventId: event.eventId,
-    createdAtMs: event.createdAtMs,
-    executionId: event.executionId,
-    streamId: event.streamId,
-    requests: pending,
-    messages: event.messages,
-    turns: event.turns,
-    usage: event.usage
-  })
+  return AgentAwaitingInput.make({ ...event, requests: pending })
 }
 
 /**

@@ -550,16 +550,7 @@ const eventForStatus = (
 
   return pendingRequests.length === event.requests.length
     ? event
-    : AgentAwaitingInput.make({
-        eventId: event.eventId,
-        createdAtMs: event.createdAtMs,
-        executionId: event.executionId,
-        streamId: event.streamId,
-        requests: pendingRequests,
-        messages: event.messages,
-        turns: event.turns,
-        usage: event.usage
-      })
+    : AgentAwaitingInput.make({ ...event, requests: pendingRequests })
 }
 
 export const reduceAgentChatState = (
