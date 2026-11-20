@@ -34,6 +34,7 @@ type AnthropicMessagesErrorFields = {
   retryable: boolean
   message: string
   provider?: LLMError['provider']
+  responseIssue?: LLMError['responseIssue']
 }
 
 export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProviderConfig) =>
@@ -60,6 +61,10 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
             ...error.provider,
             provider: config.providerId
           })
+        }
+
+        if (error.responseIssue !== undefined) {
+          fields.responseIssue = error.responseIssue
         }
 
         return new LLMError(fields)
@@ -152,7 +157,7 @@ export const makeAnthropicMessagesProviderLayer = (config: AnthropicMessagesProv
             Stream.flatMap(response =>
               streamAnthropicResponse(response, {
                 decodeToolName: name => name,
-                allowEofCompletion: false,
+                requireJsonStopReason: true,
                 reasoningReplayProvider: undefined
               })
             ),

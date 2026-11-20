@@ -9,7 +9,15 @@
 import { Effect, Layer, Redacted, Ref, Stream } from 'effect'
 import { FetchHttpClient, type HttpClient } from 'effect/http'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMDone, LLMError, LLMProvider, type LLMEvent } from '@yolk-sdk/agent/loop'
+import {
+  LLMDone,
+  LLMError,
+  LLMProvider,
+  LLMTextDelta,
+  makeAgentLoopLayer,
+  runModelTurn,
+  type LLMEvent
+} from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
@@ -427,12 +435,50 @@ describe('faults through the native Messages provider (x-api-key)', () => {
 
       expect(error.retryable).toBe(false)
       expect(error.cause).toBe('invalid_response')
+      expect(error.responseIssue).toBe('missing_done')
     })
   )
 })
 
 const doneReasons = (events: Iterable<LLMEvent>) =>
   Array.from(events).flatMap(event => (event instanceof LLMDone ? [event.stopReason] : []))
+
+const textOf = (events: Iterable<LLMEvent>) =>
+  Array.from(events)
+    .flatMap(event => (event instanceof LLMTextDelta ? [event.text] : []))
+    .join('')
+
+/** Streams until the provider fails; returns the events it emitted first and the error. */
+const failThroughProvider = <E1, E2>(
+  provider: Layer.Layer<LLMProvider, E1, HttpClient.HttpClient>,
+  emulator: AnthropicEmulator,
+  transport: (emulator: AnthropicEmulator) => Layer.Layer<HttpClient.HttpClient, E2>
+) =>
+  Effect.gen(function* () {
+    const llm = yield* LLMProvider
+    const seen = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
+
+    const error = yield* llm
+      .stream({
+        model: anthropicConformanceDefaultModels.plainText,
+        systemPrompt: 'Reply in one short sentence.',
+        messages: [UserMessage.make({ content: 'Say hello.' })],
+        tools: []
+      })
+      .pipe(
+        Stream.runForEach(event => Ref.update(seen, events => [...events, event])),
+        Effect.flip
+      )
+
+    return { events: yield* Ref.get(seen), error: expectLlmError(error) }
+  }).pipe(Effect.provide(provider.pipe(Layer.provide(transport(emulator)))))
+
+/** The loop's incomplete stream: no `Done`, so non-retryable `invalid_response` `missing_done`. */
+const expectMissingDone = (error: LLMError) => {
+  expect(error.cause).toBe('invalid_response')
+  expect(error.retryable).toBe(false)
+  expect(error.responseIssue).toBe('missing_done')
+}
 
 describe('the Claude subscription provider (bearer) against the emulator', () => {
   it.effect('completes a turn and sends the OAuth wire the emulator records', () =>
@@ -497,17 +543,64 @@ describe('the Claude subscription provider (bearer) against the emulator', () =>
       })
   )
 
-  it.effect('keeps its EOF-completion compatibility for a stream cut before message_stop', () =>
+  it.effect(
+    'a stream cut after message_delta, before message_stop, fails as missing_done without Done',
+    () =>
+      Effect.gen(function* () {
+        // Eight chunks end with `message_delta` (`stop_reason: end_turn`): its stop reason is not
+        // terminal, only `message_stop` is.
+        const { events, error } = yield* failThroughProvider(
+          claudeProvider,
+          withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]),
+          inProcessLayer
+        )
+
+        expectMissingDone(error)
+        expect(textOf(events)).not.toBe('')
+        expect(doneReasons(events)).toEqual([])
+      })
+  )
+
+  it.effect('a stream cut mid-text fails as missing_done after the partial text', () =>
     Effect.gen(function* () {
-      // Unlike native Messages, the Claude provider treats EOF without `message_stop` as a
-      // normal end (existing compatibility behaviour, recorded here, not endorsed).
-      const events = yield* streamThroughProvider(
+      // message_start, content_block_start, ping, then one text_delta.
+      const { events, error } = yield* failThroughProvider(
         claudeProvider,
-        withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]),
-        inProcessLayer
+        withFaults([{ kind: 'truncate-after-chunks', chunks: 4 }]),
+        emulatedLayer
+      ).pipe(Effect.scoped)
+
+      expectMissingDone(error)
+      expect(textOf(events)).not.toBe('')
+      expect(doneReasons(events)).toEqual([])
+    })
+  )
+
+  it.effect('a truncated stream fails the loop model turn as missing_done', () =>
+    Effect.gen(function* () {
+      const error = expectLlmError(
+        yield* runModelTurn({
+          model: anthropicConformanceDefaultModels.plainText,
+          systemPrompt: 'Reply in one short sentence.',
+          messages: [UserMessage.make({ content: 'Say hello.' })],
+          tools: [],
+          turn: 1
+        }).pipe(
+          Stream.runDrain,
+          Effect.provide(
+            makeAgentLoopLayer({
+              provider: claudeProvider.pipe(
+                Layer.provide(
+                  inProcessLayer(withFaults([{ kind: 'truncate-after-chunks', chunks: 8 }]))
+                )
+              )
+            })
+          ),
+          Effect.flip
+        )
       )
 
-      expect(doneReasons(events)).toEqual(['stop'])
+      expectMissingDone(error)
     })
   )
 })
