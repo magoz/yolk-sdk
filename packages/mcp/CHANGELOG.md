@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.155
+
+### Patch Changes
+
+- d4d8714: Upgrade the coordinated Effect runtime and platform dependencies to Effect 4.1.5 (patch releases of Effect 4.1). Hosts must move `effect` and the coordinated `@effect/*` runtime packages to 4.1.5 together with Yolk. Yolk APIs are unchanged.
+- Updated dependencies [d4d8714]
+  - @yolk-sdk/agent@0.1.0-canary.155
+  - @yolk-sdk/conformance@0.1.0-canary.155
+
 ## 0.1.0-canary.154
 
 ### Patch Changes
