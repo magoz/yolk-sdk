@@ -251,6 +251,7 @@
     "input-required-tool-calls",
     "kie-connector",
     "kie-figma-conformance",
+    "knowledge-gpt-tokenizer-4",
     "knowledge-lazy-tokenizer",
     "knowledge-tool-output",
     "ledger-input-required-marker",
