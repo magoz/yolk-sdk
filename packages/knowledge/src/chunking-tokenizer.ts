@@ -37,43 +37,42 @@ const splitSentences = (text: string) =>
     })
     .filter(unit => unit.length > 0)
 
+// Pieces of an oversized unit keep their whitespace: `buildChunkContents` joins pieces that fit
+// one chunk as they are, so trimming here would glue words and sentences together. It trims each
+// chunk's edges instead.
 const splitEncodedTokens = (text: string, maxTokens: number) => {
   const tokens = encode(text)
 
   return Array.from({ length: Math.ceil(tokens.length / maxTokens) }, (_, index) =>
-    decode(tokens.slice(index * maxTokens, index * maxTokens + maxTokens)).trim()
-  ).filter(chunk => chunk.length > 0)
+    decode(tokens.slice(index * maxTokens, index * maxTokens + maxTokens))
+  ).filter(piece => piece.length > 0)
 }
 
 const splitOversizedUnit = (text: string, maxTokens: number) => {
   const words = text.match(WORD_PATTERN) ?? []
-  const chunks: string[] = []
+  const pieces: string[] = []
   let current = ''
   let currentTokenCount = 0
+
+  const pushCurrent = () => {
+    if (current.length > 0) {
+      pieces.push(current)
+    }
+  }
 
   for (const word of words) {
     const wordTokenCount = countTokens(word)
 
     if (wordTokenCount > maxTokens) {
-      const currentChunk = current.trim()
-
-      if (currentChunk.length > 0) {
-        chunks.push(currentChunk)
-      }
-
-      chunks.push(...splitEncodedTokens(word, maxTokens))
+      pushCurrent()
+      pieces.push(...splitEncodedTokens(word, maxTokens))
       current = ''
       currentTokenCount = 0
       continue
     }
 
     if (currentTokenCount > 0 && currentTokenCount + wordTokenCount > maxTokens) {
-      const currentChunk = current.trim()
-
-      if (currentChunk.length > 0) {
-        chunks.push(currentChunk)
-      }
-
+      pushCurrent()
       current = word
       currentTokenCount = wordTokenCount
       continue
@@ -83,13 +82,9 @@ const splitOversizedUnit = (text: string, maxTokens: number) => {
     currentTokenCount += wordTokenCount
   }
 
-  const finalChunk = current.trim()
+  pushCurrent()
 
-  if (finalChunk.length > 0) {
-    chunks.push(finalChunk)
-  }
-
-  return chunks
+  return pieces
 }
 
 const splitUnitsBySize = (units: ReadonlyArray<string>, maxTokens: number) =>
