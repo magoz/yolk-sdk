@@ -374,7 +374,7 @@ const main = async () => {
         mammoth: '^1.13.0',
         unpdf: '^1.8.1',
         xlsx: 'https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz',
-        'gpt-tokenizer': '^3.4.0',
+        'gpt-tokenizer': '^4.1.2',
         react: '>=19',
         // Dependency of @yolk-sdk/codemode (./cloudflare).
         sucrase: '^3.35.1',
