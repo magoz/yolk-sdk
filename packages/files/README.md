@@ -24,11 +24,11 @@ and adds its label. This package provides the default store and the tools.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/files@canary @yolk-sdk/agent@canary effect@4.1.4
+pnpm add @yolk-sdk/files@canary @yolk-sdk/agent@canary effect@4.1.5
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.1.4`) in host code.
+Use the SDK's matching Effect version (`4.1.5`) in host code.
 Published package metadata requires Node.js 22+. The package is runtime-neutral (Web Crypto, no
 Node builtins).
 
