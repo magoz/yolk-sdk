@@ -356,7 +356,7 @@ const main = async () => {
       dependencies: {
         // Dependency of @yolk-sdk/codemode; tarballs are extracted, not installed.
         '@earendil-works/pi-codemode': '1.0.0',
-        '@effect/platform-node': '4.1.4',
+        '@effect/platform-node': '4.1.5',
         // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
         '@emulators/core': '0.12.0',
         '@modelcontextprotocol/client': '2.0.0',
@@ -365,7 +365,7 @@ const main = async () => {
         '@vercel/sandbox': '2.2.1',
         // Dependency of @yolk-sdk/vercel-workflows (./cloudflare).
         devalue: '^6.0.3',
-        effect: '4.1.4',
+        effect: '4.1.5',
         // Dependency of @yolk-sdk/mcp (./conformance), with the MCP client's own range.
         'eventsource-parser': '^3.0.0',
         // Dependencies of @yolk-sdk/extractors (./node); SheetJS is its optional peer, installed
@@ -387,7 +387,7 @@ const main = async () => {
     // Match the workspace's tested platform graph rather than a newer release.
     writeFileSync(
       join(fixtureDir, 'pnpm-workspace.yaml'),
-      "overrides:\n  '@effect/platform-node-shared': 4.1.4\n"
+      "overrides:\n  '@effect/platform-node-shared': 4.1.5\n"
     )
     execFileSync('pnpm', ['install', '--ignore-scripts'], {
       cwd: fixtureDir,

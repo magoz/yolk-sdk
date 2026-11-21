@@ -14,10 +14,10 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Install
 
 ```bash
-pnpm add -D @yolk-sdk/conformance@canary effect@4.1.4
+pnpm add -D @yolk-sdk/conformance@canary effect@4.1.5
 ```
 
-Use the SDK's matching Effect version (`4.1.4`) in host code.
+Use the SDK's matching Effect version (`4.1.5`) in host code.
 
 ## Subpaths
 

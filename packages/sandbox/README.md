@@ -6,11 +6,11 @@ Cloudflare Containers adapters.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect@4.1.4
+pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect@4.1.5
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
-Use the SDK's matching Effect version (`4.1.4`) in host code.
+Use the SDK's matching Effect version (`4.1.5`) in host code.
 Published package metadata requires Node.js 22+; `@yolk-sdk/sandbox/vercel` is server-only, and
 `@yolk-sdk/sandbox/cloudflare` runs in Cloudflare Workers.
 

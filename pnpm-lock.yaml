@@ -7,23 +7,23 @@ settings:
 catalogs:
   default:
     '@effect/opentelemetry':
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     '@effect/platform-bun':
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     '@effect/platform-node':
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     '@effect/sql-pg':
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     '@effect/vitest':
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     effect:
-      specifier: 4.1.4
-      version: 4.1.4
+      specifier: 4.1.5
+      version: 4.1.5
     typescript:
       specifier: ^7.0.2
       version: 7.0.2
@@ -32,8 +32,8 @@ catalogs:
       version: 5.0.1
 
 overrides:
-  '@effect/platform-node-shared': 4.1.4
-  '@effect/sql-d1': 4.1.4
+  '@effect/platform-node-shared': 4.1.5
+  '@effect/sql-d1': 4.1.5
   ws: ^8.22.1
   '@effect-aws/client-s3>@aws-sdk/client-s3': 3.1132.0
 
@@ -49,10 +49,10 @@ importers:
         version: link:packages/agent
       drizzle-orm:
         specifier: 1.0.0-rc.5-ab785fc
-        version: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.3.6)
+        version: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.3.6)
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.0
@@ -62,7 +62,7 @@ importers:
         version: 0.63.0
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.0.9)(typescript@7.0.2))(vite@8.3.0(@types/node@25.0.9)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
+        version: 4.1.5(effect@4.1.5)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.0.9)(typescript@7.0.2))(vite@8.3.0(@types/node@25.0.9)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
       '@oxlint/plugins':
         specifier: 1.78.0
         version: 1.78.0
@@ -192,7 +192,7 @@ importers:
     dependencies:
       '@alchemy.run/cloudflare':
         specifier: 2.0.0-beta.85
-        version: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@effect/sql-pg@4.1.4(effect@4.1.4))(@types/node@25.6.2)(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
+        version: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@effect/sql-pg@4.1.5(effect@4.1.5))(@types/node@25.6.2)(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
@@ -204,20 +204,20 @@ importers:
         version: link:../../packages/mcp
       alchemy:
         specifier: 2.0.0-beta.85
-        version: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
+        version: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20250805.0
         version: 4.20260510.1
       '@effect/platform-bun':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)
+        version: 4.1.5(effect@4.1.5)
       '@effect/platform-node':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+        version: 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -232,16 +232,16 @@ importers:
         version: 1.1.0(@types/react@19.2.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@effect-aws/client-s3':
         specifier: 2.0.0
-        version: 2.0.0(effect@4.1.4)
+        version: 2.0.0(effect@4.1.5)
       '@effect/opentelemetry':
         specifier: 'catalog:'
-        version: 4.1.4(@opentelemetry/api-logs@0.210.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.4)
+        version: 4.1.5(@opentelemetry/api-logs@0.210.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.5)
       '@effect/platform-node':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+        version: 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       '@effect/sql-pg':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)
+        version: 4.1.5(effect@4.1.5)
       '@neondatabase/serverless':
         specifier: ^1.0.2
         version: 1.0.2
@@ -283,7 +283,7 @@ importers:
         version: link:../../packages/vercel-workflows
       better-auth:
         specifier: ^1.7.5
-        version: 1.7.5(@opentelemetry/api@1.9.0)(drizzle-kit@1.0.0-rc.5-ab785fc)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5))(next@16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
+        version: 1.7.5(@opentelemetry/api@1.9.0)(drizzle-kit@1.0.0-rc.5-ab785fc)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5))(next@16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -292,10 +292,10 @@ importers:
         version: 2.1.1
       drizzle-orm:
         specifier: 1.0.0-rc.5-ab785fc
-        version: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5)
+        version: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5)
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       input-otp:
         specifier: ^1.4.2
         version: 1.4.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -368,7 +368,7 @@ importers:
         version: 1.0.0-rc.5-ab785fc
       drizzle-seed:
         specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5))
+        version: 1.0.0-rc.1(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5))
       shadcn:
         specifier: ^3.7.0
         version: 3.7.0(@types/node@25.6.2)(hono@4.11.4)(typescript@7.0.2)
@@ -389,7 +389,7 @@ importers:
         version: link:../conformance
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       react:
         specifier: '>=19'
         version: 19.2.3
@@ -404,7 +404,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       sucrase:
         specifier: ^3.35.1
         version: 3.35.1
@@ -413,7 +413,7 @@ importers:
     dependencies:
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
 
   packages/connectors:
     dependencies:
@@ -425,7 +425,7 @@ importers:
         version: link:../conformance
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
     devDependencies:
       '@yolk-sdk/mcp':
         specifier: workspace:^
@@ -438,7 +438,7 @@ importers:
         version: 0.12.0
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
     devDependencies:
       '@yolk-sdk/agent':
         specifier: workspace:^
@@ -460,7 +460,7 @@ importers:
         version: link:../knowledge
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
@@ -482,7 +482,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
     devDependencies:
       '@yolk-sdk/sandbox':
         specifier: workspace:^
@@ -495,7 +495,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
 
   packages/knowledge:
     dependencies:
@@ -504,7 +504,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       gpt-tokenizer:
         specifier: ^4.1.2
         version: 4.1.2
@@ -513,7 +513,7 @@ importers:
     dependencies:
       '@effect/platform-node':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+        version: 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       '@modelcontextprotocol/client':
         specifier: 2.4.0
         version: 2.4.0
@@ -531,7 +531,7 @@ importers:
         version: link:../conformance
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       eventsource-parser:
         specifier: ^3.0.8
         version: 3.0.8
@@ -543,7 +543,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
 
   packages/sandbox:
     dependencies:
@@ -555,7 +555,7 @@ importers:
         version: link:../agent
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
 
   packages/vercel-workflows:
     dependencies:
@@ -564,14 +564,14 @@ importers:
         version: 6.0.3
       effect:
         specifier: 'catalog:'
-        version: 4.1.4
+        version: 4.1.5
       workflow:
         specifier: ^5.0.0-beta.42
         version: 5.0.0-beta.42(@aws-sdk/credential-provider-web-identity@3.972.77)(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3(@swc/helpers@0.5.23))(chokidar@5.0.0))(@swc/core@1.15.3(@swc/helpers@0.5.23))(@swc/helpers@0.5.23)(next@16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.3.0))(react@19.3.0))(react@19.3.0)(typescript@7.0.2)(ws@8.22.1)
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 4.1.4(effect@4.1.4)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
+        version: 4.1.5(effect@4.1.5)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))
       '@workflow/vitest':
         specifier: ^5.0.0-beta.42
         version: 5.0.0-beta.42(@opentelemetry/api@1.9.0)(@swc/helpers@0.5.23)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))(ws@8.22.1)
@@ -1262,8 +1262,8 @@ packages:
     peerDependencies:
       effect: '>=4.0.0-beta.66 <5.0.0'
 
-  '@effect/opentelemetry@4.1.4':
-    resolution: {integrity: sha512-VJnookNrIWk0ZHl51DYMTRHXZrogR13kSSOJzcDxGhyUNDHvgWg217OY4R6bOrtdgM3mrPQiLRGNZ0a7bGyAJg==}
+  '@effect/opentelemetry@4.1.5':
+    resolution: {integrity: sha512-npD5KIkqIh754Rofno3qdKvbAyaNVfl777fTZkdgtUlZE6VycwCng+49aWK+sGpo4B4wKDSQLsbjAoDf/13Wew==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       '@opentelemetry/api': '>=1.9.0 <2.0.0'
@@ -1275,7 +1275,7 @@ packages:
       '@opentelemetry/sdk-trace-node': '>=2.0.0 <3.0.0'
       '@opentelemetry/sdk-trace-web': '>=2.0.0 <3.0.0'
       '@opentelemetry/semantic-conventions': '>=1.33.0 <2.0.0'
-      effect: ^4.1.4
+      effect: ^4.1.5
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
@@ -1294,33 +1294,33 @@ packages:
       '@opentelemetry/sdk-trace-web':
         optional: true
 
-  '@effect/platform-bun@4.1.4':
-    resolution: {integrity: sha512-Vdq82GOrD5HVF43aXVwHeX+4uIOrgAnjju9MEyizzFZ3yt3A6x9prtmHej1q/zAOaeNddtkpPr2ExHEvZ13S6Q==}
+  '@effect/platform-bun@4.1.5':
+    resolution: {integrity: sha512-VzUugWhIKQSWp/xtFrYIrCISDcUXWrCFfxSkqg8ul0DZgo23WRqfz+38Y3mJ2NenUv5kUj14FnjLohm2t8ZGCw==}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
 
-  '@effect/platform-node-shared@4.1.4':
-    resolution: {integrity: sha512-DWdfphHGOFJNj/mYadgpT3jIm8aRXDcPrQiGXFBH4p2H4XmA7iYMrPsI8NxVgZ7kNX0q1+FGJZJama0tINHRAg==}
+  '@effect/platform-node-shared@4.1.5':
+    resolution: {integrity: sha512-JzlrYe4uKaBFTWihBRXo2pDjkUVB39kQpKdGfXdbp7Co5sKT8hbcjOmdB5pg/WOYESdGTddd3fxD4lwlZELbZQ==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
 
-  '@effect/platform-node@4.1.4':
-    resolution: {integrity: sha512-h7QExTPq/RfYtHP/8tMlgfBvqYsuJKhxfkU6w0+NaF/ihqQ8Y3GH9t28ltupQjoqMM7P6W5gy8rOji7F0qVrmg==}
+  '@effect/platform-node@4.1.5':
+    resolution: {integrity: sha512-tFnRvxF9EKc3oU17sDHj1JeLP+TL/IkaOEl3IUk2EjgMS0x7AWs0ioUXjdNKLb3Z1LdjVfMf/DxsNh9PW5FFAg==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
       redis: '>=5.1.0 <7.0.0'
 
-  '@effect/sql-d1@4.1.4':
-    resolution: {integrity: sha512-x7UtDPNCgcAz6lvGbrf0INHxztV0qV8i4qleqPb31ADeilz7MnGYJ5Qhprqod+ySBUNPdsvXNRE9vm36TznIdg==}
+  '@effect/sql-d1@4.1.5':
+    resolution: {integrity: sha512-UBGAoDhy26GR2W0KvBtCASJRvYpM4Wadng1MaJbMEvwbasEbQ+KKiZpWICVe0JpSLp3vxbQTD+1l1JYzp30V2g==}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
 
-  '@effect/sql-pg@4.1.4':
-    resolution: {integrity: sha512-DHsmpIfJeCYiJVk3JwMQFAWaQAmKV/elUbBCjHFP7qeZtJ8dViUV/y/AHdUaZ+OmMwtr8J7ZXA7AlsKZ9hPiQA==}
+  '@effect/sql-pg@4.1.5':
+    resolution: {integrity: sha512-Fs/5EmXykN4vKzWES54aRSLts0jBiQn65Y2jnGq//IX8Qj2McB7+WGYwaGNwxXUq4mXvagGWZPNMO0GefwDpQw==}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
 
   '@effect/tsgo-darwin-arm64@0.63.0':
     resolution: {integrity: sha512-KBvYatuEol71+i+BERWuDRU9XE+4sTK78N83Ko6VNF5gy6yXiujj/bgtWs2P3cDGXsevAV6L+HtpuAWjAQKC6Q==}
@@ -1361,10 +1361,10 @@ packages:
     resolution: {integrity: sha512-bRbvVj+YLE/nBmcBWGAwsul3mjEYlqqOmWMxvwSVKq/oNnJEuZYgi2OFDeUf7q49E2g3w+oMHMWyN2QayZ77RQ==}
     hasBin: true
 
-  '@effect/vitest@4.1.4':
-    resolution: {integrity: sha512-AKpZ6zKihCRhY7hDbiQ2yp/krw+afIkxDRjFMwwzMiyhd0iYk0WaHa9J6GGC7TUF/C7HP2dZyMVq5xC0Qm/2/g==}
+  '@effect/vitest@4.1.5':
+    resolution: {integrity: sha512-18u1013wkJtSelk1ZYLc/5aUnluTQyDfi2hAemkJW1GQ9qXw4mtPSiSf0AXZPhesmGCvG1Dk2C4JYD2sz+R72w==}
     peerDependencies:
-      effect: ^4.1.4
+      effect: ^4.1.5
       vitest: '>=5.0.0 <6.0.0'
 
   '@emnapi/core@1.11.2':
@@ -5880,7 +5880,7 @@ packages:
     peerDependencies:
       '@aws-sdk/client-rds-data': '>=3'
       '@cloudflare/workers-types': '>=4'
-      '@effect/sql-d1': 4.1.4
+      '@effect/sql-d1': 4.1.5
       '@effect/sql-libsql': '>=4.0.0-beta.105 || >=4.0.0'
       '@effect/sql-mysql2': '>=4.0.0-beta.105 || >=4.0.0'
       '@effect/sql-pg': '>=4.0.0-beta.105 || >=4.0.0'
@@ -6055,8 +6055,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@4.1.4:
-    resolution: {integrity: sha512-Tgrv/9FN+TZYyOn8XSli+fVqAfwDrDAkiX5Uu9vztINb675VTQdhD0gWI5Kzvhlh9QqzjZvw72iugqw5pwoghQ==}
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -10070,20 +10070,20 @@ snapshots:
 
   '@acemir/cssom@0.9.31': {}
 
-  '@alchemy.run/acme@2.0.0-beta.85(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)':
+  '@alchemy.run/acme@2.0.0-beta.85(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/acme': 1.0.0-rc.18(effect@4.1.4)
-      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
-      effect: 4.1.4
+      '@distilled.cloud/acme': 1.0.0-rc.18(effect@4.1.5)
+      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
+      effect: 4.1.5
 
-  '@alchemy.run/cloudflare-runtime@2.0.0-beta.85(@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.4))(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/node@25.6.2)(effect@4.1.4)(rolldown@1.2.13)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))':
+  '@alchemy.run/cloudflare-runtime@2.0.0-beta.85(@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.5))(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/node@25.6.2)(effect@4.1.5)(rolldown@1.2.13)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))':
     dependencies:
       '@alchemy.run/node-utils': 2.0.0-beta.85
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261026.1)
-      '@distilled.cloud/cloudflare': 1.0.0-rc.18(effect@4.1.4)
+      '@distilled.cloud/cloudflare': 1.0.0-rc.18(effect@4.1.5)
       '@puppeteer/browsers': 3.2.6(yauzl@3.4.0)
       capnp-es: 0.0.16(typescript@7.0.2)
-      effect: 4.1.4
+      effect: 4.1.5
       magic-string: 0.30.21
       mime: 4.1.2
       sharp: 0.35.5(@types/node@25.6.2)
@@ -10091,8 +10091,8 @@ snapshots:
       workerd: 1.20261026.1
       yauzl: 3.4.0
     optionalDependencies:
-      '@effect/platform-bun': 4.1.4(effect@4.1.4)
-      '@effect/platform-node': 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+      '@effect/platform-bun': 4.1.5(effect@4.1.5)
+      '@effect/platform-node': 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       rolldown: 1.2.13
       vite: 8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)
     transitivePeerDependencies:
@@ -10100,27 +10100,27 @@ snapshots:
       - proxy-agent
       - typescript
 
-  '@alchemy.run/cloudflare@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@effect/sql-pg@4.1.4(effect@4.1.4))(@types/node@25.6.2)(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))':
+  '@alchemy.run/cloudflare@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@effect/sql-pg@4.1.5(effect@4.1.5))(@types/node@25.6.2)(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))':
     dependencies:
-      '@alchemy.run/acme': 2.0.0-beta.85(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)
-      '@alchemy.run/cloudflare-runtime': 2.0.0-beta.85(@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.4))(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/node@25.6.2)(effect@4.1.4)(rolldown@1.2.13)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
-      '@alchemy.run/docker': 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)
-      '@alchemy.run/sql': 2.0.0-beta.85(@effect/sql-pg@4.1.4(effect@4.1.4))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)
-      '@distilled.cloud/aws': 1.0.0-rc.18(effect@4.1.4)
-      '@distilled.cloud/aws4signer': 1.0.0-rc.18(effect@4.1.4)
-      '@distilled.cloud/cloudflare': 1.0.0-rc.18(effect@4.1.4)
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      '@distilled.cloud/iceberg': 1.0.0-rc.18(effect@4.1.4)
-      '@effect/sql-d1': 4.1.4(effect@4.1.4)
-      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
-      effect: 4.1.4
+      '@alchemy.run/acme': 2.0.0-beta.85(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)
+      '@alchemy.run/cloudflare-runtime': 2.0.0-beta.85(@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.5))(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/node@25.6.2)(effect@4.1.5)(rolldown@1.2.13)(typescript@7.0.2)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
+      '@alchemy.run/docker': 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)
+      '@alchemy.run/sql': 2.0.0-beta.85(@effect/sql-pg@4.1.5(effect@4.1.5))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)
+      '@distilled.cloud/aws': 1.0.0-rc.18(effect@4.1.5)
+      '@distilled.cloud/aws4signer': 1.0.0-rc.18(effect@4.1.5)
+      '@distilled.cloud/cloudflare': 1.0.0-rc.18(effect@4.1.5)
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      '@distilled.cloud/iceberg': 1.0.0-rc.18(effect@4.1.5)
+      '@effect/sql-d1': 4.1.5(effect@4.1.5)
+      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
+      effect: 4.1.5
       pathe: 2.0.3
       picomatch: 4.0.7
       rolldown: 1.2.13
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@effect/platform-bun': 4.1.4(effect@4.1.4)
-      '@effect/platform-node': 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+      '@effect/platform-bun': 4.1.5(effect@4.1.5)
+      '@effect/platform-node': 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       vite: 8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)
     transitivePeerDependencies:
       - '@effect/sql-libsql'
@@ -10132,13 +10132,13 @@ snapshots:
       - proxy-agent
       - typescript
 
-  '@alchemy.run/docker@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)':
+  '@alchemy.run/docker@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)':
     dependencies:
-      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
-      effect: 4.1.4
+      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
+      effect: 4.1.5
       rolldown: 1.2.13
     optionalDependencies:
-      '@effect/platform-bun': 4.1.4(effect@4.1.4)
+      '@effect/platform-bun': 4.1.5(effect@4.1.5)
 
   '@alchemy.run/node-utils@2.0.0-beta.85':
     dependencies:
@@ -10149,12 +10149,12 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.8
 
-  '@alchemy.run/sql@2.0.0-beta.85(@effect/sql-pg@4.1.4(effect@4.1.4))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.4)':
+  '@alchemy.run/sql@2.0.0-beta.85(@effect/sql-pg@4.1.5(effect@4.1.5))(alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1))(effect@4.1.5)':
     dependencies:
-      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
-      effect: 4.1.4
+      alchemy: 2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1)
+      effect: 4.1.5
     optionalDependencies:
-      '@effect/sql-pg': 4.1.4(effect@4.1.4)
+      '@effect/sql-pg': 4.1.5(effect@4.1.5)
 
   '@alloc/quick-lru@5.2.0': {}
 
@@ -10637,12 +10637,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
 
-  '@better-auth/drizzle-adapter@1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5))':
+  '@better-auth/drizzle-adapter@1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5))':
     dependencies:
       '@better-auth/core': 1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3)
       '@better-auth/utils': 0.4.2
     optionalDependencies:
-      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5)
+      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5)
 
   '@better-auth/kysely-adapter@1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(kysely@0.29.5)':
     dependencies:
@@ -10896,35 +10896,35 @@ snapshots:
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@distilled.cloud/acme@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/acme@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      effect: 4.1.4
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      effect: 4.1.5
 
-  '@distilled.cloud/aws4signer@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/aws4signer@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      effect: 4.1.4
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      effect: 4.1.5
 
-  '@distilled.cloud/aws@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/aws@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/aws4signer': 1.0.0-rc.18(effect@4.1.4)
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      effect: 4.1.4
+      '@distilled.cloud/aws4signer': 1.0.0-rc.18(effect@4.1.5)
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      effect: 4.1.5
 
-  '@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/cloudflare@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      effect: 4.1.4
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      effect: 4.1.5
 
-  '@distilled.cloud/core@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/core@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      effect: 4.1.4
+      effect: 4.1.5
 
-  '@distilled.cloud/iceberg@1.0.0-rc.18(effect@4.1.4)':
+  '@distilled.cloud/iceberg@1.0.0-rc.18(effect@4.1.5)':
     dependencies:
-      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.4)
-      effect: 4.1.4
+      '@distilled.cloud/core': 1.0.0-rc.18(effect@4.1.5)
+      effect: 4.1.5
 
   '@dotenvx/dotenvx@1.51.4':
     dependencies:
@@ -10948,25 +10948,25 @@ snapshots:
     dependencies:
       '@noble/ciphers': 1.3.0
 
-  '@effect-aws/client-s3@2.0.0(effect@4.1.4)':
+  '@effect-aws/client-s3@2.0.0(effect@4.1.5)':
     dependencies:
       '@aws-sdk/client-s3': 3.1132.0
       '@aws-sdk/s3-request-presigner': 3.1053.0
       '@aws-sdk/types': 3.974.5
-      '@effect-aws/commons': 1.0.0(effect@4.1.4)
-      effect: 4.1.4
+      '@effect-aws/commons': 1.0.0(effect@4.1.5)
+      effect: 4.1.5
 
-  '@effect-aws/commons@1.0.0(effect@4.1.4)':
+  '@effect-aws/commons@1.0.0(effect@4.1.5)':
     dependencies:
       '@smithy/protocol-http': 5.6.2
       '@smithy/smithy-client': 4.15.2
       '@smithy/types': 4.18.0
-      effect: 4.1.4
+      effect: 4.1.5
 
-  '@effect/opentelemetry@4.1.4(@opentelemetry/api-logs@0.210.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.4)':
+  '@effect/opentelemetry@4.1.5(@opentelemetry/api-logs@0.210.0)(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.5)':
     dependencies:
       '@opentelemetry/semantic-conventions': 1.43.0
-      effect: 4.1.4
+      effect: 4.1.5
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.210.0
@@ -10976,41 +10976,41 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.4.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/sdk-trace-node': 2.4.0(@opentelemetry/api@1.9.0)
 
-  '@effect/platform-bun@4.1.4(effect@4.1.4)':
+  '@effect/platform-bun@4.1.5(effect@4.1.5)':
     dependencies:
-      '@effect/platform-node-shared': 4.1.4(effect@4.1.4)
-      effect: 4.1.4
+      '@effect/platform-node-shared': 4.1.5(effect@4.1.5)
+      effect: 4.1.5
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node-shared@4.1.4(effect@4.1.4)':
+  '@effect/platform-node-shared@4.1.5(effect@4.1.5)':
     dependencies:
       '@types/ws': 8.18.2
-      effect: 4.1.4
+      effect: 4.1.5
       ws: 8.22.1
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))':
+  '@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))':
     dependencies:
-      '@effect/platform-node-shared': 4.1.4(effect@4.1.4)
-      effect: 4.1.4
+      '@effect/platform-node-shared': 4.1.5(effect@4.1.5)
+      effect: 4.1.5
       redis: 6.2.1(@opentelemetry/api@1.9.0)
       undici: 8.12.4
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@effect/sql-d1@4.1.4(effect@4.1.4)':
+  '@effect/sql-d1@4.1.5(effect@4.1.5)':
     dependencies:
       '@cloudflare/workers-types': 5.20261116.1
-      effect: 4.1.4
+      effect: 4.1.5
 
-  '@effect/sql-pg@4.1.4(effect@4.1.4)':
+  '@effect/sql-pg@4.1.5(effect@4.1.5)':
     dependencies:
-      effect: 4.1.4
+      effect: 4.1.5
 
   '@effect/tsgo-darwin-arm64@0.63.0':
     optional: true
@@ -11043,14 +11043,14 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.63.0
       '@effect/tsgo-win32-x64': 0.63.0
 
-  '@effect/vitest@4.1.4(effect@4.1.4)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.0.9)(typescript@7.0.2))(vite@8.3.0(@types/node@25.0.9)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))':
+  '@effect/vitest@4.1.5(effect@4.1.5)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.0.9)(typescript@7.0.2))(vite@8.3.0(@types/node@25.0.9)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))':
     dependencies:
-      effect: 4.1.4
+      effect: 4.1.5
       vitest: 5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.0.9)(typescript@7.0.2))(vite@8.3.0(@types/node@25.0.9)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
 
-  '@effect/vitest@4.1.4(effect@4.1.4)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))':
+  '@effect/vitest@4.1.5(effect@4.1.5)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)))':
     dependencies:
-      effect: 4.1.4
+      effect: 4.1.5
       vitest: 5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))
 
   '@emnapi/core@1.11.2':
@@ -14233,12 +14233,12 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
-  alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.4(effect@4.1.4))(@effect/platform-node@4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.4)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1):
+  alchemy@2.0.0-beta.85(@effect/platform-bun@4.1.5(effect@4.1.5))(@effect/platform-node@4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0)))(@types/react@19.2.8)(effect@4.1.5)(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))(ws@8.22.1):
     dependencies:
       '@alchemy.run/node-utils': 2.0.0-beta.85
       '@alchemy.run/sigil': 0.1.0-alpha.1(@types/react@19.2.8)
       capnweb: 0.12.0
-      effect: 4.1.4
+      effect: 4.1.5
       fflate: 0.8.3
       pathe: 2.0.3
       picomatch: 4.0.7
@@ -14246,8 +14246,8 @@ snapshots:
       tinyglobby: 0.2.17
       yaml: 2.9.1
     optionalDependencies:
-      '@effect/platform-bun': 4.1.4(effect@4.1.4)
-      '@effect/platform-node': 4.1.4(effect@4.1.4)(redis@6.2.1(@opentelemetry/api@1.9.0))
+      '@effect/platform-bun': 4.1.5(effect@4.1.5)
+      '@effect/platform-node': 4.1.5(effect@4.1.5)(redis@6.2.1(@opentelemetry/api@1.9.0))
       vite: 8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1)
       ws: 8.22.1
     transitivePeerDependencies:
@@ -14397,10 +14397,10 @@ snapshots:
 
   baseline-browser-mapping@2.9.15: {}
 
-  better-auth@1.7.5(@opentelemetry/api@1.9.0)(drizzle-kit@1.0.0-rc.5-ab785fc)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5))(next@16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))):
+  better-auth@1.7.5(@opentelemetry/api@1.9.0)(drizzle-kit@1.0.0-rc.5-ab785fc)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5))(next@16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@5.0.1(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jsdom@27.4.0)(msw@2.12.7(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.0(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.1))):
     dependencies:
       '@better-auth/core': 1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3)
-      '@better-auth/drizzle-adapter': 1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5))
+      '@better-auth/drizzle-adapter': 1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5))
       '@better-auth/kysely-adapter': 1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(kysely@0.29.5)
       '@better-auth/memory-adapter': 1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)
       '@better-auth/mongo-adapter': 1.7.5(@better-auth/core@1.7.5(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.6.5))(jose@6.2.3)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)
@@ -14418,7 +14418,7 @@ snapshots:
       zod: 4.6.5
     optionalDependencies:
       drizzle-kit: 1.0.0-rc.5-ab785fc
-      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5)
+      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5)
       next: 16.4.6(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(@types/node@25.6.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
@@ -15109,33 +15109,33 @@ snapshots:
       get-tsconfig: 4.14.0
       jiti: 2.7.0
 
-  drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.3.6):
+  drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.3.6):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261116.1
-      '@effect/sql-d1': 4.1.4(effect@4.1.4)
-      '@effect/sql-pg': 4.1.4(effect@4.1.4)
+      '@effect/sql-d1': 4.1.5(effect@4.1.5)
+      '@effect/sql-pg': 4.1.5(effect@4.1.5)
       '@neondatabase/serverless': 1.0.2
       '@opentelemetry/api': 1.9.0
       '@types/pg': 8.16.0
-      effect: 4.1.4
+      effect: 4.1.5
       sql.js: 1.14.1
       zod: 4.3.6
 
-  drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5):
+  drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5):
     optionalDependencies:
       '@cloudflare/workers-types': 5.20261116.1
-      '@effect/sql-d1': 4.1.4(effect@4.1.4)
-      '@effect/sql-pg': 4.1.4(effect@4.1.4)
+      '@effect/sql-d1': 4.1.5(effect@4.1.5)
+      '@effect/sql-pg': 4.1.5(effect@4.1.5)
       '@neondatabase/serverless': 1.0.2
       '@opentelemetry/api': 1.9.0
       '@types/pg': 8.16.0
-      effect: 4.1.4
+      effect: 4.1.5
       sql.js: 1.14.1
       zod: 4.6.5
 
-  drizzle-seed@1.0.0-rc.1(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5)):
+  drizzle-seed@1.0.0-rc.1(drizzle-orm@1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5)):
     dependencies:
-      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.4(effect@4.1.4))(@effect/sql-pg@4.1.4(effect@4.1.4))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.4)(sql.js@1.14.1)(zod@4.6.5)
+      drizzle-orm: 1.0.0-rc.5-ab785fc(patch_hash=9705f7cb50ff1b270449689e815b8da704772cde55918f664c6f542b771f1be2)(@cloudflare/workers-types@5.20261116.1)(@effect/sql-d1@4.1.5(effect@4.1.5))(@effect/sql-pg@4.1.5(effect@4.1.5))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.1.5)(sql.js@1.14.1)(zod@4.6.5)
       pure-rand: 6.1.0
 
   dts-resolver@3.0.0(oxc-resolver@11.24.2):
@@ -15167,7 +15167,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@4.1.4: {}
+  effect@4.1.5: {}
 
   ejs@3.1.10:
     dependencies:
