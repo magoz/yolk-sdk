@@ -167,6 +167,6 @@
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
     "effect": "catalog:",
-    "gpt-tokenizer": "^3.4.0"
+    "gpt-tokenizer": "^4.1.2"
   }
 }
