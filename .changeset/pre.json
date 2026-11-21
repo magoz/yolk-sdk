@@ -251,6 +251,7 @@
     "input-required-tool-calls",
     "kie-connector",
     "kie-figma-conformance",
+    "knowledge-chunk-whitespace",
     "knowledge-gpt-tokenizer-4",
     "knowledge-lazy-tokenizer",
     "knowledge-tool-output",
