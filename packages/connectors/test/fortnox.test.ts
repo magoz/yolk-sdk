@@ -1102,6 +1102,154 @@ describe('Fortnox connector', () => {
     })
   )
 
+  // Each JSON form below failed to decode before: a live company's populated supplier invoice lists
+  // and reads were unreadable while its empty lists decoded.
+  const supplierInvoiceWireForms: ReadonlyArray<{
+    readonly name: string
+    readonly wire: Readonly<Record<string, Schema.Json>>
+    readonly expected: Readonly<Record<string, Schema.Json>>
+  }> = [
+    { name: 'integer GivenNumber', wire: { GivenNumber: 12 }, expected: { GivenNumber: '12' } },
+    {
+      name: 'integer SupplierNumber',
+      wire: { SupplierNumber: 3 },
+      expected: { SupplierNumber: '3' }
+    },
+    {
+      name: 'integer InvoiceNumber and OCR',
+      wire: { InvoiceNumber: 57035, OCR: 5703512 },
+      expected: { InvoiceNumber: '57035', OCR: '5703512' }
+    },
+    {
+      name: 'string flags',
+      wire: { Booked: 'true', Cancelled: 'false', Credit: 'false', PaymentPending: '' },
+      expected: { Booked: true, Cancelled: false, Credit: false, PaymentPending: null }
+    },
+    {
+      name: 'string VoucherNumber',
+      wire: { VoucherNumber: '41' },
+      expected: { VoucherNumber: 41 }
+    },
+    { name: 'empty VoucherNumber', wire: { VoucherNumber: '' }, expected: { VoucherNumber: null } },
+    {
+      name: 'integer CostCenter and Project',
+      wire: { CostCenter: 101, Project: 7 },
+      expected: { CostCenter: '101', Project: '7' }
+    }
+  ]
+
+  it.effect.each(supplierInvoiceWireForms)(
+    'list_supplier_invoices and get_supplier_invoice decode $name',
+    ({ wire, expected }) =>
+      Effect.gen(function* () {
+        const row = { GivenNumber: '12', SupplierNumber: '003', Total: '1250.00', ...wire }
+
+        const harness = makeHarness([
+          response({ SupplierInvoices: [row], MetaInformation: meta() }),
+          response({ SupplierInvoice: row })
+        ])
+
+        const listed = yield* invoke('fortnox.list_supplier_invoices').pipe(
+          Effect.provide(harness.layer)
+        )
+
+        const read = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '12' }).pipe(
+          Effect.provide(harness.layer)
+        )
+
+        if (!Predicate.isTagged(listed, 'Success') || !Predicate.isTagged(read, 'Success'))
+          throw new Error('Expected supplier invoice success')
+
+        const list = yield* Schema.decodeUnknownEffect(FortnoxListSupplierInvoicesOutput)(
+          listed.value
+        )
+
+        expect(Chunk.toReadonlyArray(list.supplierInvoices)).toMatchObject([expected])
+        expect(read.value).toMatchObject(expected)
+      })
+  )
+
+  it.effect('get_supplier_invoice decodes string amounts and accounts on rows', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness([
+        response({
+          SupplierInvoice: {
+            GivenNumber: '1',
+            SupplierNumber: '003',
+            SupplierInvoiceRows: [
+              {
+                Account: '5611',
+                ArticleNumber: 12,
+                Code: 'PRD',
+                Debit: '1000.00',
+                Credit: '0',
+                DebitCurrency: '1000.00',
+                CreditCurrency: '',
+                Price: '500',
+                Quantity: '2',
+                Total: '1000.00'
+              }
+            ]
+          }
+        })
+      ])
+
+      const result = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '1' }).pipe(
+        Effect.provide(harness.layer)
+      )
+
+      if (!Predicate.isTagged(result, 'Success'))
+        throw new Error('Expected supplier invoice success')
+      const decoded = yield* Schema.decodeUnknownEffect(FortnoxSupplierInvoice)(result.value)
+
+      expect(Chunk.toReadonlyArray(decoded.SupplierInvoiceRows ?? Chunk.empty())).toMatchObject([
+        {
+          Account: 5611,
+          ArticleNumber: '12',
+          Debit: 1000,
+          Credit: 0,
+          DebitCurrency: 1000,
+          CreditCurrency: null,
+          Price: 500,
+          Quantity: 2,
+          Total: 1000
+        }
+      ])
+    })
+  )
+
+  // Raw bodies: `1e400` parses to Infinity, which no JSON fixture value can express.
+  const rejectedSupplierInvoice = (fields: string) =>
+    `{"SupplierInvoice":{"GivenNumber":"1","SupplierNumber":"003",${fields}}}`
+
+  it.effect.each([
+    { name: 'a non-boolean flag string', body: rejectedSupplierInvoice('"Booked":"yes"') },
+    {
+      name: 'a non-integer VoucherNumber string',
+      body: rejectedSupplierInvoice('"VoucherNumber":"41a"')
+    },
+    {
+      name: 'a fractional GivenNumber',
+      body: '{"SupplierInvoice":{"GivenNumber":12.5,"SupplierNumber":"003"}}'
+    },
+    {
+      name: 'an amount past the double range',
+      body: rejectedSupplierInvoice('"SupplierInvoiceRows":[{"Total":1e400}]')
+    }
+  ])('get_supplier_invoice rejects $name as a validation failure', ({ body }) =>
+    Effect.gen(function* () {
+      const harness = makeHarness([ConnectorHttpResponse.make({ status: 200, headers: {}, body })])
+
+      const result = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '1' }).pipe(
+        Effect.provide(harness.layer),
+        Effect.result
+      )
+
+      expect(result._tag).toBe('Failure')
+      expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
+    })
+  )
+
   it.effect('preserves JSON null on optional Fortnox response fields', () =>
     Effect.gen(function* () {
       const harness = makeHarness([
