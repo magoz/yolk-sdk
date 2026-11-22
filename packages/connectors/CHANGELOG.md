@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.157
+
+### Patch Changes
+
+- e797870: Fortnox supplier invoice reads accept JSON forms the OpenAPI types do not list. On a live company, `fortnox.list_supplier_invoices` and `fortnox.get_supplier_invoice` failed with `validation_failed` ("Invalid response shape") whenever a reply held at least one invoice. `GivenNumber`, `SupplierNumber`, `InvoiceNumber`, `OCR`, `CostCenter`, `Project` and the row `ArticleNumber`, `CostCenter` and `Project` now decode from strings or integers. `VoucherNumber` and row `Account` decode from integers or integer strings (`""` is unset). The `Booked`, `Cancelled`, `Credit` and `PaymentPending` flags decode from booleans or `"true"`/`"false"` (`""` is unset). Row amounts decode from numbers or numeric strings, as for customer invoices and payments. Public `FortnoxSupplierInvoice` types are unchanged.
+
+  For customer invoices, payments, offers, articles and inbox file sizes, a Fortnox amount sent as a JSON number past the double range (which parses to `Infinity`) now fails the read with `validation_failed` instead of throwing when the public schema re-checked it. Supplier invoice reads already failed this way.
+
+- Updated dependencies [7892f30]
+  - @yolk-sdk/agent@0.1.0-canary.157
+  - @yolk-sdk/conformance@0.1.0-canary.157
+
 ## 0.1.0-canary.156
 
 ### Patch Changes
