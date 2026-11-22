@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.157
+
+### Patch Changes
+
+- 7892f30: Advance in lockstep with `@yolk-sdk/connectors`, whose Fortnox supplier invoice reads now accept the JSON forms Fortnox sends beyond its OpenAPI types, and whose Fortnox reads fail an amount past the double range as `validation_failed`. These packages have no direct changes in this release.
+
 ## 0.1.0-canary.156
 
 ## 0.1.0-canary.155
