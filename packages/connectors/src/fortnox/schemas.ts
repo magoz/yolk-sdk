@@ -221,7 +221,8 @@ export class FortnoxSupplierInvoice extends Schema.Class<FortnoxSupplierInvoice>
   SupplierName: NullableString,
   InvoiceNumber: NullableString,
   ...InvoiceFields,
-  // Fortnox returns these amounts as strings; do not coerce financial values.
+  // Public values stay strings (financial values are not coerced); the wire also accepts finite
+  // numbers and records their string form.
   Total: NullableString,
   Balance: NullableString,
   CurrencyRate: NullableString,
