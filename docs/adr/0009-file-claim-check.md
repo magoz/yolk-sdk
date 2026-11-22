@@ -45,7 +45,7 @@ transcript, and swap the id back for bytes (or a signed link) at the edge that c
 | Model view  | Captured `File` parts become `Ref { id: fileId }`, lowered as a text label; bytes never reach the model |
 | Scripts     | Superseded by [ADR 0013](0013-typed-tool-results.md): files are typed fields (`FileRef`) of the value   |
 | Store       | Scope-bound `FileStoreApi` from the host; `@yolk-sdk/files` ships an object-storage implementation      |
-| Tools       | `file_upload`, `file_url`, `file_to_sandbox`, `file_from_sandbox` in `@yolk-sdk/files`                  |
+| Tools       | `file_upload`, `file_url`, `file_save`, `file_to_sandbox`, `file_from_sandbox` in `@yolk-sdk/files`     |
 | Sinks       | Host and connector tools that take files accept `fileId`, in tagged unions where inputs vary            |
 | Authority   | Host-owned: it passes `files` and the file module only to surfaces allowed to use them                  |
 | Fail-closed | Without a store, inline `File` parts become "file not captured"; base64 never reaches the model         |
@@ -148,12 +148,13 @@ it needs to.
 `@yolk-sdk/files` exports `makeFileToolModule({ store, transport?, sandbox?, maxTransferBytes?,
 defaultUrlTtlSeconds?, isEnabled? })`:
 
-| Tool                | Input                        | Output                             | Access  |
-| ------------------- | ---------------------------- | ---------------------------------- | ------- |
-| `file_upload`       | `{ fileId, url, headers? }`  | `{ status, size, etag? }`          | `write` |
-| `file_url`          | `{ fileId, ttlMinutes? }`    | `{ url, expiresAt }`               | `write` |
-| `file_to_sandbox`   | `{ fileId, path? }`          | `{ path, size }`                   | `write` |
-| `file_from_sandbox` | `{ path, name?, mimeType? }` | `{ fileId, name, mimeType, size }` | `write` |
+| Tool                | Input                          | Output                             | Access  |
+| ------------------- | ------------------------------ | ---------------------------------- | ------- |
+| `file_upload`       | `{ fileId, url, headers? }`    | `{ status, size, etag? }`          | `write` |
+| `file_url`          | `{ fileId, ttlMinutes? }`      | `{ url, expiresAt }`               | `write` |
+| `file_save`         | `{ name, content, mimeType? }` | `{ fileId, name, mimeType, size }` | `write` |
+| `file_to_sandbox`   | `{ fileId, path? }`            | `{ path, size }`                   | `write` |
+| `file_from_sandbox` | `{ path, name?, mimeType? }`   | `{ fileId, name, mimeType, size }` | `write` |
 
 - `file_upload` `PUT`s the stored bytes (up to `maxTransferBytes`, default 50 MiB) through the
   host's `FileUploadTransportApi`, which must be a guarded client: public addresses only (checked
@@ -166,6 +167,12 @@ defaultUrlTtlSeconds?, isEnabled? })`:
   tool is left out.
 - `file_url` signs a read link (default one hour, up to seven days) for destinations that fetch
   from a URL and for sharing.
+- `file_save` stores text the model or a script produced (JSON, CSV, Markdown, plain text) as
+  UTF-8, so a script hands computed data to a tool that takes `fileIds` without a sandbox or the
+  model retyping it. The name is reduced to one safe path segment and the MIME type inferred from
+  its extension (unknown: `text/plain`) unless given. Content over `maxTransferBytes` (UTF-8 bytes)
+  is `invalid_input`. Like every `put`, the `fileId` follows from the scope and content, so a
+  replayed call stores nothing new.
 - No approval: the sandbox already has open network egress, so gating these tools alone adds
   friction without protection. Hosts claim and ledger them as writes and may add prompt guidance
   about destinations named only in untrusted content. A future session-level egress policy, if

@@ -64,14 +64,18 @@ import { makeFileToolModule } from '@yolk-sdk/files'
 const files = makeFileToolModule({ store, transport: guardedUploadTransport, sandbox })
 ```
 
-| Tool                | Input                        | Does                                                                         |
-| ------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
-| `file_upload`       | `{ fileId, url, headers? }`  | `PUT`s the file to an https URL (for example a presigned upload URL)         |
-| `file_url`          | `{ fileId, ttlMinutes? }`    | Signs a temporary download link (default one hour)                           |
-| `file_to_sandbox`   | `{ fileId, path? }`          | Copies the file into the sandbox workspace (default `files/<fileId>/<name>`) |
-| `file_from_sandbox` | `{ path, name?, mimeType? }` | Turns a workspace file into a `fileId`                                       |
+| Tool                | Input                          | Does                                                                         |
+| ------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
+| `file_upload`       | `{ fileId, url, headers? }`    | `PUT`s the file to an https URL (for example a presigned upload URL)         |
+| `file_url`          | `{ fileId, ttlMinutes? }`      | Signs a temporary download link (default one hour)                           |
+| `file_save`         | `{ name, content, mimeType? }` | Saves text (JSON, CSV, Markdown, plain text) as a file                       |
+| `file_to_sandbox`   | `{ fileId, path? }`            | Copies the file into the sandbox workspace (default `files/<fileId>/<name>`) |
+| `file_from_sandbox` | `{ path, name?, mimeType? }`   | Turns a workspace file into a `fileId`                                       |
 
-All four are `write` tools. `file_upload` is left out without a `FileUploadTransportApi`, and the
+All five are `write` tools. `file_save` stores text the model or a script produced as UTF-8
+(MIME type from the name's extension, else `text/plain`; content over `maxTransferBytes` is
+`invalid_input`), so a script hands computed data to a tool that takes `fileIds` without a sandbox.
+`file_upload` is left out without a `FileUploadTransportApi`, and the
 sandbox tools without a sandbox that has `writeFile`/`readFile` (`FileSandboxApi`, which the
 `@yolk-sdk/sandbox` Vercel layer satisfies). `file_upload` results and errors name only the
 destination host, never the URL. Options: `maxTransferBytes` (default 50 MiB; transfers read the

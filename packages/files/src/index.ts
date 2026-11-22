@@ -15,6 +15,7 @@ export type {
 export {
   defaultMaxFileTransferBytes,
   fileFromSandboxToolName,
+  fileSaveToolName,
   fileToSandboxToolName,
   fileUploadToolName,
   FileUploadTransportError,

@@ -7,9 +7,9 @@
 
 ## Subpaths
 
-| Subpath           | Source         | Role                                                                                                                                                    |
-| ----------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/files` | `src/index.ts` | `makeObjectStorageFileStore`, `deleteScopeFiles`, `fileIdFor`, `makeFileToolModule` (`file_upload`, `file_url`, `file_to_sandbox`, `file_from_sandbox`) |
+| Subpath           | Source         | Role                                                                                                                                                                 |
+| ----------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/files` | `src/index.ts` | `makeObjectStorageFileStore`, `deleteScopeFiles`, `fileIdFor`, `makeFileToolModule` (`file_upload`, `file_url`, `file_save`, `file_to_sandbox`, `file_from_sandbox`) |
 
 ## Boundaries
 
@@ -39,4 +39,7 @@
 - Sandbox tools use the invoking runtime's own sandbox (the host passes it) and only exist when it
   has `writeFile`/`readFile`. The default destination is `files/<fileId>/<name>` (names repeat and
   unnamed files are all `file`), with the name reduced to one safe path segment.
+- `file_save` stores model or script text as UTF-8 through the same `put` (name reduced to one
+  segment, MIME type from the extension, else `text/plain`) and refuses content over
+  `maxTransferBytes` bytes as `invalid_input` before encoding it.
 - Keep the package runtime-neutral: hashing uses Web Crypto `crypto.subtle`.

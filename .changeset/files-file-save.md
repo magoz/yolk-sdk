@@ -1,0 +1,5 @@
+---
+'@yolk-sdk/files': minor
+---
+
+`makeFileToolModule` adds `file_save` (`fileSaveToolName`): `{ name, content, mimeType? }` stores text the model or a code mode script produced (JSON, CSV, Markdown, plain text) as a UTF-8 file in the module's store and returns `{ fileId, name, mimeType, size }` with the file in `ToolResult.files`, like `file_from_sandbox`, so a script hands computed data to any tool that takes `fileIds` without a sandbox or the model retyping it. It is a `write` tool without approval and is always in the module (it needs only the store). The name is reduced to one safe path segment, and the MIME type is inferred from its extension (an unknown or missing extension gives `text/plain`) unless `mimeType` is given (normalized like other names). Content over `maxTransferBytes` (UTF-8 bytes, default 50 MiB) is refused as `invalid_input` before anything is stored, and an unavailable store fails with a `ToolError`. The `fileId` follows from the scope and the content hash, so the same content (a replayed call) returns the same file and stores nothing new. Hosts that list the module's tools by name now also see `file_save` (after `file_url`).
