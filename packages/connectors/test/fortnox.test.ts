@@ -1102,8 +1102,8 @@ describe('Fortnox connector', () => {
     })
   )
 
-  // Each JSON form below failed to decode before shhhlabs/10x-factory#436: a live company's
-  // populated supplier invoice lists and reads were unreadable while its empty lists decoded.
+  // Each JSON form below failed to decode before: a live company's populated supplier invoice lists
+  // and reads were unreadable while its empty lists decoded.
   const supplierInvoiceWireForms: ReadonlyArray<{
     readonly name: string
     readonly wire: Readonly<Record<string, Schema.Json>>
@@ -1130,7 +1130,12 @@ describe('Fortnox connector', () => {
       wire: { VoucherNumber: '41' },
       expected: { VoucherNumber: 41 }
     },
-    { name: 'empty VoucherNumber', wire: { VoucherNumber: '' }, expected: { VoucherNumber: null } }
+    { name: 'empty VoucherNumber', wire: { VoucherNumber: '' }, expected: { VoucherNumber: null } },
+    {
+      name: 'integer CostCenter and Project',
+      wire: { CostCenter: 101, Project: 7 },
+      expected: { CostCenter: '101', Project: '7' }
+    }
   ]
 
   it.effect.each(supplierInvoiceWireForms)(
@@ -1213,11 +1218,27 @@ describe('Fortnox connector', () => {
     })
   )
 
-  it.effect('get_supplier_invoice still rejects a non-boolean flag string', () =>
+  // Raw bodies: `1e400` parses to Infinity, which no JSON fixture value can express.
+  const rejectedSupplierInvoice = (fields: string) =>
+    `{"SupplierInvoice":{"GivenNumber":"1","SupplierNumber":"003",${fields}}}`
+
+  it.effect.each([
+    { name: 'a non-boolean flag string', body: rejectedSupplierInvoice('"Booked":"yes"') },
+    {
+      name: 'a non-integer VoucherNumber string',
+      body: rejectedSupplierInvoice('"VoucherNumber":"41a"')
+    },
+    {
+      name: 'a fractional GivenNumber',
+      body: '{"SupplierInvoice":{"GivenNumber":12.5,"SupplierNumber":"003"}}'
+    },
+    {
+      name: 'an amount past the double range',
+      body: rejectedSupplierInvoice('"SupplierInvoiceRows":[{"Total":1e400}]')
+    }
+  ])('get_supplier_invoice rejects $name as a validation failure', ({ body }) =>
     Effect.gen(function* () {
-      const harness = makeHarness([
-        response({ SupplierInvoice: { GivenNumber: '1', SupplierNumber: '003', Booked: 'yes' } })
-      ])
+      const harness = makeHarness([ConnectorHttpResponse.make({ status: 200, headers: {}, body })])
 
       const result = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '1' }).pipe(
         Effect.provide(harness.layer),

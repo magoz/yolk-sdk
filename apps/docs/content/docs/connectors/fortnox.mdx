@@ -266,13 +266,17 @@ or false. Use a get action to retrieve available rows.
 
 Collections are runtime Effect `Chunk` values, including `InvoiceRows` and `SupplierInvoiceRows`.
 Customer-invoice `Total` and `Balance` remain numbers; supplier-invoice `Total` and `Balance` remain
-strings, preserving their supplied decimal representation. Row amounts retain their provider types
-and nullable `Total`/`CostCenter` values. The connector performs no monetary arithmetic or rounding.
+strings, preserving their supplied decimal representation. Row amounts are numbers (numeric
+strings decode to them) with nullable `Total`/`CostCenter` values. The connector performs no
+monetary arithmetic or rounding.
 
-Supplier invoice reads also accept JSON forms Fortnox's OpenAPI types do not list: `GivenNumber`, `SupplierNumber`, `InvoiceNumber`, `OCR` and row `ArticleNumber` as strings or
-integers, `VoucherNumber` and row `Account` as integers or integer strings (`""` is unset), the
-`Booked`, `Cancelled`, `Credit` and `PaymentPending` flags as booleans or `"true"`/`"false"` (`""` is
-unset), and row amounts as numbers or numeric strings. The public types do not change.
+Supplier invoice reads also accept JSON forms Fortnox's OpenAPI types do not list: `GivenNumber`,
+`SupplierNumber`, `InvoiceNumber`, `OCR`, `CostCenter`, `Project` and the row `ArticleNumber`,
+`CostCenter` and `Project` as strings or integers; `VoucherNumber` and row `Account` as integers or
+integer strings (`""` is unset); the `Booked`, `Cancelled`, `Credit` and `PaymentPending` flags as
+booleans or `"true"`/`"false"` (`""` is unset); and row amounts as numbers or numeric strings. The
+public types do not change. An identifier sent as a JSON number past `Number.MAX_SAFE_INTEGER` (a
+long OCR) still fails to decode: its digits are already lost.
 
 ### Pagination and search
 

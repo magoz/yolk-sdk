@@ -57,8 +57,10 @@ const NumericStringToNumber = Schema.String.pipe(
   )
 )
 
+// A JSON number past the double range parses to Infinity; it fails here, as a decode issue, rather
+// than when the public Finite fields re-check it.
 const NumberFromNumberOrNumericString = Schema.Union([
-  Schema.Number,
+  Schema.Finite,
   NumericStringToNumber,
   Schema.Null
 ])
@@ -152,11 +154,12 @@ const BooleanStringToBoolean = Schema.Literals(['true', 'false']).pipe(
   )
 )
 
-export const WireNullableBoolean = Schema.optional(
+const WireNullableBoolean = Schema.optional(
   Schema.Union([Schema.Boolean, Schema.Null, EmptyStringToNull, BooleanStringToBoolean])
 )
 
-// Reference strings (supplier invoice numbers, OCR) that Fortnox may send as JSON integers.
+// Reference strings (supplier invoice numbers, OCR, cost centers, projects) that Fortnox may send as
+// JSON integers.
 const WireNullableReference = Schema.optional(
   Schema.Union([Schema.String, IntToString, Schema.Null])
 )
@@ -195,13 +198,15 @@ export const invoiceFromApi = (value: typeof FortnoxInvoiceApi.Type) => {
 }
 
 // Fortnox's OpenAPI types for supplier invoices do not match every live answer: a populated list or
-// read failed to decode on a live company while empty lists decoded (shhhlabs/10x-factory#436). As
-// for payments, every scalar accepts each JSON form Fortnox uses for its meaning, and the public
-// FortnoxSupplierInvoice types are unchanged.
+// read failed to decode on a live company while its empty lists decoded. As for payments, every
+// scalar accepts each JSON form Fortnox uses for its meaning, and the public FortnoxSupplierInvoice
+// types are unchanged.
 const FortnoxSupplierInvoiceRowApi = Schema.Struct({
   ...FortnoxSupplierInvoiceRow.fields,
   Account: WireNullableInt,
   ArticleNumber: WireNullableReference,
+  CostCenter: WireNullableReference,
+  Project: WireNullableReference,
   Debit: WireNullableNumber,
   Credit: WireNullableNumber,
   DebitCurrency: WireNullableNumber,
@@ -217,6 +222,8 @@ export const FortnoxSupplierInvoiceApi = Schema.Struct({
   SupplierNumber: StringOrInt.pipe(Schema.decodeTo(FortnoxSupplierNumber)),
   InvoiceNumber: WireNullableReference,
   OCR: WireNullableReference,
+  CostCenter: WireNullableReference,
+  Project: WireNullableReference,
   Booked: WireNullableBoolean,
   Cancelled: WireNullableBoolean,
   Credit: WireNullableBoolean,
