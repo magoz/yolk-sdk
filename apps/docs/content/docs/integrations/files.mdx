@@ -75,22 +75,25 @@ const toolSet = Effect.gen(function* () {
 })
 ```
 
-| Tool                | Input                        | Does                                                                         |
-| ------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
-| `file_upload`       | `{ fileId, url, headers? }`  | `PUT`s the file to an https URL, for example a presigned upload URL          |
-| `file_url`          | `{ fileId, ttlMinutes? }`    | Signs a temporary download link (default one hour, at most seven days)       |
-| `file_to_sandbox`   | `{ fileId, path? }`          | Copies the file into the sandbox workspace (default `files/<fileId>/<name>`) |
-| `file_from_sandbox` | `{ path, name?, mimeType? }` | Turns a workspace file into a `fileId`                                       |
+| Tool                | Input                          | Does                                                                         |
+| ------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
+| `file_upload`       | `{ fileId, url, headers? }`    | `PUT`s the file to an https URL, for example a presigned upload URL          |
+| `file_url`          | `{ fileId, ttlMinutes? }`      | Signs a temporary download link (default one hour, at most seven days)       |
+| `file_save`         | `{ name, content, mimeType? }` | Saves text (JSON, CSV, Markdown, plain text) as a file                       |
+| `file_to_sandbox`   | `{ fileId, path? }`            | Copies the file into the sandbox workspace (default `files/<fileId>/<name>`) |
+| `file_from_sandbox` | `{ path, name?, mimeType? }`   | Turns a workspace file into a `fileId`                                       |
 
-All four are `write` tools without approval. `file_upload` exists only with a
-`FileUploadTransportApi`, and the sandbox tools only with a sandbox that has `writeFile`/`readFile`
+All five are `write` tools without approval. `file_save` stores text the model or a script
+produced as UTF-8 (MIME type from the name's extension, else `text/plain`; content over
+`maxTransferBytes` is `invalid_input`); the same content returns the same `fileId`. `file_upload`
+exists only with a `FileUploadTransportApi`, and the sandbox tools only with a sandbox that has `writeFile`/`readFile`
 (the `@yolk-sdk/sandbox` Vercel layer has them). `file_upload` results and errors name the
 destination host, never the URL. A network failure during an upload is an unknown outcome: the
 agent is told to check the destination before retrying.
 
 `makeFileToolModule` also takes `maxTransferBytes` (default 50 MiB: `file_upload` and the sandbox
-tools read the whole file into memory, so a captured file larger than this cannot be transferred),
-`defaultUrlTtlSeconds` (default one hour, clamped to one minute to seven days) and `isEnabled`.
+tools read the whole file into memory, so a captured file larger than this cannot be transferred,
+and `file_save` stores at most this many bytes), `defaultUrlTtlSeconds` (default one hour, clamped to one minute to seven days) and `isEnabled`.
 
 ## From a code mode script
 
@@ -111,6 +114,14 @@ await tools.file_upload({
   url: upload.value.url,
   headers: upload.value.headers
 })
+```
+
+A script that computed data saves it as a file for a tool that takes `fileIds`, instead of the
+model copying the data into the next call (`file_save` resolves to `{ fileId, name, mimeType, size }`):
+
+```js
+const saved = await tools.file_save({ name: 'totals.json', content: JSON.stringify(totals) })
+return saved.fileId
 ```
 
 ## Your app owns

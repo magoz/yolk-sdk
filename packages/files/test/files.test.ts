@@ -325,7 +325,143 @@ describe('file tools', () => {
     Effect.gen(function* () {
       const { toolSet } = yield* setup()
 
-      expect(toolSet.tools.map(tool => tool.name)).toEqual(['file_url'])
+      expect(toolSet.tools.map(tool => tool.name)).toEqual(['file_url', 'file_save'])
+    })
+  )
+})
+
+describe('file_save', () => {
+  const saveSetup = (options: { readonly maxTransferBytes?: number } = {}) =>
+    Effect.gen(function* () {
+      const storage = memoryStorage()
+      const store = makeObjectStorageFileStore({ storage, scope: 'ws_1/session_1' })
+
+      const toolSet = yield* resolveTools(
+        [makeFileToolModule<Record<never, never>>({ store, ...options })],
+        {}
+      )
+
+      const call = (params: unknown) =>
+        toolSet.execute(ToolCall.make({ id: 'call_1', name: 'file_save', params }))
+
+      return { call, storage, store }
+    })
+
+  const totals = JSON.stringify({ total: 225, currency: 'SEK', note: 'déjà' })
+
+  it.effect('stores the content as UTF-8 and returns the file', () =>
+    Effect.gen(function* () {
+      const { call, store } = yield* saveSetup()
+      const bytes = new TextEncoder().encode(totals)
+
+      const result = yield* call({ name: 'totals.json', content: totals })
+      const fileId = result.files?.[0]?.fileId ?? ''
+
+      expect(result.isError).toBeUndefined()
+      expect(result.structuredContent).toEqual({
+        fileId,
+        name: 'totals.json',
+        mimeType: 'application/json',
+        size: bytes.byteLength
+      })
+      expect(result.files).toEqual([
+        { fileId, name: 'totals.json', mimeType: 'application/json', size: bytes.byteLength }
+      ])
+      expect(resultText(result)).toBe(
+        `[file ${fileId}: totals.json, application/json, ${bytes.byteLength} B]`
+      )
+      expect(yield* store.read({ fileId, maxBytes: 1_000 })).toEqual(bytes)
+    })
+  )
+
+  it.effect('returns the same fileId for the same content without storing it again', () =>
+    Effect.gen(function* () {
+      const { call, storage } = yield* saveSetup()
+
+      const first = yield* call({ name: 'totals.json', content: totals })
+      const replay = yield* call({ name: 'totals.json', content: totals })
+      const other = yield* call({ name: 'totals.json', content: `${totals}\n` })
+
+      expect(replay.files?.[0]?.fileId).toBe(first.files?.[0]?.fileId)
+      expect(other.files?.[0]?.fileId).not.toBe(first.files?.[0]?.fileId)
+      expect(storage.puts).toHaveLength(2)
+    })
+  )
+
+  it.effect('reduces the name to one path segment and infers the MIME type', () =>
+    Effect.gen(function* () {
+      const { call } = yield* saveSetup()
+
+      const traversal = yield* call({ name: '../out/rows.CSV', content: 'a,b\n1,2\n' })
+      const blank = yield* call({ name: ' .. ', content: 'plain' })
+      const unknown = yield* call({ name: 'notes', content: '# Notes' })
+      const explicit = yield* call({ name: 'notes', content: '# Notes', mimeType: 'Text/Markdown' })
+      const unsafe = yield* call({ name: 'a.md', content: 'x', mimeType: 'text/html\r\nX-Evil: 1' })
+
+      expect(traversal.structuredContent).toMatchObject({
+        name: '.._out_rows.CSV',
+        mimeType: 'text/csv'
+      })
+      expect(blank.structuredContent).toMatchObject({ name: 'file', mimeType: 'text/plain' })
+      expect(unknown.structuredContent).toMatchObject({ name: 'notes', mimeType: 'text/plain' })
+      expect(explicit.structuredContent).toMatchObject({ mimeType: 'text/markdown' })
+      expect(unsafe.structuredContent).toMatchObject({ mimeType: 'application/octet-stream' })
+    })
+  )
+
+  it.effect('refuses content over maxTransferBytes as invalid input without storing', () =>
+    Effect.gen(function* () {
+      const { call, storage } = yield* saveSetup({ maxTransferBytes: 8 })
+
+      const fits = yield* call({ name: 'a.txt', content: 'x'.repeat(8) })
+      const longer = yield* call({ name: 'b.txt', content: 'x'.repeat(9) })
+      // Five code units, ten UTF-8 bytes: the cap counts bytes, not characters.
+      const wider = yield* call({ name: 'c.txt', content: 'é'.repeat(5) })
+
+      expect(fits.isError).toBeUndefined()
+
+      for (const result of [longer, wider]) {
+        expect(result.isError).toBe(true)
+        expect(result.structuredContent).toMatchObject({
+          tool: 'file_save',
+          reason: 'invalid_input'
+        })
+        expect(resultText(result)).toContain('larger than 8 B')
+      }
+
+      expect(storage.puts).toHaveLength(1)
+    })
+  )
+
+  it.effect('fails with a ToolError when the store is unavailable', () =>
+    Effect.gen(function* () {
+      const storage = memoryStorage()
+
+      const store = makeObjectStorageFileStore({
+        storage: {
+          ...storage,
+          put: () => Effect.fail(new ObjectStorageError({ reason: 'unavailable', message: 'down' }))
+        },
+        scope: 'ws_1/session_1'
+      })
+
+      const toolSet = yield* resolveTools([makeFileToolModule<Record<never, never>>({ store })], {})
+
+      const error = yield* toolSet
+        .execute(
+          ToolCall.make({
+            id: 'call_1',
+            name: 'file_save',
+            params: { name: 'a.json', content: '{}' }
+          })
+        )
+        .pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'ToolError',
+        tool: 'file_save',
+        message: 'File storage is unavailable.'
+      })
     })
   )
 })
@@ -409,6 +545,7 @@ describe('sandbox file tools', () => {
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([
         'file_url',
+        'file_save',
         'file_to_sandbox',
         'file_from_sandbox'
       ])

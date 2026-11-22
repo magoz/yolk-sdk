@@ -28,6 +28,8 @@ export const fileToSandboxToolName = 'file_to_sandbox'
 
 export const fileFromSandboxToolName = 'file_from_sandbox'
 
+export const fileSaveToolName = 'file_save'
+
 /** Transport failures: `network` (no or partial response: the outcome is unknown) or `policy`
  * (the transport refused the destination before sending, for example a private address).
  */
@@ -86,7 +88,8 @@ export type FileToolModuleOptions<Context> = {
    * `file_from_sandbox` are left out.
    */
   readonly sandbox?: FileSandboxApi
-  /** Largest file `file_upload` reads into memory. Default 50 MiB. */
+  /** Largest file `file_upload` and the sandbox tools read into memory, and largest content
+   * (UTF-8 bytes) `file_save` stores. Default 50 MiB. */
   readonly maxTransferBytes?: number
   /** Default lifetime of `file_url` links, clamped to one minute to seven days. Default one
    * hour. */
@@ -356,11 +359,30 @@ const FileFromSandboxParams = Schema.Struct({
   )
 })
 
-const FileFromSandboxOutput = Schema.Struct({
+const StoredFileOutput = Schema.Struct({
   fileId: FileId,
   name: Schema.String,
   mimeType: Schema.String,
   size: Schema.Number
+})
+
+const FileSaveParams = Schema.Struct({
+  name: Schema.String.pipe(
+    Schema.annotate({
+      description:
+        'File name with its extension, for example totals.json, rows.csv or notes.md; the extension sets the MIME type.'
+    })
+  ),
+  content: Schema.String.pipe(
+    Schema.annotate({ description: 'The full text to save, stored as UTF-8.' })
+  ),
+  mimeType: Schema.optional(
+    Schema.String.pipe(
+      Schema.annotate({
+        description: 'MIME type. Default: inferred from the extension, else text/plain.'
+      })
+    )
+  )
 })
 
 const mimeTypeByExtension: ReadonlyMap<string, string> = new Map([
@@ -407,6 +429,19 @@ const safeFileName = (name: string) => {
 
   return cleaned.length === 0 || cleaned === '.' || cleaned === '..' ? 'file' : cleaned
 }
+
+const storedFileResult = (toolCallId: string, file: FileDescriptor) =>
+  ToolResult.make({
+    toolCallId,
+    content: fileLabel(file),
+    structuredContent: {
+      fileId: file.fileId,
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size
+    },
+    files: [FileDescriptor.make(file)]
+  })
 
 const sandboxError = (tool: string) => (error: FileSandboxError) =>
   Predicate.isTagged(error, 'SandboxInputError')
@@ -473,7 +508,7 @@ const fromSandboxTool = <Context>(
     description:
       'Turn a file in the sandbox workspace into a file (fileId) that other tools accept, for example to upload, attach or share it.',
     parameters: FileFromSandboxParams,
-    output: FileFromSandboxOutput,
+    output: StoredFileOutput,
     access: 'write',
     isEnabled: options.isEnabled,
     invalidParamsMessage: error =>
@@ -501,25 +536,74 @@ const fromSandboxTool = <Context>(
           })
           .pipe(Effect.mapError(storeError(fileFromSandboxToolName, params.path)))
 
-        return ToolResult.make({
-          toolCallId: call.id,
-          content: fileLabel(file),
-          structuredContent: {
-            fileId: file.fileId,
-            name: file.name,
-            mimeType: file.mimeType,
-            size: file.size
-          },
-          files: [FileDescriptor.make(file)]
-        })
+        return storedFileResult(call.id, file)
+      })
+  })
+
+// Text content never needs a binary type: an unknown or missing extension saves as text/plain.
+const inferredTextMimeType = (name: string) => {
+  const inferred = inferredMimeType(name)
+
+  return inferred === 'application/octet-stream' ? 'text/plain' : inferred
+}
+
+const saveTool = <Context>(
+  store: FileStoreApi,
+  options: FileToolModuleOptions<Context>
+): ToolRegistration<Context> =>
+  makeTool<Context, typeof FileSaveParams>({
+    name: fileSaveToolName,
+    description: [
+      'Save text you or a script produced (JSON, CSV, Markdown, plain text) as a file (fileId) for tools that take fileIds, for example to attach, upload or hand it to another tool.',
+      'Do not paste data a script computed into another tool: save it from the script and pass the fileId.',
+      'The fileId follows from the content, so saving the same content again returns the same file.'
+    ].join(' '),
+    parameters: FileSaveParams,
+    output: StoredFileOutput,
+    access: 'write',
+    isEnabled: options.isEnabled,
+    invalidParamsMessage: error =>
+      withToolArgumentsErrorHint('Invalid file_save arguments: name, content, mimeType?', error),
+    execute: ({ call, params }) =>
+      Effect.gen(function* () {
+        const maxBytes = options.maxTransferBytes ?? defaultMaxFileTransferBytes
+
+        // Every UTF-16 code unit encodes to at least one UTF-8 byte: refuse before encoding.
+        const bytes =
+          params.content.length > maxBytes ? undefined : new TextEncoder().encode(params.content)
+
+        if (bytes === undefined || bytes.byteLength > maxBytes) {
+          return yield* Effect.fail(
+            invalid(
+              fileSaveToolName,
+              `The content is larger than ${formatFileSize(maxBytes)}, the most file_save stores.`
+            )
+          )
+        }
+
+        const name = safeFileName(params.name)
+
+        const file = yield* store
+          .put({
+            bytes,
+            name,
+            mimeType:
+              params.mimeType === undefined
+                ? inferredTextMimeType(name)
+                : normalizeFileMimeType(params.mimeType)
+          })
+          .pipe(Effect.mapError(storeError(fileSaveToolName, name)))
+
+        return storedFileResult(call.id, file)
       })
   })
 
 /**
  * The file tools of ADR 0009 over a host store: `file_upload` (only with a `transport`),
- * `file_url`, and `file_to_sandbox`/`file_from_sandbox` (only with a sandbox that transfers
- * files). All are `write` tools: hosts claim and ledger them like other writes and decide which
- * surfaces get the module. Build it per resolution with the store bound to that scope.
+ * `file_url`, `file_save` (text the model or a script produced, as a file), and
+ * `file_to_sandbox`/`file_from_sandbox` (only with a sandbox that transfers files). All are
+ * `write` tools: hosts claim and ledger them like other writes and decide which surfaces get the
+ * module. Build it per resolution with the store bound to that scope.
  */
 export const makeFileToolModule = <Context>(
   options: FileToolModuleOptions<Context>
@@ -533,6 +617,7 @@ export const makeFileToolModule = <Context>(
   }
 
   tools.push(urlTool(options.store, options))
+  tools.push(saveTool(options.store, options))
 
   if (writeFile !== undefined) tools.push(toSandboxTool(options.store, writeFile, options))
 
@@ -541,7 +626,7 @@ export const makeFileToolModule = <Context>(
   return {
     id: 'files',
     description:
-      'Move files (fileId) between tools: upload URLs, download links and the sandbox workspace.',
+      'Move files (fileId) between tools: save text as a file, upload URLs, download links and the sandbox workspace.',
     tools
   }
 }
