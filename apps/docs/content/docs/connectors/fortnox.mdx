@@ -269,6 +269,11 @@ Customer-invoice `Total` and `Balance` remain numbers; supplier-invoice `Total` 
 strings, preserving their supplied decimal representation. Row amounts retain their provider types
 and nullable `Total`/`CostCenter` values. The connector performs no monetary arithmetic or rounding.
 
+Supplier invoice reads also accept JSON forms Fortnox's OpenAPI types do not list: `GivenNumber`, `SupplierNumber`, `InvoiceNumber`, `OCR` and row `ArticleNumber` as strings or
+integers, `VoucherNumber` and row `Account` as integers or integer strings (`""` is unset), the
+`Booked`, `Cancelled`, `Credit` and `PaymentPending` flags as booleans or `"true"`/`"false"` (`""` is
+unset), and row amounts as numbers or numeric strings. The public types do not change.
+
 ### Pagination and search
 
 Every list action fetches exactly one page. Record-list inputs support `page` (integer, at least 1), `limit`

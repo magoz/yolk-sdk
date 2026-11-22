@@ -2,10 +2,12 @@ import { Chunk, Effect, SchemaIssue, SchemaTransformation } from 'effect'
 import type { SchemaAST } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  FortnoxGivenNumber,
   FortnoxInvoice,
   FortnoxInvoiceRow,
   FortnoxSupplierInvoice,
-  FortnoxSupplierInvoiceRow
+  FortnoxSupplierInvoiceRow,
+  FortnoxSupplierNumber
 } from './schemas.ts'
 
 // Fortnox list rows send invoice-level amounts as numeric strings (e.g. CurrencyRate: "1")
@@ -138,6 +140,27 @@ export const WireNullableInt = Schema.optional(
   Schema.Union([Schema.Int, Schema.Null, EmptyStringToNull, IntegerStringToInt])
 )
 
+// Fortnox sends some flags as "true"/"false" strings (its customer invoice `Credit` is one);
+// "" means unset. Public type is boolean | null | undefined.
+const BooleanStringToBoolean = Schema.Literals(['true', 'false']).pipe(
+  Schema.decodeTo(
+    Schema.Boolean,
+    SchemaTransformation.transform({
+      decode: (value: 'true' | 'false') => value === 'true',
+      encode: (value: boolean): 'true' | 'false' => (value ? 'true' : 'false')
+    })
+  )
+)
+
+export const WireNullableBoolean = Schema.optional(
+  Schema.Union([Schema.Boolean, Schema.Null, EmptyStringToNull, BooleanStringToBoolean])
+)
+
+// Reference strings (supplier invoice numbers, OCR) that Fortnox may send as JSON integers.
+const WireNullableReference = Schema.optional(
+  Schema.Union([Schema.String, IntToString, Schema.Null])
+)
+
 // Provider JSON arrays and public runtime Chunks are distinct decode boundaries.
 export const FortnoxInvoiceApi = Schema.Struct({
   ...FortnoxInvoice.fields,
@@ -171,12 +194,38 @@ export const invoiceFromApi = (value: typeof FortnoxInvoiceApi.Type) => {
   )
 }
 
+// Fortnox's OpenAPI types for supplier invoices do not match every live answer: a populated list or
+// read failed to decode on a live company while empty lists decoded (shhhlabs/10x-factory#436). As
+// for payments, every scalar accepts each JSON form Fortnox uses for its meaning, and the public
+// FortnoxSupplierInvoice types are unchanged.
+const FortnoxSupplierInvoiceRowApi = Schema.Struct({
+  ...FortnoxSupplierInvoiceRow.fields,
+  Account: WireNullableInt,
+  ArticleNumber: WireNullableReference,
+  Debit: WireNullableNumber,
+  Credit: WireNullableNumber,
+  DebitCurrency: WireNullableNumber,
+  CreditCurrency: WireNullableNumber,
+  Price: WireNullableNumber,
+  Quantity: WireNullableNumber,
+  Total: WireNullableNumber
+})
+
 export const FortnoxSupplierInvoiceApi = Schema.Struct({
   ...FortnoxSupplierInvoice.fields,
+  GivenNumber: StringOrInt.pipe(Schema.decodeTo(FortnoxGivenNumber)),
+  SupplierNumber: StringOrInt.pipe(Schema.decodeTo(FortnoxSupplierNumber)),
+  InvoiceNumber: WireNullableReference,
+  OCR: WireNullableReference,
+  Booked: WireNullableBoolean,
+  Cancelled: WireNullableBoolean,
+  Credit: WireNullableBoolean,
+  PaymentPending: WireNullableBoolean,
+  VoucherNumber: WireNullableInt,
   Total: WireNullableAmountString,
   Balance: WireNullableAmountString,
   CurrencyRate: WireNullableAmountString,
-  SupplierInvoiceRows: Schema.optional(Schema.Array(FortnoxSupplierInvoiceRow))
+  SupplierInvoiceRows: Schema.optional(Schema.Array(FortnoxSupplierInvoiceRowApi))
 })
 
 export const supplierInvoiceFromApi = (value: typeof FortnoxSupplierInvoiceApi.Type) => {
@@ -191,7 +240,9 @@ export const supplierInvoiceFromApi = (value: typeof FortnoxSupplierInvoiceApi.T
       const out: SupplierInvoiceFromApiFields = { ...fields }
 
       if (SupplierInvoiceRows !== undefined) {
-        out.SupplierInvoiceRows = Chunk.fromIterable(SupplierInvoiceRows)
+        out.SupplierInvoiceRows = Chunk.fromIterable(
+          SupplierInvoiceRows.map(row => FortnoxSupplierInvoiceRow.make(row))
+        )
       }
 
       return out
