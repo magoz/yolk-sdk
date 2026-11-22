@@ -768,8 +768,8 @@ Effect Chunks. `pagination` contains `currentPage`, `totalPages`, `totalResource
 Get inputs use branded `customerNumber` (`FortnoxCustomerNumber`), `documentNumber`
 (`FortnoxDocumentNumber`), `supplierNumber` (`FortnoxSupplierNumber`), or numeric-string
 `givenNumber` (`FortnoxGivenNumber`). The latter is Fortnox's **GivenNumber**, not the supplier's
-plain-string InvoiceNumber; the brands are nominally incompatible and keep their string wire
-representation. File discovery (`fortnox.list_supplier_invoice_files`) filters by GivenNumber and
+plain-string InvoiceNumber; the brands are nominally incompatible, and both decode to strings
+from Fortnox's string or integer forms. File discovery (`fortnox.list_supplier_invoice_files`) filters by GivenNumber and
 returns it on each file entry. Preview downloads take the canonical `FortnoxDocumentNumber` (URL
 encoded, without archive-ID restrictions); archive downloads take the opaque discovery file ID.
 Get outputs
@@ -778,6 +778,9 @@ amount, and row data; they are bounded read models, not lossless accounting expo
 and supplier bank details are omitted. Optional fields can be absent from list responses; use get
 for available `InvoiceRows` / `SupplierInvoiceRows` Chunks. Customer-invoice `Total` / `Balance` remain
 numbers, supplier-invoice equivalents remain strings. No monetary arithmetic or rounding occurs.
+Supplier invoice read actions also accept JSON forms Fortnox's OpenAPI types omit (integer
+identifiers, integer strings for `VoucherNumber` and row `Account`, `"true"`/`"false"` flags, numeric
+strings for row amounts); the public types do not change.
 
 Non-2xx responses are value-level provider failures, with status-specific unauthorized, forbidden,
 not-found, and rate-limit codes. Provider error messages and codes are retained without raw error
