@@ -182,6 +182,7 @@
     "fast-claude-parity",
     "figma-runtime-secrets",
     "file-claim-check",
+    "files-file-save",
     "finite-workflow-retries",
     "fix-afloat-endpoint",
     "fix-calendar-event-boundaries",
