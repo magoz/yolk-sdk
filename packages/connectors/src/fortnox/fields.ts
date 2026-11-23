@@ -36,6 +36,25 @@ export const NullableInt = Schema.optional(Schema.NullOr(Schema.Int))
 // Fortnox bookkeeping account numbers are four digits.
 export const AccountNumber = Schema.Int.check(Schema.isBetween({ minimum: 1000, maximum: 9999 }))
 
+const isCalendarDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00Z`)
+
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+// Fortnox dates are `YYYY-MM-DD` (formats guide,
+// https://www.fortnox.se/developer/guides-and-good-to-know/formats-and-encoding); real calendar
+// dates only, so `2026-02-30` fails before any request.
+export const CalendarDate = Schema.String.check(
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/u),
+  Schema.makeFilter(value => (isCalendarDate(value) ? true : 'Expected a real calendar date'))
+)
+
+// Fortnox searches ignore case (ILIKE, parameters guide), so voucher series codes compare
+// case-insensitively.
+export const sameVoucherSeries = (left: string, right: string) =>
+  left.toUpperCase() === right.toUpperCase()
+
 export const optionalMaxLength = (maxLength: number) =>
   Schema.optional(Schema.String.check(Schema.isMaxLength(maxLength)))
 

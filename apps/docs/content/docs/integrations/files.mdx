@@ -25,7 +25,7 @@ Available from `0.1.0-canary.114`. The package is runtime-neutral (Web Crypto, n
    `@yolk-sdk/agent/protocol`; `view: true` also shows the model an image or document). Tools
    without `output` may return a `FilePart` (`filePartFromBytes`) in their content. Connector
    actions with `fileOutput` (`gmail.get_attachment`, `outlook.get_attachment`,
-   `email.get_attachment`) and MCP blobs, images and audio already do.
+   `email.get_attachment`, `fortnox.get_sie_file`) and MCP blobs, images and audio already do.
 2. `resolveTools(modules, context, { files: { store } })` stores the bytes before the ledger sees
    the result. The value holds a `FileRef { fileId, name, mimeType, size }` where the bytes were,
    the model sees a label such as `[file file_…: Faktura_225.pdf, application/pdf, 89 KB]`, and

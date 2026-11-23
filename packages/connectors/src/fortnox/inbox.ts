@@ -3,21 +3,11 @@ import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { ConnectorFileTransferBudget } from '../file-transfer.ts'
 import type { ConnectorIntegration } from '../integration.ts'
-import {
-  OpaqueId,
-  SafeText,
-  decodeInput,
-  decodeMetadata,
-  failTransfer,
-  fileBytes,
-  validateTransfer,
-  validateUpload,
-  writeBytes
-} from '../transfer-internal.ts'
+import { OpaqueId, decodeInput, fileBytes } from '../transfer-internal.ts'
 import { closedInput, Identifier, NullableNumber, NullableString } from './fields.ts'
 import { FortnoxInboxOAuthCredentialSlot } from './oauth.ts'
-import { deleteFortnox, fortnoxApiBaseUrl, readFortnox } from './shared.ts'
-import { downloadFortnoxBytes, resolveFortnoxTransferToken } from './transfer.ts'
+import { deleteFortnox, readFortnox } from './shared.ts'
+import { downloadFortnoxBytes, uploadFortnoxMultipart } from './transfer.ts'
 import { WireNullableNumber } from './wire.ts'
 
 /** Inbox file or folder Id (`root`, a static folder such as `inbox_s`, or a Fortnox GUID). */
@@ -212,87 +202,6 @@ export interface FortnoxInboxUploadInput {
   readonly bytes: Uint8Array
 }
 
-// The name is sent as raw UTF-8 inside a quoted Content-Disposition parameter (as the official
-// Fortnox SDK does), so quotes, backslashes and path separators are rejected, not escaped.
-const UploadTarget = Schema.Struct({
-  folderId: OpaqueId,
-  fileName: SafeText.check(
-    Schema.isMaxLength(255),
-    Schema.makeFilter(name => !/["\\/]/.test(name) && !/^\.+$/.test(name) && name.trim() === name)
-  ),
-  contentType: Schema.optional(
-    Schema.String.check(
-      Schema.isMaxLength(255),
-      Schema.isPattern(/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/)
-    )
-  )
-})
-
-const encoder = new TextEncoder()
-
-const boundaryPrefix = encoder.encode('yolk-fortnox-inbox-')
-
-const boundarySuffixLength = 8
-
-// Collect every 8-character suffix following the boundary prefix in `data`. A boundary built from
-// the prefix and an unseen suffix therefore cannot occur anywhere in `data`.
-const collectSuffixes = (data: Uint8Array, seen: Set<string>) => {
-  const first = boundaryPrefix[0] ?? 0
-  const last = data.length - boundaryPrefix.length - boundarySuffixLength
-
-  for (let i = data.indexOf(first); i !== -1 && i <= last; i = data.indexOf(first, i + 1)) {
-    if (boundaryPrefix.every((byte, offset) => data[i + offset] === byte)) {
-      const start = i + boundaryPrefix.length
-
-      seen.add(String.fromCharCode(...data.subarray(start, start + boundarySuffixLength)))
-    }
-  }
-}
-
-/**
- * Deterministic multipart boundary absent from every given byte sequence: the first counter
- * value whose 8-hex-digit suffix was not seen. At most `length / 19` suffixes can be seen, so a
- * free one always exists below the 2^32 hex range for any upload under the cap.
- */
-const multipartBoundary = (parts: ReadonlyArray<Uint8Array>) => {
-  const seen = new Set<string>()
-
-  for (const part of parts) collectSuffixes(part, seen)
-
-  for (let n = 0; n <= 0xffffffff; n++) {
-    const suffix = n.toString(16).padStart(boundarySuffixLength, '0')
-
-    if (!seen.has(suffix)) return Effect.succeed(`yolk-fortnox-inbox-${suffix}`)
-  }
-
-  return failTransfer('invalid_input')
-}
-
-const multipartBody = (
-  boundary: string,
-  fileName: Uint8Array,
-  contentType: string,
-  bytes: Uint8Array
-) => {
-  const head = [
-    encoder.encode(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="`),
-    fileName,
-    encoder.encode(`"\r\nContent-Type: ${contentType}\r\n\r\n`)
-  ]
-
-  const tail = encoder.encode(`\r\n--${boundary}--\r\n`)
-  const chunks = [...head, bytes, tail]
-  const body = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
-  let offset = 0
-
-  for (const chunk of chunks) {
-    body.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-
-  return body
-}
-
 /**
  * Upload one file into an inbox folder: a single multipart/form-data POST
  * `/inbox?folderid={folderId}` (form field `file`) with the `inbox` scope, never retried. Returns
@@ -304,49 +213,10 @@ export const uploadFortnoxInboxFile = (
   input: FortnoxInboxUploadInput,
   budget: ConnectorFileTransferBudget
 ) =>
-  Effect.gen(function* () {
-    const limits = yield* validateTransfer(integration, 'fortnox', budget)
-    yield* decodeInput(Schema.Record(Schema.String, Schema.Unknown), input)
-    yield* validateUpload(input.bytes, limits, fortnoxInboxUploadMaxBytes)
-    const target = yield* decodeInput(UploadTarget, input)
-    const fileName = encoder.encode(target.fileName)
-    const boundary = yield* multipartBoundary([input.bytes, fileName])
-
-    const body = multipartBody(
-      boundary,
-      fileName,
-      target.contentType ?? 'application/octet-stream',
-      input.bytes
-    )
-
-    const token = yield* resolveFortnoxTransferToken(integration, FortnoxInboxOAuthCredentialSlot)
-
-    const response = yield* writeBytes({
-      method: 'POST',
-      url: `${fortnoxApiBaseUrl}/inbox?folderid=${encodeURIComponent(target.folderId)}`,
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/json',
-        'content-type': `multipart/form-data; boundary=${boundary}`
-      },
-      bytes: body,
-      // The file bytes are already within budget and cap; this is the exact multipart body size.
-      maxUploadBytes: body.byteLength,
-      maxBytes: limits.maxMetadataBytes,
-      maxErrorBodyBytes: limits.maxErrorBodyBytes,
-      successStatuses: [200, 201],
-      redirect: 'manual',
-      credentials: 'omit'
-    })
-
-    const metadata = yield* decodeMetadata(FileResponse, response.bytes)
-
-    if (
-      metadata.File.Size !== undefined &&
-      metadata.File.Size !== null &&
-      metadata.File.Size !== input.bytes.byteLength
-    )
-      return yield* failTransfer('invalid_metadata')
-
-    return inboxFileFromApi(metadata.File)
-  })
+  uploadFortnoxMultipart(integration, FortnoxInboxOAuthCredentialSlot, budget, input, {
+    path: 'inbox',
+    folderRequired: true,
+    boundaryPrefix: 'yolk-fortnox-inbox-',
+    maxBytes: fortnoxInboxUploadMaxBytes,
+    response: FileResponse
+  }).pipe(Effect.map(metadata => inboxFileFromApi(metadata.File)))

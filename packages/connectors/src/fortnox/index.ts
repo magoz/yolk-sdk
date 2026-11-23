@@ -1,4 +1,5 @@
 import { fortnoxArticleActions } from './articles.ts'
+import { fortnoxBookkeepingActions } from './bookkeeping.ts'
 import { fortnoxCostCenterActions } from './cost-centers.ts'
 import { fortnoxListSupplierInvoiceFilesAction } from './files.ts'
 import { fortnoxInboxActions } from './inbox.ts'
@@ -9,8 +10,12 @@ import { fortnoxPrintActions } from './print-templates.ts'
 import { fortnoxProfileActions } from './profile.ts'
 import { fortnoxSettingsRegisterActions } from './settings-registers.ts'
 import { fortnoxSettingsActions } from './settings.ts'
+import { fortnoxSieActions } from './sie.ts'
+import { fortnoxVoucherFileActions } from './voucher-files.ts'
 
 export * from './articles.ts'
+
+export * from './bookkeeping.ts'
 
 export * from './cost-centers.ts'
 
@@ -31,6 +36,10 @@ export * from './profile.ts'
 export * from './settings-registers.ts'
 
 export * from './settings.ts'
+
+export * from './sie.ts'
+
+export * from './voucher-files.ts'
 
 import { Chunk } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -378,7 +387,7 @@ export const fortnoxGetSupplierInvoiceAction = defineAction({
 export const FortnoxConnector = defineConnector({
   id: fortnoxConnectorId,
   description:
-    'Fortnox company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print-template, inbox, settings, and profile actions. Destructive actions (delete, bookkeep, cancel, convert, email, mark sent) are marked destructive.',
+    'Fortnox company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print-template, inbox, settings, profile, and bookkeeping (financial years, accounts, voucher series, vouchers, voucher files, SIE export) actions. Destructive actions (delete, bookkeep, create voucher, cancel, convert, email, mark sent) are marked destructive.',
   actions: [
     fortnoxListSupplierInvoiceFilesAction,
     fortnoxGetCompanyInformationAction,
@@ -403,6 +412,9 @@ export const FortnoxConnector = defineConnector({
     ...fortnoxInboxActions,
     ...fortnoxSettingsActions,
     ...fortnoxSettingsRegisterActions,
-    ...fortnoxProfileActions
+    ...fortnoxProfileActions,
+    ...fortnoxBookkeepingActions,
+    ...fortnoxVoucherFileActions,
+    ...fortnoxSieActions
   ]
 })

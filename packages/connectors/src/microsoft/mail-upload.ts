@@ -1,5 +1,6 @@
 import { Effect, Option, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
+import { bytesToBase64 } from '../base64-internal.ts'
 import type { ConnectorBinaryHttpError, ConnectorBinaryHttpResponse } from '../binary-http.ts'
 import { ConnectorBinaryWriteHttpClient } from '../binary-write-http.ts'
 import type { ConnectorBinaryUploadSessionRequest } from '../binary-write-http.ts'
@@ -84,16 +85,6 @@ const uploadSessionPath =
   /^\/api\/(?:v1\.0|v2\.0|gv1\.0|beta)\/[^?#]+\/AttachmentSessions\('[^'/?#]+'\)$/i
 
 const encoder = new TextEncoder()
-
-const toBase64 = (bytes: Uint8Array) => {
-  let binary = ''
-
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
-  }
-
-  return btoa(binary)
-}
 
 // Pre-authenticated capability URL: validate before first use, never echo it anywhere.
 const outlookUploadSessionUrl = (raw: string) =>
@@ -362,7 +353,7 @@ export const addOutlookAttachment = (
       })
 
     if (session === undefined) {
-      const contentBytes = toBase64(bytes)
+      const contentBytes = bytesToBase64(bytes)
 
       const body = {
         '@odata.type': '#microsoft.graph.fileAttachment',

@@ -136,6 +136,11 @@ const IntegerStringToInt = Schema.String.check(Schema.isPattern(/^[+-]?[0-9]+$/u
   )
 )
 
+// A required integer Fortnox may send as a JSON integer or an integer string (voucher file
+// connections send `VoucherNumber` as a string, which OpenAPI types as a string there and as an
+// integer on vouchers). Public type is int.
+export const WireInt = Schema.Union([Schema.Int, IntegerStringToInt])
+
 // Integer fields Fortnox sometimes sends as numeric strings ("" meaning unset); public type is
 // int | null | undefined.
 export const WireNullableInt = Schema.optional(
@@ -154,13 +159,13 @@ const BooleanStringToBoolean = Schema.Literals(['true', 'false']).pipe(
   )
 )
 
-const WireNullableBoolean = Schema.optional(
+export const WireNullableBoolean = Schema.optional(
   Schema.Union([Schema.Boolean, Schema.Null, EmptyStringToNull, BooleanStringToBoolean])
 )
 
 // Reference strings (supplier invoice numbers, OCR, cost centers, projects) that Fortnox may send as
 // JSON integers.
-const WireNullableReference = Schema.optional(
+export const WireNullableReference = Schema.optional(
   Schema.Union([Schema.String, IntToString, Schema.Null])
 )
 

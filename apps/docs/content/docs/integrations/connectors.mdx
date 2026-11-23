@@ -59,8 +59,9 @@ Return optional `refreshToken`, `clientId`, and `clientSecret` from the host's r
 
 ## Fortnox
 
-`FortnoxConnector` exposes 91 actions (42 `read`, 31 `write`, 18 `destructive`). Deletes, payment
-bookkeeping, and offer lifecycle actions are `destructive` because the Fortnox API cannot undo them.
+`FortnoxConnector` exposes 102 actions (51 `read`, 32 `write`, 19 `destructive`). Deletes, payment
+bookkeeping, creating a voucher, and offer lifecycle actions are `destructive` because the Fortnox
+API cannot undo them.
 Sending, booking, cancelling, or crediting a customer invoice is not exposed and must remain
 separately approval-gated by the host. The core record actions:
 
@@ -82,7 +83,8 @@ All resource-scoped OAuth slots share `fortnox.oauth`. Required record scope hin
 resource slots, also outside the combined slot, cover articles (`article`), price lists and prices
 (`price`), cost centers (`costcenter`), payments (`payment`), offers (`offer`), print templates
 (`print`), the inbox (`inbox`), company settings and registers (`settings`), and the token's user
-profile (`profile`); see [Read and write Fortnox records](../connectors/fortnox) for their actions.
+profile (`profile`), and `bookkeeping` covers financial years, accounts, voucher series, vouchers,
+and SIE files; see [Read and write Fortnox records](../connectors/fortnox) for their actions.
 **Fortnox scopes grant read and write**; action metadata distinguishes reads, writes, and
 destructive actions. Hosts provide HTTP and current Fortnox OAuth credentials,
 with no integration config keys.

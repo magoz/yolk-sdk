@@ -40,6 +40,10 @@ export const fortnoxSettingsScope = 'settings'
 
 export const fortnoxProfileScope = 'profile'
 
+// Fortnox scopes guide (https://www.fortnox.se/developer/guides-and-good-to-know/scopes): Vouchers,
+// Voucher Series, Accounts, Account Charts, Financial Years, and SIE all need `bookkeeping`.
+export const fortnoxBookkeepingScope = 'bookkeeping'
+
 export const FortnoxOAuthCredentialSlot = CredentialSlot.make({
   id: fortnoxOAuthSlotId,
   kind: 'oauth'
@@ -77,6 +81,8 @@ export const FortnoxInboxOAuthCredentialSlot = scopedSlot(fortnoxInboxScope)
 export const FortnoxSettingsOAuthCredentialSlot = scopedSlot(fortnoxSettingsScope)
 
 export const FortnoxProfileOAuthCredentialSlot = scopedSlot(fortnoxProfileScope)
+
+export const FortnoxBookkeepingOAuthCredentialSlot = scopedSlot(fortnoxBookkeepingScope)
 
 export const FortnoxCombinedOAuthCredentialSlot = CredentialSlot.make({
   id: fortnoxOAuthSlotId,
