@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.158
+
+### Patch Changes
+
+- d4141e3: Advance in lockstep with `@yolk-sdk/connectors`, which adds Fortnox bookkeeping actions (financial years, accounts, voucher series, vouchers, voucher file connections, and SIE files). These packages have no direct changes in this release.
+- Updated dependencies [d4141e3]
+  - @yolk-sdk/agent@0.1.0-canary.158
+
 ## 0.1.0-canary.157
 
 ### Patch Changes
