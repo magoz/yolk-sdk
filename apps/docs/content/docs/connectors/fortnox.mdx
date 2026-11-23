@@ -57,7 +57,7 @@ The HTTP adapter must preserve `Authorization: Bearer …` and `Accept: applicat
 When a request carries a JSON body it must also preserve `Content-Type: application/json` and the
 body. Lifecycle PUTs (`bookkeep`, `createorder`, `createinvoice`, `cancel`, `externalprint`) and all
 DELETEs are body-less. `fortnox.email_offer` is a side-effecting GET: never retry it or follow its
-redirects.
+redirects. Never retry POSTs either: a retried `fortnox.create_voucher` books a second voucher.
 Hosts own network policy, response-size limits, redirect safety, and avoiding credential/body logs.
 
 ## Choose consent scopes
@@ -234,23 +234,30 @@ need `connectfile`, and uploads to the archive, which need `archive` (Fortnox
   endpoint has no per-period balances: SIE type 2 holds monthly balances, type 3 adds cost center
   and project balances.
 - **Vouchers.** A voucher is unique by `VoucherSeries`, `VoucherNumber`, and `Year` (the financial
-  year Id): numbers restart every year. List rows usually leave out `VoucherRows`; `get_voucher`
+  year Id): numbers restart every year. `costCenter` is Fortnox's substring search. List rows usually leave out `VoucherRows`; `get_voucher`
   returns them. A row's `Description` is the account name Fortnox sets; `TransactionInformation`
   is the row text. `list_vouchers` with `voucherSeries` uses `/vouchers/sublist/{VoucherSeries}`.
-- **Creating a voucher books it.** The Fortnox API has no endpoint to delete or change a voucher, so
+- **Creating a voucher books it.** The Fortnox API documents no endpoint to delete or change a
+  voucher (its licence table names a Delete Voucher right, with no documented endpoint), so
   `create_voucher` is `destructive`: a mistake needs a new correcting voucher. The input is closed
   (unknown keys fail at every depth) and is checked before any request: at least two rows, each
-  with an `Account`, exactly one positive `Debit` or `Credit` with at most two decimals, optional
-  `TransactionInformation` (at most 100 characters), `CostCenter`, and `Project`; total debit equals
-  total credit, compared in whole öre. The `TransactionDate` must lie in the financial year and
+  with an `Account`, exactly one positive `Debit` or `Credit` that is exactly a two-decimal amount,
+  optional `TransactionInformation` (at most 100 characters), `CostCenter`, and `Project`; total
+  debit equals total credit, summed exactly in whole öre. An answer that names another series or
+  financial year fails with `fortnox_voucher_mismatch`: that voucher is booked, so never create it
+  again. The `TransactionDate` must lie in the financial year and
   after any locked period; Fortnox enforces that, and active accounts and existing cost centers and
   projects. The request is sent once and never retried: after a transport failure or an unreadable
   answer the voucher may exist, so list vouchers before trying again.
 - **Attaching files.** A voucher file connection links an archive file to a voucher. Upload the file
   with the host-only `uploadFortnoxArchiveFile` (or take an inbox file's `ArchiveFileId` from
   `get_inbox_folder`), then call `create_voucher_file_connection` with its id. Which id forms
-  Fortnox accepts is not verified against a live company. `list_voucher_file_connections` returns
-  only the requested voucher's connections; an answer announcing more than one page fails.
+  Fortnox accepts is not verified against a live company. The create sends `VoucherYear` in the
+  body (OpenAPI) and as `?financialyear=` (the archived page marks it read-only) and fails with
+  `fortnox_voucher_mismatch` when the answer names another voucher. The parameters guide applies
+  only one resource-specific filter at a time and matches substrings, so
+  `list_voucher_file_connections` reads every page (at most ten of 500) and returns only the
+  requested voucher's connections; a matching connection without `VoucherYear` fails closed.
 - **SIE files.** `get_sie_file` downloads `GET /3/sie/{type}?financialyear={id}` through the host
   `ConnectorBinaryHttpClient` (the string HTTP port cannot carry the bytes) and fails with
   `validation_failed` when the host provides none. The file is IBM437 (code page 437) text, as the
@@ -258,8 +265,9 @@ need `connectfile`, and uploads to the archive, which need `archive` (Fortnox
   returns `{ value, files }`: `value` is `FortnoxSieFile` (`sieType`, `financialYearId`, `fileName`,
   `mimeType: 'text/plain'`, `encoding: 'IBM437'`, `byteLength`) and the bytes become a file
   ([file claim check](../integrations/files)); invoked directly it returns them as `contentBase64`.
-  Files over `fortnoxSieFileMaxBytes` (50 MiB) fail with `fortnox_response_too_large`. Decode the
-  text as IBM437, not UTF-8.
+  Files over `fortnoxSieFileMaxBytes` (50 MiB) fail with `fortnox_response_too_large`. The stored
+  file is `text/plain` (file MIME types carry no charset): hosts and scripts that read it as text
+  must decode IBM437, not UTF-8.
 - **Wire forms.** The archived examples send voucher and account `Project` as the number `0`,
   financial year lists name the chart type `accountCharts`, and voucher file connections send
   `VoucherNumber` as a string. These decode to the public string and integer types.
@@ -334,7 +342,8 @@ Collections are runtime Effect `Chunk` values, including `InvoiceRows` and `Supp
 Customer-invoice `Total` and `Balance` remain numbers; supplier-invoice `Total` and `Balance` remain
 strings, preserving their supplied decimal representation. Row amounts are numbers with nullable
 `Total`/`CostCenter` values; supplier invoice row amounts also accept numeric strings. The connector
-performs no monetary arithmetic or rounding.
+does not round or recompute response amounts; its only monetary arithmetic is the
+`fortnox.create_voucher` balance check (whole öre) before the request.
 
 Supplier invoice read actions also accept JSON forms Fortnox's OpenAPI types do not list: `GivenNumber`,
 `SupplierNumber`, `InvoiceNumber`, `OCR`, `CostCenter`, `Project` and the row `ArticleNumber`,

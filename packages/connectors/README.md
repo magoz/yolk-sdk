@@ -67,7 +67,7 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **CredentialBinding**: integration slot-to-host-credential-ref mapping.
 - **CredentialResolver**: host Effect service that resolves refs at runtime.
 - **ConnectorHttpClient**: host-provided HTTP port used by provider actions.
-- **ConnectorBinaryHttpClient** / **ConnectorBinaryWriteHttpClient**: optional host-provided GET/write byte ports used by host-only file helpers.
+- **ConnectorBinaryHttpClient** / **ConnectorBinaryWriteHttpClient**: optional host-provided GET/write byte ports used by host-only file helpers (and, for reading, by the `fortnox.get_sie_file` action).
 - **R2ObjectClient**: host-provided conditional object port for R2 get/create/update.
 - **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
@@ -785,7 +785,8 @@ unwrap the resource. Resource fields retain Fortnox spelling and selected contac
 amount, and row data; they are bounded read models, not lossless accounting exports. Unknown fields
 and supplier bank details are omitted. Optional fields can be absent from list responses; use get
 for available `InvoiceRows` / `SupplierInvoiceRows` Chunks. Customer-invoice `Total` / `Balance` remain
-numbers, supplier-invoice equivalents remain strings. No monetary arithmetic or rounding occurs.
+numbers, supplier-invoice equivalents remain strings. Responses are not rounded or recomputed;
+the only monetary arithmetic is `fortnox.create_voucher`'s pre-request balance check in whole öre.
 Supplier invoice read actions also accept JSON forms Fortnox's OpenAPI types omit (integer
 identifiers, integer strings for `VoucherNumber` and row `Account`, `"true"`/`"false"` flags, numeric
 strings for row amounts); the public types do not change.

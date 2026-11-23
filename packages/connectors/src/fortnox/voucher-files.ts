@@ -8,9 +8,12 @@
 // OpenAPI types `VoucherNumber` as a string in both the payload and the answer and documents no
 // MetaInformation on the list; the archived examples send `VoucherNumber` as a string in answers
 // and as an integer in the create request, and carry MetaInformation. Answers decode either form.
-import { Chunk } from 'effect'
+import { Chunk, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { ConnectorError } from '../error.ts'
+import type { ConnectorIntegration } from '../integration.ts'
+import { ActionResult } from '../result.ts'
 import { closedInput, NullableInt, NullableString } from './fields.ts'
 import {
   FortnoxFinancialYearId,
@@ -18,7 +21,7 @@ import {
   FortnoxVoucherSeriesCode
 } from './bookkeeping.ts'
 import { FortnoxArchiveFileId, FortnoxConnectFileOAuthCredentialSlot } from './files.ts'
-import { FortnoxMetaInformation, readFortnox, singlePage, writeFortnox } from './shared.ts'
+import { FortnoxMetaInformation, readFortnox, writeFortnox } from './shared.ts'
 import { WireInt, WireNullableInt } from './wire.ts'
 
 export class FortnoxVoucherFileConnection extends Schema.Class<FortnoxVoucherFileConnection>(
@@ -69,7 +72,7 @@ export class FortnoxCreateVoucherFileConnectionInput extends Schema.Class<Fortno
 const ConnectionsResponse = Schema.Struct({
   VoucherFileConnections: Schema.Array(VoucherFileConnectionApi),
   MetaInformation: Schema.optional(FortnoxMetaInformation)
-}).check(singlePage)
+})
 
 const ConnectionResponse = Schema.Struct({ VoucherFileConnection: VoucherFileConnectionApi })
 
@@ -79,16 +82,81 @@ type VoucherKey = {
   readonly financialYearId: number
 }
 
-// The query filters are documented search parameters; rows are also matched here, so a filter
-// Fortnox ignored never attributes another voucher's files to this one. OpenAPI does not mark
-// VoucherYear required, so a row without it is matched by series and number (the voucheryear
-// filter already selected the year).
-const belongsTo = (key: VoucherKey) => (connection: FortnoxVoucherFileConnection) =>
-  connection.VoucherSeries === key.voucherSeries &&
-  connection.VoucherNumber === key.voucherNumber &&
-  (connection.VoucherYear === undefined ||
-    connection.VoucherYear === null ||
-    connection.VoucherYear === key.financialYearId)
+const sameVoucher = (key: VoucherKey, connection: FortnoxVoucherFileConnection) =>
+  connection.VoucherSeries === key.voucherSeries && connection.VoucherNumber === key.voucherNumber
+
+/** Pages read at most (500 rows each) before the list gives up instead of truncating. */
+const connectionPageCap = 10
+
+const connectionPageLimit = 500
+
+const listFailure = (integration: ConnectorIntegration, message: string) =>
+  new ConnectorError({
+    cause: 'validation_failed',
+    message,
+    connectorId: integration.connectorId,
+    actionId: 'fortnox.list_voucher_file_connections'
+  })
+
+// OpenAPI lists voucherseries, vouchernumber, and voucheryear as this endpoint's filters, but the
+// parameters guide says only one resource-specific filter applies at a time and searches match
+// substrings. So every page is read (up to the cap) and rows are matched here: a filter Fortnox
+// ignored never attributes another voucher's files to this one. A matching series and number
+// without a VoucherYear cannot be told apart from another year's voucher and fails the call.
+const listConnections = (integration: ConnectorIntegration, key: VoucherKey) =>
+  Effect.gen(function* () {
+    const connections: Array<FortnoxVoucherFileConnection> = []
+
+    for (let page = 1; page <= connectionPageCap; page++) {
+      const query = new URLSearchParams({
+        voucherseries: key.voucherSeries,
+        vouchernumber: String(key.voucherNumber),
+        voucheryear: String(key.financialYearId),
+        page: String(page),
+        limit: String(connectionPageLimit)
+      })
+
+      const result = yield* readFortnox(
+        integration,
+        FortnoxConnectFileOAuthCredentialSlot,
+        `voucherfileconnections?${query}`,
+        ConnectionsResponse,
+        value => value
+      )
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
+      for (const row of result.value.VoucherFileConnections) {
+        const connection = connectionFromApi(row)
+
+        if (!sameVoucher(key, connection)) continue
+
+        if (connection.VoucherYear === undefined || connection.VoucherYear === null) {
+          return yield* listFailure(
+            integration,
+            'Fortnox listed a connection for this series and number without VoucherYear'
+          )
+        }
+
+        if (connection.VoucherYear === key.financialYearId) connections.push(connection)
+      }
+
+      const meta = result.value.MetaInformation
+
+      if (meta === undefined || meta['@CurrentPage'] >= meta['@TotalPages']) {
+        return ActionResult.success(
+          FortnoxListVoucherFileConnectionsOutput.make({
+            connections: Chunk.fromIterable(connections)
+          })
+        )
+      }
+    }
+
+    return yield* listFailure(
+      integration,
+      `Fortnox voucher file connections span more than ${connectionPageCap} pages`
+    )
+  })
 
 export const fortnoxListVoucherFileConnectionsAction = defineAction({
   id: 'fortnox.list_voucher_file_connections',
@@ -97,32 +165,13 @@ export const fortnoxListVoucherFileConnectionsAction = defineAction({
   access: 'read',
   inputSchema: FortnoxListVoucherFileConnectionsInput,
   outputSchema: FortnoxListVoucherFileConnectionsOutput,
-  execute: ({ integration, input }) => {
-    const query = new URLSearchParams({
-      voucherseries: input.voucherSeries,
-      vouchernumber: String(input.voucherNumber),
-      voucheryear: String(input.financialYearId)
-    })
-
-    return readFortnox(
-      integration,
-      FortnoxConnectFileOAuthCredentialSlot,
-      `voucherfileconnections?${query}`,
-      ConnectionsResponse,
-      value =>
-        FortnoxListVoucherFileConnectionsOutput.make({
-          connections: Chunk.fromIterable(
-            value.VoucherFileConnections.map(connectionFromApi).filter(belongsTo(input))
-          )
-        })
-    )
-  }
+  execute: ({ integration, input }) => listConnections(integration, input)
 })
 
 export const fortnoxCreateVoucherFileConnectionAction = defineAction({
   id: 'fortnox.create_voucher_file_connection',
   description:
-    'Attach a file in the Fortnox archive to a voucher (verifikation) as its supporting document (underlag). FileId is an archive file Id: the Id an archive upload returned, or the ArchiveFileId of an inbox file (fortnox.get_inbox_folder). The voucher is identified by VoucherSeries, VoucherNumber, and VoucherYear (the financial year Id, Year on the voucher). Unknown fields are rejected.',
+    'Attach a file in the Fortnox archive to a voucher (verifikation) as its supporting document (underlag). FileId is an archive file Id: the Id an archive upload returned (an inbox file’s ArchiveFileId from fortnox.get_inbox_folder may also work; not verified). The voucher is identified by VoucherSeries, VoucherNumber, and VoucherYear (the financial year Id, Year on the voucher). If Fortnox answers with a connection to another voucher, the action fails with fortnox_voucher_mismatch naming it. Unknown fields are rejected.',
   access: 'write',
   inputSchema: closedInput(FortnoxCreateVoucherFileConnectionInput.fields),
   outputSchema: FortnoxVoucherFileConnection,
@@ -131,7 +180,9 @@ export const fortnoxCreateVoucherFileConnectionAction = defineAction({
       integration,
       FortnoxConnectFileOAuthCredentialSlot,
       'POST',
-      'voucherfileconnections',
+      // OpenAPI puts VoucherYear in the payload; the archived page marks it read-only and selects
+      // the year through the URL. Send both, so either reading attaches to the requested year.
+      `voucherfileconnections?financialyear=${encodeURIComponent(String(input.VoucherYear))}`,
       {
         VoucherFileConnection: {
           FileId: input.FileId,
@@ -143,6 +194,28 @@ export const fortnoxCreateVoucherFileConnectionAction = defineAction({
       },
       ConnectionResponse,
       value => connectionFromApi(value.VoucherFileConnection)
+    ).pipe(
+      Effect.map(result => {
+        if (!Predicate.isTagged(result, 'Success')) return result
+
+        const connection = result.value
+        const year = connection.VoucherYear
+
+        return connection.VoucherSeries === input.VoucherSeries &&
+          connection.VoucherNumber === input.VoucherNumber &&
+          (year === undefined || year === null || year === input.VoucherYear)
+          ? result
+          : ActionResult.failure({
+              code: 'fortnox_voucher_mismatch',
+              message: `Fortnox connected file ${connection.FileId} to voucher ${connection.VoucherSeries} ${connection.VoucherNumber} in financial year ${year ?? 'unknown'}, not the requested voucher.`,
+              underlying: {
+                fileId: connection.FileId,
+                voucherSeries: connection.VoucherSeries,
+                voucherNumber: connection.VoucherNumber,
+                financialYearId: year ?? null
+              }
+            })
+      })
     )
 })
 

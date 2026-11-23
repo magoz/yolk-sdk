@@ -322,7 +322,7 @@ export class FortnoxListVouchersInput extends Schema.Class<FortnoxListVouchersIn
   fromDate: Schema.optional(CalendarDate),
   /** Only vouchers with a TransactionDate on or before this date (`YYYY-MM-DD`). */
   toDate: Schema.optional(CalendarDate),
-  /** Only vouchers with this cost center code. */
+  /** Fortnox's cost center search (a substring match, so codes containing it may match too). */
   costCenter: Schema.optional(NonEmptyString),
   ...PaginationFields
 }) {}
@@ -350,11 +350,11 @@ const VouchersResponse = Schema.Struct({
 const VoucherResponse = Schema.Struct({ Voucher: VoucherApi })
 
 // Voucher amounts: archived docs say "float, 14 digits (incl. decimals)". The connector accepts
-// whole öre (at most two decimals) below 10^12, so the balance check below is exact.
+// whole öre below 10^12: an amount is exactly the double nearest to some two-decimal number, so
+// `Math.round(value * 100)` recovers its öre exactly and the balance check below is exact.
 const maxVoucherAmount = 1_000_000_000_000
 
-const hasAtMostTwoDecimals = (value: number) =>
-  Math.abs(Math.round(value * 100) - value * 100) < 1e-6
+const hasAtMostTwoDecimals = (value: number) => Math.round(value * 100) / 100 === value
 
 const VoucherAmount = Schema.Finite.check(
   Schema.isGreaterThanOrEqualTo(0),
@@ -387,7 +387,13 @@ export const FortnoxVoucherRowInput = Schema.Struct(VoucherRowInputFields).check
 
 export type FortnoxVoucherRowInput = typeof FortnoxVoucherRowInput.Type
 
-const toOre = (value: number | undefined) => Math.round((value ?? 0) * 100)
+// Each amount is below 10^14 öre, but a sum of many rows can pass 2^53, so totals are BigInts.
+const toOre = (value: number | undefined) => BigInt(Math.round((value ?? 0) * 100))
+
+// BigInt(...) rather than literals: the docs app type-checks this source with an older target.
+const zero = BigInt(0)
+
+const hundred = BigInt(100)
 
 const rowTotals = (rows: ReadonlyArray<FortnoxVoucherRowInput>) =>
   rows.reduce(
@@ -395,8 +401,15 @@ const rowTotals = (rows: ReadonlyArray<FortnoxVoucherRowInput>) =>
       debit: totals.debit + toOre(row.Debit),
       credit: totals.credit + toOre(row.Credit)
     }),
-    { debit: 0, credit: 0 }
+    { debit: zero, credit: zero }
   )
+
+const kronor = (ore: bigint) => {
+  const sign = ore < zero ? '-' : ''
+  const magnitude = ore < zero ? -ore : ore
+
+  return `${sign}${magnitude / hundred}.${String(magnitude % hundred).padStart(2, '0')}`
+}
 
 const FortnoxCreateVoucherFields = {
   /** Financial year to book in (the `financialyear` query); TransactionDate must fall inside it. */
@@ -420,7 +433,7 @@ export const FortnoxCreateVoucherInput = closedInput(FortnoxCreateVoucherFields)
 
     return totals.debit === totals.credit
       ? true
-      : `Expected total Debit (${totals.debit / 100}) to equal total Credit (${totals.credit / 100})`
+      : `Expected total Debit (${kronor(totals.debit)}) to equal total Credit (${kronor(totals.credit)})`
   })
 )
 
@@ -580,7 +593,7 @@ export const fortnoxListVoucherSeriesAction = defineAction({
 export const fortnoxListVouchersAction = defineAction({
   id: 'fortnox.list_vouchers',
   description:
-    'List one page of Fortnox vouchers (verifikationer) in a financial year, sorted by series and number. A voucher is identified by VoucherSeries, VoucherNumber, and Year (the financial year Id). Filters: voucherSeries, fromDate/toDate (TransactionDate, YYYY-MM-DD), costCenter, lastModified. Omit financialYearId for the current financial year. List rows usually omit VoucherRows; read a voucher with fortnox.get_voucher for its rows. Repeat the filters with pagination.nextPage to continue.',
+    'List one page of Fortnox vouchers (verifikationer) in a financial year, sorted by series and number. A voucher is identified by VoucherSeries, VoucherNumber, and Year (the financial year Id). Filters: voucherSeries, fromDate/toDate (TransactionDate, YYYY-MM-DD), costCenter (Fortnox substring search), lastModified. Omit financialYearId for the current financial year. List rows usually omit VoucherRows; read a voucher with fortnox.get_voucher for its rows. Repeat the filters with pagination.nextPage to continue.',
   access: 'read',
   inputSchema: FortnoxListVouchersInput,
   outputSchema: FortnoxListVouchersOutput,
@@ -632,7 +645,7 @@ export const fortnoxGetVoucherAction = defineAction({
 export const fortnoxCreateVoucherAction = defineAction({
   id: 'fortnox.create_voucher',
   description:
-    'Create and book a Fortnox voucher (verifikation) in VoucherSeries of financial year financialYearId. Fortnox books it immediately and assigns VoucherNumber; the Fortnox API cannot delete or change a booked voucher, so a mistake needs a new correcting voucher. TransactionDate (YYYY-MM-DD) must fall inside the financial year and after any locked period. Each row: Account (an existing active four-digit account), exactly one of Debit or Credit (positive, at most two decimals), optional TransactionInformation (row text, max 100 characters), CostCenter, and Project (existing codes). At least two rows; total Debit must equal total Credit (checked before sending). Description max 200, Comments max 1000 characters. Unknown fields are rejected. Never retried: after a transport failure or an unreadable answer the voucher may still have been booked, so list vouchers before trying again.',
+    'Create and book a Fortnox voucher (verifikation) in VoucherSeries of financial year financialYearId. Fortnox books it immediately and assigns VoucherNumber; the Fortnox API documents no way to delete or change a voucher and this connector has none, so a mistake needs a new correcting voucher. TransactionDate (YYYY-MM-DD) must fall inside the financial year and after any locked period. Each row: Account (an existing active four-digit account), exactly one of Debit or Credit (positive, at most two decimals), optional TransactionInformation (row text, max 100 characters), CostCenter, and Project (existing codes). At least two rows; total Debit must equal total Credit (checked before sending). Description max 200, Comments max 1000 characters. Unknown fields are rejected. Never retried: after a transport failure or an unreadable answer the voucher may still have been booked, so list vouchers before trying again. If Fortnox answers with a voucher in another series or financial year than requested, the action fails with fortnox_voucher_mismatch: that voucher is booked, do not create it again.',
   access: 'destructive',
   inputSchema: FortnoxCreateVoucherInput,
   outputSchema: FortnoxVoucher,
@@ -658,6 +671,22 @@ export const fortnoxCreateVoucherAction = defineAction({
       },
       VoucherResponse,
       value => voucherFromApi(value.Voucher)
+    ).pipe(
+      Effect.map(result =>
+        Predicate.isTagged(result, 'Success') &&
+        (result.value.Year !== financialYearId ||
+          result.value.VoucherSeries !== input.VoucherSeries)
+          ? ActionResult.failure({
+              code: 'fortnox_voucher_mismatch',
+              message: `Fortnox booked voucher ${result.value.VoucherSeries} ${result.value.VoucherNumber} in financial year ${result.value.Year}, not in series ${input.VoucherSeries} of financial year ${financialYearId}. It is booked: do not create it again.`,
+              underlying: {
+                voucherSeries: result.value.VoucherSeries,
+                voucherNumber: result.value.VoucherNumber,
+                financialYearId: result.value.Year
+              }
+            })
+          : result
+      )
     )
   }
 })

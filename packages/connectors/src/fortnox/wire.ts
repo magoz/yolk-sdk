@@ -136,9 +136,9 @@ const IntegerStringToInt = Schema.String.check(Schema.isPattern(/^[+-]?[0-9]+$/u
   )
 )
 
-// A required integer Fortnox may send as a JSON integer or an integer string (its archived docs
-// send voucher file connection `VoucherNumber` as a string while OpenAPI types voucher numbers as
-// integers). Public type is int.
+// A required integer Fortnox may send as a JSON integer or an integer string (voucher file
+// connections send `VoucherNumber` as a string, which OpenAPI types as a string there and as an
+// integer on vouchers). Public type is int.
 export const WireInt = Schema.Union([Schema.Int, IntegerStringToInt])
 
 // Integer fields Fortnox sometimes sends as numeric strings ("" meaning unset); public type is

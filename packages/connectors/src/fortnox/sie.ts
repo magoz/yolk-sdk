@@ -14,6 +14,7 @@
 import { Effect, Option, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import { bytesToBase64 } from '../base64-internal.ts'
 import { ConnectorBinaryHttpClient } from '../binary-http.ts'
 import { ConnectorError } from '../error.ts'
 import { connectorActionFile } from '../file-output.ts'
@@ -79,16 +80,6 @@ const startsLikeSie = (bytes: Uint8Array) => {
   while (start < bytes.length && isWhitespace(bytes[start])) start++
 
   return flagga.every((byte, offset) => bytes[start + offset] === byte)
-}
-
-const toBase64 = (bytes: Uint8Array) => {
-  let binary = ''
-
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
-  }
-
-  return globalThis.btoa(binary)
 }
 
 const actionId = 'fortnox.get_sie_file'
@@ -178,7 +169,7 @@ const getSieFile = (integration: ConnectorIntegration, input: FortnoxGetSieFileI
         mimeType: 'text/plain',
         encoding: fortnoxSieEncoding,
         byteLength: response.bytes.byteLength,
-        contentBase64: toBase64(response.bytes)
+        contentBase64: bytesToBase64(response.bytes)
       })
     )
   })

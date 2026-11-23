@@ -263,7 +263,7 @@ describe('Fortnox bookkeeping actions', () => {
       ['fortnox.create_voucher_file_connection', 'write'],
       ['fortnox.get_sie_file', 'read']
     ])
-    expect(fortnoxCreateVoucherAction.description).toContain('cannot delete or change')
+    expect(fortnoxCreateVoucherAction.description).toContain('no way to delete or change a voucher')
     expect(
       FortnoxConnector.actions.filter(action =>
         [...fortnoxBookkeepingActions, ...fortnoxVoucherFileActions, ...fortnoxSieActions].some(
@@ -687,6 +687,23 @@ describe('Fortnox bookkeeping actions', () => {
             { Account: 1930, Credit: 1.005 }
           ]
         },
+        // Not exactly a two-decimal amount.
+        {
+          ...voucherInput,
+          VoucherRows: [
+            { Account: 6570, Debit: 1.000000001 },
+            { Account: 1930, Credit: 1 }
+          ]
+        },
+        // Every amount is valid, but the sums differ by one öre past 2^53 öre.
+        {
+          ...voucherInput,
+          VoucherRows: [
+            ...Array.from({ length: 100 }, () => ({ Account: 6570, Debit: 999_999_999_999 })),
+            ...Array.from({ length: 100 }, () => ({ Account: 1930, Credit: 999_999_999_999 })),
+            { Account: 1930, Credit: 0.01 }
+          ]
+        },
         // Negative amount.
         {
           ...voucherInput,
@@ -743,6 +760,22 @@ describe('Fortnox bookkeeping actions', () => {
     })
   )
 
+  it.effect('fails when Fortnox books the voucher in another year or series', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        http: [response({ Voucher: { ...voucherBody, Year: 5 } }, 201)]
+      })
+
+      const failure = failureOf(yield* run(harness, fortnoxCreateVoucherAction.id, voucherInput))
+
+      expect(failure).toMatchObject({
+        code: 'fortnox_voucher_mismatch',
+        underlying: { voucherSeries: 'A', voucherNumber: 7, financialYearId: 5 }
+      })
+      expect(failure.message).toContain('do not create it again')
+    })
+  )
+
   it.effect('reports a Fortnox voucher rejection as a provider failure', () =>
     Effect.gen(function* () {
       const harness = makeHarness({
@@ -782,24 +815,30 @@ describe('Fortnox voucher file connections', () => {
     VoucherYear
   })
 
-  it.effect('lists the files of exactly one voucher', () =>
+  const listInput = { voucherSeries: 'A', voucherNumber: 7, financialYearId: 4 }
+
+  const listUrl = (page: number) =>
+    url(
+      `voucherfileconnections?voucherseries=A&vouchernumber=7&voucheryear=4&page=${page}&limit=500`
+    )
+
+  it.effect('lists the files of exactly one voucher across every page', () =>
     Effect.gen(function* () {
       const harness = makeHarness({
         http: [
           response({
-            MetaInformation: meta(1, 1, 4),
-            VoucherFileConnections: [inYear('7', 4), connection(7), inYear('8', 4), inYear('7', 3)]
+            MetaInformation: meta(1, 2, 4),
+            // Substring matches and other years are left out.
+            VoucherFileConnections: [inYear('7', 4), inYear('17', 4), inYear('7', 3)]
           }),
+          response({ MetaInformation: meta(2, 2, 4), VoucherFileConnections: [inYear(7, 4)] }),
+          // OpenAPI documents no MetaInformation on this list: one page.
           response({ VoucherFileConnections: [] })
         ]
       })
 
       const output = successValue(
-        yield* run(harness, fortnoxListVoucherFileConnectionsAction.id, {
-          voucherSeries: 'A',
-          voucherNumber: 7,
-          financialYearId: 4
-        }),
+        yield* run(harness, fortnoxListVoucherFileConnectionsAction.id, listInput),
         FortnoxListVoucherFileConnectionsOutput
       )
 
@@ -810,42 +849,47 @@ describe('Fortnox voucher file connections', () => {
         ])
       ).toEqual([
         [7, 4],
-        [7, undefined]
+        [7, 4]
       ])
-      expect(harness.requests[0]?.url).toBe(
-        url('voucherfileconnections?voucherseries=A&vouchernumber=7&voucheryear=4')
-      )
-      expect(harness.scopes).toEqual([['connectfile']])
+      expect(harness.requests.map(request => request.url)).toEqual([listUrl(1), listUrl(2)])
+      expect(harness.scopes).toEqual([['connectfile'], ['connectfile']])
 
-      // OpenAPI documents no MetaInformation on this list.
       const empty = successValue(
-        yield* run(harness, fortnoxListVoucherFileConnectionsAction.id, {
-          voucherSeries: 'A',
-          voucherNumber: 1,
-          financialYearId: 4
-        }),
+        yield* run(harness, fortnoxListVoucherFileConnectionsAction.id, listInput),
         FortnoxListVoucherFileConnectionsOutput
       )
 
       expect(Chunk.size(empty.connections)).toBe(0)
+      expect(harness.requests).toHaveLength(3)
     })
   )
 
-  it.effect('refuses a connection list announcing more than one page', () =>
+  it.effect('fails closed on a matching row without a year and past the page cap', () =>
     Effect.gen(function* () {
+      const manyPages = Array.from({ length: 10 }, (_, index) =>
+        response({ MetaInformation: meta(index + 1, 11, 5500), VoucherFileConnections: [] })
+      )
+
       const harness = makeHarness({
-        http: [
-          response({ MetaInformation: meta(1, 2, 200), VoucherFileConnections: [inYear(7, 4)] })
-        ]
+        http: [response({ VoucherFileConnections: [connection(7)] }), ...manyPages]
       })
 
-      const error = yield* run(harness, fortnoxListVoucherFileConnectionsAction.id, {
-        voucherSeries: 'A',
-        voucherNumber: 7,
-        financialYearId: 4
-      }).pipe(Effect.flip)
+      const noYear = yield* run(
+        harness,
+        fortnoxListVoucherFileConnectionsAction.id,
+        listInput
+      ).pipe(Effect.flip)
 
-      expect(error.cause).toBe('validation_failed')
+      const tooMany = yield* run(
+        harness,
+        fortnoxListVoucherFileConnectionsAction.id,
+        listInput
+      ).pipe(Effect.flip)
+
+      expect(noYear.cause).toBe('validation_failed')
+      expect(noYear.message).toContain('without VoucherYear')
+      expect(tooMany.cause).toBe('validation_failed')
+      expect(harness.requests).toHaveLength(11)
     })
   )
 
@@ -868,7 +912,7 @@ describe('Fortnox voucher file connections', () => {
       expect(created.VoucherNumber).toBe(7)
       expect(harness.requests[0]).toMatchObject({
         method: 'POST',
-        url: url('voucherfileconnections'),
+        url: url('voucherfileconnections?financialyear=4'),
         headers: writeHeaders
       })
       expect(harness.requests[0]?.body).toBe(
@@ -895,6 +939,28 @@ describe('Fortnox voucher file connections', () => {
       }
 
       expect(harness.sent()).toBe(1)
+    })
+  )
+
+  it.effect('fails when Fortnox connects the file to another voucher', () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        http: [response({ VoucherFileConnection: inYear('7', 3) }, 201)]
+      })
+
+      const failure = failureOf(
+        yield* run(harness, fortnoxCreateVoucherFileConnectionAction.id, {
+          FileId: '951209e2-211d-4dfc-9d4c-5c426122dc46',
+          VoucherSeries: 'A',
+          VoucherNumber: 7,
+          VoucherYear: 4
+        })
+      )
+
+      expect(failure).toMatchObject({
+        code: 'fortnox_voucher_mismatch',
+        underlying: { voucherSeries: 'A', voucherNumber: 7, financialYearId: 3 }
+      })
     })
   )
 })
