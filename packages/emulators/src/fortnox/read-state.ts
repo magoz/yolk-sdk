@@ -2,7 +2,8 @@
  * Fortnox emulator read-only resources (internal; part of the state built by `src/fortnox/state.ts`
  * and served by `src/fortnox/read-api.ts`): articles, price lists and prices, cost centers,
  * customer and supplier invoice payments, offers, print templates, the inbox, company settings,
- * the locked period, predefined accounts, labels, the five settings registers, and the user.
+ * the locked period, predefined accounts, labels, the five settings registers, the user, and the
+ * bookkeeping parts of `src/fortnox/bookkeeping-state.ts`.
  *
  * Every shape is a minimal one named after the fields the connector reads
  * (`@yolk-sdk/connectors/fortnox`), and every default is synthetic (Example AB, `example.test`).
@@ -15,6 +16,13 @@
  */
 import { Struct } from 'effect'
 import * as Schema from 'effect/Schema'
+import {
+  bookkeepingProblem,
+  defaultBookkeepingEntities,
+  emptyCompanyBookkeepingEntities,
+  fortnoxBookkeepingStateFields,
+  sortBookkeeping
+} from './bookkeeping-state.ts'
 
 const NonEmpty = Schema.String.check(Schema.isNonEmpty())
 
@@ -441,7 +449,8 @@ export const fortnoxReadStateFields = {
   termsOfDelivery: Schema.Array(FortnoxEmulatorDeliveryRegisterEntry),
   waysOfDelivery: Schema.Array(FortnoxEmulatorDeliveryRegisterEntry),
   units: Schema.Array(FortnoxEmulatorUnit),
-  me: FortnoxEmulatorMe
+  me: FortnoxEmulatorMe,
+  ...fortnoxBookkeepingStateFields
 }
 
 const FortnoxReadState = Schema.Struct(fortnoxReadStateFields)
@@ -761,7 +770,8 @@ export const defaultReadEntities: FortnoxReadEntities = {
     Email: 'user@example.test',
     Locale: 'sv_SE',
     SysAdmin: true
-  }
+  },
+  ...defaultBookkeepingEntities
 }
 
 /**
@@ -779,7 +789,8 @@ export const emptyCompanyReadEntities: FortnoxReadEntities = {
   supplierInvoicePayments: [],
   offers: [],
   labels: [],
-  inboxFiles: []
+  inboxFiles: [],
+  ...emptyCompanyBookkeepingEntities
 }
 
 // Building ---------------------------------------------------------------------------------------
@@ -867,6 +878,7 @@ const readProblem = (
   const templates = entities.printTemplates
 
   return firstProblem([
+    bookkeepingProblem(entities),
     unique('ArticleNumber', articles),
     unique('price list Code', priceLists),
     unique(
@@ -1158,6 +1170,7 @@ export const buildReadState = (
     termsOfPayment: [...entities.termsOfPayment].sort(byKey(item => item.Code)),
     termsOfDelivery: [...entities.termsOfDelivery].sort(byKey(item => item.Code)),
     waysOfDelivery: [...entities.waysOfDelivery].sort(byKey(item => item.Code)),
-    units: [...entities.units].sort(byKey(item => item.Code))
+    units: [...entities.units].sort(byKey(item => item.Code)),
+    ...sortBookkeeping(entities)
   }
 }

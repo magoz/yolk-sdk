@@ -344,6 +344,34 @@ export const fortnoxCaseSpecs: ReadonlyArray<FortnoxCaseSpec> = [
     fileName: 'profile-me.ts',
     exportName: 'fortnoxProfileMeFixture',
     doc: 'The token user profile (`Me`).'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+    seeds: [],
+    fileName: 'bookkeeping-financial-years.ts',
+    exportName: 'fortnoxFinancialYearByIdAndDateFixture',
+    doc: 'The financial year list, then its first year read back by Id and by its FromDate.'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.account-balances-list-get',
+    seeds: [],
+    fileName: 'bookkeeping-accounts.ts',
+    exportName: 'fortnoxAccountBalancesListGetFixture',
+    doc: 'The first financial year’s account page, and its first account read back.'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    seeds: [],
+    fileName: 'bookkeeping-vouchers.ts',
+    exportName: 'fortnoxVoucherListGetBalancedFixture',
+    doc: 'The first financial year’s voucher page and series, the first voucher, and its files.'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.sie-file-ibm437',
+    seeds: [],
+    fileName: 'bookkeeping-sie-file.ts',
+    exportName: 'fortnoxSieFileIbm437Fixture',
+    doc: 'The type 1 SIE file of the first financial year (`bodyBase64`).'
   }
 ]
 

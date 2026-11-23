@@ -1,7 +1,7 @@
 /**
  * Fortnox read-only resource conformance cases: company information, the customer list, and the
  * reads of the article, price, cost center, payment, offer, print template, inbox, settings,
- * settings register, and profile modules (internal; `cases.ts` lists them and `index.ts`
+ * settings register, profile, and bookkeeping modules (internal; `cases.ts` lists them and `index.ts`
  * re-exports them).
  *
  * Every case is `read`: it only sends `GET` requests through the REAL connector actions (and the
@@ -25,7 +25,25 @@ import {
   expectEqual
 } from '@yolk-sdk/conformance/case'
 import type { TypedConnectorAction } from '../../action.ts'
+import { binaryStringToBytes } from '../../base64-internal.ts'
 import { ConnectorHttpClient } from '../../http.ts'
+import {
+  fortnoxGetAccountAction,
+  fortnoxGetFinancialYearAction,
+  fortnoxGetVoucherAction,
+  fortnoxListAccountsAction,
+  fortnoxListFinancialYearsAction,
+  fortnoxListVoucherSeriesAction,
+  fortnoxListVouchersAction,
+  FortnoxGetAccountInput,
+  FortnoxGetVoucherInput,
+  FortnoxListAccountsInput,
+  FortnoxListFinancialYearsInput,
+  FortnoxListVoucherSeriesInput,
+  FortnoxListVouchersInput,
+  type FortnoxAccount,
+  type FortnoxFinancialYear
+} from '../bookkeeping.ts'
 import {
   fortnoxGetArticleAction,
   fortnoxListArticlesAction,
@@ -121,7 +139,16 @@ import {
   FortnoxListUnitsInput,
   FortnoxListWaysOfDeliveryInput
 } from '../settings-registers.ts'
+import { fortnoxGetSieFileAction, FortnoxGetSieFileInput } from '../sie.ts'
+import {
+  fortnoxListVoucherFileConnectionsAction,
+  FortnoxListVoucherFileConnectionsInput
+} from '../voucher-files.ts'
 import { fortnoxArticleListRowNumbersFixture } from './article-list-row-numbers.ts'
+import { fortnoxAccountBalancesListGetFixture } from './bookkeeping-accounts.ts'
+import { fortnoxFinancialYearByIdAndDateFixture } from './bookkeeping-financial-years.ts'
+import { fortnoxSieFileIbm437Fixture } from './bookkeeping-sie-file.ts'
+import { fortnoxVoucherListGetBalancedFixture } from './bookkeeping-vouchers.ts'
 import { fortnoxCompanyInformationFixture } from './company-information.ts'
 import { fortnoxCostCenterListMatchesGetFixture } from './cost-center-list-get.ts'
 import { fortnoxCustomerListMatchesGetFixture } from './customer-list-get.ts'
@@ -937,6 +964,247 @@ export const fortnoxProfileMeCase: FortnoxConformanceCase = defineConformanceCas
   })
 })
 
+// Bookkeeping ----------------------------------------------------------------------------------
+
+/** The first financial year a list answers (Fortnox lists the newest first). */
+const firstFinancialYear = Effect.gen(function* () {
+  const listed = yield* read(
+    fortnoxListFinancialYearsAction,
+    FortnoxListFinancialYearsInput.make({ limit: listLimit })
+  )
+
+  yield* expectPagination(listed.pagination, Chunk.size(listed.financialYears), 'financial year')
+
+  return yield* firstOf(listed.financialYears, 'the practice company needs a financial year')
+})
+
+const financialYearFields = (year: FortnoxFinancialYear) =>
+  scalars({
+    Id: year.Id,
+    FromDate: year.FromDate,
+    ToDate: year.ToDate,
+    AccountChartType: year.AccountChartType,
+    AccountingMethod: year.AccountingMethod
+  })
+
+export const fortnoxFinancialYearByIdAndDateCase: FortnoxConformanceCase = defineConformanceCase({
+  id: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+  title: 'Financial years read back by Id and by a date they contain',
+  safety: 'read',
+  docs: 'GET /3/financialyears returns `FinancialYears` plus `MetaInformation` (the archived example lists the newest year first and names the chart type `accountCharts`); GET /3/financialyears/{Id} returns one `FinancialYear`; `?date=YYYY-MM-DD` lists the year containing that date.',
+  wire: '`fortnox.list_financial_years` (limit 10) decodes every row and pagination metadata covering them; the first row has `YYYY-MM-DD` `FromDate` and `ToDate` with `FromDate` not after `ToDate`, and reads back with the same fields both by `id` and by its `FromDate` (`fortnox.get_financial_year`), the chart type decoding the same whether sent as `AccountChartType` or `accountCharts` (unverified: which name live list rows use). Aborts with a precondition when the company has no financial year.',
+  fixtures: [fortnoxFinancialYearByIdAndDateFixture.id],
+  run: Effect.gen(function* () {
+    const year = yield* firstFinancialYear
+
+    yield* expectConformance(
+      isoDatePattern.test(year.FromDate) &&
+        isoDatePattern.test(year.ToDate) &&
+        year.FromDate <= year.ToDate,
+      'expected the financial year to span YYYY-MM-DD dates in order',
+      { actual: { FromDate: year.FromDate, ToDate: year.ToDate } }
+    )
+
+    const byId = yield* read(fortnoxGetFinancialYearAction, { id: year.Id })
+    const byDate = yield* read(fortnoxGetFinancialYearAction, { date: year.FromDate })
+
+    yield* expectEqual(
+      financialYearFields(byId),
+      financialYearFields(year),
+      'expected the financial year to read back by Id as listed'
+    )
+    yield* expectEqual(
+      financialYearFields(byDate),
+      financialYearFields(year),
+      'expected the financial year to read back by its FromDate as listed'
+    )
+  })
+})
+
+const accountFields = (account: FortnoxAccount) =>
+  scalars({
+    Number: account.Number,
+    Description: account.Description,
+    Active: account.Active,
+    BalanceBroughtForward: account.BalanceBroughtForward,
+    BalanceCarriedForward: account.BalanceCarriedForward,
+    Year: account.Year
+  })
+
+export const fortnoxAccountBalancesListGetCase: FortnoxConformanceCase = defineConformanceCase({
+  id: 'fortnox.bookkeeping.account-balances-list-get',
+  title: 'Accounts list per financial year and read back with the same balances',
+  safety: 'read',
+  docs: 'GET /3/accounts?financialyear={Id} returns `Accounts` plus `MetaInformation`, sorted by number, each with its opening `BalanceBroughtForward` and closing `BalanceCarriedForward` in that year; GET /3/accounts/{Number}?financialyear={Id} returns one `Account` (the archived example sends `Project` as the number 0).',
+  wire: '`fortnox.list_accounts` (the first listed financial year, limit 10) decodes a populated page: pagination metadata covering the rows, account numbers ascending, every row in that year (`Year` its Id, or unset); the first account read back with `fortnox.get_account` in the same year has the same `Number`, `Description`, `Active`, `BalanceBroughtForward`, `BalanceCarriedForward`, and `Year` (decoding enforces finite balances or unset). Aborts with a precondition when the year has no account.',
+  fixtures: [fortnoxAccountBalancesListGetFixture.id],
+  run: Effect.gen(function* () {
+    const year = yield* firstFinancialYear
+
+    const listed = yield* read(
+      fortnoxListAccountsAction,
+      FortnoxListAccountsInput.make({ financialYearId: year.Id, limit: listLimit })
+    )
+
+    const rows = Chunk.toReadonlyArray(listed.accounts)
+
+    yield* expectPagination(listed.pagination, rows.length, 'account')
+
+    const first = yield* firstOf(listed.accounts, 'the first financial year needs an account')
+
+    yield* expectConformance(
+      rows.every((row, index) => index === 0 || (rows[index - 1]?.Number ?? 0) < row.Number),
+      'expected accounts sorted by ascending number'
+    )
+    yield* expectConformance(
+      rows.every(row => row.Year === undefined || row.Year === null || row.Year === year.Id),
+      'expected every listed account in the requested financial year'
+    )
+
+    const account = yield* read(
+      fortnoxGetAccountAction,
+      FortnoxGetAccountInput.make({ accountNumber: first.Number, financialYearId: year.Id })
+    )
+
+    yield* expectEqual(
+      accountFields(account),
+      accountFields(first),
+      'expected the listed account to read back with the same balances'
+    )
+  })
+})
+
+const toOre = (value: number | null | undefined) => Math.round((value ?? 0) * 100)
+
+export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineConformanceCase({
+  id: 'fortnox.bookkeeping.voucher-list-get-balanced',
+  title: 'Vouchers list per financial year and read back with balanced rows',
+  safety: 'read',
+  docs: 'GET /3/vouchers?financialyear={Id} returns `Vouchers` plus `MetaInformation`; a voucher is unique by `VoucherSeries`, `VoucherNumber`, and `Year`, which every row carries; GET /3/vouchers/{VoucherSeries}/{VoucherNumber}?financialyear={Id} returns one `Voucher` with `VoucherRows`; GET /3/voucherseries lists `VoucherSeriesCollection`; GET /3/voucherfileconnections lists `VoucherFileConnections` (the archived examples send `VoucherNumber` as a string).',
+  wire: '`fortnox.list_vouchers` (the first listed financial year, limit 10) decodes a populated page with pagination metadata covering the rows, every row in that year; `fortnox.list_voucher_series` for that year holds the first voucher’s series; `fortnox.get_voucher` reads the first voucher back with the same series, number, year, `Description`, and `TransactionDate`, at least two rows, and its rows not marked removed balance (total `Debit` equals total `Credit` in whole öre; unverified: how removed rows count); `fortnox.list_voucher_file_connections` for it decodes, and every connection names that voucher. Aborts with a precondition when the year has no voucher.',
+  fixtures: [fortnoxVoucherListGetBalancedFixture.id],
+  run: Effect.gen(function* () {
+    const year = yield* firstFinancialYear
+
+    const listed = yield* read(
+      fortnoxListVouchersAction,
+      FortnoxListVouchersInput.make({ financialYearId: year.Id, limit: listLimit })
+    )
+
+    yield* expectPagination(listed.pagination, Chunk.size(listed.vouchers), 'voucher')
+
+    const first = yield* firstOf(listed.vouchers, 'the first financial year needs a voucher')
+
+    yield* expectConformance(
+      Chunk.toReadonlyArray(listed.vouchers).every(row => row.Year === year.Id),
+      'expected every listed voucher in the requested financial year'
+    )
+
+    const series = yield* read(
+      fortnoxListVoucherSeriesAction,
+      FortnoxListVoucherSeriesInput.make({ financialYearId: year.Id, limit: 500 })
+    )
+
+    yield* expectConformance(
+      Chunk.toReadonlyArray(series.voucherSeries).some(item => item.Code === first.VoucherSeries),
+      'expected the voucher series list to hold the first voucher’s series'
+    )
+
+    const voucher = yield* read(
+      fortnoxGetVoucherAction,
+      FortnoxGetVoucherInput.make({
+        voucherSeries: first.VoucherSeries,
+        voucherNumber: first.VoucherNumber,
+        financialYearId: year.Id
+      })
+    )
+
+    yield* expectEqual(
+      scalars({
+        VoucherSeries: voucher.VoucherSeries,
+        VoucherNumber: voucher.VoucherNumber,
+        Year: voucher.Year,
+        Description: voucher.Description,
+        TransactionDate: voucher.TransactionDate
+      }),
+      scalars({
+        VoucherSeries: first.VoucherSeries,
+        VoucherNumber: first.VoucherNumber,
+        Year: first.Year,
+        Description: first.Description,
+        TransactionDate: first.TransactionDate
+      }),
+      'expected the listed voucher to read back as listed'
+    )
+
+    const rows = Chunk.toReadonlyArray(voucher.VoucherRows ?? Chunk.empty()).filter(
+      row => row.Removed !== true
+    )
+
+    const debit = rows.reduce((total, row) => total + toOre(row.Debit), 0)
+    const credit = rows.reduce((total, row) => total + toOre(row.Credit), 0)
+
+    yield* expectConformance(
+      rows.length >= 2 && debit === credit,
+      'expected the voucher to carry at least two rows that balance',
+      { actual: { rows: rows.length, debit: debit / 100, credit: credit / 100 } }
+    )
+
+    const connections = yield* read(
+      fortnoxListVoucherFileConnectionsAction,
+      FortnoxListVoucherFileConnectionsInput.make({
+        voucherSeries: voucher.VoucherSeries,
+        voucherNumber: voucher.VoucherNumber,
+        financialYearId: year.Id
+      })
+    )
+
+    yield* expectConformance(
+      Chunk.toReadonlyArray(connections.connections).every(
+        connection =>
+          connection.VoucherSeries === voucher.VoucherSeries &&
+          connection.VoucherNumber === voucher.VoucherNumber
+      ),
+      'expected every voucher file connection to name the voucher'
+    )
+  })
+})
+
+const sieRecord = (bytes: Uint8Array, record: string) =>
+  new TextDecoder('latin1')
+    .decode(bytes)
+    .split(/\r?\n/u)
+    .some(line => line.trim() === record)
+
+export const fortnoxSieFileIbm437Case: FortnoxConformanceCase = defineConformanceCase({
+  id: 'fortnox.bookkeeping.sie-file-ibm437',
+  title: 'A type 1 SIE file downloads as untouched PC8 bytes',
+  safety: 'read',
+  docs: 'GET /3/sie/{Type}?financialyear={Id} streams the SIE file (`application/octet-stream`); SIE filformat 4C requires `#FLAGGA` as the first record and IBM PC 8-bit text (`#FORMAT PC8`, code page 437).',
+  wire: '`fortnox.get_sie_file` (type 1, the first listed financial year) returns bytes that start with `#FLAGGA` and hold the records `#FORMAT PC8` and `#SIETYP 1`, with `byteLength` equal to the decoded `contentBase64` length (unverified: whether Fortnox writes `#FORMAT PC8`). Aborts with a precondition when the company has no financial year.',
+  fixtures: [fortnoxSieFileIbm437Fixture.id],
+  run: Effect.gen(function* () {
+    const year = yield* firstFinancialYear
+
+    const file = yield* read(
+      fortnoxGetSieFileAction,
+      FortnoxGetSieFileInput.make({ sieType: 1, financialYearId: year.Id })
+    )
+
+    const bytes = binaryStringToBytes(atob(file.contentBase64))
+
+    yield* expectEqual(
+      file.byteLength,
+      bytes.byteLength,
+      'expected byteLength to equal the downloaded SIE bytes'
+    )
+    yield* expectConformance(
+      sieRecord(bytes, '#FORMAT PC8') && sieRecord(bytes, '#SIETYP 1'),
+      'expected the SIE file to declare #FORMAT PC8 and #SIETYP 1'
+    )
+  })
+})
+
 /** The read cases, in fixture order (`fortnoxConformanceCases` lists them after the other seven). */
 export const fortnoxReadConformanceCases: ReadonlyArray<FortnoxConformanceCase> = [
   fortnoxCompanyInformationCase,
@@ -952,5 +1220,9 @@ export const fortnoxReadConformanceCases: ReadonlyArray<FortnoxConformanceCase> 
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxPredefinedAccountsAndLabelsCase,
   fortnoxSettingsRegistersCase,
-  fortnoxProfileMeCase
+  fortnoxProfileMeCase,
+  fortnoxFinancialYearByIdAndDateCase,
+  fortnoxAccountBalancesListGetCase,
+  fortnoxVoucherListGetBalancedCase,
+  fortnoxSieFileIbm437Case
 ]

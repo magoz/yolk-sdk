@@ -12,8 +12,9 @@
  * back, and report (never swallow) a failed restore, also through `ConformanceCleanupReporter` when
  * the case is being interrupted. The rejection case writes nothing when Fortnox
  * behaves as claimed: it first confirms the customer is absent and names any invoice Fortnox
- * unexpectedly creates for manual cancellation. The fourteen read cases of company information,
- * the customer list, and the read-only resource modules live in `read-cases.ts` and run last.
+ * unexpectedly creates for manual cancellation. The eighteen read cases of company information,
+ * the customer list, and the read-only resource and bookkeeping modules live in `read-cases.ts` and
+ * run last.
  */
 import { Cause, Chunk, Clock, Effect, Exit, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
@@ -58,10 +59,12 @@ import { fortnoxInvoicePreviewPdfFixture } from './invoice-preview-pdf.ts'
 import { fortnoxInvoiceRowDiscountFixture } from './invoice-row-discount.ts'
 import { fortnoxInvoiceSendEmailFixture } from './invoice-send-email.ts'
 import {
+  fortnoxAccountBalancesListGetCase,
   fortnoxArticleListRowNumbersCase,
   fortnoxCompanyInformationCase,
   fortnoxCostCenterListMatchesGetCase,
   fortnoxCustomerListMatchesGetCase,
+  fortnoxFinancialYearByIdAndDateCase,
   fortnoxInboxFolderFileBytesCase,
   fortnoxInvoicePaymentReadCase,
   fortnoxOfferRowsAndPreviewCase,
@@ -72,7 +75,9 @@ import {
   fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
-  fortnoxSupplierInvoicePaymentReadCase
+  fortnoxSieFileIbm437Case,
+  fortnoxSupplierInvoicePaymentReadCase,
+  fortnoxVoucherListGetBalancedCase
 } from './read-cases.ts'
 import {
   downloadBudget,
@@ -107,10 +112,12 @@ export {
 }
 
 export {
+  fortnoxAccountBalancesListGetCase,
   fortnoxArticleListRowNumbersCase,
   fortnoxCompanyInformationCase,
   fortnoxCostCenterListMatchesGetCase,
   fortnoxCustomerListMatchesGetCase,
+  fortnoxFinancialYearByIdAndDateCase,
   fortnoxInboxFolderFileBytesCase,
   fortnoxInvoicePaymentReadCase,
   fortnoxOfferRowsAndPreviewCase,
@@ -121,7 +128,9 @@ export {
   fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
-  fortnoxSupplierInvoicePaymentReadCase
+  fortnoxSieFileIbm437Case,
+  fortnoxSupplierInvoicePaymentReadCase,
+  fortnoxVoucherListGetBalancedCase
 }
 
 const integration = fortnoxConformanceIntegration

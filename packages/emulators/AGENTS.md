@@ -145,12 +145,14 @@ There is no root export or barrel.
   `src/notion/api.ts`, `src/todoist/api.ts`, `src/telegram/api.ts`, `src/github/api.ts`,
   `src/google.ts` over `src/google/{gmail,calendar,drive}.ts`, `src/linkedin-search/api.ts`,
   `src/mcp/api.ts`, whose routes list their JSON-RPC rows as variants, and `src/kie/api.ts`). Every
-  Fortnox route cites a case. Besides the seven invoice and customer cases, fourteen `read` cases
+  Fortnox route cites a case. Besides the seven invoice and customer cases, eighteen `read` cases
   cite `GET /3/companyinformation`, `GET /3/customers` (and `GET /3/customers/{CustomerNumber}`),
-  and the 34 read-only `GET` routes of `src/fortnox/read-api.ts` (articles, price lists and prices,
+  the 34 read-only `GET` routes of `src/fortnox/read-api.ts` (articles, price lists and prices,
   cost centers, customer and supplier invoice payments, offers and the offer preview, print
   templates, the inbox, company settings, the locked period, predefined accounts, labels, the five
-  settings registers, `/me`). As for every emulator, the wire shapes come from those conformance
+  settings registers, `/me`), and the 10 bookkeeping `GET` routes of
+  `src/fortnox/bookkeeping-api.ts` (financial years, accounts, voucher series, vouchers and the
+  series sublist, voucher file connections, SIE files). As for every emulator, the wire shapes come from those conformance
   fixtures: synthetic bodies shaped from the Fortnox OpenAPI spec and the archived resource pages'
   JSON examples (first rendered by this emulator's default seed, which fixed their key order, `@url`
   links, and extra fields, then checked against the spec). `test/fortnox-conformance.test.ts` sends
@@ -160,7 +162,8 @@ There is no root export or barrel.
   the connector's read fields, rendered in the wire types the connector's schemas accept; like every
   `/fortnox` route, they also answer requests no fixture records (other pages, filters, searches,
   ids) from the state. Their writes (and side-effecting GETs such as
-  `/offers/{DocumentNumber}/email`) are not emulated and fail closed with the 404: a connector write
+  `/offers/{DocumentNumber}/email`, and the voucher, voucher file connection, and archive creates)
+  are not emulated and fail closed with the 404: a connector write
   route needs verified evidence or a pending entry naming a conformance case's live run, and none of
   them has a case yet. The owner-approved exception for fixtureless Fortnox reads (PR #202) is
   retired: no Fortnox route is without a fixture, and no other emulator ever had a fixtureless-route
@@ -460,6 +463,17 @@ There is no root export or barrel.
   print templates, `me`, and inbox folders; `no-booked-invoices` has no invoice payments. Lookups
   of keys the state does not hold answer 404 `ErrorInformation` code `2999011`
   (`resourceNotFound`, synthetic).
+- Fortnox bookkeeping state (`src/fortnox/bookkeeping-state.ts`, spread into the read-only state)
+  has seed keys `financialYears`, `accounts`, `voucherSeries`, `vouchers`,
+  `voucherFileConnections`, and `sieFiles`; accounts, series, vouchers, and SIE files are per
+  financial year `Id`. Seeds are checked like the other read parts (duplicates; every year, series,
+  account, and voucher reference held; each voucher balances in whole öre; SIE bytes canonical
+  base64). `financialyear` selects the year by `Id`; omitted, the year containing the emulator's
+  today (as Fortnox's current year), else a 400. Financial years list newest first (the archived
+  example). The routes keep the archived examples' forms beyond OpenAPI: list rows name the chart
+  type `accountCharts`, single account and voucher reads send `Project: 0`, voucher file
+  connections send `VoucherNumber` as a string. `empty-company` keeps the years, accounts, series,
+  and SIE files and has no vouchers or file connections.
 - Microsoft Graph (`src/microsoft.ts` + `src/microsoft/*`) follows the Fortnox shape; see the
   README for its routes and wire claims. Non-obvious rules: behaviour comes only from the
   conformance fixtures; anything they do not show fails closed (400 `Synthetic*`). Its README's
@@ -1166,7 +1180,10 @@ quirks, auth, faults through the real connector, profiles, control plane),
 search, 404s, query allowlist, unemulated writes, the price sublist precedence, inbox folder JSON and
 file bytes, faults, seed integrity, profiles, and every read action of the new connector modules
 plus the offer preview and inbox file downloads run in-process through the real connector, and the
-read cases each route cites), `test/fortnox-conformance.test.ts` (all twenty-one Fortnox cases
+read cases each route cites), `test/fortnox-bookkeeping.test.ts` (the bookkeeping routes'
+manifest, year selection, filters, 400s and 404s, SIE bytes, unemulated creates, seed integrity, the
+`empty-company` profile, and every bookkeeping read action in-process through the real connector),
+`test/fortnox-conformance.test.ts` (all twenty-five Fortnox cases
 in-process and over a loopback socket, the ledger showing the restores, the state-equals-seed proof
 for the reversible and read cases, one drill per knob, disagreement drills covering every read
 case (a fault answering one route with a body, or a 404, that breaks one claim, failing exactly

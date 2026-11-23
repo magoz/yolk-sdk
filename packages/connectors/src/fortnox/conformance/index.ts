@@ -14,6 +14,10 @@
  */
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 import { fortnoxArticleListRowNumbersFixture } from './article-list-row-numbers.ts'
+import { fortnoxAccountBalancesListGetFixture } from './bookkeeping-accounts.ts'
+import { fortnoxFinancialYearByIdAndDateFixture } from './bookkeeping-financial-years.ts'
+import { fortnoxSieFileIbm437Fixture } from './bookkeeping-sie-file.ts'
+import { fortnoxVoucherListGetBalancedFixture } from './bookkeeping-vouchers.ts'
 import { fortnoxCompanyInformationFixture } from './company-information.ts'
 import { fortnoxCostCenterListMatchesGetFixture } from './cost-center-list-get.ts'
 import { fortnoxCustomerEmptyStringFixture } from './customer-empty-string.ts'
@@ -40,6 +44,7 @@ export {
   FortnoxConformanceConfig,
   FortnoxConformanceRestoreFailed,
   FortnoxConformanceSeeds,
+  fortnoxAccountBalancesListGetCase,
   fortnoxArticleListRowNumbersCase,
   fortnoxCompanyInformationCase,
   fortnoxConformanceCases,
@@ -49,6 +54,7 @@ export {
   fortnoxCostCenterListMatchesGetCase,
   fortnoxCustomerEmptyStringCase,
   fortnoxCustomerListMatchesGetCase,
+  fortnoxFinancialYearByIdAndDateCase,
   fortnoxInboxFolderFileBytesCase,
   fortnoxInvoiceListPopulatedCase,
   fortnoxInvoicePaymentFiltersCase,
@@ -64,7 +70,9 @@ export {
   fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodCase,
   fortnoxSettingsRegistersCase,
+  fortnoxSieFileIbm437Case,
   fortnoxSupplierInvoicePaymentReadCase,
+  fortnoxVoucherListGetBalancedCase,
   fortnoxWriteRejectionCase,
   type FortnoxConformanceCase,
   type FortnoxConformanceError,
@@ -75,11 +83,13 @@ export {
 export { fortnoxConformanceFixtureSeeds } from './seeds.ts'
 
 export {
+  fortnoxAccountBalancesListGetFixture,
   fortnoxArticleListRowNumbersFixture,
   fortnoxCompanyInformationFixture,
   fortnoxCostCenterListMatchesGetFixture,
   fortnoxCustomerEmptyStringFixture,
   fortnoxCustomerListMatchesGetFixture,
+  fortnoxFinancialYearByIdAndDateFixture,
   fortnoxInboxFolderFileBytesFixture,
   fortnoxInvoiceListPopulatedFixture,
   fortnoxInvoicePaymentFiltersFixture,
@@ -94,7 +104,9 @@ export {
   fortnoxProfileMeFixture,
   fortnoxSettingsCompanyAndLockedPeriodFixture,
   fortnoxSettingsRegistersFixture,
+  fortnoxSieFileIbm437Fixture,
   fortnoxSupplierInvoicePaymentReadFixture,
+  fortnoxVoucherListGetBalancedFixture,
   fortnoxWriteRejectionFixture
 }
 
@@ -120,5 +132,9 @@ export const fortnoxConformanceFixtures: ReadonlyArray<WireFixture> = [
   fortnoxSettingsCompanyAndLockedPeriodFixture,
   fortnoxPredefinedAccountsAndLabelsFixture,
   fortnoxSettingsRegistersFixture,
-  fortnoxProfileMeFixture
+  fortnoxProfileMeFixture,
+  fortnoxFinancialYearByIdAndDateFixture,
+  fortnoxAccountBalancesListGetFixture,
+  fortnoxVoucherListGetBalancedFixture,
+  fortnoxSieFileIbm437Fixture
 ]

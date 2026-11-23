@@ -987,7 +987,8 @@ describe('the real connector against the read-only routes', () => {
 
 describe('manifest', () => {
   it('lists 34 read-only routes, none a write, each citing the read case that records it', () => {
-    const reads = fortnoxEmulatorRoutes.slice(10)
+    // Routes 10-43 are `src/fortnox/read-api.ts`; the bookkeeping routes follow them.
+    const reads = fortnoxEmulatorRoutes.slice(10, 44)
 
     expect(reads).toHaveLength(34)
     expect(reads.filter(route => route.write || route.caseIds.length === 0)).toEqual([])

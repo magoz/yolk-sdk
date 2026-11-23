@@ -13,8 +13,9 @@
  * whose synthetic fixtures are the source of its shape): articles, price lists and prices,
  * cost centers, customer and supplier invoice payments, offers (with a preview PDF), print
  * templates, the inbox (folder JSON, file bytes), company settings, the locked period, predefined
- * accounts, labels, the modes/terms of payment, terms/ways of delivery, and units registers, and
- * the user (`/3/me`). Their writes are not emulated and fail closed with a 404.
+ * accounts, labels, the modes/terms of payment, terms/ways of delivery, and units registers, the
+ * user (`/3/me`), and the bookkeeping reads (financial years, accounts, voucher series, vouchers,
+ * voucher file connections, SIE files). Their writes are not emulated and fail closed with a 404.
  *
  * Node-only: `@emulators/core` imports Node builtins, so the core is loaded lazily by
  * `makeFortnoxEmulator` (importing this module has no side effects).

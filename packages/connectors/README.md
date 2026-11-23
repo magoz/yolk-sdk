@@ -832,9 +832,11 @@ email case aborts unless the invoice's `EmailInformation.EmailAddressTo` equals 
 seed exactly; the runner never runs it live unless its exact id is allowed. Neither the rejection
 case nor the email send reports through `ConformanceCleanupReporter`.
 
-Fourteen `read` cases cover company information, the customer list, and the read-only resource
+Eighteen `read` cases cover company information, the customer list, and the read-only resource
 modules (articles, prices, cost centers, payments, offers and the offer preview, print templates,
-the inbox and its file download, settings, the settings registers, and the profile). They need no
+the inbox and its file download, settings, the settings registers, the profile, and bookkeeping:
+financial years, account balances, a balanced voucher with its series and file connections, and a
+type 1 SIE file). They need no
 seed: each reads back the first row a list answers and claims only what the connector relies on
 when decoding (envelopes, `MetaInformation` where the connector requires it, and wire types such as
 numeric strings in list rows), aborting with a `precondition:` mismatch when the practice company

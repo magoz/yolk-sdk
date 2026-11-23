@@ -122,7 +122,7 @@ describe('route evidence manifest', () => {
   it('lists every route as an unverified connector route linked to Fortnox cases', () => {
     const caseIds = new Set(fortnoxConformanceCases.map(testCase => testCase.id))
 
-    expect(fortnoxEmulatorRoutes).toHaveLength(44)
+    expect(fortnoxEmulatorRoutes).toHaveLength(54)
     expect(fortnoxEmulatorRoutes.map(route => `${route.method} ${route.path}`)).toEqual([
       'GET /3/companyinformation',
       'GET /3/customers',
@@ -168,7 +168,18 @@ describe('route evidence manifest', () => {
       'GET /3/wayofdeliveries/{Code}',
       'GET /3/units',
       'GET /3/units/{Code}',
-      'GET /3/me'
+      'GET /3/me',
+      // Bookkeeping, in `src/fortnox/bookkeeping-api.ts`.
+      'GET /3/financialyears',
+      'GET /3/financialyears/{Id}',
+      'GET /3/accounts',
+      'GET /3/accounts/{Number}',
+      'GET /3/voucherseries',
+      'GET /3/vouchers',
+      'GET /3/vouchers/sublist/{VoucherSeries}',
+      'GET /3/vouchers/{VoucherSeries}/{VoucherNumber}',
+      'GET /3/voucherfileconnections',
+      'GET /3/sie/{Type}'
     ])
 
     // The read-only routes: GET only, no write, each citing the read cases whose fixtures shape it.
@@ -236,6 +247,11 @@ describe('route evidence manifest', () => {
       // A seeded key for each path parameter, by resource (offers are numbered apart from invoices).
       const concrete = (template: string): string =>
         template
+          .replace('/financialyears/{Id}', '/financialyears/2')
+          .replace('/accounts/{Number}', '/accounts/1930')
+          .replace('/vouchers/sublist/{VoucherSeries}', '/vouchers/sublist/A')
+          .replace('{VoucherSeries}/{VoucherNumber}', 'A/1')
+          .replace('/sie/{Type}', '/sie/1')
           .replace('{CustomerNumber}', '1001')
           .replace('/offers/{DocumentNumber}', '/offers/1')
           .replace('{DocumentNumber}', '103')
