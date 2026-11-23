@@ -25,7 +25,8 @@ import {
   NullableInt,
   NullableNumber,
   NullableString,
-  PaginationFields
+  PaginationFields,
+  sameVoucherSeries
 } from './fields.ts'
 import { FortnoxBookkeepingOAuthCredentialSlot } from './oauth.ts'
 import { FortnoxPagination } from './schemas.ts'
@@ -671,7 +672,7 @@ export const fortnoxCreateVoucherAction = defineAction({
       Effect.map(result =>
         Predicate.isTagged(result, 'Success') &&
         (result.value.Year !== financialYearId ||
-          result.value.VoucherSeries.toUpperCase() !== input.VoucherSeries.toUpperCase())
+          !sameVoucherSeries(result.value.VoucherSeries, input.VoucherSeries))
           ? ActionResult.failure({
               code: 'fortnox_voucher_mismatch',
               message: `Fortnox booked voucher ${result.value.VoucherSeries} ${result.value.VoucherNumber} in financial year ${result.value.Year}, not in series ${input.VoucherSeries} of financial year ${financialYearId}. It is booked: do not create it again.`,

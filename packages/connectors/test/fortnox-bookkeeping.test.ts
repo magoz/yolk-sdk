@@ -988,7 +988,8 @@ describe('Fortnox voucher file connections', () => {
         http: [
           response({ VoucherFileConnection: inYear('7', 3) }, 201),
           response({ VoucherFileConnection: connection('7') }, 201),
-          response({ VoucherFileConnection: { ...inYear('7', 4), FileId: 'other' } }, 201)
+          response({ VoucherFileConnection: { ...inYear('7', 4), FileId: 'other' } }, 201),
+          response({ VoucherFileConnection: inYear('7', 4) }, 201)
         ]
       })
 
@@ -1024,6 +1025,14 @@ describe('Fortnox voucher file connections', () => {
         code: 'fortnox_voucher_mismatch',
         underlying: { fileId: 'other' }
       })
+
+      // Series codes compare case-insensitively, as Fortnox searches do.
+      const lowerCase = yield* run(harness, fortnoxCreateVoucherFileConnectionAction.id, {
+        ...input,
+        VoucherSeries: 'a'
+      })
+
+      expect(Predicate.isTagged(lowerCase, 'Success')).toBe(true)
     })
   )
 })

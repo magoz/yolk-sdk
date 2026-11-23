@@ -50,6 +50,11 @@ export const CalendarDate = Schema.String.check(
   Schema.makeFilter(value => (isCalendarDate(value) ? true : 'Expected a real calendar date'))
 )
 
+// Fortnox searches ignore case (ILIKE, parameters guide), so voucher series codes compare
+// case-insensitively.
+export const sameVoucherSeries = (left: string, right: string) =>
+  left.toUpperCase() === right.toUpperCase()
+
 export const optionalMaxLength = (maxLength: number) =>
   Schema.optional(Schema.String.check(Schema.isMaxLength(maxLength)))
 

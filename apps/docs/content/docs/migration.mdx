@@ -35,12 +35,12 @@ Do not mix versions unless a release note explicitly says it is safe.
 `FortnoxConnector` grows from 91 to 102 actions: financial years, accounts, voucher series,
 vouchers, voucher file connections, and SIE files. Hosts that expose every Fortnox action as agent
 tools gain these eleven tools, including the `destructive` `fortnox.create_voucher` (Fortnox books
-the voucher at once and its API documents no voucher delete): keep approval on `destructive` tools, or filter
-the actions you expose. The new `bookkeeping` scope (`FortnoxBookkeepingOAuthCredentialSlot`) stays
-outside `FortnoxCombinedOAuthCredentialSlot`; Fortnox grants a scope added to an app only after the
-user authorizes again, so existing connections must reconnect before these actions work.
-`fortnox.get_sie_file` also needs the host `ConnectorBinaryHttpClient` in the connector layer. See
-[Bookkeeping](./connectors/fortnox#bookkeeping).
+the voucher at once and its API documents no voucher delete or update): keep approval on
+`destructive` tools, or filter the actions you expose. The new `bookkeeping` scope
+(`FortnoxBookkeepingOAuthCredentialSlot`) stays outside `FortnoxCombinedOAuthCredentialSlot`;
+Fortnox grants a scope added to an app only after the user authorizes again, so existing
+connections must reconnect before these actions work. `fortnox.get_sie_file` also needs the host
+`ConnectorBinaryHttpClient` in the connector layer. See [Bookkeeping](./connectors/fortnox#bookkeeping).
 
 ### Canary.152: lazy knowledge tokenizer
 

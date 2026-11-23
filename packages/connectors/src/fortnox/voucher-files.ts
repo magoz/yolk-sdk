@@ -15,7 +15,7 @@ import { defineAction } from '../action.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import { ActionResult } from '../result.ts'
-import { closedInput, NullableInt, NullableString } from './fields.ts'
+import { closedInput, NullableInt, NullableString, sameVoucherSeries } from './fields.ts'
 import {
   FortnoxFinancialYearId,
   FortnoxVoucherNumber,
@@ -83,11 +83,8 @@ type VoucherKey = {
   readonly financialYearId: number
 }
 
-// Fortnox searches ignore case (ILIKE, parameters guide), so series codes compare case-insensitively.
-const sameSeries = (left: string, right: string) => left.toUpperCase() === right.toUpperCase()
-
 const sameVoucher = (key: VoucherKey, connection: FortnoxVoucherFileConnection) =>
-  sameSeries(connection.VoucherSeries, key.voucherSeries) &&
+  sameVoucherSeries(connection.VoucherSeries, key.voucherSeries) &&
   connection.VoucherNumber === key.voucherNumber
 
 /** Pages read at most (500 rows each) before the list gives up instead of truncating. */
@@ -209,7 +206,7 @@ export const fortnoxCreateVoucherFileConnectionAction = defineAction({
 
         // Without VoucherYear the answer cannot prove the requested year: fail rather than claim it.
         return connection.FileId === input.FileId &&
-          sameSeries(connection.VoucherSeries, input.VoucherSeries) &&
+          sameVoucherSeries(connection.VoucherSeries, input.VoucherSeries) &&
           connection.VoucherNumber === input.VoucherNumber &&
           year === input.VoucherYear
           ? result
