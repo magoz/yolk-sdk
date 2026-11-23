@@ -38,6 +38,8 @@ import {
 } from '@yolk-sdk/connectors/conformance'
 import {
   FortnoxConformanceConfig,
+  fortnoxAccountBalancesListGetCase,
+  fortnoxAccountBalancesListGetFixture,
   FortnoxConformanceRestoreFailed,
   fortnoxConformanceCases,
   fortnoxConformanceCommentsMarker,
@@ -162,7 +164,11 @@ describe('Fortnox conformance cases', () => {
       ['fortnox.settings.company-and-locked-period', 'read'],
       ['fortnox.settings.predefined-accounts-and-labels', 'read'],
       ['fortnox.settings.registers-list-matches-get', 'read'],
-      ['fortnox.profile.me', 'read']
+      ['fortnox.profile.me', 'read'],
+      ['fortnox.bookkeeping.financial-year-id-and-date', 'read'],
+      ['fortnox.bookkeeping.account-balances-list-get', 'read'],
+      ['fortnox.bookkeeping.voucher-list-get-balanced', 'read'],
+      ['fortnox.bookkeeping.sie-file-ibm437', 'read']
     ])
     expect(fortnoxConformanceFixtures.map(fixture => fixture.caseId)).toEqual(
       fortnoxConformanceCases.map(testCase => testCase.id)
@@ -232,7 +238,7 @@ describe('Fortnox conformance cases', () => {
         layer: replayCaseLayer
       })
 
-      expect(report.summary).toEqual({ passed: 21, failed: 0, skipped: 0 })
+      expect(report.summary).toEqual({ passed: 25, failed: 0, skipped: 0 })
       expect(conformanceReportFailed(report)).toBe(false)
 
       for (const result of report.results) {
@@ -244,7 +250,7 @@ describe('Fortnox conformance cases', () => {
       }
 
       expect(formatConformanceReport(report).split('\n').at(-1)).toBe(
-        '21 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
+        '25 passed, 0 failed, 0 skipped; target replay; started 2026-09-29T12:00:00.000Z'
       )
     })
   )
@@ -261,7 +267,7 @@ describe('Fortnox conformance cases', () => {
         layer: ledgerCaseLayer(ledgers)
       })
 
-      expect(report.summary.passed).toBe(21)
+      expect(report.summary.passed).toBe(25)
 
       for (const testCase of fortnoxConformanceCases) {
         const { entries, remaining } = yield* ledgerOf(ledgers, testCase.id)
@@ -513,7 +519,11 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.settings.company-and-locked-period', 'passed', null],
         ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
         ['fortnox.settings.registers-list-matches-get', 'passed', null],
-        ['fortnox.profile.me', 'passed', null]
+        ['fortnox.profile.me', 'passed', null],
+        ['fortnox.bookkeeping.financial-year-id-and-date', 'passed', null],
+        ['fortnox.bookkeeping.account-balances-list-get', 'passed', null],
+        ['fortnox.bookkeeping.voucher-list-get-balanced', 'passed', null],
+        ['fortnox.bookkeeping.sie-file-ibm437', 'passed', null]
       ])
     })
   )
@@ -543,7 +553,11 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.settings.company-and-locked-period', 'passed', null],
         ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
         ['fortnox.settings.registers-list-matches-get', 'passed', null],
-        ['fortnox.profile.me', 'passed', null]
+        ['fortnox.profile.me', 'passed', null],
+        ['fortnox.bookkeeping.financial-year-id-and-date', 'passed', null],
+        ['fortnox.bookkeeping.account-balances-list-get', 'passed', null],
+        ['fortnox.bookkeeping.voucher-list-get-balanced', 'passed', null],
+        ['fortnox.bookkeeping.sie-file-ibm437', 'passed', null]
       ])
     })
   )
@@ -765,6 +779,32 @@ describe('Fortnox conformance disagreement drills', () => {
         })
         expect(exchangeIndices(entries)).toEqual(['GET 0', 'PUT 1', 'PUT 2', 'GET 3'])
       })
+  )
+
+  it.effect('compares account balances in whole öre, so float noise in list rows passes', () =>
+    Effect.gen(function* () {
+      const noisy = replaceResponse(
+        fortnoxAccountBalancesListGetFixture,
+        1,
+        replaceInBody('"BalanceCarriedForward":27874.5,', '"BalanceCarriedForward":27874.499999,')
+      )
+
+      const passed = yield* replayRun(fortnoxAccountBalancesListGetCase, noisy)
+
+      expect(passed.report.summary.passed).toBe(1)
+
+      const off = replaceResponse(
+        fortnoxAccountBalancesListGetFixture,
+        1,
+        replaceInBody('"BalanceCarriedForward":27874.5,', '"BalanceCarriedForward":27874.49,')
+      )
+
+      const { failure } = yield* drill(fortnoxAccountBalancesListGetCase, off)
+
+      expect(failure?.message).toContain(
+        'expected the listed account to read back with the same balances'
+      )
+    })
   )
 
   it.effect('aborts the sticky-discount case before any write without explicit discounts', () =>

@@ -722,6 +722,19 @@ downloads):
 | `GET /3/modesofpayments`, `termsofpayments`, `termsofdeliveries`, `wayofdeliveries`, `units` (and `/{Code}`)    | `page`/`limit`, `MetaInformation`; a mode of payment's `AccountNumber` is a string in list rows                                                                                                                                        |
 | `GET /3/me`                                                                                                     | `{ Me }`                                                                                                                                                                                                                               |
 
+Bookkeeping (`GET` only; the connector's financial year, account, voucher series, voucher, voucher
+file connection, and SIE file reads). `financialyear` selects the year by `Id`; omitted, the year
+containing today, else the newest year:
+
+| Route                                                                                                           | Behavior                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /3/financialyears`, `GET /3/financialyears/{Id}`                                                           | Newest first; `date` lists the year containing it; list rows name the chart type `accountCharts`                                                                 |
+| `GET /3/accounts`, `GET /3/accounts/{Number}`                                                                   | Per year, with `BalanceBroughtForward`/`BalanceCarriedForward`; a single read sends `Project: 0`                                                                 |
+| `GET /3/voucherseries`                                                                                          | Per year; list rows without `NextVoucherNumber` (the archived example)                                                                                           |
+| `GET /3/vouchers`, `GET /3/vouchers/sublist/{VoucherSeries}`, `GET /3/vouchers/{VoucherSeries}/{VoucherNumber}` | `fromdate`/`todate` (TransactionDate), `costcenter` (case-insensitive substring); list rows have no rows; a single read has rows, `Comments: null`, `Project: 0` |
+| `GET /3/voucherfileconnections`                                                                                 | One of `voucherseries`, `vouchernumber`, `voucheryear` (case-insensitive substring; two or more get a 400) plus `financialyear`; `VoucherNumber` as a string     |
+| `GET /3/sie/{Type}`                                                                                             | The year's SIE file bytes (`application/octet-stream`); type 1-4                                                                                                 |
+
 `GET /3/companyinformation`, `GET /3/customers`, and every read-only route above cite the Fortnox
 read conformance cases (`fortnox.company.information-decodes`, `fortnox.customer.list-matches-get`,
 and one case per resource module; see the
@@ -733,7 +746,7 @@ body byte for byte, so the emulator cannot drift; a fixture changes only for a c
 live-run reason. They use minimal synthetic shapes named after
 the connector's read fields (in the wire types the connector's schemas accept), are unverified, and
 answer requests no fixture records (other pages, filters, searches, ids) from the state. Their
-writes (`POST`, `PUT`, `DELETE`,
+writes (`POST`, `PUT`, `DELETE`, including voucher and voucher file connection creates,
 and side-effecting `GET`s such as `/offers/{DocumentNumber}/email` and `/print`) are not emulated
 and fail closed with the 404 below: emulating a connector write needs a conformance case and its
 live run first. Lists of `/3/offers` filter on the stored fields (unverified: `expired` is an

@@ -25,6 +25,7 @@ import { fortnoxApiBaseUrl } from '@yolk-sdk/connectors/fortnox'
 import { isWireBase64BodyResponse, isWireStreamResponse } from '@yolk-sdk/conformance/fixture'
 import {
   FortnoxConformanceConfig,
+  fortnoxAccountBalancesListGetFixture,
   fortnoxArticleListRowNumbersFixture,
   fortnoxCompanyInformationFixture,
   fortnoxConformanceCases,
@@ -32,6 +33,7 @@ import {
   fortnoxConformanceFixtureSeeds,
   fortnoxCostCenterListMatchesGetFixture,
   fortnoxCustomerListMatchesGetFixture,
+  fortnoxFinancialYearByIdAndDateFixture,
   fortnoxInboxFolderFileBytesFixture,
   fortnoxInvoicePaymentReadFixture,
   fortnoxOfferRowsAndPreviewFixture,
@@ -42,7 +44,9 @@ import {
   fortnoxReadConformanceCases,
   fortnoxSettingsCompanyAndLockedPeriodFixture,
   fortnoxSettingsRegistersFixture,
-  fortnoxSupplierInvoicePaymentReadFixture
+  fortnoxSieFileIbm437Fixture,
+  fortnoxSupplierInvoicePaymentReadFixture,
+  fortnoxVoucherListGetBalancedFixture
 } from '@yolk-sdk/connectors/fortnox/conformance'
 import {
   makeFortnoxEmulator,
@@ -207,7 +211,7 @@ describe('cross-check A: in-process emulator through the real connector', () => 
             .filter(testCase => testCase.safety === 'read')
             .map(testCase => testCase.id)
 
-          expect(readIds).toHaveLength(17)
+          expect(readIds).toHaveLength(21)
 
           for (const id of readIds) {
             expect(stateOf(id), id).toEqual(seedOf(id))
@@ -627,6 +631,80 @@ const readDrills: ReadonlyArray<{
     caseId: 'fortnox.profile.me',
     fault: answer('/3/me', { Me: { Id: ' ' } }),
     message: 'expected the profile to carry a non-empty Id'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.financial-year-id-and-date',
+    fault: answer('/3/financialyears/2', {
+      FinancialYear: {
+        Id: 2,
+        FromDate: '2026-01-01',
+        ToDate: '2026-06-30',
+        AccountChartType: 'Bas 2026',
+        AccountingMethod: 'ACCRUAL'
+      }
+    }),
+    message: 'expected the financial year to read back by Id as listed'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.account-balances-list-get',
+    fault: answer('/3/accounts/1930', {
+      Account: {
+        Number: 1930,
+        Description: 'Bank account (synthetic)',
+        Active: true,
+        BalanceBroughtForward: 15000,
+        BalanceCarriedForward: 1,
+        Year: 2
+      }
+    }),
+    message: 'expected the listed account to read back with the same balances'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    fault: answer('/3/vouchers/A/1', {
+      Voucher: {
+        Description: 'Bank fee (synthetic)',
+        TransactionDate: '2026-09-01',
+        VoucherNumber: 1,
+        VoucherRows: [
+          { Account: 6570, Debit: 125.5, Credit: 0 },
+          { Account: 1930, Debit: 0, Credit: 125 }
+        ],
+        VoucherSeries: 'A',
+        Year: 2
+      }
+    }),
+    message: 'expected the voucher to carry at least two rows that balance'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    fault: answer('/3/vouchers/sublist/A', {
+      Vouchers: [{ VoucherNumber: 1, VoucherSeries: 'A', Year: 1 }],
+      MetaInformation: meta
+    }),
+    message: 'expected the series list to hold the first voucher'
+  },
+  {
+    // A row of another voucher without VoucherYear: the action skips it, the raw claim fails.
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    fault: answer('/3/voucherfileconnections', {
+      VoucherFileConnections: [
+        { FileId: 'drill-file', Name: 'x.pdf', VoucherNumber: '1', VoucherSeries: 'B' }
+      ],
+      MetaInformation: meta
+    }),
+    message: 'expected every voucher file connection row to carry VoucherYear'
+  },
+  {
+    caseId: 'fortnox.bookkeeping.sie-file-ibm437',
+    fault: {
+      kind: 'status',
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+      body: '#FLAGGA 0\r\n#FORMAT ANSI\r\n#SIETYP 1\r\n',
+      match: { method: 'GET', path: '/3/sie/1' }
+    },
+    message: 'expected the SIE file to declare #FORMAT PC8 and #SIETYP 1'
   }
 ]
 
@@ -668,7 +746,11 @@ const readFixtures = [
   fortnoxSettingsCompanyAndLockedPeriodFixture,
   fortnoxPredefinedAccountsAndLabelsFixture,
   fortnoxSettingsRegistersFixture,
-  fortnoxProfileMeFixture
+  fortnoxProfileMeFixture,
+  fortnoxFinancialYearByIdAndDateFixture,
+  fortnoxAccountBalancesListGetFixture,
+  fortnoxVoucherListGetBalancedFixture,
+  fortnoxSieFileIbm437Fixture
 ]
 
 const base64Of = (bytes: ArrayBuffer): string => btoa(String.fromCharCode(...new Uint8Array(bytes)))

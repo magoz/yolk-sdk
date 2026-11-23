@@ -11,6 +11,7 @@ import type { Hono } from '@emulators/core'
 import { Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { answeredOutsideCore, emulatorJobHeader, handlerFailedResponse } from '../emulator-http.ts'
+import { fortnoxBookkeepingRoutes } from './bookkeeping-api.ts'
 import { fortnoxReadRoutes } from './read-api.ts'
 import {
   connectorRoute,
@@ -1046,7 +1047,8 @@ export const fortnoxApiRoutes: ReadonlyArray<FortnoxApiRoute> = [
   connectorRoute('PUT', '/invoices/{DocumentNumber}', true, [discountCase], updateInvoice),
   connectorRoute('GET', '/invoices/{DocumentNumber}/preview', false, [previewCase], previewInvoice),
   connectorRoute('GET', '/invoices/{DocumentNumber}/email', true, [emailCase], emailInvoice),
-  ...fortnoxReadRoutes
+  ...fortnoxReadRoutes,
+  ...fortnoxBookkeepingRoutes
 ]
 
 /** One observed Fortnox quirk the emulator implements, and the case that claims it. */
