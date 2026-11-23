@@ -1,8 +1,9 @@
 import type { WireFixture } from '@yolk-sdk/conformance/fixture'
 
 /**
- * A populated voucher page of the first financial year, its voucher series, the first voucher with
- * its rows, and that voucher’s file connections.
+ * A populated voucher page of the first financial year, its voucher series, the first voucher’s
+ * series list, the first voucher with its rows, and its file connections (which also name another
+ * series’ voucher with the same number).
  *
  * Synthetic placeholder (`evidence: 'unverified'`) shaped from the Fortnox API reference
  * (https://api.fortnox.se/apidocs) and the JSON examples of the archived resource pages
@@ -22,7 +23,7 @@ export const fortnoxVoucherListGetBalancedFixture: WireFixture = {
   recordedAt: '2026-11-23',
   account: 'synthetic',
   endpoint: 'https://api.fortnox.se/3',
-  note: 'Financial year list (limit 10), the voucher list of the first year (limit 10), its voucher series (limit 500), the first voucher by series, number, and year, and its voucher file connections. Shaped from the Fortnox API reference (GET /3/vouchers, /3/vouchers/{VoucherSeries}/{VoucherNumber}, /3/voucherseries, /3/voucherfileconnections) and the archived examples (single read `Comments` null and `Project` 0; connection `VoucherNumber` a string). Synthetic placeholder (bodies first rendered by the Fortnox emulator default seed, then checked against the reference); not recorded from a live service.',
+  note: 'Financial year list (limit 10), the voucher list of the first year (limit 10), its voucher series (limit 500), the first voucher’s series list (limit 10), the first voucher by series, number, and year, and its voucher file connections. Shaped from the Fortnox API reference (GET /3/vouchers, /3/vouchers/{VoucherSeries}/{VoucherNumber}, /3/voucherseries, /3/voucherfileconnections) and the archived examples (single read `Comments` null and `Project` 0; series list rows without `NextVoucherNumber`; connection `VoucherNumber` a string). Synthetic placeholder (bodies first rendered by the Fortnox emulator default seed, then checked against the reference); not recorded from a live service.',
   exchanges: [
     {
       request: {
@@ -53,7 +54,7 @@ export const fortnoxVoucherListGetBalancedFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"Vouchers":[{"@url":"https://api.fortnox.se/3/vouchers/A/1?financialyear=2","Description":"Bank fee (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-01","VoucherNumber":1,"VoucherSeries":"A","Year":2},{"@url":"https://api.fortnox.se/3/vouchers/A/2?financialyear=2","Description":"Sale (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-15","VoucherNumber":2,"VoucherSeries":"A","Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+        body: '{"Vouchers":[{"@url":"https://api.fortnox.se/3/vouchers/A/1?financialyear=2","Description":"Bank fee (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-01","VoucherNumber":1,"VoucherSeries":"A","Year":2},{"@url":"https://api.fortnox.se/3/vouchers/A/2?financialyear=2","Description":"Sale (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-15","VoucherNumber":2,"VoucherSeries":"A","Year":2},{"@url":"https://api.fortnox.se/3/vouchers/B/1?financialyear=2","Description":"Customer invoice (synthetic)","ReferenceNumber":"101","ReferenceType":"INVOICE","TransactionDate":"2026-09-20","VoucherNumber":1,"VoucherSeries":"B","Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":3}}'
       }
     },
     {
@@ -69,7 +70,23 @@ export const fortnoxVoucherListGetBalancedFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"VoucherSeriesCollection":[{"@url":"https://api.fortnox.se/3/voucherseries/A?financialyear=2","Code":"A","Description":"Accounting (synthetic)","Manual":true,"NextVoucherNumber":3,"Year":2},{"@url":"https://api.fortnox.se/3/voucherseries/B?financialyear=2","Code":"B","Description":"Customer invoices (synthetic)","Manual":false,"NextVoucherNumber":1,"Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+        body: '{"VoucherSeriesCollection":[{"@url":"https://api.fortnox.se/3/voucherseries/A?financialyear=2","Code":"A","Description":"Accounting (synthetic)","Manual":true,"Year":2},{"@url":"https://api.fortnox.se/3/voucherseries/B?financialyear=2","Code":"B","Description":"Customer invoices (synthetic)","Manual":false,"Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
+      }
+    },
+    {
+      request: {
+        method: 'GET',
+        url: 'https://api.fortnox.se/3/vouchers/sublist/A?limit=10&financialyear=2',
+        headers: {
+          accept: 'application/json'
+        }
+      },
+      response: {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: '{"Vouchers":[{"@url":"https://api.fortnox.se/3/vouchers/A/1?financialyear=2","Description":"Bank fee (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-01","VoucherNumber":1,"VoucherSeries":"A","Year":2},{"@url":"https://api.fortnox.se/3/vouchers/A/2?financialyear=2","Description":"Sale (synthetic)","ReferenceNumber":"","ReferenceType":"MANUAL","TransactionDate":"2026-09-15","VoucherNumber":2,"VoucherSeries":"A","Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
       }
     },
     {
@@ -101,7 +118,7 @@ export const fortnoxVoucherListGetBalancedFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"VoucherFileConnections":[{"@url":"https://api.fortnox.se/3/voucherfileconnections/00000000-0000-4000-8000-0000000000a1","FileId":"00000000-0000-4000-8000-0000000000a1","Name":"receipt.pdf","VoucherDescription":"Bank fee (synthetic)","VoucherNumber":"1","VoucherSeries":"A","VoucherYear":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":1}}'
+        body: '{"VoucherFileConnections":[{"@url":"https://api.fortnox.se/3/voucherfileconnections/00000000-0000-4000-8000-0000000000a1","FileId":"00000000-0000-4000-8000-0000000000a1","Name":"receipt.pdf","VoucherDescription":"Bank fee (synthetic)","VoucherNumber":"1","VoucherSeries":"A","VoucherYear":2},{"@url":"https://api.fortnox.se/3/voucherfileconnections/00000000-0000-4000-8000-0000000000b1","FileId":"00000000-0000-4000-8000-0000000000b1","Name":"invoice-101.pdf","VoucherDescription":"Customer invoice (synthetic)","VoucherNumber":"1","VoucherSeries":"B","VoucherYear":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":2}}'
       }
     }
   ]

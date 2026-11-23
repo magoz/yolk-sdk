@@ -5,10 +5,10 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * stored as `bodyBase64`).
  *
  * Synthetic placeholder (`evidence: 'unverified'`) shaped from the Fortnox API reference
- * (https://api.fortnox.se/apidocs) and the JSON examples of the archived resource pages
- * (developer.fortnox.se/documentation/resources, Wayback Machine), until a live recording
- * replaces it. The bodies were first rendered by the Fortnox emulator's default seed, then checked
- * against that reference. The fixture is the source of the emulator's bookkeeping answers
+ * (https://api.fortnox.se/apidocs, GET /3/sie/{Type}) and SIE filformat 4C
+ * (https://sie.se/format/), until a live recording replaces it. The SIE bytes were first rendered
+ * by the Fortnox emulator's default seed. The fixture is the source of the emulator's bookkeeping
+ * answers
  * (`@yolk-sdk/emulators/fortnox` must answer its requests byte for byte); change it only for a
  * cited spec or live-run reason.
  * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a
@@ -54,7 +54,7 @@ export const fortnoxSieFileIbm437Fixture: WireFixture = {
           'content-type': 'application/octet-stream'
         },
         bodyBase64:
-          'I0ZMQUdHQSAwDQojUFJPR1JBTSAiU3ludGhldGljIiAxDQojRk9STUFUIFBDOA0KI1NJRVRZUCAxDQojRk5BTU4gIkV4YW1wbGUgQUIgKHN5bnRoZXRpYykglCINCiNSQVIgMCAyMDI2MDEwMSAyMDI2MTIzMQ0KI0tPTlRPIDE5MzAgIkJhbmsgYWNjb3VudCAoc3ludGhldGljKSINCiNJQiAwIDE5MzAgMTUwMDAuMDANCiNVQiAwIDE5MzAgMjczNzQuNTANCg=='
+          'I0ZMQUdHQSAwDQojUFJPR1JBTSAiU3ludGhldGljIiAxDQojRk9STUFUIFBDOA0KI0dFTiAyMDI2MDkyOQ0KI1NJRVRZUCAxDQojRk5BTU4gIkV4YW1wbGUgQUIgKHN5bnRoZXRpYykglCINCiNSQVIgMCAyMDI2MDEwMSAyMDI2MTIzMQ0KI0tPTlRPIDE5MzAgIkJhbmsgYWNjb3VudCAoc3ludGhldGljKSINCiNJQiAwIDE5MzAgMTUwMDAuMDANCiNVQiAwIDE5MzAgMjc4NzQuNTANCg=='
       }
     }
   ]

@@ -163,7 +163,7 @@ describe('Fortnox conformance cases', () => {
       ['fortnox.settings.predefined-accounts-and-labels', 'read'],
       ['fortnox.settings.registers-list-matches-get', 'read'],
       ['fortnox.profile.me', 'read'],
-      ['fortnox.bookkeeping.financial-year-by-id-and-date', 'read'],
+      ['fortnox.bookkeeping.financial-year-id-and-date', 'read'],
       ['fortnox.bookkeeping.account-balances-list-get', 'read'],
       ['fortnox.bookkeeping.voucher-list-get-balanced', 'read'],
       ['fortnox.bookkeeping.sie-file-ibm437', 'read']
@@ -518,7 +518,7 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
         ['fortnox.settings.registers-list-matches-get', 'passed', null],
         ['fortnox.profile.me', 'passed', null],
-        ['fortnox.bookkeeping.financial-year-by-id-and-date', 'passed', null],
+        ['fortnox.bookkeeping.financial-year-id-and-date', 'passed', null],
         ['fortnox.bookkeeping.account-balances-list-get', 'passed', null],
         ['fortnox.bookkeeping.voucher-list-get-balanced', 'passed', null],
         ['fortnox.bookkeeping.sie-file-ibm437', 'passed', null]
@@ -552,7 +552,7 @@ describe('Fortnox conformance safety on a live target', () => {
         ['fortnox.settings.predefined-accounts-and-labels', 'passed', null],
         ['fortnox.settings.registers-list-matches-get', 'passed', null],
         ['fortnox.profile.me', 'passed', null],
-        ['fortnox.bookkeeping.financial-year-by-id-and-date', 'passed', null],
+        ['fortnox.bookkeeping.financial-year-id-and-date', 'passed', null],
         ['fortnox.bookkeeping.account-balances-list-get', 'passed', null],
         ['fortnox.bookkeeping.voucher-list-get-balanced', 'passed', null],
         ['fortnox.bookkeeping.sie-file-ibm437', 'passed', null]

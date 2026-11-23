@@ -17,10 +17,15 @@
  *
  * @experimental
  */
-import type { FortnoxEmulatorAccount, FortnoxEmulatorVoucher } from './bookkeeping-state.ts'
+import type {
+  FortnoxEmulatorAccount,
+  FortnoxEmulatorVoucher,
+  FortnoxEmulatorVoucherFileConnection
+} from './bookkeeping-state.ts'
 import {
   base64Bytes,
   connectorRoute,
+  contains,
   dateRange,
   invalidField,
   isIsoDate,
@@ -36,7 +41,7 @@ import {
 import type { FortnoxEmulatorState } from './state.ts'
 
 // The read conformance cases each route follows (`@yolk-sdk/connectors/fortnox/conformance`).
-const financialYearCase = 'fortnox.bookkeeping.financial-year-by-id-and-date'
+const financialYearCase = 'fortnox.bookkeeping.financial-year-id-and-date'
 
 const accountCase = 'fortnox.bookkeeping.account-balances-list-get'
 
@@ -52,7 +57,10 @@ const param = (params: Readonly<Record<string, string>>, name: string): string =
 const yearUrl = (env: FortnoxApiEnv, year: number, ...segments: ReadonlyArray<string>) =>
   `${resourceUrl(env, ...segments)}?financialyear=${year}`
 
-/** The `financialyear` query Id, or the year containing today; a 400 when there is none. */
+/**
+ * The `financialyear` query Id; omitted, the year containing today, else the newest year (so an
+ * unpinned clock past the seeded years keeps answering); a 400 for an unknown Id or no year.
+ */
 const selectedYear = (
   state: FortnoxEmulatorState,
   query: URLSearchParams,
@@ -62,11 +70,12 @@ const selectedYear = (
 
   if (raw === null) {
     const date = today(env)
-    const current = state.financialYears.find(year => year.FromDate <= date && date <= year.ToDate)
 
-    return current === undefined
-      ? invalidField('no financial year contains today; pass financialyear.')
-      : current.Id
+    const current =
+      state.financialYears.find(year => year.FromDate <= date && date <= year.ToDate) ??
+      state.financialYears[0]
+
+    return current === undefined ? invalidField('the company has no financial year.') : current.Id
   }
 
   const id = Number(raw)
@@ -183,12 +192,12 @@ const listVoucherSeries: RouteHandler = (state, { query }, env) => {
     'VoucherSeriesCollection',
     state.voucherSeries.filter(series => series.Year === year),
     query,
+    // The archived list example leaves `NextVoucherNumber` out of list rows.
     series => ({
       '@url': yearUrl(env, series.Year, 'voucherseries', series.Code),
       Code: series.Code,
       Description: series.Description,
       Manual: series.Manual,
-      NextVoucherNumber: series.NextVoucherNumber,
       Year: series.Year
     })
   )
@@ -227,7 +236,7 @@ const listVouchersIn =
         voucher =>
           voucher.Year === year &&
           (code === undefined || voucher.VoucherSeries === code) &&
-          (costCenter === null || voucher.CostCenter === costCenter) &&
+          (costCenter === null || contains(voucher.CostCenter, costCenter)) &&
           (range.from === null || voucher.TransactionDate >= range.from) &&
           (range.to === null || voucher.TransactionDate <= range.to)
       ),
@@ -294,22 +303,31 @@ const getVoucher: RouteHandler = (state, { params, query }, env) => {
 
 // Voucher file connections -----------------------------------------------------------------------
 
+const connectionSearchKeys = ['voucherseries', 'vouchernumber', 'voucheryear'] as const
+
+// The parameters guide: one resource-specific filter at a time (more get a 400 here rather than a
+// guess), matched as a case-insensitive substring; `financialyear` is a global parameter.
 const listVoucherFileConnections: RouteHandler = (state, { query }, env) => {
-  const series = query.get('voucherseries')
-  const number = query.get('vouchernumber')
-  const voucherYear = query.get('voucheryear')
-  const raw = query.get('financialyear')
-  const financialYear = raw === null ? null : selectedYear(state, query, env)
+  const searches = connectionSearchKeys.filter(key => query.has(key))
+
+  if (searches.length > 1) {
+    return invalidField('only one resource-specific filter is emulated per request.')
+  }
+
+  const financialYear = query.has('financialyear') ? selectedYear(state, query, env) : null
 
   if (financialYear instanceof Response) return financialYear
+
+  const field = (connection: FortnoxEmulatorVoucherFileConnection, key: string) =>
+    key === 'voucherseries'
+      ? connection.VoucherSeries
+      : String(key === 'vouchernumber' ? connection.VoucherNumber : connection.VoucherYear)
 
   return paged(
     'VoucherFileConnections',
     state.voucherFileConnections.filter(
       connection =>
-        (series === null || connection.VoucherSeries === series) &&
-        (number === null || String(connection.VoucherNumber) === number) &&
-        (voucherYear === null || String(connection.VoucherYear) === voucherYear) &&
+        searches.every(key => contains(field(connection, key), query.get(key) ?? '')) &&
         (financialYear === null || connection.VoucherYear === financialYear)
     ),
     query,

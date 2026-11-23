@@ -633,7 +633,7 @@ const readDrills: ReadonlyArray<{
     message: 'expected the profile to carry a non-empty Id'
   },
   {
-    caseId: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+    caseId: 'fortnox.bookkeeping.financial-year-id-and-date',
     fault: answer('/3/financialyears/2', {
       FinancialYear: {
         Id: 2,
@@ -675,6 +675,17 @@ const readDrills: ReadonlyArray<{
       }
     }),
     message: 'expected the voucher to carry at least two rows that balance'
+  },
+  {
+    // A row of another voucher without VoucherYear: the action skips it, the raw claim fails.
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    fault: answer('/3/voucherfileconnections', {
+      VoucherFileConnections: [
+        { FileId: 'drill-file', Name: 'x.pdf', VoucherNumber: '1', VoucherSeries: 'B' }
+      ],
+      MetaInformation: meta
+    }),
+    message: 'expected every voucher file connection row to carry VoucherYear'
   },
   {
     caseId: 'fortnox.bookkeeping.sie-file-ibm437',

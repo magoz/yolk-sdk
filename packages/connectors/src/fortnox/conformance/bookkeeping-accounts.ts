@@ -53,7 +53,7 @@ export const fortnoxAccountBalancesListGetFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"Accounts":[{"@url":"https://api.fortnox.se/3/accounts/1930?financialyear=2","Active":true,"BalanceBroughtForward":15000,"BalanceCarriedForward":27374.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank account (synthetic)","Number":1930,"Project":"","ProjectSettings":"ALLOWED","SRU":7281,"VATCode":null,"Year":2},{"@url":"https://api.fortnox.se/3/accounts/3001?financialyear=2","Active":true,"BalanceBroughtForward":0,"BalanceCarriedForward":-12500,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Sales (synthetic)","Number":3001,"Project":"","ProjectSettings":"ALLOWED","SRU":7410,"VATCode":"MP1","Year":2},{"@url":"https://api.fortnox.se/3/accounts/6570?financialyear=2","Active":true,"BalanceBroughtForward":0,"BalanceCarriedForward":125.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank fees (synthetic)","Number":6570,"Project":"","ProjectSettings":"ALLOWED","SRU":7513,"VATCode":null,"Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":3}}'
+        body: '{"Accounts":[{"@url":"https://api.fortnox.se/3/accounts/1930?financialyear=2","Active":true,"BalanceBroughtForward":15000,"BalanceCarriedForward":27874.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank account (synthetic)","Number":1930,"Project":"","ProjectSettings":"ALLOWED","SRU":7281,"VATCode":null,"Year":2},{"@url":"https://api.fortnox.se/3/accounts/3001?financialyear=2","Active":true,"BalanceBroughtForward":0,"BalanceCarriedForward":-13000,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Sales (synthetic)","Number":3001,"Project":"","ProjectSettings":"ALLOWED","SRU":7410,"VATCode":"MP1","Year":2},{"@url":"https://api.fortnox.se/3/accounts/6570?financialyear=2","Active":true,"BalanceBroughtForward":0,"BalanceCarriedForward":125.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank fees (synthetic)","Number":6570,"Project":"","ProjectSettings":"ALLOWED","SRU":7513,"VATCode":null,"Year":2}],"MetaInformation":{"@CurrentPage":1,"@TotalPages":1,"@TotalResources":3}}'
       }
     },
     {
@@ -69,7 +69,7 @@ export const fortnoxAccountBalancesListGetFixture: WireFixture = {
         headers: {
           'content-type': 'application/json'
         },
-        body: '{"Account":{"@url":"https://api.fortnox.se/3/accounts/1930?financialyear=2","Active":true,"BalanceBroughtForward":15000,"BalanceCarriedForward":27374.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank account (synthetic)","Number":1930,"Project":0,"ProjectSettings":"ALLOWED","SRU":7281,"VATCode":null,"Year":2}}'
+        body: '{"Account":{"@url":"https://api.fortnox.se/3/accounts/1930?financialyear=2","Active":true,"BalanceBroughtForward":15000,"BalanceCarriedForward":27874.5,"CostCenter":"","CostCenterSettings":"ALLOWED","Description":"Bank account (synthetic)","Number":1930,"Project":0,"ProjectSettings":"ALLOWED","SRU":7281,"VATCode":null,"Year":2}}'
       }
     }
   ]

@@ -127,6 +127,7 @@ const sie1 = ibm437Base64([
   '#FLAGGA 0\r\n',
   '#PROGRAM "Synthetic" 1\r\n',
   '#FORMAT PC8\r\n',
+  '#GEN 20260929\r\n',
   '#SIETYP 1\r\n',
   '#FNAMN "Example AB (synthetic) ',
   0x94,
@@ -134,7 +135,7 @@ const sie1 = ibm437Base64([
   '#RAR 0 20260101 20261231\r\n',
   '#KONTO 1930 "Bank account (synthetic)"\r\n',
   '#IB 0 1930 15000.00\r\n',
-  '#UB 0 1930 27374.50\r\n'
+  '#UB 0 1930 27874.50\r\n'
 ])
 
 const year2025 = 1
@@ -166,7 +167,7 @@ export const defaultBookkeepingEntities: FortnoxBookkeepingEntities = {
         Description: 'Bank account (synthetic)',
         Active: true,
         BalanceBroughtForward: Year === year2026 ? 15000 : 9000,
-        BalanceCarriedForward: Year === year2026 ? 27374.5 : 15000,
+        BalanceCarriedForward: Year === year2026 ? 27874.5 : 15000,
         SRU: 7281,
         VATCode: null
       },
@@ -176,7 +177,7 @@ export const defaultBookkeepingEntities: FortnoxBookkeepingEntities = {
         Description: 'Sales (synthetic)',
         Active: true,
         BalanceBroughtForward: 0,
-        BalanceCarriedForward: Year === year2026 ? -12500 : -6000,
+        BalanceCarriedForward: Year === year2026 ? -13000 : -6000,
         SRU: 7410,
         VATCode: 'MP1'
       },
@@ -205,7 +206,7 @@ export const defaultBookkeepingEntities: FortnoxBookkeepingEntities = {
       Code: 'B',
       Description: 'Customer invoices (synthetic)',
       Manual: false,
-      NextVoucherNumber: 1
+      NextVoucherNumber: Year === year2026 ? 2 : 1
     }
   ]),
   vouchers: [
@@ -236,6 +237,20 @@ export const defaultBookkeepingEntities: FortnoxBookkeepingEntities = {
         { Account: 1930, Debit: 12500, Credit: 0, TransactionInformation: '' },
         { Account: 3001, Debit: 0, Credit: 12500, TransactionInformation: 'Sale (synthetic)' }
       ]
+    },
+    {
+      Year: year2026,
+      VoucherSeries: 'B',
+      VoucherNumber: 1,
+      Description: 'Customer invoice (synthetic)',
+      TransactionDate: '2026-09-20',
+      ReferenceNumber: '101',
+      ReferenceType: 'INVOICE',
+      CostCenter: 'CC1',
+      VoucherRows: [
+        { Account: 1930, Debit: 500, Credit: 0, TransactionInformation: '' },
+        { Account: 3001, Debit: 0, Credit: 500, TransactionInformation: '' }
+      ]
     }
   ],
   voucherFileConnections: [
@@ -244,6 +259,13 @@ export const defaultBookkeepingEntities: FortnoxBookkeepingEntities = {
       Name: 'receipt.pdf',
       VoucherYear: year2026,
       VoucherSeries: 'A',
+      VoucherNumber: 1
+    },
+    {
+      FileId: '00000000-0000-4000-8000-0000000000b1',
+      Name: 'invoice-101.pdf',
+      VoucherYear: year2026,
+      VoucherSeries: 'B',
       VoucherNumber: 1
     }
   ],

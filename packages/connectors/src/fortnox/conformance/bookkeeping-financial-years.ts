@@ -15,8 +15,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * step.
  */
 export const fortnoxFinancialYearByIdAndDateFixture: WireFixture = {
-  id: 'fortnox.bookkeeping.financial-year-by-id-and-date.synthetic',
-  caseId: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+  id: 'fortnox.bookkeeping.financial-year-id-and-date.synthetic',
+  caseId: 'fortnox.bookkeeping.financial-year-id-and-date',
   evidence: 'unverified',
   recordedAt: '2026-11-23',
   account: 'synthetic',

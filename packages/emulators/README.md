@@ -724,16 +724,16 @@ downloads):
 
 Bookkeeping (`GET` only; the connector's financial year, account, voucher series, voucher, voucher
 file connection, and SIE file reads). `financialyear` selects the year by `Id`; omitted, the year
-containing today:
+containing today, else the newest year:
 
-| Route                                                                                                           | Behavior                                                                                                                            |
-| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /3/financialyears`, `GET /3/financialyears/{Id}`                                                           | Newest first; `date` lists the year containing it; list rows name the chart type `accountCharts`                                    |
-| `GET /3/accounts`, `GET /3/accounts/{Number}`                                                                   | Per year, with `BalanceBroughtForward`/`BalanceCarriedForward`; a single read sends `Project: 0`                                    |
-| `GET /3/voucherseries`                                                                                          | Per year                                                                                                                            |
-| `GET /3/vouchers`, `GET /3/vouchers/sublist/{VoucherSeries}`, `GET /3/vouchers/{VoucherSeries}/{VoucherNumber}` | `fromdate`/`todate` (TransactionDate), `costcenter`; list rows have no rows; a single read has rows, `Comments: null`, `Project: 0` |
-| `GET /3/voucherfileconnections`                                                                                 | Filters `voucherseries`, `vouchernumber`, `voucheryear`, `financialyear`; `VoucherNumber` as a string                               |
-| `GET /3/sie/{Type}`                                                                                             | The year's SIE file bytes (`application/octet-stream`); type 1-4                                                                    |
+| Route                                                                                                           | Behavior                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /3/financialyears`, `GET /3/financialyears/{Id}`                                                           | Newest first; `date` lists the year containing it; list rows name the chart type `accountCharts`                                                                 |
+| `GET /3/accounts`, `GET /3/accounts/{Number}`                                                                   | Per year, with `BalanceBroughtForward`/`BalanceCarriedForward`; a single read sends `Project: 0`                                                                 |
+| `GET /3/voucherseries`                                                                                          | Per year; list rows without `NextVoucherNumber` (the archived example)                                                                                           |
+| `GET /3/vouchers`, `GET /3/vouchers/sublist/{VoucherSeries}`, `GET /3/vouchers/{VoucherSeries}/{VoucherNumber}` | `fromdate`/`todate` (TransactionDate), `costcenter` (case-insensitive substring); list rows have no rows; a single read has rows, `Comments: null`, `Project: 0` |
+| `GET /3/voucherfileconnections`                                                                                 | One of `voucherseries`, `vouchernumber`, `voucheryear` (case-insensitive substring; two or more get a 400) plus `financialyear`; `VoucherNumber` as a string     |
+| `GET /3/sie/{Type}`                                                                                             | The year's SIE file bytes (`application/octet-stream`); type 1-4                                                                                                 |
 
 `GET /3/companyinformation`, `GET /3/customers`, and every read-only route above cite the Fortnox
 read conformance cases (`fortnox.company.information-decodes`, `fortnox.customer.list-matches-get`,

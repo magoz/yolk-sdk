@@ -213,7 +213,7 @@ describe('run-fortnox-conformance plan', () => {
       ['fortnox.settings.predefined-accounts-and-labels', 'runs'],
       ['fortnox.settings.registers-list-matches-get', 'runs'],
       ['fortnox.profile.me', 'runs'],
-      ['fortnox.bookkeeping.financial-year-by-id-and-date', 'runs'],
+      ['fortnox.bookkeeping.financial-year-id-and-date', 'runs'],
       ['fortnox.bookkeeping.account-balances-list-get', 'runs'],
       ['fortnox.bookkeeping.voucher-list-get-balanced', 'runs'],
       ['fortnox.bookkeeping.sie-file-ibm437', 'runs']
@@ -260,7 +260,7 @@ describe('run-fortnox-conformance plan', () => {
       'RUN   fortnox.settings.predefined-accounts-and-labels  [read]',
       'RUN   fortnox.settings.registers-list-matches-get  [read]',
       'RUN   fortnox.profile.me  [read]',
-      'RUN   fortnox.bookkeeping.financial-year-by-id-and-date  [read]',
+      'RUN   fortnox.bookkeeping.financial-year-id-and-date  [read]',
       'RUN   fortnox.bookkeeping.account-balances-list-get  [read]',
       'RUN   fortnox.bookkeeping.voucher-list-get-balanced  [read]',
       'RUN   fortnox.bookkeeping.sie-file-ibm437  [read]',

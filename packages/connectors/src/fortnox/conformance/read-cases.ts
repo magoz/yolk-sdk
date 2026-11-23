@@ -26,6 +26,7 @@ import {
 } from '@yolk-sdk/conformance/case'
 import type { TypedConnectorAction } from '../../action.ts'
 import { binaryStringToBytes } from '../../base64-internal.ts'
+import { ConnectorBinaryHttpClient } from '../../binary-http.ts'
 import { ConnectorHttpClient } from '../../http.ts'
 import {
   fortnoxGetAccountAction,
@@ -221,6 +222,27 @@ const withResponseBodies = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     const value = yield* effect.pipe(Effect.provideService(ConnectorHttpClient, observing))
 
     return { value, bodies: yield* Ref.get(bodies) }
+  })
+
+/**
+ * Run `effect` with the host's `ConnectorBinaryHttpClient` wrapped so every response's bytes are
+ * kept; the requests and responses are the host's own, unchanged (no extra request is sent).
+ */
+const withBinaryResponses = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorBinaryHttpClient
+    const responses = yield* Ref.make<ReadonlyArray<Uint8Array>>([])
+
+    const observing = ConnectorBinaryHttpClient.of({
+      request: request =>
+        http
+          .request(request)
+          .pipe(Effect.tap(response => Ref.update(responses, list => [...list, response.bytes])))
+    })
+
+    const value = yield* effect.pipe(Effect.provideService(ConnectorBinaryHttpClient, observing))
+
+    return { value, responses: yield* Ref.get(responses) }
   })
 
 const decodeMetaEnvelope = Schema.decodeUnknownOption(
@@ -983,16 +1005,15 @@ const financialYearFields = (year: FortnoxFinancialYear) =>
     Id: year.Id,
     FromDate: year.FromDate,
     ToDate: year.ToDate,
-    AccountChartType: year.AccountChartType,
     AccountingMethod: year.AccountingMethod
   })
 
 export const fortnoxFinancialYearByIdAndDateCase: FortnoxConformanceCase = defineConformanceCase({
-  id: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+  id: 'fortnox.bookkeeping.financial-year-id-and-date',
   title: 'Financial years read back by Id and by a date they contain',
   safety: 'read',
   docs: 'GET /3/financialyears returns `FinancialYears` plus `MetaInformation` (the archived example lists the newest year first and names the chart type `accountCharts`); GET /3/financialyears/{Id} returns one `FinancialYear`; `?date=YYYY-MM-DD` lists the year containing that date.',
-  wire: '`fortnox.list_financial_years` (limit 10) decodes every row and pagination metadata covering them; the first row has `YYYY-MM-DD` `FromDate` and `ToDate` with `FromDate` not after `ToDate`, and reads back with the same fields both by `id` and by its `FromDate` (`fortnox.get_financial_year`), the chart type decoding the same whether sent as `AccountChartType` or `accountCharts` (unverified: which name live list rows use). Aborts with a precondition when the company has no financial year.',
+  wire: '`fortnox.list_financial_years` (limit 10) decodes every row and pagination metadata covering them; the first row has `YYYY-MM-DD` `FromDate` and `ToDate` with `FromDate` not after `ToDate`, and reads back with the same `Id`, `FromDate`, `ToDate`, and `AccountingMethod` both by `id` and by its `FromDate` (`fortnox.get_financial_year`). The chart type is not compared: the archived examples send it as `accountCharts` in list rows and `AccountChartType` (with a different value) in single reads, and the connector decodes either name. Aborts with a precondition when the company has no financial year.',
   fixtures: [fortnoxFinancialYearByIdAndDateFixture.id],
   run: Effect.gen(function* () {
     const year = yield* firstFinancialYear
@@ -1021,13 +1042,18 @@ export const fortnoxFinancialYearByIdAndDateCase: FortnoxConformanceCase = defin
   })
 })
 
+const wholeOre = (value: number | null | undefined) =>
+  value === undefined || value === null ? null : Math.round(value * 100)
+
+// OpenAPI types list `BalanceCarriedForward` as a float and single reads as a double, so the
+// balances compare in whole öre.
 const accountFields = (account: FortnoxAccount) =>
   scalars({
     Number: account.Number,
     Description: account.Description,
     Active: account.Active,
-    BalanceBroughtForward: account.BalanceBroughtForward,
-    BalanceCarriedForward: account.BalanceCarriedForward,
+    BalanceBroughtForward: wholeOre(account.BalanceBroughtForward),
+    BalanceCarriedForward: wholeOre(account.BalanceCarriedForward),
     Year: account.Year
   })
 
@@ -1036,7 +1062,7 @@ export const fortnoxAccountBalancesListGetCase: FortnoxConformanceCase = defineC
   title: 'Accounts list per financial year and read back with the same balances',
   safety: 'read',
   docs: 'GET /3/accounts?financialyear={Id} returns `Accounts` plus `MetaInformation`, sorted by number, each with its opening `BalanceBroughtForward` and closing `BalanceCarriedForward` in that year; GET /3/accounts/{Number}?financialyear={Id} returns one `Account` (the archived example sends `Project` as the number 0).',
-  wire: '`fortnox.list_accounts` (the first listed financial year, limit 10) decodes a populated page: pagination metadata covering the rows, account numbers ascending, every row in that year (`Year` its Id, or unset); the first account read back with `fortnox.get_account` in the same year has the same `Number`, `Description`, `Active`, `BalanceBroughtForward`, `BalanceCarriedForward`, and `Year` (decoding enforces finite balances or unset). Aborts with a precondition when the year has no account.',
+  wire: '`fortnox.list_accounts` (the first listed financial year, limit 10) decodes a populated page: pagination metadata covering the rows, account numbers ascending, every row in that year (`Year` its Id, or unset); the first account read back with `fortnox.get_account` in the same year has the same `Number`, `Description`, `Active`, and `Year`, and the same `BalanceBroughtForward` and `BalanceCarriedForward` in whole öre (decoding enforces finite balances or unset; unverified: OpenAPI types the list closing balance as a float, the single read as a double). Aborts with a precondition when the year has no account.',
   fixtures: [fortnoxAccountBalancesListGetFixture.id],
   run: Effect.gen(function* () {
     const year = yield* firstFinancialYear
@@ -1081,7 +1107,7 @@ export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineC
   title: 'Vouchers list per financial year and read back with balanced rows',
   safety: 'read',
   docs: 'GET /3/vouchers?financialyear={Id} returns `Vouchers` plus `MetaInformation`; a voucher is unique by `VoucherSeries`, `VoucherNumber`, and `Year`, which every row carries; GET /3/vouchers/{VoucherSeries}/{VoucherNumber}?financialyear={Id} returns one `Voucher` with `VoucherRows`; GET /3/voucherseries lists `VoucherSeriesCollection`; GET /3/voucherfileconnections lists `VoucherFileConnections` (the archived examples send `VoucherNumber` as a string).',
-  wire: '`fortnox.list_vouchers` (the first listed financial year, limit 10) decodes a populated page with pagination metadata covering the rows, every row in that year; `fortnox.list_voucher_series` for that year holds the first voucher’s series; `fortnox.get_voucher` reads the first voucher back with the same series, number, year, `Description`, and `TransactionDate`, at least two rows, and its rows not marked removed balance (total `Debit` equals total `Credit` in whole öre; unverified: how removed rows count); `fortnox.list_voucher_file_connections` for it decodes, and every connection names that voucher. Aborts with a precondition when the year has no voucher.',
+  wire: '`fortnox.list_vouchers` (the first listed financial year, limit 10) decodes a populated page with pagination metadata covering the rows, every row in that year; `fortnox.list_voucher_series` for that year holds the first voucher’s series; `fortnox.list_vouchers` with that series (the `/vouchers/sublist/{VoucherSeries}` path) lists the first voucher too; `fortnox.get_voucher` reads the first voucher back with the same series, number, year, `Description`, and `TransactionDate`, at least two rows, and its rows not marked removed balance (total `Debit` equals total `Credit` in whole öre; unverified: how removed rows count); `fortnox.list_voucher_file_connections` for it decodes, and every raw connection row Fortnox answers carries `VoucherYear` (observed at the port; unverified: OpenAPI does not mark it required). Aborts with a precondition when the year has no voucher.',
   fixtures: [fortnoxVoucherListGetBalancedFixture.id],
   run: Effect.gen(function* () {
     const year = yield* firstFinancialYear
@@ -1108,6 +1134,23 @@ export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineC
     yield* expectConformance(
       Chunk.toReadonlyArray(series.voucherSeries).some(item => item.Code === first.VoucherSeries),
       'expected the voucher series list to hold the first voucher’s series'
+    )
+
+    const inSeries = yield* read(
+      fortnoxListVouchersAction,
+      FortnoxListVouchersInput.make({
+        financialYearId: year.Id,
+        voucherSeries: first.VoucherSeries,
+        limit: listLimit
+      })
+    )
+
+    yield* expectConformance(
+      Chunk.toReadonlyArray(inSeries.vouchers).some(
+        row =>
+          row.VoucherNumber === first.VoucherNumber && row.VoucherSeries === first.VoucherSeries
+      ),
+      'expected the series list to hold the first voucher'
     )
 
     const voucher = yield* read(
@@ -1150,25 +1193,48 @@ export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineC
       { actual: { rows: rows.length, debit: debit / 100, credit: credit / 100 } }
     )
 
-    const connections = yield* read(
-      fortnoxListVoucherFileConnectionsAction,
-      FortnoxListVoucherFileConnectionsInput.make({
-        voucherSeries: voucher.VoucherSeries,
-        voucherNumber: voucher.VoucherNumber,
-        financialYearId: year.Id
-      })
+    const connections = yield* withResponseBodies(
+      read(
+        fortnoxListVoucherFileConnectionsAction,
+        FortnoxListVoucherFileConnectionsInput.make({
+          voucherSeries: voucher.VoucherSeries,
+          voucherNumber: voucher.VoucherNumber,
+          financialYearId: year.Id
+        })
+      )
     )
 
     yield* expectConformance(
-      Chunk.toReadonlyArray(connections.connections).every(
-        connection =>
-          connection.VoucherSeries === voucher.VoucherSeries &&
-          connection.VoucherNumber === voucher.VoucherNumber
-      ),
-      'expected every voucher file connection to name the voucher'
+      connections.bodies.length > 0 && connections.bodies.every(everyConnectionHasYear),
+      'expected every voucher file connection row to carry VoucherYear'
     )
   })
 })
+
+const decodeConnectionRows = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      VoucherFileConnections: Schema.Array(
+        Schema.Struct({ VoucherYear: Schema.optionalKey(Schema.Json) })
+      )
+    })
+  )
+)
+
+/** Whether every raw connection row of an answer carries a non-null `VoucherYear`. */
+const everyConnectionHasYear = (body: string): boolean => {
+  const decoded = decodeConnectionRows(body)
+
+  return (
+    Option.isSome(decoded) &&
+    decoded.value.VoucherFileConnections.every(
+      row => row.VoucherYear !== undefined && row.VoucherYear !== null
+    )
+  )
+}
+
+const sameBytes = (left: Uint8Array, right: Uint8Array) =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
 
 const sieRecord = (bytes: Uint8Array, record: string) =>
   new TextDecoder('latin1')
@@ -1178,25 +1244,30 @@ const sieRecord = (bytes: Uint8Array, record: string) =>
 
 export const fortnoxSieFileIbm437Case: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.bookkeeping.sie-file-ibm437',
-  title: 'A type 1 SIE file downloads as untouched PC8 bytes',
+  title: 'A type 1 SIE file downloads as the untouched PC8 bytes Fortnox answered',
   safety: 'read',
   docs: 'GET /3/sie/{Type}?financialyear={Id} streams the SIE file (`application/octet-stream`); SIE filformat 4C requires `#FLAGGA` as the first record and IBM PC 8-bit text (`#FORMAT PC8`, code page 437).',
-  wire: '`fortnox.get_sie_file` (type 1, the first listed financial year) returns bytes that start with `#FLAGGA` and hold the records `#FORMAT PC8` and `#SIETYP 1`, with `byteLength` equal to the decoded `contentBase64` length (unverified: whether Fortnox writes `#FORMAT PC8`). Aborts with a precondition when the company has no financial year.',
+  wire: '`fortnox.get_sie_file` (type 1, the first listed financial year) returns exactly the bytes the binary port answered (compared byte for byte, so no text decoding touched them), with `byteLength` their length; they start with `#FLAGGA` (the action checks it) and hold the records `#FORMAT PC8` and `#SIETYP 1` (unverified: whether Fortnox writes `#FORMAT PC8`). Aborts with a precondition when the company has no financial year.',
   fixtures: [fortnoxSieFileIbm437Fixture.id],
   run: Effect.gen(function* () {
     const year = yield* firstFinancialYear
 
-    const file = yield* read(
-      fortnoxGetSieFileAction,
-      FortnoxGetSieFileInput.make({ sieType: 1, financialYearId: year.Id })
+    const downloaded = yield* withBinaryResponses(
+      read(
+        fortnoxGetSieFileAction,
+        FortnoxGetSieFileInput.make({ sieType: 1, financialYearId: year.Id })
+      )
     )
 
+    const file = downloaded.value
     const bytes = binaryStringToBytes(atob(file.contentBase64))
+    const answered = downloaded.responses[0] ?? new Uint8Array()
 
-    yield* expectEqual(
-      file.byteLength,
-      bytes.byteLength,
-      'expected byteLength to equal the downloaded SIE bytes'
+    yield* expectConformance(
+      downloaded.responses.length === 1 &&
+        sameBytes(bytes, answered) &&
+        file.byteLength === answered.byteLength,
+      'expected the SIE file to be exactly the bytes Fortnox answered'
     )
     yield* expectConformance(
       sieRecord(bytes, '#FORMAT PC8') && sieRecord(bytes, '#SIETYP 1'),

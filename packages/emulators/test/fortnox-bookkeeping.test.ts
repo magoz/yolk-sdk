@@ -114,6 +114,14 @@ describe('bookkeeping routes', () => {
       ).toEqual([1])
       expect(await rows(target, '/3/financialyears?date=2001-01-01', 'FinancialYears')).toEqual([])
 
+      // Without financialyear the year containing today (2026, Id 2) applies; past the seeded
+      // years, the newest one.
+      const later = await emulator({ now: () => Date.parse('2031-01-01T00:00:00.000Z') })
+
+      expect((await rows(later, '/3/accounts', 'Accounts')).map(row => field(row, 'Year'))).toEqual(
+        [2, 2, 2]
+      )
+
       // Without financialyear the year containing today (2026, Id 2) applies.
       expect(
         (await rows(target, '/3/accounts', 'Accounts')).map(row => field(row, 'Year'))
@@ -148,12 +156,13 @@ describe('bookkeeping routes', () => {
       const numbers = async (path: string) =>
         (await rows(target, path, 'Vouchers')).map(row => field(row, 'VoucherNumber'))
 
-      expect(await numbers('/3/vouchers?financialyear=2')).toEqual([1, 2])
+      expect(await numbers('/3/vouchers?financialyear=2')).toEqual([1, 2, 1])
       expect(await numbers('/3/vouchers/sublist/A?financialyear=2')).toEqual([1, 2])
-      expect(await numbers('/3/vouchers/sublist/B?financialyear=2')).toEqual([])
-      expect(await numbers('/3/vouchers?financialyear=2&fromdate=2026-09-10')).toEqual([2])
+      expect(await numbers('/3/vouchers/sublist/B?financialyear=2')).toEqual([1])
+      expect(await numbers('/3/vouchers?financialyear=2&fromdate=2026-09-10')).toEqual([2, 1])
       expect(await numbers('/3/vouchers?financialyear=2&todate=2026-09-10')).toEqual([1])
-      expect(await numbers('/3/vouchers?financialyear=2&costcenter=CC1')).toEqual([])
+      // Fortnox searches match substrings, ignoring case.
+      expect(await numbers('/3/vouchers?financialyear=2&costcenter=cc')).toEqual([1])
       expect(await numbers('/3/vouchers?financialyear=1')).toEqual([])
     })
   )
@@ -162,13 +171,22 @@ describe('bookkeeping routes', () => {
     Effect.promise(async () => {
       const target = await emulator()
 
-      expect(
-        await rows(
-          target,
-          '/3/voucherfileconnections?vouchernumber=2&financialyear=2',
-          'VoucherFileConnections'
+      const fileIds = async (query: string) =>
+        (await rows(target, `/3/voucherfileconnections?${query}`, 'VoucherFileConnections')).map(
+          row => field(row, 'FileId')
         )
-      ).toEqual([])
+
+      expect(await fileIds('vouchernumber=2&financialyear=2')).toEqual([])
+      // One resource-specific filter, a substring match: number 1 names A/1 and B/1.
+      expect(await fileIds('vouchernumber=1&financialyear=2')).toEqual([
+        '00000000-0000-4000-8000-0000000000a1',
+        '00000000-0000-4000-8000-0000000000b1'
+      ])
+      expect(await fileIds('voucherseries=b')).toEqual(['00000000-0000-4000-8000-0000000000b1'])
+      expect(
+        (await call(target, 'GET', '/3/voucherfileconnections?voucherseries=A&vouchernumber=1'))
+          .status
+      ).toBe(400)
 
       const sie = await call(target, 'GET', '/3/sie/1?financialyear=2')
       const bytes = new Uint8Array(await sie.arrayBuffer())

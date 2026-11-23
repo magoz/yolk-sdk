@@ -346,7 +346,7 @@ export const fortnoxCaseSpecs: ReadonlyArray<FortnoxCaseSpec> = [
     doc: 'The token user profile (`Me`).'
   },
   {
-    caseId: 'fortnox.bookkeeping.financial-year-by-id-and-date',
+    caseId: 'fortnox.bookkeeping.financial-year-id-and-date',
     seeds: [],
     fileName: 'bookkeeping-financial-years.ts',
     exportName: 'fortnoxFinancialYearByIdAndDateFixture',

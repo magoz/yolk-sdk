@@ -469,8 +469,12 @@ There is no root export or barrel.
   financial year `Id`. Seeds are checked like the other read parts (duplicates; every year, series,
   account, and voucher reference held; each voucher balances in whole öre; SIE bytes canonical
   base64). `financialyear` selects the year by `Id`; omitted, the year containing the emulator's
-  today (as Fortnox's current year), else a 400. Financial years list newest first (the archived
-  example). The routes keep the archived examples' forms beyond OpenAPI: list rows name the chart
+  today (as Fortnox's current year), else the newest year. Financial years list newest first (the
+  archived example). Voucher file connections take one resource-specific filter (two or more: 400,
+  per the parameters guide) and `costcenter`/connection searches match case-insensitive
+  substrings, so the connector's own row matching is exercised (the default seed holds A/1 and B/1
+  connections, both matched by `vouchernumber=1`). Voucher series list rows leave out
+  `NextVoucherNumber` (the archived example). The routes keep the archived examples' forms beyond OpenAPI: list rows name the chart
   type `accountCharts`, single account and voucher reads send `Project: 0`, voucher file
   connections send `VoucherNumber` as a string. `empty-company` keeps the years, accounts, series,
   and SIE files and has no vouchers or file connections.
