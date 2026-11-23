@@ -742,7 +742,7 @@ and return a financial year's SIE file (`fortnox.get_sie_file`, IBM437 bytes thr
 `ConnectorBinaryHttpClient`, returned to agents as a file); voucher file connections
 (`connectfile`) list and attach archive files to a voucher (102 actions: 51 `read`, 32 `write`, 19
 `destructive`). Deletes, payment bookkeeping (`fortnox.bookkeep_*`), `fortnox.create_voucher`
-(Fortnox books the voucher at once and has no API to delete or change it), and offer lifecycle
+(Fortnox books the voucher at once and its API documents no voucher delete or update), and offer lifecycle
 actions (`fortnox.create_order_from_offer`, `fortnox.create_invoice_from_offer`,
 `fortnox.cancel_offer`, `fortnox.email_offer`, `fortnox.mark_offer_sent`) are `destructive`: the
 Fortnox API cannot undo them, so hosts must gate them with approval. New write inputs reject unknown

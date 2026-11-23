@@ -404,12 +404,8 @@ const rowTotals = (rows: ReadonlyArray<FortnoxVoucherRowInput>) =>
     { debit: zero, credit: zero }
   )
 
-const kronor = (ore: bigint) => {
-  const sign = ore < zero ? '-' : ''
-  const magnitude = ore < zero ? -ore : ore
-
-  return `${sign}${magnitude / hundred}.${String(magnitude % hundred).padStart(2, '0')}`
-}
+// Totals are sums of nonnegative amounts.
+const kronor = (ore: bigint) => `${ore / hundred}.${String(ore % hundred).padStart(2, '0')}`
 
 const FortnoxCreateVoucherFields = {
   /** Financial year to book in (the `financialyear` query); TransactionDate must fall inside it. */
@@ -675,7 +671,7 @@ export const fortnoxCreateVoucherAction = defineAction({
       Effect.map(result =>
         Predicate.isTagged(result, 'Success') &&
         (result.value.Year !== financialYearId ||
-          result.value.VoucherSeries !== input.VoucherSeries)
+          result.value.VoucherSeries.toUpperCase() !== input.VoucherSeries.toUpperCase())
           ? ActionResult.failure({
               code: 'fortnox_voucher_mismatch',
               message: `Fortnox booked voucher ${result.value.VoucherSeries} ${result.value.VoucherNumber} in financial year ${result.value.Year}, not in series ${input.VoucherSeries} of financial year ${financialYearId}. It is booked: do not create it again.`,
