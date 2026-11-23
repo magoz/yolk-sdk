@@ -677,6 +677,14 @@ const readDrills: ReadonlyArray<{
     message: 'expected the voucher to carry at least two rows that balance'
   },
   {
+    caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
+    fault: answer('/3/vouchers/sublist/A', {
+      Vouchers: [{ VoucherNumber: 1, VoucherSeries: 'A', Year: 1 }],
+      MetaInformation: meta
+    }),
+    message: 'expected the series list to hold the first voucher'
+  },
+  {
     // A row of another voucher without VoucherYear: the action skips it, the raw claim fails.
     caseId: 'fortnox.bookkeeping.voucher-list-get-balanced',
     fault: answer('/3/voucherfileconnections', {

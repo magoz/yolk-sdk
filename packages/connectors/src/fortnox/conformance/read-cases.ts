@@ -237,7 +237,12 @@ const withBinaryResponses = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       request: request =>
         http
           .request(request)
-          .pipe(Effect.tap(response => Ref.update(responses, list => [...list, response.bytes])))
+          // A copy, so nothing the action does to the buffer can change the comparison baseline.
+          .pipe(
+            Effect.tap(response =>
+              Ref.update(responses, list => [...list, new Uint8Array(response.bytes)])
+            )
+          )
     })
 
     const value = yield* effect.pipe(Effect.provideService(ConnectorBinaryHttpClient, observing))
@@ -1100,8 +1105,6 @@ export const fortnoxAccountBalancesListGetCase: FortnoxConformanceCase = defineC
   })
 })
 
-const toOre = (value: number | null | undefined) => Math.round((value ?? 0) * 100)
-
 export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineConformanceCase({
   id: 'fortnox.bookkeeping.voucher-list-get-balanced',
   title: 'Vouchers list per financial year and read back with balanced rows',
@@ -1148,7 +1151,9 @@ export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineC
     yield* expectConformance(
       Chunk.toReadonlyArray(inSeries.vouchers).some(
         row =>
-          row.VoucherNumber === first.VoucherNumber && row.VoucherSeries === first.VoucherSeries
+          row.VoucherNumber === first.VoucherNumber &&
+          row.VoucherSeries === first.VoucherSeries &&
+          row.Year === first.Year
       ),
       'expected the series list to hold the first voucher'
     )
@@ -1184,8 +1189,8 @@ export const fortnoxVoucherListGetBalancedCase: FortnoxConformanceCase = defineC
       row => row.Removed !== true
     )
 
-    const debit = rows.reduce((total, row) => total + toOre(row.Debit), 0)
-    const credit = rows.reduce((total, row) => total + toOre(row.Credit), 0)
+    const debit = rows.reduce((total, row) => total + (wholeOre(row.Debit) ?? 0), 0)
+    const credit = rows.reduce((total, row) => total + (wholeOre(row.Credit) ?? 0), 0)
 
     yield* expectConformance(
       rows.length >= 2 && debit === credit,

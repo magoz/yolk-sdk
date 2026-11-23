@@ -8,9 +8,8 @@ import type { WireFixture } from '@yolk-sdk/conformance/fixture'
  * (https://api.fortnox.se/apidocs, GET /3/sie/{Type}) and SIE filformat 4C
  * (https://sie.se/format/), until a live recording replaces it. The SIE bytes were first rendered
  * by the Fortnox emulator's default seed. The fixture is the source of the emulator's bookkeeping
- * answers
- * (`@yolk-sdk/emulators/fortnox` must answer its requests byte for byte); change it only for a
- * cited spec or live-run reason.
+ * answers (`@yolk-sdk/emulators/fortnox` must answer its requests byte for byte); change it only
+ * for a cited spec or live-run reason.
  * `pnpm conformance:fortnox --live --owner-approved --account <label> --record` stages a
  * replacement in a gitignored directory; see the script header for the manual scrub-and-promote
  * step.

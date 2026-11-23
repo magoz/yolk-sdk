@@ -114,14 +114,6 @@ describe('bookkeeping routes', () => {
       ).toEqual([1])
       expect(await rows(target, '/3/financialyears?date=2001-01-01', 'FinancialYears')).toEqual([])
 
-      // Without financialyear the year containing today (2026, Id 2) applies; past the seeded
-      // years, the newest one.
-      const later = await emulator({ now: () => Date.parse('2031-01-01T00:00:00.000Z') })
-
-      expect((await rows(later, '/3/accounts', 'Accounts')).map(row => field(row, 'Year'))).toEqual(
-        [2, 2, 2]
-      )
-
       // Without financialyear the year containing today (2026, Id 2) applies.
       expect(
         (await rows(target, '/3/accounts', 'Accounts')).map(row => field(row, 'Year'))
@@ -141,6 +133,13 @@ describe('bookkeeping routes', () => {
 
         expect(response.status, path).toBe(400)
       }
+
+      // Past the seeded years, an omitted financialyear selects the newest one.
+      const later = await emulator({ now: () => Date.parse('2031-01-01T00:00:00.000Z') })
+
+      expect((await rows(later, '/3/accounts', 'Accounts')).map(row => field(row, 'Year'))).toEqual(
+        [2, 2, 2]
+      )
 
       const missing = await call(target, 'GET', '/3/vouchers/A/9?financialyear=2')
 

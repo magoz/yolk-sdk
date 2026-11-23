@@ -565,7 +565,7 @@ export const fortnoxGetAccountAction = defineAction({
 export const fortnoxListVoucherSeriesAction = defineAction({
   id: 'fortnox.list_voucher_series',
   description:
-    'List one page of Fortnox voucher series (verifikationsserier) for a financial year: Code, Description, Manual, NextVoucherNumber. Omit financialYearId for the current financial year. Repeat financialYearId/lastModified/limit with pagination.nextPage to continue.',
+    'List one page of Fortnox voucher series (verifikationsserier) for a financial year: Code, Description, Manual, NextVoucherNumber (often absent from list rows). Omit financialYearId for the current financial year. Repeat financialYearId/lastModified/limit with pagination.nextPage to continue.',
   access: 'read',
   inputSchema: FortnoxListVoucherSeriesInput,
   outputSchema: FortnoxListVoucherSeriesOutput,

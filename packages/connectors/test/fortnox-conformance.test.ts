@@ -38,6 +38,8 @@ import {
 } from '@yolk-sdk/connectors/conformance'
 import {
   FortnoxConformanceConfig,
+  fortnoxAccountBalancesListGetCase,
+  fortnoxAccountBalancesListGetFixture,
   FortnoxConformanceRestoreFailed,
   fortnoxConformanceCases,
   fortnoxConformanceCommentsMarker,
@@ -777,6 +779,32 @@ describe('Fortnox conformance disagreement drills', () => {
         })
         expect(exchangeIndices(entries)).toEqual(['GET 0', 'PUT 1', 'PUT 2', 'GET 3'])
       })
+  )
+
+  it.effect('compares account balances in whole öre, so float noise in list rows passes', () =>
+    Effect.gen(function* () {
+      const noisy = replaceResponse(
+        fortnoxAccountBalancesListGetFixture,
+        1,
+        replaceInBody('"BalanceCarriedForward":27874.5,', '"BalanceCarriedForward":27874.499999,')
+      )
+
+      const passed = yield* replayRun(fortnoxAccountBalancesListGetCase, noisy)
+
+      expect(passed.report.summary.passed).toBe(1)
+
+      const off = replaceResponse(
+        fortnoxAccountBalancesListGetFixture,
+        1,
+        replaceInBody('"BalanceCarriedForward":27874.5,', '"BalanceCarriedForward":27874.49,')
+      )
+
+      const { failure } = yield* drill(fortnoxAccountBalancesListGetCase, off)
+
+      expect(failure?.message).toContain(
+        'expected the listed account to read back with the same balances'
+      )
+    })
   )
 
   it.effect('aborts the sticky-discount case before any write without explicit discounts', () =>

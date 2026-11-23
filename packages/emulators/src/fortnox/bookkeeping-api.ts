@@ -12,7 +12,7 @@
  * types do not list (financial year list rows name the chart type `accountCharts`; single account
  * and voucher reads send `Project` as the number `0`; voucher file connections send
  * `VoucherNumber` as a string). `financialyear` selects the year by `Id`; omitted, the year
- * containing the emulator's today, as Fortnox uses the current financial year. Every route is
+ * containing the emulator's today, as Fortnox uses the current financial year, else the newest one. Every route is
  * `unverified`.
  *
  * @experimental
