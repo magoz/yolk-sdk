@@ -80,6 +80,20 @@ export const listPath = (
   return suffix === '' ? resource : `${resource}?${suffix}`
 }
 
+// The Fortnox OpenAPI documents no MetaInformation and no paging parameters for some lists (labels,
+// predefined accounts, voucher file connections) while the archived docs examples carry it. Accept
+// an absent MetaInformation, but reject a response announcing more pages instead of truncating.
+export const singlePage = Schema.makeFilter<{
+  readonly MetaInformation?: typeof FortnoxMetaInformation.Type
+}>(value =>
+  value.MetaInformation !== undefined && value.MetaInformation['@TotalPages'] > 1
+    ? {
+        path: ['MetaInformation', '@TotalPages'],
+        issue: 'Fortnox announced more than one page for an unpaginated list'
+      }
+    : undefined
+)
+
 const ErrorEnvelope = Schema.Struct({
   ErrorInformation: Schema.Struct({
     // The responses guide uses lowercase; the OpenAPI schema uses PascalCase.
@@ -113,7 +127,8 @@ type FortnoxProviderFailureFields = {
   underlying?: { readonly providerCode: number | string }
 }
 
-const providerFailure = (response: ConnectorHttpResponse) =>
+/** The `ActionResult` failure for a non-2xx Fortnox answer (status code plus `ErrorInformation`). */
+export const providerFailure = (response: ConnectorHttpResponse) =>
   Effect.gen(function* () {
     const parsed = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
       response.body
@@ -155,7 +170,10 @@ const providerFailure = (response: ConnectorHttpResponse) =>
     )
   })
 
-const resolveFortnoxAccessToken = (integration: ConnectorIntegration, slot: CredentialSlot) =>
+export const resolveFortnoxAccessToken = (
+  integration: ConnectorIntegration,
+  slot: CredentialSlot
+) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
 

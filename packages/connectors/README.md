@@ -16,39 +16,39 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                            | Purpose                                                                                                                                      |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types                                       |
-| `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                                            |
-| `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                                                  |
-| `@yolk-sdk/connectors/afloat/conformance`          | Experimental Afloat target, seeds, and derived fixtures for the `@yolk-sdk/mcp/conformance` cases                                            |
-| `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter                               |
-| `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update                                    |
-| `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                                                           |
-| `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port                                   |
-| `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge                                |
-| `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                                                             |
-| `@yolk-sdk/connectors/figma/conformance`           | Experimental Figma target, seeds, and synthetic fixtures for the `@yolk-sdk/mcp/conformance` cases                                           |
-| `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print, inbox, settings, profile actions |
-| `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                                                           |
-| `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                                               |
-| `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                                            |
-| `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                          |
-| `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                        |
-| `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                       |
-| `@yolk-sdk/connectors/kie/conformance`             | Experimental Kie conformance cases, seed config, and synthetic replay fixtures                                                               |
-| `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                     |
-| `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                               |
-| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint/Teams Graph actions, shared OAuth slots, host-only file and transcript download, upload, draft attachments       |
-| `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                                                   |
-| `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                                                        |
-| `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                                            |
-| `@yolk-sdk/connectors/r2-storage`                  | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                                                            |
-| `@yolk-sdk/connectors/r2-storage/conformance`      | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge                                        |
-| `@yolk-sdk/connectors/telegram`                    | Telegram bot send/validate actions                                                                                                           |
-| `@yolk-sdk/connectors/telegram/conformance`        | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                                                          |
-| `@yolk-sdk/connectors/todoist`                     | Todoist project/task/label/comment actions and API token slot constants                                                                      |
-| `@yolk-sdk/connectors/todoist/conformance`         | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                                                           |
+| Subpath                                            | Purpose                                                                                                                                                   |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                             | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types                                                    |
+| `@yolk-sdk/connectors/agent`                       | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                                                                         |
+| `@yolk-sdk/connectors/afloat`                      | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                                                                               |
+| `@yolk-sdk/connectors/afloat/conformance`          | Experimental Afloat target, seeds, and derived fixtures for the `@yolk-sdk/mcp/conformance` cases                                                         |
+| `@yolk-sdk/connectors/conformance`                 | Experimental, conformance/testing only: Effect `HttpClient` bridges, a static resolver, and a cleanup reporter                                            |
+| `@yolk-sdk/connectors/dropbox`                     | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update                                                 |
+| `@yolk-sdk/connectors/dropbox/conformance`         | Experimental Dropbox conformance cases, seed config, and synthetic replay fixtures                                                                        |
+| `@yolk-sdk/connectors/email`                       | Portable IMAP reads/drafts/message state/labels, POP3 reads, and SMTP submission through a host email port                                                |
+| `@yolk-sdk/connectors/email/conformance`           | Experimental email port conformance cases, `PortFixture` replay, seeds, and a plain-JSON `EmailClient` bridge                                             |
+| `@yolk-sdk/connectors/figma`                       | Figma remote MCP auth action and OAuth constants                                                                                                          |
+| `@yolk-sdk/connectors/figma/conformance`           | Experimental Figma target, seeds, and synthetic fixtures for the `@yolk-sdk/mcp/conformance` cases                                                        |
+| `@yolk-sdk/connectors/fortnox`                     | Company, customer, invoice, supplier, supplier-invoice, article, price, cost-center, payment, offer, print, inbox, settings, profile, bookkeeping actions |
+| `@yolk-sdk/connectors/fortnox/conformance`         | Experimental Fortnox conformance cases, seed config, and synthetic replay fixtures                                                                        |
+| `@yolk-sdk/connectors/github`                      | Repo-scoped GitHub issue/PR/repository actions plus host-only App tokens and attachment upload                                                            |
+| `@yolk-sdk/connectors/github/conformance`          | Experimental GitHub conformance cases, seed config, and synthetic replay fixtures                                                                         |
+| `@yolk-sdk/connectors/google`                      | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                                                                       |
+| `@yolk-sdk/connectors/google/conformance`          | Experimental Gmail, Calendar, and Drive conformance cases, seed config, and synthetic replay fixtures                                                     |
+| `@yolk-sdk/connectors/kie`                         | Kie image/video generation task submit (GPT Image 2, Wan 2.7) and task status actions, `KieApiKeySlot` (`kie.api_key`)                                    |
+| `@yolk-sdk/connectors/kie/conformance`             | Experimental Kie conformance cases, seed config, and synthetic replay fixtures                                                                            |
+| `@yolk-sdk/connectors/linkedin-search`             | Exa people search and Enrich Layer profile/email actions                                                                                                  |
+| `@yolk-sdk/connectors/linkedin-search/conformance` | Experimental LinkedIn search (Exa, Enrich Layer) conformance cases, seed config, and synthetic replay fixtures                                            |
+| `@yolk-sdk/connectors/microsoft`                   | Outlook/OneDrive/SharePoint/Teams Graph actions, shared OAuth slots, host-only file and transcript download, upload, draft attachments                    |
+| `@yolk-sdk/connectors/microsoft/conformance`       | Experimental Microsoft Graph conformance cases, seed config, and synthetic replay fixtures                                                                |
+| `@yolk-sdk/connectors/notion`                      | Notion search/page/block/database/data-source/comment/user actions and API token slot                                                                     |
+| `@yolk-sdk/connectors/notion/conformance`          | Experimental Notion conformance cases, seed config, and synthetic replay fixtures                                                                         |
+| `@yolk-sdk/connectors/r2-storage`                  | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                                                                         |
+| `@yolk-sdk/connectors/r2-storage/conformance`      | Experimental R2 port conformance cases, seed config, synthetic port fixtures, and a plain-JSON bridge                                                     |
+| `@yolk-sdk/connectors/telegram`                    | Telegram bot send/validate actions                                                                                                                        |
+| `@yolk-sdk/connectors/telegram/conformance`        | Experimental Telegram conformance cases, seed config, and synthetic replay fixtures                                                                       |
+| `@yolk-sdk/connectors/todoist`                     | Todoist project/task/label/comment actions and API token slot constants                                                                                   |
+| `@yolk-sdk/connectors/todoist/conformance`         | Experimental Todoist conformance cases, seed config, and synthetic replay fixtures                                                                        |
 
 ## Imports
 
@@ -78,8 +78,8 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
   (`{ unavailable, name, mimeType }`) when no file store is configured, the file is too large or
   storing failed (ADR 0013), so scripts check `'unavailable' in file` before reading
   `result.files[0].fileId`; `connector.invoke` keeps
-  the full output. `gmail.get_attachment`, `outlook.get_attachment` and `email.get_attachment`
-  declare it.
+  the full output. `gmail.get_attachment`, `outlook.get_attachment`, `email.get_attachment` and
+  `fortnox.get_sie_file` declare it.
 
 `makeConnectorToolModule` uses the connector `description` as the module description (override
 with `description`) and returns each action result as the JSON encoding of its `outputSchema`
@@ -722,7 +722,8 @@ All share `fortnox.oauth`; `FortnoxCombinedOAuthCredentialSlot` requests all fiv
 `FortnoxCostCenterOAuthCredentialSlot` (`costcenter`), `FortnoxPaymentOAuthCredentialSlot`
 (`payment`), `FortnoxOfferOAuthCredentialSlot` (`offer`), `FortnoxPrintOAuthCredentialSlot`
 (`print`), `FortnoxInboxOAuthCredentialSlot` (`inbox`), `FortnoxSettingsOAuthCredentialSlot`
-(`settings`), and `FortnoxProfileOAuthCredentialSlot` (`profile`) are not on the combined slot. These consent hints
+(`settings`), `FortnoxProfileOAuthCredentialSlot` (`profile`), and
+`FortnoxBookkeepingOAuthCredentialSlot` (`bookkeeping`) are not on the combined slot. These consent hints
 do not restrict the underlying token to reads. Read actions use `read` metadata; customer and invoice
 create/update actions use `write` metadata: `fortnox.create_customer`, `fortnox.update_customer`,
 `fortnox.create_invoice`, and `fortnox.update_invoice`. Customer invoices have no send or book
@@ -735,11 +736,18 @@ Resource modules add list/get/create/update/delete actions for articles, price l
 cost centers, invoice and supplier-invoice payments, offers, inbox folders, labels, predefined
 accounts, modes of payment, terms of payment and delivery, ways of delivery, and units, plus
 `fortnox.list_print_templates`, `fortnox.get_company_settings`, `fortnox.get_locked_period`, and
-`fortnox.get_profile` (91 actions: 42 `read`, 31 `write`, 18 `destructive`). Deletes, payment
-bookkeeping (`fortnox.bookkeep_*`), and offer lifecycle actions (`fortnox.create_order_from_offer`,
-`fortnox.create_invoice_from_offer`, `fortnox.cancel_offer`, `fortnox.email_offer`,
-`fortnox.mark_offer_sent`) are `destructive`: the Fortnox API cannot undo them, so hosts must gate
-them with approval. New write inputs reject unknown keys. See the Fortnox guide for the full table.
+`fortnox.get_profile`. Bookkeeping actions (`bookkeeping` scope) list and read financial years,
+accounts with their opening and closing balances, voucher series, and vouchers, create vouchers,
+and return a financial year's SIE file (`fortnox.get_sie_file`, IBM437 bytes through the optional
+`ConnectorBinaryHttpClient`, returned to agents as a file); voucher file connections
+(`connectfile`) list and attach archive files to a voucher (102 actions: 51 `read`, 32 `write`, 19
+`destructive`). Deletes, payment bookkeeping (`fortnox.bookkeep_*`), `fortnox.create_voucher`
+(Fortnox books the voucher at once and has no API to delete or change it), and offer lifecycle
+actions (`fortnox.create_order_from_offer`, `fortnox.create_invoice_from_offer`,
+`fortnox.cancel_offer`, `fortnox.email_offer`, `fortnox.mark_offer_sent`) are `destructive`: the
+Fortnox API cannot undo them, so hosts must gate them with approval. New write inputs reject unknown
+keys; `fortnox.create_voucher` also checks that debit equals credit before sending. See the Fortnox
+guide for the full table.
 
 Write inputs preserve Fortnox's PascalCase wire names. Creating a customer requires `Name` and lets
 Fortnox assign `CustomerNumber`; updating a customer includes `CustomerNumber` for the URL but omits
@@ -1761,7 +1769,7 @@ base64 attachment actions remain unchanged. Full API/policy reference:
 | `microsoft`  | `downloadOneDriveItem`, `downloadOutlookAttachment`                                                                      | `createOneDriveFile`, `updateOneDriveFile`, `addOutlookAttachment` |
 | `r2-storage` | `getR2Object`                                                                                                            | `createR2Object`, `updateR2Object`                                 |
 | `google`     | `downloadGoogleDriveFile`, `exportGoogleDriveFile`, `downloadGmailAttachment`                                            | Not added                                                          |
-| `fortnox`    | `downloadFortnoxInvoicePreview`, `downloadFortnoxOfferPreview`, `downloadFortnoxArchiveFile`, `downloadFortnoxInboxFile` | `uploadFortnoxInboxFile`                                           |
+| `fortnox`    | `downloadFortnoxInvoicePreview`, `downloadFortnoxOfferPreview`, `downloadFortnoxArchiveFile`, `downloadFortnoxInboxFile` | `uploadFortnoxInboxFile`, `uploadFortnoxArchiveFile`               |
 | `notion`     | `downloadNotionFile`                                                                                                     | Not added                                                          |
 | `email`      | `downloadEmailAttachment`                                                                                                | Not added                                                          |
 | `telegram`   | `downloadTelegramFile`                                                                                                   | Not added                                                          |
@@ -1886,7 +1894,9 @@ state rather than dropping conditions or silently changing modes.
   static folder ids, which answer folder JSON. Inbox upload (`uploadFortnoxInboxFile`) is one
   never-retried multipart POST through `ConnectorBinaryWriteHttpClient`, capped at
   `fortnoxInboxUploadMaxBytes` (50 MiB, not a documented Fortnox limit), and verifies the returned
-  `Size`. Both inbox helpers use the `inbox` slot.
+  `Size`. Both inbox helpers use the `inbox` slot. Archive upload (`uploadFortnoxArchiveFile`,
+  `/archive[?folderid=…]`, `archive` slot, `fortnoxArchiveUploadMaxBytes`) works the same way; its
+  returned `Id` is the `FileId` `fortnox.create_voucher_file_connection` attaches to a voucher.
 - Notion accepts hosted/external provider file objects from page/property/block reads. Fourth argument
   `NotionFileDownloadPolicy` requires `allowHostedUrl`; external files additionally require
   `allowExternalUrl`. Never forward Notion credentials. Refresh expired grants by rereading the owning

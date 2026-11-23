@@ -165,14 +165,22 @@ host-only `downloadFortnoxInboxFile`, `uploadFortnoxInboxFile`, `fortnoxInboxUpl
 settings (`FortnoxCompanySettings`, `FortnoxLockedPeriod`, `FortnoxPredefinedAccount`,
 `FortnoxLabel`, `fortnoxSettingsActions`), settings registers (`FortnoxModeOfPayment`,
 `FortnoxTermsOfPayment`, `FortnoxTermsOfDelivery`, `FortnoxWayOfDelivery`, `FortnoxUnit`,
-`fortnoxSettingsRegisterActions`), and profile (`FortnoxProfile`, `fortnoxProfileActions`).
+`fortnoxSettingsRegisterActions`), profile (`FortnoxProfile`, `fortnoxProfileActions`), and
+bookkeeping (`FortnoxFinancialYear`, `FortnoxFinancialYearId`, `FortnoxAccount`,
+`FortnoxVoucherSeries`, `FortnoxVoucherSeriesCode`, `FortnoxVoucher`, `FortnoxVoucherRow`,
+`FortnoxVoucherNumber`, `FortnoxCreateVoucherInput`, `FortnoxVoucherRowInput`,
+`fortnoxBookkeepingActions`; voucher file connections `FortnoxVoucherFileConnection`,
+`fortnoxVoucherFileActions`; SIE files `FortnoxGetSieFileOutput`, `FortnoxSieFile`,
+`FortnoxSieType`, `fortnoxSieFileMaxBytes`, `fortnoxSieActions`; host-only archive upload
+`uploadFortnoxArchiveFile`, `FortnoxArchiveFile`, `FortnoxArchiveFileId`,
+`fortnoxArchiveUploadMaxBytes`).
 Their opt-in slots (`FortnoxArticleOAuthCredentialSlot`, `FortnoxPriceOAuthCredentialSlot`,
 `FortnoxCostCenterOAuthCredentialSlot`, `FortnoxPaymentOAuthCredentialSlot`,
 `FortnoxOfferOAuthCredentialSlot`, `FortnoxPrintOAuthCredentialSlot`,
 `FortnoxInboxOAuthCredentialSlot`, `FortnoxSettingsOAuthCredentialSlot`,
-`FortnoxProfileOAuthCredentialSlot`) are not on the combined slot. Read actions declare `read`;
-create/update actions declare `write`; deletes, bookkeeping, and offer lifecycle actions declare
-`destructive`.
+`FortnoxProfileOAuthCredentialSlot`, `FortnoxBookkeepingOAuthCredentialSlot`) are not on the
+combined slot. Read actions declare `read`; create/update actions declare `write`; deletes,
+bookkeeping, creating a voucher, and offer lifecycle actions declare `destructive`.
 See [Read and write Fortnox records](../connectors/fortnox) for OAuth constants, consent limitations,
 pagination, selected fields, and monetary wire types.
 

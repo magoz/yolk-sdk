@@ -1,19 +1,21 @@
 ---
 title: Read and write Fortnox records
-description: Read and write Fortnox records, prices, payments, offers, inbox, and settings with host-owned OAuth.
+description: Read and write Fortnox records, prices, payments, offers, inbox, settings, and bookkeeping with host-owned OAuth.
 ---
 
 Use `@yolk-sdk/connectors/fortnox` to read Fortnox records directly or expose them as agent tools.
-The connector exposes 91 actions: 42 `read`, 31 `write`, and 18 `destructive`. It sends GET, POST,
+The connector exposes 102 actions: 51 `read`, 32 `write`, and 19 `destructive`. It sends GET, POST,
 PUT, and DELETE requests to `https://api.fortnox.se/3`.
 
-`destructive` actions cannot be undone through the Fortnox API: deletes, payment bookkeeping, offer
-conversion, cancellation, emailing, and marking an offer sent. Gate them with host approval. Customer
-invoices still have no send, book, cancel, or credit action; those remain host capabilities.
+`destructive` actions cannot be undone through the Fortnox API: deletes, payment bookkeeping,
+creating a voucher (Fortnox books it at once), offer conversion, cancellation, emailing, and marking
+an offer sent. Gate them with host approval. Customer invoices still have no send, book, cancel, or
+credit action; those remain host capabilities.
 
-Host-only invoice and offer preview PDFs, archive and inbox downloads, inbox upload, and
+Host-only invoice and offer preview PDFs, archive and inbox downloads, archive and inbox uploads, and
 supplier-file discovery are described in [Transfer connector files](./files#fortnox-and-notion).
-Previews do not mark a document Sent.
+Previews do not mark a document Sent. `fortnox.get_sie_file` is the one action that returns file
+bytes; see [Bookkeeping](#bookkeeping).
 
 ## Connect a host credential
 
@@ -85,6 +87,7 @@ All slots bind through `fortnox.oauth`:
 | `FortnoxInboxOAuthCredentialSlot`              | `inbox`              | Inbox                 | Any                           |
 | `FortnoxSettingsOAuthCredentialSlot`           | `settings`           | Inställningar         | Any                           |
 | `FortnoxProfileOAuthCredentialSlot`            | `profile`            | Profil                | Any                           |
+| `FortnoxBookkeepingOAuthCredentialSlot`        | `bookkeeping`        | Bokföring             | Bokföring or Kundfaktura      |
 
 `print` covers only print templates; printing, previewing, or emailing a document uses the
 document's own scope (`invoice`, `offer`). Fortnox also lists Company Logo (Företagslogga) and a
@@ -93,7 +96,7 @@ connector has no actions for either.
 
 `FortnoxOAuthCredentialSlot` is the generic binding without scope hints.
 `FortnoxCombinedOAuthCredentialSlot` declares the original five record scopes only (not the file,
-article, price, cost-center, payment, offer, print, inbox, settings, or profile scopes); use it only
+article, price, cost-center, payment, offer, print, inbox, settings, profile, or bookkeeping scopes); use it only
 when the host needs exactly those resources. Action-scoped slots supply consent hints to the
 resolver, not a token store or permission checker.
 
@@ -189,10 +192,11 @@ All action IDs carry the `fortnox.` prefix. Notes per resource:
   `update_predefined_account` changes the account Fortnox books with by default. Deleting a label
   removes it from every document that uses it. Labels and predefined accounts are not paginated.
 - **Not covered.** Article URL connections, price-list deletion, `?path=` inbox addressing,
-  Email Senders, Predefined Voucher Series, Company Logo, and the sales API (scope or endpoint not
-  confirmed). Within the original scopes, customer-invoice send, book, cancel, and credit, customer
-  deletion, supplier and supplier-invoice writes, and file-connection writes are also not
-  connector actions yet.
+  Email Senders, Predefined Voucher Series, Account Charts, voucher series writes, account writes,
+  voucher external URL connections, Company Logo, and the sales API (scope or endpoint not
+  confirmed, or not needed yet). Within the original scopes, customer-invoice send, book, cancel,
+  and credit, customer deletion, supplier and supplier-invoice writes, and file-connection writes
+  other than voucher file connections are also not connector actions yet.
 
 These additions follow Fortnox's current API reference and archived resource pages; none has been
 observed against a live company yet. The
@@ -200,6 +204,68 @@ observed against a live company yet. The
 (including the offer preview and inbox file bytes) with unverified, synthetic shapes named after the
 fields these actions read, which the read [conformance cases](#conformance-cases) cover; their
 writes, and side-effecting reads such as `email_offer`, are not emulated and fail closed with a 404.
+
+### Bookkeeping
+
+Every bookkeeping action needs the `bookkeeping` scope, except the voucher file connections, which
+need `connectfile`, and uploads to the archive, which need `archive` (Fortnox
+[scopes guide](https://www.fortnox.se/developer/guides-and-good-to-know/scopes)).
+
+| Action                                   | Access      | Input                                                                                                 | Success value                               |
+| ---------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `fortnox.list_financial_years`           | read        | `{ date?, page?, limit? }`                                                                            | `{ financialYears, pagination }`            |
+| `fortnox.get_financial_year`             | read        | exactly one of `{ id }` or `{ date }`                                                                 | `FortnoxFinancialYear`                      |
+| `fortnox.list_accounts`                  | read        | `{ financialYearId?, page?, limit?, lastModified? }`                                                  | `{ accounts, pagination }`                  |
+| `fortnox.get_account`                    | read        | `{ accountNumber, financialYearId? }`                                                                 | `FortnoxAccount`                            |
+| `fortnox.list_voucher_series`            | read        | `{ financialYearId?, page?, limit?, lastModified? }`                                                  | `{ voucherSeries, pagination }`             |
+| `fortnox.list_vouchers`                  | read        | `{ financialYearId?, voucherSeries?, fromDate?, toDate?, costCenter?, page?, limit?, lastModified? }` | `{ vouchers, pagination }`                  |
+| `fortnox.get_voucher`                    | read        | `{ voucherSeries, voucherNumber, financialYearId }`                                                   | `FortnoxVoucher` with `VoucherRows`         |
+| `fortnox.create_voucher`                 | destructive | `FortnoxCreateVoucherInput`                                                                           | `FortnoxVoucher`                            |
+| `fortnox.list_voucher_file_connections`  | read        | `{ voucherSeries, voucherNumber, financialYearId }`                                                   | `{ connections }`                           |
+| `fortnox.create_voucher_file_connection` | write       | `{ FileId, VoucherSeries, VoucherNumber, VoucherYear }`                                               | `FortnoxVoucherFileConnection`              |
+| `fortnox.get_sie_file`                   | read        | `{ sieType: 1 \| 2 \| 3 \| 4, financialYearId }`                                                      | `FortnoxGetSieFileOutput` (file for agents) |
+
+- **Financial years.** `financialYearId` is a financial year's `Id`; it is the `financialyear`
+  query Fortnox uses to select the year (accounts, voucher series, and vouchers are per year).
+  Omitted, Fortnox uses the current financial year. `get_financial_year` by `date` lists
+  `financialyears?date=…` and answers `fortnox_not_found` when no year contains the date.
+- **Accounts.** `BalanceBroughtForward` is the opening balance (ingående balans) and
+  `BalanceCarriedForward` the closing balance (utgående balans) in the selected year. The accounts
+  endpoint has no per-period balances: SIE type 2 holds monthly balances, type 3 adds cost center
+  and project balances.
+- **Vouchers.** A voucher is unique by `VoucherSeries`, `VoucherNumber`, and `Year` (the financial
+  year Id): numbers restart every year. List rows usually leave out `VoucherRows`; `get_voucher`
+  returns them. A row's `Description` is the account name Fortnox sets; `TransactionInformation`
+  is the row text. `list_vouchers` with `voucherSeries` uses `/vouchers/sublist/{VoucherSeries}`.
+- **Creating a voucher books it.** The Fortnox API has no endpoint to delete or change a voucher, so
+  `create_voucher` is `destructive`: a mistake needs a new correcting voucher. The input is closed
+  (unknown keys fail at every depth) and is checked before any request: at least two rows, each
+  with an `Account`, exactly one positive `Debit` or `Credit` with at most two decimals, optional
+  `TransactionInformation` (at most 100 characters), `CostCenter`, and `Project`; total debit equals
+  total credit, compared in whole öre. The `TransactionDate` must lie in the financial year and
+  after any locked period; Fortnox enforces that, and active accounts and existing cost centers and
+  projects. The request is sent once and never retried: after a transport failure or an unreadable
+  answer the voucher may exist, so list vouchers before trying again.
+- **Attaching files.** A voucher file connection links an archive file to a voucher. Upload the file
+  with the host-only `uploadFortnoxArchiveFile` (or take an inbox file's `ArchiveFileId` from
+  `get_inbox_folder`), then call `create_voucher_file_connection` with its id. Which id forms
+  Fortnox accepts is not verified against a live company. `list_voucher_file_connections` returns
+  only the requested voucher's connections; an answer announcing more than one page fails.
+- **SIE files.** `get_sie_file` downloads `GET /3/sie/{type}?financialyear={id}` through the host
+  `ConnectorBinaryHttpClient` (the string HTTP port cannot carry the bytes) and fails with
+  `validation_failed` when the host provides none. The file is IBM437 (code page 437) text, as the
+  [SIE format](https://sie.se/format/) requires, and must start with `#FLAGGA`. As an agent tool it
+  returns `{ value, files }`: `value` is `FortnoxSieFile` (`sieType`, `financialYearId`, `fileName`,
+  `mimeType: 'text/plain'`, `encoding: 'IBM437'`, `byteLength`) and the bytes become a file
+  ([file claim check](../integrations/files)); invoked directly it returns them as `contentBase64`.
+  Files over `fortnoxSieFileMaxBytes` (50 MiB) fail with `fortnox_response_too_large`. Decode the
+  text as IBM437, not UTF-8.
+- **Wire forms.** The archived examples send voucher and account `Project` as the number `0`,
+  financial year lists name the chart type `accountCharts`, and voucher file connections send
+  `VoucherNumber` as a string. These decode to the public string and integer types.
+
+None of the bookkeeping endpoints has been observed against a live company yet, and the Fortnox
+emulator does not serve them.
 
 Create customer inputs require `Name`; Fortnox assigns `CustomerNumber`. Create invoice inputs
 require `CustomerNumber`; Fortnox assigns `DocumentNumber`. Update inputs carry the provider
@@ -370,7 +436,8 @@ const tools = makeConnectorToolModule(FortnoxConnector, {
 
 The adapter inherits each action's declared access metadata (`read`, `write`, or `destructive`);
 explicit host access overrides still win. Require manual approval for `destructive` tools such as
-`fortnox.email_offer` and `fortnox.bookkeep_invoice_payment`, or exclude them from the module.
+`fortnox.email_offer`, `fortnox.bookkeep_invoice_payment`, and `fortnox.create_voucher`, or exclude
+them from the module.
 Customer-invoice sending and booking are still not connector actions, so any host-owned outbound
 action must keep its own approval gate.
 See [Add connector tools](../integrations/connector-tool) for tool execution and authorization.
@@ -460,5 +527,7 @@ quirks.
 - [Parameters and pagination](https://www.fortnox.se/developer/guides-and-good-to-know/parameters/)
 - [Response and error envelopes](https://www.fortnox.se/developer/guides-and-good-to-know/responses)
 - [Error codes](https://www.fortnox.se/developer/guides-and-good-to-know/errors)
+- [SIE file format](https://sie.se/format/)
+- [Voucher resource (archived)](https://web.archive.org/web/2023/https://developer.fortnox.se/documentation/resources/vouchers/)
 - [Customer resource (archived)](https://web.archive.org/web/20220812174224/https://developer.fortnox.se/documentation/resources/customers/)
 - [Updating document rows with RowId (archived)](https://web.archive.org/web/20211203193604/https://developer.fortnox.se/blog/updating-document-rows-using-rowid/)

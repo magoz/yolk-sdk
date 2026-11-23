@@ -14,7 +14,13 @@ import {
   closedInput
 } from './fields.ts'
 import { FortnoxSettingsOAuthCredentialSlot } from './oauth.ts'
-import { FortnoxMetaInformation, deleteFortnox, readFortnox, writeFortnox } from './shared.ts'
+import {
+  FortnoxMetaInformation,
+  deleteFortnox,
+  readFortnox,
+  singlePage,
+  writeFortnox
+} from './shared.ts'
 
 export const FortnoxLabelId = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 2_147_483_647 })
@@ -128,20 +134,6 @@ export class FortnoxDeleteLabelInput extends Schema.Class<FortnoxDeleteLabelInpu
 export class FortnoxDeleteLabelOutput extends Schema.Class<FortnoxDeleteLabelOutput>(
   'FortnoxDeleteLabelOutput'
 )({ labelId: FortnoxLabelId, deleted: Schema.Literal(true) }) {}
-
-// The Fortnox OpenAPI documents no MetaInformation and no paging parameters for labels or
-// predefined accounts (the legacy predefined-accounts page showed one page of 33). Accept an
-// absent MetaInformation, but reject a response announcing more pages instead of truncating.
-const singlePage = Schema.makeFilter<{
-  readonly MetaInformation?: typeof FortnoxMetaInformation.Type
-}>(value =>
-  value.MetaInformation !== undefined && value.MetaInformation['@TotalPages'] > 1
-    ? {
-        path: ['MetaInformation', '@TotalPages'],
-        issue: 'Fortnox announced more than one page for an unpaginated list'
-      }
-    : undefined
-)
 
 const PredefinedAccountsResponse = Schema.Struct({
   PreDefinedAccounts: Schema.Array(FortnoxPredefinedAccount),

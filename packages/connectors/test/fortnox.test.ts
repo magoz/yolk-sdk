@@ -255,8 +255,8 @@ const listItems = (output: typeof FortnoxListOutput.Type) => {
   return Chunk.toReadonlyArray(output.supplierInvoices)
 }
 
-// Deletes, bookkeeping, offer lifecycle (convert, cancel, email, mark sent), and inbox deletion
-// cannot be undone through the Fortnox API.
+// Deletes, bookkeeping (including creating a voucher, which books it), offer lifecycle (convert,
+// cancel, email, mark sent), and inbox deletion cannot be undone through the Fortnox API.
 const destructiveActionIds = [
   'fortnox.delete_article',
   'fortnox.delete_price',
@@ -275,7 +275,8 @@ const destructiveActionIds = [
   'fortnox.delete_mode_of_payment',
   'fortnox.delete_terms_of_payment',
   'fortnox.delete_way_of_delivery',
-  'fortnox.delete_unit'
+  'fortnox.delete_unit',
+  'fortnox.create_voucher'
 ]
 
 describe('Fortnox connector', () => {
@@ -286,8 +287,8 @@ describe('Fortnox connector', () => {
 
   it('exports reads, writes, and destructive actions with shared resource-scoped OAuth bindings', () => {
     expect(FortnoxConnector.id).toBe('fortnox')
-    expect(FortnoxConnector.actions).toHaveLength(91)
-    expect(new Set(FortnoxConnector.actions.map(action => action.id)).size).toBe(91)
+    expect(FortnoxConnector.actions).toHaveLength(102)
+    expect(new Set(FortnoxConnector.actions.map(action => action.id)).size).toBe(102)
     expect(FortnoxConnector.actions.map(action => action.id)).toEqual(
       expect.arrayContaining([
         ...reads.map(item => item.action),
