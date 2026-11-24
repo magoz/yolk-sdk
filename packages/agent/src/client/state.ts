@@ -28,6 +28,7 @@ import * as Schema from 'effect/Schema'
 import {
   agentEventToolCallIds,
   disputedAgentTurns,
+  missedAgentExecutionStart,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -921,6 +922,27 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
+  // A start this client missed (a mid-turn snapshot rebuild) is applied first, as it would have
+  // been, except that it keeps the draft: a rebuilt draft is the missed execution's own output.
+  const missed = missedAgentExecutionStart(state.executions ?? [], event)
+
+  return applyUnseenAgentEvent(
+    missed === undefined ? state : applyUnseenAgentEvent(state, missed, nowMs, 'missed'),
+    event,
+    nowMs,
+    'seen'
+  )
+}
+
+/** A `missed` start is one `missedAgentExecutionStart` made: it never resets the draft. */
+type AgentEventOrigin = 'seen' | 'missed'
+
+const applyUnseenAgentEvent = (
+  state: AgentClientState,
+  event: AgentEvent,
+  nowMs: number,
+  origin: AgentEventOrigin
+): AgentClientState => {
   const executions = state.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
 
@@ -959,7 +981,7 @@ export const applyAgentEventWithOptions = (
       ? route.started
       : undefined
 
-  const applied = nextTurnStart(applyAgentEventRouted(routed, event, nowMs), event, route)
+  const applied = nextTurnStart(applyAgentEventRouted(routed, event, nowMs, origin), event, route)
   const before = Predicate.isTagged(route, 'Start') ? route.executions : executions
 
   const after = recordAgentExecutionEvent(
@@ -1164,7 +1186,8 @@ const isModelToolRun = (run: AgentToolRun) =>
 const applyAgentEventRouted = (
   state: AgentClientState,
   event: AgentEvent,
-  nowMs: number
+  nowMs: number,
+  origin: AgentEventOrigin
 ): AgentClientState => {
   const replay = acknowledgedReplay(state, event)
 
@@ -1176,7 +1199,8 @@ const applyAgentEventRouted = (
     )
   }
 
-  const applied = applyAgentEventUnchecked(state, event, nowMs)
+  // A start's only change is resetting the draft (`discardUnfinishedStream`).
+  const applied = origin === 'missed' ? state : applyAgentEventUnchecked(state, event, nowMs)
   const statusEvent = eventForStatus(applied, event)
 
   return rememberEvent(
@@ -1604,7 +1628,8 @@ export const submitAgentUserMessage = (
  * arguments) or, for answers, the run holding their request, and adds a run of its own otherwise,
  * never landing on an earlier turn's run reusing its id. A snapshot taken mid-turn keeps working:
  * that turn's later host events for runs holding their call find them as the same call. Its later
- * model events (before the next `LLMStreamStart`) still act as replays of an earlier run's: a
+ * model events carrying `executionTurn` start the turn they name (its missed `LLMStreamStart`);
+ * untagged ones (before the next `LLMStreamStart`) still act as replays of an earlier run's: a
  * reused id among them can reach an earlier turn's run. Pure; changes nothing else.
  */
 export const markAgentRunStart = (state: AgentClientState): AgentClientState =>

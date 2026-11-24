@@ -1,6 +1,7 @@
 import { Data, Equal, Match, Predicate } from 'effect'
 import {
   isTerminalAgentEvent,
+  LLMStreamStart,
   type AgentAwaitingInput,
   type AgentEnd,
   type AgentEvent,
@@ -241,6 +242,73 @@ export const routeAgentExecutionEvent = <Output>(
       ]
     }))
   })
+}
+
+type MissedStartFields = {
+  turn: number
+  executionId: string
+  streamId?: string
+  createdAtMs?: number
+}
+
+/**
+ * The events a model call streams after its `LLMStreamStart` (`runModelTurn`): only these start a
+ * missed execution. Host events (requests, the tool batch, answers, user messages, terminals) are
+ * never tagged by contract, and a tagged one from a host that does is not taken for a model start.
+ */
+const followsModelStreamStart = (event: AgentEvent) =>
+  Match.value(event).pipe(
+    Match.tag(
+      'LLMTextDelta',
+      'LLMReasoningDelta',
+      'LLMReasoningReplay',
+      'ToolInputStart',
+      'ToolInputDelta',
+      'ToolInputEnd',
+      'ProviderToolResult',
+      'AssistantMessage',
+      'UsageUpdate',
+      'AgentRetry',
+      'LLMStreamEnd',
+      'TurnEnd',
+      () => true
+    ),
+    Match.orElse(() => false)
+  )
+
+/**
+ * The `LLMStreamStart` this client missed for the execution of `event`, for a reducer to apply
+ * before it: the event names its execution's turn (`executionTurn`), and the ledger has never
+ * seen that `executionId` (a client rebuilt from a snapshot resumes mid-turn, past the start). It
+ * carries no `eventId` (never deduped or remembered) and starts the turn as the real start would:
+ * stale in an ended run or for a turn its run closed or moved past, superseding a live execution of
+ * the same turn, else a new turn. `undefined` for a known execution (its start's `turn` decides),
+ * an event without `executionId` or `executionTurn`, and any event a model call does not stream
+ * after its start (`followsModelStreamStart`): an `LLMStreamStart` (its own `turn` decides), a
+ * `TurnStart` (it comes before the start) and host events.
+ */
+export const missedAgentExecutionStart = <Output>(
+  runs: AgentExecutions<Output>,
+  event: AgentEvent
+): LLMStreamStart | undefined => {
+  const { executionId, executionTurn } = event
+
+  if (
+    executionId === undefined ||
+    executionTurn === undefined ||
+    !followsModelStreamStart(event) ||
+    allExecutions(runs).some(execution => execution.executionId === executionId)
+  ) {
+    return undefined
+  }
+
+  const fields: MissedStartFields = { turn: executionTurn, executionId }
+
+  if (event.streamId !== undefined) fields.streamId = event.streamId
+
+  if (event.createdAtMs !== undefined) fields.createdAtMs = event.createdAtMs
+
+  return LLMStreamStart.make(fields)
 }
 
 /** Tool call ids an event refers to. */

@@ -14,12 +14,14 @@ import {
   type Content,
   type HitlRequest,
   type HitlResponse,
+  type LLMStreamStart,
   type ToolCall,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
   agentEventToolCallIds,
   disputedAgentTurns,
+  missedAgentExecutionStart,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -39,6 +41,7 @@ import {
   isPastRequestToolCall,
   messagesAfterAnchor,
   replaceWithCommittedAnswer,
+  streamingDraftMessage,
   deleteChatTurn,
   editChatUserMessage,
   markChatError,
@@ -181,9 +184,10 @@ const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
  * snapshot's parts only as the same call (id, name and arguments) or, for answers, the part holding
  * their request, and adds a part of its own otherwise, never landing on an earlier turn's call
  * reusing its id. A snapshot taken mid-turn keeps working: that turn's later host events for calls
- * in the snapshot's messages find them as the same call. Its later model events (before the next
- * `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach an
- * earlier turn's call, as without a start. Pure; works on either chat state, typed with the new
+ * in the snapshot's messages find them as the same call. Its later model events carrying
+ * `executionTurn` start the turn they name (its missed `LLMStreamStart`); untagged ones (before the
+ * next `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach
+ * an earlier turn's call, as without a start. Pure; works on either chat state, typed with the new
  * `turnStart` (a narrower `turnStart` type the input had does not survive).
  */
 export const markChatRunStart = <
@@ -232,6 +236,13 @@ export type AgentChatProjectionStep = {
    * of a call already finished.
    */
   readonly statusEvent: AgentEvent | undefined
+  /**
+   * The `LLMStreamStart` the event's execution missed, which the projection applied first (the
+   * event names its turn with `executionTurn`, and its `executionId` was unseen: a mid-turn
+   * snapshot rebuild). Fold it into the status before `statusEvent`, as the `useAgentChat` reducer
+   * and `reduceAgentEvents` do. Absent when nothing was missed or the missed start was stale.
+   */
+  readonly missedStart?: LLMStreamStart
 }
 
 /**
@@ -239,7 +250,8 @@ export type AgentChatProjectionStep = {
  * status fold should apply (`statusEvent`), so its status agrees with the chat: a replayed pause
  * whose calls are past their requests leaves the status as it was instead of blocking the run
  * with no card to answer, and a pause naming some such calls blocks only on its other requests.
- * The `useAgentChat` reducer folds its status from the same `statusEvent`. Pure.
+ * The `useAgentChat` reducer folds its status from the same `missedStart` (when present) and then
+ * `statusEvent`. Pure.
  */
 export const stepAgentChatProjection = (
   state: AgentChatEventProjectionState,
@@ -250,15 +262,25 @@ export const stepAgentChatProjection = (
     return { projection: state, statusEvent: undefined }
   }
 
-  const routed = projectExecutionEvent(state, event, options)
+  // A start this chat missed (a mid-turn snapshot rebuild) is applied first, as it would have
+  // been, except that it keeps the draft: a rebuilt draft is the missed execution's own output.
+  const missed = missedAgentExecutionStart(state.executions ?? [], event)
 
-  return {
+  const started =
+    missed === undefined ? undefined : projectExecutionEvent(state, missed, options, 'missed')
+
+  const before = started === undefined ? state : { ...state, ...projectionFields(started) }
+  const routed = projectExecutionEvent(before, event, options, 'seen')
+
+  const step: AgentChatProjectionStep = {
     projection: {
       ...projectionFields(routed),
       seenEventIds: rememberEventId(state.seenEventIds, event)
     },
-    statusEvent: routed.applied ? eventForStatus(state, event, routed.pendingRequests) : undefined
+    statusEvent: routed.applied ? eventForStatus(before, event, routed.pendingRequests) : undefined
   }
+
+  return missed !== undefined && started?.applied === true ? { ...step, missedStart: missed } : step
 }
 
 type ExecutionProjection = {
@@ -303,7 +325,8 @@ type ProjectedExecutionEvent = ExecutionProjection & {
 const projectExecutionEvent = (
   projection: ExecutionProjection,
   event: AgentEvent,
-  options: ApplyAgentEventToChatMessagesOptions
+  options: ApplyAgentEventToChatMessagesOptions,
+  origin: 'seen' | 'missed'
 ): ProjectedExecutionEvent => {
   const executions = projection.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
@@ -350,9 +373,31 @@ const projectExecutionEvent = (
       ? route.started
       : undefined
 
-  const startAnchor = Predicate.isTagged(route, 'Start')
-    ? turnAnchor(route.superseded, started)
-    : undefined
+  // A missed start that supersedes nothing owns the draft still streaming (a rebuilt draft is its
+  // output): its turn starts before it, and a newer execution removes it, as the client's `text`.
+  const streaming =
+    origin === 'missed' && Predicate.isTagged(route, 'Start') && route.superseded.length === 0
+      ? streamingDraftMessage(started)
+      : undefined
+
+  // Never another execution's message: only a draft no execution this chat saw produced.
+  const draft =
+    streaming !== undefined &&
+    !executions.some(run =>
+      run.executions.some(execution =>
+        execution.output.some(
+          output => Predicate.isTagged(output, 'Message') && output.messageId === streaming.id
+        )
+      )
+    )
+      ? streaming
+      : undefined
+
+  const startAnchor = !Predicate.isTagged(route, 'Start')
+    ? undefined
+    : draft === undefined
+      ? turnAnchor(route.superseded, started)
+      : Option.fromNullishOr(started.at(-2)?.id)
 
   const ownTurn =
     startAnchor ?? (owner === undefined ? undefined : executionTurnAnchor(owner.output))
@@ -363,12 +408,17 @@ const projectExecutionEvent = (
   // run's call first), never the resumed batch's call reusing its id.
   const runStart = ownTurn === undefined && latest?.run === true ? latest : undefined
 
-  const chatMessages = applyExecutionEventToChatMessages(committed, event, options, {
-    foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
-    turn,
-    modelTurn: runStart === undefined ? turn : undefined,
-    runOutput: runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
-  })
+  // A missed start (`stepAgentChatProjection`) keeps the draft: a start only finalizes it here.
+  const chatMessages =
+    origin === 'missed'
+      ? committed
+      : applyExecutionEventToChatMessages(committed, event, options, {
+          foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
+          turn,
+          modelTurn: runStart === undefined ? turn : undefined,
+          runOutput:
+            runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
+        })
 
   const after = recordAgentExecutionEvent(
     Predicate.isTagged(route, 'Start')
@@ -384,6 +434,9 @@ const projectExecutionEvent = (
           ...(startAnchor === undefined
             ? []
             : [AgentChatExecutionOutput.After({ messageId: startAnchor })]),
+          ...(draft === undefined
+            ? []
+            : [AgentChatExecutionOutput.Message({ messageId: draft.id })]),
           ...chatExecutionOutput(owner, event, committed, chatMessages, turn)
         ]
   )
@@ -771,9 +824,13 @@ export const reduceAgentChatState = (
         ...step.projection
       }
 
-      return step.statusEvent === undefined
-        ? projected
-        : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), step.statusEvent))
+      const tree = [step.missedStart, step.statusEvent].reduce(
+        (current: AgentStatusTree, event) =>
+          event === undefined ? current : nextAgentStatusTree(current, event),
+        statusTree(paused)
+      )
+
+      return withStatusTree(projected, tree)
     }),
     Match.tag('Error', current =>
       withStatusTree(

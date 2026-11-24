@@ -845,6 +845,20 @@ const hasStreamingPart = (message: AgentChatMessage) =>
       part.state === 'streaming'
   )
 
+/**
+ * The chat's last message when it is an assistant message still streaming: a draft a host rebuilt
+ * from a snapshot, which the execution whose start the chat missed streamed (package-internal).
+ */
+export const streamingDraftMessage = (
+  messages: ReadonlyArray<AgentChatMessage>
+): AgentChatMessage | undefined => {
+  const last = messages.at(-1)
+
+  return last !== undefined && last.role === 'assistant' && hasStreamingPart(last)
+    ? last
+    : undefined
+}
+
 const hasStreamingTextPart = (message: AgentChatMessage) =>
   message.parts.some(part => Predicate.isTagged(part, 'Text') && part.state === 'streaming')
 

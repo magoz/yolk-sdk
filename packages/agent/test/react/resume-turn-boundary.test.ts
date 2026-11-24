@@ -8,6 +8,7 @@ import {
   BackgroundToolAccepted,
   HostToolCallPart,
   LLMStreamStart,
+  LLMTextDelta,
   QuestionAnswer,
   QuestionPrompt,
   QuestionRequest,
@@ -53,6 +54,7 @@ import {
   makeAgentChatEventProjectionState,
   markChatRunStart,
   reduceAgentChatState,
+  stepAgentChatProjection,
   type AgentChatEventProjectionState,
   type AgentChatState,
   type AgentChatTurnStart
@@ -599,6 +601,196 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
       expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(
         all(['weather {"city":"Oslo"}:Completed', 'weather {"city":"Bergen"}:ApprovalRequested'])
       )
+    })
+  })
+
+  describe('taken mid-turn, while the turn streams its model call', () => {
+    // The cursor lies past turn 2's `LLMStreamStart`; its model events name their execution's turn
+    // (`executionTurn`, as the vercel-workflows sequencer sets it), so the rebuilt state starts
+    // turn 2 from the first one and a reused `call_0` never lands on turn 1's call.
+    const snapshot: Snapshot = { messages: [user, turnOne, osloResult], toolRuns: [osloRun] }
+
+    const tagged = (executionId: string, turn: number) => ({
+      ...host(),
+      executionId,
+      executionTurn: turn
+    })
+
+    const batch = (call: ToolCall, content: string) => [
+      ToolExecutionStarted.make({ ...host(), call }),
+      ToolExecutionCompleted.make({
+        ...host(),
+        call,
+        result: ToolResult.make({ toolCallId: call.id, content })
+      })
+    ]
+
+    const turnThree = [
+      LLMStreamStart.make({ ...tagged('step-3:1', 3), turn: 3 }),
+      AssistantMessageEvent.make({ ...tagged('step-3:1', 3), message: answer(done) })
+    ]
+
+    it("starts the turn from its first model event, off an earlier turn's call", () => {
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: bergen }),
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: turnTwo }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+
+      const started = applyEvents(fromSnapshot(snapshot, true), events.slice(0, 1))
+
+      expect(started.client.turnStart).toMatchObject({ streamId: 'run-1', turn: 2, firstRun: 1 })
+      expect(started.projection.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
+      expect(started.chat.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
+    })
+
+    it('folds the missed start into status as the real start would', () => {
+      const delta = LLMTextDelta.make({ ...tagged('step-2:1', 2), text: 'Now' })
+
+      const missed = applyEvents(fromSnapshot(snapshot, true), [delta])
+
+      const seen = applyEvents(fromSnapshot(snapshot, true), [
+        LLMStreamStart.make({ ...tagged('step-2:1', 2), turn: 2 }),
+        delta
+      ])
+
+      expect(missed.client.status).toEqual(seen.client.status)
+      expect(missed.chat.status).toEqual(seen.chat.status)
+      expect(missed.chat.status).toMatchObject({
+        _tag: 'Working',
+        activity: { _tag: 'Generating' }
+      })
+
+      // A host folding status beside the projection folds the missed start, then the event.
+      const step = stepAgentChatProjection(fromSnapshot(snapshot, true).projection, delta)
+
+      expect(step.missedStart).toEqual(
+        LLMStreamStart.make({ turn: 2, executionId: 'step-2:1', streamId: 'run-1' })
+      )
+      expect(step.statusEvent).toBe(delta)
+
+      // A stale missed start moves nothing.
+      const later = applyEvents(fromSnapshot(snapshot, true), [delta]).projection
+
+      const stale = stepAgentChatProjection(
+        later,
+        LLMTextDelta.make({ ...tagged('step-1:2', 1), text: 'Old' })
+      )
+
+      expect(stale.missedStart).toBeUndefined()
+      expect(stale.statusEvent).toBeUndefined()
+    })
+
+    it("keeps the snapshot's draft of the missed execution streaming", () => {
+      const chatMessages = buildAgentChatMessages({
+        messages: snapshot.messages,
+        userDraft: '',
+        assistantDraft: 'Now Ber',
+        reasoningDraft: '',
+        toolRuns: snapshot.toolRuns,
+        error: null
+      })
+
+      const rebuilt: Reducers = {
+        client: markAgentRunStart({
+          ...initialAgentClientState,
+          messages: snapshot.messages,
+          toolRuns: snapshot.toolRuns,
+          text: 'Now Ber'
+        }),
+        projection: markChatRunStart(makeAgentChatEventProjectionState(chatMessages)),
+        chat: markChatRunStart({ ...initialAgentChatState, chatMessages })
+      }
+
+      const resumed = applyEvents(rebuilt, [
+        LLMTextDelta.make({ ...tagged('step-2:1', 2), text: 'gen', textSoFar: 'Now Bergen' })
+      ])
+
+      const texts = (messages: ReadonlyArray<AgentChatMessage>) =>
+        messages.flatMap(message =>
+          message.parts.flatMap(part =>
+            Predicate.isTagged(part, 'Text') ? [[part.content, part.state]] : []
+          )
+        )
+
+      expect(resumed.client.text).toBe('Now Bergen')
+      expect(texts(resumed.projection.chatMessages)).toEqual(texts(resumed.chat.chatMessages))
+      expect(texts(resumed.chat.chatMessages).filter(([, state]) => state === 'streaming')).toEqual(
+        [['Now Bergen', 'streaming']]
+      )
+
+      // The execution's own answer replaces its draft: one message, no duplicate.
+      const answered = applyEvents(resumed, [
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: answer('Now Bergen') })
+      ])
+
+      const done = [
+        ['Weather in Oslo, then Bergen?', 'done'],
+        ['Oslo first', 'done'],
+        ['Now Bergen', 'done']
+      ]
+
+      expect(texts(answered.projection.chatMessages)).toEqual(done)
+      expect(texts(answered.chat.chatMessages)).toEqual(done)
+
+      // A newer execution of the turn, its start seen or missed, removes the draft with the rest of
+      // the superseded execution's output, in every reducer.
+      const newer = LLMTextDelta.make({ ...tagged('step-2:2', 2), text: 'Oslo again' })
+
+      for (const events of [
+        [LLMStreamStart.make({ ...tagged('step-2:2', 2), turn: 2 }), newer],
+        [newer]
+      ]) {
+        const superseded = applyEvents(resumed, events)
+
+        const shown = [
+          ['Weather in Oslo, then Bergen?', 'done'],
+          ['Oslo first', 'done'],
+          ['Oslo again', 'streaming']
+        ]
+
+        expect(superseded.client.text).toBe('Oslo again')
+        expect(texts(superseded.projection.chatMessages)).toEqual(shown)
+        expect(texts(superseded.chat.chatMessages)).toEqual(shown)
+      }
+    })
+
+    it("lets a redelivered execution's start supersede the resumed one", () => {
+      const stockholm = weather('Stockholm')
+
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: stockholm }),
+        LLMStreamStart.make({ ...tagged('step-2:2', 2), turn: 2 }),
+        ToolInputEnd.make({ ...tagged('step-2:2', 2), call: bergen }),
+        AssistantMessageEvent.make({ ...tagged('step-2:2', 2), message: turnTwo }),
+        // The superseded execution keeps streaming; its events drop.
+        AssistantMessageEvent.make({
+          ...tagged('step-2:1', 2),
+          message: answer('Now Stockholm', [stockholm])
+        }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+    })
+
+    it('drops an unseen execution of a turn the run moved past', () => {
+      const stockholm = weather('Stockholm')
+
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: bergen }),
+        // A losing execution of turn 1 the snapshot already committed.
+        ToolInputEnd.make({ ...tagged('step-1:2', 1), call: stockholm }),
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: turnTwo }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
     })
   })
 })

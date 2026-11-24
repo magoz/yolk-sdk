@@ -120,7 +120,10 @@ At `AgentEnd` and `AgentAwaitingInput`, each turn in which a newer execution sup
 shows the committed answer from the event's messages, with its tool calls' state; before that
 event, a non-final turn whose older execution committed shows the newer one. A turn retried after a
 user message and a client that connected mid-turn have
-[limits](../vercel-workflows#emit-replay-safe-stream-events). Keep the projection's
+[limits](../vercel-workflows#emit-replay-safe-stream-events). A model event whose execution this
+client never saw start but that names its turn (`executionTurn`) starts that turn first, as its
+`LLMStreamStart` would have, keeping the draft. Hosts folding status beside the projection fold
+`stepAgentChatProjection`'s `missedStart` before its `statusEvent`. Keep the projection's
 `executions` and `turnStart` with its `seenEventIds`, and reset `executions` to `[]` per run if
 events carry no `streamId`. Events without `executionId` only discard output still streaming at the
 next `LLMStreamStart`.
@@ -204,9 +207,11 @@ which can be an earlier turn's (client runs kept from earlier turns, or stored m
 run). With the run start, it reaches the snapshot's cards and runs only as the same call or, for
 answers, the one holding their request, and adds its own otherwise. A snapshot taken mid-turn keeps
 working: that turn's later host events name calls in the snapshot's last message and find them as
-the same call. That turn's later model events (input, provider results) before the next
-`LLMStreamStart` count as replays of an earlier run's, so a reused id among them can still reach an
-earlier turn's call, as without a start. A client that missed a run's `LLMStreamStart` otherwise (it
-connected mid-turn after a local submit, or an `AgentStart` replayed without `eventId` after the
-turn's start, whose replay its event id then dedupes) has the same limit. The next `AgentStart` or
-`LLMStreamStart` replaces the run start.
+the same call. Its model events carrying `executionTurn` with their `executionId` (the
+vercel-workflows sequencer sets both) start the turn they name, as its missed `LLMStreamStart`
+would, so a reused id among them stays off earlier turns' calls. Model events without
+`executionTurn` before the next `LLMStreamStart` count as replays of an earlier run's, so a reused
+id among them can still reach an earlier turn's call, as without a start. A client that missed a
+run's `LLMStreamStart` otherwise (it connected mid-turn after a local submit, or an `AgentStart`
+replayed without `eventId` after the turn's start, whose replay its event id then dedupes) has the
+same limit for such events. The next `AgentStart` or `LLMStreamStart` replaces the run start.

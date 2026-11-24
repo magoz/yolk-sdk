@@ -467,24 +467,24 @@ Open cases:
   the first is never treated as a turn that ran twice. This includes a promoted steer written with a
   new `eventId` between two executions of a turn; hosts that replay a promoted steer under a
   deterministic `eventId` (de-duplicated by the client) are not affected. A client that connects
-  mid-turn never saw the earlier execution's start, so its events take the plain path. The committed
-  answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
+  mid-turn never saw the executions' starts: each starts its turn from its first event
+  (`executionTurn`), the one seen first counting as the older execution. The committed answer is
+  matched by value among the run's messages, not per turn: an uncommitted answer equal to
   another committed message of the run (same text, same call ids) counts as committed. Providers
   can reuse call ids across turns: the chat projections match a turn's tool events only after the
   latest turn start they saw (a replayed or late request or tool-batch event for a call that turn
   lacks, or holds as another call reusing the id, acts on the earlier part holding the same call,
-  an answer on the part holding its request),
-  and `reduceAgentEvents` scopes its tool runs the same way (one run per turn for a reused id), so
-  only until a client sees a start (it joined mid-turn) can a reused id still update an earlier
-  turn's call or run (`AgentStart` and a local submit record a run start, so a resumed run's tool
-  batch before its next model turn stays on the paused call, #352; a host that rebuilds its state
-  from a snapshot and reads the run from a cursor past `AgentStart` marks one itself with
-  `markChatRunStart` / `markAgentRunStart`, #355). A client that joined mid-turn, or rebuilt from
-  a snapshot taken mid-turn, still applies that turn's model events before the next start as
-  replays, where a reused id can reach an earlier turn's call; its host events find calls in the
-  snapshot as the same call. A client that never saw a later
-  turn's start has no bound on where a reconciled turn ends; the committed answer takes the first part of each of its calls
-  after the turn's start.
+  an answer on the part holding its request), and `reduceAgentEvents` scopes its tool runs the
+  same way (one run per turn for a reused id). `AgentStart` and a local submit record a run start,
+  so a resumed run's tool batch before its next model turn stays on the paused call (#352); a host
+  that rebuilds its state from a snapshot and reads the run from a cursor past `AgentStart` marks
+  one itself with `markChatRunStart` / `markAgentRunStart` (#355). A client that joined mid-turn,
+  or rebuilt from a snapshot taken mid-turn, starts that turn from its first tagged event
+  (`executionTurn`), and its host events find calls in the snapshot as the same call. The limit
+  left: model events without `executionId` before the next start still apply as replays, where a
+  reused id can update an earlier turn's call or run. A client that never saw a later turn's start
+  has no bound on where a reconciled turn ends; the committed answer takes the first part of each
+  of its calls after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes
   only that stream's run, not the main run's turns. A late start from a losing execution of the
   main run's paused turn is then not fenced by that terminal.

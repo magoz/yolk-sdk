@@ -32,6 +32,7 @@ import {
   ToolInputStart,
   ToolResult,
   ToolResultMessage,
+  TurnStart,
   UserMessage,
   UserMessageEvent,
   makeBackgroundToolAcceptedResult,
@@ -39,7 +40,8 @@ import {
   type AgentEvent,
   type AgentMessage
 } from '@yolk-sdk/agent/protocol'
-import { reduceAgentEvents } from '../../src/client'
+import { reduceAgentEvents, type AgentExecutions } from '../../src/client'
+import { missedAgentExecutionStart } from '../../src/client/executions.ts'
 import {
   applyAgentEventToChatProjection,
   initialAgentChatState,
@@ -1717,5 +1719,53 @@ describe('call ids reused across turns', () => {
         ])
       }
     )
+  })
+})
+
+describe('a start the client missed', () => {
+  const missed = (event: AgentEvent, runs: AgentExecutions<never> = []) =>
+    missedAgentExecutionStart(runs, event)
+
+  const named = { executionId: 'step-2:1', executionTurn: 2, streamId: 'run-1' }
+
+  it('is the start of an unseen execution that names its turn, without an event id', () => {
+    const start = missed(
+      LLMTextDelta.make({ ...named, eventId: 'run-1:2:5:step-2:1', createdAtMs: 7, text: 'Hej' })
+    )
+
+    expect(start).toEqual(
+      LLMStreamStart.make({ turn: 2, executionId: 'step-2:1', streamId: 'run-1', createdAtMs: 7 })
+    )
+    expect(start?.eventId).toBeUndefined()
+  })
+
+  it('is nothing for a known execution, a start, a turn start, or an event without both fields', () => {
+    const known: AgentExecutions<never> = [
+      {
+        streamId: 'run-1',
+        ended: false,
+        closedThroughTurn: 0,
+        retired: false,
+        executions: [{ executionId: 'step-2:1', turn: 2, status: 'Settled', calls: [], output: [] }]
+      }
+    ]
+
+    expect(missed(LLMTextDelta.make({ ...named, text: 'Hej' }), known)).toBeUndefined()
+    expect(missed(LLMStreamStart.make({ ...named, turn: 2 }))).toBeUndefined()
+    expect(missed(TurnStart.make({ ...named, turn: 2 }))).toBeUndefined()
+    // Host events are never model starts, even from a host that tags them.
+    expect(
+      missed(
+        ToolExecutionStarted.make({
+          ...named,
+          call: ToolCall.make({ id: 'call_1', name: 'x', params: {} })
+        })
+      )
+    ).toBeUndefined()
+    expect(
+      missed(AgentEnd.make({ ...named, messages: [], turns: 2, usage: zeroAgentUsage }))
+    ).toBeUndefined()
+    expect(missed(LLMTextDelta.make({ executionId: 'step-2:1', text: 'Hej' }))).toBeUndefined()
+    expect(missed(LLMTextDelta.make({ executionTurn: 2, text: 'Hej' }))).toBeUndefined()
   })
 })
