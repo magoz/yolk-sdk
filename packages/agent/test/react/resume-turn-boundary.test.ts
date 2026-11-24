@@ -674,6 +674,7 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
 
       // A stale missed start moves nothing.
       const later = applyEvents(fromSnapshot(snapshot, true), [delta]).projection
+
       const stale = stepAgentChatProjection(
         later,
         LLMTextDelta.make({ ...tagged('step-1:2', 1), text: 'Old' })
@@ -720,6 +721,27 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
       expect(texts(resumed.chat.chatMessages).filter(([, state]) => state === 'streaming')).toEqual(
         [['Now Bergen', 'streaming']]
       )
+
+      // A newer execution of the turn, its start seen or missed, removes the draft with the rest of
+      // the superseded execution's output, in every reducer.
+      const newer = LLMTextDelta.make({ ...tagged('step-2:2', 2), text: 'Oslo again' })
+
+      for (const events of [
+        [LLMStreamStart.make({ ...tagged('step-2:2', 2), turn: 2 }), newer],
+        [newer]
+      ]) {
+        const superseded = applyEvents(resumed, events)
+
+        const shown = [
+          ['Weather in Oslo, then Bergen?', 'done'],
+          ['Oslo first', 'done'],
+          ['Oslo again', 'streaming']
+        ]
+
+        expect(superseded.client.text).toBe('Oslo again')
+        expect(texts(superseded.projection.chatMessages)).toEqual(shown)
+        expect(texts(superseded.chat.chatMessages)).toEqual(shown)
+      }
     })
 
     it("lets a redelivered execution's start supersede the resumed one", () => {

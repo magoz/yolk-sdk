@@ -41,6 +41,7 @@ import {
   isPastRequestToolCall,
   messagesAfterAnchor,
   replaceWithCommittedAnswer,
+  streamingDraftMessage,
   deleteChatTurn,
   editChatUserMessage,
   markChatError,
@@ -249,7 +250,8 @@ export type AgentChatProjectionStep = {
  * status fold should apply (`statusEvent`), so its status agrees with the chat: a replayed pause
  * whose calls are past their requests leaves the status as it was instead of blocking the run
  * with no card to answer, and a pause naming some such calls blocks only on its other requests.
- * The `useAgentChat` reducer folds its status from the same `statusEvent`. Pure.
+ * The `useAgentChat` reducer folds its status from the same `missedStart` (when present) and then
+ * `statusEvent`. Pure.
  */
 export const stepAgentChatProjection = (
   state: AgentChatEventProjectionState,
@@ -371,9 +373,18 @@ const projectExecutionEvent = (
       ? route.started
       : undefined
 
-  const startAnchor = Predicate.isTagged(route, 'Start')
-    ? turnAnchor(route.superseded, started)
-    : undefined
+  // A missed start that supersedes nothing owns the draft still streaming (a rebuilt draft is its
+  // output): its turn starts before it, and a newer execution removes it, as the client's `text`.
+  const draft =
+    origin === 'missed' && Predicate.isTagged(route, 'Start') && route.superseded.length === 0
+      ? streamingDraftMessage(started)
+      : undefined
+
+  const startAnchor = !Predicate.isTagged(route, 'Start')
+    ? undefined
+    : draft === undefined
+      ? turnAnchor(route.superseded, started)
+      : Option.fromNullishOr(started.at(-2)?.id)
 
   const ownTurn =
     startAnchor ?? (owner === undefined ? undefined : executionTurnAnchor(owner.output))
@@ -410,6 +421,9 @@ const projectExecutionEvent = (
           ...(startAnchor === undefined
             ? []
             : [AgentChatExecutionOutput.After({ messageId: startAnchor })]),
+          ...(draft === undefined
+            ? []
+            : [AgentChatExecutionOutput.Message({ messageId: draft.id })]),
           ...chatExecutionOutput(owner, event, committed, chatMessages, turn)
         ]
   )

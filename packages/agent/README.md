@@ -820,7 +820,8 @@ projection uses `stepAgentChatProjection`: it applies the event as `applyAgentEv
 does and returns `statusEvent`, the event the reducer's status follows (the pause with only its
 pending requests), or `undefined` when the status must not move (a seen or dropped event, a replayed
 start of a finished call, a pause naming only such calls); fold it with `nextAgentStatus` or collect
-it for `agentStatusFromEvents`. The loop asks for a call only until it has a result or used an
+it for `agentStatusFromEvents`, after the step's `missedStart` when it returns one (the start a
+mid-turn rebuild missed, applied first). The loop asks for a call only until it has a result or used an
 answer: an invalid input answer re-pends the same request while the part is still pending (only a
 valid payload emits `InputSubmitted`), a running call has no result, so an abort leaves it running
 and the next run that resumes it asks again (the card shows), and a later turn reusing the id asks

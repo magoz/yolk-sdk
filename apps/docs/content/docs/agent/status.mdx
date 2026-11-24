@@ -67,7 +67,10 @@ A host that keeps a chat projection and folds status itself gets the same fence 
 `undefined` when the status must not move (an event seen before, one from a superseded or stale
 model step, a replayed start of a finished call, a pause whose every call is past its request).
 A pause naming some such calls comes back with only its pending requests. Folding every event
-instead would show `Blocked` with no card to answer.
+instead would show `Blocked` with no card to answer. When the event's model step started before
+the projection's first event (a mid-turn snapshot rebuild) and names its turn (`executionTurn`),
+the step also returns `missedStart`, the `LLMStreamStart` the projection applied first: fold it
+before `statusEvent`.
 
 ```ts
 import { idleAgentStatus, nextAgentStatus } from '@yolk-sdk/agent/protocol'
@@ -79,12 +82,13 @@ let status = idleAgentStatus
 for (const event of events) {
   const step = stepAgentChatProjection(projection, event)
   projection = step.projection
+  if (step.missedStart !== undefined) status = nextAgentStatus(status, step.missedStart)
   if (step.statusEvent !== undefined) status = nextAgentStatus(status, step.statusEvent)
 }
 ```
 
-To use `agentStatusFromEvents` (or `agentStatusTreeFromEvents`), collect the `statusEvent`s that
-are not `undefined` and pass those instead of the raw events.
+To use `agentStatusFromEvents` (or `agentStatusTreeFromEvents`), collect each step's `missedStart`
+and then its `statusEvent`, leaving out `undefined`, and pass those instead of the raw events.
 
 ## From stored state
 
