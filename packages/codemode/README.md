@@ -57,7 +57,8 @@ const program = Effect.gen(function* () {
 - Scripts call tools as `await tools.<id>(args)`. Every nested call runs through the resolution's
   normal execute path (input decoding, enablement, registration wrappers, same host context), gets
   the id `<toolCallId>/<seq>`, and is recorded on the result's `nestedCalls` with status, duration,
-  truncated error, and usage. The record keeps up to `maxNestedCalls` calls, at most 4096
+  truncated error, usage, and `usageIncomplete` when its usage under-counts it (the script's result
+  then carries `usageIncomplete` too). The record keeps up to `maxNestedCalls` calls, at most 4096
   (`nestedToolCallMaxRecordedCalls`; argument byte budgets still apply), and per-status `counts`
   over every call. Nested results never reach the model; only the script output and return value do.
 - Typed results ([ADR 0013](https://github.com/magoz/yolk-sdk/blob/main/docs/adr/0013-typed-tool-results.md)):
@@ -294,7 +295,9 @@ Each call then takes a permit from `processLimiter`, shared across scripts and r
 `defaultClassifierProcessLimiter` (200 per process) unless you pass one built with
 `makeClassifierConcurrencyLimiter(max)` or `false`. An interrupted waiting call releases its
 permits. Nested-call records carry token usage; cost stays in the result's
-`structuredContent.usage`.
+`structuredContent.usage`. A classification the classifier answered without usage marks the result
+`usageIncomplete` (its usage is uncounted), and so the script's result; a classifier that never
+reports usage marks every answered call.
 
 ## Host responsibilities
 

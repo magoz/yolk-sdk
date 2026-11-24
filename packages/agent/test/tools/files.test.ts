@@ -1,6 +1,9 @@
 import { Effect, Option, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
   contentText,
   FileDescriptor,
   FilePart,
@@ -130,6 +133,43 @@ describe('tool result file capture', () => {
         `Attachment:[file ${fileId}: Faktura_225.pdf, application/pdf, 16 B]`
       )
       expect(JSON.stringify(result)).not.toContain(base64Of(invoice))
+    })
+  )
+
+  it.effect('keeps nested usage and its incompleteness on a captured result', () =>
+    Effect.gen(function* () {
+      const usage = AgentUsage.make({
+        input: AgentInputUsage.make({ total: 9 }),
+        output: AgentOutputUsage.make({ total: 2 })
+      })
+
+      const tool = makeTool<TestContext, typeof EmptyToolParams>({
+        name: 'download',
+        description: 'download',
+        parameters: EmptyToolParams,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(
+            ToolResult.make({
+              toolCallId: call.id,
+              content: [invoice],
+              usage,
+              usageIncomplete: true
+            })
+          )
+      })
+
+      const toolSet = yield* resolveTools([moduleOf([tool])], context, {
+        files: { store: memoryStore() }
+      })
+
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'download', params: {} })
+      )
+
+      expect(result.files).toHaveLength(1)
+      expect(result.usage).toEqual(usage)
+      expect(result.usageIncomplete).toBe(true)
     })
   )
 

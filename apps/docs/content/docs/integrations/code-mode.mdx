@@ -323,7 +323,9 @@ name, compact arguments, status, duration, truncated error, usage) for your audi
 `maxNestedCalls` entries, with per-status `counts` over all calls; the model never sees it.
 `toolResultMessageFromResult` drops `nestedCalls` and `usage`, and the loop does not add
 `ToolResult.usage` (nested and classifier token spend) to run usage; read both from the `ToolResult`
-or tool events.
+or tool events. `ToolResult.usageIncomplete: true` means that sum under-counts: a nested call
+reported incomplete usage (its own `usageIncomplete`, kept on its record), for example a
+classification the classifier answered without usage.
 
 ## Survive step re-execution
 

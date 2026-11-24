@@ -454,6 +454,7 @@ type StoredResultFields = {
   acceptance?: ToolResult['acceptance']
   nestedCalls?: ToolResult['nestedCalls']
   usage?: ToolResult['usage']
+  usageIncomplete?: ToolResult['usageIncomplete']
   files?: ToolResult['files']
 }
 
@@ -587,9 +588,9 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * (never rebuilt, so another tool returning that shape gets no notice the ledger wrote; its refs
  * are dropped). Their other `structuredContent` fields are dropped. The kept refs and their text
  * are never cut, so with many pause ids they can exceed `maxBytes`. A bound smaller than the
- * identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, kept refs) leaves an empty
- * content, or only the review text. The live call still returns the original result; only replays
- * see the stored copy.
+ * identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, `usageIncomplete`, kept
+ * refs) leaves an empty content, or only the review text. The live call still returns the original
+ * result; only replays see the stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,
@@ -603,6 +604,8 @@ export const toolLedgerResult = (
   if (result.acceptance !== undefined) full.acceptance = result.acceptance
 
   if (result.usage !== undefined) full.usage = result.usage
+
+  if (result.usageIncomplete !== undefined) full.usageIncomplete = result.usageIncomplete
 
   const structured =
     result.structuredContent === undefined ? undefined : jsonValue(result.structuredContent)
@@ -772,6 +775,8 @@ const typedResultTooLarge = (full: StoredResultFields): ToolResult => {
   }
 
   if (full.usage !== undefined) fields.usage = full.usage
+
+  if (full.usageIncomplete !== undefined) fields.usageIncomplete = full.usageIncomplete
 
   if (full.files !== undefined) fields.files = full.files
 
@@ -1050,6 +1055,8 @@ const replay = (
   if (stored.nestedCalls !== undefined) fields.nestedCalls = stored.nestedCalls
 
   if (stored.usage !== undefined) fields.usage = stored.usage
+
+  if (stored.usageIncomplete !== undefined) fields.usageIncomplete = stored.usageIncomplete
 
   if (stored.files !== undefined) fields.files = stored.files
 

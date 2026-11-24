@@ -1279,6 +1279,10 @@ This package declares them; it does not run scripts.
   bounded `ToolResult.nestedCalls` record and summed `ToolResult.usage` never reach the model:
   `toolResultMessageFromResult` drops both, and the loop does not add `ToolResult.usage` to run
   usage. Capture them from the `ToolResult` or tool events when you need audit or billing records.
+  `ToolResult.usageIncomplete: true` (also never model-visible) says `usage` under-counts: a nested
+  model call completed without (all of) its usage report (`LLMStreamEnd.usageUnavailable`,
+  `LLMDone.usageUnavailable`). Tools running their own model calls set it; the recorder ORs it
+  from every recorded call (`NestedToolCallInput.usageIncomplete`), dropped ones included.
   Size the record with `makeNestedToolCallRecorder({ maxCalls })`; per-status `counts` cover
   every call, dropped ones included.
 

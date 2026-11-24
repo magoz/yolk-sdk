@@ -267,6 +267,7 @@ type ToolResultFields = {
   acceptance?: ToolResult['acceptance']
   nestedCalls?: ToolResult['nestedCalls']
   usage?: ToolResult['usage']
+  usageIncomplete?: ToolResult['usageIncomplete']
   files?: ToolResult['files']
 }
 
@@ -285,6 +286,8 @@ const withCaptured = (result: ToolResult, captured: ReadonlyArray<Captured>) => 
   if (result.nestedCalls !== undefined) fields.nestedCalls = result.nestedCalls
 
   if (result.usage !== undefined) fields.usage = result.usage
+
+  if (result.usageIncomplete !== undefined) fields.usageIncomplete = result.usageIncomplete
 
   const files = [...(result.files ?? []), ...captured.flatMap(item => item.files)]
 

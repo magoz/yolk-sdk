@@ -274,6 +274,7 @@ type CallOutcome = {
   durationMs: number
   error?: string
   usage?: AgentUsage
+  usageIncomplete?: true
 }
 
 type RecordedCallFields = {
@@ -285,6 +286,7 @@ type RecordedCallFields = {
   durationMs?: number
   error?: string
   usage?: AgentUsage
+  usageIncomplete?: true
 }
 
 type CallRecord = {
@@ -311,6 +313,10 @@ const recordedOutcome = (exit: Exit.Exit<ToolResult>, durationMs: number): CallO
 
   if (result.usage !== undefined) {
     outcome.usage = result.usage
+  }
+
+  if (result.usageIncomplete === true) {
+    outcome.usageIncomplete = true
   }
 
   return outcome
@@ -825,7 +831,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })
           )
 
-          const { nestedCalls, usage } = nestedToolCallResultFields(recorder)
+          const { nestedCalls, usage, usageIncomplete } = nestedToolCallResultFields(recorder)
 
           const segments = codeModeResultSegments({
             result,
@@ -869,6 +875,7 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
             structuredContent: CodeModeStructuredContent
             nestedCalls: typeof nestedCalls
             usage?: AgentUsage
+            usageIncomplete?: true
           }
 
           const fields: ResultFields = {
@@ -884,6 +891,10 @@ const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult,
 
           if (usage !== undefined) {
             fields.usage = usage
+          }
+
+          if (usageIncomplete !== undefined) {
+            fields.usageIncomplete = usageIncomplete
           }
 
           return ToolResult.make(fields)

@@ -86,6 +86,49 @@ describe('nested tool call record', () => {
     expect(fields.usage?.input.total).toBe(nestedToolCallMaxCalls + 4)
   })
 
+  it('marks summed usage incomplete when any call under-counts, dropped calls included', () => {
+    const fields = nestedToolCallResultFields(
+      record([
+        { ...nestedCall(1), usage: usage(4, 2) },
+        { ...nestedCall(2), usage: usage(3, 1), usageIncomplete: true },
+        { ...nestedCall(3), usage: usage(1, 1), usageIncomplete: false }
+      ])
+    )
+
+    expect(fields.usage).toMatchObject({ input: { total: 8 }, output: { total: 4 } })
+    expect(fields.usageIncomplete).toBe(true)
+    expect(fields.nestedCalls.calls.map(call => call.usageIncomplete)).toEqual([
+      undefined,
+      true,
+      undefined
+    ])
+    expect(Object.hasOwn(fields.nestedCalls.calls[2] ?? {}, 'usageIncomplete')).toBe(false)
+
+    // A call that reported nothing can still under-count: the flag stands without usage.
+    const unreported = nestedToolCallResultFields(
+      record([{ ...nestedCall(1), usageIncomplete: true }])
+    )
+
+    expect(unreported.usage).toBeUndefined()
+    expect(unreported.usageIncomplete).toBe(true)
+
+    const dropped = [
+      nestedCall(1),
+      nestedCall(2),
+      { ...nestedCall(3), usageIncomplete: true }
+    ].reduce(recordNestedToolCall, makeNestedToolCallRecorder({ maxCalls: 2 }))
+
+    expect(nestedToolCallResultFields(dropped).nestedCalls.calls).toHaveLength(2)
+    expect(nestedToolCallResultFields(dropped).usageIncomplete).toBe(true)
+
+    expect(
+      Object.hasOwn(
+        nestedToolCallResultFields(record([{ ...nestedCall(1), usage: usage(1, 1) }])),
+        'usageIncomplete'
+      )
+    ).toBe(false)
+  })
+
   it('keeps per-status counts of every call, dropped calls included', () => {
     const statuses = ['ok', 'error', 'cancelled', 'ok', 'ok'] as const
 
@@ -211,7 +254,7 @@ describe('nested tool call record', () => {
         ...nestedToolCallResultFields(
           record([
             { ...nestedCall(1), durationMs: 3, usage: usage(4, 2) },
-            { ...nestedCall(2), status: 'error', error: 'nope' }
+            { ...nestedCall(2), status: 'error', error: 'nope', usageIncomplete: true }
           ])
         )
       })
@@ -223,11 +266,14 @@ describe('nested tool call record', () => {
       expect(decoded).toEqual(result)
       expect(decoded.nestedCalls?.calls[1]?.error).toBe('nope')
       expect(decoded.usage?.input.total).toBe(4)
+      expect(decoded.usageIncomplete).toBe(true)
+      expect(decoded.nestedCalls?.calls[1]?.usageIncomplete).toBe(true)
 
       const message = toolResultMessageFromResult(decoded)
 
       expect(Object.hasOwn(message, 'nestedCalls')).toBe(false)
       expect(Object.hasOwn(message, 'usage')).toBe(false)
+      expect(Object.hasOwn(message, 'usageIncomplete')).toBe(false)
       expect(JSON.stringify(message)).not.toContain('call_parent/1')
     })
   )

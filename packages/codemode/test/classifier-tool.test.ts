@@ -76,6 +76,42 @@ describe('makeClassifierTool', () => {
         output: { total: 0 }
       })
       expect(result.usage).toMatchObject({ input: { total: 10 }, output: { total: 0 } })
+      expect(result.usageIncomplete).toBeUndefined()
+      expect(result.nestedCalls?.calls[0]?.usageIncomplete).toBeUndefined()
+    })
+  )
+
+  it.live('marks script usage incomplete when a classifier answers without usage', () =>
+    Effect.gen(function* () {
+      let index = 0
+
+      const tool = makeClassifierTool<TestContext>({
+        classify: request =>
+          Effect.sync(() => {
+            const { usage: _, ...unreported } = answer(request)
+
+            return index++ === 0 ? unreported : answer(request)
+          })
+      })
+
+      const result = yield* runCode(
+        [
+          moduleOf('host', [makeCodeModeTool<TestContext>({ executor: makePiCodeModeExecutor() })]),
+          moduleOf('ai', [tool])
+        ],
+        `await tools.classify({ state: 'a', questions: ${JSON.stringify(question)} })
+         await tools.classify({ state: 'b', questions: ${JSON.stringify(question)} })
+         return 'done'`
+      )
+
+      expect(
+        result.nestedCalls?.calls.map(call => [call.usage?.input.total, call.usageIncomplete])
+      ).toEqual([
+        [undefined, true],
+        [10, undefined]
+      ])
+      expect(result.usage).toMatchObject({ input: { total: 10 }, output: { total: 0 } })
+      expect(result.usageIncomplete).toBe(true)
     })
   )
 
@@ -334,6 +370,11 @@ describe('makeClassifierTool', () => {
           reason: 'missing_answer',
           questionId: 'urgent',
           usage: { inputTokens: 7, outputTokens: 0 }
+        }),
+        ClassificationResponseInvalid.make({
+          message: 'Classification answers do not fit their questions: missing_answer',
+          reason: 'missing_answer',
+          questionId: 'urgent'
         })
       ]
 
@@ -353,7 +394,7 @@ describe('makeClassifierTool', () => {
           moduleOf('ai', [tool])
         ],
         `const messages = []
-         for (let i = 0; i < 3; i++) {
+         for (let i = 0; i < 4; i++) {
            try { await tools.classify({ state: 'x', questions: ${JSON.stringify(question)} }) }
            catch (error) { messages.push(error.message) }
          }
@@ -361,14 +402,23 @@ describe('makeClassifierTool', () => {
       )
 
       expect(text(result.content)).toContain(
-        'Return value:\n["tools.classify: Invalid classification request: too many options","tools.classify: Classifier provider failed with status 503","tools.classify: Classification answers do not fit their questions: missing_answer"]'
+        'Return value:\n["tools.classify: Invalid classification request: too many options","tools.classify: Classifier provider failed with status 503","tools.classify: Classification answers do not fit their questions: missing_answer","tools.classify: Classification answers do not fit their questions: missing_answer"]'
       )
       expect(result.nestedCalls?.calls.map(call => call.status)).toEqual([
+        'error',
         'error',
         'error',
         'error'
       ])
       expect(result.nestedCalls?.calls[2]?.usage).toMatchObject({ input: { total: 7 } })
+      // Only an answered classification without usage under-counts; failed requests report nothing.
+      expect(result.nestedCalls?.calls.map(call => call.usageIncomplete)).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        true
+      ])
+      expect(result.usageIncomplete).toBe(true)
     })
   )
 
@@ -410,6 +460,7 @@ describe('makeClassifierTool', () => {
           message: error.message
         })
         expect(result.usage).toBeUndefined()
+        expect(result.usageIncomplete).toBeUndefined()
       }
     })
   )

@@ -119,7 +119,7 @@ immutable receipt storage and host-owned rendering. `InteractionSubmitted` is no
 | `decorateLLMProvider`                                                               | wrap an existing `LLMProvider` service                                                                             |
 | `collectModelTurn`                                                                  | success-only fold of a model-turn stream to `ModelTurnResult`                                                      |
 | `collectModelTurnAttempt`                                                           | `Collected` / `StreamFailed` / `SinkFailed` with `ModelTurnCollection`                                             |
-| `ModelTurnResult`                                                                   | finalized `{ assistantMessage, toolCalls, usage, stopReason }`                                                     |
+| `ModelTurnResult`                                                                   | finalized `{ assistantMessage, toolCalls, usage, stopReason, usageUnavailable? }`                                  |
 | `ModelTurnCollection`                                                               | result plus `outputStarted` and `partialAssistantMessage`                                                          |
 | `CollectModelTurnAttemptResult`                                                     | collector tagged union                                                                                             |
 | `LLMProvider`                                                                       | provider service contract                                                                                          |
@@ -273,9 +273,10 @@ executors included, a stable `idempotencyKey`; see
 every executed result (direct, nested, staged and interaction calls) before the ledger and replaces
 `FilePart` bytes with `fileId` labels; without it inline `FilePart` bytes become "file not
 captured" labels ([move files between tools](../integrations/files)).
-`ToolResult.nestedCalls` and `ToolResult.usage` never reach the model: `toolResultMessageFromResult`
-drops them and the loop does not add `ToolResult.usage` to run usage. `ToolRegistryError` causes
-include `codemode_unsupported_tool`, `invalid_tool_exposure`, `deferred_unsupported_tool`,
+`ToolResult.nestedCalls`, `ToolResult.usage` and `ToolResult.usageIncomplete` (the usage
+under-counts a nested model call that completed without its usage report) never reach the model:
+`toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run usage.
+`ToolRegistryError` causes include `codemode_unsupported_tool`, `invalid_tool_exposure`, `deferred_unsupported_tool`,
 `duplicate_instruction`, `staging_unsupported_policy`,
 `staging_validation_required`, `plan_review_duplicate`, and `change_preview_unsupported_policy`. See
 [Add code mode](../integrations/code-mode#choose-what-scripts-can-call). `resolveTools` adds the

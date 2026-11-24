@@ -24,6 +24,12 @@ export type ModelTurnResult = {
   readonly toolCalls: ReadonlyArray<ToolCall>
   readonly usage: AgentUsage
   readonly stopReason: 'stop' | 'tool_use'
+  /**
+   * The model stream completed without (all of) the usage report it asked for (its
+   * `LLMStreamEnd.usageUnavailable`): `usage` under-counts the turn. A tool that runs model turns
+   * reports it as `ToolResult.usageIncomplete`. Absent when the report arrived.
+   */
+  readonly usageUnavailable?: true
 }
 
 export type ModelTurnCollection = ModelTurnResult & {
@@ -109,12 +115,16 @@ const emptyCollection = (initialUsage?: AgentUsage): ModelTurnCollection => ({
   partialAssistantMessage: undefined
 })
 
-const toModelTurnResult = (collection: ModelTurnCollection): ModelTurnResult => ({
-  assistantMessage: collection.assistantMessage,
-  toolCalls: collection.toolCalls,
-  usage: collection.usage,
-  stopReason: collection.stopReason
-})
+const toModelTurnResult = (collection: ModelTurnCollection): ModelTurnResult => {
+  const result: ModelTurnResult = {
+    assistantMessage: collection.assistantMessage,
+    toolCalls: collection.toolCalls,
+    usage: collection.usage,
+    stopReason: collection.stopReason
+  }
+
+  return collection.usageUnavailable === true ? { ...result, usageUnavailable: true } : result
+}
 
 // `LLMReasoningReplay` alone published nothing visible: a turn that fails after only that is
 // redone from scratch rather than continued from a partial holding bare signed thinking.
@@ -195,6 +205,11 @@ const applyModelTurnEvent = (acc: ModelTurnCollection, event: AgentEvent): Model
       partialAssistantMessage,
       outputStarted
     })),
+    Match.tag('LLMStreamEnd', (current): ModelTurnCollection => {
+      const next: ModelTurnCollection = { ...acc, partialAssistantMessage, outputStarted }
+
+      return current.usageUnavailable === true ? { ...next, usageUnavailable: true } : next
+    }),
     Match.orElse(() => ({
       ...acc,
       partialAssistantMessage,

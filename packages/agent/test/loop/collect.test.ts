@@ -9,11 +9,15 @@ import {
   assistantContent,
   assistantReasoningText,
   HostToolCallPart,
+  LLMStreamEnd,
+  LLMStreamStart,
   LLMTextDelta as AgentLLMTextDelta,
   RedactedReasoningReplay,
   SignedReasoningReplay,
   ToolCall,
   ToolDef,
+  TurnEnd,
+  UsageUpdate,
   UserMessage,
   type AgentEvent,
   type AgentMessage
@@ -96,6 +100,32 @@ describe('collectModelTurn', () => {
         })
       )
       expect(assistantContent(assistantMessageFromResult(result.assistantMessage))).toBe('ok')
+    })
+  )
+
+  it.effect('carries a stream end without its usage report as usageUnavailable', () =>
+    Effect.gen(function* () {
+      const usage = AgentUsage.make({
+        input: AgentInputUsage.make({ total: 5 }),
+        output: AgentOutputUsage.make({ total: 0 })
+      })
+
+      const turn = (end: LLMStreamEnd) =>
+        collectModelTurn(
+          Stream.make(
+            LLMStreamStart.make({ turn: 1 }),
+            UsageUpdate.make({ usage }),
+            end,
+            TurnEnd.make({ turn: 1, reason: 'stop' })
+          )
+        )
+
+      const unreported = yield* turn(LLMStreamEnd.make({ turn: 1, usageUnavailable: true }))
+      const reported = yield* turn(LLMStreamEnd.make({ turn: 1 }))
+
+      expect(unreported.usage).toEqual(usage)
+      expect(unreported.usageUnavailable).toBe(true)
+      expect(Object.hasOwn(reported, 'usageUnavailable')).toBe(false)
     })
   )
 
