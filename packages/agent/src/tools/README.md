@@ -124,7 +124,8 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
   the static fallback.
 - Report nested calls on the result with protocol `recordNestedToolCall` and
   `nestedToolCallResultFields` over `makeNestedToolCallRecorder({ maxCalls })`; the bounded record
-  (with per-status `counts` over every call) and summed usage never reach the model.
+  (with per-status `counts` over every call), summed usage and `usageIncomplete` (some call's usage
+  under-counts it) never reach the model.
 
 ## Durable tool ledger
 

@@ -229,7 +229,10 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   `makeClassifierConcurrencyLimiter(max)` or `false`. Both use `Semaphore.withPermits`, so
   interruption while waiting never leaks a permit. `costUsd` has no
   `AgentUsage` field: nested-call records carry token usage only, and cost stays in the result's
-  `structuredContent.usage`.
+  `structuredContent.usage`. A classifier that answered (a result, or `ClassificationResponseInvalid`)
+  without usage marks the result `usageIncomplete` (billed, not counted); request and provider
+  errors never do. Code mode copies each nested result's `usageIncomplete` onto its record, and the
+  recorder ORs it onto the script's result.
 - Catalog placement (ADR 0007): `makeCodeModeTool({ catalog })`. `description` (default) keeps the
   catalog in the tool description. `instructions` makes the description invariant
   (`renderCodeModeInstructedDescription`: intro, globals, `stage()` whenever staging is offered,

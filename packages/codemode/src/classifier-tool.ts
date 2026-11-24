@@ -1,4 +1,4 @@
-import { Effect, Predicate, Semaphore } from 'effect'
+import { Data, Effect, Predicate, Semaphore } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ClassificationResult,
@@ -108,8 +108,21 @@ const agentUsage = (usage: ClassificationUsage): AgentUsage =>
 const errorReason = (error: ClassificationError): ModelVisibleToolErrorReason =>
   Predicate.isTagged(error, 'ClassificationRequestInvalid') ? 'invalid_input' : 'unavailable'
 
-const billedUsage = (error: ClassificationError) =>
-  Predicate.isTagged(error, 'ClassificationResponseInvalid') ? error.usage : undefined
+/** The usage a classification reported: `Billed` when the classifier answered (a result, or a
+ * response that failed to decode), with its usage or `undefined` when it reported none (billed but
+ * uncounted); `Unbilled` when no answer came back.
+ */
+type ClassificationBilling = Data.TaggedEnum<{
+  Billed: { readonly usage: ClassificationUsage | undefined }
+  Unbilled: Record<never, never>
+}>
+
+const ClassificationBilling = Data.taggedEnum<ClassificationBilling>()
+
+const errorBilling = (error: ClassificationError): ClassificationBilling =>
+  Predicate.isTagged(error, 'ClassificationResponseInvalid')
+    ? ClassificationBilling.Billed({ usage: error.usage })
+    : ClassificationBilling.Unbilled()
 
 /** The parent tool call id of a nested call id `<parentToolCallId>/<seq>`, else the id itself. */
 const scriptKey = (call: ToolCall) => {
@@ -124,11 +137,17 @@ type ResultFields = {
   isError?: boolean
   structuredContent: unknown
   usage?: AgentUsage
+  usageIncomplete?: true
 }
 
-const withUsage = (fields: ResultFields, usage: ClassificationUsage | undefined) => {
-  if (usage !== undefined) {
-    fields.usage = agentUsage(usage)
+/** An answered classification without usage was billed but not counted: `usageIncomplete`. */
+const withUsage = (fields: ResultFields, billing: ClassificationBilling) => {
+  if (Predicate.isTagged(billing, 'Billed')) {
+    if (billing.usage === undefined) {
+      fields.usageIncomplete = true
+    } else {
+      fields.usage = agentUsage(billing.usage)
+    }
   }
 
   return ToolResult.make(fields)
@@ -137,7 +156,7 @@ const withUsage = (fields: ResultFields, usage: ClassificationUsage | undefined)
 const successResult = (call: ToolCall, result: ClassificationResult) =>
   withUsage(
     { toolCallId: call.id, content: JSON.stringify(result.answers), structuredContent: result },
-    result.usage
+    ClassificationBilling.Billed({ usage: result.usage })
   )
 
 const errorResult = (call: ToolCall, name: string, error: ClassificationError) =>
@@ -150,7 +169,7 @@ const errorResult = (call: ToolCall, name: string, error: ClassificationError) =
         modelVisibleToolError({ tool: name, reason: errorReason(error), message: error.message })
       )
     },
-    billedUsage(error)
+    errorBilling(error)
   )
 
 /**
@@ -158,7 +177,8 @@ const errorResult = (call: ToolCall, name: string, error: ClassificationError) =
  * item per call with a classifier model. Its content is the compact JSON of the answers, its
  * `structuredContent` the full `ClassificationResult` (which nested calls resolve to), and its
  * token usage is reported on `ToolResult.usage`. Classifier errors become model-visible error
- * results; usage billed before a response error is kept.
+ * results; usage billed before a response error is kept. A classifier that answered (a result or
+ * an undecodable response) without reporting usage marks `ToolResult.usageIncomplete`.
  *
  * Each call takes a per-script permit (`maxConcurrency`) and then a process permit
  * (`processLimiter`), so one script's queue never holds process permits it cannot use.

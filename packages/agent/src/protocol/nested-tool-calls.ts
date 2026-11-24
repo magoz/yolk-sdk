@@ -60,7 +60,9 @@ export class NestedToolCallRecord extends Schema.Class<NestedToolCallRecord>(
   access: Schema.optional(NestedToolCallAccess),
   durationMs: Schema.optional(Schema.Number),
   error: Schema.optional(Schema.String),
-  usage: Schema.optional(AgentUsage)
+  usage: Schema.optional(AgentUsage),
+  /** The call's `usage` under-counts it (its `ToolResult.usageIncomplete`). */
+  usageIncomplete: Schema.optional(Schema.Literal(true))
 }) {}
 
 /** Calls per status over every recorded call, including calls dropped from `calls`. */
@@ -94,6 +96,8 @@ export type NestedToolCallInput = {
   readonly durationMs?: number
   readonly error?: string
   readonly usage?: AgentUsage
+  /** The call's `usage` under-counts it (its `ToolResult.usageIncomplete`). */
+  readonly usageIncomplete?: boolean
 }
 
 type StatusCounts = {
@@ -104,14 +108,16 @@ type StatusCounts = {
 
 const zeroCounts: StatusCounts = { ok: 0, error: 0, cancelled: 0 }
 
-/** Immutable recorder state. Fold calls with `recordNestedToolCall`; usage and status counts of
- * dropped calls still count. `maxCalls` defaults to `nestedToolCallMaxCalls`.
+/** Immutable recorder state. Fold calls with `recordNestedToolCall`; usage, its incompleteness
+ * and status counts of dropped calls still count. `maxCalls` defaults to `nestedToolCallMaxCalls`.
  */
 export type NestedToolCallRecorder = {
   readonly calls: ReadonlyArray<NestedToolCallRecord>
   readonly complete: boolean
   readonly argsBytes: number
   readonly usage?: AgentUsage
+  /** Some recorded call's usage under-counts it, so the summed `usage` does too. */
+  readonly usageIncomplete?: boolean
   readonly maxCalls?: number
   readonly counts?: StatusCounts
 }
@@ -169,12 +175,14 @@ type NestedToolCallRecordFields = {
   durationMs?: number
   error?: string
   usage?: AgentUsage
+  usageIncomplete?: true
 }
 
 /** Pure fold step enforcing the record bounds. Calls past the recorder's `maxCalls` are dropped
- * (still counted by status), arguments past the per-call or total byte budget are cut; either marks
- * the record incomplete. Errors are always cut to `nestedToolCallMaxErrorChars` without affecting
- * completeness.
+ * (still counted by status, usage and its incompleteness), arguments past the per-call or total
+ * byte budget are cut; either marks the record incomplete. Errors are always cut to
+ * `nestedToolCallMaxErrorChars` without affecting completeness. A call with `usageIncomplete`
+ * marks the summed usage incomplete.
  */
 export const recordNestedToolCall = (
   recorder: NestedToolCallRecorder,
@@ -187,11 +195,14 @@ export const recordNestedToolCall = (
         ? input.usage
         : addAgentUsage(recorder.usage, input.usage)
 
+  const usageIncomplete = recorder.usageIncomplete === true || input.usageIncomplete === true
+
   type RecorderFields = {
     calls: ReadonlyArray<NestedToolCallRecord>
     complete: boolean
     argsBytes: number
     usage?: AgentUsage
+    usageIncomplete?: boolean
     maxCalls?: number
     counts?: StatusCounts
   }
@@ -208,6 +219,10 @@ export const recordNestedToolCall = (
   const withUsage = (fields: RecorderFields): NestedToolCallRecorder => {
     if (usage !== undefined) {
       fields.usage = usage
+    }
+
+    if (usageIncomplete) {
+      fields.usageIncomplete = true
     }
 
     fields.maxCalls = maxCalls
@@ -248,6 +263,10 @@ export const recordNestedToolCall = (
     fields.usage = input.usage
   }
 
+  if (input.usageIncomplete === true) {
+    fields.usageIncomplete = true
+  }
+
   return withUsage({
     calls: [...recorder.calls, NestedToolCallRecord.make(fields)],
     complete: recorder.complete && !truncated,
@@ -258,10 +277,11 @@ export const recordNestedToolCall = (
 export type NestedToolCallResultFields = {
   readonly nestedCalls: NestedToolCalls
   readonly usage?: AgentUsage
+  readonly usageIncomplete?: true
 }
 
 /** `ToolResult` fields for a recorder: the bounded record with per-status counts plus summed
- * usage when reported.
+ * usage when reported, and `usageIncomplete` when some call's usage under-counts it.
  */
 export const nestedToolCallResultFields = (
   recorder: NestedToolCallRecorder
@@ -272,5 +292,17 @@ export const nestedToolCallResultFields = (
     counts: NestedToolCallCounts.make(recorder.counts ?? zeroCounts)
   })
 
-  return recorder.usage === undefined ? { nestedCalls } : { nestedCalls, usage: recorder.usage }
+  type Fields = {
+    nestedCalls: NestedToolCalls
+    usage?: AgentUsage
+    usageIncomplete?: true
+  }
+
+  const fields: Fields = { nestedCalls }
+
+  if (recorder.usage !== undefined) fields.usage = recorder.usage
+
+  if (recorder.usageIncomplete === true) fields.usageIncomplete = true
+
+  return fields
 }

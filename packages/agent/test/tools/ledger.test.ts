@@ -15,6 +15,9 @@ import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
   ImagePart,
   inlineBase64AttachmentSource,
   makeInputRequiredToolResult,
@@ -1514,6 +1517,33 @@ describe('tool ledger', () => {
     )
 
     expect(tiny).toEqual(ToolResult.make({ toolCallId: 'call_1', content: '', isError: true }))
+  })
+
+  it('keeps nested usage and its incompleteness through every reduction', () => {
+    const usage = AgentUsage.make({
+      input: AgentInputUsage.make({ total: 12 }),
+      output: AgentOutputUsage.make({ total: 3 })
+    })
+
+    const result = (content: string, structuredContent?: unknown) =>
+      ToolResult.make(
+        structuredContent === undefined
+          ? { toolCallId: 'call_1', content, usage, usageIncomplete: true }
+          : { toolCallId: 'call_1', content, structuredContent, usage, usageIncomplete: true }
+      )
+
+    const stored = [
+      toolLedgerResult(result('fits')),
+      toolLedgerResult(result('x'.repeat(5_000)), 1_000),
+      toolLedgerResult(result('x', { value: 'y'.repeat(5_000) }), 1_000, { typed: true })
+    ]
+
+    expect(resultText(stored[2] ?? result(''))).toContain('too large for the tool ledger')
+    expect(stored.map(entry => [entry.usage, entry.usageIncomplete])).toEqual([
+      [usage, true],
+      [usage, true],
+      [usage, true]
+    ])
   })
 
   it('cuts a multi-megabyte text result to the bound without losing its prefix', () => {

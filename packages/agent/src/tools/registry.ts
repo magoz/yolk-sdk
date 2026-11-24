@@ -1004,6 +1004,7 @@ type CheckedResultFields = {
   acceptance?: ToolResult['acceptance']
   nestedCalls?: ToolResult['nestedCalls']
   usage?: ToolResult['usage']
+  usageIncomplete?: ToolResult['usageIncomplete']
   files?: ToolResult['files']
 }
 
@@ -1021,6 +1022,8 @@ const withCheckedValue = (result: ToolResult, value: Schema.Json | undefined): T
   if (result.nestedCalls !== undefined) fields.nestedCalls = result.nestedCalls
 
   if (result.usage !== undefined) fields.usage = result.usage
+
+  if (result.usageIncomplete !== undefined) fields.usageIncomplete = result.usageIncomplete
 
   if (result.files !== undefined) fields.files = result.files
 

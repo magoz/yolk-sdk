@@ -369,6 +369,12 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
    * usage (hosts decide, as for subagents).
    */
   usage: Schema.optional(AgentUsage),
+  /** `usage` under-counts the nested work: a nested model call completed without (all of) the
+   * usage report it was billed for (a child stream's `LLMStreamEnd.usageUnavailable`, a
+   * provider's `LLMDone.usageUnavailable`, a classification without usage). May be set without
+   * `usage` (nothing was reported). Absent when the reports were complete. Not model-visible.
+   */
+  usageIncomplete: Schema.optional(Schema.Literal(true)),
   /** Files captured from this result (ADR 0009). Not sent to providers: the content carries each
    * file's label. Code mode scripts read files from a typed tool's file fields (ADR 0013).
    */
