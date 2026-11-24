@@ -163,6 +163,41 @@ describe('tool ledger', () => {
     })
   )
 
+  it.effect('replays nested usage and its incompleteness under the current call id', () =>
+    Effect.gen(function* () {
+      const usage = AgentUsage.make({
+        input: AgentInputUsage.make({ total: 4 }),
+        output: AgentOutputUsage.make({ total: 1 })
+      })
+
+      // The stored result names another call id, so the replay rebuilds it field by field.
+      const tool = makeTool<TestContext, typeof NoteParams>({
+        name: 'append_note',
+        description: 'Append a note',
+        parameters: NoteParams,
+        access: 'write',
+        execute: ({ call }) =>
+          Effect.succeed(
+            ToolResult.make({
+              toolCallId: `${call.id}_inner`,
+              content: 'appended',
+              usage,
+              usageIncomplete: true
+            })
+          )
+      })
+
+      const store = makeInMemoryToolLedgerStore({ scope: 'run_1' })
+
+      yield* execute([tool], noteCall(), { store })
+      const replayed = yield* execute([tool], noteCall(), { store })
+
+      expect(replayed.toolCallId).toBe('call_1')
+      expect(replayed.usage).toEqual(usage)
+      expect(replayed.usageIncomplete).toBe(true)
+    })
+  )
+
   it.effect('makes a concurrent duplicate wait and executes the call once', () =>
     Effect.gen(function* () {
       const probe = makeProbe()

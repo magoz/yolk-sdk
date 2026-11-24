@@ -117,7 +117,7 @@ export type NestedToolCallRecorder = {
   readonly argsBytes: number
   readonly usage?: AgentUsage
   /** Some recorded call's usage under-counts it, so the summed `usage` does too. */
-  readonly usageIncomplete?: boolean
+  readonly usageIncomplete?: true
   readonly maxCalls?: number
   readonly counts?: StatusCounts
 }
@@ -202,7 +202,7 @@ export const recordNestedToolCall = (
     complete: boolean
     argsBytes: number
     usage?: AgentUsage
-    usageIncomplete?: boolean
+    usageIncomplete?: true
     maxCalls?: number
     counts?: StatusCounts
   }

@@ -275,8 +275,8 @@ every executed result (direct, nested, staged and interaction calls) before the 
 captured" labels ([move files between tools](../integrations/files)).
 `ToolResult.nestedCalls`, `ToolResult.usage` and `ToolResult.usageIncomplete` (the usage
 under-counts a nested model call that completed without its usage report) never reach the model:
-`toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run usage. `ToolRegistryError` causes
-include `codemode_unsupported_tool`, `invalid_tool_exposure`, `deferred_unsupported_tool`,
+`toolResultMessageFromResult` drops them and the loop does not add `ToolResult.usage` to run usage.
+`ToolRegistryError` causes include `codemode_unsupported_tool`, `invalid_tool_exposure`, `deferred_unsupported_tool`,
 `duplicate_instruction`, `staging_unsupported_policy`,
 `staging_validation_required`, `plan_review_duplicate`, and `change_preview_unsupported_policy`. See
 [Add code mode](../integrations/code-mode#choose-what-scripts-can-call). `resolveTools` adds the

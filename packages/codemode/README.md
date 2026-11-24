@@ -296,7 +296,8 @@ Each call then takes a permit from `processLimiter`, shared across scripts and r
 `makeClassifierConcurrencyLimiter(max)` or `false`. An interrupted waiting call releases its
 permits. Nested-call records carry token usage; cost stays in the result's
 `structuredContent.usage`. A classification the classifier answered without usage marks the result
-`usageIncomplete` (billed but not counted), and so the script's result.
+`usageIncomplete` (its usage is uncounted), and so the script's result; a classifier that never
+reports usage marks every answered call.
 
 ## Host responsibilities
 

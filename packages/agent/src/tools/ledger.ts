@@ -588,9 +588,9 @@ const fitText = (base: StoredResultFields, reduced: CutContent, maxBytes: number
  * (never rebuilt, so another tool returning that shape gets no notice the ledger wrote; its refs
  * are dropped). Their other `structuredContent` fields are dropped. The kept refs and their text
  * are never cut, so with many pause ids they can exceed `maxBytes`. A bound smaller than the
- * identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, `usageIncomplete`, kept refs) leaves an empty
- * content, or only the review text. The live call still returns the original result; only replays
- * see the stored copy.
+ * identifying fields (`toolCallId`, `isError`, `acceptance`, `usage`, `usageIncomplete`, kept
+ * refs) leaves an empty content, or only the review text. The live call still returns the original
+ * result; only replays see the stored copy.
  */
 export const toolLedgerResult = (
   result: ToolResult,

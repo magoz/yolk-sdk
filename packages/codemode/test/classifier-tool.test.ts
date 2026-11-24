@@ -411,7 +411,7 @@ describe('makeClassifierTool', () => {
         'error'
       ])
       expect(result.nestedCalls?.calls[2]?.usage).toMatchObject({ input: { total: 7 } })
-      // Only an answered classification without usage under-counts; failed requests billed nothing.
+      // Only an answered classification without usage under-counts; failed requests report nothing.
       expect(result.nestedCalls?.calls.map(call => call.usageIncomplete)).toEqual([
         undefined,
         undefined,

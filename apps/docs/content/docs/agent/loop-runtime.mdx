@@ -55,7 +55,7 @@ const LoopLayer = makeAgentLoopLayer({
 
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks. Pass the decorator layer as `provider` after providing the inner provider.
 
-`collectModelTurn(stream, { initialUsage, onEvent })` is the success-only wrapper: it returns a finalized `ModelTurnResult` or re-fails. `initialUsage` is the starting cumulative usage; `UsageUpdate` events add to it.
+`collectModelTurn(stream, { initialUsage, onEvent })` is the success-only wrapper: it returns a finalized `ModelTurnResult` or re-fails. `initialUsage` is the starting cumulative usage; `UsageUpdate` events add to it. `usageUnavailable: true` says the stream's `LLMStreamEnd` was marked `usageUnavailable`, so `usage` under-counts the turn; a tool that runs model turns reports it as `ToolResult.usageIncomplete`.
 
 `collectModelTurnAttempt` keeps a `ModelTurnCollection` on typed stream or sink failure:
 
