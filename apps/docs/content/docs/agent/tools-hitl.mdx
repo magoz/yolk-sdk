@@ -171,6 +171,30 @@ Every tool declares one access level:
 
 The SDK records access metadata. Your host enforces approval policy.
 
+### Mark tools that call a model
+
+Access says what a call changes, not what it costs. A tool that calls a model when it runs (a
+language model, a classifier, a child agent run) sets `invokesModel: true`, on `makeTool` options
+or a raw `ToolRegistration`:
+
+```ts
+makeTool({
+  name: 'summarize_thread',
+  parameters: SummarizeParams,
+  access: 'read',
+  invokesModel: true,
+  execute
+})
+```
+
+`resolveTools` copies it to `ToolMetadata.invokesModel` and, for code mode,
+`NestedTool.invokesModel`; it is never sent to providers. It changes nothing by itself: host policy
+reads it, for example code mode's
+[`readOnlyNestedCallGate`](../integrations/code-mode#allow-only-reads), which refuses such calls in
+scripts that must run without a model. The package's `subagent` and `classify` tools set it.
+Tools whose host handlers call a model are yours to mark, for example a `makeKnowledgeLookupTool`
+whose search embeds the query: `{ ...makeKnowledgeLookupTool(handlers), invokesModel: true }`.
+
 ## Ledger writes for re-executed steps
 
 Durable hosts re-execute steps: Vercel Workflow's queue is at-least-once, so a tool-batch step

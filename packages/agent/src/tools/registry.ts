@@ -245,10 +245,13 @@ export type NestedTool = {
   readonly moduleId: string
   /** The module's `ToolModule.description`, when set. */
   readonly moduleDescription?: string
+  /** Set when the registration calls a model when it runs (`ToolRegistration.invokesModel`). */
+  readonly invokesModel?: true
 }
 
 /** Nested tool access for registrations with `nestedToolAccess: true` (for example a code mode
- * tool). Scoped to the same `resolveTools` resolution and host context.
+ * tool), or for host-run scripts (`ResolvedToolSet.nestedExecutor`). Scoped to the same
+ * `resolveTools` resolution and host context.
  */
 export type NestedToolExecutor = {
   /** Code-mode-callable tools (`callableBy` all or codemode, outside the fail-closed set),
@@ -278,6 +281,13 @@ export type NestedToolExecutor = {
 export type NestedToolStagingDescription = {
   readonly tools: ReadonlyArray<NestedTool>
   readonly reviewToolName: string
+}
+
+type NestedToolFields = {
+  def: ToolDef
+  moduleId: string
+  moduleDescription?: string
+  invokesModel?: true
 }
 
 type NestedToolExecutorFields = {
@@ -350,6 +360,13 @@ export type ToolRegistration<Context> = {
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
   readonly background?: boolean
+  /**
+   * The tool calls a model when it runs (a language model, a classifier, a child agent run), so a
+   * call costs model usage whatever its `access`. A trait for host policy, never model-visible:
+   * `resolveTools` copies it to `ToolMetadata.invokesModel` and `NestedTool.invokesModel`, and
+   * gates such as code mode's `readOnlyNestedCallGate` refuse these calls.
+   */
+  readonly invokesModel?: boolean
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */
   readonly nestedToolAccess?: boolean
   /** With `nestedToolAccess: true`, the resolved definition's description is computed from the
@@ -518,6 +535,8 @@ type MakeToolBaseOptions<Context, ParamsSchema extends ToolParamsSchema> = {
    * `execute` answers the validation error.
    */
   readonly isReadCall?: (params: ParamsSchema['Type']) => boolean
+  /** See `ToolRegistration.invokesModel`. */
+  readonly invokesModel?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: Schema.SchemaError) => string
 } & ToolExposure
@@ -614,6 +633,8 @@ export type ToolMetadata = {
   readonly moduleId: string
   readonly name: string
   readonly access: ToolAccess
+  /** Set when the registration calls a model when it runs (`ToolRegistration.invokesModel`). */
+  readonly invokesModel?: true
 }
 
 type ResolvedRegistration<Context> = {
@@ -649,6 +670,15 @@ export type ResolvedToolSet = {
    * these to `RunConfig.instructions` for model turns.
    */
   readonly instructions: ReadonlyArray<RunInstruction>
+  /**
+   * Nested tool access outside any tool call, for scripts a host runs itself (for example
+   * `runCodeModeScript` from `@yolk-sdk/codemode` on a schedule): the same tools, dispatch path,
+   * host context and ledger as a nested-access registration's `nested`. `parentCallId` stands in
+   * for the parent tool call: callers assign nested call ids `<parentCallId>/<seq>`, the ledger's
+   * nested keys under parent key `parentCallId`, so pick an id unique within the ledger scope
+   * (for example a delivery id). Never offers staging (a staged plan needs a model to review it).
+   */
+  readonly nestedExecutor: (input: { readonly parentCallId: string }) => NestedToolExecutor
 }
 
 const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
@@ -912,6 +942,7 @@ const invalidParamsMessage = (
 type MakeToolRegistrationFields<Context> = {
   def: ToolDef
   background?: boolean
+  invokesModel?: boolean
   nestedToolAccess?: boolean
   describe?: NestedToolDescriber
   instruct?: NestedToolInstructor
@@ -1217,6 +1248,10 @@ export function makeTool<Context, ParamsSchema extends ToolParamsSchema>(
 
   if (options.background !== undefined) {
     registration.background = options.background
+  }
+
+  if (options.invokesModel !== undefined) {
+    registration.invokesModel = options.invokesModel
   }
 
   if (options.nestedToolAccess !== undefined) {
@@ -2113,10 +2148,15 @@ export const resolveTools = <Context>(
         isCodeModeCallable(item.tool.def)
     )
 
-    const nestedToolOf = (item: ResolvedRegistration<Context>): NestedTool =>
-      item.moduleDescription === undefined
-        ? { def: item.tool.def, moduleId: item.moduleId }
-        : { def: item.tool.def, moduleId: item.moduleId, moduleDescription: item.moduleDescription }
+    const nestedToolOf = (item: ResolvedRegistration<Context>): NestedTool => {
+      const nested: NestedToolFields = { def: item.tool.def, moduleId: item.moduleId }
+
+      if (item.moduleDescription !== undefined) nested.moduleDescription = item.moduleDescription
+
+      if (item.tool.invokesModel === true) nested.invokesModel = true
+
+      return nested
+    }
 
     const nestedTools: ReadonlyArray<NestedTool> = nestedRegistrations.map(nestedToolOf)
 
@@ -2175,11 +2215,15 @@ export const resolveTools = <Context>(
       return activated(item.tool) ? backgroundToolDef(def) : def
     })
 
-    const metadata = Arr.map(resolved, item => ({
-      moduleId: item.moduleId,
-      name: item.tool.def.name,
-      access: item.tool.access
-    }))
+    const metadata = Arr.map(resolved, (item): ToolMetadata => {
+      const fields = {
+        moduleId: item.moduleId,
+        name: item.tool.def.name,
+        access: item.tool.access
+      }
+
+      return item.tool.invokesModel === true ? { ...fields, invokesModel: true } : fields
+    })
 
     // Registry boundary for model-produced arguments: every validator and handler below sees
     // call params with strict-mode `null`s on optional, non-nullable properties omitted.
@@ -2415,7 +2459,7 @@ export const resolveTools = <Context>(
       !resolved.some(item => item.tool.nestedToolAccess === true)
     ) {
       yield* Effect.logWarning(
-        `Code-mode-only tools are unreachable without a nested tool access registration: ${codeModeOnlyNames.join(', ')}`
+        `Code-mode-only tools are unreachable from model turns without a nested tool access registration (host-run scripts reach them through nestedExecutor): ${codeModeOnlyNames.join(', ')}`
       )
     }
 
@@ -2611,18 +2655,20 @@ export const resolveTools = <Context>(
       )
     }
 
+    const nestedAccess: NestedToolExecutor['access'] = call =>
+      Option.match(
+        Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
+        {
+          onNone: () => Effect.succeed(undefined),
+          onSome: match => effectiveCallAccess(match.tool, call)
+        }
+      )
+
     const nestedFor = (parent: ToolCall): NestedToolExecutor => {
       const executor: NestedToolExecutorFields = {
         tools: nestedTools,
-        execute: nestedExecute(parent),
-        access: call =>
-          Option.match(
-            Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
-            {
-              onNone: () => Effect.succeed(undefined),
-              onSome: match => effectiveCallAccess(match.tool, call)
-            }
-          )
+        execute: nestedExecute(parent.id),
+        access: nestedAccess
       }
 
       if (planResolution !== undefined)
@@ -2631,8 +2677,15 @@ export const resolveTools = <Context>(
       return executor
     }
 
+    // Host-run scripts: no parent tool call, so no staging (plan ids derive from the call).
+    const nestedExecutor: ResolvedToolSet['nestedExecutor'] = ({ parentCallId }) => ({
+      tools: nestedTools,
+      execute: nestedExecute(parentCallId),
+      access: nestedAccess
+    })
+
     const nestedExecute =
-      (parent: ToolCall): NestedToolExecutor['execute'] =>
+      (parentCallId: string): NestedToolExecutor['execute'] =>
       call =>
         Option.match(
           Arr.findFirst(nestedRegistrations, item => item.tool.def.name === call.name),
@@ -2654,7 +2707,7 @@ export const resolveTools = <Context>(
               )
             },
             onSome: match =>
-              executeRegistration(match, call, undefined, parent.id).pipe(
+              executeRegistration(match, call, undefined, parentCallId).pipe(
                 Effect.catchTag('ToolError', error =>
                   Effect.succeed(
                     makeErrorToolResult({ toolCallId: call.id, content: error.message })
@@ -2672,7 +2725,8 @@ export const resolveTools = <Context>(
       interactions,
       interactionHost: options.interactionHost,
       approvalPreviews,
-      instructions
+      instructions,
+      nestedExecutor
     }
 
     return planResolution === undefined

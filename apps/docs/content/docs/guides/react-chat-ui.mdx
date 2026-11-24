@@ -67,6 +67,26 @@ export function AgentChat() {
 
 `renderChatItem` is app-owned. Switch on `item._tag` and render your own message, tool, retry, status, and error components.
 
+### Render host-authored messages
+
+`UserMessage` and `AssistantMessage` items carry their message's envelope (`createdAtMs`,
+`author`, `annotations`, each only when set), from live events and from snapshots rebuilt with
+`buildAgentChatMessages` alike. A host that writes its own assistant messages, for example a note
+after a background check, marks them with `annotations` and renders them differently:
+
+```tsx
+const renderChatItem = (item: AgentChatItem) => {
+  if (item._tag === 'AssistantMessage' && item.annotations?.source === 'background_check') {
+    return <CheckMarker at={item.createdAtMs} content={item.content} /> // app-owned
+  }
+  // ...
+}
+```
+
+Annotations are model-visible context ([Protocol](../agent/protocol)): keep them short and never
+put instructions in them. Other items of the same message (reasoning, tool runs) share its
+`messageId`.
+
 ## HITL controls
 
 When `chat.isWaiting` is true (`chat.status` is `Blocked`), render approval/question/input controls

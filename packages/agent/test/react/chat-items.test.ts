@@ -117,9 +117,92 @@ describe('buildAgentChatMessages', () => {
       ToolResultMessage.make({ toolCallId: call.id, content: result.content })
     ])
   })
+
+  it('keeps assistant message envelopes from the transcript and round-trips them', () => {
+    const hostNote = AssistantAgentMessage.make({
+      createdAtMs: 1_700,
+      annotations: { source: 'host_check', checks: 3 },
+      parts: [AssistantTextPart.make({ content: 'The check matched.' })]
+    })
+
+    const messages = buildAgentChatMessages({
+      messages: [UserMessage.make({ content: 'watch it' }), hostNote],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      createdAtMs: 1_700,
+      annotations: { source: 'host_check', checks: 3 }
+    })
+    expect(toAgentMessages(messages)).toEqual([UserMessage.make({ content: 'watch it' }), hostNote])
+  })
 })
 
 describe('buildAgentChatItems', () => {
+  it('carries message envelopes onto user and assistant message items', () => {
+    const author = { displayName: 'Ada' }
+
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'watch it', author, createdAtMs: 1_000 }),
+        AssistantAgentMessage.make({
+          createdAtMs: 2_000,
+          annotations: { source: 'host_check' },
+          parts: [
+            AssistantReasoningPart.make({ text: 'Checked.' }),
+            AssistantTextPart.make({ content: 'The check matched.' })
+          ]
+        }),
+        assistantMessage({ content: 'Plain reply.' })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    const items = buildAgentChatItems({
+      messages,
+      isRunning: false,
+      activeToolLabel: Option.none()
+    })
+
+    expect(items).toEqual([
+      AgentChatItem.UserMessage({
+        id: 'message-0-user-text',
+        messageId: 'message-0-user',
+        content: 'watch it',
+        createdAtMs: 1_000,
+        author
+      }),
+      AgentChatItem.Reasoning({
+        id: 'message-1-reasoning-0',
+        messageId: 'message-1-assistant',
+        text: 'Checked.'
+      }),
+      AgentChatItem.AssistantMessage({
+        id: 'message-1-assistant-text-1',
+        messageId: 'message-1-assistant',
+        content: 'The check matched.',
+        createdAtMs: 2_000,
+        annotations: { source: 'host_check' }
+      }),
+      AgentChatItem.AssistantMessage({
+        id: 'message-2-assistant-text-0',
+        messageId: 'message-2-assistant',
+        content: 'Plain reply.'
+      })
+    ])
+    // Messages without an envelope keep the previous item shape exactly.
+    expect(Object.keys(items[3] ?? {}).sort()).toEqual(['_tag', 'content', 'id', 'messageId'])
+  })
+
   it('normalizes protocol messages, tools, drafts, and errors', () => {
     const call = ToolCall.make({
       id: 'call_1',

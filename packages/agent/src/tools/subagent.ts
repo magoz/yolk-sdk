@@ -410,6 +410,8 @@ export const makeSubagentToolRegistration = <Context>(
     description: subagentToolDescription(options),
     parameters: configuredSubagentToolParams(options),
     access: 'read',
+    // The child run calls a model.
+    invokesModel: true,
     isEnabled: options.isEnabled,
     invalidParamsMessage: error =>
       withToolArgumentsErrorHint(

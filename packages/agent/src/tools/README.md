@@ -119,6 +119,12 @@ These are the code mode contract (`docs/adr/0002-code-mode.md`); this package do
   code-mode-callable tools of the same resolution and host context. Nested calls run through the
   resolved execute path and fail closed with model-visible error results. Assign nested call ids as
   `<parentToolCallId>/<seq>`.
+- `ResolvedToolSet.nestedExecutor({ parentCallId })` returns the same nested executor for a script
+  the host runs outside any tool call (for example `runCodeModeScript` from `@yolk-sdk/codemode`):
+  nested ids `<parentCallId>/<seq>`, ledgered under parent key `parentCallId`; no staging.
+- `invokesModel: true` (`makeTool` option or raw registration) marks a tool that calls a model when
+  it runs, whatever its access; `resolveTools` copies it to `ToolMetadata` and `NestedTool` for host
+  policy (code mode's `readOnlyNestedCallGate` refuses it). `subagent` sets it.
 - `describe: ({ tools }) => string` on a nested-access registration computes its resolved
   description from those nested tools (for example a code mode catalog); `def.description` stays
   the static fallback.

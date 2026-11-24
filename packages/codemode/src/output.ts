@@ -5,7 +5,7 @@ import {
   type Content,
   type NestedToolCallStatus
 } from '@yolk-sdk/agent/protocol'
-import type { CodeModeExecutionResult, CodeModeOutputItem } from './executor.ts'
+import type { CodeModeError, CodeModeExecutionResult, CodeModeOutputItem } from './executor.ts'
 
 /** Text or image piece of the model-visible result, in order. */
 export type CodeModeResultSegment = CodeModeOutputItem
@@ -197,6 +197,12 @@ const encodeValue = (value: unknown): string => {
   }
 }
 
+/** The error of a failed execution that reported none. */
+export const codeModeMissingError: CodeModeError = {
+  kind: 'sandbox',
+  message: 'The script failed without an error.'
+}
+
 /** Default cap of images kept in one result. */
 export const defaultCodeModeMaxImages = 8
 
@@ -263,10 +269,7 @@ export const codeModeResultSegments = (input: {
   }
 
   if (!result.ok) {
-    const error = result.error ?? {
-      kind: 'sandbox',
-      message: 'The script failed without an error.'
-    }
+    const error = result.error ?? codeModeMissingError
 
     text(`\n\nScript error: ${error.kind}: ${error.message}`)
 

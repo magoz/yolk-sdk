@@ -78,7 +78,7 @@ describe('subagent tool', () => {
       expect(toolSet.tools[0]?.description).toContain('runs same-turn subagent calls concurrently')
       expect(toolSet.tools[0]?.description).not.toContain('multi_tool_use')
       expect(toolSet.metadata).toEqual([
-        { moduleId: 'subagent', name: subagentToolName, access: 'read' }
+        { moduleId: 'subagent', name: subagentToolName, access: 'read', invokesModel: true }
       ])
     })
   )

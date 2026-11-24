@@ -293,7 +293,7 @@ describe('resolveTools exposure rules', () => {
       )
 
       expect(JSON.stringify(messages)).toContain(
-        'Code-mode-only tools are unreachable without a nested tool access registration: hidden'
+        'Code-mode-only tools are unreachable from model turns without a nested tool access registration (host-run scripts reach them through nestedExecutor): hidden'
       )
 
       messages.length = 0

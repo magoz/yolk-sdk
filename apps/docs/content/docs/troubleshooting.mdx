@@ -258,9 +258,11 @@ See [Authorize one action](./agent/tools-hitl#authorize-one-action).
   interaction, or background activation, is `question` or `subagent`, or has `nestedToolAccess`.
   These tools never run from code mode; use `callableBy: 'all'` or `'model'`.
 
-A logged warning, `Code-mode-only tools are unreachable without a nested tool access registration`,
-means you marked tools `callableBy: 'codemode'` but did not register the code mode tool (or another
-`nestedToolAccess` registration) in the same resolution. See
+A logged warning, `Code-mode-only tools are unreachable from model turns without a nested tool
+access registration`, means you marked tools `callableBy: 'codemode'` but did not register the code
+mode tool (or another `nestedToolAccess` registration) in the same resolution. Scripts you run
+yourself through `ResolvedToolSet.nestedExecutor` still reach them; ignore the warning for
+resolutions used only for those. See
 [Choose what scripts can call](./integrations/code-mode#choose-what-scripts-can-call).
 
 Staged tool plans add three causes:

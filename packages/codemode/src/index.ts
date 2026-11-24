@@ -76,16 +76,34 @@ export type {
 export {
   codeModeDeadlineMarginMs,
   codeModeMinimumTimeoutMs,
-  codeModeToolName,
+  CodeModeNestedCallRefused,
+  CodeModeScriptStaged,
   defaultCodeModeLimits,
-  makeCodeModeTool
-} from './tool.ts'
+  runCodeModeScript
+} from './script.ts'
+
+export type {
+  CodeModeBeforeNestedCall,
+  CodeModeBeforeNestedCallInput,
+  CodeModeLimits,
+  CodeModeNestedCallOutcome,
+  CodeModeNestedCallRefusal,
+  CodeModeNestedCallSettledInput,
+  CodeModeScriptCall,
+  CodeModeScriptResult,
+  CodeModeStagingOptions,
+  RunCodeModeScriptOptions
+} from './script.ts'
+
+export { readOnlyNestedCallGate } from './read-only.ts'
+
+export type { ReadOnlyNestedCallGateOptions, ReadOnlyNestedCallRefusalCode } from './read-only.ts'
+
+export { codeModeToolName, makeCodeModeTool } from './tool.ts'
 
 export type {
   CodeModeAfterNestedCallInput,
-  CodeModeLimits,
-  CodeModeNestedCallOutcome,
-  CodeModeStagingOptions,
+  CodeModeToolBeforeNestedCallInput,
   MakeCodeModeToolOptions
 } from './tool.ts'
 

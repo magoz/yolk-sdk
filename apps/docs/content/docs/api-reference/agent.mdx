@@ -258,7 +258,8 @@ Its variants are `Transcript`, `AppendInput`, and `AppendHitlResponse`.
 `makeTool` also accepts `output` (typed results: `execute` returns `{ output }`, encoded into
 `structuredContent` and declared as `ToolDef.outputSchema`; file fields are `ToolFile`, ADR 0013),
 `render`, `callableBy`,
-`discovery`, `loading`, `nestedToolAccess`, `describe`, `instruct`, `abandonedResult` (the result of a ledgered call
+`discovery`, `loading`, `invokesModel` (the tool calls a model when it runs; copied to
+`ToolMetadata.invokesModel` and `NestedTool.invokesModel`), `nestedToolAccess`, `describe`, `instruct`, `abandonedResult` (the result of a ledgered call
 found abandoned), `changePreview` (approval-gated tools: the change preview of approvals and plan
 reviews; `ResolvedToolSet.approvalPreviews` carries the resolved previewers for loop configs, and
 `resolveTools(..., { changePreview: { maxBytes, timeoutMs } })` bounds them), and `staging`
@@ -282,6 +283,9 @@ under-counts a nested model call that completed without its usage report) never 
 [Add code mode](../integrations/code-mode#choose-what-scripts-can-call). `resolveTools` adds the
 package `tool_search` tool when any tool is deferred (`{ toolSearch: false }` opts out) and
 collects `instruct` hooks in `ResolvedToolSet.instructions`.
+`ResolvedToolSet.nestedExecutor({ parentCallId })` returns the `NestedToolExecutor` a
+nested-access registration gets, bound to a host id instead of a tool call (no staging), for
+scripts the host runs itself ([Run a script outside a model turn](../integrations/code-mode#run-a-script-outside-a-model-turn)).
 
 Typed-input helpers: `makeInputTool` keeps original call/response validators server-side;
 `makeInputToolModule` packages the registration as a module. `makeInputToolDef` creates only a
@@ -520,7 +524,7 @@ Tagged model constructors are also exported from `@yolk-sdk/agent/react`:
 | Model family         | Constructor values                                                                                                                                 |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Messages and tools   | `AgentChatPart`, `ChatToolState`                                                                                                                   |
-| Rendered items       | `AgentChatItem`, `ToolRunState`                                                                                                                    |
+| Rendered items       | `AgentChatItem`, `AgentChatItemEnvelope`, `ToolRunState`                                                                                           |
 | Reducer actions      | `AgentChatAction`                                                                                                                                  |
 | Message edit results | `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`                                                                |
 | Hook results         | `AgentChatSubmitResult`, `AgentChatDeleteTurnResult`, `AgentChatRegenerateResult`, `AgentChatEditUserMessageResult`, `AgentChatHitlResponseResult` |

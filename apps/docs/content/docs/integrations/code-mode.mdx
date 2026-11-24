@@ -295,8 +295,9 @@ run({ messages, systemPrompt, tools: toolSet.tools, instructions: toolSet.instru
   tool whose identifier an earlier tool already uses (scripts call it by that name when the name
   is still free; a tool whose identifier and name are both taken is unreachable). Error results,
   argument rejections, `beforeNestedCall` failures, and the `maxNestedCalls` limit read
-  `<label>: <message>`. Only the message crosses into the script; there is no structured reason or
-  details yet. `ToolResult.nestedCalls` records the tool's own message without the prefix.
+  `<label>: <message>`. Only the message and `error.code` (a tool's error code, or the code of a
+  `CodeModeNestedCallRefused`) cross into the script. `ToolResult.nestedCalls` records the tool's
+  own message without the prefix.
 - A nested call that is interrupted rejects with `<label> was cancelled.`; one whose tool fails
   with a defect rejects with `<label> failed unexpectedly.` and is recorded as `error`.
 - A nested call that [paused for a person's input](../agent/tools-hitl#finish-calls-that-paused-for-input)
@@ -547,7 +548,87 @@ return messages.filter((_, index) => results[index].answers.urgent.probability >
 
 Each call reports token usage on the nested-call record; the cost (`costUsd`) stays in the
 classifier result's `structuredContent.usage`. Classifier errors reject the call with a safe
-message.
+message. The classifier tool is a `read` marked `invokesModel: true`, so
+[`readOnlyNestedCallGate`](#allow-only-reads) refuses it.
+
+## Run a script outside a model turn
+
+A host can run a script itself, with no model and no tool call, for example a background check on a
+schedule. `runCodeModeScript` runs it over the same tools, dispatch path, limits, deadline clamp,
+store, and nested-call hooks as the `codemode` tool (which runs every script through it), and
+returns what happened as data instead of model-visible text.
+
+```ts
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+import { readOnlyNestedCallGate, runCodeModeScript } from '@yolk-sdk/codemode'
+import { makePiCodeModeExecutor } from '@yolk-sdk/codemode/node'
+
+const executor = makePiCodeModeExecutor()
+
+const runCheck = (checkId: string, code: string, state: unknown) =>
+  Effect.gen(function* () {
+    const toolSet = yield* resolveTools(hostModules, hostContext) // host-owned
+
+    const result = yield* runCodeModeScript({
+      executor,
+      code,
+      // Nested calls get ids `<parentCallId>/<seq>` (their ledger keys): pick an id unique per run.
+      nested: toolSet.nestedExecutor({ parentCallId: checkId }),
+      parentCallId: checkId,
+      store: { state }, // the script reads it with load('state')
+      limits: { timeoutMs: 60_000 },
+      beforeNestedCall: readOnlyNestedCallGate()
+    })
+
+    // A refused call fails the check even when the script caught the rejection.
+    if (result.calls.some(call => call.refusal !== undefined)) return { failed: 'refused call' }
+
+    return result.ok ? { value: result.value } : { failed: result.error.message }
+  })
+```
+
+- `ResolvedToolSet.nestedExecutor({ parentCallId })` gives the nested tool access a nested-access
+  registration gets, bound to `parentCallId` instead of a tool call: the same `tools` (code-mode
+  callable, outside the fail-closed set), `execute` (decoding, registration wrappers, the ledger),
+  and `access`. It never offers staging: a staged plan needs a model turn to review it.
+- The result: `ok`; `value` (the script's JSON return value) and `storeWrites` when it succeeded,
+  `error` (`kind`, `message`) when it failed; `output` (text and images, unbounded); `calls` (every
+  nested call with its id, arguments, status, effective access, error, and `refusal`);
+  `nestedCalls` (the bounded record), `usage`, `usageIncomplete`, `inputRequired`, `timeoutMs` and
+  `wallTimeMs`. It never fails; interrupting the effect aborts the script and cancels running
+  nested calls.
+- `deadline` is epoch milliseconds, as for the tool; `store` is what `load(key)` reads. Pass inputs
+  such as a carried-over state through `store`.
+- The `codemode` tool keeps the return value in its model-visible text only:
+  `structuredContent.codemode` stays `{ ok, storeWrites?, plan?, inputRequired? }`, because it is
+  persisted with the transcript and an unbounded value would grow it. Hosts that need the value run
+  the script with `runCodeModeScript`.
+
+### Allow only reads
+
+`readOnlyNestedCallGate(options?)` is a ready-made `beforeNestedCall` for `runCodeModeScript` or
+`makeCodeModeTool`. It admits a call only when its effective access is `read` (a registration's
+`isReadCall` counts, so a `list` call of a `write` tool passes) and the tool is neither
+approval-gated nor marked [`invokesModel`](../agent/tools-hitl#mark-tools-that-call-a-model). It
+fails closed: a tool without effective access is refused. Every refusal is a
+`CodeModeNestedCallRefused` whose `code` the script sees as `error.code` and the call's `refusal`
+keeps:
+
+| Code                | Refused call                                                 |
+| ------------------- | ------------------------------------------------------------ |
+| `unavailable`       | the resolution has no such script-callable tool              |
+| `approval_required` | the tool is approval-gated                                   |
+| `invokes_model`     | the tool calls a model when it runs (for example `classify`) |
+| `not_read`          | the call's effective access is `write` or `destructive`      |
+
+`admit` relaxes only the access check, for a write the host knows only reads (for example a remote
+tool its server marks read-only): `readOnlyNestedCallGate({ admit: ({ tool }) => readOnlyRemoteTools.has(tool.def.name) })`.
+A hook that throws or dies (an `admit` that throws included) refuses the call too, with the
+message `The call could not be admitted.` and no code, so counting `refusal`s counts it.
+Your own `beforeNestedCall` hooks receive the same input (`call`, `tool`, `access`, and with
+`makeCodeModeTool` the `context`) and may fail with a plain message or a
+`new CodeModeNestedCallRefused({ code, message })`.
 
 ## Limits
 
