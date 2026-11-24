@@ -1,5 +1,15 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.160
+
+### Patch Changes
+
+- d55175d: Advance in lockstep with `@yolk-sdk/agent` and `@yolk-sdk/codemode`: hosts can run code mode scripts outside a model turn (`runCodeModeScript` over `ResolvedToolSet.nestedExecutor`), gate them to reads (`readOnlyNestedCallGate`), mark tools that call a model (`invokesModel`), and render annotated host messages from chat items. These packages have no direct changes in this release.
+- Updated dependencies [d55175d]
+- Updated dependencies [6f9a9e3]
+  - @yolk-sdk/conformance@0.1.0-canary.160
+  - @yolk-sdk/agent@0.1.0-canary.160
+
 ## 0.1.0-canary.159
 
 ### Patch Changes
