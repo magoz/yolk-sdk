@@ -10,6 +10,11 @@ export type DurableAgentEvent<Event extends object = object> = Event & {
   /** Set from `SequenceDurableAgentEventInput.executionId`; clients route live events by it. */
   readonly executionId?: string
   /**
+   * The step's `turn`, set with `executionId` (removed without it): clients that missed the
+   * execution's `LLMStreamStart` start its turn from it.
+   */
+  readonly executionTurn?: number
+  /**
    * The `streamId`, set on every event (omitted when blank or padded, which clients reject) so
    * clients group executions per run and a terminal event closes its run.
    */
@@ -34,11 +39,19 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
    * reusing a stream id across runs can drop legitimate follow-up events.
    */
   readonly streamId: string
+  /**
+   * The model step's turn: it must equal the turn its model call streams (`LLMStreamStart.turn`,
+   * `runModelTurn`'s `turn`), because tagged events also carry it as `executionTurn`, which
+   * clients that missed the execution's `LLMStreamStart` start its turn from (a lower turn drops
+   * the execution's events as stale). With `executionId` it must be a non-negative safe integer
+   * (sequencing throws a `TypeError` otherwise).
+   */
   readonly turn: number
   /**
    * Identifies one execution of a model step. It is appended to the id and set as the event's
-   * `executionId` field (removed without it), which `@yolk-sdk/agent` clients route by, per run
-   * (the event's `streamId` field, set on every event) and turn. It and `streamId` must be
+   * `executionId` field, with `turn` as its `executionTurn` (both removed without it), which
+   * `@yolk-sdk/agent` clients route by, per run (the event's `streamId` field, set on every event)
+   * and turn. It and `streamId` must be
    * non-empty without surrounding whitespace (clients reject anything else); otherwise sequencing
    * throws a `TypeError` (a defect in `writeDurableAgentEvent`).
    *
@@ -131,6 +144,7 @@ export const sequenceDurableAgentEvent = <Event extends object>(
     eventId: string
     createdAtMs?: number
     executionId?: string
+    executionTurn?: number
     streamId?: string
   }
 
@@ -141,6 +155,10 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 
   if (input.executionId !== undefined && !isNonBlankTrimmed(input.streamId)) {
     throw new TypeError('streamId must be non-empty, without surrounding whitespace')
+  }
+
+  if (input.executionId !== undefined && !(Number.isSafeInteger(input.turn) && input.turn >= 0)) {
+    throw new TypeError('turn must be a non-negative safe integer for a tagged event')
   }
 
   const event: SequencedDurableAgentEventFields = {
@@ -161,8 +179,10 @@ export const sequenceDurableAgentEvent = <Event extends object>(
   // event carries its `streamId` (when clients can decode it), so a terminal event closes its run.
   if (input.executionId === undefined) {
     delete event.executionId
+    delete event.executionTurn
   } else {
     event.executionId = input.executionId
+    event.executionTurn = input.turn
   }
 
   if (isNonBlankTrimmed(input.streamId)) {

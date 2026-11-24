@@ -28,6 +28,7 @@ import * as Schema from 'effect/Schema'
 import {
   agentEventToolCallIds,
   disputedAgentTurns,
+  missedAgentExecutionStart,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -921,6 +922,21 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
+  // A start this client missed (a mid-turn snapshot rebuild) is applied first, as it would have been.
+  const missed = missedAgentExecutionStart(state.executions ?? [], event)
+
+  return applyUnseenAgentEvent(
+    missed === undefined ? state : applyUnseenAgentEvent(state, missed, nowMs),
+    event,
+    nowMs
+  )
+}
+
+const applyUnseenAgentEvent = (
+  state: AgentClientState,
+  event: AgentEvent,
+  nowMs: number
+): AgentClientState => {
   const executions = state.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
 
@@ -1604,7 +1620,8 @@ export const submitAgentUserMessage = (
  * arguments) or, for answers, the run holding their request, and adds a run of its own otherwise,
  * never landing on an earlier turn's run reusing its id. A snapshot taken mid-turn keeps working:
  * that turn's later host events for runs holding their call find them as the same call. Its later
- * model events (before the next `LLMStreamStart`) still act as replays of an earlier run's: a
+ * model events carrying `executionTurn` start the turn they name (its missed `LLMStreamStart`);
+ * untagged ones (before the next `LLMStreamStart`) still act as replays of an earlier run's: a
  * reused id among them can reach an earlier turn's run. Pure; changes nothing else.
  */
 export const markAgentRunStart = (state: AgentClientState): AgentClientState =>

@@ -467,7 +467,8 @@ Open cases:
   the first is never treated as a turn that ran twice. This includes a promoted steer written with a
   new `eventId` between two executions of a turn; hosts that replay a promoted steer under a
   deterministic `eventId` (de-duplicated by the client) are not affected. A client that connects
-  mid-turn never saw the earlier execution's start, so its events take the plain path. The committed
+  mid-turn never saw the earlier execution's start: its events start their turn from
+  `executionTurn`, the one seen first counting as the older execution. The committed
   answer is matched by value among the run's messages, not per turn: an uncommitted answer equal to
   another committed message of the run (same text, same call ids) counts as committed. Providers
   can reuse call ids across turns: the chat projections match a turn's tool events only after the
@@ -480,9 +481,9 @@ Open cases:
   batch before its next model turn stays on the paused call, #352; a host that rebuilds its state
   from a snapshot and reads the run from a cursor past `AgentStart` marks one itself with
   `markChatRunStart` / `markAgentRunStart`, #355). A client that joined mid-turn, or rebuilt from
-  a snapshot taken mid-turn, still applies that turn's model events before the next start as
-  replays, where a reused id can reach an earlier turn's call; its host events find calls in the
-  snapshot as the same call. A client that never saw a later
+  a snapshot taken mid-turn, starts that turn from its first tagged event (`executionTurn`), so a
+  reused id stays off earlier turns' calls; its host events find calls in the snapshot as the same
+  call. Model events without `executionId` still apply as replays before the next start. A client that never saw a later
   turn's start has no bound on where a reconciled turn ends; the committed answer takes the first part of each of its calls
   after the turn's start.
 - A terminal written on a namespaced child stream (for example `workflow:<run>:tool:<ns>`) closes

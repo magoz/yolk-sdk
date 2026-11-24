@@ -917,12 +917,13 @@ messages that lag the run). With the run start (`markChatRunStart` after the las
 `markAgentRunStart` after the last run), the batch reaches the snapshot's cards and runs only as
 the same call or, for answers, the one holding their request, and adds its own otherwise. A
 snapshot taken mid-turn keeps working: that turn's later host events name calls in the snapshot's
-last message (or runs holding them) and find them as the same call. That turn's later model events
-(input, provider results) before the next `LLMStreamStart` count as replays of an earlier run's, so
-a reused id among them can still reach an earlier turn's call, as without a start; a client that
-missed a run's `LLMStreamStart` otherwise (it connected mid-turn after a local submit, or an
-`AgentStart` replayed without `eventId` after the turn's `LLMStreamStart`, whose replay its event id
-then dedupes) has the same limit.
+last message (or runs holding them) and find them as the same call. Its model events that carry
+`executionTurn` with their `executionId` (the vercel-workflows sequencer sets both) start the turn
+they name first, as its missed `LLMStreamStart` would. Model events without it before the next
+`LLMStreamStart` count as replays of an earlier run's, so a reused id among them can still reach an
+earlier turn's call, as without a start; a client that missed a run's `LLMStreamStart` otherwise (it
+connected mid-turn after a local submit, or an `AgentStart` replayed without `eventId` after the
+turn's `LLMStreamStart`, whose replay its event id then dedupes) has the same limit for such events.
 The next `AgentStart` or `LLMStreamStart` replaces the run start.
 
 A retried or redelivered model step streams a second answer for the same turn. Events carry
@@ -930,6 +931,10 @@ optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequ
 execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
 and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.turn`):
 
+- An event of an execution this client never saw start that names its turn (`executionTurn`, set
+  with `executionId`; never on `LLMStreamStart` or `TurnStart`) first applies that missed start,
+  without an `eventId`, so every rule below holds for it (a client rebuilt from a snapshot resumes
+  mid-turn).
 - A newer execution's `LLMStreamStart` supersedes the older one of that turn: its provisional
   output (streaming text, its `AssistantMessage`, tool calls no host event acted on, restored to a
   call whose id it reused) is removed and its later events are dropped.

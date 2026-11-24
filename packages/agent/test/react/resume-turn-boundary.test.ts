@@ -601,4 +601,83 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
       )
     })
   })
+
+  describe('taken mid-turn, while the turn streams its model call', () => {
+    // The cursor lies past turn 2's `LLMStreamStart`; its model events name their execution's turn
+    // (`executionTurn`, as the vercel-workflows sequencer sets it), so the rebuilt state starts
+    // turn 2 from the first one and a reused `call_0` never lands on turn 1's call.
+    const snapshot: Snapshot = { messages: [user, turnOne, osloResult], toolRuns: [osloRun] }
+
+    const tagged = (executionId: string, turn: number) => ({
+      ...host(),
+      executionId,
+      executionTurn: turn
+    })
+
+    const batch = (call: ToolCall, content: string) => [
+      ToolExecutionStarted.make({ ...host(), call }),
+      ToolExecutionCompleted.make({
+        ...host(),
+        call,
+        result: ToolResult.make({ toolCallId: call.id, content })
+      })
+    ]
+
+    const turnThree = [
+      LLMStreamStart.make({ ...tagged('step-3:1', 3), turn: 3 }),
+      AssistantMessageEvent.make({ ...tagged('step-3:1', 3), message: answer(done) })
+    ]
+
+    it("starts the turn from its first model event, off an earlier turn's call", () => {
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: bergen }),
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: turnTwo }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+
+      const started = applyEvents(fromSnapshot(snapshot, true), events.slice(0, 1))
+
+      expect(started.client.turnStart).toMatchObject({ streamId: 'run-1', turn: 2, firstRun: 1 })
+      expect(started.projection.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
+      expect(started.chat.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
+    })
+
+    it("lets a redelivered execution's start supersede the resumed one", () => {
+      const stockholm = weather('Stockholm')
+
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: stockholm }),
+        LLMStreamStart.make({ ...tagged('step-2:2', 2), turn: 2 }),
+        ToolInputEnd.make({ ...tagged('step-2:2', 2), call: bergen }),
+        AssistantMessageEvent.make({ ...tagged('step-2:2', 2), message: turnTwo }),
+        // The superseded execution keeps streaming; its events drop.
+        AssistantMessageEvent.make({
+          ...tagged('step-2:1', 2),
+          message: answer('Now Stockholm', [stockholm])
+        }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+    })
+
+    it('drops an unseen execution of a turn the run moved past', () => {
+      const stockholm = weather('Stockholm')
+
+      const events = [
+        ToolInputEnd.make({ ...tagged('step-2:1', 2), call: bergen }),
+        // A losing execution of turn 1 the snapshot already committed.
+        ToolInputEnd.make({ ...tagged('step-1:2', 1), call: stockholm }),
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: turnTwo }),
+        ...batch(bergen, '9C'),
+        ...turnThree
+      ]
+
+      expect(calls(applyEvents(fromSnapshot(snapshot, true), events))).toEqual(all(ended))
+    })
+  })
 })

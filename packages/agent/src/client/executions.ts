@@ -1,6 +1,7 @@
 import { Data, Equal, Match, Predicate } from 'effect'
 import {
   isTerminalAgentEvent,
+  LLMStreamStart,
   type AgentAwaitingInput,
   type AgentEnd,
   type AgentEvent,
@@ -241,6 +242,48 @@ export const routeAgentExecutionEvent = <Output>(
       ]
     }))
   })
+}
+
+type MissedStartFields = {
+  turn: number
+  executionId: string
+  streamId?: string
+  createdAtMs?: number
+}
+
+/**
+ * The `LLMStreamStart` this client missed for the execution of `event`, for a reducer to apply
+ * before it: the event names its execution's turn (`executionTurn`), and the ledger has never
+ * seen that `executionId` (a client rebuilt from a snapshot resumes mid-turn, past the start). It
+ * carries no `eventId` (never deduped or remembered) and starts the turn as the real start would:
+ * stale in an ended run or for a turn its run closed or moved past, superseding a live execution of
+ * the same turn, else a new turn. `undefined` for a known execution (its start's `turn` decides),
+ * an event without `executionId` or `executionTurn`, an `LLMStreamStart` (its own `turn`), and a
+ * `TurnStart` (which comes before its execution's start).
+ */
+export const missedAgentExecutionStart = <Output>(
+  runs: AgentExecutions<Output>,
+  event: AgentEvent
+): LLMStreamStart | undefined => {
+  const { executionId, executionTurn } = event
+
+  if (
+    executionId === undefined ||
+    executionTurn === undefined ||
+    Predicate.isTagged(event, 'LLMStreamStart') ||
+    Predicate.isTagged(event, 'TurnStart') ||
+    allExecutions(runs).some(execution => execution.executionId === executionId)
+  ) {
+    return undefined
+  }
+
+  const fields: MissedStartFields = { turn: executionTurn, executionId }
+
+  if (event.streamId !== undefined) fields.streamId = event.streamId
+
+  if (event.createdAtMs !== undefined) fields.createdAtMs = event.createdAtMs
+
+  return LLMStreamStart.make(fields)
 }
 
 /** Tool call ids an event refers to. */

@@ -1,0 +1,10 @@
+---
+'@yolk-sdk/agent': minor
+'@yolk-sdk/vercel-workflows': minor
+---
+
+A client that rebuilds from a snapshot and resumes a run mid-turn, past that turn's `LLMStreamStart`, now starts the turn from its first model event instead of matching that turn's model events against any turn. Events gain an optional `executionTurn` identity field: the turn of the execution (`executionId`) that produced them, its `LLMStreamStart.turn`.
+
+`sequenceDurableAgentEvent` (and `writeDurableAgentEvent`) sets `executionTurn` from its `turn` on every event that carries an `executionId`, and removes it from events without one, as it does `executionId`. A step's `turn` must therefore be the turn its model call streams (`runModelTurn`'s `turn`): a lower one makes clients drop the execution's events as stale. With an `executionId`, a `turn` that is not a non-negative safe integer now throws a `TypeError`, like a blank `executionId`; untagged events are unchanged.
+
+`reduceAgentEvents`, `applyAgentEventToChatProjection` / `stepAgentChatProjection` and the `useAgentChat` reducer apply the `LLMStreamStart` an event's execution missed (no `eventId`) before the first event of an unseen `executionId` that carries `executionTurn` (never an `LLMStreamStart` or `TurnStart`). The existing start rules then hold: a start in an ended run, or for a turn its run closed or moved past, drops the execution's events; a newer execution of the same turn supersedes the live one (after a rebuild, the execution seen first counts as the older one); otherwise the turn starts after the current messages and runs, so a call id the provider reuses in that turn no longer lands on an earlier turn's call. Hosts rebuilding from a snapshot keep calling `markChatRunStart` / `markAgentRunStart`; model events without `executionTurn` (older streams, hosts that sequence without `executionId`) behave as before.

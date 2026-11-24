@@ -20,6 +20,7 @@ import {
 import {
   agentEventToolCallIds,
   disputedAgentTurns,
+  missedAgentExecutionStart,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
   type AgentExecution,
@@ -181,9 +182,10 @@ const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
  * snapshot's parts only as the same call (id, name and arguments) or, for answers, the part holding
  * their request, and adds a part of its own otherwise, never landing on an earlier turn's call
  * reusing its id. A snapshot taken mid-turn keeps working: that turn's later host events for calls
- * in the snapshot's messages find them as the same call. Its later model events (before the next
- * `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach an
- * earlier turn's call, as without a start. Pure; works on either chat state, typed with the new
+ * in the snapshot's messages find them as the same call. Its later model events carrying
+ * `executionTurn` start the turn they name (its missed `LLMStreamStart`); untagged ones (before the
+ * next `LLMStreamStart`) still act as replays of an earlier run's: a reused id among them can reach
+ * an earlier turn's call, as without a start. Pure; works on either chat state, typed with the new
  * `turnStart` (a narrower `turnStart` type the input had does not survive).
  */
 export const markChatRunStart = <
@@ -298,9 +300,26 @@ type ProjectedExecutionEvent = ExecutionProjection & {
  * settled or stale execution's events, removes a superseded execution's provisional output when a
  * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` shows the committed
  * answer of every turn of the run that ran more than once and shows another one. Tool events match
- * a call only in their turn: an owned event's execution's, any other the latest turn's.
+ * a call only in their turn: an owned event's execution's, any other the latest turn's. A start
+ * this chat missed (`missedAgentExecutionStart`: a mid-turn snapshot rebuild) is applied first.
  */
 const projectExecutionEvent = (
+  projection: ExecutionProjection,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions
+): ProjectedExecutionEvent => {
+  const missed = missedAgentExecutionStart(projection.executions ?? [], event)
+
+  return projectRoutedEvent(
+    missed === undefined
+      ? projection
+      : projectionFields(projectRoutedEvent(projection, missed, options)),
+    event,
+    options
+  )
+}
+
+const projectRoutedEvent = (
   projection: ExecutionProjection,
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions

@@ -34,16 +34,24 @@ describe('durable workflow agent events', () => {
       text: 'hej',
       eventId: 'workflow:run-1:2:3:step-1:1',
       executionId: 'step-1:1',
+      executionTurn: 2,
       streamId: 'workflow:run-1'
     })
     expect(sequenced('step-1:2').event.eventId).toBe('workflow:run-1:2:3:step-1:2')
     expect(sequenced(undefined).event.eventId).toBe('workflow:run-1:2:3')
     expect(Object.hasOwn(sequenced(undefined).event, 'executionId')).toBe(false)
+    expect(Object.hasOwn(sequenced(undefined).event, 'executionTurn')).toBe(false)
     expect(sequenced('step-1:1').nextEventSequence).toBe(4)
   })
 
   it('keeps the execution fields in step with the id and rejects a blank execution or stream id', () => {
-    const stale = { _tag: 'LLMTextDelta', text: 'hej', executionId: 'old', streamId: 'other' }
+    const stale = {
+      _tag: 'LLMTextDelta',
+      text: 'hej',
+      executionId: 'old',
+      executionTurn: 9,
+      streamId: 'other'
+    }
 
     const plain = sequenceDurableAgentEvent({
       state: makeDurableAgentEventSequencerState(0),
@@ -68,7 +76,31 @@ describe('durable workflow agent events', () => {
     })
 
     expect(tagged.event.executionId).toBe('step-1:2')
+    expect(tagged.event.executionTurn).toBe(1)
     expect(tagged.event.streamId).toBe('workflow:run-1')
+
+    // A tagged event names its turn, so the turn must be one a client can start.
+    for (const turn of [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        sequenceDurableAgentEvent({
+          state: makeDurableAgentEventSequencerState(0),
+          streamId: 'workflow:run-1',
+          turn,
+          executionId: 'step-1:1',
+          event: { _tag: 'LLMTextDelta', text: 'hej' }
+        })
+      ).toThrow(TypeError)
+    }
+
+    // Untagged events keep any turn the host numbers them by.
+    expect(
+      sequenceDurableAgentEvent({
+        state: makeDurableAgentEventSequencerState(0),
+        streamId: 'workflow:run-1',
+        turn: -1,
+        event: { _tag: 'LLMTextDelta', text: 'hej' }
+      }).event.eventId
+    ).toBe('workflow:run-1:-1:0')
 
     expect(() =>
       sequenceDurableAgentEvent({

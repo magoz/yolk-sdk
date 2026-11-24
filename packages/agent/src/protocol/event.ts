@@ -36,6 +36,14 @@ const EventIdentity = {
    */
   executionId: Schema.optional(NonEmptyTrimmedString),
   /**
+   * The turn of the execution (`executionId`) that produced this event, its `LLMStreamStart.turn`;
+   * set with `executionId` (the vercel-workflows sequencer sets both). A client that missed the
+   * execution's `LLMStreamStart` (it rebuilt from a snapshot and resumed mid-turn) starts the turn
+   * from the first such event it sees, as that start would. Once the start is known, its own
+   * `turn` decides.
+   */
+  executionTurn: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /**
    * The durable stream (one run) the event belongs to. Clients group executions and their turns by
    * it, and a terminal event closes its run, so turn numbers of different runs never meet.
    */
