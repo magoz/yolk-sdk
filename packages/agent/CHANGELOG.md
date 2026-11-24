@@ -1,5 +1,30 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.159
+
+### Minor Changes
+
+- 0e5d1ac: A client that rebuilds from a snapshot and resumes a run mid-turn, past that turn's `LLMStreamStart`, now starts the turn from its first model event instead of matching that turn's model events against any turn. Events gain an optional `executionTurn` identity field: the turn of the execution (`executionId`) that produced them, its `LLMStreamStart.turn`.
+
+  `sequenceDurableAgentEvent` (and `writeDurableAgentEvent`) sets `executionTurn` from its `turn` on every event that carries an `executionId`, and removes it from events without one, as it does `executionId`. A step's `turn` must therefore be the turn its model call streams (`runModelTurn`'s `turn`): a lower one makes clients drop the execution's events as stale. With an `executionId`, a `turn` that is not a non-negative safe integer now throws a `TypeError`, like a blank `executionId`; untagged events are unchanged.
+
+  `reduceAgentEvents`, `applyAgentEventToChatProjection` / `stepAgentChatProjection` and the `useAgentChat` reducer apply the `LLMStreamStart` an event's execution missed (no `eventId`) before the first event of an unseen `executionId` that carries `executionTurn`; only events a model call streams after its start qualify (never `LLMStreamStart`, `TurnStart` or host events). The missed start keeps a rebuilt draft streaming and moves the status as the real start would: `stepAgentChatProjection` returns it as `missedStart`, which hosts folding status beside the projection fold before `statusEvent` (the `useAgentChat` reducer does). The existing start rules then hold: a start in an ended run, or for a turn its run closed or moved past, drops the execution's events; a newer execution of the same turn supersedes the live one (after a rebuild, the execution seen first counts as the older one); otherwise the turn starts after the current messages and runs, so a call id the provider reuses in that turn no longer lands on an earlier turn's call. Hosts rebuilding from a snapshot keep calling `markChatRunStart` / `markAgentRunStart`; model events without `executionTurn` (older streams, hosts that sequence without `executionId`) behave as before.
+
+- 628ebd5: Mark tool-attributed usage that under-counts its nested work. `ToolResult` gains an optional `usageIncomplete: true`: `usage` misses (part of) a nested model call that completed without the usage report it was billed for (a child stream's `LLMStreamEnd.usageUnavailable`, a provider's `LLMDone.usageUnavailable`, a classification without usage). It may stand without `usage` (nothing was reported) and, like `usage`, is never model-visible: `toolResultMessageFromResult` drops it. Tools that run their own model calls set it.
+
+  The nested-call recorder carries it: `NestedToolCallInput.usageIncomplete` is kept on the call's `NestedToolCallRecord.usageIncomplete`, and `recordNestedToolCall` ORs it over every call, dropped ones included, so `nestedToolCallResultFields` returns `usageIncomplete: true` beside the summed `usage`. The result boundary, file capture and the tool ledger (its stored copy, the typed-too-large copy and replays) keep it with `usage`.
+
+  `collectModelTurn` and `collectModelTurnAttempt` carry a marked `LLMStreamEnd` as `ModelTurnResult.usageUnavailable: true` (absent otherwise), so a tool that runs child model turns can set `usageIncomplete` from them. Harness `attemptModelTurn` carries it on `StepOutcome.Completed` and `Continue`.
+
+  Code mode copies each nested result's `usageIncomplete` onto its record and the script's result. `makeClassifierTool` marks a classification the classifier answered without usage (a result, or `ClassificationResponseInvalid`) as `usageIncomplete`; request and provider errors are not marked. It assumes a classifier that reports the usage it spends: one that never does marks every answered call.
+
+  The fields are absent when every report arrived and on results recorded before they existed, so stored results and ledger entries decode unchanged.
+
+### Patch Changes
+
+- Updated dependencies [0e5d1ac]
+  - @yolk-sdk/conformance@0.1.0-canary.159
+
 ## 0.1.0-canary.158
 
 ### Patch Changes
