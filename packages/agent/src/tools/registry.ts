@@ -2459,7 +2459,7 @@ export const resolveTools = <Context>(
       !resolved.some(item => item.tool.nestedToolAccess === true)
     ) {
       yield* Effect.logWarning(
-        `Code-mode-only tools are unreachable without a nested tool access registration: ${codeModeOnlyNames.join(', ')}`
+        `Code-mode-only tools are unreachable from model turns without a nested tool access registration (host-run scripts reach them through nestedExecutor): ${codeModeOnlyNames.join(', ')}`
       )
     }
 

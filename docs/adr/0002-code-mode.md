@@ -158,7 +158,8 @@ type ToolCallableBy =
 | `callableBy: 'codemode'`, `discovery: 'search'` | Only scripts call it. Not listed; scripts find it with `searchTools()`.              |
 
 Tools with `callableBy: 'codemode'` are not sent to providers. Without a code mode tool in the
-same tool set, they are unreachable, and resolution warns.
+same tool set, models cannot reach them (host-run scripts still can, through
+`ResolvedToolSet.nestedExecutor`), and resolution warns.
 
 [ADR 0007](./0007-tool-exposure-and-catalog.md) adds `discovery: 'pinned'` (always listed, outside
 the budget), the `loading` axis (deferred `all` tools count as `search` in the catalog), stage-only

@@ -19,7 +19,8 @@ keep message envelopes on chat items.
 - `beforeNestedCall` also receives the called `tool` (`NestedTool`) and the call's effective
   `access`, and may refuse with `new CodeModeNestedCallRefused({ code, message })`: the script sees
   `error.code`, and the call's `refusal` keeps both. Existing hooks (`{ call, context }`, string
-  failures) keep working.
+  failures) keep working. A hook that throws or dies now refuses the call (`The call could not be
+admitted.`, recorded as its `refusal`) instead of escaping the call.
 - `readOnlyNestedCallGate({ admit? })`: a ready-made `beforeNestedCall` that admits only calls whose
   effective access is `read` and refuses approval-gated and `invokesModel` tools, failing closed,
   with codes `unavailable`, `approval_required`, `invokes_model` and `not_read`. `admit` relaxes only
@@ -32,8 +33,10 @@ keep message envelopes on chat items.
 
 - `ResolvedToolSet.nestedExecutor({ parentCallId })` returns the `NestedToolExecutor` a
   nested-access registration gets, bound to a host id instead of a tool call (nested ids
-  `<parentCallId>/<seq>`, ledgered under parent key `parentCallId`), without staging. Hosts that
-  build `ResolvedToolSet` values by hand (test fakes) must add it.
+  `<parentCallId>/<seq>`, ledgered under parent key `parentCallId`), without staging. It is a
+  required field: hosts that build `ResolvedToolSet` values by hand (test fakes) must add it. The
+  warning for code-mode-only tools without a nested-access registration now says they stay
+  reachable through it.
 - `ToolRegistration.invokesModel` and the `makeTool` option mark a tool that calls a model when it
   runs. `resolveTools` copies it to `ToolMetadata.invokesModel` and `NestedTool.invokesModel`; it is
   never sent to providers. The `subagent` tool sets it.

@@ -231,6 +231,54 @@ describe('runCodeModeScript', () => {
     })
   )
 
+  it.effect('refuses, without running, a call whose beforeNestedCall throws or dies', () =>
+    Effect.gen(function* () {
+      const log: ToolLog = []
+      const toolSet = yield* hostToolSet(log)
+
+      const executor = callingExecutor(async options => ({
+        ok: true,
+        value: [
+          await settle(call(options, 'lookup', { query: 'throws' })),
+          await settle(call(options, 'record', { op: 'set', value: 'x' }))
+        ],
+        output: []
+      }))
+
+      const result = yield* runCodeModeScript({
+        executor,
+        code: 'ignored',
+        nested: toolSet.nestedExecutor({ parentCallId: 'check_1' }),
+        parentCallId: 'check_1',
+        beforeNestedCall: input => {
+          if (input.call.name === 'lookup') throw new Error('hook bug')
+
+          return readOnlyNestedCallGate({
+            admit: () => {
+              throw new Error('admit bug')
+            }
+          })(input)
+        }
+      })
+
+      const refused = {
+        ok: false,
+        message: 'The call could not be admitted.',
+        code: undefined
+      }
+
+      expect(result.ok && result.value).toEqual([
+        { ...refused, message: 'tools.lookup: The call could not be admitted.' },
+        { ...refused, message: 'tools.record: The call could not be admitted.' }
+      ])
+      expect(result.calls.map(entry => [entry.status, entry.refusal])).toEqual([
+        ['error', { message: 'The call could not be admitted.' }],
+        ['error', { message: 'The call could not be admitted.' }]
+      ])
+      expect(log).toEqual([])
+    })
+  )
+
   it.effect('reports admitted calls to afterNestedCall, never refused ones', () =>
     Effect.gen(function* () {
       const toolSet = yield* hostToolSet([])

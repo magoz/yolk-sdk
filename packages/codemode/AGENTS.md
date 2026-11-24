@@ -49,7 +49,8 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
 - One script runner: `runCodeModeScript` (`script.ts`) owns dispatch, limits, the deadline clamp, the
   backstop, the store, staging and both hooks; `makeCodeModeTool` only loads the store, evaluates
   `deadline`, adds `context` to the hooks, and turns its `CodeModeScriptResult` into the tool result
-  (`scriptToolResult`). Never add a second dispatch path. Host-run scripts use
+  (`scriptToolResult`); it calls `loadStore`, then reads `deadline`, before the runner samples its
+  start time (`wallTimeMs` and the clamp exclude `loadStore`). Never add a second dispatch path. Host-run scripts use
   `ResolvedToolSet.nestedExecutor({ parentCallId })` (no staging). The run result keeps the return
   value, the unbounded `output` and `calls` (with `refusal`); the tool result keeps the return value
   in text only (`structuredContent.codemode` shape unchanged, ADR 0002).
@@ -71,7 +72,10 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   refused call answers an error result whose `structuredContent` is `{ code }`, so the script sees
   `error.code`. `readOnlyNestedCallGate` (`read-only.ts`) admits only effective `read` access and
   refuses approval-gated and `invokesModel` tools (codes `unavailable`, `approval_required`,
-  `invokes_model`, `not_read`; fail-closed; `admit` relaxes only the access check).
+  `invokes_model`, `not_read`; fail-closed; `admit` relaxes only the access check). A hook that
+  throws or dies (an `admit` that throws included) refuses the call with the fixed refusal `The call
+could not be admitted.` (logged, no code): it never runs and its `refusal` is set, so hosts
+  counting refusals count it.
 - A nested fiber that ends with interrupts only rejects with `was cancelled`; any other failure
   (a defect) rejects with `failed unexpectedly` and records `error`.
 - `executor.execute` has an Effect backstop at `timeoutMs` + 5 s (`timeout` failure, signal

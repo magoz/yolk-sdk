@@ -55,7 +55,11 @@ import type {
   CodeModeStore,
   CodeModeStoreWrites
 } from './executor.ts'
-import { defaultCodeModeMaxImageBytes, defaultCodeModeMaxImages } from './output.ts'
+import {
+  codeModeMissingError,
+  defaultCodeModeMaxImageBytes,
+  defaultCodeModeMaxImages
+} from './output.ts'
 import { searchCodeModeTools } from './search.ts'
 import type { CodeModeStagedPlan } from './store.ts'
 
@@ -376,6 +380,9 @@ const hookOutcome = (exit: Exit.Exit<ToolResult>): CodeModeNestedCallOutcome =>
 const refusalOf = (error: string | CodeModeNestedCallRefused): CodeModeNestedCallRefusal =>
   Predicate.isString(error) ? { message: error } : { message: error.message, code: error.code }
 
+/** The refusal of a call whose `beforeNestedCall` threw or died. */
+const hookFailedRefusal = 'The call could not be admitted.'
+
 /** The error result a refused call answers with; its `code` reaches the script as `error.code`. */
 const refusedResult = (call: ToolCall, refusal: CodeModeNestedCallRefusal) =>
   ToolResult.make(
@@ -556,11 +563,6 @@ const boundedWait = (effect: Effect.Effect<void>) =>
     Effect.asVoid
   )
 
-const missingError: CodeModeError = {
-  kind: 'sandbox',
-  message: 'The script failed without an error.'
-}
-
 /**
  * Runs one code mode script outside a model turn, over `nested` (a nested-access registration's,
  * or `ResolvedToolSet.nestedExecutor` for a host-run script), and returns what it did as data:
@@ -707,6 +709,12 @@ export const runCodeModeScript = (
                   : Effect.suspend(() =>
                       beforeNestedCall({ call: nestedCall, tool: nestedTool, access })
                     ).pipe(
+                      // A hook that throws or dies refuses the call (fail closed), as a refusal.
+                      Effect.catchDefect(defect =>
+                        Effect.logWarning(
+                          `Code mode beforeNestedCall failed for ${nestedCall.id}; the call is refused: ${Cause.pretty(Cause.die(defect))}`
+                        ).pipe(Effect.andThen(Effect.fail(hookFailedRefusal)))
+                      ),
                       Effect.matchEffect({
                         onFailure: error => {
                           const refusal = refusalOf(error)
@@ -922,7 +930,7 @@ export const runCodeModeScript = (
             const failed: CodeModeScriptResult = {
               ...run,
               ok: false,
-              error: result.error ?? missingError
+              error: result.error ?? codeModeMissingError
             }
 
             return failed
