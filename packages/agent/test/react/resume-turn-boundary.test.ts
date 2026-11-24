@@ -722,6 +722,20 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
         [['Now Bergen', 'streaming']]
       )
 
+      // The execution's own answer replaces its draft: one message, no duplicate.
+      const answered = applyEvents(resumed, [
+        AssistantMessageEvent.make({ ...tagged('step-2:1', 2), message: answer('Now Bergen') })
+      ])
+
+      const done = [
+        ['Weather in Oslo, then Bergen?', 'done'],
+        ['Oslo first', 'done'],
+        ['Now Bergen', 'done']
+      ]
+
+      expect(texts(answered.projection.chatMessages)).toEqual(done)
+      expect(texts(answered.chat.chatMessages)).toEqual(done)
+
       // A newer execution of the turn, its start seen or missed, removes the draft with the rest of
       // the superseded execution's output, in every reducer.
       const newer = LLMTextDelta.make({ ...tagged('step-2:2', 2), text: 'Oslo again' })

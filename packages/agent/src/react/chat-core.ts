@@ -375,9 +375,22 @@ const projectExecutionEvent = (
 
   // A missed start that supersedes nothing owns the draft still streaming (a rebuilt draft is its
   // output): its turn starts before it, and a newer execution removes it, as the client's `text`.
-  const draft =
+  const streaming =
     origin === 'missed' && Predicate.isTagged(route, 'Start') && route.superseded.length === 0
       ? streamingDraftMessage(started)
+      : undefined
+
+  // Never another execution's message: only a draft no execution this chat saw produced.
+  const draft =
+    streaming !== undefined &&
+    !executions.some(run =>
+      run.executions.some(execution =>
+        execution.output.some(
+          output => Predicate.isTagged(output, 'Message') && output.messageId === streaming.id
+        )
+      )
+    )
+      ? streaming
       : undefined
 
   const startAnchor = !Predicate.isTagged(route, 'Start')
