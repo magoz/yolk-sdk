@@ -45,6 +45,8 @@ export type StepOutcome = Data.TaggedEnum<{
     readonly toolCalls: ModelTurnResult['toolCalls']
     readonly usage: ModelTurnResult['usage']
     readonly stopReason: ModelTurnResult['stopReason']
+    /** `usage` under-counts the model turn (`ModelTurnResult.usageUnavailable`). */
+    readonly usageUnavailable?: true
   }
   Retry: {
     readonly error: AgentLoopError
@@ -55,6 +57,8 @@ export type StepOutcome = Data.TaggedEnum<{
     readonly toolCalls: ModelTurnResult['toolCalls']
     readonly usage: ModelTurnResult['usage']
     readonly stopReason: ModelTurnResult['stopReason']
+    /** `usage` under-counts the model turn (`ModelTurnResult.usageUnavailable`). */
+    readonly usageUnavailable?: true
   }
   RecoverFull: {
     readonly error: AgentLoopError
@@ -84,18 +88,20 @@ export type ToolBatchOutcome = Extract<
 const completedOutcome = (result: ModelTurnResult): CompletedTurn =>
   StepOutcome.Completed({
     needsContinuation: result.stopReason === 'tool_use',
+    ...modelTurnResult(result)
+  })
+
+// Explicit field selection: a collection carries more than its result.
+const modelTurnResult = (result: ModelTurnResult): ModelTurnResult => {
+  const fields: ModelTurnResult = {
     assistantMessage: result.assistantMessage,
     toolCalls: result.toolCalls,
     usage: result.usage,
     stopReason: result.stopReason
-  })
+  }
 
-const modelTurnResult = (result: ModelTurnResult): ModelTurnResult => ({
-  assistantMessage: result.assistantMessage,
-  toolCalls: result.toolCalls,
-  usage: result.usage,
-  stopReason: result.stopReason
-})
+  return result.usageUnavailable === true ? { ...fields, usageUnavailable: true } : fields
+}
 
 const invalidOverflowCompactionAttemptError = () =>
   new LLMError({
@@ -244,13 +250,11 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
 
         return classifyModelTurnFailure({
           error: current.error,
-          collected: {
+          collected: modelTurnResult({
+            ...current.collection,
             assistantMessage:
-              current.collection.assistantMessage ?? current.collection.partialAssistantMessage,
-            toolCalls: current.collection.toolCalls,
-            usage: current.collection.usage,
-            stopReason: current.collection.stopReason
-          },
+              current.collection.assistantMessage ?? current.collection.partialAssistantMessage
+          }),
           outputStarted: current.collection.outputStarted,
           messages: config.messages,
           overflowCompactionAttempt,

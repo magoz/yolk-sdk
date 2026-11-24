@@ -106,6 +106,22 @@ describe('attemptModelTurn', () => {
     }).pipe(Effect.provide(Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), loopLayer)))
   )
 
+  it.effect('carries a stream that ended without its usage report as usageUnavailable', () =>
+    Effect.gen(function* () {
+      const turn = (done: LLMDone) =>
+        attemptModelTurn(turnConfig).pipe(
+          Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'ok' }), done)))
+        )
+
+      const unreported = yield* turn(LLMDone.make({ stopReason: 'stop', usageUnavailable: true }))
+      const reported = yield* turn(LLMDone.make({ stopReason: 'stop' }))
+
+      expect(unreported._tag).toBe('Completed')
+      expect(Predicate.isTagged(unreported, 'Completed') && unreported.usageUnavailable).toBe(true)
+      expect(Object.hasOwn(reported, 'usageUnavailable')).toBe(false)
+    })
+  )
+
   it.effect('marks tool_use as needsContinuation', () =>
     Effect.gen(function* () {
       const outcome = yield* attemptModelTurn({

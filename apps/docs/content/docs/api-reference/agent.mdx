@@ -119,7 +119,7 @@ immutable receipt storage and host-owned rendering. `InteractionSubmitted` is no
 | `decorateLLMProvider`                                                               | wrap an existing `LLMProvider` service                                                                             |
 | `collectModelTurn`                                                                  | success-only fold of a model-turn stream to `ModelTurnResult`                                                      |
 | `collectModelTurnAttempt`                                                           | `Collected` / `StreamFailed` / `SinkFailed` with `ModelTurnCollection`                                             |
-| `ModelTurnResult`                                                                   | finalized `{ assistantMessage, toolCalls, usage, stopReason }`                                                     |
+| `ModelTurnResult`                                                                   | finalized `{ assistantMessage, toolCalls, usage, stopReason, usageUnavailable? }`                                  |
 | `ModelTurnCollection`                                                               | result plus `outputStarted` and `partialAssistantMessage`                                                          |
 | `CollectModelTurnAttemptResult`                                                     | collector tagged union                                                                                             |
 | `LLMProvider`                                                                       | provider service contract                                                                                          |
