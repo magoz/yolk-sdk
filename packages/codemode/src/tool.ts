@@ -1,128 +1,62 @@
-import {
-  Cause,
-  Clock,
-  Data,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  FiberSet,
-  Option,
-  Predicate,
-  Result,
-  Scope
-} from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   boundNestedToolCallArgs,
   inputRequiredNotice,
-  makeNestedToolCallRecorder,
   mergeInputRequiredRefs,
   toolInputRequired,
-  type ToolInputRequiredRef,
   nestedToolCallMaxErrorChars,
   nestedToolCallRecordLimit,
-  nestedToolCallResultFields,
-  recordNestedToolCall,
   truncateCodePoints,
-  ToolCall,
   ToolResult,
   type AgentUsage,
   type Content,
-  type NestedToolCallAccess,
-  type NestedToolCallInput,
-  type NestedToolCallStatus
+  type ToolCall
 } from '@yolk-sdk/agent/protocol'
-import { toCodemodeIdentifier } from '@earendil-works/pi-codemode/declarations'
 import {
   makeTool,
   stagedToolPlanNotice,
-  type NestedTool,
-  type NestedToolExecutor,
   type NestedToolInstructor,
-  type StagedCallReceipt,
   type ToolExecutionInput,
   type ToolLedgerAbandonedInput,
   type ToolLedgerEntry,
-  type ToolPlanBuilder,
-  type ToolPlanStageError,
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import {
-  codeModeCatalog,
   codeModeCatalogInstruction,
-  codeModeStageOnlyCatalog,
   defaultCodeModeInlineBudget,
-  describeCodeModeTool,
-  findCodeModeTool,
   renderCodeModeDescription,
   renderCodeModeInstructedDescription,
-  type CodeModeCatalogTool,
   type CodeModeStagingDescription
 } from './catalog.ts'
-import type {
-  CodeModeExecutionResult,
-  CodeModeExecutor,
-  CodeModeExecutorGlobal,
-  CodeModeExecutorTool,
-  CodeModeStore
-} from './executor.ts'
+import type { CodeModeExecutionResult, CodeModeExecutor, CodeModeStore } from './executor.ts'
 import {
   boundCodeModeSegments,
   codeModeResultSegments,
   codeModeSegmentsContent,
-  defaultCodeModeMaxImageBytes,
-  defaultCodeModeMaxImages,
   type CodeModeResultSegment
 } from './output.ts'
-import { searchCodeModeTools } from './search.ts'
+import {
+  CodeModeScriptStaged,
+  defaultCodeModeLimits,
+  runCodeModeScript,
+  type CodeModeBeforeNestedCall,
+  type CodeModeBeforeNestedCallInput,
+  type CodeModeLimits,
+  type CodeModeNestedCallSettledInput,
+  type CodeModeScriptResult,
+  type CodeModeStagingOptions
+} from './script.ts'
 import type {
   CodeModeInterruptedCall,
   CodeModeInterruptedCalls,
   CodeModeInterruptedCallStatus,
-  CodeModeStagedPlan,
   CodeModeStructuredContent
 } from './store.ts'
 
 /** Default name of the code mode tool. */
 export const codeModeToolName = 'codemode'
-
-/** Host-owned limits of one script. */
-export type CodeModeLimits = {
-  /** Overall deadline including nested calls. Default 120000 (clamped by `deadline`). */
-  readonly timeoutMs?: number
-  /** VM heap cap. Default 64 MiB. */
-  readonly memoryLimitBytes?: number
-  /** Nested tool calls per script; further calls reject with an Error. Default 256. The
-   * `nestedCalls` record keeps up to this many calls, at most `nestedToolCallMaxRecordedCalls`
-   * (4096) whatever the limit (argument byte budgets still apply).
-   */
-  readonly maxNestedCalls?: number
-  /** Model-visible result characters, cut head and tail with an omission marker. Default 40000. */
-  readonly maxOutputChars?: number
-  /** Images kept in the result, in order; later images are dropped with a note. Default 8. */
-  readonly maxImages?: number
-  /** Base64 characters of images kept in the result in total; an image that would exceed it is
-   * dropped with a note. Default 4 MiB.
-   */
-  readonly maxImageBytes?: number
-}
-
-export const defaultCodeModeLimits = {
-  timeoutMs: 120_000,
-  memoryLimitBytes: 64 * 1024 * 1024,
-  maxNestedCalls: 256,
-  maxOutputChars: 40_000,
-  maxImages: defaultCodeModeMaxImages,
-  maxImageBytes: defaultCodeModeMaxImageBytes
-} as const satisfies Required<CodeModeLimits>
-
-/** Kept between a host deadline and the script deadline, for result handling. */
-export const codeModeDeadlineMarginMs = 5_000
-
-/** A deadline never clamps a script below this timeout. */
-export const codeModeMinimumTimeoutMs = 1_000
 
 export type MakeCodeModeToolOptions<Context> = {
   readonly executor: CodeModeExecutor
@@ -142,16 +76,14 @@ export type MakeCodeModeToolOptions<Context> = {
    */
   readonly loadStore?: (context: Context) => Effect.Effect<CodeModeStore, ToolError>
   /**
-   * Runs before each nested call executes, with the nested call (id `<toolCallId>/<seq>`) and the
-   * host context. A failure rejects that call in the script with the message and records it as an
-   * `error` without executing it. Host decorators around the `ToolExecutor` (outside
-   * `ResolvedToolSet.execute`) never see nested calls: put per-call run-authority checks here or in
-   * registration-level wrappers.
+   * Runs before each nested call executes, with the nested call (id `<toolCallId>/<seq>`), the
+   * called tool, its effective access, and the host context. A failure refuses that call: it
+   * rejects in the script with the message (and `error.code` for a `CodeModeNestedCallRefused`)
+   * and is recorded as an `error` without executing. Host decorators around the `ToolExecutor`
+   * (outside `ResolvedToolSet.execute`) never see nested calls: put per-call run-authority checks
+   * here or in registration-level wrappers. `readOnlyNestedCallGate` admits only reads.
    */
-  readonly beforeNestedCall?: (input: {
-    readonly call: ToolCall
-    readonly context: Context
-  }) => Effect.Effect<void, string>
+  readonly beforeNestedCall?: CodeModeBeforeNestedCall<CodeModeToolBeforeNestedCallInput<Context>>
   /**
    * Runs after each nested call that `beforeNestedCall` admitted, with its outcome: `success` (a
    * result without `isError`), `failure` (an error result or an unexpected failure), or
@@ -180,20 +112,13 @@ export type MakeCodeModeToolOptions<Context> = {
   readonly catalog?: 'description' | 'instructions'
 }
 
-export type CodeModeStagingOptions = {
-  /** Staged calls per script; `stage` rejects past it. At most the resolution's `maxCalls`. */
-  readonly maxCalls?: number
+/** What the code mode tool's `beforeNestedCall` sees: the call, its tool and access, the context. */
+export type CodeModeToolBeforeNestedCallInput<Context> = CodeModeBeforeNestedCallInput & {
+  readonly context: Context
 }
 
-/** Outcome of a nested call for `afterNestedCall`. */
-export type CodeModeNestedCallOutcome = 'success' | 'failure' | 'interrupted'
-
-export type CodeModeAfterNestedCallInput<Context> = {
-  readonly call: ToolCall
-  readonly outcome: CodeModeNestedCallOutcome
-  readonly durationMs: number
+export type CodeModeAfterNestedCallInput<Context> = CodeModeNestedCallSettledInput & {
   readonly context: Context
-  readonly result?: ToolResult
 }
 
 const CodeModeParams = Schema.Struct({
@@ -205,703 +130,104 @@ const CodeModeParams = Schema.Struct({
 
 type CodeModeParams = typeof CodeModeParams.Type
 
-class CodeModeExecutorRejected extends Data.TaggedError('CodeModeExecutorRejected')<{
-  readonly message: string
-}> {}
+/** The staging notice of a script that staged calls, after the bounded output. */
+const stagingNotice = (staged: CodeModeScriptResult['staged']) => {
+  if (staged === undefined) return undefined
 
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : Predicate.isString(error) ? error : 'unknown error'
+  const plural = staged.count === 1 ? '' : 's'
 
-// The text a script sees of a result: its text parts only. File, image, document and audio parts
-// (and the labels providers render for them) never enter scripts (ADR 0013).
-const nestedText = (content: Content) =>
-  Predicate.isString(content)
-    ? content
-    : content
-        .flatMap(part => (Predicate.isTagged(part, 'Text') ? [part.text] : []))
-        .filter(text => text.length > 0)
-        .join('\n')
-
-type NestedResolution =
-  | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly message: string; readonly code?: string }
-
-// The `code` of an error result: a model-visible error's (`ModelVisibleToolError.code`) or any
-// structured error with a string `code` (a connector's `ProviderFailure`).
-const decodeErrorCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.String }))
-
-const errorCode = (result: ToolResult) =>
-  Option.getOrUndefined(
-    Option.map(decodeErrorCode(result.structuredContent), envelope => envelope.code)
-  )
-
-/** A typed tool's successful result without its value: the script never falls back to text. */
-const isInvalidTypedResult = (tool: CodeModeCatalogTool, result: ToolResult) =>
-  tool.structured && result.isError !== true && result.structuredContent === undefined
+  return CodeModeScriptStaged.$match(staged, {
+    Discarded: ({ count }) =>
+      `\n\nThe script failed, so its ${count} staged call${plural} ${count === 1 ? 'was' : 'were'} discarded; nothing was applied.`,
+    SaveFailed: ({ count, message }) =>
+      `\n\nThe script staged ${count} call${plural}, but the plan could not be saved (${message}); nothing was applied. Run the script again.`,
+    Saved: ({ plan }) => `\n\n${stagedToolPlanNotice(plan)}`
+  })
+}
 
 /**
- * What a nested call resolves to (ADR 0013). A typed tool (one with an output schema) resolves to
- * its value as declared, file fields as `FileRef` or `FileUnavailable`; a typed result without a
- * value rejects ("returned an invalid result"). An untyped tool resolves to its text parts joined
- * with newlines. Error results reject with their text and the `code` of their structured error
- * (a model-visible error's code, a connector failure's code). Files never reach scripts as labels.
+ * The code mode tool's result for one script: bounded text (header, output, return value, error,
+ * calls made), then the staging and input-required notices (never cut), the nested-call record,
+ * usage, and `structuredContent.codemode`.
  */
-const resolveNestedResult = (tool: CodeModeCatalogTool, result: ToolResult): NestedResolution => {
-  if (result.isError === true) {
-    const text = nestedText(result.content)
-    const message = text.length > 0 ? text : `Tool ${tool.name} failed.`
-    const code = errorCode(result)
+const scriptToolResult = (
+  call: ToolCall,
+  limits: Required<CodeModeLimits>,
+  script: CodeModeScriptResult
+): ToolResult => {
+  const execution: CodeModeExecutionResult = script.ok
+    ? { ok: true, value: script.value, output: script.output }
+    : { ok: false, error: script.error, output: script.output }
 
-    return code === undefined ? { ok: false, message } : { ok: false, message, code }
-  }
-
-  if (!tool.structured) return { ok: true, value: nestedText(result.content) }
-
-  return result.structuredContent === undefined
-    ? { ok: false, message: 'returned an invalid result' }
-    : { ok: true, value: result.structuredContent }
-}
-
-/** The script-visible rejection of a nested call, with the tool's error `code` when it has one. */
-const nestedCallError = (label: string, resolution: { message: string; code?: string }) => {
-  const error = new Error(`${label}: ${resolution.message}`)
-
-  return resolution.code === undefined ? error : Object.assign(error, { code: resolution.code })
-}
-
-type CallOutcome = {
-  status: NestedToolCallStatus
-  durationMs: number
-  error?: string
-  usage?: AgentUsage
-  usageIncomplete?: true
-}
-
-type RecordedCallFields = {
-  id: string
-  name: string
-  args: unknown
-  status: NestedToolCallStatus
-  access?: NestedToolCallAccess
-  durationMs?: number
-  error?: string
-  usage?: AgentUsage
-  usageIncomplete?: true
-}
-
-type CallRecord = {
-  readonly name: string
-  readonly args: unknown
-  readonly id: string
-  access?: NestedToolCallAccess
-  outcome?: CallOutcome
-}
-
-const recordedOutcome = (exit: Exit.Exit<ToolResult>, durationMs: number): CallOutcome => {
-  if (Exit.isFailure(exit)) {
-    return Cause.hasInterruptsOnly(exit.cause)
-      ? { status: 'cancelled', durationMs }
-      : { status: 'error', durationMs, error: 'The tool call failed unexpectedly.' }
-  }
-
-  const result = exit.value
-
-  const outcome: CallOutcome =
-    result.isError === true
-      ? { status: 'error', durationMs, error: nestedText(result.content) }
-      : { status: 'ok', durationMs }
-
-  if (result.usage !== undefined) {
-    outcome.usage = result.usage
-  }
-
-  if (result.usageIncomplete === true) {
-    outcome.usageIncomplete = true
-  }
-
-  return outcome
-}
-
-const hookOutcome = (exit: Exit.Exit<ToolResult>): CodeModeNestedCallOutcome =>
-  Exit.isSuccess(exit)
-    ? exit.value.isError === true
-      ? 'failure'
-      : 'success'
-    : Cause.hasInterruptsOnly(exit.cause)
-      ? 'interrupted'
-      : 'failure'
-
-/** What `describeNamespace(name)` resolves to. */
-type CodeModeNamespaceDescription = {
-  readonly name: string
-  description?: string
-  readonly tools: ReadonlyArray<{
-    readonly name: string
-    readonly description: string
-    readonly stageOnly?: true
-  }>
-}
-
-const SearchOptions = Schema.Struct({
-  limit: Schema.optionalKey(Schema.Finite),
-  namespace: Schema.optionalKey(Schema.String)
-})
-
-const decodeSearchOptions = Schema.decodeUnknownOption(SearchOptions)
-
-/** `searchTools`, `describeTool`, and `describeNamespace` over every nested tool and, while the
- * script may stage, every stageable tool. */
-const discoveryGlobals = (
-  catalog: ReadonlyArray<CodeModeCatalogTool>
-): ReadonlyArray<CodeModeExecutorGlobal> => [
-  {
-    name: 'searchTools',
-    spread: true,
-    execute: args => {
-      const [query, options] = Array.isArray(args) ? args : []
-
-      return Promise.resolve(
-        searchCodeModeTools(
-          catalog,
-          Predicate.isString(query) ? query : '',
-          Option.getOrElse(decodeSearchOptions(options ?? {}), () => ({}))
-        )
-      )
-    }
-  },
-  {
-    name: 'describeTool',
-    execute: name => {
-      const tool = Predicate.isString(name) ? findCodeModeTool(catalog, name) : undefined
-
-      return Promise.resolve(tool === undefined ? undefined : describeCodeModeTool(tool))
-    }
-  },
-  {
-    name: 'describeNamespace',
-    execute: name => {
-      const tools = catalog.filter(tool => tool.namespace === name)
-
-      if (!Predicate.isString(name) || tools.length === 0) return Promise.resolve(undefined)
-
-      const description = tools.find(
-        tool => tool.namespaceDescription !== undefined
-      )?.namespaceDescription
-
-      const namespace: CodeModeNamespaceDescription = {
-        name,
-        tools: tools.map(tool =>
-          tool.exposure === 'stage'
-            ? { name: tool.name, description: tool.description, stageOnly: true }
-            : { name: tool.identifier, description: tool.description }
-        )
-      }
-
-      if (description !== undefined) namespace.description = description
-
-      return Promise.resolve(namespace)
-    }
-  }
-]
-
-type StageFork = (
-  effect: Effect.Effect<StagedCallReceipt, ToolPlanStageError>,
-  options: { readonly signal: AbortSignal }
-) => Fiber.Fiber<StagedCallReceipt, ToolPlanStageError>
-
-/**
- * `stage(name, args)`: records one call into the script's plan (never runs it). `name` is the raw
- * tool name or its catalog identifier (what `searchTools` returns for callable tools).
- */
-const stageGlobal = (
-  plan: ToolPlanBuilder,
-  fork: StageFork,
-  stageable: ReadonlyArray<NestedTool>
-): CodeModeExecutorGlobal => ({
-  name: 'stage',
-  spread: true,
-  signature: '(name: string, args: object): Promise<{ staged: true; key: string; index: number }>',
-  description:
-    'Record a call of a stageable tool into this script’s plan for a person to review; it does not run.',
-  execute: (args, { signal }) => {
-    const [name, params] = Array.isArray(args) ? args : []
-
-    if (signal.aborted) return Promise.reject(new Error('stage was cancelled.'))
-
-    if (!Predicate.isString(name))
-      return Promise.reject(new Error('stage: the first argument must be a tool name.'))
-
-    const toolName =
-      stageable.find(({ def }) => def.name === name)?.def.name ??
-      stageable.find(({ def }) => toCodemodeIdentifier(def.name) === name)?.def.name ??
-      name
-
-    return new Promise((resolve, reject) => {
-      fork(plan.stage({ name: toolName, params: params === undefined ? {} : params }), {
-        signal
-      }).addObserver(exit => {
-        if (Exit.isSuccess(exit)) {
-          resolve(exit.value)
-
-          return
-        }
-
-        const error = Cause.findErrorOption(exit.cause)
-
-        reject(
-          new Error(
-            Option.isSome(error)
-              ? `stage: ${error.value.message}`
-              : Cause.hasInterruptsOnly(exit.cause)
-                ? 'stage was cancelled.'
-                : 'stage failed unexpectedly.'
-          )
-        )
-      })
-    })
-  }
-})
-
-/** A direct call of a stageable tool rejects with a hint to stage it (ADR 0007). */
-const stageOnlyRejections = (stageOnly: ReadonlyArray<CodeModeCatalogTool>) =>
-  stageOnly.flatMap(tool => {
-    const message = `${tool.name} is approval-gated: record it with stage(${JSON.stringify(tool.name)}, args) instead of calling it.`
-
-    return tool.identifier === tool.name
-      ? [{ key: tool.name, message }]
-      : [
-          { key: tool.identifier, message },
-          { key: tool.name, message }
-        ]
+  const segments = codeModeResultSegments({
+    result: execution,
+    wallTimeMs: script.wallTimeMs,
+    calls: script.calls,
+    maxChars: limits.maxOutputChars,
+    maxImages: limits.maxImages,
+    maxImageBytes: limits.maxImageBytes
   })
 
-const hasStoreWrites = (result: CodeModeExecutionResult) =>
-  result.storeWrites !== undefined &&
-  (Object.keys(result.storeWrites.set).length > 0 || result.storeWrites.delete.length > 0)
+  const { inputRequired, staged } = script
 
-const timeoutFor = (limit: number, deadline: number | undefined, now: number) =>
-  deadline === undefined
-    ? limit
-    : Math.max(codeModeMinimumTimeoutMs, Math.min(limit, deadline - now - codeModeDeadlineMarginMs))
+  const inputRequiredText =
+    inputRequired.length === 0 ? undefined : `\n\n${inputRequiredNotice(inputRequired)}`
 
-/**
- * Waits at most `codeModeDeadlineMarginMs` for an effect (interrupting nested fibers) to finish; it
- * keeps running detached when a nested call does not respond to interruption in time.
- */
-const boundedWait = (effect: Effect.Effect<void>) =>
-  Effect.forkDetach(effect).pipe(
-    Effect.flatMap(fiber =>
-      Fiber.await(fiber).pipe(
-        Effect.timeoutOption(Duration.millis(codeModeDeadlineMarginMs)),
-        Effect.interruptible
-      )
-    ),
-    Effect.asVoid
-  )
+  // The staging and input notices follow the bounded output so a cut never hides them.
+  const notices: ReadonlyArray<CodeModeResultSegment> = [
+    stagingNotice(staged),
+    inputRequiredText
+  ].flatMap(text => (text === undefined ? [] : [{ type: 'text', text }]))
 
-type RunInput<Context> = {
-  readonly options: MakeCodeModeToolOptions<Context>
-  readonly limits: Required<CodeModeLimits>
-  readonly call: ToolCall
-  readonly context: Context
-  readonly code: string
-  readonly nested: NestedToolExecutor
+  const content = codeModeSegmentsContent([...segments, ...notices])
+
+  const ok = script.ok && (staged === undefined || !CodeModeScriptStaged.$is('SaveFailed')(staged))
+
+  const codemode: CodeModeStructuredContent['codemode'] =
+    ok && script.ok && script.storeWrites !== undefined
+      ? { ok: true, storeWrites: script.storeWrites }
+      : { ok }
+
+  const withPlan =
+    staged !== undefined && CodeModeScriptStaged.$is('Saved')(staged)
+      ? { ...codemode, plan: staged.plan }
+      : codemode
+
+  const structuredContent: CodeModeStructuredContent = {
+    codemode: inputRequired.length === 0 ? withPlan : { ...withPlan, inputRequired }
+  }
+
+  type ResultFields = {
+    toolCallId: string
+    content: Content
+    isError?: boolean
+    structuredContent: CodeModeStructuredContent
+    nestedCalls: CodeModeScriptResult['nestedCalls']
+    usage?: AgentUsage
+    usageIncomplete?: true
+  }
+
+  const fields: ResultFields = {
+    toolCallId: call.id,
+    content,
+    structuredContent,
+    nestedCalls: script.nestedCalls
+  }
+
+  if (!ok) {
+    fields.isError = true
+  }
+
+  if (script.usage !== undefined) {
+    fields.usage = script.usage
+  }
+
+  if (script.usageIncomplete !== undefined) {
+    fields.usageIncomplete = script.usageIncomplete
+  }
+
+  return ToolResult.make(fields)
 }
-
-const runScript = <Context>(input: RunInput<Context>): Effect.Effect<ToolResult, ToolError> =>
-  Effect.gen(function* () {
-    const { call, limits, nested, options } = input
-    const store = options.loadStore === undefined ? {} : yield* options.loadStore(input.context)
-    const startedAt = yield* Clock.currentTimeMillis
-    const timeoutMs = timeoutFor(limits.timeoutMs, options.deadline?.(input.context), startedAt)
-    const catalog = codeModeCatalog(nested.tools)
-
-    return yield* Effect.acquireUseRelease(
-      Scope.make(),
-      scope =>
-        Effect.gen(function* () {
-          // Nested calls run as fibers of this tool call (same services, interrupted with it).
-          const fibers = yield* FiberSet.make<ToolResult>().pipe(Scope.provide(scope))
-          const runFork = yield* FiberSet.runtime(fibers)<never>()
-          const records: Array<CallRecord> = []
-          // Nested calls that paused for input (ADR 0014), reported even when the script caught them.
-          const paused: Array<ToolInputRequiredRef> = []
-
-          // Staged tool plans: only when the resolution offers staging and the host keeps it on.
-          const stagingOptions = options.staging === false ? undefined : options.staging
-          const staging = options.staging === false ? undefined : nested.staging
-          const maxStagedCalls = stagingOptions?.maxCalls
-
-          const plan =
-            staging === undefined
-              ? undefined
-              : staging.begin(
-                  maxStagedCalls === undefined ? undefined : { maxCalls: maxStagedCalls }
-                )
-
-          const stageFibers = yield* FiberSet.make<StagedCallReceipt, ToolPlanStageError>().pipe(
-            Scope.provide(scope)
-          )
-
-          const stageFork = yield* FiberSet.runtime(stageFibers)<never>()
-
-          const callTool =
-            (tool: CodeModeCatalogTool): CodeModeExecutorTool['execute'] =>
-            (args, { signal }) => {
-              if (signal.aborted) {
-                return Promise.reject(new Error(`${tool.callLabel} was cancelled.`))
-              }
-
-              if (records.length >= limits.maxNestedCalls) {
-                return Promise.reject(
-                  new Error(
-                    `${tool.callLabel}: Nested call limit reached: a script may make at most ${limits.maxNestedCalls} tool calls. Batch the work or return partial results.`
-                  )
-                )
-              }
-
-              const params = args === undefined ? {} : args
-
-              const record: CallRecord = {
-                id: `${call.id}/${records.length + 1}`,
-                name: tool.name,
-                args: params
-              }
-
-              records.push(record)
-
-              const nestedCall = ToolCall.make({ id: record.id, name: tool.name, params })
-              const afterNestedCall = options.afterNestedCall
-
-              const run =
-                afterNestedCall === undefined
-                  ? nested.execute(nestedCall)
-                  : Effect.gen(function* () {
-                      const started = yield* Clock.currentTimeMillis
-
-                      // Host observability never changes the call: a hook failure, defects and
-                      // synchronous throws included, is only logged.
-                      const afterNestedCallSafely = (
-                        hookInput: CodeModeAfterNestedCallInput<Context>
-                      ) =>
-                        Effect.suspend(() => afterNestedCall(hookInput)).pipe(
-                          Effect.exit,
-                          Effect.flatMap(hookExit =>
-                            Exit.isSuccess(hookExit)
-                              ? Effect.void
-                              : Effect.logWarning(
-                                  `Code mode afterNestedCall failed for ${nestedCall.id}; ignored: ${Cause.pretty(hookExit.cause)}`
-                                )
-                          )
-                        )
-
-                      return yield* nested.execute(nestedCall).pipe(
-                        Effect.onExit(exit =>
-                          Effect.flatMap(Clock.currentTimeMillis, finished =>
-                            afterNestedCallSafely(
-                              Exit.isSuccess(exit)
-                                ? {
-                                    call: nestedCall,
-                                    outcome: hookOutcome(exit),
-                                    durationMs: finished - started,
-                                    context: input.context,
-                                    result: exit.value
-                                  }
-                                : {
-                                    call: nestedCall,
-                                    outcome: hookOutcome(exit),
-                                    durationMs: finished - started,
-                                    context: input.context
-                                  }
-                            )
-                          )
-                        )
-                      )
-                    })
-
-              // The plan's ordering guardrail: once a script stages, only read tools run.
-              const guarded =
-                plan === undefined
-                  ? run
-                  : plan.admit(nestedCall).pipe(
-                      Effect.matchEffect({
-                        onFailure: error =>
-                          Effect.succeed(
-                            ToolResult.make({
-                              toolCallId: nestedCall.id,
-                              content: error.message,
-                              isError: true
-                            })
-                          ),
-                        onSuccess: () => run
-                      })
-                    )
-
-              const admitted =
-                options.beforeNestedCall === undefined
-                  ? guarded
-                  : options.beforeNestedCall({ call: nestedCall, context: input.context }).pipe(
-                      Effect.matchEffect({
-                        onFailure: message =>
-                          Effect.succeed(
-                            ToolResult.make({
-                              toolCallId: nestedCall.id,
-                              content: message,
-                              isError: true
-                            })
-                          ),
-                        onSuccess: () => guarded
-                      })
-                    )
-
-              const execution = Effect.gen(function* () {
-                const access = yield* nested.access(nestedCall)
-
-                if (access !== undefined) record.access = access
-
-                const started = yield* Clock.currentTimeMillis
-
-                return yield* admitted.pipe(
-                  Effect.onExit(exit =>
-                    Effect.map(Clock.currentTimeMillis, finished => {
-                      record.outcome = recordedOutcome(exit, finished - started)
-                    })
-                  ),
-                  Effect.tap(result =>
-                    Effect.sync(() => {
-                      const ref = toolInputRequired(result)
-
-                      if (Option.isSome(ref)) paused.push(ref.value)
-                    })
-                  ),
-                  Effect.tap(result =>
-                    isInvalidTypedResult(tool, result)
-                      ? Effect.logWarning(
-                          `Code mode: ${tool.name} declares an output schema but returned no value (call ${nestedCall.id}).`
-                        )
-                      : Effect.void
-                  )
-                )
-              })
-
-              return new Promise((resolve, reject) => {
-                runFork(execution, { signal }).addObserver(exit => {
-                  if (Exit.isFailure(exit)) {
-                    reject(
-                      new Error(
-                        Cause.hasInterruptsOnly(exit.cause)
-                          ? `${tool.callLabel} was cancelled.`
-                          : `${tool.callLabel} failed unexpectedly.`
-                      )
-                    )
-
-                    return
-                  }
-
-                  const resolution = resolveNestedResult(tool, exit.value)
-
-                  if (resolution.ok) {
-                    resolve(resolution.value)
-                  } else {
-                    // The script sees which call failed; the nested-call record keeps the raw text.
-                    reject(nestedCallError(tool.callLabel, resolution))
-                  }
-                })
-              })
-            }
-
-          const tools: ReadonlyArray<CodeModeExecutorTool> = catalog.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-            outputSchema: tool.outputSchema,
-            callLabel: tool.callLabel,
-            execute: callTool(tool)
-          }))
-
-          const stageOnly =
-            plan === undefined || staging === undefined
-              ? []
-              : codeModeStageOnlyCatalog(staging.tools)
-
-          const result = yield* Effect.tryPromise({
-            try: signal =>
-              options.executor.execute(input.code, {
-                tools,
-                globals:
-                  plan === undefined || staging === undefined
-                    ? discoveryGlobals(catalog)
-                    : [
-                        ...discoveryGlobals([...catalog, ...stageOnly]),
-                        stageGlobal(plan, stageFork, staging.tools)
-                      ],
-                unbound: stageOnlyRejections(stageOnly),
-                timeoutMs,
-                memoryLimitBytes: limits.memoryLimitBytes,
-                store,
-                signal
-              }),
-            catch: error => new CodeModeExecutorRejected({ message: errorMessage(error) })
-          }).pipe(
-            Effect.catch(error =>
-              Effect.succeed<CodeModeExecutionResult>({
-                ok: false,
-                error: {
-                  kind: 'sandbox',
-                  message: `The code mode executor failed: ${error.message}`
-                },
-                output: []
-              })
-            ),
-            // Backstop for executors that miss their own deadline: interrupting aborts the signal.
-            Effect.timeoutOption(Duration.millis(timeoutMs + codeModeDeadlineMarginMs)),
-            Effect.map(
-              Option.getOrElse((): CodeModeExecutionResult => ({
-                ok: false,
-                error: {
-                  kind: 'timeout',
-                  message: `Execution timed out after ${timeoutMs} ms (the executor did not stop in time)`
-                },
-                output: []
-              }))
-            )
-          )
-
-          // Calls still running when the script ended are cancelled and recorded as such.
-          yield* boundedWait(FiberSet.clear(fibers))
-          yield* boundedWait(FiberSet.clear(stageFibers))
-
-          const finishedAt = yield* Clock.currentTimeMillis
-
-          // A successful script's staged calls are saved once as a plan; a failed script's are
-          // discarded (a partial plan is never offered for review). Nothing staged ever ran.
-          const stagedCount = plan === undefined ? 0 : (yield* plan.staged).length
-
-          const saved =
-            plan === undefined || stagedCount === 0 || !result.ok
-              ? undefined
-              : yield* plan.finish.pipe(Effect.result)
-
-          const savedPlan: CodeModeStagedPlan | undefined =
-            staging === undefined ||
-            saved === undefined ||
-            Result.isFailure(saved) ||
-            saved.success === undefined
-              ? undefined
-              : {
-                  id: saved.success.id,
-                  digest: saved.success.digest,
-                  count: saved.success.calls.length,
-                  reviewToolName: staging.reviewToolName
-                }
-
-          const planFailure =
-            saved !== undefined && Result.isFailure(saved) ? saved.failure : undefined
-
-          const planFailed = planFailure !== undefined
-          const plural = stagedCount === 1 ? '' : 's'
-
-          const stagingNotice =
-            stagedCount === 0
-              ? undefined
-              : !result.ok
-                ? `\n\nThe script failed, so its ${stagedCount} staged call${plural} ${stagedCount === 1 ? 'was' : 'were'} discarded; nothing was applied.`
-                : planFailure !== undefined
-                  ? `\n\nThe script staged ${stagedCount} call${plural}, but the plan could not be saved (${planFailure.message}); nothing was applied. Run the script again.`
-                  : savedPlan === undefined
-                    ? undefined
-                    : `\n\n${stagedToolPlanNotice(savedPlan)}`
-
-          const recorded = records.map((record): NestedToolCallInput => {
-            const fields: RecordedCallFields = {
-              id: record.id,
-              name: record.name,
-              args: record.args,
-              // A call interrupted before it started has no outcome.
-              ...(record.outcome ?? { status: 'cancelled' })
-            }
-
-            if (record.access !== undefined) fields.access = record.access
-
-            return fields
-          })
-
-          const recorder = recorded.reduce(
-            recordNestedToolCall,
-            makeNestedToolCallRecorder({ maxCalls: limits.maxNestedCalls })
-          )
-
-          const { nestedCalls, usage, usageIncomplete } = nestedToolCallResultFields(recorder)
-
-          const segments = codeModeResultSegments({
-            result,
-            wallTimeMs: finishedAt - startedAt,
-            calls: recorded,
-            maxChars: limits.maxOutputChars,
-            maxImages: limits.maxImages,
-            maxImageBytes: limits.maxImageBytes
-          })
-
-          const inputRequired = mergeInputRequiredRefs(paused)
-
-          const inputRequiredText =
-            inputRequired.length === 0 ? undefined : `\n\n${inputRequiredNotice(inputRequired)}`
-
-          // The staging and input notices follow the bounded output so a cut never hides them.
-          const notices: ReadonlyArray<CodeModeResultSegment> = [
-            stagingNotice,
-            inputRequiredText
-          ].flatMap(text => (text === undefined ? [] : [{ type: 'text', text }]))
-
-          const content = codeModeSegmentsContent([...segments, ...notices])
-
-          const ok = result.ok && !planFailed
-
-          const codemode: CodeModeStructuredContent['codemode'] =
-            ok && result.storeWrites !== undefined && hasStoreWrites(result)
-              ? { ok: true, storeWrites: result.storeWrites }
-              : { ok }
-
-          const withPlan = savedPlan === undefined ? codemode : { ...codemode, plan: savedPlan }
-
-          const structuredContent: CodeModeStructuredContent = {
-            codemode: inputRequired.length === 0 ? withPlan : { ...withPlan, inputRequired }
-          }
-
-          type ResultFields = {
-            toolCallId: string
-            content: Content
-            isError?: boolean
-            structuredContent: CodeModeStructuredContent
-            nestedCalls: typeof nestedCalls
-            usage?: AgentUsage
-            usageIncomplete?: true
-          }
-
-          const fields: ResultFields = {
-            toolCallId: call.id,
-            content,
-            structuredContent,
-            nestedCalls
-          }
-
-          if (!ok) {
-            fields.isError = true
-          }
-
-          if (usage !== undefined) {
-            fields.usage = usage
-          }
-
-          if (usageIncomplete !== undefined) {
-            fields.usageIncomplete = usageIncomplete
-          }
-
-          return ToolResult.make(fields)
-        }),
-      (scope, exit) => boundedWait(Scope.close(scope, exit))
-    )
-  })
 
 const argsPreviewChars = 200
 
@@ -1050,7 +376,8 @@ const abandonedScriptResult =
 
 /**
  * The code mode tool: one registration (default name `codemode`, input `{ code }`) whose scripts
- * call the other code-mode-callable tools of the same `resolveTools` resolution. Nested calls run
+ * call the other code-mode-callable tools of the same `resolveTools` resolution. Each call runs its
+ * script with `runCodeModeScript` over the registration's `nested` executor: nested calls run
  * through the resolved execute path with the same host context (input decoding, enablement,
  * registration wrappers), get ids `<toolCallId>/<seq>`, and are recorded on the result's
  * `nestedCalls`. The resolved description lists the callable tools (see
@@ -1084,6 +411,48 @@ export const makeCodeModeTool = <Context>(
       ? undefined
       : staging
 
+  const run = ({
+    call,
+    context,
+    params,
+    nested
+  }: ToolExecutionInput<Context> & { readonly params: CodeModeParams }) =>
+    Effect.gen(function* () {
+      if (nested === undefined) {
+        return yield* Effect.fail(
+          new ToolError({
+            tool: name,
+            cause: 'unavailable',
+            message: `${name} requires nested tool access; resolve it with resolveTools.`
+          })
+        )
+      }
+
+      const loaded = options.loadStore === undefined ? {} : yield* options.loadStore(context)
+      const { beforeNestedCall, afterNestedCall } = options
+
+      const script = yield* runCodeModeScript({
+        executor: options.executor,
+        code: params.code,
+        nested,
+        parentCallId: call.id,
+        limits,
+        deadline: options.deadline?.(context),
+        store: loaded,
+        beforeNestedCall:
+          beforeNestedCall === undefined
+            ? undefined
+            : input => beforeNestedCall({ ...input, context }),
+        afterNestedCall:
+          afterNestedCall === undefined
+            ? undefined
+            : input => afterNestedCall({ ...input, context }),
+        staging: options.staging
+      })
+
+      return scriptToolResult(call, limits, script)
+    })
+
   const registration = makeTool<Context, typeof CodeModeParams>({
     name,
     description: instructed
@@ -1108,21 +477,7 @@ export const makeCodeModeTool = <Context>(
     },
 
     abandonedResult: abandonedScriptResult(limits),
-    execute: ({
-      call,
-      context,
-      params,
-      nested
-    }: ToolExecutionInput<Context> & { readonly params: CodeModeParams }) =>
-      nested === undefined
-        ? Effect.fail(
-            new ToolError({
-              tool: name,
-              cause: 'unavailable',
-              message: `${name} requires nested tool access; resolve it with resolveTools.`
-            })
-          )
-        : runScript({ options, limits, call, context, code: params.code, nested })
+    execute: run
   })
 
   if (!instructed) return registration

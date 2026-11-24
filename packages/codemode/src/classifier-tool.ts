@@ -236,6 +236,8 @@ export const makeClassifierTool = <Context>(
     parameters: ClassifierToolParams,
     output: ClassificationResult,
     access: 'read',
+    // A read that calls a classifier model: read-only gates refuse it.
+    invokesModel: true,
     callableBy: 'codemode',
     discovery: 'listed',
     execute: ({ call, params }) => {

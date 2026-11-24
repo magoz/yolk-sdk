@@ -50,7 +50,12 @@ export {
   ToolRunState
 } from './chat-items.ts'
 
-export type { BuildAgentChatItemsInput, ToolDuration, ToolRunTiming } from './chat-items.ts'
+export type {
+  AgentChatItemEnvelope,
+  BuildAgentChatItemsInput,
+  ToolDuration,
+  ToolRunTiming
+} from './chat-items.ts'
 
 export {
   AgentChatExecutionOutput,

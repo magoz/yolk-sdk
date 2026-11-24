@@ -16,11 +16,11 @@ Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is 
 
 ## Subpaths
 
-| Subpath                         | Purpose                                                                                                                                                   |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`            | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
-| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                     |
-| `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`: a fresh Dynamic Worker isolate (Worker Loader binding) per script, without network access                            |
+| Subpath                         | Purpose                                                                                                                                                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/codemode`            | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), `runCodeModeScript`, `readOnlyNestedCallGate`, the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
+| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                                                                    |
+| `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`: a fresh Dynamic Worker isolate (Worker Loader binding) per script, without network access                                                                           |
 
 ## Example
 
@@ -112,8 +112,18 @@ const program = Effect.gen(function* () {
   only results of the code mode tool (default `codemode`), so other tools cannot spoof writes, and
   keeps the 256 KiB-per-value and 1 MiB-total bounds by dropping offending writes. Transcript
   `ToolResultMessage`s carry no tool name: pair each with its assistant tool call's name.
-- `beforeNestedCall({ call, context })` runs before each nested call; a failure rejects that call in
-  the script with `<label>: <message>` and records it as `error` without executing it.
+- `beforeNestedCall({ call, tool, access, context })` runs before each nested call, with the
+  called tool and the call's effective access; a failure (a message or a
+  `CodeModeNestedCallRefused({ code, message })`, whose `code` the script sees as `error.code`)
+  rejects that call in the script with `<label>: <message>` and records it as `error` without
+  executing it. `readOnlyNestedCallGate({ admit? })` admits only reads: effective access `read`
+  (so `isReadCall` counts), not approval-gated, not `invokesModel` (codes `unavailable`,
+  `approval_required`, `invokes_model`, `not_read`).
+- `runCodeModeScript({ executor, code, nested, parentCallId, ... })` runs a script outside a model
+  turn, for example a scheduled host check over `ResolvedToolSet.nestedExecutor({ parentCallId })`,
+  with the same dispatch, limits, store and hooks as the tool (which runs every script through it),
+  and returns data: `ok`, `value`/`storeWrites` or `error`, `output`, `calls` (with `refusal`),
+  `nestedCalls`, usage, `inputRequired`, `staged`, `timeoutMs`, `wallTimeMs`.
 - `afterNestedCall({ call, outcome, durationMs, context, result? })` runs after each admitted
   nested call with `success`, `failure` (error result or unexpected failure), or `interrupted`
   (cancelled, for example still running when the script ended). Calls rejected before running are

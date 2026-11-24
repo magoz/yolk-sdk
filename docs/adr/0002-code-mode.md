@@ -41,6 +41,7 @@ world only through the host's resolved tools.
 | Fail-closed rule | Approval, input, interaction, and background tools never run from code mode, whatever their `callableBy` says.                                                                      |
 | Approvals        | Never inside scripts. Gated writes are staged and reviewed once ([ADR 0005](0005-staged-tool-plans.md)).                                                                            |
 | Re-execution     | A host-supplied durable tool ledger runs each ledgered call (top-level and nested) at most once per key.                                                                            |
+| Host-run scripts | `runCodeModeScript` runs a script outside a model turn over `ResolvedToolSet.nestedExecutor`; the code mode tool runs every script through it.                                      |
 
 ## Engine
 
@@ -93,8 +94,9 @@ executor) can be added for `cloudflare/agent` without changing the tool contract
 and a worker thread, and its executor is Node-only. This matches `@yolk-sdk/sandbox` standing
 beside `@yolk-sdk/agent`.
 
-- `@yolk-sdk/codemode` (runtime-neutral): `makeCodeModeTool`, the executor interface, catalog
-  rendering, discovery helpers, result bounding, and `makeClassifierTool`.
+- `@yolk-sdk/codemode` (runtime-neutral): `makeCodeModeTool`, `runCodeModeScript`,
+  `readOnlyNestedCallGate`, the executor interface, catalog rendering, discovery helpers, result
+  bounding, and `makeClassifierTool`.
 - `@yolk-sdk/codemode/node`: the pi executor, with wasm and worker resolution owned by Yolk.
 - Dependency direction: `@yolk-sdk/codemode` depends on `@yolk-sdk/agent` subpaths
   (`tools`, `protocol`, `classification`). `@yolk-sdk/agent` never imports code mode.
@@ -253,9 +255,43 @@ of. There is no `mode` option in v1: the only behavior is the former `mode: 'on'
   safe defaults.
 - **Surfaces**: hosts decide where to advertise the tool. Voice sessions do not get it in v1.
 
-- **Hooks**: `beforeNestedCall({ call, context })` admits or rejects each nested call;
-  `afterNestedCall({ call, outcome, durationMs, context, result? })` observes each admitted call
-  with outcome `success`, `failure`, or `interrupted` (as opencode's `tool.after`).
+- **Hooks**: `beforeNestedCall({ call, tool, access, context })` admits or refuses each nested
+  call, seeing the called `NestedTool` and the call's effective access (`nested.access`); it fails
+  with a message or a `CodeModeNestedCallRefused({ code, message })`, whose `code` the script sees
+  as `error.code`. `afterNestedCall({ call, outcome, durationMs, context, result? })` observes each
+  admitted call with outcome `success`, `failure`, or `interrupted` (as opencode's `tool.after`).
+- **Return value**: it stays in the model-visible text (`Return value:` and its JSON).
+  `structuredContent.codemode` keeps `{ ok, storeWrites?, plan?, inputRequired? }`: it is
+  persisted with the transcript and matched by the ledger's bounding, and an unbounded value there
+  would grow both. Hosts that need the value run the script with `runCodeModeScript`.
+
+### Host-run scripts
+
+A host may run a script itself, outside any model turn and without a tool call, for example a
+background check on a schedule whose result decides whether to wake a session.
+`runCodeModeScript({ executor, code, nested, parentCallId, limits?, deadline?, store?,
+beforeNestedCall?, afterNestedCall?, staging? })` is the one script runner: `makeCodeModeTool`
+calls it for every script (with its registration's `nested` and the call id), so dispatch, limits,
+the deadline clamp, the executor backstop, interruption, the store, and both hooks are shared. It
+returns data instead of text and never fails: `ok`, the JSON `value` and `storeWrites` of a
+successful script or its `error`, the unbounded `output`, every nested call (`calls`, with the
+`refusal` of each call `beforeNestedCall` refused), the bounded `nestedCalls` record and usage,
+`inputRequired`, the staged plan outcome (`staged`), `timeoutMs`, and `wallTimeMs`.
+
+- **Nested access without a call**: `ResolvedToolSet.nestedExecutor({ parentCallId })` returns the
+  executor a nested-access registration gets, bound to a host id: the same tools, dispatch path
+  (`executeRegistration`), host context and ledger, with nested ids `<parentCallId>/<seq>` under
+  parent key `parentCallId`. It never offers staging: a plan needs a model turn to review it.
+- **Read-only gate**: `readOnlyNestedCallGate({ admit? })` is a ready-made `beforeNestedCall` that
+  admits a call only when its effective access is `read` (so `isReadCall` counts) and its tool is
+  neither approval-gated nor `invokesModel`; it fails closed for tools without effective access.
+  Refusal codes: `unavailable`, `approval_required`, `invokes_model`, `not_read`. `admit` relaxes
+  only the access check, for writes the host knows only read.
+- **Tools that call a model**: `ToolRegistration.invokesModel` (and the `makeTool` option) marks a
+  tool whose calls spend model usage whatever their access. `resolveTools` copies it to
+  `ToolMetadata` and `NestedTool`; it is never sent to providers. `classify` and `subagent` set it.
+  It is a trait for host policy, not an access level: access says what a call changes, the trait
+  what it costs.
 
 ### Known gap: polling
 

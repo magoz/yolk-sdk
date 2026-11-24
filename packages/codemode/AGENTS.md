@@ -7,16 +7,17 @@ the other code-mode-callable tools of the same `resolveTools` resolution. The ag
 
 ## Subpaths
 
-| Subpath                         | Source              | Role                                                                                      |
-| ------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
-| `@yolk-sdk/codemode`            | `src/index.ts`      | Executor interface, `makeCodeModeTool`, catalog, search, bounding, store, classifier tool |
-| `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                 |
-| `@yolk-sdk/codemode/cloudflare` | `src/cloudflare.ts` | `makeDynamicWorkerCodeModeExecutor` on Cloudflare Dynamic Workers (Worker Loader)         |
+| Subpath                         | Source              | Role                                                                                                                           |
+| ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/codemode`            | `src/index.ts`      | Executor interface, `makeCodeModeTool`, `runCodeModeScript`, read-only gate, catalog, search, bounding, store, classifier tool |
+| `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                                                      |
+| `@yolk-sdk/codemode/cloudflare` | `src/cloudflare.ts` | `makeDynamicWorkerCodeModeExecutor` on Cloudflare Dynamic Workers (Worker Loader)                                              |
 
 Files: `executor.ts` (engine-neutral `CodeModeExecutor` types, `reportInternalError`),
 `catalog.ts` (nested tool catalog, fair listing, description), `search.ts` (BM25 `searchTools`),
-`output.ts` (result text, head-and-tail bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `tool.ts`
-(`makeCodeModeTool`), `classifier-tool.ts` (`makeClassifierTool`), `node.ts` (pi executor),
+`output.ts` (result text, head-and-tail bounding, call summary), `store.ts` (`codeModeStoreFromToolResults`), `script.ts`
+(`runCodeModeScript`, limits, hook and refusal types: the one script runner), `read-only.ts` (`readOnlyNestedCallGate`), `tool.ts`
+(`makeCodeModeTool` over `runCodeModeScript`, its result text and the abandoned-script result), `classifier-tool.ts` (`makeClassifierTool`), `node.ts` (pi executor),
 `guard.ts` (the in-VM tools guard and tool-rejection encoding both executors share),
 `cloudflare.ts` (Dynamic Worker executor), `pi-prelude.ts` (pi's in-VM prelude, vendored: pi does
 not export it; `test/pi-prelude.test.ts` fails when the installed pi's copy differs, so a pi
@@ -36,7 +37,7 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
 - Among Yolk packages, code mode depends only on `@yolk-sdk/agent` (`protocol`, `loop`, `tools`,
   `classification`); `@yolk-sdk/agent` never imports code mode.
 - The executor interface is Promise-based on purpose: engines (pi, a Workers executor) plug in
-  without Effect. `makeCodeModeTool` bridges with `Effect.tryPromise` (its signal aborts the script
+  without Effect. `runCodeModeScript` bridges with `Effect.tryPromise` (its signal aborts the script
   on interruption) and runs nested calls as fibers of a `FiberSet` scoped to the tool call, forked
   with the call's services and interrupted through the nested call's signal; never use a detached
   `Effect.runPromise`.
@@ -45,7 +46,14 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
 
 - Nested calls go only through `nested.execute` (the resolved execute path). Never call tool
   executors directly; never bypass input decoding or registration wrappers.
-- Nested results follow ADR 0013 (`resolveNestedResult` in `tool.ts`): a typed tool (output schema)
+- One script runner: `runCodeModeScript` (`script.ts`) owns dispatch, limits, the deadline clamp, the
+  backstop, the store, staging and both hooks; `makeCodeModeTool` only loads the store, evaluates
+  `deadline`, adds `context` to the hooks, and turns its `CodeModeScriptResult` into the tool result
+  (`scriptToolResult`). Never add a second dispatch path. Host-run scripts use
+  `ResolvedToolSet.nestedExecutor({ parentCallId })` (no staging). The run result keeps the return
+  value, the unbounded `output` and `calls` (with `refusal`); the tool result keeps the return value
+  in text only (`structuredContent.codemode` shape unchanged, ADR 0002).
+- Nested results follow ADR 0013 (`resolveNestedResult` in `script.ts`): a typed tool (output schema)
   resolves to its `structuredContent` as declared, file fields `FileRef | FileUnavailable`, nothing
   merged; a typed success without a value rejects `<label>: returned an invalid result` (and logs a
   warning), never falls back to text. Code mode does not validate values: the `resolveTools` result
@@ -57,7 +65,13 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   bytes.
 - Host decorators around the `ToolExecutor` (outside `ResolvedToolSet.execute`) never see nested
   calls. Per-call run-authority checks belong in `beforeNestedCall` (a failure rejects the call in
-  the script and records it as `error` without executing) or registration-level wrappers.
+  the script and records it as `error` with its `refusal` without executing) or registration-level
+  wrappers. The hook sees `{ call, tool, access }` (plus `context` from the tool): access is computed
+  once, before it. It fails with a string or `CodeModeNestedCallRefused({ code, message })`; the
+  refused call answers an error result whose `structuredContent` is `{ code }`, so the script sees
+  `error.code`. `readOnlyNestedCallGate` (`read-only.ts`) admits only effective `read` access and
+  refuses approval-gated and `invokesModel` tools (codes `unavailable`, `approval_required`,
+  `invokes_model`, `not_read`; fail-closed; `admit` relaxes only the access check).
 - A nested fiber that ends with interrupts only rejects with `was cancelled`; any other failure
   (a defect) rejects with `failed unexpectedly` and records `error`.
 - `executor.execute` has an Effect backstop at `timeoutMs` + 5 s (`timeout` failure, signal
@@ -220,7 +234,7 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   `stageOnly: true`; `describeTool` renders the `stage()` call and its argument type; `stage()`
   accepts the raw name or the catalog identifier. The description never names `search` or deferred
   stageable tools, so they leave it byte-identical once any stageable tool exists.
-- `makeClassifierTool` takes the classifier `classify` function or service; provider options stay
+- `makeClassifierTool` is `access: 'read'` with `invokesModel: true`; it takes the classifier `classify` function or service; provider options stay
   host-owned. Each call takes the per-script permit, then a process permit (in that order, so a
   script's queue never holds process permits). Per-script semaphores are keyed by the parent tool
   call id of `<parentToolCallId>/<seq>` (else the call id) and removed when idle. The process
@@ -263,6 +277,11 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
   aborts, or late isolate failures), and code mode end to end.
 - `test/pi-prelude.test.ts`: the vendored prelude equals the installed pi's.
 - `test/catalog.test.ts`: listing, fairness, stability, description hook, search, call labels.
+- `test/script.test.ts`: `runCodeModeScript` over `nestedExecutor` (structured result, store,
+  deadline clamp, failures, coded and plain refusals, `afterNestedCall`, interruption aborting the
+  script and cancelling nested calls, no staging), `readOnlyNestedCallGate` (reads, `isReadCall`,
+  writes, `invokesModel`, `admit`, fail-closed codes), the gate through `makeCodeModeTool`, and the
+  pi executor end to end.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call
   records.

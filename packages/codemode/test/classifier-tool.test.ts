@@ -39,6 +39,7 @@ describe('makeClassifierTool', () => {
     expect(tool.def.callableBy).toBe('codemode')
     expect(tool.def.discovery).toBe('listed')
     expect(tool.access).toBe('read')
+    expect(tool.invokesModel).toBe(true)
     expect(tool.def.parameters).toMatchObject({ type: 'object', required: ['state', 'questions'] })
     expect(JSON.stringify(tool.def.parameters)).not.toContain('providerOptions')
     expect(tool.def.outputSchema).toMatchObject({ type: 'object', required: ['model', 'answers'] })

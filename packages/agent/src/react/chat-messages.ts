@@ -2640,6 +2640,7 @@ const chatMessagesFromProtocolMessage = ({
         turnId: currentTurnId,
         sequence,
         role: 'assistant',
+        ...chatMessageEnvelope(current),
         parts: assistantPartsFromMessage({
           message: current,
           messageIndex: sequence,

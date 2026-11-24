@@ -7,6 +7,8 @@ import {
   type InputResponse,
   type InteractionRequest,
   type InteractionResponse,
+  type MessageAnnotations,
+  type MessageAuthor,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -103,19 +105,31 @@ export type ToolRunState =
 
 export const ToolRunState = Data.taggedEnum<ToolRunState>()
 
+/**
+ * The envelope of the message a `UserMessage` or `AssistantMessage` item renders, as set on its
+ * `AgentChatMessage`, so a UI can render host-authored messages (for example ones whose
+ * `annotations` name a host source) differently. Each field is absent when the message has none.
+ * Other items of the same message (reasoning, tool runs) find it through `messageId`.
+ */
+export type AgentChatItemEnvelope = {
+  readonly createdAtMs?: number
+  readonly author?: MessageAuthor
+  readonly annotations?: MessageAnnotations
+}
+
 export type AgentChatItem =
-  | {
+  | ({
       readonly _tag: 'UserMessage'
       readonly id: string
       readonly messageId: string
       readonly content: Content
-    }
-  | {
+    } & AgentChatItemEnvelope)
+  | ({
       readonly _tag: 'AssistantMessage'
       readonly id: string
       readonly messageId: string
       readonly content: Content
-    }
+    } & AgentChatItemEnvelope)
   | {
       readonly _tag: 'Reasoning'
       readonly id: string
@@ -356,7 +370,8 @@ const textItemFromPart = (
         AgentChatItem.UserMessage({
           id: part.id,
           messageId: message.id,
-          content: part.content
+          content: part.content,
+          ...chatItemEnvelope(message)
         })
       )
     case 'assistant':
@@ -364,12 +379,31 @@ const textItemFromPart = (
         AgentChatItem.AssistantMessage({
           id: part.id,
           messageId: message.id,
-          content: part.content
+          content: part.content,
+          ...chatItemEnvelope(message)
         })
       )
     case 'system':
       return Option.none()
   }
+}
+
+type ChatItemEnvelopeFields = {
+  createdAtMs?: number
+  author?: MessageAuthor
+  annotations?: MessageAnnotations
+}
+
+const chatItemEnvelope = (message: AgentChatMessage): AgentChatItemEnvelope => {
+  const fields: ChatItemEnvelopeFields = {}
+
+  if (message.createdAtMs !== undefined) fields.createdAtMs = message.createdAtMs
+
+  if (message.author !== undefined) fields.author = message.author
+
+  if (message.annotations !== undefined) fields.annotations = message.annotations
+
+  return fields
 }
 
 const itemFromPart = (
