@@ -123,7 +123,7 @@ Claim snapshots are not transcript storage. `makeDurableObjectDriverLayer` requi
 
 `attemptModelTurn` classifies **one `runModelTurn` invocation** after that stream's configured loop/provider retries. It does not add an outer retry loop. Hosts that own physical-attempt scheduling should pass `LoopConfig.maxRetries: 0` and skip retry decorators.
 
-Incomplete streams (`LLMError.responseIssue === 'missing_done'`) become `RecoverFull` before output or `Continue` after partial text/reasoning/completed calls. Content-filter and other nonretryable terminals stay failed. `onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`.
+Incomplete streams (`LLMError.responseIssue === 'missing_done'`) become `RecoverFull` before output or `Continue` after partial text/reasoning/completed calls. Content-filter and other nonretryable terminals stay failed. `onEvent` sink errors, compact errors, Abort, and mixed defect/interrupt Causes are not classified as provider `Retry` / `Continue`. `Completed` and `Continue` carry `usageUnavailable: true` when the model stream ended without its usage report.
 
 See [Loop and runtime](../agent/loop-runtime) for collectors and [Harness composition](../vercel-workflows/harness-composition) for Workflow hosts.
 
