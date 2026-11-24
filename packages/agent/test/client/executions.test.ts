@@ -1753,6 +1753,18 @@ describe('a start the client missed', () => {
     expect(missed(LLMTextDelta.make({ ...named, text: 'Hej' }), known)).toBeUndefined()
     expect(missed(LLMStreamStart.make({ ...named, turn: 2 }))).toBeUndefined()
     expect(missed(TurnStart.make({ ...named, turn: 2 }))).toBeUndefined()
+    // Host events are never model starts, even from a host that tags them.
+    expect(
+      missed(
+        ToolExecutionStarted.make({
+          ...named,
+          call: ToolCall.make({ id: 'call_1', name: 'x', params: {} })
+        })
+      )
+    ).toBeUndefined()
+    expect(
+      missed(AgentEnd.make({ ...named, messages: [], turns: 2, usage: zeroAgentUsage }))
+    ).toBeUndefined()
     expect(missed(LLMTextDelta.make({ executionId: 'step-2:1', text: 'Hej' }))).toBeUndefined()
     expect(missed(LLMTextDelta.make({ executionTurn: 2, text: 'Hej' }))).toBeUndefined()
   })

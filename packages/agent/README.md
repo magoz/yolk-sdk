@@ -931,10 +931,12 @@ optional `executionId` and `streamId` (set by `@yolk-sdk/vercel-workflows`' sequ
 execution and run that produced them, and `reduceAgentEvents`, `applyAgentEventToChatProjection`
 and the `useAgentChat` reducer route by them, per run and turn (`LLMStreamStart.turn`):
 
-- An event of an execution this client never saw start that names its turn (`executionTurn`, set
-  with `executionId`; never on `LLMStreamStart` or `TurnStart`) first applies that missed start,
-  without an `eventId`, so every rule below holds for it (a client rebuilt from a snapshot resumes
-  mid-turn).
+- An event a model call streams after its start (not `LLMStreamStart`, `TurnStart` or a host
+  event) whose execution this client never saw start and that names its turn (`executionTurn`, set
+  with `executionId`) first applies that missed start, without an `eventId`, so every rule below
+  holds for it (a client rebuilt from a snapshot resumes mid-turn). The missed start keeps the
+  draft streaming, folds into status (`stepAgentChatProjection` returns it as `missedStart`, to fold
+  before `statusEvent`), and is not remembered.
 - A newer execution's `LLMStreamStart` supersedes the older one of that turn: its provisional
   output (streaming text, its `AssistantMessage`, tool calls no host event acted on, restored to a
   call whose id it reused) is removed and its later events are dropped.

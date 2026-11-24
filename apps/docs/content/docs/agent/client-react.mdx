@@ -120,9 +120,10 @@ At `AgentEnd` and `AgentAwaitingInput`, each turn in which a newer execution sup
 shows the committed answer from the event's messages, with its tool calls' state; before that
 event, a non-final turn whose older execution committed shows the newer one. A turn retried after a
 user message and a client that connected mid-turn have
-[limits](../vercel-workflows#emit-replay-safe-stream-events). An event whose execution this client
-never saw start but that names its turn (`executionTurn`) starts that turn first, as its
-`LLMStreamStart` would have. Keep the projection's
+[limits](../vercel-workflows#emit-replay-safe-stream-events). A model event whose execution this
+client never saw start but that names its turn (`executionTurn`) starts that turn first, as its
+`LLMStreamStart` would have, keeping the draft. Hosts folding status beside the projection fold
+`stepAgentChatProjection`'s `missedStart` before its `statusEvent`. Keep the projection's
 `executions` and `turnStart` with its `seenEventIds`, and reset `executions` to `[]` per run if
 events carry no `streamId`. Events without `executionId` only discard output still streaming at the
 next `LLMStreamStart`.

@@ -51,9 +51,9 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
    * Identifies one execution of a model step. It is appended to the id and set as the event's
    * `executionId` field, with `turn` as its `executionTurn` (both removed without it), which
    * `@yolk-sdk/agent` clients route by, per run (the event's `streamId` field, set on every event)
-   * and turn. It and `streamId` must be
-   * non-empty without surrounding whitespace (clients reject anything else); otherwise sequencing
-   * throws a `TypeError` (a defect in `writeDurableAgentEvent`).
+   * and turn. It and `streamId` must be non-empty without surrounding whitespace (clients reject
+   * anything else); otherwise sequencing throws a `TypeError` (a defect in
+   * `writeDurableAgentEvent`).
    *
    * Every execution of a step starts from the same `eventSequence`, and a step runs more than
    * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).

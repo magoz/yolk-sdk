@@ -8,6 +8,7 @@ import {
   BackgroundToolAccepted,
   HostToolCallPart,
   LLMStreamStart,
+  LLMTextDelta,
   QuestionAnswer,
   QuestionPrompt,
   QuestionRequest,
@@ -53,6 +54,7 @@ import {
   makeAgentChatEventProjectionState,
   markChatRunStart,
   reduceAgentChatState,
+  stepAgentChatProjection,
   type AgentChatEventProjectionState,
   type AgentChatState,
   type AgentChatTurnStart
@@ -643,6 +645,81 @@ describe('a host that rebuilds its state from a snapshot (#355)', () => {
       expect(started.client.turnStart).toMatchObject({ streamId: 'run-1', turn: 2, firstRun: 1 })
       expect(started.projection.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
       expect(started.chat.turnStart).toMatchObject({ streamId: 'run-1', turn: 2 })
+    })
+
+    it('folds the missed start into status as the real start would', () => {
+      const delta = LLMTextDelta.make({ ...tagged('step-2:1', 2), text: 'Now' })
+
+      const missed = applyEvents(fromSnapshot(snapshot, true), [delta])
+
+      const seen = applyEvents(fromSnapshot(snapshot, true), [
+        LLMStreamStart.make({ ...tagged('step-2:1', 2), turn: 2 }),
+        delta
+      ])
+
+      expect(missed.client.status).toEqual(seen.client.status)
+      expect(missed.chat.status).toEqual(seen.chat.status)
+      expect(missed.chat.status).toMatchObject({
+        _tag: 'Working',
+        activity: { _tag: 'Generating' }
+      })
+
+      // A host folding status beside the projection folds the missed start, then the event.
+      const step = stepAgentChatProjection(fromSnapshot(snapshot, true).projection, delta)
+
+      expect(step.missedStart).toEqual(
+        LLMStreamStart.make({ turn: 2, executionId: 'step-2:1', streamId: 'run-1' })
+      )
+      expect(step.statusEvent).toBe(delta)
+
+      // A stale missed start moves nothing.
+      const later = applyEvents(fromSnapshot(snapshot, true), [delta]).projection
+      const stale = stepAgentChatProjection(
+        later,
+        LLMTextDelta.make({ ...tagged('step-1:2', 1), text: 'Old' })
+      )
+
+      expect(stale.missedStart).toBeUndefined()
+      expect(stale.statusEvent).toBeUndefined()
+    })
+
+    it("keeps the snapshot's draft of the missed execution streaming", () => {
+      const chatMessages = buildAgentChatMessages({
+        messages: snapshot.messages,
+        userDraft: '',
+        assistantDraft: 'Now Ber',
+        reasoningDraft: '',
+        toolRuns: snapshot.toolRuns,
+        error: null
+      })
+
+      const rebuilt: Reducers = {
+        client: markAgentRunStart({
+          ...initialAgentClientState,
+          messages: snapshot.messages,
+          toolRuns: snapshot.toolRuns,
+          text: 'Now Ber'
+        }),
+        projection: markChatRunStart(makeAgentChatEventProjectionState(chatMessages)),
+        chat: markChatRunStart({ ...initialAgentChatState, chatMessages })
+      }
+
+      const resumed = applyEvents(rebuilt, [
+        LLMTextDelta.make({ ...tagged('step-2:1', 2), text: 'gen', textSoFar: 'Now Bergen' })
+      ])
+
+      const texts = (messages: ReadonlyArray<AgentChatMessage>) =>
+        messages.flatMap(message =>
+          message.parts.flatMap(part =>
+            Predicate.isTagged(part, 'Text') ? [[part.content, part.state]] : []
+          )
+        )
+
+      expect(resumed.client.text).toBe('Now Bergen')
+      expect(texts(resumed.projection.chatMessages)).toEqual(texts(resumed.chat.chatMessages))
+      expect(texts(resumed.chat.chatMessages).filter(([, state]) => state === 'streaming')).toEqual(
+        [['Now Bergen', 'streaming']]
+      )
     })
 
     it("lets a redelivered execution's start supersede the resumed one", () => {

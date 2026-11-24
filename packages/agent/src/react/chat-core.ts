@@ -14,6 +14,7 @@ import {
   type Content,
   type HitlRequest,
   type HitlResponse,
+  type LLMStreamStart,
   type ToolCall,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
@@ -234,6 +235,13 @@ export type AgentChatProjectionStep = {
    * of a call already finished.
    */
   readonly statusEvent: AgentEvent | undefined
+  /**
+   * The `LLMStreamStart` the event's execution missed, which the projection applied first (the
+   * event names its turn with `executionTurn`, and its `executionId` was unseen: a mid-turn
+   * snapshot rebuild). Fold it into the status before `statusEvent`, as the `useAgentChat` reducer
+   * and `reduceAgentEvents` do. Absent when nothing was missed or the missed start was stale.
+   */
+  readonly missedStart?: LLMStreamStart
 }
 
 /**
@@ -252,15 +260,25 @@ export const stepAgentChatProjection = (
     return { projection: state, statusEvent: undefined }
   }
 
-  const routed = projectExecutionEvent(state, event, options)
+  // A start this chat missed (a mid-turn snapshot rebuild) is applied first, as it would have
+  // been, except that it keeps the draft: a rebuilt draft is the missed execution's own output.
+  const missed = missedAgentExecutionStart(state.executions ?? [], event)
 
-  return {
+  const started =
+    missed === undefined ? undefined : projectExecutionEvent(state, missed, options, 'missed')
+
+  const before = started === undefined ? state : { ...state, ...projectionFields(started) }
+  const routed = projectExecutionEvent(before, event, options, 'seen')
+
+  const step: AgentChatProjectionStep = {
     projection: {
       ...projectionFields(routed),
       seenEventIds: rememberEventId(state.seenEventIds, event)
     },
-    statusEvent: routed.applied ? eventForStatus(state, event, routed.pendingRequests) : undefined
+    statusEvent: routed.applied ? eventForStatus(before, event, routed.pendingRequests) : undefined
   }
+
+  return missed !== undefined && started?.applied === true ? { ...step, missedStart: missed } : step
 }
 
 type ExecutionProjection = {
@@ -300,29 +318,13 @@ type ProjectedExecutionEvent = ExecutionProjection & {
  * settled or stale execution's events, removes a superseded execution's provisional output when a
  * newer one of the same turn starts, and at `AgentEnd` / `AgentAwaitingInput` shows the committed
  * answer of every turn of the run that ran more than once and shows another one. Tool events match
- * a call only in their turn: an owned event's execution's, any other the latest turn's. A start
- * this chat missed (`missedAgentExecutionStart`: a mid-turn snapshot rebuild) is applied first.
+ * a call only in their turn: an owned event's execution's, any other the latest turn's.
  */
 const projectExecutionEvent = (
   projection: ExecutionProjection,
   event: AgentEvent,
-  options: ApplyAgentEventToChatMessagesOptions
-): ProjectedExecutionEvent => {
-  const missed = missedAgentExecutionStart(projection.executions ?? [], event)
-
-  return projectRoutedEvent(
-    missed === undefined
-      ? projection
-      : projectionFields(projectRoutedEvent(projection, missed, options)),
-    event,
-    options
-  )
-}
-
-const projectRoutedEvent = (
-  projection: ExecutionProjection,
-  event: AgentEvent,
-  options: ApplyAgentEventToChatMessagesOptions
+  options: ApplyAgentEventToChatMessagesOptions,
+  origin: 'seen' | 'missed'
 ): ProjectedExecutionEvent => {
   const executions = projection.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
@@ -382,12 +384,17 @@ const projectRoutedEvent = (
   // run's call first), never the resumed batch's call reusing its id.
   const runStart = ownTurn === undefined && latest?.run === true ? latest : undefined
 
-  const chatMessages = applyExecutionEventToChatMessages(committed, event, options, {
-    foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
-    turn,
-    modelTurn: runStart === undefined ? turn : undefined,
-    runOutput: runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
-  })
+  // A missed start (`stepAgentChatProjection`) keeps the draft: a start only finalizes it here.
+  const chatMessages =
+    origin === 'missed'
+      ? committed
+      : applyExecutionEventToChatMessages(committed, event, options, {
+          foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
+          turn,
+          modelTurn: runStart === undefined ? turn : undefined,
+          runOutput:
+            runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
+        })
 
   const after = recordAgentExecutionEvent(
     Predicate.isTagged(route, 'Start')
@@ -790,9 +797,13 @@ export const reduceAgentChatState = (
         ...step.projection
       }
 
-      return step.statusEvent === undefined
-        ? projected
-        : withStatusTree(projected, nextAgentStatusTree(statusTree(paused), step.statusEvent))
+      const tree = [step.missedStart, step.statusEvent].reduce(
+        (current: AgentStatusTree, event) =>
+          event === undefined ? current : nextAgentStatusTree(current, event),
+        statusTree(paused)
+      )
+
+      return withStatusTree(projected, tree)
     }),
     Match.tag('Error', current =>
       withStatusTree(

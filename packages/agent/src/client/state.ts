@@ -922,20 +922,26 @@ export const applyAgentEventWithOptions = (
     return state
   }
 
-  // A start this client missed (a mid-turn snapshot rebuild) is applied first, as it would have been.
+  // A start this client missed (a mid-turn snapshot rebuild) is applied first, as it would have
+  // been, except that it keeps the draft: a rebuilt draft is the missed execution's own output.
   const missed = missedAgentExecutionStart(state.executions ?? [], event)
 
   return applyUnseenAgentEvent(
-    missed === undefined ? state : applyUnseenAgentEvent(state, missed, nowMs),
+    missed === undefined ? state : applyUnseenAgentEvent(state, missed, nowMs, 'missed'),
     event,
-    nowMs
+    nowMs,
+    'seen'
   )
 }
+
+/** A `missed` start is one `missedAgentExecutionStart` made: it never resets the draft. */
+type AgentEventOrigin = 'seen' | 'missed'
 
 const applyUnseenAgentEvent = (
   state: AgentClientState,
   event: AgentEvent,
-  nowMs: number
+  nowMs: number,
+  origin: AgentEventOrigin
 ): AgentClientState => {
   const executions = state.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
@@ -975,7 +981,7 @@ const applyUnseenAgentEvent = (
       ? route.started
       : undefined
 
-  const applied = nextTurnStart(applyAgentEventRouted(routed, event, nowMs), event, route)
+  const applied = nextTurnStart(applyAgentEventRouted(routed, event, nowMs, origin), event, route)
   const before = Predicate.isTagged(route, 'Start') ? route.executions : executions
 
   const after = recordAgentExecutionEvent(
@@ -1180,7 +1186,8 @@ const isModelToolRun = (run: AgentToolRun) =>
 const applyAgentEventRouted = (
   state: AgentClientState,
   event: AgentEvent,
-  nowMs: number
+  nowMs: number,
+  origin: AgentEventOrigin
 ): AgentClientState => {
   const replay = acknowledgedReplay(state, event)
 
@@ -1192,7 +1199,8 @@ const applyAgentEventRouted = (
     )
   }
 
-  const applied = applyAgentEventUnchecked(state, event, nowMs)
+  // A start's only change is resetting the draft (`discardUnfinishedStream`).
+  const applied = origin === 'missed' ? state : applyAgentEventUnchecked(state, event, nowMs)
   const statusEvent = eventForStatus(applied, event)
 
   return rememberEvent(
