@@ -45,7 +45,7 @@ world only through the host's resolved tools.
 
 ## Engine
 
-`@earendil-works/pi-codemode` (MIT, v1.0.0, single dependency `quickjs-wasi` maintained by
+`@earendil-works/pi-codemode` (MIT, chosen at v1.0.0, now pinned at 1.6.0, single dependency `quickjs-wasi` maintained by
 vercel-labs) runs each script in a fresh QuickJS VM compiled to WebAssembly, inside a worker
 thread. The VM has its own linear memory and an optional heap cap; the host owns the deadline and
 abort signal, sets a shared interrupt flag the VM polls, and terminates the worker. The only
@@ -79,9 +79,9 @@ Accept these pi limitations:
   nondeterministic values through a host `step()` global instead.
 - Schemas only shape declarations; pi does not validate values. Yolk validates through the
   resolved tool set.
-- pi buffers script output (text and images) on the host thread without a limit while the script
-  runs. The timeout mitigates it, and Yolk bounds the result afterwards (characters, image count,
-  and image bytes). Ask upstream for an output budget hook.
+- pi buffers script output (text and images) on the host thread while the script runs. Since pi
+  1.0.1 its prelude fails a script past 16 Mi characters or 100,000 output items, and Yolk bounds
+  the result afterwards (characters, image count, and image bytes).
 
 The Yolk executor interface hides the engine. Vendoring the MIT runtime is the fallback if Yolk
 needs warm worker pools, worker options, or replay hooks that `globals` cannot express. A Workers

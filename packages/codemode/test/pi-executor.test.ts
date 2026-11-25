@@ -520,15 +520,21 @@ describe('code mode with the pi executor', () => {
     })
   )
 
-  it.live('keeps checking and sending the snapshot when the script changes built-ins', () =>
+  it.live('keeps checking and sending the snapshot when the script tries to change built-ins', () =>
     Effect.gen(function* () {
       const log: ToolLog = []
 
       const result = yield* runCode(
         [moduleOf('host', [codemode()]), moduleOf('docs', [jsonProbeTool(log), probeTool(log)])],
         `const results = []
+         // pi freezes the built-ins, so most changes fail; the call is made either way.
          const attempt = async (setup, call) => {
-           const restore = setup()
+           let restore = () => {}
+           try {
+             restore = setup()
+           } catch (error) {
+             results.push('setup ' + error.name + ': ' + error.message)
+           }
            try {
              results.push('ok: ' + (await call()))
            } catch (error) {
@@ -616,6 +622,7 @@ describe('code mode with the pi executor', () => {
       expect(result.isError).toBeUndefined()
       expect(returnValue(result)).toEqual([
         'ok: {"query":"a","tags":["keep"]}',
+        'setup TypeError: object is not extensible',
         'ok: {"query":"a","tags":["first"]}',
         'ok: {"value":[1]}',
         'ok: {"query":"a","limit":7}',
@@ -1274,6 +1281,39 @@ describe('pi executor concurrency', () => {
 
       expect(text(next.content)).toContain('Return value:\n"next"')
       expect(Date.now() - startedAt).toBeLessThan(3_000)
+    })
+  )
+})
+
+describe('pi executor output', () => {
+  const executor = makePiCodeModeExecutor()
+
+  const options: CodeModeExecuteOptions = {
+    tools: [],
+    globals: [],
+    timeoutMs: 10_000,
+    memoryLimitBytes: 64 * 1024 * 1024,
+    store: {},
+    signal: new AbortController().signal
+  }
+
+  it.live('returns console and text() output as plain text items', () =>
+    Effect.promise(async () => {
+      const result = await executor.execute('console.log("a", 1)\ntext("b")', options)
+
+      expect(result.output).toEqual([
+        { type: 'text', text: 'a 1' },
+        { type: 'text', text: 'b' }
+      ])
+    })
+  )
+
+  it.live('fails a script that prints past the output limit', () =>
+    Effect.promise(async () => {
+      const result = await executor.execute('while (true) console.log("")', options)
+
+      expect(result).toMatchObject({ ok: false, error: { kind: 'script' } })
+      expect(result.error?.message).toContain('script output exceeded the limit')
     })
   )
 })

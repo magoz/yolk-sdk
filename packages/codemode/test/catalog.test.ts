@@ -506,8 +506,16 @@ describe('searchTools', () => {
 
     const declaration = tool === undefined ? '' : describeCodeModeTool(tool)
 
+    // pi shows `default` as a comment tag, which puts the object on several lines.
     expect(declaration).toContain(
-      'Promise<{ file: FileRef; kind: {"$ref":"#/$defs/FileRef"}; marker: {"$ref":"#/$defs/FileRef"}; }>'
+      [
+        'Promise<{',
+        '  file: FileRef;',
+        '  kind: {"$ref":"#/$defs/FileRef"};',
+        '  // @default {"$ref":"#/$defs/FileRef"}',
+        '  marker: {"$ref":"#/$defs/FileRef"};',
+        '}>'
+      ].join('\n')
     )
   })
 

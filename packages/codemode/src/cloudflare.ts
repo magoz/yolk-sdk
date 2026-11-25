@@ -244,7 +244,8 @@ export default class CodeModeScript extends WorkerEntrypoint {
           return;
         }
         if (kind === "output") {
-          output.push(a === "text" ? { type: "text", text: b } : { type: "image", data: b, mimeType: c });
+          // "text" and "console" (console.*) items are both text.
+          output.push(a === "image" ? { type: "image", data: b, mimeType: c } : { type: "text", text: b });
           return;
         }
         if (kind === "done") resolve({ ok: a, payload: b === undefined ? null : b, writes: c === undefined ? null : c, output });

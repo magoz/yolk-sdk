@@ -1,4 +1,4 @@
-import { createContext, runInContext } from 'node:vm'
+import { constants, createContext, runInContext } from 'node:vm'
 import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { modelVisibleToolError, makeTool } from '@yolk-sdk/agent/tools'
@@ -48,7 +48,9 @@ const instantiate = (code: WorkerLoaderCode) => {
       'const CodeModeScript = class extends WorkerEntrypoint {'
     )}\nCodeModeScript`
 
-  const Script: unknown = runInContext(script, createContext({}))
+  // An ordinary global, as an isolate has: a contextified one mishandles the prelude making the
+  // built-in globals read-only (`defineProperty` without a value stores `undefined`).
+  const Script: unknown = runInContext(script, createContext(constants.DONT_CONTEXTIFY))
 
   if (!isConstructor(Script)) throw new Error('The module exports no entrypoint class')
 
@@ -211,6 +213,13 @@ describe('makeDynamicWorkerCodeModeExecutor', () => {
     })
     expect(unparsable.error?.kind).toBe('script')
     expect(unparsable.error?.message).toMatch(/^The script could not be parsed/)
+  })
+
+  it('fails a script that prints past the output limit', async () => {
+    const result = await vmExecutor.execute('while (true) console.log("")', options())
+
+    expect(result).toMatchObject({ ok: false, error: { kind: 'script' } })
+    expect(result.error?.message).toContain('script output exceeded the limit')
   })
 
   it('times out a script that does not finish and aborts its tool calls', async () => {

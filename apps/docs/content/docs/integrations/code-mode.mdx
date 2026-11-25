@@ -682,9 +682,11 @@ and aborts the executor's signal.
   })
   ```
 
-- The pi engine buffers script output (text and images) on the host thread without a limit while
-  the script runs; only the timeout bounds it. The result is bounded afterwards
-  (`maxOutputChars`, `maxImages`, `maxImageBytes`).
+- A script fails once it has printed 16 Mi characters or 100,000 `text()`, `image()` and
+  `console.*` items, on both executors. The result is bounded afterwards (`maxOutputChars`,
+  `maxImages`, `maxImageBytes`).
+- Built-ins are frozen and built-in globals are read-only before the script runs, on both
+  executors, so scripts cannot patch them (assignments fail silently, or throw in strict code).
 - The worker inherits a copy of the host's `process.env`. Scripts cannot read it (the VM has no
   `process`), but keep that in mind for engine-level vulnerabilities.
 - The VM's clock and `Math.random` come from the engine's WASI shim.

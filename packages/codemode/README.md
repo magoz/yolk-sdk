@@ -19,7 +19,7 @@ Requires Node.js 22.19+ (the pi engine's minimum). `@yolk-sdk/codemode/node` is 
 | Subpath                         | Purpose                                                                                                                                                                                                  |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/codemode`            | Runtime-neutral: `makeCodeModeTool` (incl. `stage` for staged plans), `runCodeModeScript`, `readOnlyNestedCallGate`, the `CodeModeExecutor` interface, catalog/discovery, store rebuild, classifier tool |
-| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.0.0                                                                                    |
+| `@yolk-sdk/codemode/node`       | `makePiCodeModeExecutor`: QuickJS (WebAssembly) in a worker thread per script, on `@earendil-works/pi-codemode` 1.6.0                                                                                    |
 | `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`: a fresh Dynamic Worker isolate (Worker Loader binding) per script, without network access                                                                           |
 
 ## Example
@@ -223,7 +223,7 @@ A Worker cannot start worker threads, so `makePiCodeModeExecutor` does not run t
 `makeDynamicWorkerCodeModeExecutor` runs each script in a fresh
 [Dynamic Worker](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/)
 isolate instead, with `globalOutbound: null` (no network access). The isolate evaluates pi's prelude
-(vendored from `@earendil-works/pi-codemode` 1.0.0, MIT) around the script, so scripts see the same
+(vendored from `@earendil-works/pi-codemode` 1.6.0, MIT) around the script, so scripts see the same
 globals (`tools`, `ALL_TOOLS`, `text`, `image`, `exit`, `console`, `store`/`load`) and the same
 tools guard and rejection codes as on Node. Tool and global calls come back to the calling Worker
 over RPC. TypeScript annotations are stripped with Sucrase first; Sucrase loads when the first script
@@ -333,7 +333,10 @@ reports usage marks every answered call.
   `./node`, and the Dynamic Worker engine (`cloudflare:workers`, Sucrase) behind `./cloudflare`.
   `@yolk-sdk/agent` never imports code mode.
 - The pi worker inherits a copy of `process.env`; scripts cannot read it (the VM has no `process`).
-- pi buffers script text and image output on the host thread without a limit while the script
-  runs; only the timeout bounds it. Results are bounded afterwards (`maxOutputChars`,
+- A script fails once it has printed 16 Mi characters or 100,000 `text()`, `image()` and
+  `console.*` items (both executors). Results are bounded afterwards (`maxOutputChars`,
   `maxImages`, `maxImageBytes`).
+- Built-ins are frozen and built-in globals are read-only before the script runs (both executors),
+  so a script cannot patch them; assigning a frozen property fails silently, or throws in strict
+  code.
 - `stripTypeScriptTypes` is experimental in Node and prints one `ExperimentalWarning` per process.
