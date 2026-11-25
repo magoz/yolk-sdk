@@ -116,9 +116,12 @@ const program = Effect.gen(function* () {
   called tool and the call's effective access; a failure (a message or a
   `CodeModeNestedCallRefused({ code, message })`, whose `code` the script sees as `error.code`)
   rejects that call in the script with `<label>: <message>` and records it as `error` without
-  executing it. `readOnlyNestedCallGate({ admit? })` admits only reads: effective access `read`
-  (so `isReadCall` counts), not approval-gated, not `invokesModel` (codes `unavailable`,
-  `approval_required`, `invokes_model`, `not_read`).
+  executing it. `readOnlyNestedCallGate({ admit?, admitModelCall? })` admits only reads: effective
+  access `read` (so `isReadCall` counts), not approval-gated, not `invokesModel` (codes
+  `unavailable`, `approval_required`, `invokes_model`, `not_read`). Both options are predicates
+  over `{ call, tool, access }`: `admit` relaxes only the access check, `admitModelCall` only the
+  model check (for example `({ tool }) => tool.def.name === 'classify'`; the call must still read).
+  A predicate that throws refuses the call.
 - `runCodeModeScript({ executor, code, nested, parentCallId, ... })` runs a script outside a model
   turn, for example a scheduled host check over `ResolvedToolSet.nestedExecutor({ parentCallId })`,
   with the same dispatch, limits, store and hooks as the tool (which runs every script through it),

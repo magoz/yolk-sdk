@@ -364,7 +364,8 @@ export type ToolRegistration<Context> = {
    * The tool calls a model when it runs (a language model, a classifier, a child agent run), so a
    * call costs model usage whatever its `access`. A trait for host policy, never model-visible:
    * `resolveTools` copies it to `ToolMetadata.invokesModel` and `NestedTool.invokesModel`, and
-   * gates such as code mode's `readOnlyNestedCallGate` refuse these calls.
+   * gates such as code mode's `readOnlyNestedCallGate` refuse these calls unless the host admits
+   * them.
    */
   readonly invokesModel?: boolean
   /** Receive a `nested` executor over the other code-mode-callable tools of the resolution. */

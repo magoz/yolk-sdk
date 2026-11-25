@@ -72,10 +72,12 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   refused call answers an error result whose `structuredContent` is `{ code }`, so the script sees
   `error.code`. `readOnlyNestedCallGate` (`read-only.ts`) admits only effective `read` access and
   refuses approval-gated and `invokesModel` tools (codes `unavailable`, `approval_required`,
-  `invokes_model`, `not_read`; fail-closed; `admit` relaxes only the access check). A hook that
-  throws or dies (an `admit` that throws included) refuses the call with the fixed refusal `The call
-could not be admitted.` (logged, no code): it never runs and its `refusal` is set, so hosts
-  counting refusals count it.
+  `invokes_model`, `not_read`; fail-closed; `admit` relaxes only the access check,
+  `admitModelCall` only the model check and is asked only about `invokesModel` tools; checks run in
+  that code order, so an admitted model call still needs `read` or `admit`). Keep each option to
+  one check. A hook that throws or dies (an `admit` or `admitModelCall` that throws included)
+  refuses the call with the fixed refusal `The call could not be admitted.` (logged, no code): it
+  never runs and its `refusal` is set, so hosts counting refusals count it.
 - A nested fiber that ends with interrupts only rejects with `was cancelled`; any other failure
   (a defect) rejects with `failed unexpectedly` and records `error`.
 - `executor.execute` has an Effect backstop at `timeoutMs` + 5 s (`timeout` failure, signal
@@ -284,7 +286,8 @@ more than 100000 values; ...` or `... is nested more than 64 levels deep`: a wal
 - `test/script.test.ts`: `runCodeModeScript` over `nestedExecutor` (structured result, store,
   deadline clamp, failures, coded and plain refusals, `afterNestedCall`, interruption aborting the
   script and cancelling nested calls, no staging), `readOnlyNestedCallGate` (reads, `isReadCall`,
-  writes, `invokesModel`, `admit`, fail-closed codes), the gate through `makeCodeModeTool`, and the
+  writes, `invokesModel`, `admit`, `admitModelCall` (asked only for model tools, writes stay
+  `not_read`, a throwing one refuses), fail-closed codes), the gate through `makeCodeModeTool`, and the
   pi executor end to end.
 - `test/tool.test.ts`: limits and plumbing with a fake executor (defects, `beforeNestedCall`,
   backstops), bounding, store rebuild and bounds, the rejection prefix, and unprefixed nested-call

@@ -283,11 +283,15 @@ successful script or its `error`, the unbounded `output`, every nested call (`ca
   executor a nested-access registration gets, bound to a host id: the same tools, dispatch path
   (`executeRegistration`), host context and ledger, with nested ids `<parentCallId>/<seq>` under
   parent key `parentCallId`. It never offers staging: a plan needs a model turn to review it.
-- **Read-only gate**: `readOnlyNestedCallGate({ admit? })` is a ready-made `beforeNestedCall` that
-  admits a call only when its effective access is `read` (so `isReadCall` counts) and its tool is
-  neither approval-gated nor `invokesModel`; it fails closed for tools without effective access.
-  Refusal codes: `unavailable`, `approval_required`, `invokes_model`, `not_read`. `admit` relaxes
-  only the access check, for writes the host knows only read.
+- **Read-only gate**: `readOnlyNestedCallGate({ admit?, admitModelCall? })` is a ready-made
+  `beforeNestedCall` that admits a call only when its effective access is `read` (so `isReadCall`
+  counts) and its tool is neither approval-gated nor `invokesModel`; it fails closed for tools
+  without effective access. Refusal codes: `unavailable`, `approval_required`, `invokes_model`,
+  `not_read`. `admit` relaxes only the access check, for writes the host knows only read.
+  `admitModelCall` relaxes only the model check, for model calls whose cost the host accepts (a
+  bounded `classify`, not an open-ended child run); the call must still read, so the two checks
+  stay independent: access says what a call changes, the trait what it costs. A predicate that
+  throws refuses the call.
 - **Tools that call a model**: `ToolRegistration.invokesModel` (and the `makeTool` option) marks a
   tool whose calls spend model usage whatever their access. `resolveTools` copies it to
   `ToolMetadata` and `NestedTool`; it is never sent to providers. `classify` and `subagent` set it.
