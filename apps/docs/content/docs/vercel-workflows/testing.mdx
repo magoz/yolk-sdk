@@ -48,7 +48,8 @@ ambient mock does not apply platform retry policy by itself: wrap host step call
 `world.step(...)` or call `world.runStep(...)` when the test must exercise retries and
 `getStepMetadata().attempt`. Use `world.inspect(runId)` for stream closure, write-after-close
 attempts, step attempts, status, run errors, `unstorableStepErrors` (`stepName`, `attempt`,
-`error`), and the run's start `attributes` (`{}` without any; no `$parentRunId`/`$rootRunId`).
+`error`), `discardedStepExecutions` ([Speculative execution](#speculative-execution)), and the
+run's start `attributes` (`{}` without any; no `$parentRunId`/`$rootRunId`).
 `world.sdk.start` checks them with the installed runtime's validator, so an attribute the platform
 rejects fails the start there too. Use `world.sdk` with `VercelWorkflows.layerFromSdk` when testing
 Effect route/service boundaries.
@@ -97,6 +98,28 @@ read back, so error tags, prototypes, and custom fields are gone and `cause` sur
 
 Carry anything the workflow body must read across the boundary as plain data, for example in an
 error's `cause`, and assert `unstorableStepErrors` is empty in tests of your step failures.
+
+### Speculative execution
+
+Workflow 5.8 may start the body of a step with `maxRetries > 0` before its start is recorded. When
+that start is refused, the platform discards the body's outcome and runs the body again with the
+same `getStepMetadata()`: same `stepId`, same `attempt`. Reproduce it with
+`new TestWorkflowWorld({ discardStepExecution })`:
+
+```ts
+const world = new TestWorkflowWorld({ discardStepExecution: ({ attempt }) => attempt === 1 })
+```
+
+Before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`), the world calls
+`discardStepExecution` with the step's metadata. On `true` it runs the body once and discards the
+outcome: never stored, never retried, not counted in `stepAttempts`. That execution's stream writes
+stay, as on the platform. The body then runs again with the same metadata, and that run is the
+attempt; later attempts keep their numbers. At most one execution per attempt is discarded, and it
+settles before the kept one starts, while the platform may run both at once.
+`world.inspect(runId).discardedStepExecutions` lists them (`stepName`, `stepId`, `attempt`, and
+`outcome`, an Effect `Result`: `Success` with the returned value, `Failure` with the thrown one).
+Use it to check that your model step's `executionId` differs between the two runs
+([Emit replay-safe stream events](../vercel-workflows#emit-replay-safe-stream-events)).
 
 ## Pure contract tests
 
@@ -164,7 +187,8 @@ Cover:
 - Event sequence advances across model, tool, and HITL resume.
 - Default retries are disabled, except the close step's (`defaultCloseStreamRetry`).
 - Retried streamed steps have de-dupe-ready event ids; a model step's live events carry an
-  `executionId` per execution, so a retry never reuses an earlier execution's ids.
+  `executionId` per execution, so a retry, or a speculative re-execution under the same attempt,
+  never reuses an earlier execution's ids.
 - Terminal write happens only after durable commit succeeds.
 - `AgentEnd` closes through `closeStream`, and only there; a retried close re-closes harmlessly.
 - Failure paths use `writeError`, not `closeStream`; a `writeError` rejection preserves the original

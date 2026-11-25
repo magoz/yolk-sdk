@@ -30,6 +30,17 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Canary.163: model step execution ids under Workflow 5.8
+
+Workflow 5.8's speculative execution can discard a step body's outcome and run the body again under
+the same `getStepMetadata()` `stepId` and `attempt`, possibly beside the first, for steps with
+`maxRetries > 0`. An `executionId` of `${stepId}:${attempt}`, the example earlier docs gave, then
+repeats: both executions write the same event ids and clients splice their answers. Generate the
+id once at the start of the step body instead, for example
+`${stepId}:${attempt}:${crypto.randomUUID()}`. `TestWorkflowWorld`'s new `discardStepExecution`
+option reproduces this in tests
+([Speculative execution](./vercel-workflows/testing#speculative-execution)).
+
 ### Canary.158: Fortnox bookkeeping actions
 
 `FortnoxConnector` grows from 91 to 102 actions: financial years, accounts, voucher series,

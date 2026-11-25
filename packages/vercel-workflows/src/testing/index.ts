@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import { types } from 'node:util'
 import path from 'node:path'
-import { Predicate } from 'effect'
+import { Predicate, Result } from 'effect'
 import type {
   VercelWorkflowsSdkClient,
   VercelWorkflowsSdkRun,
@@ -14,10 +14,10 @@ import type {
 
 // Behavioral emulator of the Vercel Workflow platform for tests: run lifecycle,
 // append-only durable streams with write-after-close -> 409 conflicts, a step
-// executor honoring `fn.maxRetries` + `getStepMetadata().attempt`, hooks/resume,
-// and cancellation. Host code under test runs unmodified against it; tests mock
-// only the `workflow` module's ambient APIs, delegating to the active world
-// (see `testWorkflowModule`).
+// executor honoring `fn.maxRetries` + `getStepMetadata().attempt` (optionally with Workflow 5.8's
+// speculative re-execution: `discardStepExecution`), hooks/resume, and cancellation. Host code
+// under test runs unmodified against it; tests mock only the `workflow` module's ambient APIs,
+// delegating to the active world (see `testWorkflowModule`).
 //
 // Step errors cross the platform boundary the way they do in a deployment: each one is stored with
 // the installed `workflow` runtime's own step-error serializer, and the workflow body sees only the
@@ -119,6 +119,32 @@ export type TestWorkflowUnstorableStepError = {
   readonly error: unknown
 }
 
+/**
+ * A step body execution whose outcome the platform discarded (see
+ * `TestWorkflowWorldOptions.discardStepExecution`); the body then ran again with the same metadata.
+ */
+export type TestWorkflowDiscardedStepExecution = TestWorkflowStepMetadata & {
+  /** The value the body resolved with (`Success`), or the value it threw or rejected with. */
+  readonly outcome: Result.Result<unknown, unknown>
+}
+
+export type TestWorkflowWorldOptions = {
+  /**
+   * Reproduces Workflow 5.8's speculative execution. For a step with `maxRetries > 0` the platform
+   * may start the body before its start is recorded; when that start is refused it discards the
+   * body's outcome and runs the body again with the same `getStepMetadata()` (same `stepId` and
+   * `attempt`), possibly beside the first. Steps with `maxRetries: 0` never run early.
+   *
+   * Called before each attempt of a step with `maxRetries > 0`. When it returns `true`, the body
+   * runs once and its outcome (value or thrown value) is discarded: never stored, never retried,
+   * not counted in `stepAttempts`, but listed in `inspect(runId).discardedStepExecutions`. Its
+   * stream writes stay, as on the platform. Then the body runs again with the same metadata, and
+   * that execution is the attempt. At most one execution per attempt is discarded, and it settles
+   * before the kept one starts (the platform may run them concurrently).
+   */
+  readonly discardStepExecution?: (step: TestWorkflowStepMetadata) => boolean
+}
+
 export type TestWorkflowStepFunction<TArgs extends ReadonlyArray<unknown>, TResult> = ((
   ...args: TArgs
 ) => Promise<TResult>) & { readonly maxRetries?: number }
@@ -148,6 +174,7 @@ type TestWorkflowRunRecord = {
   stepSequence: number
   readonly stepAttempts: Map<string, number>
   readonly unstorableStepErrors: Array<TestWorkflowUnstorableStepError>
+  readonly discardedStepExecutions: Array<TestWorkflowDiscardedStepExecution>
 }
 
 type AmbientContext = {
@@ -374,6 +401,16 @@ const platformErrorMessage = async (value: unknown): Promise<string> => {
 
 const retriesLabel = (count: number) => (count === 1 ? 'retry' : 'retries')
 
+const settleStepExecution = async (
+  execution: () => Promise<unknown>
+): Promise<Result.Result<unknown, unknown>> => {
+  try {
+    return Result.succeed(await execution())
+  } catch (error) {
+    return Result.fail(error)
+  }
+}
+
 export type TestWorkflowRunInspection = {
   readonly runId: string
   /** The `attributes` the run was started with through `sdk.start` (`{}` without any). */
@@ -387,6 +424,8 @@ export type TestWorkflowRunInspection = {
   readonly runError: unknown
   /** Every thrown step value the platform could not store, in order. */
   readonly unstorableStepErrors: ReadonlyArray<TestWorkflowUnstorableStepError>
+  /** Every step body execution whose outcome was discarded (`discardStepExecution`), in order. */
+  readonly discardedStepExecutions: ReadonlyArray<TestWorkflowDiscardedStepExecution>
 }
 
 export type TestWorkflowHook<T> = Promise<T> & { readonly [Symbol.dispose]: () => void }
@@ -396,6 +435,11 @@ type TestWorkflowWorldStartResult = { readonly runId: string }
 export class TestWorkflowWorld {
   private readonly runs = new Map<string, TestWorkflowRunRecord>()
   private runSequence = 0
+  private readonly discardStepExecution: TestWorkflowWorldOptions['discardStepExecution']
+
+  constructor(options: TestWorkflowWorldOptions = {}) {
+    this.discardStepExecution = options.discardStepExecution
+  }
 
   start<TArgs extends ReadonlyArray<unknown>, TResult>(
     workflowFn: (...args: TArgs) => Promise<TResult>,
@@ -428,7 +472,8 @@ export class TestWorkflowWorld {
       resumedHookTokens: new Set(),
       stepSequence: 0,
       stepAttempts: new Map(),
-      unstorableStepErrors: []
+      unstorableStepErrors: [],
+      discardedStepExecutions: []
     }
 
     this.runs.set(runId, run)
@@ -478,7 +523,8 @@ export class TestWorkflowWorld {
       writeAfterCloseAttempts: run.writeAfterCloseAttempts,
       stepAttempts: new Map(run.stepAttempts),
       runError: run.runError,
-      unstorableStepErrors: [...run.unstorableStepErrors]
+      unstorableStepErrors: [...run.unstorableStepErrors],
+      discardedStepExecutions: [...run.discardedStepExecutions]
     }
   }
 
@@ -552,7 +598,9 @@ export class TestWorkflowWorld {
   // (by `name`, or `fatal: true`; an AbortError is promoted to one) is never
   // retried; an exhausted step fails with the platform's FatalError whose
   // `cause` is the last thrown value. The caller sees errors only as the
-  // platform stores and reads them back.
+  // platform stores and reads them back. With `discardStepExecution`, an attempt of a step with
+  // `maxRetries > 0` may first run the body once more and discard that outcome (speculative
+  // execution).
   async runStep<TArgs extends ReadonlyArray<unknown>, TResult>(
     stepFn: TestWorkflowStepFunction<TArgs, TResult>,
     args: TArgs,
@@ -569,15 +617,26 @@ export class TestWorkflowWorld {
     let attempt = 1
 
     for (;;) {
+      const stepMetadata: TestWorkflowStepMetadata = { attempt, stepId, stepName }
+
+      // Speculative execution (Workflow 5.8, `maxRetries > 0` only): the body ran before its start
+      // was recorded, the start was refused, and the platform runs it again under the same attempt.
+      if (maxRetries > 0 && this.discardStepExecution?.(stepMetadata) === true) {
+        const outcome = await settleStepExecution(() =>
+          ambientStorage.run({ world: this, run, stepMetadata: { ...stepMetadata } }, () =>
+            stepFn(...args)
+          )
+        )
+
+        run.discardedStepExecutions.push({ ...stepMetadata, outcome })
+      }
+
       run.stepAttempts.set(stepName, (run.stepAttempts.get(stepName) ?? 0) + 1)
 
       let thrown: unknown
 
       try {
-        return await ambientStorage.run(
-          { world: this, run, stepMetadata: { attempt, stepId, stepName } },
-          () => stepFn(...args)
-        )
+        return await ambientStorage.run({ world: this, run, stepMetadata }, () => stepFn(...args))
       } catch (error) {
         thrown = error
       }
