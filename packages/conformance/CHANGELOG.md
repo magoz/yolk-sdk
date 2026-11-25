@@ -1,5 +1,11 @@
 # @yolk-sdk/conformance
 
+## 0.1.0-canary.162
+
+### Patch Changes
+
+- aab270f: Advance in lockstep with `@yolk-sdk/codemode`, which upgrades its script engine to `@earendil-works/pi-codemode` 1.6.0 (frozen built-ins, output limits, constraint tags in tool declarations). These packages have no direct changes in this release.
+
 ## 0.1.0-canary.161
 
 ### Patch Changes
