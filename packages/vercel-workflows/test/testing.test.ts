@@ -721,6 +721,50 @@ describe('TestWorkflowWorld speculative step execution (discardStepExecution)', 
     })
   })
 
+  it('never records a discarded execution that threw an unstorable value', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    const unstorable = new Error('crash', { cause: new (class Issue {})() })
+    let executions = 0
+
+    const step = Object.assign(
+      async () => {
+        executions += 1
+
+        if (executions === 1) throw unstorable
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(world.status(runId)).toBe('completed')
+    expect(world.inspect(runId)).toMatchObject({
+      stepAttempts: new Map([['model', 1]]),
+      unstorableStepErrors: [],
+      discardedStepExecutions: [{ attempt: 1, outcome: Result.fail(unstorable) }]
+    })
+  })
+
+  it('re-executes a step without maxRetries, which takes the platform default', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    let executions = 0
+
+    const step = async () => {
+      executions += 1
+
+      return 'ok'
+    }
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(executions).toBe(2)
+    expect(world.inspect(runId).discardedStepExecutions).toHaveLength(1)
+  })
+
   it('never re-executes a step with maxRetries: 0', async () => {
     const asked: Array<string> = []
 

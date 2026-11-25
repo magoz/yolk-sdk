@@ -140,7 +140,8 @@ export type TestWorkflowWorldOptions = {
    * not counted in `stepAttempts`, but listed in `inspect(runId).discardedStepExecutions`. Its
    * stream writes stay, as on the platform. Then the body runs again with the same metadata, and
    * that execution is the attempt. At most one execution per attempt is discarded, and it settles
-   * before the kept one starts (the platform may run them concurrently).
+   * before the kept one starts (the platform may run them concurrently), so a discarded body that
+   * never settles blocks the step.
    */
   readonly discardStepExecution?: (step: TestWorkflowStepMetadata) => boolean
 }

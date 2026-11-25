@@ -115,9 +115,10 @@ Before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`), the
 outcome: never stored, never retried, not counted in `stepAttempts`. That execution's stream writes
 stay, as on the platform. The body then runs again with the same metadata, and that run is the
 attempt; later attempts keep their numbers. At most one execution per attempt is discarded, and it
-settles before the kept one starts, while the platform may run both at once.
-`world.inspect(runId).discardedStepExecutions` lists them (`stepName`, `stepId`, `attempt`, and
-`outcome`, an Effect `Result`: `Success` with the returned value, `Failure` with the thrown one).
+settles before the kept one starts, while the platform may run both at once, so a discarded body
+that never settles blocks the step. `world.inspect(runId).discardedStepExecutions` lists them
+(`stepName`, `stepId`, `attempt`, and `outcome`, an Effect `Result`: `Success` with the returned
+value, `Failure` with the thrown one).
 Use it to check that your model step's `executionId` differs between the two runs
 ([Emit replay-safe stream events](../vercel-workflows#emit-replay-safe-stream-events)).
 

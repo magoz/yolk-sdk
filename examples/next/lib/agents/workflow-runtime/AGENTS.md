@@ -16,12 +16,14 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 - App steps use `writeDurableAgentEvent`; normal ids are `workflow:<runId>:<turn>:<sequence>`. The
   model step's live events (everything `runModelTurn` emits, `LLMStreamStart` included) also carry
   `executionId` `<stepId>:<attempt>:<uuid>` (`getStepMetadata()` plus a UUID made once per step
-  body: Workflow 5.8 re-runs a discarded speculative body under the same attempt), appended to the
-  id (`workflow:<runId>:<turn>:<sequence>:<stepId>:<attempt>:<uuid>`) and set on the event with the
-  step's `turn` as `executionTurn` (it must be the `runModelTurn` turn), so a retried, redelivered
-  or speculatively re-run model step never reuses an earlier execution's ids. `AgentEnd` and
-  tool-batch events stay plain. Tests that run steps inline (no platform step context) fake
-  `getStepMetadata` in their `workflow` module mock (`workflow-host.test.ts`).
+  body: the attempt alone repeats once a step allows retries, since Workflow 5.8 re-runs a discarded
+  speculative body of a `maxRetries > 0` step under the same attempt; this step sets
+  `maxRetries = 0` today), appended to the id
+  (`workflow:<runId>:<turn>:<sequence>:<stepId>:<attempt>:<uuid>`) and set on the event with the
+  step's `turn` as `executionTurn` (it must be the `runModelTurn` turn), so a retried or redelivered
+  model step never reuses an earlier execution's ids. `AgentEnd` and tool-batch events stay plain.
+  Tests that run steps inline (no platform step context) fake `getStepMetadata` in their `workflow`
+  module mock (`workflow-host.test.ts`).
 - Error events use run-scoped stream ids: `workflow:<runId>:error:<turn>:<sequence>`.
 - Carry `eventSequence` through model/tool step results so retries/replay can de-dupe; reset it for
   fresh independent streams.

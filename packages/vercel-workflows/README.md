@@ -105,16 +105,18 @@ for it. The emulator differs from Vercel in two ways: a non-suspending `await` (
 the next hook here while Vercel accepts it, and a disposed hook frees its token (and answers
 `TestWorkflowHookNotFoundError`) at once, while Vercel records the disposal at the run's next
 suspension. The emulator does not model reading a hook more than once, nor the platform hook's
-`getConflict()`. `new TestWorkflowWorld({ discardStepExecution })` reproduces Workflow 5.8's
-speculative execution: before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`)
-it asks `discardStepExecution(metadata)`, and on `true` runs the body once, discards its outcome
-(never stored, retried or counted in `stepAttempts`; its stream writes stay) and runs it again with
-the same `stepId` and `attempt`. The discarded execution settles before the kept one starts (Vercel
-may run them side by side); `world.inspect(runId).discardedStepExecutions` lists each with its
-`outcome` (an Effect `Result`). Executing a step loads the workflow runtime, so it needs the Node
-test environment. Ambient module mocks do not apply retry policy by themselves: wrap host step
-callbacks with `world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise
-platform retry attempts and `getStepMetadata().attempt`.
+`getConflict()`. Executing a step loads the workflow runtime, so it needs the Node test environment.
+Ambient module mocks do not apply retry policy by themselves: wrap host step callbacks with
+`world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise platform retry
+attempts and `getStepMetadata().attempt`.
+
+`new TestWorkflowWorld({ discardStepExecution })` reproduces Workflow 5.8's speculative execution:
+before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`) it asks
+`discardStepExecution(metadata)`, and on `true` runs the body once, discards its outcome (never
+stored, retried or counted in `stepAttempts`; its stream writes stay) and runs it again with the
+same `stepId` and `attempt`. The discarded execution settles before the kept one starts (Vercel may
+run them side by side), so a discarded body that never settles blocks the step;
+`world.inspect(runId).discardedStepExecutions` lists each with its `outcome` (an Effect `Result`).
 
 Mock the ambient `workflow` module so production orchestration runs against the active test world:
 
