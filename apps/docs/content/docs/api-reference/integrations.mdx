@@ -448,6 +448,9 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 | `@yolk-sdk/codemode/cloudflare` | `makeDynamicWorkerCodeModeExecutor`, `WorkerLoader`, `WorkerLoaderCode`, `DynamicWorkerCodeModeExecutorOptions`, `defaultDynamicWorkerCompatibilityDate`, `defaultDynamicWorkerCpuMs`, `maxDynamicWorkerHostCallFailureReports`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 See [Add code mode](../integrations/code-mode); `makeCodeModeTool({ catalog: 'instructions' })` delivers the catalog as a host instruction ([Deliver the catalog as instructions](../integrations/code-mode#deliver-the-catalog-as-instructions)).
+`readOnlyNestedCallGate({ admit?, admitModelCall? })` takes two predicates over the
+`CodeModeBeforeNestedCallInput` (`{ call, tool, access }`): `admit` relaxes the access check and
+`admitModelCall` the `invokesModel` check ([Allow only reads](../integrations/code-mode#allow-only-reads)).
 
 ## File extraction
 

@@ -549,7 +549,7 @@ return messages.filter((_, index) => results[index].answers.urgent.probability >
 Each call reports token usage on the nested-call record; the cost (`costUsd`) stays in the
 classifier result's `structuredContent.usage`. Classifier errors reject the call with a safe
 message. The classifier tool is a `read` marked `invokesModel: true`, so
-[`readOnlyNestedCallGate`](#allow-only-reads) refuses it.
+[`readOnlyNestedCallGate`](#allow-only-reads) refuses it unless its `admitModelCall` admits it.
 
 ## Run a script outside a model turn
 
@@ -622,10 +622,21 @@ keeps:
 | `invokes_model`     | the tool calls a model when it runs (for example `classify`) |
 | `not_read`          | the call's effective access is `write` or `destructive`      |
 
-`admit` relaxes only the access check, for a write the host knows only reads (for example a remote
-tool its server marks read-only): `readOnlyNestedCallGate({ admit: ({ tool }) => readOnlyRemoteTools.has(tool.def.name) })`.
-A hook that throws or dies (an `admit` that throws included) refuses the call too, with the
-message `The call could not be admitted.` and no code, so counting `refusal`s counts it.
+Two options relax one check each. Both are predicates over the same input as `beforeNestedCall`
+(`{ call, tool, access }`) and admit when they return `true`:
+
+- `admit` relaxes only the access check, for a write the host knows only reads (for example a remote
+  tool its server marks read-only): `readOnlyNestedCallGate({ admit: ({ tool }) => readOnlyRemoteTools.has(tool.def.name) })`.
+- `admitModelCall` relaxes only the model check, for model calls whose cost the host accepts, such as
+  a bounded `classify` but not an open-ended child run:
+  `readOnlyNestedCallGate({ admitModelCall: ({ tool }) => tool.def.name === 'classify' })`. It is
+  asked only about tools marked `invokesModel`. An admitted call still has to read (effective
+  access `read`, or `admit`), so a write marked `invokesModel` is still refused as `not_read`;
+  approval-gated and unavailable tools stay refused.
+
+A hook that throws or dies (an `admit` or `admitModelCall` that throws included) refuses the call
+too, with the message `The call could not be admitted.` and no code, so counting `refusal`s counts
+it.
 Your own `beforeNestedCall` hooks receive the same input (`call`, `tool`, `access`, and with
 `makeCodeModeTool` the `context`) and may fail with a plain message or a
 `new CodeModeNestedCallRefused({ code, message })`.

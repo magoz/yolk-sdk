@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolApprovalPolicy, ToolCall } from '@yolk-sdk/agent/protocol'
@@ -73,12 +73,36 @@ const classifier = makeClassifierTool<TestContext>({
     })
 })
 
+/** A tool that calls a model when it runs: an open-ended read (like `subagent`, which is never nested-callable) or a drafting write. */
+const modelTool = (
+  name: string,
+  access: 'read' | 'write',
+  log: ToolLog
+): ToolRegistration<TestContext> =>
+  makeTool<TestContext, typeof QueryParams>({
+    name,
+    description: `Calls a model (${access}).`,
+    parameters: QueryParams,
+    access,
+    invokesModel: true,
+    execute: ({ params }) =>
+      Effect.sync(() => {
+        log.push(`${name}:${params.query}`)
+
+        return { content: `${name}:${params.query}` }
+      })
+  })
+
 const hostToolSet = (log: ToolLog) =>
   resolveTools(
     [
       moduleOf('docs', [queryTool('lookup', { log })]),
       moduleOf('records', [recordTool(log)]),
-      moduleOf('models', [classifier])
+      moduleOf('models', [
+        classifier,
+        modelTool('delegate', 'read', log),
+        modelTool('draft', 'write', log)
+      ])
     ],
     context
   )
@@ -439,6 +463,159 @@ describe('readOnlyNestedCallGate', () => {
 
       expect(result.calls.map(entry => entry.refusal?.code)).toEqual([undefined, 'invokes_model'])
       expect(log).toEqual(['record:set:x'])
+    })
+  )
+
+  const modelCalls = async (options: CodeModeExecuteOptions) => [
+    await settle(
+      call(options, 'classify', {
+        state: 'x',
+        questions: { yes: { type: 'boolean', instructions: 'Yes?' } }
+      })
+    ),
+    await settle(call(options, 'delegate', { query: 'a' })),
+    await settle(call(options, 'draft', { query: 'b' }))
+  ]
+
+  it.effect('refuses every tool that invokes a model by default', () =>
+    Effect.gen(function* () {
+      const { result, log } = yield* gated(modelCalls)
+
+      expect(result.calls.map(entry => entry.refusal?.code)).toEqual([
+        'invokes_model',
+        'invokes_model',
+        'invokes_model'
+      ])
+      expect(log).toEqual([])
+    })
+  )
+
+  it.effect('admits the model calls admitModelCall accepts, only when they read', () =>
+    Effect.gen(function* () {
+      const asked: Array<string> = []
+
+      const { result, log } = yield* gated(
+        modelCalls,
+        readOnlyNestedCallGate({
+          admitModelCall: ({ call: nestedCall, tool, access }) => {
+            asked.push(`${nestedCall.name}:${tool.moduleId}:${access}`)
+
+            return tool.def.name !== 'delegate'
+          }
+        })
+      )
+
+      expect(result.ok && result.value).toMatchObject([
+        { ok: true, value: { answers: { yes: { type: 'boolean', probability: 0.9 } } } },
+        { ok: false, code: 'invokes_model' },
+        {
+          ok: false,
+          message: 'tools.draft: draft is not a read: this script may only call tools that read.',
+          code: 'not_read'
+        }
+      ])
+      expect(result.calls.map(entry => [entry.name, entry.status, entry.refusal?.code])).toEqual([
+        ['classify', 'ok', undefined],
+        ['delegate', 'error', 'invokes_model'],
+        ['draft', 'error', 'not_read']
+      ])
+      expect(asked).toEqual(['classify:models:read', 'delegate:models:read', 'draft:models:write'])
+      expect(log).toEqual([])
+    })
+  )
+
+  it.effect('asks admitModelCall only about tools that invoke a model', () =>
+    Effect.gen(function* () {
+      const asked: Array<string> = []
+
+      const { result } = yield* gated(
+        async options => [
+          await call(options, 'lookup', { query: 'a' }),
+          await settle(call(options, 'record', { op: 'set', value: 'x' }))
+        ],
+        readOnlyNestedCallGate({
+          admitModelCall: ({ call: nestedCall }) => {
+            asked.push(nestedCall.name)
+
+            return true
+          }
+        })
+      )
+
+      expect(result.calls.map(entry => entry.refusal?.code)).toEqual([undefined, 'not_read'])
+      expect(asked).toEqual([])
+    })
+  )
+
+  it.effect('runs a model write only when both admitModelCall and admit accept it', () =>
+    Effect.gen(function* () {
+      const { result, log } = yield* gated(
+        async options => [await settle(call(options, 'draft', { query: 'b' }))],
+        readOnlyNestedCallGate({ admit: () => true, admitModelCall: () => true })
+      )
+
+      expect(result.calls.map(entry => [entry.status, entry.refusal])).toEqual([['ok', undefined]])
+      expect(log).toEqual(['draft:b'])
+    })
+  )
+
+  it.effect('refuses, without running, a call whose admitModelCall throws', () =>
+    Effect.gen(function* () {
+      const { result, log } = yield* gated(
+        async options => [
+          await settle(call(options, 'delegate', { query: 'a' })),
+          await call(options, 'lookup', { query: 'a' })
+        ],
+        readOnlyNestedCallGate({
+          admitModelCall: () => {
+            throw new Error('admitModelCall bug')
+          }
+        })
+      )
+
+      expect(result.ok && result.value).toEqual([
+        {
+          ok: false,
+          message: 'tools.delegate: The call could not be admitted.',
+          code: undefined
+        },
+        'lookup:a'
+      ])
+      expect(result.calls.map(entry => [entry.status, entry.refusal])).toEqual([
+        ['error', { message: 'The call could not be admitted.' }],
+        ['ok', undefined]
+      ])
+      expect(log).toEqual(['lookup:a:tenant_1'])
+    })
+  )
+
+  it.effect('dies instead of throwing when a predicate throws, even called directly', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* hostToolSet([])
+
+      const classify = toolSet
+        .nestedExecutor({ parentCallId: 'p' })
+        .tools.find(tool => tool.def.name === 'classify')
+
+      expect(classify?.invokesModel).toBe(true)
+
+      if (classify === undefined) return
+
+      const gate = readOnlyNestedCallGate({
+        admitModelCall: () => {
+          throw new Error('admitModelCall bug')
+        }
+      })
+
+      const checked = gate({
+        call: ToolCall.make({ id: 'p/1', name: 'classify', params: {} }),
+        tool: classify,
+        access: 'read'
+      })
+
+      const exit = yield* Effect.exit(checked)
+
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
     })
   )
 
