@@ -10,7 +10,7 @@ the other code-mode-callable tools of the same `resolveTools` resolution. The ag
 | Subpath                         | Source              | Role                                                                                                                           |
 | ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `@yolk-sdk/codemode`            | `src/index.ts`      | Executor interface, `makeCodeModeTool`, `runCodeModeScript`, read-only gate, catalog, search, bounding, store, classifier tool |
-| `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.0.0)                                                      |
+| `@yolk-sdk/codemode/node`       | `src/node.ts`       | `makePiCodeModeExecutor` over `@earendil-works/pi-codemode` (exact 1.6.0)                                                      |
 | `@yolk-sdk/codemode/cloudflare` | `src/cloudflare.ts` | `makeDynamicWorkerCodeModeExecutor` on Cloudflare Dynamic Workers (Worker Loader)                                              |
 
 Files: `executor.ts` (engine-neutral `CodeModeExecutor` types, `reportInternalError`),
@@ -132,12 +132,19 @@ upgrade re-copies it), `cloudflare-workers.d.ts` (type-check-only `cloudflare:wo
   the configured code mode tool name; it keeps pi's bounds (256 Ki characters of JSON per value,
   1 Mi in total with keys) by dropping offending writes, keeping the previous value.
 - Results keep at most `maxImages` (8) images and `maxImageBytes` (4 MiB of base64); later images
-  are dropped with a note. pi buffers output on the host thread without a limit while a script
-  runs; only the timeout bounds it.
+  are dropped with a note. pi's prelude (both executors) fails a script past 16 Mi characters or
+  100,000 `text()`/`image()`/`console.*` items of output (`RangeError`, a `script` error).
+- pi's prelude freezes the built-ins and makes the built-in globals read-only before the script
+  runs (both executors). The Dynamic Worker tests evaluate the module in a
+  `createContext(constants.DONT_CONTEXTIFY)` context: a contextified global stores `undefined` for
+  the prelude's value-less `defineProperty`. Executors return output items as
+  `CodeModeOutputItem` (pi's `console: true` and the prelude's `console` output kind become plain
+  text).
 - The Node executor strips TypeScript with `node:module` `stripTypeScriptTypes` inside an async
   function wrapper (positions preserved) and maps failures to `script` errors; one sandbox (worker +
   VM) per execution, closed in `finally`; the per-executor concurrency cap counts queue time against
-  the timeout.
+  the timeout and holds a slot until the worker has exited (`onWorkerStarted`): pi settles a result
+  and `close()` once it has asked the worker to stop.
 - The Dynamic Worker executor (`cloudflare.ts`) loads one Worker per execution (`load()`, one
   billed Dynamic Worker) with `globalOutbound: null` and `limits.cpuMs` (`cpuMs`, default 500): the
   CPU limit is the real ceiling, since the host timeout and abort only answer early and cannot stop

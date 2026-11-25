@@ -49,6 +49,9 @@ export type PiCodeModeExecutorOptions = {
 
 type SlotOutcome = 'acquired' | 'aborted' | 'timeout'
 
+/** The worker an execution started, if any; its slot is released once the worker has exited. */
+type StartedWorker = { exited?: Promise<void> }
+
 type Waiter = (outcome: SlotOutcome) => void
 
 /** Abort- and deadline-aware counting semaphore for executions. */
@@ -241,11 +244,21 @@ type MutableExecutionResult = {
   storeWrites?: CodeModeStoreWrites
 }
 
+// pi marks `console.*` text with `console: true`; Yolk's output items carry only the text.
+const fromPiOutput = (output: CodemodeResult['output']): CodeModeExecutionResult['output'] =>
+  output.map(item =>
+    item.type === 'text'
+      ? { type: 'text', text: item.text }
+      : { type: 'image', data: item.data, mimeType: item.mimeType }
+  )
+
 const fromPiResult = (
-  result: CodemodeResult,
+  piResult: CodemodeResult,
   scriptLines: number,
   onInternalError: CodeModeInternalErrorObserver | undefined
 ): CodeModeExecutionResult => {
+  const result = { ...piResult, output: fromPiOutput(piResult.output) }
+
   if (result.ok) {
     const storeWrites = decodeStoreWrites(result.storeWrites)
 
@@ -314,7 +327,12 @@ export const makePiCodeModeExecutor = (
     Math.max(1, Math.floor(options.maxConcurrentExecutions ?? defaultMaxConcurrentExecutions))
   )
 
-  const run = async (code: string, execution: CodeModeExecuteOptions, queuedAt: number) => {
+  const run = async (
+    code: string,
+    execution: CodeModeExecuteOptions,
+    queuedAt: number,
+    onWorkerStarted: (exited: Promise<void>) => void
+  ) => {
     const remaining = () => execution.timeoutMs - (Date.now() - queuedAt)
     const stripped = stripTypes(code)
 
@@ -333,7 +351,8 @@ export const makePiCodeModeExecutor = (
       tools: execution.tools.map(piTool),
       globals: execution.globals.map(piGlobal),
       timeoutMs,
-      memoryLimitBytes: execution.memoryLimitBytes
+      memoryLimitBytes: execution.memoryLimitBytes,
+      onWorkerStarted
     }
 
     if (options.wasm !== undefined) sandboxOptions.wasm = options.wasm
@@ -382,10 +401,20 @@ export const makePiCodeModeExecutor = (
         })
       }
 
+      // pi settles once it has asked the worker to stop, not once it exited: the slot stays taken
+      // until the worker is gone, so the cap bounds live workers.
+      const worker: StartedWorker = {}
+
       try {
-        return await run(code, execution, queuedAt)
+        return await run(code, execution, queuedAt, exited => {
+          worker.exited = exited
+        })
       } finally {
-        slots.release()
+        if (worker.exited === undefined) {
+          slots.release()
+        } else {
+          void worker.exited.then(slots.release, slots.release)
+        }
       }
     }
   }

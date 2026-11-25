@@ -1,4 +1,4 @@
-// Vendored from `@earendil-works/pi-codemode` 1.0.0 (`dist/runtime/prelude-source.js`), MIT
+// Vendored from `@earendil-works/pi-codemode` 1.6.0 (`dist/runtime/prelude-source.js`), MIT
 // License, Copyright (c) Earendil Works. pi does not export its in-VM prelude, which the Dynamic
 // Worker executor (`./cloudflare.ts`) evaluates in its isolate. Copied verbatim;
 // `test/pi-prelude.test.ts` fails when the installed pi's prelude differs, so a pi upgrade updates
@@ -6,22 +6,118 @@
 //
 // Evaluates to `(bridge, toolsJson, globalsJson, storeJson) => { settle, run, stalled }`: the
 // `tools` proxy, `ALL_TOOLS`, output helpers (`text`, `image`, `exit`, `console`), globals, and the
-// synchronous `store`/`load` over a JSON snapshot. See pi's source for the bridge protocol.
+// synchronous `store`/`load` over a JSON snapshot. Before the script runs it freezes the built-ins
+// and makes the built-in globals read-only. See pi's source for the bridge protocol.
 
 const MAX_STORE_VALUE_CHARS = 256 * 1024
 
 const MAX_STORE_TOTAL_CHARS = 1024 * 1024
 
+const MAX_OUTPUT_CHARS = 16 * 1024 * 1024
+
+const MAX_OUTPUT_ITEMS = 100_000
+
 const IMAGE_HELPER_EXPECTS =
-  'image expects a non-empty image URL string, an object with image_url, or a raw MCP image block'
+  'image expects a non-empty image URL string, an object with image_url, or an image block { type: "image", data, mimeType }'
 
 export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJson) {
 	"use strict";
+
+	// Freeze every object reachable from the built-in globals, plus the intrinsics that are only
+	// reachable from instances (iterator and generator prototypes, %TypedArray%).
+	//
+	// Freezing alone breaks ordinary code through the "override mistake": a data property that is
+	// read-only on a prototype cannot be assigned on an instance either, so
+	// this.name = "MyError" in an Error subclass would throw. Commonly overridden properties
+	// become accessors whose setter defines an own property on the instance instead.
+	(function lockdown() {
+		const OVERRIDABLE = new Set(["constructor", "name", "message", "toString", "toLocaleString", "valueOf", "toJSON"]);
+		const seen = new Set([globalThis]);
+		const queue = [];
+		const add = (value) => {
+			if ((typeof value === "object" && value !== null) || typeof value === "function") {
+				if (!seen.has(value)) {
+					seen.add(value);
+					queue.push(value);
+				}
+			}
+		};
+
+		// Accessors from an object literal have no own prototype object, unlike function expressions,
+		// whose prototype.constructor would be converted again without end.
+		function allowOverride(object, key, value, enumerable) {
+			const { get, set } = Object.getOwnPropertyDescriptor(
+				{
+					get accessor() {
+						return value;
+					},
+					set accessor(next) {
+						if (this === object) {
+							throw new TypeError("Cannot assign to read only property '" + String(key) + "' of a built-in");
+						}
+						if ((typeof this !== "object" || this === null) && typeof this !== "function") return;
+						Object.defineProperty(this, key, { value: next, writable: true, enumerable: true, configurable: true });
+					},
+				},
+				"accessor",
+			);
+			Object.defineProperty(object, key, { get, set, enumerable, configurable: false });
+			add(get);
+			add(set);
+		}
+
+		for (const key of Reflect.ownKeys(globalThis)) {
+			const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+			add(descriptor.value);
+			add(descriptor.get);
+			add(descriptor.set);
+			if ("value" in descriptor && descriptor.configurable) {
+				Object.defineProperty(globalThis, key, { writable: false, configurable: false });
+			}
+		}
+		add(Object.getPrototypeOf(function* () {}));
+		add(Object.getPrototypeOf(async function () {}));
+		add(Object.getPrototypeOf(async function* () {}));
+		add(Object.getPrototypeOf(Int8Array));
+		add(Object.getPrototypeOf([][Symbol.iterator]()));
+		add(Object.getPrototypeOf(new Map()[Symbol.iterator]()));
+		add(Object.getPrototypeOf(new Set()[Symbol.iterator]()));
+		add(Object.getPrototypeOf(""[Symbol.iterator]()));
+		add(Object.getPrototypeOf(/a/[Symbol.matchAll]("")));
+		if (typeof Iterator === "function") {
+			if (typeof Iterator.prototype.map === "function") add(Object.getPrototypeOf([].values().map((x) => x)));
+			if (typeof Iterator.from === "function") add(Object.getPrototypeOf(Iterator.from({ next() {} })));
+		}
+
+		while (queue.length > 0) {
+			const object = queue.pop();
+			add(Object.getPrototypeOf(object));
+			const descriptors = Object.getOwnPropertyDescriptors(object);
+			for (const key of Reflect.ownKeys(descriptors)) {
+				const descriptor = descriptors[key];
+				if ("value" in descriptor) {
+					add(descriptor.value);
+					if (
+						descriptor.writable &&
+						descriptor.configurable &&
+						(object === Object.prototype || OVERRIDABLE.has(key))
+					) {
+						allowOverride(object, key, descriptor.value, descriptor.enumerable);
+					}
+				} else {
+					add(descriptor.get);
+					add(descriptor.set);
+				}
+			}
+			Object.freeze(object);
+		}
+	})();
 	const stringify = JSON.stringify;
 	const parse = JSON.parse;
 	const promiseThen = Promise.prototype.then;
 	const ErrorCtor = Error;
 	const TypeErrorCtor = TypeError;
+	const RangeErrorCtor = RangeError;
 	const pending = new Map();
 	let nextId = 1;
 	let finished = false;
@@ -52,6 +148,8 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 	function format(value) {
 		if (typeof value === "string") return value;
 		if (value instanceof ErrorCtor) return errorText(value);
+		// JSON.stringify turns NaN and Infinity into "null".
+		if (typeof value === "number") return String(value);
 		try {
 			const json = stringify(value);
 			return json === undefined ? String(value) : json;
@@ -60,11 +158,17 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 		}
 	}
 
+	// The host requires string fields. A script can set an error's name or message to anything, so
+	// they are coerced, and a value whose coercion throws gets a placeholder.
 	function describeError(error) {
-		if (error instanceof ErrorCtor) {
-			return stringify({ name: error.name, message: error.message, stack: errorText(error) });
+		try {
+			if (error instanceof ErrorCtor) {
+				return stringify({ name: String(error.name), message: String(error.message), stack: errorText(error) });
+			}
+			return stringify({ message: String(format(error)) });
+		} catch {
+			return stringify({ message: "The script threw a value that cannot be described" });
 		}
-		return stringify({ message: format(error) });
 	}
 
 	function caller(kind, name, spread) {
@@ -207,6 +311,26 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 	Object.defineProperty(globalThis, "store", { value: store, enumerable: true });
 	Object.defineProperty(globalThis, "load", { value: load, enumerable: true });
 
+	let outputChars = 0;
+	let outputItems = 0;
+
+	// Past the output limits the script fails: done() reports the error, so catching it does not
+	// resume output, and the host ends the script.
+	function output(kind, data, mimeType) {
+		if (finished) return;
+		outputChars += data.length;
+		outputItems++;
+		if (outputChars > ${MAX_OUTPUT_CHARS} || outputItems > ${MAX_OUTPUT_ITEMS}) {
+			const error = new RangeErrorCtor(
+				"script output exceeded the limit of ${MAX_OUTPUT_CHARS} characters or ${MAX_OUTPUT_ITEMS} text(), image(), and console calls. " +
+					"Print a summary instead, or write large data to a file with a tool.",
+			);
+			done(false, describeError(error));
+			throw error;
+		}
+		bridge("output", kind, data, mimeType);
+	}
+
 	// Primitives become their string form, everything else JSON.
 	function outputText(value) {
 		if (value === undefined || value === null || typeof value !== "object" && typeof value !== "function") {
@@ -223,7 +347,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 		} catch (error) {
 			throw new TypeErrorCtor(error instanceof ErrorCtor ? error.message : String(error));
 		}
-		if (!finished) bridge("output", "text", rendered);
+		output("text", rendered);
 	}
 
 	function imageUrl(value) {
@@ -237,9 +361,9 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 		}
 		if (typeof value.type !== "string") throw new TypeErrorCtor(${JSON.stringify(IMAGE_HELPER_EXPECTS)});
 		if (value.type !== "image") {
-			throw new TypeErrorCtor('image only accepts MCP image blocks, got "' + value.type + '"');
+			throw new TypeErrorCtor('image only accepts image blocks, got "' + value.type + '"');
 		}
-		if (typeof value.data !== "string" || value.data === "") throw new TypeErrorCtor("image expected MCP image data");
+		if (typeof value.data !== "string" || value.data === "") throw new TypeErrorCtor("image expected image block data");
 		if (value.data.toLowerCase().startsWith("data:")) return value.data;
 		return "data:;base64," + value.data;
 	}
@@ -278,7 +402,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 		if (!signature) {
 			throw new TypeErrorCtor("invalid image output. The image data is not a PNG, JPEG, GIF, or WebP image");
 		}
-		if (!finished) bridge("output", "image", data, signature[0]);
+		output("image", data, signature[0]);
 	}
 
 	function exit() {
@@ -296,7 +420,7 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 	const console = {};
 	for (const level of ["log", "info", "warn", "error", "debug"]) {
 		console[level] = (...args) => {
-			if (!finished) bridge("output", "text", args.map(format).join(" "));
+			output("console", args.map(format).join(" "));
 		};
 	}
 	Object.freeze(console);
@@ -309,12 +433,20 @@ export const PRELUDE_SOURCE = `(function (bridge, toolsJson, globalsJson, storeJ
 	Object.defineProperty(globalThis, "exit", { value: exit, enumerable: true });
 
 	return {
-		settle(id, ok, payload) {
+		settle(id, ok, payload, propertiesJson) {
 			const entry = pending.get(id);
 			if (!entry) return;
 			pending.delete(id);
 			if (!ok) {
-				entry.reject(new ErrorCtor(payload));
+				const error = new ErrorCtor(payload);
+				if (propertiesJson !== undefined) {
+					const properties = parse(propertiesJson);
+					for (const key of Object.keys(properties)) {
+						if (key === "name" || key === "message" || key === "stack") continue;
+						Object.defineProperty(error, key, { value: properties[key], writable: true, enumerable: true, configurable: true });
+					}
+				}
+				entry.reject(error);
 				return;
 			}
 			let value;

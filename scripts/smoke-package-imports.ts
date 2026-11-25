@@ -355,7 +355,7 @@ const main = async () => {
       private: true,
       dependencies: {
         // Dependency of @yolk-sdk/codemode; tarballs are extracted, not installed.
-        '@earendil-works/pi-codemode': '1.0.0',
+        '@earendil-works/pi-codemode': '1.6.0',
         '@effect/platform-node': '4.1.5',
         // Dependency of @yolk-sdk/emulators (./fortnox); tarballs are extracted, not installed.
         '@emulators/core': '0.12.0',
