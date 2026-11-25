@@ -105,10 +105,18 @@ for it. The emulator differs from Vercel in two ways: a non-suspending `await` (
 the next hook here while Vercel accepts it, and a disposed hook frees its token (and answers
 `TestWorkflowHookNotFoundError`) at once, while Vercel records the disposal at the run's next
 suspension. The emulator does not model reading a hook more than once, nor the platform hook's
-`getConflict()`. Executing a step loads the workflow runtime, so it needs the Node test
-environment. Ambient module mocks do not apply retry policy by themselves: wrap host step callbacks
-with `world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise platform
-retry attempts and `getStepMetadata().attempt`.
+`getConflict()`. Executing a step loads the workflow runtime, so it needs the Node test environment.
+Ambient module mocks do not apply retry policy by themselves: wrap host step callbacks with
+`world.step(...)` or call `world.runStep(...)` explicitly when the test must exercise platform retry
+attempts and `getStepMetadata().attempt`.
+
+`new TestWorkflowWorld({ discardStepExecution })` reproduces Workflow 5.8's speculative execution:
+before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`) it asks
+`discardStepExecution(metadata)`, and on `true` runs the body once, discards its outcome (never
+stored, retried or counted in `stepAttempts`; its stream writes stay) and runs it again with the
+same `stepId` and `attempt`. The discarded execution settles before the kept one starts (Vercel may
+run them side by side), so a discarded body that never settles blocks the step;
+`world.inspect(runId).discardedStepExecutions` lists each with its `outcome` (an Effect `Result`).
 
 Mock the ambient `workflow` module so production orchestration runs against the active test world:
 
@@ -379,17 +387,23 @@ available. Host apps still own active-run locking, stale-run guards, and cancell
 ### One step, several executions
 
 A step can run more than once: opt-in loop retries (`modelStepRetry`), platform retries
-(`fn.maxRetries`), and queue redelivery, which can run beside an execution that is still streaming.
+(`fn.maxRetries`), queue redelivery, which can run beside an execution that is still streaming, and
+Workflow 5.8's speculative execution, which starts a step body (of a step with `maxRetries > 0`)
+before its start is recorded and, when that start is refused, discards the outcome and runs the body
+again under the same `attempt`, possibly beside the first.
 Every execution starts from the same `eventSequence`. A model step's second execution calls the
 model again and streams a different answer, so without more the same ids carry different events and
 a client de-duping by `eventId` keeps the first execution's early deltas plus the second's tail.
 
-Pass an `executionId` unique per execution, and pass it on exactly the events the model call
-produces: every event from `LLMStreamStart` through `AssistantMessage`/`UsageUpdate` (deltas, tool
-input, provider tool results). `LLMStreamStart` must carry it: it is identical in every execution,
-so with a plain id the second start would be de-duped and the client could not tell the executions
-apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is unique per execution: a loop
-retry is a new step id, and each platform retry or redelivery a new attempt. The sequencer appends
+Pass an `executionId` unique per execution of the step body, and pass it on exactly the events the
+model call produces: every event from `LLMStreamStart` through `AssistantMessage`/`UsageUpdate`
+(deltas, tool input, provider tool results). `LLMStreamStart` must carry it: it is identical in
+every execution, so with a plain id the second start would be de-duped and the client could not tell
+the executions apart. `${stepId}:${attempt}` from `workflow`'s `getStepMetadata()` is not unique: a
+speculative re-execution repeats both. Generate the id once at the start of the step body, for
+example `${stepId}:${attempt}:${crypto.randomUUID()}`; step bodies are not replayed, so nothing
+needs to compute it again. `TestWorkflowWorld`'s `discardStepExecution` reproduces speculative
+re-execution in tests ([Test Workflow behavior](#test-workflow-behavior)). The sequencer appends
 it to the id and sets it as the event's `executionId` field (removed without it). Every written event
 also carries the `streamId` field, so clients keep each run's turns apart and a terminal event
 closes its own run (never parse either from the id: both contain `:`). Both must be non-empty
@@ -406,8 +420,9 @@ execution writes the same events. Ledgered tool calls replay their recorded resu
 not ledgered and run again, so a re-executed batch can write a different result under the same id.
 
 ```ts
+// Once per step body: `attempt` repeats when Workflow discards a body's outcome and runs it again.
 const { stepId, attempt } = getStepMetadata()
-const executionId = `${stepId}:${attempt}`
+const executionId = `${stepId}:${attempt}:${crypto.randomUUID()}`
 
 yield * writeDurableAgentEvent({ writer, event, streamId, turn, executionId, state })
 ```

@@ -102,11 +102,15 @@ const writeSequencedWorkflowEvent = (input: {
     yield* Ref.set(input.eventSequence, result.nextEventSequence)
   })
 
-/** `<stepId>:<attempt>` of the running step: unique per execution of it. */
+/**
+ * `<stepId>:<attempt>:<uuid>` of the running step: unique per execution of its body. Call it once
+ * per body. `attempt` alone repeats once a step allows retries: Workflow 5.8 re-runs a discarded
+ * speculative body of a `maxRetries > 0` step under it (the steps here set `maxRetries = 0`).
+ */
 const stepExecutionId = () => {
   const { stepId, attempt } = getStepMetadata()
 
-  return `${stepId}:${attempt}`
+  return `${stepId}:${attempt}:${crypto.randomUUID()}`
 }
 
 const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
@@ -257,8 +261,9 @@ export async function runAgentWorkflowModelStep(input: {
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
   const workflowRunId = getWorkflowMetadata().workflowRunId
-  // Every execution of this step (loop retry: new step id; platform retry or redelivery: new
-  // attempt) streams from the same `eventSequence`, so its live events carry their own execution.
+  // Every execution of this step (loop retry, redelivery, and a platform retry or speculative
+  // re-run once it allows retries) streams from the same `eventSequence`, so its live events carry
+  // their own.
   const executionId = stepExecutionId()
 
   return await Effect.runPromise(

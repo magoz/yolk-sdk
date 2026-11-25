@@ -56,8 +56,11 @@ export type SequenceDurableAgentEventInput<Event extends object = object> = {
    * `writeDurableAgentEvent`).
    *
    * Every execution of a step starts from the same `eventSequence`, and a step runs more than
-   * once (opt-in loop retries, platform retries, queue redelivery beside a running execution).
-   * Set it, unique per execution (for example `${stepId}:${attempt}` from `getStepMetadata()`), on
+   * once (opt-in loop retries, platform retries, queue redelivery beside a running execution,
+   * Workflow 5.8 speculative execution). Make it unique per execution of the step body, not per
+   * attempt: a speculative re-execution repeats `getStepMetadata()`'s `stepId` and `attempt`.
+   * Generate it once at the start of the body (for example
+   * `${stepId}:${attempt}:${crypto.randomUUID()}`; bodies are not replayed) and set it on
    * every event the model call produces, from `LLMStreamStart` through `AssistantMessage` and
    * `UsageUpdate`; `LLMStreamStart` must carry it. Leave it off host events (a promoted user
    * message, the terminal event written after the commit). A receipt replay writes only that

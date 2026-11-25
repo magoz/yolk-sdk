@@ -87,13 +87,16 @@ ${streamId}:${turn}:${eventSequence}:${executionId}
 Clients should de-dupe by `eventId` during resume/reconnect.
 
 Every execution of a step starts from the same `eventSequence`, and a step can run more than once
-(loop retries, platform retries, queue redelivery). Pass an `executionId` unique per execution, such
-as `${stepId}:${attempt}` from `getStepMetadata()`, on every event the model call produces, from
-`LLMStreamStart` (required) through `AssistantMessage`/`UsageUpdate`. The sequencer appends it to the
-id and sets it on the event with the `streamId` and the step's `turn` as `executionTurn`, so a
-step's `turn` must be the turn its model call streams (`runModelTurn`'s `turn`; a non-negative safe
-integer, or sequencing throws). Leave it off host events (a promoted user message, the terminal
-event written after the commit); a receipt replay rewrites only that terminal event.
+(loop retries, platform retries, queue redelivery, Workflow 5.8 speculative execution). Pass an
+`executionId` unique per execution of the step body, generated once at its start, such as
+`${stepId}:${attempt}:${crypto.randomUUID()}` (`getStepMetadata()`'s `stepId` and `attempt` alone
+repeat: speculative execution re-runs a discarded body under the same attempt, possibly beside it),
+on every event the model call produces, from `LLMStreamStart` (required) through
+`AssistantMessage`/`UsageUpdate`. The sequencer appends it to the id and sets it on the event with
+the `streamId` and the step's `turn` as `executionTurn`, so a step's `turn` must be the turn its
+model call streams (`runModelTurn`'s `turn`; a non-negative safe integer, or sequencing throws).
+Leave it off host events (a promoted user message, the terminal event written after the commit); a
+receipt replay rewrites only that terminal event.
 Yolk clients then remove a superseded execution's output, drop its later events and late starts,
 and, at `AgentEnd` or `AgentAwaitingInput`, show the committed answer and the calls the tool batch
 ran for each turn in which a newer execution superseded an older one (limits: a turn retried after a

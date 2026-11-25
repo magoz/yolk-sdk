@@ -1,0 +1,7 @@
+---
+'@yolk-sdk/vercel-workflows': patch
+---
+
+Docs: an `executionId` must be unique per execution of the step body, not per attempt. Workflow 5.8's speculative execution starts the body of a step with `maxRetries > 0` before its start is recorded; when that start is refused it discards the outcome and runs the body again under the same `getStepMetadata()` `stepId` and `attempt`, possibly beside the first. The documented example `${stepId}:${attempt}` then repeats, both executions write the same event ids, and `@yolk-sdk/agent` clients splice the two answers without seeing the turn as re-executed. Generate the id once at the start of the step body instead, for example `${stepId}:${attempt}:${crypto.randomUUID()}` (step bodies are not replayed).
+
+`TestWorkflowWorld` takes an opt-in `discardStepExecution: (step: TestWorkflowStepMetadata) => boolean` option (`new TestWorkflowWorld({ discardStepExecution })`). Before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`), a `true` answer runs the body once, discards its outcome (never stored, retried or counted in `stepAttempts`; its stream writes stay) and runs it again with the same `stepId` and `attempt`; later attempts keep their numbers. The discarded execution settles before the kept one starts. `inspect(runId).discardedStepExecutions` lists each with its `outcome`, an Effect `Result` (new types `TestWorkflowWorldOptions`, `TestWorkflowDiscardedStepExecution`).

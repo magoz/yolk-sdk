@@ -8,7 +8,11 @@ import {
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowStepRetryPolicy
 } from '../src/workflow.ts'
-import { TestWorkflowWorld } from '../src/testing/index.ts'
+import {
+  TestWorkflowWorld,
+  type TestWorkflowStepMetadata,
+  type TestWorkflowWorldOptions
+} from '../src/testing/index.ts'
 
 // Every execution of a model step starts from the same `eventSequence`, so
 // without an execution id a retried step wrote different events under the first execution's ids
@@ -73,11 +77,18 @@ const textsOf = (events: ReadonlyArray<WrittenEvent>, executionId: string | unde
       : []
   )
 
+/** The recommended id: generated once per execution of the step body (step bodies never replay). */
+const uniqueExecutionId = (step: TestWorkflowStepMetadata) =>
+  `${step.stepId}:${step.attempt}:${crypto.randomUUID()}`
+
 const runRetriedModelStep = async (input: {
   readonly modelStepRetry?: VercelAgentWorkflowStepRetryPolicy
   readonly platformMaxRetries: number
+  readonly discardStepExecution?: TestWorkflowWorldOptions['discardStepExecution']
+  readonly executionIdOf?: (step: TestWorkflowStepMetadata) => string
 }) => {
-  const world = new TestWorkflowWorld()
+  const world = new TestWorkflowWorld({ discardStepExecution: input.discardStepExecution })
+  const executionIdOf = input.executionIdOf ?? uniqueExecutionId
 
   // Execution 1 streams two deltas and fails (a provider error); execution 2 answers differently.
   const outputs = [
@@ -91,8 +102,7 @@ const runRetriedModelStep = async (input: {
     async (
       stepInput: VercelAgentWorkflowModelStepInput
     ): Promise<VercelAgentWorkflowModelStepResult> => {
-      const { stepId, attempt } = TestWorkflowWorld.getStepMetadata()
-      const executionId = `${stepId}:${attempt}`
+      const executionId = executionIdOf(TestWorkflowWorld.getStepMetadata())
       const deltas = outputs[executionIds.length] ?? []
       const isLast = executionIds.length === outputs.length - 1
       const turn = stepInput.state.turn
@@ -191,7 +201,12 @@ describe('model-step executions write distinct durable event ids (#305)', () => 
       modelStepRetry: { maxAttempts: 2 },
       platformMaxRetries: 0
     },
-    { label: 'a platform retry (fn.maxRetries)', platformMaxRetries: 1 }
+    { label: 'a platform retry (fn.maxRetries)', platformMaxRetries: 1 },
+    {
+      label: 'a speculative re-execution under the same attempt (Workflow 5.8)',
+      platformMaxRetries: 1,
+      discardStepExecution: () => true
+    }
   ])('keeps every event of a model step re-run by $label', async config => {
     const { status, executionIds, events } = await runRetriedModelStep(config)
 
@@ -210,5 +225,19 @@ describe('model-step executions write distinct durable event ids (#305)', () => 
         Predicate.isTagged(event, 'LLMStreamStart') ? [event.executionId] : []
       )
     ).toEqual(executionIds)
+  })
+
+  // Workflow 5.8 re-runs a discarded body under the same `attempt`, so `${stepId}:${attempt}`
+  // repeats: both executions share every id and de-dupe splices their answers.
+  it('splices a speculative re-execution whose id is only <stepId>:<attempt>', async () => {
+    const { executionIds, events } = await runRetriedModelStep({
+      platformMaxRetries: 1,
+      discardStepExecution: () => true,
+      executionIdOf: ({ stepId, attempt }) => `${stepId}:${attempt}`
+    })
+
+    expect(new Set(executionIds).size).toBe(1)
+    expect(aliasedEventIds(events)).not.toEqual([])
+    expect(textsOf(dedupeByEventId(events), executionIds[0])).toEqual(['Hel', 'lo w', ' cannot'])
   })
 })

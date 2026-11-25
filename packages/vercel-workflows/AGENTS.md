@@ -22,8 +22,10 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - `./testing` ships `TestWorkflowWorld`: a behavioral platform emulator (run lifecycle,
   append-only durable streams with write-after-close -> 409 conflicts and idempotent close (as
   `@workflow/world-vercel`), retrying step executor, hooks/resume, cancellation, `sdk.start`
-  attributes checked with the installed `@workflow/world` validator and shown in `inspect`) plus
-  `testWorkflowModule` for mocking the ambient `workflow` module.
+  attributes checked with the installed `@workflow/world` validator and shown in `inspect`, opt-in
+  speculative re-execution `discardStepExecution` for `maxRetries > 0` steps only, as Workflow 5.8
+  `mayRunBeforeItsStart`, run sequentially and listed in `inspect`) plus `testWorkflowModule` for
+  mocking the ambient `workflow` module.
   Its step executor stores every step error with the installed `workflow` runtime's own serializer
   (`@workflow/core/serialization`, resolved through `workflow` natively so `vi.mock('workflow')`
   never replaces it) and throws only the value read back, with the platform's FatalError rules
@@ -61,7 +63,9 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   by `eventId`, so duplicate ids across runs drop legitimate live events.
 - Every execution of a step starts from the same `eventSequence`, so every event a model call
   produces (`LLMStreamStart` through `AssistantMessage`/`UsageUpdate`) needs an `executionId`
-  unique per execution (`${stepId}:${attempt}` from `getStepMetadata()`; non-empty, trimmed, or
+  unique per execution of the step body, generated once in it (document
+  `${stepId}:${attempt}:${crypto.randomUUID()}`, never `${stepId}:${attempt}` alone: Workflow 5.8
+  speculative execution re-runs a discarded body under the same attempt; non-empty, trimmed, or
   sequencing throws). The sequencer appends it to the id and sets the event's `executionId` field
   and `executionTurn` (its `turn`, a non-negative safe integer or sequencing throws; it must equal
   the model call's `LLMStreamStart.turn`: clients that missed the start start the turn from it, and

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Result } from 'effect'
 import {
   defaultTestWorkflowStepMaxRetries,
   TestWorkflowHookConflictError,
@@ -647,6 +648,201 @@ describe('TestWorkflowWorld step executor', () => {
 
     await world.settled(runId)
     expect(metadataError).toBeInstanceOf(Error)
+  })
+})
+
+// Workflow 5.8 starts a `maxRetries > 0` step body before its start is recorded; a refused start
+// discards the outcome and the body runs again with the same `getStepMetadata()`.
+describe('TestWorkflowWorld speculative step execution (discardStepExecution)', () => {
+  it('runs the body again with the same stepId and attempt, discarding the first outcome', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    const seen: Array<{ readonly stepId: string; readonly attempt: number }> = []
+
+    const step = Object.assign(
+      async () => {
+        const { stepId, attempt } = TestWorkflowWorld.getStepMetadata()
+        seen.push({ stepId, attempt })
+        const writer = TestWorkflowWorld.getWritable<string>().getWriter()
+        await writer.write(`execution ${seen.length}`)
+        writer.releaseLock()
+
+        return `answer ${seen.length}`
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    const [first, second] = seen
+
+    expect(seen).toHaveLength(2)
+    expect(second).toEqual(first)
+    await expect(world.sdk.getRun<string>(runId).returnValue).resolves.toBe('answer 2')
+    expect(world.inspect(runId)).toMatchObject({
+      // The discarded execution's stream writes stay, as on the platform.
+      chunks: ['execution 1', 'execution 2'],
+      stepAttempts: new Map([['model', 1]]),
+      discardedStepExecutions: [
+        {
+          stepName: 'model',
+          stepId: first?.stepId,
+          attempt: 1,
+          outcome: Result.succeed('answer 1')
+        }
+      ]
+    })
+  })
+
+  it('neither stores nor retries a discarded execution that threw', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    const fatal = Object.assign(new Error('stop'), { name: 'FatalError' })
+    let executions = 0
+
+    const step = Object.assign(
+      async () => {
+        executions += 1
+
+        if (executions === 1) throw fatal
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(world.status(runId)).toBe('completed')
+    expect(world.inspect(runId)).toMatchObject({
+      stepAttempts: new Map([['model', 1]]),
+      unstorableStepErrors: [],
+      discardedStepExecutions: [{ attempt: 1, outcome: Result.fail(fatal) }]
+    })
+  })
+
+  it('never records a discarded execution that threw an unstorable value', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    const unstorable = new Error('crash', { cause: new (class Issue {})() })
+    let executions = 0
+
+    const step = Object.assign(
+      async () => {
+        executions += 1
+
+        if (executions === 1) throw unstorable
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(world.status(runId)).toBe('completed')
+    expect(world.inspect(runId)).toMatchObject({
+      stepAttempts: new Map([['model', 1]]),
+      unstorableStepErrors: [],
+      discardedStepExecutions: [{ attempt: 1, outcome: Result.fail(unstorable) }]
+    })
+  })
+
+  it('re-executes a step without maxRetries, which takes the platform default', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    let executions = 0
+
+    const step = async () => {
+      executions += 1
+
+      return 'ok'
+    }
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'model'), [])
+    await world.settled(runId)
+
+    expect(executions).toBe(2)
+    expect(world.inspect(runId).discardedStepExecutions).toHaveLength(1)
+  })
+
+  it('never re-executes a step with maxRetries: 0', async () => {
+    const asked: Array<string> = []
+
+    const world = new TestWorkflowWorld({
+      discardStepExecution: ({ stepName }) => {
+        asked.push(stepName)
+
+        return true
+      }
+    })
+
+    let executions = 0
+
+    const step = Object.assign(
+      async () => {
+        executions += 1
+
+        return 'ok'
+      },
+      { maxRetries: 0 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'once'), [])
+    await world.settled(runId)
+
+    expect(executions).toBe(1)
+    expect(asked).toEqual([])
+    expect(world.inspect(runId).discardedStepExecutions).toEqual([])
+  })
+
+  it('leaves the attempt numbering of real retries unchanged', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: () => true })
+    const attempts: Array<number> = []
+
+    const step = Object.assign(
+      async () => {
+        attempts.push(TestWorkflowWorld.getStepMetadata().attempt)
+
+        // Every kept execution before the last attempt fails; discarded ones succeed, unseen.
+        if (attempts.length % 2 === 0 && attempts.length < 6) throw new Error('transient')
+
+        return `attempt ${attempts.at(-1)}`
+      },
+      { maxRetries: 2 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'flaky'), [])
+    await world.settled(runId)
+
+    expect(attempts).toEqual([1, 1, 2, 2, 3, 3])
+    await expect(world.sdk.getRun<string>(runId).returnValue).resolves.toBe('attempt 3')
+
+    const { stepAttempts, discardedStepExecutions } = world.inspect(runId)
+
+    expect(stepAttempts.get('flaky')).toBe(3)
+    expect(discardedStepExecutions.map(execution => execution.attempt)).toEqual([1, 2, 3])
+  })
+
+  it('re-executes only the attempts the option picks', async () => {
+    const world = new TestWorkflowWorld({ discardStepExecution: ({ attempt }) => attempt === 2 })
+    const attempts: Array<number> = []
+
+    const step = Object.assign(
+      async () => {
+        attempts.push(TestWorkflowWorld.getStepMetadata().attempt)
+
+        if (attempts.length === 1) throw new Error('transient')
+
+        return 'ok'
+      },
+      { maxRetries: 1 }
+    )
+
+    const { runId } = world.start(async () => world.runStep(step, [], 'flaky'), [])
+    await world.settled(runId)
+
+    expect(attempts).toEqual([1, 2, 2])
+    expect(world.inspect(runId).stepAttempts.get('flaky')).toBe(2)
   })
 })
 
