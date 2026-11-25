@@ -1,5 +1,14 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.161
+
+### Patch Changes
+
+- 34b7f96: Advance in lockstep with `@yolk-sdk/codemode`: `readOnlyNestedCallGate` can admit model-invoking reads such as `classify` through `admitModelCall`. These packages have no direct changes in this release.
+- Updated dependencies [34b7f96]
+  - @yolk-sdk/agent@0.1.0-canary.161
+  - @yolk-sdk/conformance@0.1.0-canary.161
+
 ## 0.1.0-canary.160
 
 ### Patch Changes
