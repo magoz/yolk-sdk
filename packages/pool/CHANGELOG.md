@@ -1,5 +1,13 @@
 # @yolk-sdk/pool
 
+## 0.1.0-canary.164
+
+### Patch Changes
+
+- 338a76f: Advance in lockstep with `@yolk-sdk/vercel-workflows`: its Cloudflare runtime can prepare a run's object before the run starts (`prepareRun`, `startWithRunId`, `registerRunPreloads`). These packages have no direct changes in this release.
+- Updated dependencies [338a76f]
+  - @yolk-sdk/agent@0.1.0-canary.164
+
 ## 0.1.0-canary.163
 
 ### Patch Changes
