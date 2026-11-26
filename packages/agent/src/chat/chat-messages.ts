@@ -10,11 +10,8 @@ import {
   ProviderToolCallPart,
   ProviderToolResultPart,
   type InputRequest,
-  type InputResponse,
   type InteractionRequest,
-  type InteractionResponse,
   type QuestionRequest,
-  type QuestionResponse,
   type ToolApprovalRequest,
   ToolResult,
   ToolResultMessage,
@@ -32,129 +29,15 @@ import {
   type AgentMessage,
   type AssistantPart,
   type Content,
-  type MessageAnnotations,
-  type MessageAuthor,
   type MessageEnvelope
 } from '@yolk-sdk/agent/protocol'
-
-export type ChatPartState = 'streaming' | 'done'
-
-export type ChatToolState =
-  | { readonly _tag: 'Called' }
-  | { readonly _tag: 'InputStreaming'; readonly input: string }
-  | { readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest }
-  | {
-      readonly _tag: 'Denied'
-      readonly reason: string
-      /** The approval request it denies, when that was seen (it names the denied call). */
-      readonly request?: ToolApprovalRequest
-    }
-  | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
-  | {
-      readonly _tag: 'QuestionAnswered'
-      readonly response: QuestionResponse
-      readonly request?: QuestionRequest
-    }
-  | {
-      readonly _tag: 'QuestionCancelled'
-      readonly response: QuestionResponse
-      readonly request?: QuestionRequest
-    }
-  | { readonly _tag: 'InputRequested'; readonly request: InputRequest }
-  | {
-      readonly _tag: 'InputSubmitted'
-      readonly response: InputResponse
-      readonly request?: InputRequest
-    }
-  | {
-      readonly _tag: 'InputCancelled'
-      readonly response: InputResponse
-      readonly request?: InputRequest
-    }
-  | { readonly _tag: 'InteractionRequested'; readonly request: InteractionRequest }
-  | {
-      readonly _tag: 'InteractionSubmitted'
-      readonly response: InteractionResponse
-      readonly request?: InteractionRequest
-    }
-  | {
-      readonly _tag: 'InteractionCancelled'
-      readonly response: InteractionResponse
-      readonly request?: InteractionRequest
-    }
-  | { readonly _tag: 'Running'; readonly startedAtMs: number }
-  | {
-      readonly _tag: 'Completed'
-      readonly result: ToolResult
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | {
-      readonly _tag: 'Accepted'
-      readonly result: ToolResult
-      readonly resultEnvelope?: MessageEnvelope
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | {
-      readonly _tag: 'Errored'
-      readonly message: string
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | { readonly _tag: 'ProviderCompleted'; readonly result: ToolResult }
-
-export const ChatToolState = Data.taggedEnum<ChatToolState>()
-
-export type AgentChatPart =
-  | {
-      readonly _tag: 'Text'
-      readonly id: string
-      readonly content: Content
-      readonly state: ChatPartState
-    }
-  | {
-      readonly _tag: 'Reasoning'
-      readonly id: string
-      readonly text: string
-      readonly state: ChatPartState
-    }
-  | {
-      readonly _tag: 'ToolCall'
-      readonly id: string
-      readonly call: ToolCall
-      readonly state: ChatToolState
-    }
-  | {
-      readonly _tag: 'ToolResult'
-      readonly id: string
-      readonly toolCallId: string
-      readonly name: string
-      readonly content: Content
-      readonly isError?: boolean
-      readonly acceptance?: ToolResult['acceptance']
-      readonly structuredContent?: unknown
-    }
-  | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
-
-export const AgentChatPart = Data.taggedEnum<AgentChatPart>()
-
-export type AgentChatMessage = {
-  readonly id: string
-  readonly turnId: string
-  readonly sequence: number
-  readonly role: 'user' | 'assistant' | 'system'
-  readonly createdAtMs?: number
-  readonly author?: MessageAuthor
-  readonly annotations?: MessageAnnotations
-  readonly parts: ReadonlyArray<AgentChatPart>
-  /**
-   * Host instruction messages (ADR 0007) that followed this message in the transcript. Never
-   * rendered; `toAgentMessages` emits them right after this message, so a transcript rebuilt from
-   * chat messages keeps them and the loop does not re-append them.
-   */
-  readonly instructionsAfter?: ReadonlyArray<UserMessage>
-}
+import {
+  AgentChatPart,
+  ChatToolState,
+  type AgentChatExecutionOutput,
+  type AgentChatMessage,
+  type ChatPartState
+} from './chat-schemas.ts'
 
 export type DeleteChatTurnResult =
   | { readonly _tag: 'NotFound' }
@@ -198,8 +81,64 @@ const turnId = (sequence: number) => `turn-${sequence}`
 
 const lastTurnId = (messages: ReadonlyArray<AgentChatMessage>) => messages.at(-1)?.turnId
 
-const nextMessageSequence = (messages: ReadonlyArray<AgentChatMessage>) =>
-  messages.reduce((max, message) => Math.max(max, message.sequence), -1) + 1
+/**
+ * The sequence of the next message: one past the highest (a committed answer can sit before later
+ * messages, so the last message's is not always the highest). Runs only when an event creates a
+ * message.
+ */
+const nextMessageSequence = (messages: ReadonlyArray<AgentChatMessage>) => {
+  let max = -1
+
+  for (const message of messages) {
+    if (message.sequence > max) max = message.sequence
+  }
+
+  return max + 1
+}
+
+/**
+ * `messages` with the message at `index` replaced by `update(message)`. The same array when the
+ * update returns the message itself (or `index` is out of range): every other message keeps its
+ * reference, and an unchanged chat keeps the array's.
+ */
+const updateMessageAt = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  index: number,
+  update: (message: AgentChatMessage) => AgentChatMessage
+): ReadonlyArray<AgentChatMessage> => {
+  const message = messages[index]
+
+  if (message === undefined) return messages
+
+  const next = update(message)
+
+  if (next === message) return messages
+
+  const updated = messages.slice()
+
+  updated[index] = next
+
+  return updated
+}
+
+/** `message` with `parts` mapped by `update`; the same message when no part changed. */
+const updateMessageParts = (
+  message: AgentChatMessage,
+  update: (part: AgentChatPart) => AgentChatPart
+): AgentChatMessage => {
+  let parts: Array<AgentChatPart> | undefined
+
+  message.parts.forEach((part, index) => {
+    const next = update(part)
+
+    if (next === part) return
+
+    parts ??= message.parts.slice()
+    parts[index] = next
+  })
+
+  return parts === undefined ? message : { ...message, parts }
+}
 
 type ChatMessageEnvelopeFields = {
   createdAtMs?: MessageEnvelope['createdAtMs']
@@ -897,23 +836,42 @@ type ToolPartScope = {
   readonly replays: boolean
 }
 
+/**
+ * The last index in `[from, end)` whose message satisfies `predicate` (`-1`: none). Scans back from
+ * `end`, so a match near the chat's end (the current turn) costs only the messages after it.
+ */
 const findLastMessageIndex = (
   messages: ReadonlyArray<AgentChatMessage>,
-  predicate: (message: AgentChatMessage, index: number) => boolean
-) =>
-  messages.reduce(
-    (lastIndex, message, index) => (predicate(message, index) ? index : lastIndex),
-    -1
-  )
+  predicate: (message: AgentChatMessage) => boolean,
+  from = 0,
+  end = messages.length
+) => {
+  for (let index = end - 1; index >= Math.max(from, 0); index -= 1) {
+    const message = messages[index]
 
+    if (message !== undefined && predicate(message)) return index
+  }
+
+  return -1
+}
+
+/**
+ * The index of the latest message with the id (`-1`: none, or `None`). Ids can repeat: a terminal
+ * event whose run messages the chat lacks appends them numbered from 0 (`appendRunMessagesIfEmpty`,
+ * a second `message-0-user`). The search runs back from the end, where the turn anchors it looks
+ * for are (each recorded as the chat's last message), so the latest message with the id wins.
+ */
 const indexOfMessage = (messages: ReadonlyArray<AgentChatMessage>, id: Option.Option<string>) =>
   Option.match(id, {
     onNone: () => -1,
-    onSome: messageId => messages.findIndex(message => message.id === messageId)
+    onSome: messageId => findLastMessageIndex(messages, message => message.id === messageId)
   })
 
-const lastUserIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
-  findLastMessageIndex(messages, message => message.role === 'user')
+const isUserMessage = (message: AgentChatMessage) => message.role === 'user'
+
+/** The last user message before `end` (`-1`: none). */
+const lastUserIndex = (messages: ReadonlyArray<AgentChatMessage>, end = messages.length) =>
+  findLastMessageIndex(messages, isUserMessage, 0, end)
 
 /**
  * Where the current model turn's output starts in the chat: after this message (none: the chat was
@@ -922,12 +880,15 @@ const lastUserIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
 export type ChatTurnAnchor = Option.Option<string> | undefined
 
 /**
- * The index of the first chat message a turn's tool events may match a call in: providers reuse
- * call ids across turns, so a call is matched only after its turn's start, never in an earlier
- * turn. Without a known start (none seen, or its message is gone) every message, the last one
- * holding the call winning, as replays of an earlier call without event ids expect.
+ * The index of the first chat message a turn's tool events may match a call in (package-internal):
+ * providers reuse call ids across turns, so a call is matched only after its turn's start, never in
+ * an earlier turn. Without a known start (none seen, or its message is gone) every message, the last
+ * one holding the call winning, as replays of an earlier call without event ids expect.
  */
-const turnStartIndex = (messages: ReadonlyArray<AgentChatMessage>, anchor: ChatTurnAnchor) => {
+export const turnStartIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  anchor: ChatTurnAnchor
+) => {
   if (anchor === undefined) return 0
 
   const index = indexOfMessage(messages, anchor)
@@ -943,8 +904,8 @@ const toolCallMessageIndex = (
 ) =>
   findLastMessageIndex(
     messages,
-    (message, index) =>
-      index >= scope.from && !scope.foreign.has(message.id) && hasToolCall(message, callId)
+    message => !scope.foreign.has(message.id) && hasToolCall(message, callId),
+    scope.from
   )
 
 type ToolCallPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
@@ -1086,13 +1047,14 @@ const matchedToolCallIndex = (
 
   const earlier = findLastMessageIndex(
     messages,
-    (message, messageIndex) =>
-      messageIndex < scope.from &&
+    message =>
       !scope.foreign.has(message.id) &&
       message.parts.some(
         part =>
           Predicate.isTagged(part, 'ToolCall') && part.call.id === callId && replayed(part) === true
-      )
+      ),
+    0,
+    scope.from
   )
 
   return earlier === -1 ? index : earlier
@@ -1141,7 +1103,10 @@ export const isLatestTurnAnchor = (
 ) => {
   const index = indexOfMessage(messages, anchor)
 
-  return (Option.isNone(anchor) || index !== -1) && lastUserIndex(messages) <= index
+  return (
+    (Option.isNone(anchor) || index !== -1) &&
+    findLastMessageIndex(messages, isUserMessage, index + 1) === -1
+  )
 }
 
 const findMessageIndex = (messages: ReadonlyArray<AgentChatMessage>, messageId: string) =>
@@ -1238,9 +1203,9 @@ const lastAssistantIndex = (
   foreign: ForeignMessages = noForeignMessages,
   from = 0
 ) => {
-  const index = findLastMessageIndex(messages, message => message.role === 'assistant')
+  const index = findLastMessageIndex(messages, message => message.role === 'assistant', from)
 
-  return index === -1 || index < from || foreign.has(messages[index]?.id ?? '')
+  return index === -1 || foreign.has(messages[index]?.id ?? '')
     ? Option.none<number>()
     : Option.some(index)
 }
@@ -1273,9 +1238,7 @@ const appendAssistantPart = (
       ]
     },
     onSome: index =>
-      messages.map((message, messageIndex) =>
-        messageIndex === index ? { ...message, parts: [...message.parts, part] } : message
-      )
+      updateMessageAt(messages, index, message => ({ ...message, parts: [...message.parts, part] }))
   })
 
 const appendAssistantTextDelta = (
@@ -1300,30 +1263,26 @@ const appendAssistantTextDelta = (
     )
   }
 
-  return messages.map((message, messageIndex) =>
-    messageIndex === index.value
-      ? {
-          ...message,
-          parts: hasStreamingTextPart(message)
-            ? message.parts.map(part =>
-                Predicate.isTagged(part, 'Text') && part.state === 'streaming'
-                  ? {
-                      ...part,
-                      content: input.textSoFar ?? appendTextToContent(part.content, input.delta)
-                    }
-                  : part
-              )
-            : [
-                ...message.parts,
-                AgentChatPart.Text({
-                  id: `message-${message.sequence}-assistant-text`,
-                  content,
-                  state: 'streaming'
-                })
-              ]
-        }
-      : message
-  )
+  return updateMessageAt(messages, index.value, message => ({
+    ...message,
+    parts: hasStreamingTextPart(message)
+      ? message.parts.map(part =>
+          Predicate.isTagged(part, 'Text') && part.state === 'streaming'
+            ? {
+                ...part,
+                content: input.textSoFar ?? appendTextToContent(part.content, input.delta)
+              }
+            : part
+        )
+      : [
+          ...message.parts,
+          AgentChatPart.Text({
+            id: `message-${message.sequence}-assistant-text`,
+            content,
+            state: 'streaming'
+          })
+        ]
+  }))
 }
 
 const appendAssistantReasoningDelta = (
@@ -1348,29 +1307,25 @@ const appendAssistantReasoningDelta = (
     )
   }
 
-  return messages.map((message, messageIndex) =>
-    messageIndex === index.value
-      ? {
-          ...message,
-          parts: message.parts.some(
-            part => Predicate.isTagged(part, 'Reasoning') && part.state === 'streaming'
-          )
-            ? message.parts.map(part =>
-                Predicate.isTagged(part, 'Reasoning') && part.state === 'streaming'
-                  ? { ...part, text: input.reasoningSoFar ?? `${part.text}${input.delta}` }
-                  : part
-              )
-            : [
-                ...message.parts,
-                AgentChatPart.Reasoning({
-                  id: `message-${message.sequence}-reasoning`,
-                  text,
-                  state: 'streaming'
-                })
-              ]
-        }
-      : message
-  )
+  return updateMessageAt(messages, index.value, message => ({
+    ...message,
+    parts: message.parts.some(
+      part => Predicate.isTagged(part, 'Reasoning') && part.state === 'streaming'
+    )
+      ? message.parts.map(part =>
+          Predicate.isTagged(part, 'Reasoning') && part.state === 'streaming'
+            ? { ...part, text: input.reasoningSoFar ?? `${part.text}${input.delta}` }
+            : part
+        )
+      : [
+          ...message.parts,
+          AgentChatPart.Reasoning({
+            id: `message-${message.sequence}-reasoning`,
+            text,
+            state: 'streaming'
+          })
+        ]
+  }))
 }
 
 const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolState => {
@@ -1476,17 +1431,13 @@ const appendToolCallPart = (
       ]
     },
     onSome: assistantIndex =>
-      messages.map((message, messageIndex) =>
-        messageIndex === assistantIndex
-          ? {
-              ...message,
-              parts: [
-                ...message.parts,
-                AgentChatPart.ToolCall({ id: `tool-call-${call.id}`, call, state })
-              ]
-            }
-          : message
-      )
+      updateMessageAt(messages, assistantIndex, message => ({
+        ...message,
+        parts: [
+          ...message.parts,
+          AgentChatPart.ToolCall({ id: `tool-call-${call.id}`, call, state })
+        ]
+      }))
   })
 }
 
@@ -1599,19 +1550,14 @@ const upsertToolCallPart = (
   const existingIndex = matchedToolCallIndex(messages, call.id, scope, sameCall(call))
 
   if (existingIndex !== -1) {
-    return messages.map((message, messageIndex) =>
-      messageIndex === existingIndex
-        ? {
-            ...message,
-            parts: message.parts.map(part =>
-              Predicate.isTagged(part, 'ToolCall') && part.call.id === call.id
-                ? keepsToolState(part, call, state)
-                  ? part
-                  : { ...part, call, state: mergeToolState(part.state, state) }
-                : part
-            )
-          }
-        : message
+    return updateMessageAt(messages, existingIndex, message =>
+      updateMessageParts(message, part =>
+        Predicate.isTagged(part, 'ToolCall') &&
+        part.call.id === call.id &&
+        !keepsToolState(part, call, state)
+          ? { ...part, call, state: mergeToolState(part.state, state) }
+          : part
+      )
     )
   }
 
@@ -1637,17 +1583,12 @@ const updateToolCallState = (
 
   return reached === undefined || replayed(reached) === false
     ? messages
-    : messages.map((message, messageIndex) =>
-        messageIndex === index
-          ? {
-              ...message,
-              parts: message.parts.map(part =>
-                Predicate.isTagged(part, 'ToolCall') && part.call.id === callId
-                  ? { ...part, state: update(part.state) }
-                  : part
-              )
-            }
-          : message
+    : updateMessageAt(messages, index, message =>
+        updateMessageParts(message, part =>
+          Predicate.isTagged(part, 'ToolCall') && part.call.id === callId
+            ? { ...part, state: update(part.state) }
+            : part
+        )
       )
 }
 
@@ -1659,20 +1600,29 @@ const appendToolInputDelta = (
   id: string,
   delta: string,
   scope: ToolPartScope
-): ReadonlyArray<AgentChatMessage> =>
-  messages.map((message, index) => ({
-    ...message,
-    parts:
-      index < scope.from || scope.foreign.has(message.id)
-        ? message.parts
-        : message.parts.map(part =>
-            Predicate.isTagged(part, 'ToolCall') &&
-            part.call.id === id &&
-            Predicate.isTagged(part.state, 'InputStreaming')
-              ? { ...part, state: { ...part.state, input: `${part.state.input}${delta}` } }
-              : part
-          )
-  }))
+): ReadonlyArray<AgentChatMessage> => {
+  let updated = messages
+
+  for (let index = Math.max(scope.from, 0); index < messages.length; index += 1) {
+    const message = messages[index]
+
+    if (message === undefined || scope.foreign.has(message.id) || !hasToolCall(message, id)) {
+      continue
+    }
+
+    updated = updateMessageAt(updated, index, current =>
+      updateMessageParts(current, part =>
+        Predicate.isTagged(part, 'ToolCall') &&
+        part.call.id === id &&
+        Predicate.isTagged(part.state, 'InputStreaming')
+          ? { ...part, state: { ...part.state, input: `${part.state.input}${delta}` } }
+          : part
+      )
+    )
+  }
+
+  return updated
+}
 
 const finalizeAssistantParts = (
   parts: ReadonlyArray<AgentChatPart>
@@ -1762,13 +1712,15 @@ const appendOrReplaceAssistantMessage = (
   scope: ToolPartScope
 ) => {
   const acceptedCallIds = new Set(
-    messages.flatMap((current, index) =>
-      (index < scope.from ? [] : current.parts).flatMap(part =>
-        Predicate.isTagged(part, 'ToolCall') && Predicate.isTagged(part.state, 'Accepted')
-          ? [part.call.id]
-          : []
+    messages
+      .slice(Math.max(scope.from, 0))
+      .flatMap(current =>
+        current.parts.flatMap(part =>
+          Predicate.isTagged(part, 'ToolCall') && Predicate.isTagged(part.state, 'Accepted')
+            ? [part.call.id]
+            : []
+        )
       )
-    )
   )
 
   const isAcceptedCallReplay = (part: AssistantPart) =>
@@ -1787,11 +1739,11 @@ const appendOrReplaceAssistantMessage = (
   const replayIndex = message.parts.some(isAcceptedCallReplay)
     ? findLastMessageIndex(
         messages,
-        (current, index) =>
-          index >= scope.from &&
+        current =>
           current.role === 'assistant' &&
           !scope.foreign.has(current.id) &&
-          messageToolCallIds.some(callId => hasToolCall(current, callId))
+          messageToolCallIds.some(callId => hasToolCall(current, callId)),
+        scope.from
       )
     : -1
 
@@ -1824,19 +1776,10 @@ const appendOrReplaceAssistantMessage = (
       ]
     },
     onSome: assistantIndex =>
-      messages.map((current, messageIndex) =>
-        messageIndex === assistantIndex
-          ? {
-              ...current,
-              parts: partsFromAssistantMessage(
-                message,
-                current.sequence,
-                current.parts,
-                acceptedCallIds
-              )
-            }
-          : current
-      )
+      updateMessageAt(messages, assistantIndex, current => ({
+        ...current,
+        parts: partsFromAssistantMessage(message, current.sequence, current.parts, acceptedCallIds)
+      }))
   })
 }
 
@@ -1865,14 +1808,21 @@ const appendOrphanToolResult = (
   ]
 }
 
+const hasErrorPart = (message: AgentChatMessage) =>
+  message.parts.some(part => Predicate.isTagged(part, 'Error'))
+
 const clearTransientParts = (
   messages: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatMessage> =>
-  messages.flatMap(message => {
-    const parts = message.parts.filter(part => !Predicate.isTagged(part, 'Error'))
+  messages.some(hasErrorPart)
+    ? messages.flatMap(message => {
+        if (!hasErrorPart(message)) return [message]
 
-    return parts.length > 0 ? [{ ...message, parts }] : []
-  })
+        const parts = message.parts.filter(part => !Predicate.isTagged(part, 'Error'))
+
+        return parts.length > 0 ? [{ ...message, parts }] : []
+      })
+    : messages
 
 const isUnfinishedStreamPart = (part: AgentChatPart) =>
   ((Predicate.isTagged(part, 'Text') || Predicate.isTagged(part, 'Reasoning')) &&
@@ -1899,36 +1849,6 @@ const discardUnfinishedStream = (
 
   return parts.length === 0 ? kept : [...kept, { ...last, parts }]
 }
-
-/** What a model-step execution produced in the chat, for removal when it is superseded. */
-export type AgentChatExecutionOutput = Data.TaggedEnum<{
-  /** A chat message it created. */
-  Message: { readonly messageId: string }
-  /** A tool part it touched first, in `messageId`; `prior` is the part it replaced, if any. */
-  ToolPart: {
-    readonly callId: string
-    readonly messageId: string
-    readonly prior: Option.Option<AgentChatPart>
-  }
-  /**
-   * A message it did not create that its `AssistantMessage` replaced, with the message as it was:
-   * one in its turn (another execution's, or one the tool batch added, holding a call id a provider
-   * reused), or any message when no start was seen.
-   */
-  ReplacedMessage: { readonly prior: AgentChatMessage }
-  /**
-   * Where its turn's output starts: after this chat message (none: the chat was empty). Recorded
-   * at its start, from the execution it superseded when there is one.
-   */
-  After: { readonly messageId: Option.Option<string> }
-  /**
-   * Where its turn's output ends: this chat message was the last when a later turn of its run
-   * started (none: the chat was empty). Recorded on an execution kept for reconciling.
-   */
-  Until: { readonly messageId: Option.Option<string> }
-}>
-
-export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
 
 const toolPartKey = (messageId: string, callId: string) => JSON.stringify([messageId, callId])
 
@@ -1977,7 +1897,7 @@ const turnOutputStart = (
   const created = createdMessageIds(outputs)
   const first = messages.findIndex(message => created.has(message.id))
 
-  return lastUserIndex(first === -1 ? messages : messages.slice(0, first)) + 1
+  return lastUserIndex(messages, first === -1 ? messages.length : first) + 1
 }
 
 /**
@@ -2039,11 +1959,9 @@ export const discardChatExecutionOutput = (
     )
   )
 
-  const kept = lastUserIndex(messages.slice(0, turnOutputStart(messages, outputs)))
+  const kept = lastUserIndex(messages, turnOutputStart(messages, outputs))
 
-  return messages.flatMap((current, index) => {
-    if (index <= kept) return [current]
-
+  const tail = messages.slice(kept + 1).flatMap(current => {
     const message = restoredMessage(current, replaced.get(current.id), unacknowledged)
     const owned = created.has(message.id)
 
@@ -2069,6 +1987,11 @@ export const discardChatExecutionOutput = (
 
     return parts.length === 0 ? [] : [{ ...message, parts }]
   })
+
+  return tail.length === messages.length - kept - 1 &&
+    tail.every((message, index) => message === messages[kept + 1 + index])
+    ? messages
+    : [...messages.slice(0, kept + 1), ...tail]
 }
 
 /**
@@ -2177,24 +2100,16 @@ const finalizeUnfinishedStream = (
       )
     : messages
 
-const finalizeStreamingParts = (
-  messages: ReadonlyArray<AgentChatMessage>
-): ReadonlyArray<AgentChatMessage> =>
-  messages.map(message =>
-    message.role === 'assistant'
-      ? { ...message, parts: finalizeAssistantParts(message.parts) }
-      : message
-  )
-
 const appendRunMessagesIfEmpty = (
   messages: ReadonlyArray<AgentChatMessage>,
   runMessages: ReadonlyArray<AgentMessage>
 ) => {
-  const lastUserMessageIndex = findLastMessageIndex(messages, message => message.role === 'user')
-
-  const hasAssistantAfterLastUser = messages.some(
-    (message, index) => message.role === 'assistant' && index > lastUserMessageIndex
-  )
+  const hasAssistantAfterLastUser =
+    findLastMessageIndex(
+      messages,
+      message => message.role === 'assistant',
+      lastUserIndex(messages) + 1
+    ) !== -1
 
   if (runMessages.length === 0 || hasAssistantAfterLastUser) {
     return messages
@@ -2242,7 +2157,7 @@ export const appendProtocolMessage = (
       // several turns, and the latest is the one a hydrated or merged result answers.
       if (
         (current.acceptance !== undefined || isInteractionOutcome) &&
-        messages.some(existing => hasToolCall(existing, current.toolCallId))
+        findLastMessageIndex(messages, existing => hasToolCall(existing, current.toolCallId)) !== -1
       ) {
         return updateToolCallState(
           messages,
@@ -2347,31 +2262,35 @@ export const applyExecutionEventToChatMessages = (
   const eventTimeMs = event.createdAtMs ?? options.nowMs ?? 0
   const foreign = scope.foreign
 
+  // Scopes are built only by the events that place tool calls (text deltas need none).
+
   // The model's stream never changes another execution's output; a host step acts on any call.
-  const model: ToolPartScope = {
+  const model = (): ToolPartScope => ({
     from: turnStartIndex(messages, scope.modelTurn),
     foreign,
     replays: false
-  }
+  })
 
   // Requests, the tool batch and answers act on a call the model placed, maybe a replay of one.
-  const host: ToolPartScope = {
+  const hostScope = (): ToolPartScope => ({
     from: turnStartIndex(messages, scope.turn),
     foreign: noForeignMessages,
     replays: true
-  }
+  })
 
   // Before a run's first model turn, a model tool event replays an earlier run's: a call before the
   // run's messages comes first, never the resumed batch's call reusing its id.
-  const replayed: ToolPartScope | undefined =
-    scope.runOutput === undefined
-      ? undefined
-      : { from: 0, foreign: new Set([...foreign, ...scope.runOutput]), replays: false }
+  const modelScope = (callId: string): ToolPartScope => {
+    if (scope.runOutput === undefined) return model()
 
-  const modelScope = (callId: string): ToolPartScope =>
-    replayed !== undefined && toolCallMessageIndex(messages, callId, replayed) !== -1
-      ? replayed
-      : model
+    const replayed: ToolPartScope = {
+      from: 0,
+      foreign: new Set([...foreign, ...scope.runOutput]),
+      replays: false
+    }
+
+    return toolCallMessageIndex(messages, callId, replayed) !== -1 ? replayed : model()
+  }
 
   const upsertModelToolCallPart = (call: ToolCall, state: ChatToolState) =>
     upsertToolCallPart(messages, call, state, modelScope(call.id))
@@ -2401,7 +2320,7 @@ export const applyExecutionEventToChatMessages = (
       ),
       Match.tag('UserMessage', current => appendProtocolMessage(messages, current.message)),
       Match.tag('AssistantMessage', current =>
-        appendOrReplaceAssistantMessage(messages, current.message, model)
+        appendOrReplaceAssistantMessage(messages, current.message, model())
       ),
       Match.tag('ToolInputStart', current =>
         upsertModelToolCallPart(
@@ -2417,14 +2336,14 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.call,
           ChatToolState.ApprovalRequested({ request: current.request }),
-          host
+          hostScope()
         )
       ),
       Match.tag('ToolApprovalGranted', () => messages)
     )
     .pipe(
       Match.tag('ToolApprovalDenied', current =>
-        updateToolCallState(messages, current.toolCallId, host, pendingApproval, state =>
+        updateToolCallState(messages, current.toolCallId, hostScope(), pendingApproval, state =>
           deniedState(current.reason, approvalRequestOf(state))
         )
       ),
@@ -2433,7 +2352,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.QuestionRequested({ request: current.request }),
-          host
+          hostScope()
         )
       ),
       Match.tag('InputRequested', current =>
@@ -2441,7 +2360,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InputRequested({ request: current.request }),
-          host
+          hostScope()
         )
       ),
       Match.tag('InteractionRequested', current =>
@@ -2449,14 +2368,14 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.request.call,
           ChatToolState.InteractionRequested({ request: current.request }),
-          host
+          hostScope()
         )
       ),
       Match.tag('InputSubmitted', current =>
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveInputRequest(
@@ -2469,7 +2388,7 @@ export const applyExecutionEventToChatMessages = (
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveInputRequest(
@@ -2482,7 +2401,7 @@ export const applyExecutionEventToChatMessages = (
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveInteractionRequest(
@@ -2495,7 +2414,7 @@ export const applyExecutionEventToChatMessages = (
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveInteractionRequest(
@@ -2508,7 +2427,7 @@ export const applyExecutionEventToChatMessages = (
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveQuestionRequest(
@@ -2521,7 +2440,7 @@ export const applyExecutionEventToChatMessages = (
         updateToolCallState(
           messages,
           current.response.toolCallId,
-          host,
+          hostScope(),
           answeredRequest(current.response.requestId),
           state =>
             preserveQuestionRequest(
@@ -2535,7 +2454,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.call,
           ChatToolState.Running({ startedAtMs: eventTimeMs }),
-          host
+          hostScope()
         )
       ),
       Match.tag('ToolExecutionAccepted', 'ToolExecutionCompleted', current =>
@@ -2545,7 +2464,7 @@ export const applyExecutionEventToChatMessages = (
           Predicate.isTagged(current, 'ToolExecutionAccepted')
             ? ChatToolState.Accepted({ result: current.result, endedAtMs: eventTimeMs })
             : ChatToolState.Completed({ result: current.result, endedAtMs: eventTimeMs }),
-          host
+          hostScope()
         )
       ),
       Match.tag('ToolExecutionError', current =>
@@ -2553,7 +2472,7 @@ export const applyExecutionEventToChatMessages = (
           messages,
           current.call,
           ChatToolState.Errored({ message: current.message, endedAtMs: eventTimeMs }),
-          host
+          hostScope()
         )
       ),
       Match.tag('ProviderToolResult', current =>
@@ -2564,7 +2483,7 @@ export const applyExecutionEventToChatMessages = (
       ),
       Match.tag('AgentError', current => markChatError(messages, current.message)),
       Match.tag('AgentEnd', current =>
-        appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
+        appendRunMessagesIfEmpty(finalizeUnfinishedStream(messages), current.messages)
       ),
       Match.tag('AgentAwaitingInput', current =>
         current.requests.reduce(
@@ -2585,9 +2504,9 @@ export const applyExecutionEventToChatMessages = (
                 ),
                 Match.exhaustive
               ),
-              host
+              hostScope()
             ),
-          appendRunMessagesIfEmpty(finalizeStreamingParts(messages), current.messages)
+          appendRunMessagesIfEmpty(finalizeUnfinishedStream(messages), current.messages)
         )
       ),
       // A tagged start's predecessor output is handled by execution routing (chat-core); a draft
@@ -2967,10 +2886,10 @@ const withInstructionAfterLast = (
 
   if (last === undefined) return messages
 
-  return [
-    ...messages.slice(0, -1),
-    { ...last, instructionsAfter: [...(last.instructionsAfter ?? []), instruction] }
-  ]
+  return updateMessageAt(messages, messages.length - 1, message => ({
+    ...message,
+    instructionsAfter: [...(message.instructionsAfter ?? []), instruction]
+  }))
 }
 
 const ownProtocolMessages = (message: AgentChatMessage): ReadonlyArray<AgentMessage> => {

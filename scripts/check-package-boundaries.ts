@@ -218,6 +218,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: agentCoreForbiddenImports
   },
   {
+    // The chat projection is framework-neutral: `@yolk-sdk/agent/react` re-exports it and adds
+    // the hook, never the other way round.
+    packageDir: 'packages/agent/src/chat',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
     packageDir: 'packages/agent/src/compaction',
     forbiddenImports: agentCoreForbiddenImports
   },

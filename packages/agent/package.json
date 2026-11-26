@@ -31,6 +31,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./chat": {
+      "types": "./src/chat/index.ts",
+      "default": "./src/chat/index.ts"
+    },
     "./classification": {
       "types": "./src/classification/index.ts",
       "default": "./src/classification/index.ts"
@@ -204,6 +208,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./chat": {
+        "types": "./dist/chat/index.d.mts",
+        "import": "./dist/chat/index.mjs",
+        "default": "./dist/chat/index.mjs"
       },
       "./classification": {
         "types": "./dist/classification/index.d.mts",

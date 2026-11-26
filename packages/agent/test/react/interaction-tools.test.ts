@@ -17,13 +17,13 @@ import {
   zeroAgentUsage,
   interactionRequestId
 } from '@yolk-sdk/agent/protocol'
-import { applyAgentEventToChatMessages, toAgentMessages } from '../../src/react/chat-messages.ts'
+import { applyAgentEventToChatMessages, toAgentMessages } from '../../src/chat/chat-messages.ts'
 import {
   reduceAgentChatState,
   initialAgentChatState,
   isActiveChatToolPart
-} from '../../src/react/chat-core.ts'
-import { buildAgentChatItems } from '../../src/react/chat-items.ts'
+} from '../../src/chat/chat-core.ts'
+import { buildAgentChatItems } from '../../src/chat/chat-items.ts'
 
 const call = ToolCall.make({ id: 'call_doc', name: 'document', params: {} })
 

@@ -229,7 +229,7 @@ need not decode new interactions, but must never downgrade one to data-only comp
 execution. Hosts advertise interaction tools only on supported surfaces.
 
 Reusing `InputResponse` was considered because it inherits existing input guards. It was rejected:
-`react/chat-messages.ts` reconstructs a tool result from `InputSubmitted`, so an old projection can
+`chat/chat-messages.ts` reconstructs a tool result from `InputSubmitted`, so an old projection can
 silently treat acceptance as completed work. Optional action fields can also be stripped by old
 copy helpers. Distinct variants make these migrations explicit and fail closed.
 

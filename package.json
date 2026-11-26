@@ -34,6 +34,7 @@
     "packages:publint": "tsx scripts/check-package-publint.ts",
     "packages:smoke": "tsx scripts/smoke-package-imports.ts",
     "packages:import-cost": "tsx scripts/measure-package-imports.ts",
+    "bench:chat": "tsx scripts/bench-chat-projection.ts",
     "packages:evidence": "tsx scripts/check-emulator-evidence.ts",
     "packages:check": "pnpm --filter './packages/*' check && pnpm packages:boundaries && pnpm packages:exports && pnpm packages:evidence",
     "cloudflare:check": "pnpm --filter './cloudflare/*' check",

@@ -79,6 +79,7 @@ const packageExportContracts: ReadonlyArray<PackageExportContract> = [
     expectedExports: [
       './package.json',
       '.',
+      './chat',
       './classification',
       './client',
       './compaction',

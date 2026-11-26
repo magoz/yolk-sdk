@@ -19,7 +19,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { Predicate } from 'effect'
 import { AgentToolRun, toolRunsFromHitlRequests } from '../../src/client/state.ts'
-import { buildAgentChatMessages } from '../../src/react/chat-messages.ts'
+import { buildAgentChatMessages } from '../../src/chat/chat-messages.ts'
 
 // Providers reuse call ids across turns (`call_0` in every turn), so `toolRuns` can hold one run per
 // turn for an id (`reduceAgentEvents`), and snapshot hosts pass runs of several turns: pending
