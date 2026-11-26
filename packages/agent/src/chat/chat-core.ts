@@ -571,7 +571,8 @@ const chatExecutionOutput = (
   const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
     turnToolCallMessage(messages, callId, turn)
 
-  const known = new Set(before.map(message => message.id))
+  const changed = changedFrom(before, after)
+  const known = new Set(before.slice(changed).map(message => message.id))
 
   const touched = new Set(
     execution.output.flatMap(output =>
@@ -579,9 +580,11 @@ const chatExecutionOutput = (
     )
   )
 
-  const created = after.flatMap(message =>
-    known.has(message.id) ? [] : [AgentChatExecutionOutput.Message({ messageId: message.id })]
-  )
+  const created = after
+    .slice(changed)
+    .flatMap(message =>
+      known.has(message.id) ? [] : [AgentChatExecutionOutput.Message({ messageId: message.id })]
+    )
 
   const parts = agentEventToolCallIds(event).flatMap(callId => {
     if (touched.has(callId)) return []
@@ -599,7 +602,26 @@ const chatExecutionOutput = (
     return [AgentChatExecutionOutput.ToolPart({ callId, messageId: holder.id, prior: priorPart })]
   })
 
-  return [...created, ...replacedMessages(execution, event, before, after), ...parts]
+  return [...created, ...replacedMessages(execution, event, before, after, changed), ...parts]
+}
+
+/**
+ * The index of the first message an event changed: `before` and `after` hold the same messages
+ * (by reference) up to it. An event changes the chat's tail (its turn), so the scan is a reference
+ * comparison of the messages before it, and what follows reads only the tail.
+ */
+const changedFrom = (
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>
+) => {
+  if (before === after) return before.length
+
+  const shared = Math.min(before.length, after.length)
+  let index = 0
+
+  while (index < shared && before[index] === after[index]) index += 1
+
+  return index
 }
 
 /**
@@ -611,7 +633,8 @@ const replacedMessages = (
   execution: AgentExecution<AgentChatExecutionOutput>,
   event: AgentEvent,
   before: ReadonlyArray<AgentChatMessage>,
-  after: ReadonlyArray<AgentChatMessage>
+  after: ReadonlyArray<AgentChatMessage>,
+  changed: number
 ): ReadonlyArray<AgentChatExecutionOutput> => {
   if (!Predicate.isTagged(event, 'AssistantMessage')) return []
 
@@ -625,9 +648,10 @@ const replacedMessages = (
     )
   )
 
-  const current = new Map(after.map(message => [message.id, message]))
+  // Messages before `changed` are the same in both: none of them was replaced.
+  const current = new Map(after.slice(changed).map(message => [message.id, message]))
 
-  return before.flatMap(prior => {
+  return before.slice(changed).flatMap(prior => {
     const next = current.get(prior.id)
 
     return next === undefined || next === prior || recorded.has(prior.id)
