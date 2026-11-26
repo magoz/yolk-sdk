@@ -616,8 +616,47 @@ own `WorkflowRun` Durable Object:
 
 Supported `workflow` surface: `createHook`, `sleep`, `getWritable`, `getStepMetadata`,
 `getWorkflowMetadata`, `FatalError`, `RetryableError`, plus the Cloudflare-only `getStepSignal`.
-`workflow/api`: `start`, `getRun`, `resumeHook` (`start` accepts and ignores `attributes`). Other
-Vercel Workflow APIs (`defineHook`, webhooks, `fetch`) are not provided.
+`workflow/api`: `start`, `getRun`, `resumeHook` (`start` accepts and ignores `attributes`), plus
+the Cloudflare-only `startWithRunId`, `prepareRun`, `createRunId` and `isRunId`. Other Vercel
+Workflow APIs (`defineHook`, webhooks, `fetch`) are not provided.
+
+### Prepare a run ahead of its start
+
+Every run gets a new `WorkflowRun` object, so a start pays for creating the object and evaluating
+the workflow's module in its fresh isolate (about a second for a large runtime on Cloudflare).
+When you know a run is coming (someone is typing a message), warm its object first. These are
+Cloudflare-only exports of `@yolk-sdk/vercel-workflows/cloudflare/api` (import them from there:
+`workflow/api`'s types do not declare them):
+
+```ts
+import { createRunId, prepareRun, startWithRunId } from '@yolk-sdk/vercel-workflows/cloudflare/api'
+
+// While the person types: pick the next run's id, keep it, and warm its object.
+const runId = createRunId()
+await prepareRun(sessionWorkflow, runId)
+
+// On send: start under that id. Claim the id once (for example a compare-and-set in your
+// database) so only one caller starts under it.
+const started = await startWithRunId(sessionWorkflow, [input], { runId })
+
+if (started.status === 'taken') {
+  // Another run lives under this id: start yours under a new id.
+}
+```
+
+- `prepareRun(workflow, runId)` loads the workflow's module and the modules registered with
+  `registerRunPreloads({ name: () => import('./runtime') })` (from
+  `@yolk-sdk/vercel-workflows/cloudflare`, called at the Worker entry's module scope; list what a run
+  loads anyway, such as a runtime its steps import lazily, and keep them plain `import()`s: every
+  `prepareRun` calls them again) in the run's object. It stores nothing, so an object prepared and never started
+  costs only its preparation and is evicted after a few idle minutes. Calling it again on a warm
+  object is cheap and keeps it resident.
+- `startWithRunId(workflow, args, { runId })` starts the run only when no run lives under the id
+  and answers `{ status: 'created', run }`. Otherwise it changes nothing: `alreadyStarted` (with
+  `run`) when that run has the same workflow and arguments, most likely your own earlier call whose
+  answer was lost, so treat it as yours and do not start the same input again; `taken` (no handle)
+  when it is another run. Use each id for one start, retries included.
+- Run ids are `wrun_` and 32 hex digits (`createRunId`, `isRunId`); other ids are refused.
 
 ### Wire a Worker
 
@@ -628,7 +667,7 @@ Worker entry must export the class:
 
 ```ts
 // worker.ts
-import { registerWorkflowModules } from '@yolk-sdk/vercel-workflows/cloudflare'
+import { registerRunPreloads, registerWorkflowModules } from '@yolk-sdk/vercel-workflows/cloudflare'
 
 export { WorkflowRun } from '@yolk-sdk/vercel-workflows/cloudflare'
 
@@ -636,6 +675,13 @@ export { WorkflowRun } from '@yolk-sdk/vercel-workflows/cloudflare'
 // scope can exceed its startup CPU limit. Keys are module paths relative to the Vite root.
 registerWorkflowModules({
   'app/agent-workflow.ts': () => import('./app/agent-workflow.ts')
+})
+
+// Optional, for `prepareRun`: what a prepared run object loads ahead of its start. Register both
+// here, at the entry's module scope: a run object's fresh isolate sees only what evaluating the
+// Worker's modules registered.
+registerRunPreloads({
+  runtime: () => import('./app/agent-runtime.ts')
 })
 ```
 

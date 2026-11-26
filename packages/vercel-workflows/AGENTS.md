@@ -146,6 +146,14 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   against `LiveRun.stopped` (halted and no step in flight), so `kick()`'s promise settles and
   nothing keeps the run alive. Keep `getStepMetadata` Vercel-shaped: Cloudflare-only additions get
   their own exports.
+- Prepared runs (Cloudflare-only, `./cloudflare/api`): `prepareRun(workflow, runId)` calls
+  `WorkflowRun.prepare(workflowId)`, which loads the workflow's module and the
+  `registerRunPreloads` modules and never touches storage (never read `this.store` there: its
+  getter creates the tables). `startWithRunId` calls `startNew`, which creates and kicks only when
+  no run lives under the id (`created`; else `alreadyStarted` when the stored workflow id and args
+  text match, `taken` otherwise, with no run handle; the read and create have no await between them,
+  so racing calls never both create); `start` keeps its create-or-kick. Chosen ids must match
+  `isRunId` (`wrun_` + 32 hex), so a hook index (`hook:<token>`) is never started as a run.
 - Tests: `test/cloudflare-execution.test.ts` (execution over the memory store) and
   `test/cloudflare-runtime.test.ts` (`WorkflowRun` over `node:sqlite` through the `workflow/api`
   module, evictions, alarms, hooks, streams, cancel, lazy modules, the SQLite store, serialization,

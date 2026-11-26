@@ -14,6 +14,13 @@ export type StartRunInput = {
   readonly args: string
 }
 
+/**
+ * What `startNew` did: `created` the run, or found one already under its id: `alreadyStarted`
+ * (the same workflow and arguments, most likely an earlier call of the same caller whose answer
+ * was lost) or `taken` (another run).
+ */
+export type StartNewOutcome = 'created' | 'alreadyStarted' | 'taken'
+
 export type RunOutcome = {
   readonly status: RunStatus
   /** devalue text of the result or error once the run ended. */
@@ -23,6 +30,10 @@ export type RunOutcome = {
 /** The RPC surface of a `WorkflowRun` instance (a run, or a hook index named `hook:<token>`). */
 export interface WorkflowRunStub {
   start(input: StartRunInput): Promise<void>
+  /** Creates and starts the run unless one already lives under its id (then changes nothing). */
+  startNew(input: StartRunInput): Promise<StartNewOutcome>
+  /** Loads the workflow's module and the run preloads; never touches storage. */
+  prepare(workflowId: string): Promise<void>
   status(): Promise<RunOutcome>
   settled(): Promise<RunOutcome>
   cancel(): Promise<void>

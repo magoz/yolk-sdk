@@ -53,3 +53,30 @@ export const workflowById = async (id: string): Promise<InvocableWorkflow | unde
 }
 
 export const workflowIdOf = (workflow: object): string | undefined => ids.get(workflow)
+
+const preloads = new Map<string, () => Promise<unknown>>()
+
+/**
+ * Modules a prepared run object loads ahead of its run (`prepareRun`), by name (registering a name
+ * again replaces it). List what a run loads anyway, for example a runtime its steps import lazily:
+ * a prepared object then starts with them evaluated. A run started without `prepareRun` never
+ * loads them for this. Each `prepareRun` calls them again, so keep them idempotent (plain
+ * `import()`). Call this at the Worker entry's module scope, beside `registerWorkflowModules`: the
+ * registry is per isolate, and a run object's fresh isolate sees only what evaluating the Worker's
+ * modules registered.
+ */
+export const registerRunPreloads = (
+  modules: Readonly<Record<string, () => Promise<unknown>>>
+): void => {
+  for (const [name, load] of Object.entries(modules)) preloads.set(name, load)
+}
+
+/** Loads the workflow's module and the run preloads; fails for a workflow no module registers. */
+export const prepareWorkflow = async (id: string): Promise<void> => {
+  const [workflow] = await Promise.all([
+    workflowById(id),
+    ...[...preloads.values()].map(load => load())
+  ])
+
+  if (workflow === undefined) throw new Error(`No workflow is registered as ${id}`)
+}

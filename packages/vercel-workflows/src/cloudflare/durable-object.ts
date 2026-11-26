@@ -1,6 +1,12 @@
 import { DurableObject } from 'cloudflare:workers'
 import { WorkflowExecution, type ExecutionHost, type HookClaim } from './execution.ts'
-import { runNamespace, type RunOutcome, type StartRunInput } from './namespace.ts'
+import {
+  runNamespace,
+  type RunOutcome,
+  type StartNewOutcome,
+  type StartRunInput
+} from './namespace.ts'
+import { prepareWorkflow } from './registry.ts'
 import { makeHookIndex, makeSqliteRunStore } from './sqlite-store.ts'
 import type { RunStore } from './store.ts'
 
@@ -94,20 +100,47 @@ export class WorkflowRun extends DurableObject {
     if (current === null || current > time) await this.ctx.storage.setAlarm(time)
   }
 
+  private createRun(input: StartRunInput) {
+    this.store.createRun({
+      runId: input.runId,
+      workflowId: input.workflowId,
+      args: input.args,
+      status: 'pending',
+      outcome: undefined,
+      createdAt: Date.now(),
+      completedAt: undefined
+    })
+  }
+
   async start(input: StartRunInput): Promise<void> {
-    if (this.store.readRun() === undefined) {
-      this.store.createRun({
-        runId: input.runId,
-        workflowId: input.workflowId,
-        args: input.args,
-        status: 'pending',
-        outcome: undefined,
-        createdAt: Date.now(),
-        completedAt: undefined
-      })
+    if (this.store.readRun() === undefined) this.createRun(input)
+
+    void this.execution.kick()
+  }
+
+  // The read and the create run with no await between them, so two calls never both create.
+  async startNew(input: StartRunInput): Promise<StartNewOutcome> {
+    const existing = this.store.readRun()
+
+    if (existing !== undefined) {
+      return existing.workflowId === input.workflowId && existing.args === input.args
+        ? 'alreadyStarted'
+        : 'taken'
     }
 
-    this.execution.kick()
+    this.createRun(input)
+    void this.execution.kick()
+
+    return 'created'
+  }
+
+  /**
+   * Warms this object for a run that has not started: loads the workflow's module and the run
+   * preloads (`registerRunPreloads`). Never touches storage, so an object prepared and never
+   * started keeps nothing once evicted.
+   */
+  async prepare(workflowId: string): Promise<void> {
+    await prepareWorkflow(workflowId)
   }
 
   async status(): Promise<RunOutcome> {
@@ -125,7 +158,7 @@ export class WorkflowRun extends DurableObject {
     if (run === undefined) throw new Error('Workflow run not found')
 
     if (run.status === 'pending' || run.status === 'running') {
-      this.execution.kick()
+      void this.execution.kick()
       await new Promise<void>(resolve => this.settledWaiters.add(resolve))
     }
 
