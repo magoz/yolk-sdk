@@ -31,21 +31,19 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { AgentToolRun } from '../../src/client/state.ts'
 import {
-  AgentChatPart,
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
-  ChatToolState,
   deleteChatTurn,
   DeleteChatTurnResult,
   editChatUserMessage,
   EditChatUserMessageResult,
   regenerateChatMessagesFrom,
   RegenerateChatMessagesResult,
-  toAgentMessages,
-  type AgentChatMessage
+  toAgentMessages
 } from '../../src/chat/chat-messages.ts'
 import { Predicate } from 'effect'
+import { type AgentChatMessage, AgentChatPart, ChatToolState } from '../../src/chat/chat-schemas.ts'
 
 describe('agent chat messages', () => {
   it('preserves multipart user content for protocol replay', () => {

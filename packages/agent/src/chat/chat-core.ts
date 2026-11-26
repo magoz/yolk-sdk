@@ -9,7 +9,6 @@ import {
   startAgentStatusTree,
   type AgentEvent,
   type AgentMessage,
-  type AgentStatus,
   type AgentStatusTree,
   type Content,
   type HitlRequest,
@@ -28,12 +27,11 @@ import {
   type AgentExecutionRoute,
   type AgentExecutions
 } from '../client/executions.ts'
-import { emptyHitlPauses, rememberHitlPause, type HitlPauses } from '../client/hitl-pauses.ts'
+import { emptyHitlPauses, rememberHitlPause } from '../client/hitl-pauses.ts'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   applyExecutionEventToChatMessages,
-  AgentChatExecutionOutput,
   discardChatExecutionOutput,
   executionTurnAnchor,
   isFinishedToolCall,
@@ -48,65 +46,24 @@ import {
   regenerateChatMessagesFrom,
   turnStartIndex,
   turnToolCallMessage,
-  type AgentChatMessage,
-  type AgentChatPart,
   type ApplyAgentEventToChatMessagesOptions,
   type ChatTurnAnchor
 } from './chat-messages.ts'
+import {
+  AgentChatExecutionOutput,
+  type AgentChatEventProjectionState,
+  type AgentChatMessage,
+  type AgentChatPart,
+  type AgentChatState,
+  type AgentChatTurnStart
+} from './chat-schemas.ts'
 import {
   MessagesRegenerated,
   ProtocolMessageAppended,
   TurnDeleted,
   UserMessageEdited,
-  UserMessageSubmitted,
-  type AgentChatSessionEvent
+  UserMessageSubmitted
 } from './chat-session-events.ts'
-
-export type AgentChatState = {
-  /** Run status; failures and pending retries live here (`Failed`, `Working(Retrying)`). */
-  readonly status: AgentStatus
-  readonly subagents: AgentStatusTree['subagents']
-  readonly chatMessages: ReadonlyArray<AgentChatMessage>
-  readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
-  /** The `eventId`s of this stream's events applied so far; see `AgentChatEventProjectionState`. */
-  readonly seenEventIds: HashSet.HashSet<string>
-  /** Model-step executions seen on this stream; see `AgentChatEventProjectionState`. */
-  readonly executions?: AgentExecutions<AgentChatExecutionOutput>
-  /** The latest model turn's start; see `AgentChatEventProjectionState`. */
-  readonly turnStart?: AgentChatTurnStart
-  /**
-   * The pause each request was last asked in (`rememberHitlPause` over every `AgentAwaitingInput`,
-   * seen or not): `useAgentChat` puts it on the transport request of an answer (`pause`). Reset
-   * with `seenEventIds`; absent in states built before it.
-   */
-  readonly hitlPauses?: HitlPauses
-}
-
-/**
- * The start of the latest model turn a chat projection saw (its `LLMStreamStart`, tagged or not),
- * or of the run (`AgentStart`, the chat reducer's local submit/HITL/regenerate/edit:
- * `runTurnStart`). Providers reuse tool call ids across turns, so the turn's tool events match a
- * call only in the messages after `after`: the model's stream (its own execution's start, when
- * tagged) and host events (the tool batch, approvals, questions and their answers act on the latest
- * turn's calls; on a miss, on the earlier part holding the same call or the request an answer
- * answers, as a resumed run's tool batch does before its first model turn).
- */
-export type AgentChatTurnStart = {
-  /** The start's `streamId` (`''` when none). */
-  readonly streamId: string
-  /** The `LLMStreamStart`'s turn; `0` for a run start (the loop numbers model turns from 1). */
-  readonly turn: number
-  /** The turn's output follows this chat message (none: the chat was empty). */
-  readonly after: Option.Option<string>
-  /**
-   * A run start, before the run's first model turn: it bounds host events. The model's tool events
-   * before the run's first `LLMStreamStart` replay an earlier run's (a run's own model output
-   * follows a start), so they act on a call before the run's messages when one holds their id, else
-   * as usual (`ChatEventScope.runOutput`). The run's first `LLMStreamStart` starts a new turn, never
-   * retries this one.
-   */
-  readonly run?: true
-}
 
 /**
  * A run's start (`AgentStart`, a local submit/HITL/regenerate/edit): its turn's output follows the
@@ -123,28 +80,6 @@ const runTurnStart = (
   after: Option.fromNullishOr(messages.at(-1)?.id),
   run: true
 })
-
-export type AgentChatEventProjectionState = {
-  readonly chatMessages: ReadonlyArray<AgentChatMessage>
-  /**
-   * The `eventId`s of the events applied so far: a replayed event (a reconnect re-reading from an
-   * earlier cursor, an overlapping stream) is skipped. A persistent set, so each event costs the
-   * same however long the stream ran.
-   */
-  readonly seenEventIds: HashSet.HashSet<string>
-  /**
-   * Model-step executions seen on this stream (events carrying `executionId`), with the chat
-   * message ids and tool calls each produced. Carry it with `seenEventIds` between events; absent
-   * in states built before it.
-   */
-  readonly executions?: AgentExecutions<AgentChatExecutionOutput>
-  /**
-   * The latest model turn's start (`AgentChatTurnStart`); carry it with `seenEventIds`. Absent
-   * until a start (or `AgentStart`) is seen and in states built before it: tool events then match
-   * the last message holding a call, in any turn.
-   */
-  readonly turnStart?: AgentChatTurnStart
-}
 
 export const initialAgentChatState: AgentChatState = {
   status: idleAgentStatus,
@@ -289,6 +224,65 @@ export const stepAgentChatProjection = (
 
   return missed !== undefined && started?.applied === true ? { ...step, missedStart: missed } : step
 }
+
+/** A batch of events applied to a chat projection (`stepAgentChatProjectionAll`). */
+export type AgentChatProjectionBatch = {
+  /** The projection after the events, as folding `stepAgentChatProjection` over them gives it. */
+  readonly projection: AgentChatEventProjectionState
+  /**
+   * The events the run's status follows, in order: each event's `missedStart` (when present), then
+   * its `statusEvent` (when defined). Fold every one, as the `useAgentChat` reducer does.
+   */
+  readonly statusEvents: ReadonlyArray<AgentEvent>
+  /**
+   * Whether the chat's message ids, in order, differ from the input's: a list keyed by message id
+   * changes only then. Messages the events did not change keep their references either way.
+   */
+  readonly messageIdsChanged: boolean
+}
+
+/**
+ * Applies events in order, as folding `stepAgentChatProjection` over them does (events seen before
+ * are skipped by `eventId`), for a host that receives a run's events in batches (one render per
+ * batch). Pure; each event costs what one step does, plus one pass of reference comparisons over
+ * the chat per batch for `messageIdsChanged`.
+ */
+export const stepAgentChatProjectionAll = (
+  state: AgentChatEventProjectionState,
+  events: Iterable<AgentEvent>,
+  options: ApplyAgentEventToChatMessagesOptions = {}
+): AgentChatProjectionBatch => {
+  let projection = state
+  const statusEvents: Array<AgentEvent> = []
+
+  for (const event of events) {
+    const step = stepAgentChatProjection(projection, event, options)
+
+    projection = step.projection
+
+    if (step.missedStart !== undefined) statusEvents.push(step.missedStart)
+
+    if (step.statusEvent !== undefined) statusEvents.push(step.statusEvent)
+  }
+
+  return {
+    projection,
+    statusEvents,
+    messageIdsChanged: !sameMessageIds(state.chatMessages, projection.chatMessages)
+  }
+}
+
+const sameMessageIds = (
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>
+) =>
+  before === after ||
+  (before.length === after.length &&
+    before.every((message, index) => {
+      const next = after[index]
+
+      return message === next || message.id === next?.id
+    }))
 
 type ExecutionProjection = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>

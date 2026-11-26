@@ -10,11 +10,8 @@ import {
   ProviderToolCallPart,
   ProviderToolResultPart,
   type InputRequest,
-  type InputResponse,
   type InteractionRequest,
-  type InteractionResponse,
   type QuestionRequest,
-  type QuestionResponse,
   type ToolApprovalRequest,
   ToolResult,
   ToolResultMessage,
@@ -32,129 +29,15 @@ import {
   type AgentMessage,
   type AssistantPart,
   type Content,
-  type MessageAnnotations,
-  type MessageAuthor,
   type MessageEnvelope
 } from '@yolk-sdk/agent/protocol'
-
-export type ChatPartState = 'streaming' | 'done'
-
-export type ChatToolState =
-  | { readonly _tag: 'Called' }
-  | { readonly _tag: 'InputStreaming'; readonly input: string }
-  | { readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest }
-  | {
-      readonly _tag: 'Denied'
-      readonly reason: string
-      /** The approval request it denies, when that was seen (it names the denied call). */
-      readonly request?: ToolApprovalRequest
-    }
-  | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
-  | {
-      readonly _tag: 'QuestionAnswered'
-      readonly response: QuestionResponse
-      readonly request?: QuestionRequest
-    }
-  | {
-      readonly _tag: 'QuestionCancelled'
-      readonly response: QuestionResponse
-      readonly request?: QuestionRequest
-    }
-  | { readonly _tag: 'InputRequested'; readonly request: InputRequest }
-  | {
-      readonly _tag: 'InputSubmitted'
-      readonly response: InputResponse
-      readonly request?: InputRequest
-    }
-  | {
-      readonly _tag: 'InputCancelled'
-      readonly response: InputResponse
-      readonly request?: InputRequest
-    }
-  | { readonly _tag: 'InteractionRequested'; readonly request: InteractionRequest }
-  | {
-      readonly _tag: 'InteractionSubmitted'
-      readonly response: InteractionResponse
-      readonly request?: InteractionRequest
-    }
-  | {
-      readonly _tag: 'InteractionCancelled'
-      readonly response: InteractionResponse
-      readonly request?: InteractionRequest
-    }
-  | { readonly _tag: 'Running'; readonly startedAtMs: number }
-  | {
-      readonly _tag: 'Completed'
-      readonly result: ToolResult
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | {
-      readonly _tag: 'Accepted'
-      readonly result: ToolResult
-      readonly resultEnvelope?: MessageEnvelope
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | {
-      readonly _tag: 'Errored'
-      readonly message: string
-      readonly startedAtMs?: number
-      readonly endedAtMs?: number
-    }
-  | { readonly _tag: 'ProviderCompleted'; readonly result: ToolResult }
-
-export const ChatToolState = Data.taggedEnum<ChatToolState>()
-
-export type AgentChatPart =
-  | {
-      readonly _tag: 'Text'
-      readonly id: string
-      readonly content: Content
-      readonly state: ChatPartState
-    }
-  | {
-      readonly _tag: 'Reasoning'
-      readonly id: string
-      readonly text: string
-      readonly state: ChatPartState
-    }
-  | {
-      readonly _tag: 'ToolCall'
-      readonly id: string
-      readonly call: ToolCall
-      readonly state: ChatToolState
-    }
-  | {
-      readonly _tag: 'ToolResult'
-      readonly id: string
-      readonly toolCallId: string
-      readonly name: string
-      readonly content: Content
-      readonly isError?: boolean
-      readonly acceptance?: ToolResult['acceptance']
-      readonly structuredContent?: unknown
-    }
-  | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
-
-export const AgentChatPart = Data.taggedEnum<AgentChatPart>()
-
-export type AgentChatMessage = {
-  readonly id: string
-  readonly turnId: string
-  readonly sequence: number
-  readonly role: 'user' | 'assistant' | 'system'
-  readonly createdAtMs?: number
-  readonly author?: MessageAuthor
-  readonly annotations?: MessageAnnotations
-  readonly parts: ReadonlyArray<AgentChatPart>
-  /**
-   * Host instruction messages (ADR 0007) that followed this message in the transcript. Never
-   * rendered; `toAgentMessages` emits them right after this message, so a transcript rebuilt from
-   * chat messages keeps them and the loop does not re-append them.
-   */
-  readonly instructionsAfter?: ReadonlyArray<UserMessage>
-}
+import {
+  AgentChatPart,
+  ChatToolState,
+  type AgentChatExecutionOutput,
+  type AgentChatMessage,
+  type ChatPartState
+} from './chat-schemas.ts'
 
 export type DeleteChatTurnResult =
   | { readonly _tag: 'NotFound' }
@@ -1964,36 +1847,6 @@ const discardUnfinishedStream = (
 
   return parts.length === 0 ? kept : [...kept, { ...last, parts }]
 }
-
-/** What a model-step execution produced in the chat, for removal when it is superseded. */
-export type AgentChatExecutionOutput = Data.TaggedEnum<{
-  /** A chat message it created. */
-  Message: { readonly messageId: string }
-  /** A tool part it touched first, in `messageId`; `prior` is the part it replaced, if any. */
-  ToolPart: {
-    readonly callId: string
-    readonly messageId: string
-    readonly prior: Option.Option<AgentChatPart>
-  }
-  /**
-   * A message it did not create that its `AssistantMessage` replaced, with the message as it was:
-   * one in its turn (another execution's, or one the tool batch added, holding a call id a provider
-   * reused), or any message when no start was seen.
-   */
-  ReplacedMessage: { readonly prior: AgentChatMessage }
-  /**
-   * Where its turn's output starts: after this chat message (none: the chat was empty). Recorded
-   * at its start, from the execution it superseded when there is one.
-   */
-  After: { readonly messageId: Option.Option<string> }
-  /**
-   * Where its turn's output ends: this chat message was the last when a later turn of its run
-   * started (none: the chat was empty). Recorded on an execution kept for reconciling.
-   */
-  Until: { readonly messageId: Option.Option<string> }
-}>
-
-export const AgentChatExecutionOutput = Data.taggedEnum<AgentChatExecutionOutput>()
 
 const toolPartKey = (messageId: string, callId: string) => JSON.stringify([messageId, callId])
 

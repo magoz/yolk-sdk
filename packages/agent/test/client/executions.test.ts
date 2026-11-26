@@ -49,7 +49,8 @@ import {
   reduceAgentChatState
 } from '../../src/chat/chat-core.ts'
 import { AgentChatAction } from '../../src/chat/chat-actions.ts'
-import { appendProtocolMessage, type AgentChatMessage } from '../../src/chat/chat-messages.ts'
+import { appendProtocolMessage } from '../../src/chat/chat-messages.ts'
+import type { AgentChatMessage } from '../../src/chat/chat-schemas.ts'
 
 // Model-step executions (events carrying `executionId`): a retried or redelivered model step
 // streams a second answer for the same turn. Every scenario runs through the client reducer and

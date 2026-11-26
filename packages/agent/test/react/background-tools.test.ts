@@ -50,8 +50,8 @@ import {
 } from '@yolk-sdk/agent/react'
 import { AgentToolRun } from '../../src/client/state.ts'
 import { buildAgentChatItems } from '../../src/chat/chat-items.ts'
-import { ChatToolState } from '../../src/chat/chat-messages.ts'
 import { getActiveChatToolParts, getCompletedChatToolParts } from '../../src/chat/chat-core.ts'
+import { ChatToolState } from '../../src/chat/chat-schemas.ts'
 
 const call = ToolCall.make({
   id: 'work',

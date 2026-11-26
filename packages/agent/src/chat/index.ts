@@ -11,17 +11,44 @@ export {
   makeAgentChatEventProjectionState,
   markChatRunStart,
   reduceAgentChatState,
-  stepAgentChatProjection
+  stepAgentChatProjection,
+  stepAgentChatProjectionAll
 } from './chat-core.ts'
 
 export type {
   ActiveChatToolPart,
-  AgentChatEventProjectionState,
+  AgentChatProjectionBatch,
   AgentChatProjectionStep,
-  AgentChatState,
-  AgentChatTurnStart,
   CompletedChatToolPart
 } from './chat-core.ts'
+
+export {
+  AgentChatEventProjectionStateSchema,
+  AgentChatExecutionOutput,
+  AgentChatExecutionOutputSchema,
+  AgentChatExecutionsSchema,
+  AgentChatMessageSchema,
+  AgentChatPart,
+  AgentChatPartSchema,
+  AgentChatStateSchema,
+  AgentChatTurnStartSchema,
+  ChatPartStateSchema,
+  ChatToolState,
+  ChatToolStateSchema
+} from './chat-schemas.ts'
+
+export type {
+  AgentChatEventProjectionState,
+  AgentChatMessage,
+  AgentChatState,
+  AgentChatTurnStart,
+  ChatPartState
+} from './chat-schemas.ts'
+
+// The client's Schemas the chat state is made of, so a host keeps the chat with one import.
+export { AgentExecutionsSchema, HitlPauses } from '@yolk-sdk/agent/client'
+
+export type { AgentExecution, AgentExecutionRun, AgentExecutions } from '@yolk-sdk/agent/client'
 
 export {
   AgentChatAction,
@@ -58,12 +85,9 @@ export type {
 } from './chat-items.ts'
 
 export {
-  AgentChatExecutionOutput,
-  AgentChatPart,
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
-  ChatToolState,
   deleteChatTurn,
   DeleteChatTurnResult,
   editChatUserMessage,
@@ -75,8 +99,6 @@ export {
 } from './chat-messages.ts'
 
 export type {
-  AgentChatMessage,
   ApplyAgentEventToChatMessagesOptions,
-  BuildAgentChatMessagesInput,
-  ChatPartState
+  BuildAgentChatMessagesInput
 } from './chat-messages.ts'

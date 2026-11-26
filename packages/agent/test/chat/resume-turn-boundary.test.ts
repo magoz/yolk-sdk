@@ -54,13 +54,16 @@ import {
   makeAgentChatEventProjectionState,
   markChatRunStart,
   reduceAgentChatState,
-  stepAgentChatProjection,
-  type AgentChatEventProjectionState,
-  type AgentChatState,
-  type AgentChatTurnStart
+  stepAgentChatProjection
 } from '../../src/chat/chat-core.ts'
-import { buildAgentChatMessages, type AgentChatMessage } from '../../src/chat/chat-messages.ts'
+import { buildAgentChatMessages } from '../../src/chat/chat-messages.ts'
 import { makeQuestionToolDef } from '../../src/tools/index.ts'
+import type {
+  AgentChatEventProjectionState,
+  AgentChatMessage,
+  AgentChatState,
+  AgentChatTurnStart
+} from '../../src/chat/chat-schemas.ts'
 
 // A loop resume emits `AgentStart`, then the resumed tool batch (answers, starts, results), before
 // its first model turn. Providers reuse `call_0` in every turn: the batch acts on the paused call,

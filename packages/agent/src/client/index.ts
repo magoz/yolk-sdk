@@ -17,6 +17,8 @@ export {
   toolRunsFromHitlRequests
 } from './state.ts'
 
+export { AgentExecutionsSchema } from './executions.ts'
+
 export type { AgentExecution, AgentExecutionRun, AgentExecutions } from './executions.ts'
 
 export type {

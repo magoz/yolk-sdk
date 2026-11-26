@@ -16,7 +16,7 @@ import {
   type Content,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
-import type { AgentChatMessage, ChatToolState } from './chat-messages.ts'
+import type { AgentChatMessage, ChatToolState } from './chat-schemas.ts'
 
 export type ToolDuration =
   | { readonly _tag: 'Known'; readonly milliseconds: number }

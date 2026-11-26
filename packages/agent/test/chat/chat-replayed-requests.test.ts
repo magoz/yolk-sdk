@@ -55,18 +55,20 @@ import {
   applyAgentEventToChatProjection,
   initialAgentChatState,
   makeAgentChatEventProjectionState,
-  reduceAgentChatState,
-  type AgentChatEventProjectionState,
-  type AgentChatState
+  reduceAgentChatState
 } from '../../src/chat/chat-core.ts'
 import { AgentToolRun } from '../../src/client/state.ts'
 import {
   applyAgentEventToChatMessages,
-  buildAgentChatMessages,
-  type AgentChatMessage,
-  type ChatToolState
+  buildAgentChatMessages
 } from '../../src/chat/chat-messages.ts'
 import { makeInputToolDef } from '../../src/tools/index.ts'
+import type {
+  AgentChatEventProjectionState,
+  AgentChatMessage,
+  AgentChatState,
+  ChatToolState
+} from '../../src/chat/chat-schemas.ts'
 
 // A request event (or `AgentAwaitingInput` request) replayed after its call settled must not set
 // the call back to pending. Every scenario runs through both chat reducers: the event projection

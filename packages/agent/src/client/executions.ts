@@ -1,11 +1,12 @@
 import { Data, Equal, Match, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
+  AssistantAgentMessage,
   isTerminalAgentEvent,
   LLMStreamStart,
   type AgentAwaitingInput,
   type AgentEnd,
-  type AgentEvent,
-  type AssistantAgentMessage
+  type AgentEvent
 } from '@yolk-sdk/agent/protocol'
 
 /**
@@ -54,6 +55,32 @@ export type AgentExecutionRun<Output> = {
 }
 
 export type AgentExecutions<Output> = ReadonlyArray<AgentExecutionRun<Output>>
+
+/**
+ * The Schema of `AgentExecutions<Output>` for a reducer's output Schema (the chat's
+ * `AgentChatExecutionsSchema`), so hosts can keep or send a projection's executions:
+ * `Schema.toCodecJson(AgentExecutionsSchema(output))` is their JSON form. Its type is
+ * `AgentExecutions<typeof output.Type>`.
+ */
+export const AgentExecutionsSchema = <Output extends Schema.Constraint>(output: Output) =>
+  Schema.Array(
+    Schema.Struct({
+      streamId: Schema.String,
+      ended: Schema.Boolean,
+      closedThroughTurn: Schema.Number,
+      retired: Schema.Boolean,
+      executions: Schema.Array(
+        Schema.Struct({
+          executionId: Schema.String,
+          turn: Schema.Number,
+          status: Schema.Literals(['Live', 'Superseded', 'Settled']),
+          calls: Schema.Array(Schema.String),
+          output: Schema.Array(output),
+          answer: Schema.optional(AssistantAgentMessage)
+        })
+      )
+    })
+  )
 
 export type AgentExecutionRoute<Output> = Data.TaggedEnum<{
   /** No `executionId`, or one whose `LLMStreamStart` this client never saw. */

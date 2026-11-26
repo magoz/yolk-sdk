@@ -26,11 +26,11 @@ import {
   ToolRunState
 } from '../../src/chat/chat-items.ts'
 import {
-  AgentChatPart,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   toAgentMessages
 } from '../../src/chat/chat-messages.ts'
+import { AgentChatPart } from '../../src/chat/chat-schemas.ts'
 
 const assistantMessage = (input: {
   readonly content: string
