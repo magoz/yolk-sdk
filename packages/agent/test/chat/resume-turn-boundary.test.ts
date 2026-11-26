@@ -47,7 +47,7 @@ import {
 import { AgentToolRun } from '../../src/client/state.ts'
 import { ContextTransformer, LoopConfig, run } from '../../src/loop/index.ts'
 import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing/index.ts'
-import { AgentChatAction } from '../../src/react/chat-actions.ts'
+import { AgentChatAction } from '../../src/chat/chat-actions.ts'
 import {
   applyAgentEventToChatProjection,
   initialAgentChatState,
@@ -58,8 +58,8 @@ import {
   type AgentChatEventProjectionState,
   type AgentChatState,
   type AgentChatTurnStart
-} from '../../src/react/chat-core.ts'
-import { buildAgentChatMessages, type AgentChatMessage } from '../../src/react/chat-messages.ts'
+} from '../../src/chat/chat-core.ts'
+import { buildAgentChatMessages, type AgentChatMessage } from '../../src/chat/chat-messages.ts'
 import { makeQuestionToolDef } from '../../src/tools/index.ts'
 
 // A loop resume emits `AgentStart`, then the resumed tool batch (answers, starts, results), before

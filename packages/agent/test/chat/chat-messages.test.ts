@@ -44,7 +44,7 @@ import {
   RegenerateChatMessagesResult,
   toAgentMessages,
   type AgentChatMessage
-} from '../../src/react/chat-messages.ts'
+} from '../../src/chat/chat-messages.ts'
 import { Predicate } from 'effect'
 
 describe('agent chat messages', () => {

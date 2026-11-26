@@ -19,7 +19,7 @@ import {
   UserMessage,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
-import { AgentChatHitlResponseResult } from '../../src/react/chat-actions.ts'
+import { AgentChatHitlResponseResult } from '../../src/chat/chat-actions.ts'
 import {
   applyAgentEventToChatMessages,
   buildAgentChatItems,

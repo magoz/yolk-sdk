@@ -24,8 +24,8 @@ import {
   AgentChatHitlResponseResult,
   AgentChatRegenerateResult,
   AgentChatSubmitResult
-} from '../../src/react/chat-actions.ts'
-import { TurnDeleted, UserMessageEdited } from '../../src/react/chat-session-events.ts'
+} from '../../src/chat/chat-actions.ts'
+import { TurnDeleted, UserMessageEdited } from '../../src/chat/chat-session-events.ts'
 import {
   useAgentChat,
   type AgentChatTransport,

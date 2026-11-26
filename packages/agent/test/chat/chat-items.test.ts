@@ -24,13 +24,13 @@ import {
   ToolDurationKnown,
   ToolDurationUnknown,
   ToolRunState
-} from '../../src/react/chat-items.ts'
+} from '../../src/chat/chat-items.ts'
 import {
   AgentChatPart,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   toAgentMessages
-} from '../../src/react/chat-messages.ts'
+} from '../../src/chat/chat-messages.ts'
 
 const assistantMessage = (input: {
   readonly content: string

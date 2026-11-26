@@ -42,10 +42,10 @@ import {
   initialAgentChatState,
   makeAgentChatEventProjectionState,
   reduceAgentChatState
-} from '../../src/react/chat-core.ts'
+} from '../../src/chat/chat-core.ts'
 import { Predicate } from 'effect'
-import { AgentChatAction } from '../../src/react/chat-actions.ts'
-import { AgentChatPart, ChatToolState } from '../../src/react/chat-messages.ts'
+import { AgentChatAction } from '../../src/chat/chat-actions.ts'
+import { AgentChatPart, ChatToolState } from '../../src/chat/chat-messages.ts'
 
 describe('agent chat core', () => {
   it('submits user messages through the headless reducer', () => {

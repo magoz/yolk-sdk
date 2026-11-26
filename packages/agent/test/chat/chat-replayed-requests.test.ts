@@ -50,7 +50,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { ContextTransformer, LoopConfig, run, runToolBatch } from '../../src/loop/index.ts'
 import { FauxProvider, TestToolExecutor } from '../../src/loop/testing/index.ts'
-import { AgentChatAction } from '../../src/react/chat-actions.ts'
+import { AgentChatAction } from '../../src/chat/chat-actions.ts'
 import {
   applyAgentEventToChatProjection,
   initialAgentChatState,
@@ -58,14 +58,14 @@ import {
   reduceAgentChatState,
   type AgentChatEventProjectionState,
   type AgentChatState
-} from '../../src/react/chat-core.ts'
+} from '../../src/chat/chat-core.ts'
 import { AgentToolRun } from '../../src/client/state.ts'
 import {
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   type AgentChatMessage,
   type ChatToolState
-} from '../../src/react/chat-messages.ts'
+} from '../../src/chat/chat-messages.ts'
 import { makeInputToolDef } from '../../src/tools/index.ts'
 
 // A request event (or `AgentAwaitingInput` request) replayed after its call settled must not set

@@ -26,17 +26,17 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import {
   AgentChatAction,
-  AgentChatDeleteTurnResult as AgentChatDeleteTurnResultValue,
-  AgentChatEditUserMessageResult as AgentChatEditUserMessageResultValue,
-  AgentChatHitlResponseResult as AgentChatHitlResponseResultValue,
-  AgentChatRegenerateResult as AgentChatRegenerateResultValue,
-  AgentChatSubmitResult as AgentChatSubmitResultValue
-} from './chat-actions.ts'
+  AgentChatDeleteTurnResult,
+  AgentChatEditUserMessageResult,
+  AgentChatHitlResponseResult,
+  AgentChatRegenerateResult,
+  AgentChatSubmitResult
+} from '../chat/chat-actions.ts'
 import {
   hasAgentChatReasoningSummary,
   initialAgentChatState,
   reduceAgentChatState
-} from './chat-core.ts'
+} from '../chat/chat-core.ts'
 import {
   DeleteChatTurnResult,
   EditChatUserMessageResult,
@@ -45,7 +45,7 @@ import {
   editChatUserMessage,
   regenerateChatMessagesFrom,
   toAgentMessages
-} from './chat-messages.ts'
+} from '../chat/chat-messages.ts'
 
 export type AgentChatTransportRequest = Omit<StreamAgentEventsRequest, 'signal'> & {
   readonly signal: AbortSignal
@@ -73,47 +73,6 @@ export type UseAgentChatOptions = {
   readonly onAbort?: () => void
   readonly nowMs?: () => number
 }
-
-export type AgentChatSubmitResult =
-  | {
-      readonly _tag: 'Submitted'
-      readonly content: Content
-      readonly message: UserMessage
-      readonly messages: AgentTranscript
-    }
-  | { readonly _tag: 'Ignored' }
-
-export type AgentChatDeleteTurnResult =
-  | {
-      readonly _tag: 'Deleted'
-      readonly turnStartMessageId: string
-      readonly deletedMessageIds: ReadonlyArray<string>
-    }
-  | { readonly _tag: 'Ignored' }
-
-export type AgentChatRegenerateResult =
-  | {
-      readonly _tag: 'Regenerated'
-      readonly messageId: string
-      readonly messages: AgentTranscript
-    }
-  | { readonly _tag: 'Ignored' }
-
-export type AgentChatEditUserMessageResult =
-  | {
-      readonly _tag: 'Edited'
-      readonly messageId: string
-      readonly messages: AgentTranscript
-    }
-  | { readonly _tag: 'Ignored' }
-
-export type AgentChatHitlResponseResult =
-  | {
-      readonly _tag: 'Submitted'
-      readonly response: HitlResponse
-      readonly messages: AgentTranscript
-    }
-  | { readonly _tag: 'Ignored' }
 
 const admitAgentChatTransportCause = (error: unknown): AgentTransportError =>
   error instanceof AgentTransportError
@@ -269,7 +228,7 @@ export function useAgentChat({
   const submitMessage = useCallback(
     (message: UserMessage): AgentChatSubmitResult => {
       if (!canSubmitContent(message.content)) {
-        return AgentChatSubmitResultValue.Ignored()
+        return AgentChatSubmitResult.Ignored()
       }
 
       const messages = appendAgentMessage(toAgentMessages(state.chatMessages), message)
@@ -277,7 +236,7 @@ export function useAgentChat({
       dispatch(AgentChatAction.Submit({ message }))
       runAgent(messages)
 
-      return AgentChatSubmitResultValue.Submitted({
+      return AgentChatSubmitResult.Submitted({
         content: message.content,
         message,
         messages
@@ -291,7 +250,7 @@ export function useAgentChat({
       const content = value.trim()
 
       if (!canSubmitText(content)) {
-        return AgentChatSubmitResultValue.Ignored()
+        return AgentChatSubmitResult.Ignored()
       }
 
       return submitMessage(UserMessage.make({ content }))
@@ -302,18 +261,18 @@ export function useAgentChat({
   const deleteTurn = useCallback(
     (messageId: string): AgentChatDeleteTurnResult => {
       if (isRunning || isWaiting || abortControllerRef.current !== null) {
-        return AgentChatDeleteTurnResultValue.Ignored()
+        return AgentChatDeleteTurnResult.Ignored()
       }
 
       const next = deleteChatTurn(state.chatMessages, messageId)
 
       if (DeleteChatTurnResult.$is('NotFound')(next)) {
-        return AgentChatDeleteTurnResultValue.Ignored()
+        return AgentChatDeleteTurnResult.Ignored()
       }
 
       dispatch(AgentChatAction.DeleteTurn({ messageId }))
 
-      return AgentChatDeleteTurnResultValue.Deleted({
+      return AgentChatDeleteTurnResult.Deleted({
         turnStartMessageId: next.turnStartMessageId,
         deletedMessageIds: next.deletedMessageIds
       })
@@ -324,25 +283,25 @@ export function useAgentChat({
   const regenerateFrom = useCallback(
     (messageId: string): AgentChatRegenerateResult => {
       if (isRunning || isWaiting || abortControllerRef.current !== null) {
-        return AgentChatRegenerateResultValue.Ignored()
+        return AgentChatRegenerateResult.Ignored()
       }
 
       const next = regenerateChatMessagesFrom(state.chatMessages, messageId)
 
       if (RegenerateChatMessagesResult.$is('NotFound')(next)) {
-        return AgentChatRegenerateResultValue.Ignored()
+        return AgentChatRegenerateResult.Ignored()
       }
 
       const messages = toAgentMessages(next.messages)
       const transcript = transcriptFromChatMessages(messages)
 
       return Option.match(transcript, {
-        onNone: () => AgentChatRegenerateResultValue.Ignored(),
+        onNone: () => AgentChatRegenerateResult.Ignored(),
         onSome: value => {
           dispatch(AgentChatAction.RegenerateFrom({ messageId }))
           runAgent(value)
 
-          return AgentChatRegenerateResultValue.Regenerated({ messageId, messages: value })
+          return AgentChatRegenerateResult.Regenerated({ messageId, messages: value })
         }
       })
     },
@@ -357,7 +316,7 @@ export function useAgentChat({
         isWaiting ||
         abortControllerRef.current !== null
       ) {
-        return AgentChatEditUserMessageResultValue.Ignored()
+        return AgentChatEditUserMessageResult.Ignored()
       }
 
       const next = editChatUserMessage(state.chatMessages, messageId, content)
@@ -367,12 +326,12 @@ export function useAgentChat({
         const transcript = transcriptFromChatMessages(messages)
 
         return Option.match(transcript, {
-          onNone: () => AgentChatEditUserMessageResultValue.Ignored(),
+          onNone: () => AgentChatEditUserMessageResult.Ignored(),
           onSome: value => {
             dispatch(AgentChatAction.EditUserMessage({ messageId, content }))
             runAgent(value)
 
-            return AgentChatEditUserMessageResultValue.Edited({
+            return AgentChatEditUserMessageResult.Edited({
               messageId: next.messageId,
               messages: value
             })
@@ -380,7 +339,7 @@ export function useAgentChat({
         })
       }
 
-      return AgentChatEditUserMessageResultValue.Ignored()
+      return AgentChatEditUserMessageResult.Ignored()
     },
     [isRunning, isWaiting, runAgent, state.chatMessages]
   )
@@ -388,20 +347,20 @@ export function useAgentChat({
   const submitHitlResponse = useCallback(
     (response: HitlResponse): AgentChatHitlResponseResult => {
       if (!canSubmitHitlResponse()) {
-        return AgentChatHitlResponseResultValue.Ignored()
+        return AgentChatHitlResponseResult.Ignored()
       }
 
       const transcript = transcriptFromChatMessages(toAgentMessages(state.chatMessages))
 
       return Option.match(transcript, {
-        onNone: () => AgentChatHitlResponseResultValue.Ignored(),
+        onNone: () => AgentChatHitlResponseResult.Ignored(),
         onSome: messages => {
           // Read before the dispatch: the answer starts a new stream, which has its own pauses.
           const pause = hitlPauseFor(state.hitlPauses ?? emptyHitlPauses, response)
           dispatch(AgentChatAction.SubmitHitlResponse({ response }))
           runAgent(messages, [response], pause)
 
-          return AgentChatHitlResponseResultValue.Submitted({ response, messages })
+          return AgentChatHitlResponseResult.Submitted({ response, messages })
         }
       })
     },

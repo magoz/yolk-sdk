@@ -14,6 +14,7 @@ metadata.
   - `@yolk-sdk/agent/loop/testing`
   - `@yolk-sdk/agent/runtime`
   - `@yolk-sdk/agent/client`
+  - `@yolk-sdk/agent/chat`
   - `@yolk-sdk/agent/compaction`
   - `@yolk-sdk/agent/classification`
   - `@yolk-sdk/agent/tools`
@@ -87,7 +88,7 @@ metadata.
 - Conformance internals live under `packages/conformance/src/*`, not app code.
 - Emulator internals live under `packages/emulators/src/*`, not app code.
 - Area tests mirror source layout:
-  - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
+  - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,chat,react,oauth,providers,skillset,voice,property}`
   - `packages/mcp/test/{client,server,conformance}`
   - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/codemode/test`
@@ -122,7 +123,8 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/connectors/**/conformance -> @yolk-sdk/conformance/* (see conformance import rule below)
 @yolk-sdk/mcp/conformance -> @yolk-sdk/conformance/* + @yolk-sdk/mcp/client + eventsource-parser (the client's own ^3.0.0 range, so one copy resolves; verified in-repo by a parity test) (see conformance import rule below)
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
-@yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
+@yolk-sdk/agent/chat -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect; never React
+@yolk-sdk/agent/react -> @yolk-sdk/agent/chat + @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect
 @yolk-sdk/agent/classification -> @yolk-sdk/agent/protocol + Effect; never provider code
 @yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol} + Effect; openai/realtime + openai/speech may also use @yolk-sdk/agent/voice contracts; vercel/ai-gateway-classifier implements @yolk-sdk/agent/classification

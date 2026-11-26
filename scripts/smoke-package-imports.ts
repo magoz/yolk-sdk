@@ -16,6 +16,7 @@ const packages: ReadonlyArray<PackageManifest> = [
     name: '@yolk-sdk/agent',
     exports: [
       '.',
+      './chat',
       './classification',
       './client',
       './compaction',
@@ -241,6 +242,9 @@ const checkLazyImports = (fixtureDir: string, cloudflareStub: string) => {
       '  load: (url, context, next) => { loaded.push(url); return next(url, context) }',
       '})',
       'const evaluated = name => loaded.some(url => url.includes(`/node_modules/${name}/`))',
+      // The framework-neutral chat projection never loads React (`@yolk-sdk/agent/react` adds it).
+      'await import("@yolk-sdk/agent/chat")',
+      'if (evaluated("react")) throw new Error("@yolk-sdk/agent/chat evaluated react on import")',
       ...lazyDependencies.flatMap(({ subpaths, dependency }) => [
         ...subpaths.map(subpath => `await import(${JSON.stringify(subpath)})`),
         `if (evaluated(${JSON.stringify(dependency)})) throw new Error(${JSON.stringify(`${subpaths.join(', ')} evaluated ${dependency} on import`)})`
