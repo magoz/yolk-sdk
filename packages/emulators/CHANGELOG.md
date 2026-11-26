@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.163
+
+### Patch Changes
+
+- f4b28c7: Advance in lockstep with `@yolk-sdk/vercel-workflows` and `@yolk-sdk/codemode`: Workflow `executionId`s must be unique per execution of a step body, cancelled Cloudflare runs abort their running steps (`getStepSignal()`) and settle, and Cloudflare code mode keeps the output a script sent before hitting its CPU limit. These packages have no direct changes in this release.
+
 ## 0.1.0-canary.162
 
 ### Patch Changes

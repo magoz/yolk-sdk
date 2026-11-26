@@ -1,5 +1,22 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.163
+
+### Minor Changes
+
+- 048503f: Cloudflare runtime: cancelling a run now ends its running steps and lets the run's execution settle.
+
+  - `getStepSignal()` (new, from `@yolk-sdk/vercel-workflows/cloudflare/workflow`; not part of Vercel's `workflow`, so import it from this subpath) returns the running step's `AbortSignal`. `run.cancel()` aborts it with a `WorkflowRunCancelledError` as the reason. Pass it to a step's fetch or model call so a cancelled run's step stops instead of running to its end for an outcome that is dropped.
+  - A step waiting to retry stops at once when its run is cancelled, instead of after its backoff.
+  - A run cancelled while its workflow module was still loading stays `cancelled`; before, its status was overwritten with `running` (or `failed` for a missing module) and a later alarm or `settled()` could run it again.
+  - A cancelled run's body still stops where it waits, but its execution now ends once its steps in flight are done, instead of never settling. `WorkflowExecution.kick()` returns a promise that settles when the execution ends (it never rejects).
+
+### Patch Changes
+
+- d8cc970: Docs: an `executionId` must be unique per execution of the step body, not per attempt. Workflow 5.8's speculative execution starts the body of a step with `maxRetries > 0` before its start is recorded; when that start is refused it discards the outcome and runs the body again under the same `getStepMetadata()` `stepId` and `attempt`, possibly beside the first. The documented example `${stepId}:${attempt}` then repeats, both executions write the same event ids, and `@yolk-sdk/agent` clients splice the two answers without seeing the turn as re-executed. Generate the id once at the start of the step body instead, for example `${stepId}:${attempt}:${crypto.randomUUID()}` (step bodies are not replayed).
+
+  `TestWorkflowWorld` takes an opt-in `discardStepExecution: (step: TestWorkflowStepMetadata) => boolean` option (`new TestWorkflowWorld({ discardStepExecution })`). Before each attempt of a step with `maxRetries > 0` (never `maxRetries: 0`), a `true` answer runs the body once, discards its outcome (never stored, retried or counted in `stepAttempts`; its stream writes stay) and runs it again with the same `stepId` and `attempt`; later attempts keep their numbers. The discarded execution settles before the kept one starts. `inspect(runId).discardedStepExecutions` lists each with its `outcome`, an Effect `Result` (new types `TestWorkflowWorldOptions`, `TestWorkflowDiscardedStepExecution`).
+
 ## 0.1.0-canary.162
 
 ### Patch Changes
