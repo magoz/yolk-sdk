@@ -11,6 +11,11 @@
  * the other events), per history length. Flat rows mean the per-event cost does not grow with the
  * chat; `--turns` (default 16, about 240 events each) lengthens the run, which shows whether it grows
  * with the events already seen (the `eventId` dedupe).
+ *
+ * A second table folds the same run into a projection that already folded N earlier runs of the
+ * session (each with its own `streamId`, `--turns` short model turns and `AgentEnd`), as a host
+ * folding a whole session log does: the chat grows with them, and so does the executions ledger
+ * (one entry per folded model step), which every tagged event looks its execution up in.
  */
 import process from 'node:process'
 import { Predicate } from 'effect'
@@ -51,6 +56,8 @@ import {
 
 const historyLengths = [0, 500, 2_000, 8_000] as const
 
+const priorRunCounts = [0, 50, 200, 800] as const
+
 const numberArgument = (name: string, fallback: number) => {
   const index = process.argv.indexOf(name)
 
@@ -58,8 +65,6 @@ const numberArgument = (name: string, fallback: number) => {
 }
 
 const liveTurns = numberArgument('--turns', 16)
-
-const deltasPerTurn = 200
 
 const runs = numberArgument('--runs', 5)
 
@@ -94,10 +99,27 @@ const history = (rows: number): ReadonlyArray<AgentMessage> =>
     ]
   }).flat()
 
-const streamId = 'workflow:bench'
+type RunStream = {
+  readonly streamId: string
+  /** Reasoning deltas, text deltas and tool input deltas per model turn. */
+  readonly reasoning: number
+  readonly deltas: number
+  readonly inputDeltas: number
+}
+
+const live: RunStream = { streamId: 'workflow:bench', reasoning: 20, deltas: 200, inputDeltas: 10 }
+
+/** An earlier run of the session: the same turns, streaming a few deltas each. */
+const prior = (index: number): RunStream => ({
+  streamId: `workflow:bench:prior-${index}`,
+  reasoning: 1,
+  deltas: 4,
+  inputDeltas: 1
+})
 
 /** One durable run: tagged model turns, an untagged tool batch per turn, and `AgentEnd`. */
-const liveRun = (): ReadonlyArray<AgentEvent> => {
+const durableRun = (run: RunStream): ReadonlyArray<AgentEvent> => {
+  const { streamId } = run
   const events: Array<AgentEvent> = []
   let sequence = 0
 
@@ -116,18 +138,18 @@ const liveRun = (): ReadonlyArray<AgentEvent> => {
   events.push(UserMessageEvent.make({ ...ids(1), message: question }))
 
   for (let turn = 1; turn <= liveTurns; turn += 1) {
-    const executionId = `step_model:${turn}:1`
+    const executionId = `${streamId}:step_model:${turn}:1`
     const tagged = () => ids(turn, executionId)
-    const call = ToolCall.make({ id: `live-call-${turn}`, name: 'search', params: { turn } })
+    const call = ToolCall.make({ id: `call-${turn}`, name: 'search', params: { turn } })
     let text = ''
 
     events.push(LLMStreamStart.make({ ...tagged(), turn }))
 
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < run.reasoning; index += 1) {
       events.push(LLMReasoningDelta.make({ ...tagged(), text: 'thinking ' }))
     }
 
-    for (let index = 0; index < deltasPerTurn; index += 1) {
+    for (let index = 0; index < run.deltas; index += 1) {
       const delta = `word${index} `
 
       text += delta
@@ -136,7 +158,7 @@ const liveRun = (): ReadonlyArray<AgentEvent> => {
 
     events.push(ToolInputStart.make({ ...tagged(), id: call.id, name: call.name }))
 
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < run.inputDeltas; index += 1) {
       events.push(ToolInputDelta.make({ ...tagged(), id: call.id, delta: '{' }))
     }
 
@@ -171,7 +193,7 @@ const median = (values: ReadonlyArray<number>) => {
   return sorted[Math.floor(sorted.length / 2)] ?? 0
 }
 
-const events = liveRun()
+const events = durableRun(live)
 
 const fold = (start: AgentChatEventProjectionState) => {
   let projection = start
@@ -205,7 +227,21 @@ const fold = (start: AgentChatEventProjectionState) => {
   }
 }
 
-const table = historyLengths.map(rows => {
+/** The median of `--runs` folds into `start`, after one warm-up fold. */
+const measure = (start: AgentChatEventProjectionState) => {
+  fold(start)
+
+  const results = Array.from({ length: runs }, () => fold(start))
+
+  return {
+    'µs/event': median(results.map(result => result.all)).toFixed(2),
+    'µs/delta': median(results.map(result => result.delta)).toFixed(2),
+    'µs/other event': median(results.map(result => result.other)).toFixed(2),
+    'rows after': results[0]?.rows ?? 0
+  }
+}
+
+const historyTable = historyLengths.map(rows => {
   const start = markChatRunStart(
     makeAgentChatEventProjectionState(
       buildAgentChatMessages({
@@ -219,19 +255,33 @@ const table = historyLengths.map(rows => {
     )
   )
 
-  fold(start)
+  return { 'history rows': start.chatMessages.length, ...measure(start) }
+})
 
-  const results = Array.from({ length: runs }, () => fold(start))
+const priorRunsTable = priorRunCounts.map(count => {
+  const start = Array.from({ length: count }, (_, index) => durableRun(prior(index)))
+    .flat()
+    .reduce(
+      (projection, event) => stepAgentChatProjection(projection, event, { nowMs: 0 }).projection,
+      makeAgentChatEventProjectionState()
+    )
+
+  const ledger = (start.executions ?? []).reduce((total, run) => total + run.executions.length, 0)
 
   return {
+    'prior runs': count,
+    'ledger entries': ledger,
     'history rows': start.chatMessages.length,
-    'µs/event': median(results.map(result => result.all)).toFixed(2),
-    'µs/delta': median(results.map(result => result.delta)).toFixed(2),
-    'µs/other event': median(results.map(result => result.other)).toFixed(2),
-    'rows after': results[0]?.rows ?? 0
+    ...measure(start)
   }
 })
 
 console.log(`${events.length} events per fold (${liveTurns} turns), median of ${runs} folds`)
 
-console.table(table)
+console.log('Into a rebuilt history (a run start after it):')
+
+console.table(historyTable)
+
+console.log(`Into a projection that folded earlier runs (${liveTurns} model steps each):`)
+
+console.table(priorRunsTable)

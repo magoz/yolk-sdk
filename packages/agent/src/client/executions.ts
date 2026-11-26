@@ -172,7 +172,37 @@ const openRun = <Output>(streamId: string): AgentExecutionRun<Output> => ({
   executions: []
 })
 
-const allExecutions = <Output>(runs: AgentExecutions<Output>) => runs.flatMap(run => run.executions)
+/**
+ * The execution with the id (`undefined`: the ledger never saw it). An id is recorded only when it
+ * is unseen, so it names one entry; the search runs back from the latest run, which holds the live
+ * executions, so a live event's lookup does not grow with the runs folded before it. Only a start
+ * of a new execution (once per model step) reads the whole ledger.
+ */
+const findExecution = <Output>(
+  runs: AgentExecutions<Output>,
+  executionId: string
+): AgentExecution<Output> | undefined => {
+  for (let runIndex = runs.length - 1; runIndex >= 0; runIndex -= 1) {
+    const executions = runs[runIndex]?.executions ?? []
+
+    for (let index = executions.length - 1; index >= 0; index -= 1) {
+      const execution = executions[index]
+
+      if (execution?.executionId === executionId) return execution
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Whether a run can hold no execution data: an ended or retired run was released (its executions
+ * keep only their identity) and settled, and nothing adds to it after (a later start in it is
+ * stale; only live executions record output, calls or `Until`). Per-event work skips it, so it
+ * does not grow with the runs folded before.
+ */
+export const isReleasedAgentExecutionRun = <Output>(run: AgentExecutionRun<Output>) =>
+  run.ended || run.retired
 
 /** The run's current (not retired) entry, appended when there is none. */
 const withCurrentRun = <Output>(
@@ -209,7 +239,7 @@ export const routeAgentExecutionEvent = <Output>(
 
   if (executionId === undefined) return AgentExecutionRoute.Plain()
 
-  const known = allExecutions(runs).find(execution => execution.executionId === executionId)
+  const known = findExecution(runs, executionId)
 
   if (known !== undefined) {
     return known.status === 'Live'
@@ -324,7 +354,7 @@ export const missedAgentExecutionStart = <Output>(
     executionId === undefined ||
     executionTurn === undefined ||
     !followsModelStreamStart(event) ||
-    allExecutions(runs).some(execution => execution.executionId === executionId)
+    findExecution(runs, executionId) !== undefined
   ) {
     return undefined
   }
@@ -496,29 +526,39 @@ export const recordAgentExecutionEvent = <Output>(
 
   if (calls.length === 0 && output.length === 0 && answer === undefined && !boundary) return runs
 
-  const recorded = runs.map(run => ({
-    ...run,
-    executions: run.executions.map(execution => {
-      if (!owned) {
-        return acknowledges(run, execution, event) &&
-          execution.calls.some(call => calls.includes(call))
-          ? { ...execution, calls: execution.calls.filter(call => !calls.includes(call)) }
-          : execution
-      }
+  const record = (
+    run: AgentExecutionRun<Output>,
+    execution: AgentExecution<Output>
+  ): AgentExecution<Output> => {
+    if (!owned) {
+      return acknowledges(run, execution, event) &&
+        execution.calls.some(call => calls.includes(call))
+        ? { ...execution, calls: execution.calls.filter(call => !calls.includes(call)) }
+        : execution
+    }
 
-      if (execution.status !== 'Live' || execution.executionId !== event.executionId) {
-        return execution
-      }
+    if (execution.status !== 'Live' || execution.executionId !== event.executionId) {
+      return execution
+    }
 
-      const produced = {
-        ...execution,
-        calls: [...execution.calls, ...calls.filter(call => !execution.calls.includes(call))],
-        output: [...execution.output, ...output]
-      }
+    const produced = {
+      ...execution,
+      calls: [...execution.calls, ...calls.filter(call => !execution.calls.includes(call))],
+      output: [...execution.output, ...output]
+    }
 
-      return answer === undefined ? produced : { ...produced, answer }
-    })
-  }))
+    return answer === undefined ? produced : { ...produced, answer }
+  }
+
+  // A released run holds no live execution and no calls: it keeps its reference, as does every
+  // run and execution the event did not change.
+  const recorded = mapChanged(runs, run => {
+    if (isReleasedAgentExecutionRun(run)) return run
+
+    const executions = mapChanged(run.executions, execution => record(run, execution))
+
+    return executions === run.executions ? run : { ...run, executions }
+  })
 
   if (!boundary) return recorded
 
@@ -527,6 +567,16 @@ export const recordAgentExecutionEvent = <Output>(
   const released = terminal ? releaseRuns(settled, closing) : settled
 
   return restart ? retireRuns(released, event) : released
+}
+
+/** `items` mapped, the same array when every item maps to itself. */
+const mapChanged = <Item>(
+  items: ReadonlyArray<Item>,
+  update: (item: Item) => Item
+): ReadonlyArray<Item> => {
+  const mapped = items.map(update)
+
+  return mapped.every((item, index) => item === items[index]) ? items : mapped
 }
 
 /** A turn of a run closed by a terminal event that shows an answer the step did not commit. */

@@ -20,6 +20,7 @@ import {
 import {
   agentEventToolCallIds,
   disputedAgentTurns,
+  isReleasedAgentExecutionRun,
   missedAgentExecutionStart,
   recordAgentExecutionEvent,
   routeAgentExecutionEvent,
@@ -199,6 +200,32 @@ export const stepAgentChatProjection = (
   state: AgentChatEventProjectionState,
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions = {}
+): AgentChatProjectionStep =>
+  stepAgentChatProjectionWith(chatExecutionOutput, state, event, options)
+
+/**
+ * What an execution's event produced (`chatExecutionOutput`): `before` is the chat the event is
+ * applied to, `after` the chat it gave, `turn` and `modelTurn` the anchors its tool events and its
+ * model output were scoped to.
+ */
+export type ChatExecutionOutputRecorder = (
+  execution: AgentExecution<AgentChatExecutionOutput>,
+  event: AgentEvent,
+  before: ReadonlyArray<AgentChatMessage>,
+  after: ReadonlyArray<AgentChatMessage>,
+  turn: ChatTurnAnchor,
+  modelTurn: ChatTurnAnchor
+) => ReadonlyArray<AgentChatExecutionOutput>
+
+/**
+ * `stepAgentChatProjection` with the execution output recorder given (package-internal: the
+ * differential test folds with a reference recorder that compares the whole chat).
+ */
+export const stepAgentChatProjectionWith = (
+  executionOutput: ChatExecutionOutputRecorder,
+  state: AgentChatEventProjectionState,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions
 ): AgentChatProjectionStep => {
   if (hasSeenEventId(state.seenEventIds, event)) {
     return { projection: state, statusEvent: undefined }
@@ -209,10 +236,12 @@ export const stepAgentChatProjection = (
   const missed = missedAgentExecutionStart(state.executions ?? [], event)
 
   const started =
-    missed === undefined ? undefined : projectExecutionEvent(state, missed, options, 'missed')
+    missed === undefined
+      ? undefined
+      : projectExecutionEvent(state, missed, options, 'missed', executionOutput)
 
   const before = started === undefined ? state : { ...state, ...projectionFields(started) }
-  const routed = projectExecutionEvent(before, event, options, 'seen')
+  const routed = projectExecutionEvent(before, event, options, 'seen', executionOutput)
 
   const step: AgentChatProjectionStep = {
     projection: {
@@ -327,7 +356,8 @@ const projectExecutionEvent = (
   projection: ExecutionProjection,
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions,
-  origin: 'seen' | 'missed'
+  origin: 'seen' | 'missed',
+  executionOutput: ChatExecutionOutputRecorder
 ): ProjectedExecutionEvent => {
   const executions = projection.executions ?? []
   const route = routeAgentExecutionEvent(executions, event)
@@ -440,7 +470,7 @@ const projectExecutionEvent = (
           ...(draft === undefined
             ? []
             : [AgentChatExecutionOutput.Message({ messageId: draft.id })]),
-          ...chatExecutionOutput(owner, event, committed, chatMessages, turn, modelTurn)
+          ...executionOutput(owner, event, committed, chatMessages, turn, modelTurn)
         ]
   )
 
@@ -507,23 +537,29 @@ const turnAnchor = (
 
 /**
  * The chat messages other executions still hold as their output (an earlier turn's answer kept
- * for reconciling): the owner's events never change them.
+ * for reconciling): the owner's events never change them. Released runs (ended or retired) hold
+ * no output and are skipped, so an owned event's cost does not grow with the runs folded before.
  */
 const foreignMessages = (
   executions: AgentExecutions<AgentChatExecutionOutput>,
   owner: AgentExecution<AgentChatExecutionOutput>
-): ReadonlySet<string> =>
-  new Set(
-    executions.flatMap(run =>
-      run.executions.flatMap(execution =>
-        execution.executionId === owner.executionId
-          ? []
-          : execution.output.flatMap(output =>
-              Predicate.isTagged(output, 'Message') ? [output.messageId] : []
-            )
-      )
-    )
-  )
+): ReadonlySet<string> => {
+  const foreign = new Set<string>()
+
+  for (const run of executions) {
+    if (isReleasedAgentExecutionRun(run)) continue
+
+    for (const execution of run.executions) {
+      if (execution.executionId === owner.executionId) continue
+
+      for (const output of execution.output) {
+        if (Predicate.isTagged(output, 'Message')) foreign.add(output.messageId)
+      }
+    }
+  }
+
+  return foreign
+}
 
 /**
  * When a later turn of a run starts (with or without `executionId`), the executions of its earlier
@@ -564,20 +600,26 @@ const endEarlierTurns = (
  * first in its turn (`turn`), with the part it replaced (a provider can reuse a call id within a
  * turn) so removal can restore it.
  */
-const chatExecutionOutput = (
-  execution: AgentExecution<AgentChatExecutionOutput>,
-  event: AgentEvent,
-  before: ReadonlyArray<AgentChatMessage>,
-  after: ReadonlyArray<AgentChatMessage>,
-  turn: ChatTurnAnchor,
-  modelTurn: ChatTurnAnchor
-): ReadonlyArray<AgentChatExecutionOutput> => {
+const chatExecutionOutput: ChatExecutionOutputRecorder = (
+  execution,
+  event,
+  before,
+  after,
+  turn,
+  modelTurn
+) => {
   const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
     turnToolCallMessage(messages, callId, turn)
 
   // An execution's events add messages only at the chat's end and replace only messages after the
   // model's turn start (`modelTurn`; every message when it is unknown), so only those are compared:
-  // an event's cost follows its turn, not the chat.
+  // an event's cost follows its turn, not the chat (checked against a whole-chat comparison:
+  // `test/property/chat-execution-output.property.test.ts`). It assumes owned events never reuse
+  // the id of a message before the turn's start: one that did would be recorded as created here,
+  // where the whole chat holds the id already. Messages the model stream creates take the next
+  // sequence's id; only a host event tagged against the contract (host events carry no
+  // `executionId`) can: a tagged `AgentError` writes `markChatError`'s fixed `'error-message'`,
+  // which an earlier turn's error may hold before the turn's start.
   const turnBefore = before.slice(turnStartIndex(before, modelTurn))
   const turnAfter = after.slice(turnStartIndex(after, modelTurn))
   const known = new Set(turnBefore.map(message => message.id))
