@@ -37,12 +37,16 @@ Each run lives in its own `WorkflowRun` Durable Object, named by its run id.
 - `getWritable()` in a step appends to the run's stream; `getRun(runId).getReadable({ startIndex })`
   follows it live and `getTailIndex()` returns the last chunk's index.
 - `run.cancel()` stops the run where it waits; `returnValue` rejects with
-  `WorkflowRunCancelledError`.
+  `WorkflowRunCancelledError`. A step still running gets its signal aborted (reason a
+  `WorkflowRunCancelledError`): read it with `getStepSignal()` from
+  `@yolk-sdk/vercel-workflows/cloudflare/workflow` (not part of `workflow`'s types) and pass it to
+  the step's fetch or model call so it ends with the run. Its outcome is dropped either way, a step
+  waiting to retry stops at once, and the run's execution ends once its steps are done.
 
 The drop-in modules cover `createHook`, `sleep`, `getWritable`, `getStepMetadata`,
-`getWorkflowMetadata`, `FatalError`, and `RetryableError` (`workflow`), and `start`, `getRun`, and
-`resumeHook` (`workflow/api`). `defineHook`, webhooks, and `fetch` are not provided; `start` ignores
-`attributes`.
+`getWorkflowMetadata`, `FatalError`, and `RetryableError` (`workflow`, plus the Cloudflare-only
+`getStepSignal`), and `start`, `getRun`, and `resumeHook` (`workflow/api`). `defineHook`,
+webhooks, and `fetch` are not provided; `start` ignores `attributes`.
 
 ## Configure the Worker
 

@@ -39,6 +39,21 @@ export const getStepMetadata = () => {
   }
 }
 
+/**
+ * Not in Vercel's `workflow`: the running step's `AbortSignal`, aborted when its run is cancelled
+ * (`run.cancel()`; reason a `WorkflowRunCancelledError`). Pass it to the step's I/O (fetch, model
+ * calls) so a cancelled run's step ends instead of running to its end for an outcome that is
+ * dropped. Import it from `@yolk-sdk/vercel-workflows/cloudflare/workflow`, since `workflow`'s
+ * types do not declare it.
+ */
+export const getStepSignal = (): AbortSignal => {
+  const step = stepStorage.getStore()
+
+  if (step === undefined) throw new Error('getStepSignal() can only be called inside a step')
+
+  return step.signal
+}
+
 export const getWritable = (): WritableStream<Uint8Array> => {
   const step = stepStorage.getStore()
 

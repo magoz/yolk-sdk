@@ -6,7 +6,13 @@ import {
   type WorkflowHook,
   type WorkflowScope
 } from './context.ts'
-import { FatalError, HookConflictError, HookNotFoundError, RetryableError } from './errors.ts'
+import {
+  FatalError,
+  HookConflictError,
+  HookNotFoundError,
+  RetryableError,
+  WorkflowRunCancelledError
+} from './errors.ts'
 import { workflowById } from './registry.ts'
 import { deserialize, serialize } from './serialization.ts'
 import type { JournalEntry, RunRecord, RunStore } from './store.ts'
@@ -55,9 +61,26 @@ const retryDelayMs = (attempt: number, error: unknown) => {
   return Math.min(30_000, 1000 * 2 ** (attempt - 1))
 }
 
-const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+/** Waits `ms`, or less when `signal` aborts first. */
+const delay = (ms: number, signal: AbortSignal) =>
+  new Promise<void>(resolve => {
+    if (signal.aborted) return resolve()
 
-/** A promise that never settles: a cancelled run's body stops where it waits. */
+    const done = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+
+    const timer = setTimeout(done, ms)
+
+    signal.addEventListener('abort', done, { once: true })
+  })
+
+/**
+ * A promise that never settles: a cancelled run's body stops where it waits. `execute` does not
+ * wait for it: it ends once the run is halted and its steps in flight are done (`LiveRun.stopped`).
+ */
 const halted = <A>(): Promise<A> => new Promise<A>(() => undefined)
 
 const isTerminal = (run: RunRecord) =>
@@ -111,6 +134,13 @@ const quiet = <A>(promise: Promise<A>): Promise<A> => {
 class LiveRun {
   stepsInFlight = 0
   private halted = false
+  /** Aborted by `halt`: steps get its signal, so their I/O can end with the run. */
+  private readonly cancellation = new AbortController()
+  private markStopped: () => void = () => undefined
+  /** Settles once the run is halted and no step of it is in flight. */
+  private readonly stopped = new Promise<void>(resolve => {
+    this.markStopped = resolve
+  })
   private readonly counters = new Map<string, number>()
   private readonly hookWaiters = new Map<string, HookWaiter>()
   private hookChanges: Array<HookChange> = []
@@ -135,6 +165,8 @@ class LiveRun {
 
   halt() {
     this.halted = true
+    this.cancellation.abort(new WorkflowRunCancelledError(this.run.runId))
+    this.settleIfStopped()
 
     for (const timer of this.sleepTimers) clearTimeout(timer)
 
@@ -147,6 +179,10 @@ class LiveRun {
     this.hookChanges = []
 
     for (const wake of [...this.claimWakers.values()]) wake()
+  }
+
+  private settleIfStopped() {
+    if (this.halted && this.stepsInFlight === 0) this.markStopped()
   }
 
   resolveHook(key: string, payload: unknown): boolean {
@@ -163,6 +199,9 @@ class LiveRun {
   async execute(): Promise<void> {
     const store = this.host.store
     const workflow = await workflowById(this.run.workflowId)
+
+    // Cancelled while its module loaded: the run is already `cancelled`, never overwrite it.
+    if (this.halted) return
 
     if (workflow === undefined) {
       store.finishRun(
@@ -192,16 +231,18 @@ class LiveRun {
       | { readonly ok: true; readonly value: unknown }
       | { readonly ok: false; readonly error: unknown }
 
+    const body = quiet(workflowStorage.run(scope, async () => workflow(...args)))
+
     try {
-      const value: unknown = await workflowStorage.run(scope, () => workflow(...args))
+      const value: unknown = await Promise.race([body, this.stopped])
       outcome = { ok: true, value }
     } catch (error) {
       outcome = { ok: false, error }
     }
 
-    const current = store.readRun()
-
     if (this.halted) return
+
+    const current = store.readRun()
 
     // Ended elsewhere (cancelled, or by an earlier instance): wake this instance's waiters anyway.
     if (current === undefined || isTerminal(current)) {
@@ -266,7 +307,8 @@ class LiveRun {
           attempt,
           stepStartedAt: new Date(),
           workflowStartedAt: new Date(this.run.createdAt),
-          writable: () => this.writable()
+          writable: () => this.writable(),
+          signal: this.cancellation.signal
         }
 
         try {
@@ -283,7 +325,7 @@ class LiveRun {
 
           if (!FatalError.is(error) && attempt <= maxRetries) {
             this.host.log(`Workflow step ${id} attempt ${attempt} failed; retrying`, error)
-            await delay(retryDelayMs(attempt, error))
+            await delay(retryDelayMs(attempt, error), this.cancellation.signal)
 
             if (this.halted) return halted()
 
@@ -303,6 +345,7 @@ class LiveRun {
       }
     } finally {
       this.stepsInFlight -= 1
+      this.settleIfStopped()
     }
   }
 
@@ -564,6 +607,7 @@ class LiveRun {
 
 export class WorkflowExecution {
   private live: LiveRun | undefined
+  private liveExecution: Promise<void> = Promise.resolve()
   private readonly host: ExecutionHost
 
   constructor(host: ExecutionHost) {
@@ -578,24 +622,29 @@ export class WorkflowExecution {
     return this.live !== undefined
   }
 
-  /** Runs (or replays) the body unless it already runs here or the run ended. */
-  kick(): void {
-    if (this.live !== undefined) return
+  /**
+   * Runs (or replays) the body unless it already runs here or the run ended. The promise settles
+   * when this execution ends: the run finished, or it was cancelled and its steps in flight are
+   * done (never rejects).
+   */
+  kick(): Promise<void> {
+    if (this.live !== undefined) return this.liveExecution
 
     const run = this.host.store.readRun()
 
-    if (run === undefined || isTerminal(run)) return
+    if (run === undefined || isTerminal(run)) return Promise.resolve()
 
     const live = new LiveRun(run, this.host)
 
     this.live = live
-
-    live
+    this.liveExecution = live
       .execute()
       .catch(error => this.host.log('Workflow execution failed', error))
       .finally(() => {
         if (this.live === live) this.live = undefined
       })
+
+    return this.liveExecution
   }
 
   /**
