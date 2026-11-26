@@ -8,8 +8,7 @@ import {
   InputResponse,
   InteractionRequest,
   InteractionResponse,
-  MessageAnnotations,
-  MessageAuthor,
+  MessageEnvelopeSchema,
   QuestionRequest,
   QuestionResponse,
   SubagentStatusEntry,
@@ -26,9 +25,14 @@ import { AgentChatSessionEvent } from './chat-session-events.ts'
  * The chat projection's state as Effect Schemas: the types the projection uses are derived from
  * them, and `Schema.toCodecJson(schema)` gives each a JSON form (options as `{ _tag, value }`,
  * `seenEventIds` as an array of ids, `hitlPauses` as an array of entries) for hosts that keep or
- * send it. The tagged unions keep their `Data.taggedEnum` constructors under the type's name
- * (`ChatToolState.Running({ startedAtMs })`); their Schemas carry a `Schema` suffix, as every
- * Schema here does.
+ * send it. Every Schema here is exported from `@yolk-sdk/agent/chat` (with the client's
+ * `AgentExecutionsSchema` and `HitlPauses`).
+ *
+ * Naming: constructors keep the plain name and Schemas get `Schema`: the tagged unions keep their
+ * `Data.taggedEnum` constructors under the type's name (`ChatToolState.Running({ startedAtMs })`)
+ * beside `ChatToolStateSchema`, and every Schema here carries the suffix. `AgentChatSessionEvent`
+ * (a union of Schema classes) and the client's `HitlPauses` are Schemas named before this
+ * convention: their type shares their name and they keep it.
  */
 
 export const ChatPartStateSchema = Schema.Literals(['streaming', 'done'])
@@ -80,13 +84,8 @@ export const ChatToolStateSchema = Schema.Union([
   }),
   Schema.TaggedStruct('Accepted', {
     result: ToolResult,
-    resultEnvelope: Schema.optional(
-      Schema.Struct({
-        createdAtMs: Schema.optional(Schema.Number),
-        author: Schema.optional(MessageAuthor),
-        annotations: Schema.optional(MessageAnnotations)
-      })
-    ),
+    /** The result message's envelope, kept so the message serializes back as it was. */
+    resultEnvelope: Schema.optional(MessageEnvelopeSchema),
     startedAtMs: Schema.optional(Schema.Number),
     endedAtMs: Schema.optional(Schema.Number)
   }),
@@ -136,9 +135,7 @@ export const AgentChatMessageSchema = Schema.Struct({
   turnId: Schema.String,
   sequence: Schema.Number,
   role: Schema.Literals(['user', 'assistant', 'system']),
-  createdAtMs: Schema.optional(Schema.Number),
-  author: Schema.optional(MessageAuthor),
-  annotations: Schema.optional(MessageAnnotations),
+  ...MessageEnvelopeSchema.fields,
   parts: Schema.Array(AgentChatPartSchema),
   /**
    * Host instruction messages (ADR 0007) that followed this message in the transcript. Never

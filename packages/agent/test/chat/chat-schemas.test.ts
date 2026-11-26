@@ -40,7 +40,6 @@ import {
   stepAgentChatProjectionAll,
   type AgentChatEventProjectionState,
   type AgentChatMessage,
-  type AgentChatState,
   type AgentExecutions
 } from '@yolk-sdk/agent/chat'
 import type { AgentExecutionsSchema } from '@yolk-sdk/agent/chat'
@@ -314,18 +313,14 @@ describe('chat projection Schemas', () => {
     })
   )
 
-  it('derives the chat types from the Schemas', () => {
-    expectTypeOf<
-      typeof AgentChatEventProjectionStateSchema.Type
-    >().toEqualTypeOf<AgentChatEventProjectionState>()
-
-    expectTypeOf<typeof AgentChatStateSchema.Type>().toEqualTypeOf<AgentChatState>()
-
+  // The chat types are `typeof <Schema>.Type`, so they cannot drift; `AgentExecutions<Output>` is
+  // generic and written by hand beside `AgentExecutionsSchema(output)`, so `pnpm tsc` checks the
+  // two agree (a field added to one only fails here).
+  it('keeps the hand-written AgentExecutions type equal to its Schema', () => {
     expectTypeOf<typeof AgentChatExecutionsSchema.Type>().toEqualTypeOf<
       AgentExecutions<AgentChatExecutionOutput>
     >()
 
-    // The generic Schema types any reducer's output.
     const Output = Schema.Struct({ id: Schema.String })
 
     expectTypeOf<ReturnType<typeof AgentExecutionsSchema<typeof Output>>['Type']>().toEqualTypeOf<

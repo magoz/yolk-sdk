@@ -168,6 +168,7 @@ export {
   MessageAnnotations,
   MessageAuthor,
   type MessageEnvelope,
+  MessageEnvelopeSchema,
   MessageInstruction,
   ProviderToolCallPart,
   ProviderToolResultPart,

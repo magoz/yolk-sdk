@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentAwaitingInput,
+  AgentEnd,
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
@@ -26,6 +27,7 @@ import {
   ToolResult,
   ToolResultMessage,
   UserMessage,
+  UserMessageEvent,
   inlineBase64Source,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
@@ -40,9 +42,10 @@ import {
   EditChatUserMessageResult,
   regenerateChatMessagesFrom,
   RegenerateChatMessagesResult,
-  toAgentMessages
+  toAgentMessages,
+  turnStartIndex
 } from '../../src/chat/chat-messages.ts'
-import { Predicate } from 'effect'
+import { Option, Predicate } from 'effect'
 import { type AgentChatMessage, AgentChatPart, ChatToolState } from '../../src/chat/chat-schemas.ts'
 
 describe('agent chat messages', () => {
@@ -685,5 +688,36 @@ describe('agent chat messages', () => {
     expect(acceptedTool.state.result.acceptance).toEqual(
       BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
     )
+  })
+
+  it('starts a turn after the latest message holding its anchor id', () => {
+    // A terminal whose run messages the chat lacks appends them numbered from 0, so message ids
+    // can repeat (`message-0-user` here).
+    const asked = applyAgentEventToChatMessages(
+      [],
+      UserMessageEvent.make({ message: UserMessage.make({ content: 'first' }) })
+    )
+
+    const ended = applyAgentEventToChatMessages(
+      asked,
+      AgentEnd.make({
+        messages: [
+          UserMessage.make({ content: 'first' }),
+          AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'answer' })] })
+        ],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+    )
+
+    expect(ended.map(message => message.id)).toEqual([
+      'message-0-user',
+      'message-0-user',
+      'message-1-assistant'
+    ])
+
+    // An anchor is the chat's last message when recorded: the latest with the id wins.
+    expect(turnStartIndex(ended, Option.some('message-0-user'))).toBe(2)
+    expect(turnStartIndex(ended, Option.some('message-1-assistant'))).toBe(3)
   })
 })

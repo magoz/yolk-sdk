@@ -856,8 +856,10 @@ const findLastMessageIndex = (
 }
 
 /**
- * The index of the message with the id (`-1`: none, or `None`). Message ids are unique in a chat;
- * the search runs back from the end, where the turn anchors it looks for are.
+ * The index of the latest message with the id (`-1`: none, or `None`). Ids can repeat: a terminal
+ * event whose run messages the chat lacks appends them numbered from 0 (`appendRunMessagesIfEmpty`,
+ * a second `message-0-user`). The search runs back from the end, where the turn anchors it looks
+ * for are (each recorded as the chat's last message), so the latest message with the id wins.
  */
 const indexOfMessage = (messages: ReadonlyArray<AgentChatMessage>, id: Option.Option<string>) =>
   Option.match(id, {

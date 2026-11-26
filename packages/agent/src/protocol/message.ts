@@ -25,11 +25,15 @@ export type MessageEnvelope = {
   readonly annotations?: MessageAnnotations
 }
 
-const MessageEnvelopeSchema = {
+/**
+ * The envelope fields every message carries beside its content (`MessageEnvelope`); others that
+ * keep a message's envelope (the chat's `Accepted.resultEnvelope`) reuse it.
+ */
+export const MessageEnvelopeSchema = Schema.Struct({
   createdAtMs: Schema.optional(Schema.Number),
   author: Schema.optional(MessageAuthor),
   annotations: Schema.optional(MessageAnnotations)
-}
+})
 
 /**
  * Marks a user-role message the loop appended as a host instruction (ADR 0007): `key` names the
@@ -45,7 +49,7 @@ export const MessageInstruction = Schema.Struct({
 export type MessageInstruction = typeof MessageInstruction.Type
 
 export class UserMessage extends Schema.TaggedClass<UserMessage>()('User', {
-  ...MessageEnvelopeSchema,
+  ...MessageEnvelopeSchema.fields,
   content: Content,
   instruction: Schema.optional(MessageInstruction)
 }) {}
@@ -168,13 +172,13 @@ export type AssistantPart = typeof AssistantPart.Type
 export class AssistantAgentMessage extends Schema.TaggedClass<AssistantAgentMessage>()(
   'Assistant',
   {
-    ...MessageEnvelopeSchema,
+    ...MessageEnvelopeSchema.fields,
     parts: Schema.Array(AssistantPart)
   }
 ) {}
 
 export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('ToolResult', {
-  ...MessageEnvelopeSchema,
+  ...MessageEnvelopeSchema.fields,
   toolCallId: Schema.String,
   content: Content,
   isError: Schema.optional(Schema.Boolean),

@@ -29,18 +29,22 @@ import {
   type AgentMessage
 } from '@yolk-sdk/agent/protocol'
 import {
+  initialAgentChatState,
   makeAgentChatEventProjectionState,
   markChatRunStart,
+  reduceAgentChatState,
   stepAgentChatProjection,
   stepAgentChatProjectionAll
 } from '../../src/chat/chat-core.ts'
+import { AgentChatAction } from '../../src/chat/chat-actions.ts'
 import {
   applyAgentEventToChatMessages,
   buildAgentChatMessages
 } from '../../src/chat/chat-messages.ts'
 import type {
   AgentChatEventProjectionState,
-  AgentChatMessage
+  AgentChatMessage,
+  AgentChatState
 } from '../../src/chat/chat-schemas.ts'
 
 /** Exchanges of a question, a call with its result, and an answer. */
@@ -75,35 +79,42 @@ const projectionOf = (messages: ReadonlyArray<AgentMessage>) =>
 const fold = (state: AgentChatEventProjectionState, events: ReadonlyArray<AgentEvent>) =>
   events.reduce((current, event) => stepAgentChatProjection(current, event).projection, state)
 
-const tagged = (turn: number, index: number) => ({
-  eventId: `run:${turn}:${index}`,
-  streamId: 'run',
-  executionId: `step:${turn}`,
+const reduceEvents = (state: AgentChatState, events: ReadonlyArray<AgentEvent>) =>
+  events.reduce(
+    (current, event) => reduceAgentChatState(current, AgentChatAction.Event({ event })),
+    state
+  )
+
+const taggedEvent = (turn: number, index: number, attempt = 1, run = 'run') => ({
+  eventId: `${run}:${turn}:${attempt}:${index}`,
+  streamId: run,
+  executionId: `${run}:step:${turn}:${attempt}`,
   executionTurn: turn
 })
 
 /** One tagged model turn streaming text and a call, then its untagged tool batch. */
-const turnEvents = (turn: number): ReadonlyArray<AgentEvent> => {
+const turnEvents = (turn: number, attempt = 1, run = 'run'): ReadonlyArray<AgentEvent> => {
   const call = ToolCall.make({ id: `live-${turn}`, name: 'search', params: { turn } })
+  const tagged = (index: number) => taggedEvent(turn, index, attempt, run)
 
   return [
-    LLMStreamStart.make({ ...tagged(turn, 0), turn }),
-    LLMTextDelta.make({ ...tagged(turn, 1), text: 'hel' }),
-    LLMTextDelta.make({ ...tagged(turn, 2), text: 'lo' }),
-    ToolInputStart.make({ ...tagged(turn, 3), id: call.id, name: call.name }),
-    ToolInputDelta.make({ ...tagged(turn, 4), id: call.id, delta: '{}' }),
-    ToolInputEnd.make({ ...tagged(turn, 5), call }),
+    LLMStreamStart.make({ ...tagged(0), turn }),
+    LLMTextDelta.make({ ...tagged(1), text: 'hel' }),
+    LLMTextDelta.make({ ...tagged(2), text: 'lo' }),
+    ToolInputStart.make({ ...tagged(3), id: call.id, name: call.name }),
+    ToolInputDelta.make({ ...tagged(4), id: call.id, delta: '{}' }),
+    ToolInputEnd.make({ ...tagged(5), call }),
     AssistantMessageEvent.make({
-      ...tagged(turn, 6),
+      ...tagged(6),
       message: AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'hello' }), HostToolCallPart.make({ call })]
       })
     }),
-    LLMStreamEnd.make({ ...tagged(turn, 7), turn }),
-    ToolExecutionStarted.make({ eventId: `run:${turn}:8`, streamId: 'run', call }),
+    LLMStreamEnd.make({ ...tagged(7), turn }),
+    ToolExecutionStarted.make({ eventId: `${run}:${turn}:${attempt}:8`, streamId: run, call }),
     ToolExecutionCompleted.make({
-      eventId: `run:${turn}:9`,
-      streamId: 'run',
+      eventId: `${run}:${turn}:${attempt}:9`,
+      streamId: run,
       call,
       result: ToolResult.make({ toolCallId: call.id, content: 'done' })
     })
@@ -136,6 +147,76 @@ describe('chat projection identity', () => {
     })
 
     expect(folded.at(-1)?.chatMessages.length).toBe(start.chatMessages.length + 2)
+  })
+
+  it('keeps the history when a newer execution supersedes a turn', () => {
+    const start = projectionOf(history(20))
+    const superseded = fold(start, turnEvents(1).slice(0, 5))
+
+    expect(superseded.chatMessages).toHaveLength(start.chatMessages.length + 1)
+
+    // The newer execution's start removes the older one's message and nothing else.
+    const [restart, ...rest] = turnEvents(1, 2)
+    const restarted = stepAgentChatProjection(superseded, restart).projection
+
+    expect(restarted.chatMessages).toHaveLength(start.chatMessages.length)
+    expect(sameReferences(start.chatMessages, restarted.chatMessages)).toBe(true)
+
+    const shown = fold(restarted, rest)
+
+    expect(sameReferences(start.chatMessages, shown.chatMessages)).toBe(true)
+    expect(shown.chatMessages).toHaveLength(start.chatMessages.length + 1)
+  })
+
+  it('keeps the messages a regenerate, edit or delete leaves, through the next run', () => {
+    const chat = reduceEvents(
+      { ...initialAgentChatState, chatMessages: projectionOf(history(10)).chatMessages },
+      turnEvents(1)
+    )
+
+    // Each exchange shows as three rows: the question, the call with its result, the answer.
+    const user = chat.chatMessages[15]
+    const target = chat.chatMessages[17]
+
+    expect(target?.role).toBe('assistant')
+    expect(user?.role).toBe('user')
+
+    const regenerated = reduceAgentChatState(
+      chat,
+      AgentChatAction.RegenerateFrom({ messageId: target?.id ?? '' })
+    )
+
+    const edited = reduceAgentChatState(
+      chat,
+      AgentChatAction.EditUserMessage({ messageId: user?.id ?? '', content: 'again' })
+    )
+
+    const deleted = reduceAgentChatState(
+      chat,
+      AgentChatAction.DeleteTurn({ messageId: target?.id ?? '' })
+    )
+
+    expect(regenerated.chatMessages).toEqual(chat.chatMessages.slice(0, 17))
+    expect(sameReferences(regenerated.chatMessages, chat.chatMessages)).toBe(true)
+
+    // The edited message is new; every one before it keeps its reference.
+    expect(edited.chatMessages).toHaveLength(16)
+    expect(sameReferences(edited.chatMessages.slice(0, 15), chat.chatMessages)).toBe(true)
+    expect(edited.chatMessages[15]).not.toBe(user)
+
+    // Every message outside the deleted turn keeps its reference, in order.
+    expect(deleted.chatMessages.length).toBeLessThan(chat.chatMessages.length)
+
+    expect(
+      deleted.chatMessages.every(message => chat.chatMessages.some(kept => kept === message))
+    ).toBe(true)
+
+    for (const state of [regenerated, edited, deleted]) {
+      const next = reduceEvents(state, turnEvents(1, 1, 'next'))
+
+      expect(sameReferences(state.chatMessages, next.chatMessages)).toBe(true)
+      expect(next.chatMessages).toHaveLength(state.chatMessages.length + 1)
+    }
   })
 
   it('keeps the history at the run end and a run start', () => {

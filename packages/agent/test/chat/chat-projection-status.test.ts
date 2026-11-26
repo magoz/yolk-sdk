@@ -37,7 +37,7 @@ import {
   stepAgentChatProjection,
   type AgentChatEventProjectionState,
   type AgentChatState
-} from '@yolk-sdk/agent/react'
+} from '@yolk-sdk/agent/chat'
 
 // `stepAgentChatProjection` gives a host that folds status itself beside the chat projection the
 // same answer as the `useAgentChat` reducer: each case runs the step, the plain projection and the
