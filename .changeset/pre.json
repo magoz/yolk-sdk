@@ -92,6 +92,7 @@
     "canary-160-lockstep",
     "canary-161-lockstep",
     "canary-162-lockstep",
+    "canary-163-lockstep",
     "canary-79-lockstep-notes",
     "canary-81-lockstep",
     "canary-82-lockstep",
@@ -125,11 +126,13 @@
     "client-tool-run-turn-scope",
     "cloudflare-hook-token-conflict",
     "cloudflare-runtime-lockstep",
+    "cloudflare-step-abort-signal",
     "cloudflare-workflow-runtime",
     "code-mode-package",
     "code-mode-tool-contract",
     "codemode-abandoned-staged-plan",
     "codemode-change-previews",
+    "codemode-cloudflare-cpu-limit-output",
     "codemode-dynamic-worker-limits",
     "codemode-dynamic-workers",
     "codemode-internal-error-observer",
@@ -380,6 +383,7 @@
     "workflow-hitl-hook-answers",
     "workflow-hitl-name-the-pause",
     "workflow-hook-token-conflict",
-    "workflow-runtime-factory"
+    "workflow-runtime-factory",
+    "workflow-speculative-execution-ids"
   ]
 }
