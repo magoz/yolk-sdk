@@ -23,12 +23,13 @@ export { runNamespace, workflowRunsBinding } from './namespace.ts'
 
 export type {
   RunOutcome,
+  StartNewOutcome,
   StartRunInput,
   WorkflowRunNamespace,
   WorkflowRunStub
 } from './namespace.ts'
 
-export { registerWorkflowModules } from './registry.ts'
+export { registerRunPreloads, registerWorkflowModules } from './registry.ts'
 
 export type { WorkflowFunction } from './registry.ts'
 

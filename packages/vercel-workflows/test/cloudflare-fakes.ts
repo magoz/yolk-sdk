@@ -132,6 +132,8 @@ export const makeFakeWorkflowRuns = () => {
   const namespace: WorkflowRunNamespace = {
     getByName: (name): WorkflowRunStub => ({
       start: input => objectOf(name).start(input),
+      startNew: input => objectOf(name).startNew(input),
+      prepare: workflowId => objectOf(name).prepare(workflowId),
       status: () => objectOf(name).status(),
       settled: () => objectOf(name).settled(),
       cancel: () => objectOf(name).cancel(),
@@ -169,6 +171,13 @@ export const makeFakeWorkflowRuns = () => {
     /** Fires the instance's alarm, as Cloudflare does once it is due (or after an eviction). */
     fireAlarm: (name: string) => objectOf(name).alarm(),
     alarmOf: (name: string) => instances.get(name)?.alarm ?? null,
+    /** The tables an instance's storage holds (none until something wrote to it). */
+    tablesOf: (name: string) =>
+      instances
+        .get(name)
+        ?.database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .all()
+        .map(row => String(row.name)) ?? [],
     settleBackground: () => Promise.all(background.splice(0))
   }
 }

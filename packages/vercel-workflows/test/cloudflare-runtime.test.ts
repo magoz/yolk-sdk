@@ -2,7 +2,15 @@ import { DatabaseSync } from 'node:sqlite'
 import { Predicate } from 'effect'
 import { parseAst } from 'vite'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { getRun, resumeHook, start } from '../src/cloudflare/api.ts'
+import {
+  createRunId,
+  getRun,
+  isRunId,
+  prepareRun,
+  resumeHook,
+  start,
+  startWithRunId
+} from '../src/cloudflare/api.ts'
 import { workflowEntry, workflowStep } from '../src/cloudflare/directives.ts'
 import {
   HookNotFoundError,
@@ -10,7 +18,7 @@ import {
   RetryableError,
   WorkflowRunCancelledError
 } from '../src/cloudflare/errors.ts'
-import { registerWorkflowModules } from '../src/cloudflare/registry.ts'
+import { registerRunPreloads, registerWorkflowModules } from '../src/cloudflare/registry.ts'
 import { deserialize, serialize } from '../src/cloudflare/serialization.ts'
 import { makeSqliteRunStore } from '../src/cloudflare/sqlite-store.ts'
 import { compileWorkflowDirectives, workflowDirectivesRuntime } from '../src/cloudflare/vite.ts'
@@ -643,6 +651,146 @@ describe('WorkflowRun and the workflow/api module', () => {
 
     expect(await getRun('wrun_lazy').returnValue).toBe(42)
     expect(loaded).toBe(1)
+  })
+
+  it('starts a run under a chosen id once, and never two runs under one id', async () => {
+    let runsOfBody = 0
+
+    async function counted(value: number) {
+      runsOfBody += 1
+
+      return value + 1
+    }
+
+    workflowEntry(counted, 'runtime#counted')
+
+    const runId = createRunId()
+
+    expect(isRunId(runId)).toBe(true)
+
+    const first = await startWithRunId(counted, [1], { runId })
+
+    expect(first.status).toBe('created')
+    expect(first.status === 'taken' ? undefined : await first.run.returnValue).toBe(2)
+
+    // The same call again (a retry whose first answer was lost): the run already there is its own.
+    const retried = await startWithRunId(counted, [1], { runId })
+
+    expect(retried.status).toBe('alreadyStarted')
+    expect(retried.status === 'taken' ? undefined : retried.run.runId).toBe(runId)
+
+    // Another input under the id: not this caller's run, and no handle to it.
+    expect(await startWithRunId(counted, [10], { runId })).toEqual({ status: 'taken' })
+    expect(runsOfBody).toBe(1)
+
+    // Two starts racing under a new id: one creates.
+    const racedId = createRunId()
+
+    const raced = await Promise.all([
+      startWithRunId(counted, [5], { runId: racedId }),
+      startWithRunId(counted, [6], { runId: racedId })
+    ])
+
+    expect(raced.map(result => result.status).toSorted()).toEqual(['created', 'taken'])
+    expect(await getRun(racedId).returnValue).toBeOneOf([6, 7])
+    expect(runsOfBody).toBe(2)
+
+    for (const bad of ['hook:token', 'wrun_short', `wrun_${'G'.repeat(32)}`]) {
+      await expect(startWithRunId(counted, [], { runId: bad })).rejects.toThrow(
+        'startWithRunId() needs a run id made by createRunId()'
+      )
+    }
+
+    await expect(startWithRunId(async () => undefined, [], { runId })).rejects.toThrow(
+      '"use workflow"'
+    )
+  })
+
+  it('leaves a run already under the id alone, even after its object was evicted', async () => {
+    let bodies = 0
+
+    async function parked() {
+      bodies += 1
+
+      using hook = createHook({ token: 'runtime-parked' })
+
+      return await hook
+    }
+
+    workflowEntry(parked, 'runtime#parked')
+
+    const runId = createRunId()
+
+    expect((await startWithRunId(parked, [], { runId })).status).toBe('created')
+    await waitFor(async () => (await getRun(runId).status) === 'running')
+    runs.evict(runId)
+
+    // `start` would replay it here; `startWithRunId` changes nothing.
+    expect((await startWithRunId(parked, [], { runId })).status).toBe('alreadyStarted')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(bodies).toBe(1)
+
+    await resumeHook('runtime-parked', 'done').catch(() => undefined)
+    await getRun(runId).cancel()
+  })
+
+  it('prepares a run object without storing anything, then starts the run there', async () => {
+    let moduleLoads = 0
+    let preloads = 0
+
+    async function prepared(value: number) {
+      return value * 3
+    }
+
+    registerWorkflowModules({
+      'prepared/module.ts': async () => {
+        moduleLoads += 1
+        workflowEntry(prepared, 'prepared/module.ts#prepared')
+      }
+    })
+    registerRunPreloads({
+      runtime: async () => {
+        preloads += 1
+      }
+    })
+
+    const runId = createRunId()
+
+    // The Worker that prepares may know only the id of a lazily registered workflow.
+    await runs.namespace.getByName(runId).prepare('prepared/module.ts#prepared')
+
+    expect([moduleLoads, preloads]).toEqual([1, 1])
+    expect(runs.tablesOf(runId)).toEqual([])
+
+    // Preparing again (to keep it resident) still stores nothing.
+    await prepareRun(prepared, runId)
+    expect(runs.tablesOf(runId)).toEqual([])
+
+    const started = await startWithRunId(prepared, [7], { runId })
+
+    expect(started.status).toBe('created')
+    expect(started.status === 'taken' ? undefined : await started.run.returnValue).toBe(21)
+    expect(moduleLoads).toBe(1)
+
+    await expect(
+      runs.namespace.getByName(createRunId()).prepare('prepared/module.ts#missing')
+    ).rejects.toThrow('No workflow is registered as prepared/module.ts#missing')
+    await expect(prepareRun(prepared, 'hook:token')).rejects.toThrow(
+      'prepareRun() needs a run id made by createRunId()'
+    )
+
+    // A preload that fails fails the preparation (and stores nothing).
+    registerRunPreloads({
+      runtime: async () => {
+        throw new Error('preload failed')
+      }
+    })
+
+    const failingId = createRunId()
+
+    await expect(prepareRun(prepared, failingId)).rejects.toThrow('preload failed')
+    expect(runs.tablesOf(failingId)).toEqual([])
+    registerRunPreloads({ runtime: async () => undefined })
   })
 })
 
