@@ -9,7 +9,8 @@
  * untagged tool batch, and the terminal `AgentEnd`, with ids as the durable sequencer writes them.
  * Reports the median over `--runs` folds of the microseconds per event (all events, text deltas,
  * the other events), per history length. Flat rows mean the per-event cost does not grow with the
- * chat.
+ * chat; `--turns` (default 16, about 240 events each) lengthens the run, which shows whether it grows
+ * with the events already seen (the `eventId` dedupe).
  */
 import process from 'node:process'
 import { Predicate } from 'effect'
@@ -50,13 +51,17 @@ import {
 
 const historyLengths = [0, 500, 2_000, 8_000] as const
 
-const liveTurns = 16
+const numberArgument = (name: string, fallback: number) => {
+  const index = process.argv.indexOf(name)
+
+  return index === -1 ? fallback : Number(process.argv[index + 1] ?? fallback)
+}
+
+const liveTurns = numberArgument('--turns', 16)
 
 const deltasPerTurn = 200
 
-const runsArgument = process.argv.indexOf('--runs')
-
-const runs = runsArgument === -1 ? 5 : Number(process.argv[runsArgument + 1] ?? 5)
+const runs = numberArgument('--runs', 5)
 
 const sentence = (seed: number) => `Sentence ${seed} about the session, its stream and its cursor.`
 

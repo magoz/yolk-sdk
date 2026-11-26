@@ -131,7 +131,7 @@ describe('agent chat core', () => {
       initialAgentChatState
     )
 
-    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect([...state.seenEventIds].sort()).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
       AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
@@ -147,7 +147,7 @@ describe('agent chat core', () => {
       makeAgentChatEventProjectionState()
     )
 
-    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect([...state.seenEventIds].sort()).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
       AgentChatPart.Text({ id: 'message-0-assistant-text', content: 'hello', state: 'streaming' })
     ])
@@ -205,7 +205,7 @@ describe('agent chat core', () => {
       makeAgentChatEventProjectionState()
     )
 
-    expect(state.seenEventIds).toEqual(['workflow:1:steer:0'])
+    expect([...state.seenEventIds].sort()).toEqual(['workflow:1:steer:0'])
     expect(state.chatMessages).toEqual([
       {
         id: 'message-0-user',
@@ -235,7 +235,7 @@ describe('agent chat core', () => {
       makeAgentChatEventProjectionState()
     )
 
-    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect([...state.seenEventIds].sort()).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
       AgentChatPart.Reasoning({
         id: 'message-0-reasoning',
@@ -457,7 +457,7 @@ describe('agent chat core', () => {
     )
 
     expect(hitlPauseFor(asked.hitlPauses ?? emptyHitlPauses, response)).toBe('run:9')
-    expect(asked.seenEventIds).toEqual(['run:4', 'run:9'])
+    expect([...asked.seenEventIds].sort()).toEqual(['run:4', 'run:9'])
 
     for (const action of [
       AgentChatAction.SubmitHitlResponse({ response }),

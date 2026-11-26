@@ -1,4 +1,4 @@
-import { Array as Arr, Match, Option, Predicate, Struct } from 'effect'
+import { Array as Arr, HashSet, Match, Option, Predicate, Struct } from 'effect'
 import {
   AgentAwaitingInput,
   AgentFailed,
@@ -46,6 +46,7 @@ import {
   editChatUserMessage,
   markChatError,
   regenerateChatMessagesFrom,
+  turnStartIndex,
   turnToolCallMessage,
   type AgentChatMessage,
   type AgentChatPart,
@@ -67,7 +68,8 @@ export type AgentChatState = {
   readonly subagents: AgentStatusTree['subagents']
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
-  readonly seenEventIds: ReadonlyArray<string>
+  /** The `eventId`s of this stream's events applied so far; see `AgentChatEventProjectionState`. */
+  readonly seenEventIds: HashSet.HashSet<string>
   /** Model-step executions seen on this stream; see `AgentChatEventProjectionState`. */
   readonly executions?: AgentExecutions<AgentChatExecutionOutput>
   /** The latest model turn's start; see `AgentChatEventProjectionState`. */
@@ -124,7 +126,12 @@ const runTurnStart = (
 
 export type AgentChatEventProjectionState = {
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
-  readonly seenEventIds: ReadonlyArray<string>
+  /**
+   * The `eventId`s of the events applied so far: a replayed event (a reconnect re-reading from an
+   * earlier cursor, an overlapping stream) is skipped. A persistent set, so each event costs the
+   * same however long the stream ran.
+   */
+  readonly seenEventIds: HashSet.HashSet<string>
   /**
    * Model-step executions seen on this stream (events carrying `executionId`), with the chat
    * message ids and tool calls each produced. Carry it with `seenEventIds` between events; absent
@@ -144,14 +151,14 @@ export const initialAgentChatState: AgentChatState = {
   subagents: [],
   chatMessages: [],
   sessionEvents: [],
-  seenEventIds: []
+  seenEventIds: HashSet.empty()
 }
 
-const hasSeenEventId = (seenEventIds: ReadonlyArray<string>, event: AgentEvent) =>
-  event.eventId !== undefined && seenEventIds.includes(event.eventId)
+const hasSeenEventId = (seenEventIds: HashSet.HashSet<string>, event: AgentEvent) =>
+  event.eventId !== undefined && HashSet.has(seenEventIds, event.eventId)
 
-const rememberEventId = (seenEventIds: ReadonlyArray<string>, event: AgentEvent) =>
-  event.eventId === undefined ? seenEventIds : [...seenEventIds, event.eventId]
+const rememberEventId = (seenEventIds: HashSet.HashSet<string>, event: AgentEvent) =>
+  event.eventId === undefined ? seenEventIds : HashSet.add(seenEventIds, event.eventId)
 
 const hasSeenEvent = (state: AgentChatState, event: AgentEvent) =>
   hasSeenEventId(state.seenEventIds, event)
@@ -206,7 +213,7 @@ export const makeAgentChatEventProjectionState = (
   chatMessages: ReadonlyArray<AgentChatMessage> = []
 ): AgentChatEventProjectionState => ({
   chatMessages,
-  seenEventIds: []
+  seenEventIds: HashSet.empty()
 })
 
 /**
@@ -408,6 +415,8 @@ const projectExecutionEvent = (
   // run's call first), never the resumed batch's call reusing its id.
   const runStart = ownTurn === undefined && latest?.run === true ? latest : undefined
 
+  const modelTurn = runStart === undefined ? turn : undefined
+
   // A missed start (`stepAgentChatProjection`) keeps the draft: a start only finalizes it here.
   const chatMessages =
     origin === 'missed'
@@ -415,7 +424,7 @@ const projectExecutionEvent = (
       : applyExecutionEventToChatMessages(committed, event, options, {
           foreign: owner === undefined ? new Set<string>() : foreignMessages(executions, owner),
           turn,
-          modelTurn: runStart === undefined ? turn : undefined,
+          modelTurn,
           runOutput:
             runStart === undefined ? undefined : messagesAfterAnchor(committed, runStart.after)
         })
@@ -437,7 +446,7 @@ const projectExecutionEvent = (
           ...(draft === undefined
             ? []
             : [AgentChatExecutionOutput.Message({ messageId: draft.id })]),
-          ...chatExecutionOutput(owner, event, committed, chatMessages, turn)
+          ...chatExecutionOutput(owner, event, committed, chatMessages, turn, modelTurn)
         ]
   )
 
@@ -566,13 +575,18 @@ const chatExecutionOutput = (
   event: AgentEvent,
   before: ReadonlyArray<AgentChatMessage>,
   after: ReadonlyArray<AgentChatMessage>,
-  turn: ChatTurnAnchor
+  turn: ChatTurnAnchor,
+  modelTurn: ChatTurnAnchor
 ): ReadonlyArray<AgentChatExecutionOutput> => {
   const messageWithToolCall = (messages: ReadonlyArray<AgentChatMessage>, callId: string) =>
     turnToolCallMessage(messages, callId, turn)
 
-  const changed = changedFrom(before, after)
-  const known = new Set(before.slice(changed).map(message => message.id))
+  // An execution's events add messages only at the chat's end and replace only messages after the
+  // model's turn start (`modelTurn`; every message when it is unknown), so only those are compared:
+  // an event's cost follows its turn, not the chat.
+  const turnBefore = before.slice(turnStartIndex(before, modelTurn))
+  const turnAfter = after.slice(turnStartIndex(after, modelTurn))
+  const known = new Set(turnBefore.map(message => message.id))
 
   const touched = new Set(
     execution.output.flatMap(output =>
@@ -580,11 +594,9 @@ const chatExecutionOutput = (
     )
   )
 
-  const created = after
-    .slice(changed)
-    .flatMap(message =>
-      known.has(message.id) ? [] : [AgentChatExecutionOutput.Message({ messageId: message.id })]
-    )
+  const created = turnAfter.flatMap(message =>
+    known.has(message.id) ? [] : [AgentChatExecutionOutput.Message({ messageId: message.id })]
+  )
 
   const parts = agentEventToolCallIds(event).flatMap(callId => {
     if (touched.has(callId)) return []
@@ -602,26 +614,7 @@ const chatExecutionOutput = (
     return [AgentChatExecutionOutput.ToolPart({ callId, messageId: holder.id, prior: priorPart })]
   })
 
-  return [...created, ...replacedMessages(execution, event, before, after, changed), ...parts]
-}
-
-/**
- * The index of the first message an event changed: `before` and `after` hold the same messages
- * (by reference) up to it. An event changes the chat's tail (its turn), so the scan is a reference
- * comparison of the messages before it, and what follows reads only the tail.
- */
-const changedFrom = (
-  before: ReadonlyArray<AgentChatMessage>,
-  after: ReadonlyArray<AgentChatMessage>
-) => {
-  if (before === after) return before.length
-
-  const shared = Math.min(before.length, after.length)
-  let index = 0
-
-  while (index < shared && before[index] === after[index]) index += 1
-
-  return index
+  return [...created, ...replacedMessages(execution, event, turnBefore, turnAfter), ...parts]
 }
 
 /**
@@ -633,8 +626,7 @@ const replacedMessages = (
   execution: AgentExecution<AgentChatExecutionOutput>,
   event: AgentEvent,
   before: ReadonlyArray<AgentChatMessage>,
-  after: ReadonlyArray<AgentChatMessage>,
-  changed: number
+  after: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatExecutionOutput> => {
   if (!Predicate.isTagged(event, 'AssistantMessage')) return []
 
@@ -648,10 +640,9 @@ const replacedMessages = (
     )
   )
 
-  // Messages before `changed` are the same in both: none of them was replaced.
-  const current = new Map(after.slice(changed).map(message => [message.id, message]))
+  const current = new Map(after.map(message => [message.id, message]))
 
-  return before.slice(changed).flatMap(prior => {
+  return before.flatMap(prior => {
     const next = current.get(prior.id)
 
     return next === undefined || next === prior || recorded.has(prior.id)
@@ -683,7 +674,7 @@ const restarted = (
 ): AgentChatState => ({
   ...Struct.omit(state, ['hitlPauses']),
   chatMessages,
-  seenEventIds: [],
+  seenEventIds: HashSet.empty(),
   executions: [],
   turnStart: runTurnStart('', chatMessages)
 })

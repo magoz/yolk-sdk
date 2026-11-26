@@ -995,12 +995,15 @@ const lastUserIndex = (messages: ReadonlyArray<AgentChatMessage>, end = messages
 export type ChatTurnAnchor = Option.Option<string> | undefined
 
 /**
- * The index of the first chat message a turn's tool events may match a call in: providers reuse
- * call ids across turns, so a call is matched only after its turn's start, never in an earlier
- * turn. Without a known start (none seen, or its message is gone) every message, the last one
- * holding the call winning, as replays of an earlier call without event ids expect.
+ * The index of the first chat message a turn's tool events may match a call in (package-internal):
+ * providers reuse call ids across turns, so a call is matched only after its turn's start, never in
+ * an earlier turn. Without a known start (none seen, or its message is gone) every message, the last
+ * one holding the call winning, as replays of an earlier call without event ids expect.
  */
-const turnStartIndex = (messages: ReadonlyArray<AgentChatMessage>, anchor: ChatTurnAnchor) => {
+export const turnStartIndex = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  anchor: ChatTurnAnchor
+) => {
   if (anchor === undefined) return 0
 
   const index = indexOfMessage(messages, anchor)
