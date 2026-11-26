@@ -1,5 +1,13 @@
 # @yolk-sdk/codemode
 
+## 0.1.0-canary.165
+
+### Patch Changes
+
+- 76a643f: Advance in lockstep with `@yolk-sdk/agent`: its new `@yolk-sdk/agent/chat` subpath is the chat projection without React, an event's cost no longer grows with the chat's history, the projection's state has Effect Schemas, and `seenEventIds` is an Effect `HashSet`. These packages have no direct changes in this release.
+- Updated dependencies [cfb0e27]
+  - @yolk-sdk/agent@0.1.0-canary.165
+
 ## 0.1.0-canary.164
 
 ### Patch Changes
