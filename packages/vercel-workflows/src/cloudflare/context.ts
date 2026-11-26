@@ -25,6 +25,8 @@ export interface StepScope {
   readonly stepStartedAt: Date
   readonly workflowStartedAt: Date
   readonly writable: () => WritableStream<Uint8Array>
+  /** Aborted when the run is cancelled (reason: a `WorkflowRunCancelledError`). */
+  readonly signal: AbortSignal
 }
 
 export const workflowStorage = new AsyncLocalStorage<WorkflowScope>()

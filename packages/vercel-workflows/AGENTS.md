@@ -139,6 +139,13 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   per index, the row only after the grant, and `hookHeld` counting an undecided claim.
 - All `./cloudflare*` modules share module state (`AsyncLocalStorage` scopes, the registry): one
   copy per Worker.
+- Cancel (`WorkflowExecution.cancel` -> `LiveRun.halt`) aborts the run's `AbortController`, whose
+  signal every step scope carries (`getStepSignal()`, Cloudflare-only, reason
+  `WorkflowRunCancelledError`) and which ends retry backoffs; a halted step's outcome is still
+  dropped, never journaled. The halted body waits forever on `halted()`, but `execute` races it
+  against `LiveRun.stopped` (halted and no step in flight), so `kick()`'s promise settles and
+  nothing keeps the run alive. Keep `getStepMetadata` Vercel-shaped: Cloudflare-only additions get
+  their own exports.
 - Tests: `test/cloudflare-execution.test.ts` (execution over the memory store) and
   `test/cloudflare-runtime.test.ts` (`WorkflowRun` over `node:sqlite` through the `workflow/api`
   module, evictions, alarms, hooks, streams, cancel, lazy modules, the SQLite store, serialization,

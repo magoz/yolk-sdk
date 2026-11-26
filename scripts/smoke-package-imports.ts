@@ -605,7 +605,7 @@ const main = async () => {
           'for (const symbol of ["WorkflowRun", "WorkflowExecution", "registerWorkflowModules", "makeMemoryRunStore", "makeSqliteRunStore", "serialize", "deserialize"]) { if (typeof workflowsCloudflare[symbol] !== "function") throw new Error(`Missing Cloudflare workflow export: ${symbol}`) }',
           'if (workflowsCloudflare.workflowRunsBinding !== "WORKFLOW_RUNS" || !(workflowsCloudflare.deserialize(workflowsCloudflare.serialize(new Map([[1, 2]]))) instanceof Map)) throw new Error("Cloudflare workflow runtime smoke failed")',
           'const workflowsCloudflareWorkflow = await import("@yolk-sdk/vercel-workflows/cloudflare/workflow")',
-          'for (const symbol of ["createHook", "sleep", "getWritable", "getStepMetadata", "getWorkflowMetadata", "FatalError", "RetryableError"]) { if (typeof workflowsCloudflareWorkflow[symbol] !== "function") throw new Error(`Missing Cloudflare workflow module export: ${symbol}`) }',
+          'for (const symbol of ["createHook", "sleep", "getWritable", "getStepMetadata", "getStepSignal", "getWorkflowMetadata", "FatalError", "RetryableError"]) { if (typeof workflowsCloudflareWorkflow[symbol] !== "function") throw new Error(`Missing Cloudflare workflow module export: ${symbol}`) }',
           'const workflowsCloudflareApi = await import("@yolk-sdk/vercel-workflows/cloudflare/api")',
           'for (const symbol of ["start", "getRun", "resumeHook"]) { if (typeof workflowsCloudflareApi[symbol] !== "function") throw new Error(`Missing Cloudflare workflow API export: ${symbol}`) }',
           'const workflowsCloudflareDirectives = await import("@yolk-sdk/vercel-workflows/cloudflare/directives")',

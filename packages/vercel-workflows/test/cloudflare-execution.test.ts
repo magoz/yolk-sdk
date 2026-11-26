@@ -1,13 +1,15 @@
 import { Predicate } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { workflowEntry, workflowStep } from '../src/cloudflare/directives.ts'
-import { FatalError } from '../src/cloudflare/errors.ts'
+import { FatalError, WorkflowRunCancelledError } from '../src/cloudflare/errors.ts'
 import { WorkflowExecution, type ExecutionHost } from '../src/cloudflare/execution.ts'
 import { deserialize, serialize } from '../src/cloudflare/serialization.ts'
+import { registerWorkflowModules } from '../src/cloudflare/registry.ts'
 import { makeMemoryRunStore, type RunStore } from '../src/cloudflare/store.ts'
 import {
   createHook,
   getStepMetadata,
+  getStepSignal,
   getWorkflowMetadata,
   getWritable,
   sleep
@@ -406,11 +408,182 @@ describe('WorkflowExecution', () => {
     const execution = new WorkflowExecution(host)
 
     startRun(store, 'test#waiting', [])
-    execution.kick()
+    const executed = execution.kick()
     await waitFor(() => store.readPendingHook('never') !== undefined)
     execution.cancel()
 
     expect(store.readRun()?.status).toBe('cancelled')
     expect(execution.running).toBe(false)
+    // The halted body never resumes, but the execution ends.
+    await executed
+  })
+
+  it("aborts a running step's signal on cancel, drops its outcome, then settles", async () => {
+    const seen: Array<string> = []
+    let started = false
+    let finish: () => void = () => undefined
+
+    async function slowStep() {
+      return workflowStep(slowStep, 'test#slow', async () => {
+        const signal = getStepSignal()
+
+        started = true
+        signal.addEventListener('abort', () => {
+          seen.push(`aborted: ${WorkflowRunCancelledError.is(signal.reason)}`)
+        })
+
+        // The step ends on its own schedule after the abort, as a fetch that honours it would.
+        await new Promise<void>(resolve => {
+          finish = resolve
+        })
+
+        return 'late'
+      })
+    }
+
+    async function slowWorkflow() {
+      seen.push(`step: ${String(await slowStep())}`)
+
+      return 'done'
+    }
+
+    workflowEntry(slowWorkflow, 'test#slow-workflow')
+
+    const store = makeMemoryRunStore()
+    const { host } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+    let ended = false
+
+    startRun(store, 'test#slow-workflow', [])
+    void execution.kick().then(() => {
+      ended = true
+    })
+    await waitFor(() => started)
+    execution.cancel()
+
+    expect(seen).toEqual(['aborted: true'])
+
+    // Not ended while its step still runs.
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(ended).toBe(false)
+
+    finish()
+    await waitFor(() => ended)
+
+    // The step's outcome is dropped: never journaled, never seen by the body.
+    expect(seen).toEqual(['aborted: true'])
+    expect(store.readJournal('step:test#slow#0')).toBeUndefined()
+    expect(store.readRun()?.status).toBe('cancelled')
+  })
+
+  it('ends a step waiting to retry at once when its run is cancelled', async () => {
+    let attempts = 0
+
+    async function failingStep() {
+      return workflowStep(failingStep, 'test#failing', async () => {
+        attempts += 1
+        throw new Error('transient')
+      })
+    }
+
+    Object.assign(failingStep, { maxRetries: 3 })
+
+    async function failingWorkflow() {
+      return await failingStep()
+    }
+
+    workflowEntry(failingWorkflow, 'test#failing-workflow')
+
+    const store = makeMemoryRunStore()
+    const { host } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+
+    startRun(store, 'test#failing-workflow', [])
+    const executed = execution.kick()
+    await waitFor(() => attempts === 1)
+
+    // The first backoff is a second; the cancelled run's execution ends well before it.
+    const cancelledAt = Date.now()
+    execution.cancel()
+    await executed
+
+    expect(Date.now() - cancelledAt).toBeLessThan(500)
+    expect(attempts).toBe(1)
+  })
+
+  it('never retries or journals a step that fails with its abort reason', async () => {
+    let attempts = 0
+
+    async function abortableStep() {
+      return workflowStep(abortableStep, 'test#abortable', async () => {
+        const signal = getStepSignal()
+
+        attempts += 1
+
+        // A fetch given the signal rejects with its reason when the run is cancelled.
+        await new Promise<never>((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      })
+    }
+
+    Object.assign(abortableStep, { maxRetries: 3 })
+
+    async function abortableWorkflow() {
+      return await abortableStep()
+    }
+
+    workflowEntry(abortableWorkflow, 'test#abortable-workflow')
+
+    const store = makeMemoryRunStore()
+    const { host } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+
+    startRun(store, 'test#abortable-workflow', [])
+    const executed = execution.kick()
+    await waitFor(() => attempts === 1)
+    execution.cancel()
+    await executed
+
+    expect(attempts).toBe(1)
+    expect(store.readJournal('step:test#abortable#0')).toBeUndefined()
+    expect(store.readRun()?.status).toBe('cancelled')
+  })
+
+  it('keeps a run cancelled while its workflow module loads', async () => {
+    let loaded: () => void = () => undefined
+    let ran = false
+
+    async function lazyWorkflow() {
+      ran = true
+
+      return 'ran'
+    }
+
+    registerWorkflowModules({
+      'test-lazy': async () => {
+        await new Promise<void>(resolve => {
+          loaded = resolve
+        })
+        workflowEntry(lazyWorkflow, 'test-lazy#lazyWorkflow')
+      }
+    })
+
+    const store = makeMemoryRunStore()
+    const { host } = makeHost(store)
+    const execution = new WorkflowExecution(host)
+
+    startRun(store, 'test-lazy#lazyWorkflow', [])
+    const executed = execution.kick()
+    execution.cancel()
+    loaded()
+    await executed
+
+    expect(store.readRun()?.status).toBe('cancelled')
+    expect(ran).toBe(false)
+  })
+
+  it('gives the step signal only inside a step', () => {
+    expect(() => getStepSignal()).toThrow('getStepSignal() can only be called inside a step')
   })
 })
