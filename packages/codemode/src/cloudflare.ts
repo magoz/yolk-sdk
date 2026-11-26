@@ -17,7 +17,7 @@ import {
   type CodeModeStoreWrites
 } from './executor.ts'
 import { encodedRejection, guardPrefix, guardSuffix } from './guard.ts'
-import { PRELUDE_SOURCE } from './pi-prelude.ts'
+import { MAX_OUTPUT_CHARS, MAX_OUTPUT_ITEMS, PRELUDE_SOURCE } from './pi-prelude.ts'
 
 /** The Worker a script runs in, as `WorkerLoader.load` takes it. */
 export type WorkerLoaderCode = {
@@ -99,12 +99,40 @@ const ended = (kind: string): CallReply => ({
       : encodedRejection(new Error(executionEndedMessage)).message
 })
 
+const OutputItem = Schema.Union([
+  Schema.Struct({ type: Schema.Literal('text'), text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal('image'), data: Schema.String, mimeType: Schema.String })
+])
+
+const decodeOutputItem = Schema.decodeUnknownOption(OutputItem)
+
+const parseJson = (text: string): Option.Option<unknown> => {
+  try {
+    const value: unknown = JSON.parse(text)
+
+    return Option.some(value)
+  } catch {
+    return Option.none()
+  }
+}
+
+/** Raw JSON the host keeps of a script's output batches: its output, escaped, with framing. */
+const maxOutputBatchChars = 2 * MAX_OUTPUT_CHARS + 64 * MAX_OUTPUT_ITEMS
+
+const outputItemChars = (item: CodeModeOutputItem) =>
+  item.type === 'text' ? item.text.length : item.data.length
+
 /**
  * The host side of a script's calls, passed to the isolate as an RPC stub. Its calls live as long
  * as the execution (`signal`): once it aborts, calls still pending answer at once with
  * `executionEndedMessage` (the tools see the signal abort), and later calls get the same answer
  * without running. A Dynamic Worker counts as in flight while it waits on a call to the host, so an
  * unawaited call must not keep it open (4 per request, 10 per Durable Object).
+ *
+ * Each call also carries the output the script printed since its previous call (`output`), so an
+ * isolate that dies (its CPU limit) or an execution the host ends early (timeout, abort) keeps the
+ * output that reached the host. The script can reach this stub, so what it sends is decoded and
+ * capped by the prelude's own output limits.
  */
 class ToolHost extends RpcTarget {
   readonly #tools: ReadonlyMap<string, CodeModeExecutorTool>
@@ -113,6 +141,9 @@ class ToolHost extends RpcTarget {
   readonly #ended: Promise<void>
   readonly #onInternalError: CodeModeInternalErrorObserver | undefined
   #callFailureReports = 0
+  /** Output batches as the script sent them (JSON), decoded only when `output` is read. */
+  readonly #outputBatches: Array<string> = []
+  #outputBatchChars = 0
 
   constructor(
     tools: ReadonlyArray<CodeModeExecutorTool>,
@@ -130,8 +161,18 @@ class ToolHost extends RpcTarget {
     })
   }
 
-  /** `kind` is `call` (a tool) or `global`; arguments and results cross as JSON text. */
-  async call(kind: string, name: string, argsJson: string | null): Promise<CallReply> {
+  /**
+   * `kind` is `call` (a tool) or `global`; arguments and results cross as JSON text. `outputJson`
+   * is the output printed since the previous call (a JSON array of output items), or null.
+   */
+  async call(
+    kind: string,
+    name: string,
+    argsJson: string | null,
+    outputJson: unknown = null
+  ): Promise<CallReply> {
+    this.#receiveOutput(outputJson)
+
     if (this.#signal.aborted) return ended(kind)
 
     const reply = this.#execute(kind, name, argsJson)
@@ -149,6 +190,50 @@ class ToolHost extends RpcTarget {
 
     this.#callFailureReports++
     reportInternalError(this.#onInternalError, { stage: 'host-call', cause })
+  }
+
+  /** The output that reached the host, in order. */
+  /**
+   * The output that reached the host, in order: decoded and capped by the prelude's limits, and
+   * cut at the first batch or item past them, so it stays a prefix of what the script printed.
+   */
+  get output(): ReadonlyArray<CodeModeOutputItem> {
+    const output: Array<CodeModeOutputItem> = []
+    let chars = 0
+
+    for (const batch of this.#outputBatches) {
+      const items = parseJson(batch)
+
+      if (Option.isNone(items) || !Array.isArray(items.value)) return output
+
+      for (const value of items.value) {
+        const item = Option.getOrUndefined(decodeOutputItem(value))
+
+        if (item === undefined) return output
+
+        chars += outputItemChars(item)
+
+        if (chars > MAX_OUTPUT_CHARS || output.length >= MAX_OUTPUT_ITEMS) return output
+
+        output.push(item)
+      }
+    }
+
+    return output
+  }
+
+  // Only stored: most executions end with the isolate's reply and never read it. Bounded by raw
+  // size (JSON escaping at most doubles text; item framing is small) so a script cannot make the
+  // host hold more, and ignored once the execution ended.
+  #receiveOutput(outputJson: unknown) {
+    if (!Predicate.isString(outputJson) || this.#signal.aborted) return
+
+    const chars = this.#outputBatchChars + outputJson.length
+
+    if (chars > maxOutputBatchChars) return
+
+    this.#outputBatchChars = chars
+    this.#outputBatches.push(outputJson)
   }
 
   async #execute(kind: string, name: string, argsJson: string | null): Promise<CallReply> {
@@ -231,10 +316,20 @@ export default class CodeModeScript extends WorkerEntrypoint {
   async run(host, toolsJson, globalsJson, storeJson) {
     return await new Promise((resolve) => {
       const output = [];
+      // Output not yet sent to the host; each call carries it, so output printed before the
+      // script's last call survives an isolate that dies (its CPU limit). A batch whose call
+      // fails to reach the host is not sent again.
+      let sent = 0;
+      const unsent = () => {
+        if (sent === output.length) return null;
+        const items = output.slice(sent);
+        sent = output.length;
+        return JSON.stringify(items);
+      };
       let api;
       const bridge = (kind, a, b, c) => {
         if (kind === "call" || kind === "global") {
-          host.call(kind, b, c === undefined ? null : c).then(
+          host.call(kind, b, c === undefined ? null : c, unsent()).then(
             (reply) => reply.ok ? api.settle(a, true, reply.payload === null ? undefined : reply.payload) : api.settle(a, false, reply.message),
             (error) => {
               Promise.resolve().then(() => host.reportCallFailure(error)).catch(() => {});
@@ -265,13 +360,6 @@ const IsolateReply = Schema.Struct({
   output: Schema.Array(Schema.Unknown)
 })
 
-const OutputItem = Schema.Union([
-  Schema.Struct({ type: Schema.Literal('text'), text: Schema.String }),
-  Schema.Struct({ type: Schema.Literal('image'), data: Schema.String, mimeType: Schema.String })
-])
-
-const decodeOutputItem = Schema.decodeUnknownOption(OutputItem)
-
 const WriteEntries = Schema.Array(
   Schema.Union([Schema.Tuple([Schema.String]), Schema.Tuple([Schema.String, Schema.String])])
 )
@@ -283,16 +371,6 @@ const ScriptError = Schema.Struct({
   message: Schema.optional(Schema.String),
   stack: Schema.optional(Schema.String)
 })
-
-const parseJson = (text: string): Option.Option<unknown> => {
-  try {
-    const value: unknown = JSON.parse(text)
-
-    return Option.some(value)
-  } catch {
-    return Option.none()
-  }
-}
 
 /** pi reports writes as `[key, json]` entries, `[key]` for a deleted key. */
 const decodeStoreWrites = (writesJson: string | null): Option.Option<CodeModeStoreWrites> => {
@@ -413,6 +491,8 @@ const isCpuLimitError = (error: unknown) => /\bcpu\b.*\blimit/i.test(describeErr
 /** How an execution settled, with the executor's own failure behind it, if any. */
 type Settled = {
   readonly result: CodeModeExecutionResult
+  /** Set when the isolate answered, whose reply carries the complete output. */
+  readonly replied?: true
   readonly internalError?: CodeModeInternalError
 }
 
@@ -562,7 +642,7 @@ export const makeDynamicWorkerCodeModeExecutor = (
       }
 
       const run = entrypoint.run(host, toolsJson, globalsJson, storeJson).then(
-        (reply): Settled => ({ result: fromIsolate(reply) }),
+        (reply): Settled => ({ result: fromIsolate(reply), replied: true }),
         (error: unknown) => fromRunFailure(error, cpuMs)
       )
 
@@ -593,7 +673,16 @@ export const makeDynamicWorkerCodeModeExecutor = (
         reportInternalError(options.onInternalError, settled.internalError)
       }
 
-      return settled.result
+      // The isolate ran on this thread, and a Worker's clock moves only at I/O and timers: a
+      // CPU-limit failure arrives with the clock where the script started spinning. One timer turn
+      // (after the race, so it cannot turn the failure into a timeout) lets the caller's next clock
+      // read, the run's wall time, see the time it took.
+      if (settled.internalError?.stage === 'cpu-limit') {
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+
+      // Without the isolate's reply, the output is what reached the host with the script's calls.
+      return settled.replied === true ? settled.result : { ...settled.result, output: host.output }
     } catch (error) {
       reportInternalError(options.onInternalError, { stage: 'isolate', cause: error })
 
