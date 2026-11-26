@@ -776,19 +776,27 @@ const projection = events.reduce(
 
 `@yolk-sdk/agent/chat` holds the same projection without React (`@yolk-sdk/agent/react`
 re-exports it and adds `useAgentChat`), for hosts on another UI framework or folding on a server.
-An event costs the same however long the chat is: it reads and replaces only its turn's messages,
-every other message keeps its reference (a list keyed by message id redraws only what changed), and
-`seenEventIds` is a persistent `HashSet`. A host that receives events in batches folds each batch
-with `stepAgentChatProjectionAll(state, events, options)`: the projection `stepAgentChatProjection`
-would give, the events the run's status follows (`statusEvents`: each event's `missedStart`, then
-its `statusEvent`) and whether the chat's message ids changed (`messageIdsChanged`).
+A streamed event (deltas, tool input, the answer, tool-batch updates) costs its turn's tail, not
+the chat: it reads and replaces only its turn's messages, every other message keeps its reference (a
+list keyed by message id redraws only what changed), and `seenEventIds` is a persistent `HashSet`.
+Turn boundaries (`LLMStreamStart`, `AgentStart`, terminal events, errors) and events that add a
+message scan the chat once. The projection's executions ledger keeps one entry per model step it
+folded, in every run: a tagged event finds its execution from the latest run back and skips ended
+or retired runs, but a new execution's start reads the whole ledger, so a projection folding a long
+session pays that once per model step (`pnpm bench:chat` measures both). A host that receives
+events in batches folds each batch with `stepAgentChatProjectionAll(state, events, options)`: the
+projection `stepAgentChatProjection` would give, the events the run's status follows
+(`statusEvents`: each event's `missedStart`, then its `statusEvent`) and whether the chat's message
+ids changed (`messageIdsChanged`).
 
-The projection's state is made of Effect Schemas (`AgentChatEventProjectionStateSchema`,
-`AgentChatStateSchema`, `AgentChatMessageSchema`, `AgentChatPartSchema`, `ChatToolStateSchema`,
-`ChatPartStateSchema`, `AgentChatTurnStartSchema`, `AgentChatExecutionOutputSchema`,
-`AgentChatExecutionsSchema`, the generic `AgentExecutionsSchema(output)` and `HitlPauses`); the
-types are derived from them. `Schema.toCodecJson(schema)` is a JSON form for hosts that keep or send
-the state (`seenEventIds` as an array of ids, options as `{ _tag, value }`).
+The projection's state is made of Effect Schemas (`src/chat/chat-schemas.ts`, all exported from
+`@yolk-sdk/agent/chat`, with the client's generic `AgentExecutionsSchema(output)` and `HitlPauses`);
+the types are derived from them. Constructors keep the plain name and Schemas get `Schema`
+(`ChatToolState` / `ChatToolStateSchema`); `AgentChatSessionEvent` and `HitlPauses` are Schemas
+named before that and keep their names. `Schema.toCodecJson(schema)` is a JSON form for hosts that
+keep or send the state (`seenEventIds` as an array of ids, options as `{ _tag, value }`); plain
+`JSON.stringify` and `structuredClone` no longer round-trip a state (`seenEventIds` comes back as a
+plain object, not a `HashSet`).
 
 ```ts
 import * as Schema from 'effect/Schema'

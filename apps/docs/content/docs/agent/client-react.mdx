@@ -42,11 +42,9 @@ chat projection without React (for another UI framework, or a fold on a server):
 - `applyAgentEventToChatProjection`, and `stepAgentChatProjection` for a host that folds status
   beside it; `stepAgentChatProjectionAll` folds a batch of events (the projection, the events status
   follows, and whether the message ids changed)
-- the state's Effect Schemas, the types derived from them: `AgentChatEventProjectionStateSchema`,
-  `AgentChatStateSchema`, `AgentChatMessageSchema`, `AgentChatPartSchema`, `ChatToolStateSchema`,
-  `ChatPartStateSchema`, `AgentChatTurnStartSchema`, `AgentChatExecutionOutputSchema`,
-  `AgentChatExecutionsSchema`, `AgentExecutionsSchema` and `HitlPauses`; `Schema.toCodecJson` of
-  one is its JSON form (`seenEventIds`, a persistent `HashSet`, as an array of ids)
+- the state's Effect Schemas, the types derived from them (each `…Schema` export, for example
+  `AgentChatEventProjectionStateSchema`, plus `HitlPauses`); `Schema.toCodecJson` of one is its JSON
+  form (`seenEventIds`, a persistent `HashSet`, as an array of ids)
 - chat reducer and selectors
 - tagged constructors: `AgentChatPart`, `ChatToolState`, `AgentChatItem`, `ToolRunState`,
   `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`,
