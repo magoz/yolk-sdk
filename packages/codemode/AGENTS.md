@@ -155,7 +155,16 @@ exceeded its CPU limit of <cpuMs> ms`). One `AbortController` is the execution's
   without running them, so an unawaited call never keeps the Dynamic Worker in flight (4 per
   request, 10 per Durable Object); then the entrypoint and Worker stubs are disposed when they have
   `Symbol.dispose` (never throwing). `ToolHost` never rejects across RPC; it answers with a reply.
-  No concurrency cap (owner decision: no hard caps).
+  No concurrency cap (owner decision: no hard caps). Each `ToolHost.call` carries the output
+  printed since the previous call (`unsent()` in the module; no extra RPCs), kept raw (bounded by
+  size, not after the execution ended) and decoded only when read, capped by the prelude's
+  `MAX_OUTPUT_CHARS`/`MAX_OUTPUT_ITEMS` and cut at the first bad batch or item (a prefix; the
+  script can reach the stub). A batch whose call fails to reach the host is lost. An
+  execution that ends without the isolate's reply (CPU limit, isolate failure, timeout, abort)
+  returns that output, a replied one its reply's. A spinning isolate shares the caller's thread and
+  sends nothing, so output after the last call is lost. A CPU-limit failure settles after one timer
+  turn: a Worker's clock moves only at I/O and timers, and without it the runner's wall time stops
+  where the script started spinning.
 - Error text: both executors pass through what the script controls (its thrown error's name,
   message and stack, TypeScript parse errors, tool rejections, global rejections as pi gives
   them). Their own failures use fixed messages and never forward loader, isolate, pi, or RPC error

@@ -250,6 +250,10 @@ Limits and lifetime:
 - `cpuMs` (default 500, `defaultDynamicWorkerCpuMs`) is passed as the loaded Worker's
   `limits.cpuMs` and is the real ceiling of a script. Time spent waiting for tool calls is not CPU
   time. A script past it fails with `timeout` (`Execution exceeded its CPU limit of <cpuMs> ms`).
+- The isolate's output reaches the calling Worker with each tool or global call, so an execution
+  that ends without the isolate's answer (its CPU limit, a failed isolate, the timeout, an abort)
+  keeps the output printed before the script's last call; output printed after it is lost, since
+  a spinning isolate shares the calling Worker's thread and can send nothing.
 - The timeout and abort signal only answer the caller early: a synchronous loop cannot be stopped
   from the calling Worker, so the isolate may keep running (and billing) until its CPU limit.
 - When an execution ends (result, timeout, abort, failure), tool and global calls still pending

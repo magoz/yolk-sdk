@@ -318,7 +318,7 @@ describe('makeDynamicWorkerCodeModeExecutor', () => {
 })
 
 type Host = {
-  call(kind: string, name: string, argsJson: string | null): Promise<unknown>
+  call(kind: string, name: string, argsJson: string | null, outputJson?: unknown): Promise<unknown>
   reportCallFailure?(cause: unknown): Promise<void>
 }
 
@@ -620,6 +620,140 @@ describe('Dynamic Worker failures', () => {
     ).toMatchObject({
       error: { kind: 'timeout', message: 'Execution exceeded its CPU limit of 30 ms' }
     })
+  })
+
+  it('keeps the output sent before the last call when the isolate dies at its CPU limit', async () => {
+    // The real module, whose isolate then dies as if the script spun after its last call.
+    const dying: WorkerLoader = {
+      load: code => ({
+        getEntrypoint: () => {
+          const entrypoint = instantiate(code)
+
+          if (!isRunnable(entrypoint)) throw new Error('The module exports no run entrypoint')
+
+          return {
+            run: async (...args: ReadonlyArray<unknown>) => {
+              await entrypoint.run(...args)
+
+              throw new Error('Worker exceeded CPU time limit.')
+            }
+          }
+        }
+      })
+    }
+
+    const tools = [{ name: 'lookup', execute: async () => 'found' }]
+
+    const script = [
+      'console.log("before", 1)',
+      'image("data:image/png;base64,iVBORw0KGgo=")',
+      'await tools.lookup({})',
+      'console.log("after the last call")',
+      'return 1'
+    ].join('\n')
+
+    const result = await makeDynamicWorkerCodeModeExecutor({ loader: () => dying }).execute(
+      script,
+      options({ tools })
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'timeout', message: 'Execution exceeded its CPU limit of 500 ms' },
+      output: [
+        { type: 'text', text: 'before 1' },
+        { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }
+      ]
+    })
+
+    // An isolate that answers returns all of its output, each item once.
+    expect((await vmExecutor.execute(script, options({ tools }))).output).toEqual([
+      { type: 'text', text: 'before 1' },
+      { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+      { type: 'text', text: 'after the last call' }
+    ])
+  })
+
+  it('keeps the output that reached the host when the execution times out', async () => {
+    const executor = controlledLoader(async host => {
+      if (!isHost(host)) throw new Error('no host')
+
+      await host.call('call', 'lookup', '{}', JSON.stringify([{ type: 'text', text: 'working' }]))
+
+      return new Promise(() => undefined)
+    })
+
+    const result = await executor.execute(
+      'ignored',
+      options({ timeoutMs: 50, tools: [{ name: 'lookup', execute: async () => 'found' }] })
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'timeout', message: 'Execution timed out after 50 ms' },
+      output: [{ type: 'text', text: 'working' }]
+    })
+  })
+
+  it('decodes and caps the output a script sends with its calls, keeping a prefix', async () => {
+    const outputOf = async (batches: ReadonlyArray<unknown>) => {
+      const executor = controlledLoader(async host => {
+        if (!isHost(host)) throw new Error('no host')
+
+        for (const batch of batches) await host.call('global', 'noop', null, batch)
+
+        throw new Error('Worker exceeded CPU time limit.')
+      })
+
+      return (await executor.execute('ignored', options())).output
+    }
+
+    const text = (value: string) => ({ type: 'text', text: value })
+
+    // The item cap: later output is dropped.
+    const items = await outputOf([
+      JSON.stringify(Array.from({ length: 100_000 }, () => text('x'))),
+      JSON.stringify([text('past it')])
+    ])
+
+    expect(items).toHaveLength(100_000)
+    expect(items.at(-1)).toEqual(text('x'))
+
+    // The character cap counts image data too, and nothing after the first item past it is kept.
+    const image = { type: 'image', data: 'A'.repeat(16 * 1024 * 1024 - 1), mimeType: 'image/png' }
+
+    expect(
+      (await outputOf([JSON.stringify([image]), JSON.stringify([text('xy'), text('')])])).map(
+        item => item.type
+      )
+    ).toEqual(['image'])
+
+    // A batch the prelude would never send ends the output there; a non-string is ignored.
+    expect(
+      await outputOf([
+        ['not a string'],
+        JSON.stringify([text('a')]),
+        JSON.stringify([{ type: 'video' }]),
+        JSON.stringify([text('b')])
+      ])
+    ).toEqual([text('a')])
+    expect(await outputOf(['not json', JSON.stringify([text('b')])])).toEqual([])
+  })
+
+  it('settles a CPU-limit failure after a timer turn, so the clock has moved', async () => {
+    let timerRan = false
+
+    const executor = controlledLoader(async () => {
+      setTimeout(() => {
+        timerRan = true
+      }, 0)
+
+      throw new Error('Worker exceeded CPU time limit.')
+    })
+
+    await executor.execute('ignored', options())
+
+    expect(timerRan).toBe(true)
   })
 
   it('gives a call whose host RPC fails a fixed message', async () => {

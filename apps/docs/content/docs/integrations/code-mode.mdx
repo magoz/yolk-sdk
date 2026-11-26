@@ -81,6 +81,9 @@ not apply.
 - `cpuMs` (default 500) becomes the isolate's CPU limit and is the real ceiling of a script; a
   script past it fails with a `timeout`. The timeout and abort signal only answer the caller early:
   a synchronous loop keeps running until its CPU limit.
+- An execution that ends at its CPU limit (or times out, or is aborted) keeps the output the script
+  printed before its last tool or global call, which is when output reaches your Worker; output
+  printed after that call is lost.
 - When an execution ends, tool calls still pending are rejected at once and their signal aborts,
   and later calls are rejected without running, so an unawaited call never keeps a Dynamic Worker
   in flight (Cloudflare allows 4 per request, 10 per Durable Object).
