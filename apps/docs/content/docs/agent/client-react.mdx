@@ -35,12 +35,18 @@ Durable transports may replay events. Prefer event ids and projection helpers fo
 
 ## Use React state
 
-`@yolk-sdk/agent/react` exports:
+`@yolk-sdk/agent/react` exports `useAgentChat` and everything in `@yolk-sdk/agent/chat`, the same
+chat projection without React (for another UI framework, or a fold on a server):
 
-- `useAgentChat`
 - `buildAgentChatItems`
 - `applyAgentEventToChatProjection`, and `stepAgentChatProjection` for a host that folds status
-  beside it
+  beside it; `stepAgentChatProjectionAll` folds a batch of events (the projection, the events status
+  follows, and whether the message ids changed)
+- the state's Effect Schemas, the types derived from them: `AgentChatEventProjectionStateSchema`,
+  `AgentChatStateSchema`, `AgentChatMessageSchema`, `AgentChatPartSchema`, `ChatToolStateSchema`,
+  `ChatPartStateSchema`, `AgentChatTurnStartSchema`, `AgentChatExecutionOutputSchema`,
+  `AgentChatExecutionsSchema`, `AgentExecutionsSchema` and `HitlPauses`; `Schema.toCodecJson` of
+  one is its JSON form (`seenEventIds`, a persistent `HashSet`, as an array of ids)
 - chat reducer and selectors
 - tagged constructors: `AgentChatPart`, `ChatToolState`, `AgentChatItem`, `ToolRunState`,
   `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`,

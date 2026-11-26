@@ -30,7 +30,8 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/compaction`                             | Host-owned compaction budgets, checkpoints, formatting, retry                                                                                                                |
 | `@yolk-sdk/agent/classification`                         | Classifier model contract: typed questions, answers, usage, errors                                                                                                           |
 | `@yolk-sdk/agent/tools`                                  | Tool registry, deferred loading (`tool_search`), typed inputs, interactions, subagents/questions, durable tool ledger, staged tool plans, tool change previews, file capture |
-| `@yolk-sdk/agent/react`                                  | Headless React chat hook, reducer, selectors, and render model                                                                                                               |
+| `@yolk-sdk/agent/chat`                                   | Framework-neutral chat projection: event fold, reducer, selectors, render model, and their Schemas (no React)                                                                |
+| `@yolk-sdk/agent/react`                                  | Headless React chat hook (`useAgentChat`); re-exports `@yolk-sdk/agent/chat`                                                                                                 |
 | `@yolk-sdk/agent/oauth`                                  | Provider-neutral OAuth token and broker contracts                                                                                                                            |
 | `@yolk-sdk/agent/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                                                                                        |
 | `@yolk-sdk/agent/providers/openai/codex`                 | OpenAI Codex request and auth helpers                                                                                                                                        |
@@ -126,7 +127,8 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 stop, edit, regenerate, delete, tool approval, question, and typed input responses. The package supplies no components, styling, auth, or route ownership, and React remains an optional
 peer used only by React subpaths.
 
-Chat ADTs on `@yolk-sdk/agent/react` are value constructors: `AgentChatPart`, `ChatToolState`,
+Chat ADTs on `@yolk-sdk/agent/chat` (and `@yolk-sdk/agent/react`, which re-exports it) are value
+constructors: `AgentChatPart`, `ChatToolState`,
 `DeleteChatTurnResult`, `EditChatUserMessageResult`, `RegenerateChatMessagesResult`, `AgentChatItem`,
 `ToolRunState`, `AgentChatAction`, and hook results such as `AgentChatSubmitResult`. They are
 `Data.taggedEnum` plain objects (`_tag` last), not Equal/Hash classes. Duration descriptors use
@@ -769,6 +771,37 @@ import {
 const projection = events.reduce(
   (state, event) => applyAgentEventToChatProjection(state, event),
   makeAgentChatEventProjectionState()
+)
+```
+
+`@yolk-sdk/agent/chat` holds the same projection without React (`@yolk-sdk/agent/react`
+re-exports it and adds `useAgentChat`), for hosts on another UI framework or folding on a server.
+An event costs the same however long the chat is: it reads and replaces only its turn's messages,
+every other message keeps its reference (a list keyed by message id redraws only what changed), and
+`seenEventIds` is a persistent `HashSet`. A host that receives events in batches folds each batch
+with `stepAgentChatProjectionAll(state, events, options)`: the projection `stepAgentChatProjection`
+would give, the events the run's status follows (`statusEvents`: each event's `missedStart`, then
+its `statusEvent`) and whether the chat's message ids changed (`messageIdsChanged`).
+
+The projection's state is made of Effect Schemas (`AgentChatEventProjectionStateSchema`,
+`AgentChatStateSchema`, `AgentChatMessageSchema`, `AgentChatPartSchema`, `ChatToolStateSchema`,
+`ChatPartStateSchema`, `AgentChatTurnStartSchema`, `AgentChatExecutionOutputSchema`,
+`AgentChatExecutionsSchema`, the generic `AgentExecutionsSchema(output)` and `HitlPauses`); the
+types are derived from them. `Schema.toCodecJson(schema)` is a JSON form for hosts that keep or send
+the state (`seenEventIds` as an array of ids, options as `{ _tag, value }`).
+
+```ts
+import * as Schema from 'effect/Schema'
+import {
+  AgentChatEventProjectionStateSchema,
+  stepAgentChatProjectionAll
+} from '@yolk-sdk/agent/chat'
+
+const { projection, statusEvents, messageIdsChanged } = stepAgentChatProjectionAll(state, batch)
+
+// An Effect of the JSON-safe value; `Schema.decodeUnknownEffect` of the same codec reads it back.
+const json = Schema.encodeEffect(Schema.toCodecJson(AgentChatEventProjectionStateSchema))(
+  projection
 )
 ```
 
@@ -1451,7 +1484,9 @@ aborts, and implementation bugs outside typed tool execution.
 - Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
 - `@yolk-sdk/agent/compaction` combines pure planning/formatting helpers with Effect-native transformer and retry adapters; hosts own thresholds, summaries, compaction payloads, and durable compactor policy.
 - `@yolk-sdk/agent/classification` is provider-neutral (no Node, React, or provider code); provider subpaths supply `ClassifierModel` layers.
-- `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
+- `@yolk-sdk/agent/chat` is the framework-neutral chat projection: it never imports React.
+- `@yolk-sdk/agent/react` is headless and uses React as an optional peer; it re-exports
+  `@yolk-sdk/agent/chat` and adds `useAgentChat`.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - `@yolk-sdk/agent/providers/openai/speech` is server integration requiring runtime
   `FormData`/`Blob`, a host `HttpClient` layer, and a secret API key; do not invoke it from browser
