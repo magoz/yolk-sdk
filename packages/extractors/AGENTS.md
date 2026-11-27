@@ -48,7 +48,7 @@ resolution, indexed lookup), `xlsx-range.ts` (strict ranges), `pptx-text.ts`, `x
 - Every OOXML input goes through `readOfficeArchive` before any parser: bounded inflation counted
   against declared sizes and `maxExpandedBytes`, strict ZIP directory checks (no `..`, `.`, `//`,
   absolute, backslash, or control-character names, no names equal ignoring case; directory
-  entries ending in `/` are fine). DOCX gets `storedArchive(parts)`, PPTX reads the validated
+  entries ending in `/` are fine). DOCX gets `storedArchive(parts)` (as both `buffer` and `arrayBuffer`: hosts that resolve browser files get mammoth's browser unzip, which reads only `arrayBuffer`; `test/docx-browser-mammoth.test.ts`), PPTX reads the validated
   parts directly, and SheetJS gets only `buildSheetJsInput(parts)`.
 - XLSX: strip every `<hyperlink>` tag (`/<\/?(?:[\w.-]+:)?hyperlink\b[^<>]*>/gi`, a superset of
   SheetJS's `hlinkregex`, replaced with a space) from every part, whatever its name or type,

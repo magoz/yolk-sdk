@@ -144,8 +144,11 @@ const extractDocx = (input: FileInput, limits: FileExtractorLimits) =>
     const result = yield* Effect.tryPromise({
       try: async () => {
         const { default: mammoth } = await import('mammoth')
+        // Both: mammoth's Node unzip reads `buffer`, its browser unzip (which hosts resolving
+        // browser files, such as Cloudflare Workers under Vite, get) only `arrayBuffer`.
+        const arrayBuffer = new Uint8Array(storedArchive(parts)).buffer
 
-        return await mammoth.extractRawText({ buffer: Buffer.from(storedArchive(parts)) })
+        return await mammoth.extractRawText({ buffer: Buffer.from(arrayBuffer), arrayBuffer })
       },
       catch: cause =>
         new FileExtractionError({ message: 'Could not extract DOCX text', format: 'docx', cause })
