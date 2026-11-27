@@ -1,5 +1,11 @@
 # @yolk-sdk/emulators
 
+## 0.1.0-canary.166
+
+### Patch Changes
+
+- 17616b8: Advance in lockstep with `@yolk-sdk/agent` and `@yolk-sdk/extractors`: `markChatRunStart` takes the chat Schemas' states under `exactOptionalPropertyTypes`, and `.docx` extraction works where mammoth's browser build is resolved, such as Cloudflare Workers under Vite. These packages have no direct changes in this release.
+
 ## 0.1.0-canary.165
 
 ### Patch Changes

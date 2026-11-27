@@ -1,5 +1,13 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.166
+
+### Patch Changes
+
+- c6a09c1: `markChatRunStart` (`@yolk-sdk/agent/chat`, `@yolk-sdk/agent/react`) takes an `AgentChatEventProjectionState` or an `AgentChatState` under `exactOptionalPropertyTypes`. Its input type now allows `turnStart?: AgentChatTurnStart | undefined`, which the chat Schemas give, so hosts no longer copy the start over from a call on the messages alone.
+- Updated dependencies [17616b8]
+  - @yolk-sdk/conformance@0.1.0-canary.166
+
 ## 0.1.0-canary.165
 
 ### Minor Changes
