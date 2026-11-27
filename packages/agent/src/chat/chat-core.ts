@@ -136,7 +136,8 @@ const started = (state: AgentChatState, next: AgentChatState): AgentChatState =>
 export const markChatRunStart = <
   State extends {
     readonly chatMessages: ReadonlyArray<AgentChatMessage>
-    readonly turnStart?: AgentChatTurnStart
+    // `| undefined`: the chat Schemas type `turnStart` with `Schema.optional`.
+    readonly turnStart?: AgentChatTurnStart | undefined
   }
 >(
   state: State
